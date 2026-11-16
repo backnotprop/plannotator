@@ -17,7 +17,7 @@
  *
  * Build the binary first (see inbox.spec.ts).
  */
-import { expect, test } from '@playwright/test';
+import { expect, test } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -67,6 +67,7 @@ exit 4
     PATH: `${stubs}:/usr/bin:/bin`,
     HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_BROWSER: NO_BROWSER,
