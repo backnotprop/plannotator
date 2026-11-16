@@ -1662,7 +1662,8 @@ CODEX_CONFIG_EOF
         tmp_config="$(mktemp)"
         if awk '
             function is_table(line) {
-                return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/
+                return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*(#.*)?$/ ||
+                       line ~ /^[[:space:]]*\[\[[^]]+\]\][[:space:]]*(#.*)?$/
             }
             BEGIN {
                 in_features = 0
@@ -1675,7 +1676,7 @@ CODEX_CONFIG_EOF
                         print "hooks = true"
                         saw_hook = 1
                     }
-                    in_features = ($0 ~ /^[[:space:]]*\[features\][[:space:]]*$/)
+                    in_features = ($0 ~ /^[[:space:]]*\[[[:space:]]*features[[:space:]]*\][[:space:]]*(#.*)?$/)
                     if (in_features) saw_features = 1
                 }
 

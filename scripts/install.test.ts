@@ -3015,6 +3015,32 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(existsSync(join(sandbox.home, ".local", "bin", "plannotator"))).toBe(false);
     });
 
+    test.each([
+      ["commented table headers", "[features] # preferences\ncollaboration_modes = true", '[mcp_servers.test] # other table\ncommand = "fixture"'],
+      ["an array table", "[features]\ncollaboration_modes = true", '[[skills.config]] # other table\npath = "fixture/SKILL.md"\nenabled = false'],
+    ])("keeps Codex hooks in the features table with %s", (_name, features, otherTables) => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", codexHome: true });
+      const path = join(sandbox.home, ".codex", "config.toml");
+      const config = `${features}\n\n${otherTables}\n`;
+      try {
+        writeFileSync(path, config);
+        const args = ["--version", "v99.9.9", "--non-interactive", "--no-extras", "--skip-skills"];
+        const { code, out } = runInstallSh(sandbox, args);
+        expect(code, out).toBe(0);
+        const updated = readFileSync(path, "utf8");
+        expect(Bun.TOML.parse(updated)).toEqual({
+          ...(Bun.TOML.parse(config) as Record<string, unknown>),
+          features: { collaboration_modes: true, hooks: true },
+        });
+        expect(updated).toContain(features);
+        expect(updated).toContain(otherTables);
+        expect(runInstallSh(sandbox, args).code).toBe(0);
+        expect(readFileSync(path, "utf8")).toBe(updated);
+      } finally {
+        rmSync(join(sandbox.home, ".."), { recursive: true, force: true });
+      }
+    });
+
     test("M2: a foreign \"codex\": true outside skipInstall (plus explicit false inside) does NOT skip", () => {
       const sandbox = setupInstallSandbox({
         gh: "pass-all",
