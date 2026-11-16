@@ -5,11 +5,12 @@
  * server session going through, or a claim that could not be saved showing it (it would show again on every load).
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { __setConfigSaveMergeWindowHookForTest } from "@plannotator/shared/config";
+import { savedConfig } from "../../tests/helpers/saved-config";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -36,7 +37,7 @@ async function world(options: { version: string; usedBefore: boolean }) {
   const base = `http://127.0.0.1:${server.port}`;
   const post = (path: string, body: Record<string, unknown> = {}) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const due = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { list_intro: { due: boolean } }).list_intro.due;
-  const saved = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxListIntro as { dueAt?: string; shownAt?: string; version?: number } | undefined;
+  const saved = () => savedConfig(dataDir).inboxListIntro as { dueAt?: string; shownAt?: string; version?: number } | undefined;
   return { base, post, due, saved };
 }
 

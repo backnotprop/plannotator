@@ -48,6 +48,7 @@ and each kind gets what works there:
 | --- | --- | --- | --- | --- |
 | `terminal` (interactive) | yes | yes | yes | the mod's |
 | `panel` (VS Code chat panel) | yes | yes | yes | the mod's |
+| `panel` (Orca chat) | yes | yes | yes | Orca's own plan card |
 | `t3` (a T3 Code thread) | yes, as the thread | yes, as the thread | yes | T3's own Plan mode |
 | `headless` (`claude -p`, any other SDK app) | yes | no | no: the classic CLI | the classic hook |
 
@@ -66,7 +67,7 @@ extension hosts the CLI through the Agent SDK, so its sessions raise
 `session.start` with `isInteractive: false` and `surface: null`. The panel has
 a person reading it and shows a plugin's turn ("Prompt from the <plugin>
 plugin", Claude Code's VS Code docs), so it is its own kind
-(`isVsCodePanelSession` in `enabled.ts`; `panel` on `Allowed`):
+(`isPanelSession` in `enabled.ts`; `panel` on `Allowed`):
 `CLAUDE_CODE_ENTRYPOINT` is exactly `claude-vscode` (the extension sets it in
 the environment it spawns the CLI with; read in the 2.1.322 extension), and
 none of `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION` or a `PLANNOTATOR_SESSION_TAG`
@@ -95,6 +96,59 @@ resolves `{ drop }` (after Stop, "the host has ended its input", a
 stays pending, no delivery is tried until the person's next prompt or a
 main-loop turn start, and the window says "Stopped". Not seen yet in a real
 panel.
+
+**The panel hosts.** `isPanelEntrypoint` reads one table, `PANEL_HOSTS` in
+`enabled.ts`: each entrypoint a panel host gives its sessions, with whether
+the mod reviews ExitPlanMode there. Every panel host gets the same checks
+(the nested-run variables, a tag naming another session) and everything
+above except, where its flag says the host draws its own plan card, plan
+review (`panelHostOwnsPlanMode`, `hostPlanMode` on `Allowed`).
+
+**Orca chat (#3325).** Orca uses the same panel path with
+`CLAUDE_CODE_ENTRYPOINT=orca`, but draws its own "Review proposed plan" card
+(Approve plan / Keep planning) for ExitPlanMode: with the mod's plan review on
+as well, a real run opened both, and approving Orca's card left Plannotator's
+plan server running with its tab open. So in Orca the mod reviews no plan: its
+`tool.call` and `classic.PermissionRequest` hooks pass ExitPlanMode on. Once
+the mod passes it on, Claude Code runs the plugin's classic PermissionRequest
+command hook (`plannotator`, started by the session's `claude` itself; seen in
+a real Orca 1.4.259 run), as it also does when a guard plugin
+(`cc-plugin-sec-default`) sends `classic.*` past the mod. So at `session.start`,
+before any request of its own, the mod sets `PLANNOTATOR_PLAN_REVIEW=0` in the
+process's environment (`HOST_PLAN_CARD_ENV`, the existing switch, #2299) and
+`PLANNOTATOR_PLAN_REVIEW_SET_BY=claude-code:<session id>` beside it
+(`HOST_PLAN_CARD_MARKER`; it follows the session id after `/clear`). The hook
+process inherits both and exits 0 with no decision, and Orca's card decides.
+The switch is set for every process with Orca's entrypoint, also one the panel
+guard sorted `headless` (an Orca started from a terminal inside a
+Plannotator-enabled Claude Code session inherits that session's
+`PLANNOTATOR_SESSION_TAG`, so its sessions are `headless`, with the Inbox tool
+alone, but its plans still go to Orca's card). It is never set over the
+person's own explicit on value (`1`, `true`, `on`), and the person's own off
+value stays unmarked (`planSwitchAction`). Binaries 0.28.52 and later honor the
+switch, so no binary change is needed; with an older binary (see "Version
+skew") Orca shows both plan UIs, as before this change. Orca also shows both
+when the switch never reaches the hook: the mod off, a Claude Code without
+hooks modules (before 2.1.287), or a managed-settings `env` that names
+`PLANNOTATOR_PLAN_REVIEW` (the mod's `env.set` is then refused).
+
+Everything the session starts inherits both variables: a `claude -p` from
+Claude's Bash (it has no dialog, so its own permissions decide ExitPlanMode,
+and with none Claude Code denies it), but also a review server, the Inbox, an
+"Open in" terminal or a tmux server, from which a person may later start a
+terminal Claude Code. Two guards keep that session's plan review: its mod
+treats a `0` whose marker names another session as unset and clears both
+(`clear` in `planSwitchAction`), and a binary from this change on honors a
+marked `0` only in the hook of the session that set it (`planReviewEnvFor`)
+and drops both from its own environment at startup, so nothing it starts
+inherits them (`scrubModSessionEnv`, `apps/hook/server/mod-session-env.ts`).
+A person's own `0` has no marker and is always honored. With an older binary
+and the mod off in that later session, the inherited `0` still turns its plan
+review off.
+
+Seen in a real Orca 1.4.259 run: Orca's card shows and waits, no Plannotator
+plan server starts, and the debug log says the switch was set and that both
+ExitPlanMode and its permission request were passed on.
 
 **A T3 Code thread.** T3 Code (pingdotgg/t3code) runs a thread's Claude through
 the Agent SDK with no `settingSources`, so the user's plugins, this one
@@ -173,7 +227,9 @@ claim folder holds, the T3 wake leaves the reply alone; once the poll is stale
 (T3 releases an idle Claude after 30 minutes, later while it has background
 work), the T3 wake sends what still waits, under a grant, and the bridge poll
 never hands the mod what the T3 wake handed for a send in flight. ExitPlanMode
-passes on to T3's own Plan mode. Commands and the Bash take-over are the mod's,
+passes on to T3's own Plan mode (the mod passes it on, so the plugin's
+classic command hook runs there too; Orca's switch is not set for T3).
+Commands and the Bash take-over are the mod's,
 and the opt-in T3 Bash hook (`prepareT3Hook`, `claudeModServesThread`) stands
 aside in a thread whose tag the mod set. Not seen yet in a real T3: how T3
 draws a plugin-started turn. A review decision after T3 released the Claude is
@@ -181,10 +237,21 @@ restored by the Claude session id, which T3 resumes under the same thread.
 
 Tests: `session-kind.test.ts` (the thread rule against core's for every id
 form, the allow/deny table, the identity against the shim's, the claim folder
-against the Inbox's, the feature table), `register-vscode.test.ts` (the real
-registered hooks on a fake `$`: the panel and a T3 thread register both tools,
+against the Inbox's, the feature table, the panel hosts and which one draws
+its own plan card), `register-vscode.test.ts` (the real
+registered hooks on a fake `$`: every panel host and a T3 thread register both tools,
 poll as their session or thread and deliver once; each refusal is held and
-goes in once after the person's prompt; the `sdk` origin pulls the lease, a
+goes in once after the person's prompt; the mod's plan review opens in VS Code,
+and in Orca it does not, while Orca's code review
+stays the mod's; every process with Orca's entrypoint leaves a marked
+`PLANNOTATOR_PLAN_REVIEW=0` in its environment and no other session does,
+the person's own value is never overwritten, and a terminal or panel
+session that inherited another session's marked `0` reviews plans and
+clears it; the real classic plan hook, run as a process in the environment
+the mod left, exits 0 with no decision for Orca, opens a review in another
+session's hook with that environment, and opens one for the VS Code panel;
+`mod-session-env.test.ts` (the CLI drops the marked `0` and keeps it for its
+own session's hook only); the `sdk` origin pulls the lease, a
 task notification does not; each headless session gets `plannotator_inbox`
 alone, filed as its session, without the wake mark, no poll, the classic
 flows; an Ask AI child and the knob off stay inert; a thread under an

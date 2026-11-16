@@ -37,6 +37,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 import { E2E_LAUNCH_OFF, inboxScratch, removeInboxScratch } from './inbox-scratch';
 
 const repo = resolve(__dirname, '../..');
@@ -156,7 +157,7 @@ async function mainWorld(): Promise<World> {
   return main;
 }
 
-const saved = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
+const saved = (w: World) => savedConfig(w.dataDir) as { inboxVoice?: { on?: boolean; phonesOnly?: boolean }; inboxVoiceIntro?: { shownAt?: string } };
 
 let speech: Browser;
 let silence: Browser;
