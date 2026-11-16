@@ -337,6 +337,19 @@ describe("htmlAssetRouteFromDocument", () => {
 		).toBe("/api/html-assets/abc/");
 	});
 
+	test("a linked machine's page in the Inbox: its route through the forward, so its image links open from there", () => {
+		const machine = "ibx_01K7MMMMMMMMMMMMMMMMMMMMMM";
+		expect(htmlAssetRouteFromDocument(`<head><base href="/api/inbox/m/${machine}/html-assets/tok/"><title>x</title>`)).toBe(
+			`/api/inbox/m/${machine}/html-assets/tok/`,
+		);
+		expect(htmlAssetRouteFromDocument(`<base href="/api/inbox/m/${machine}/html-assets/tok/assets/">`)).toBe(`/api/inbox/m/${machine}/html-assets/tok/`);
+		// Nothing else under the forward, and no malformed machine id, is an asset route.
+		expect(htmlAssetRouteFromDocument(`<base href="/api/inbox/m/${machine}/threads/tok/">`)).toBeNull();
+		expect(htmlAssetRouteFromDocument('<base href="/api/inbox/m/ibx_short/html-assets/tok/">')).toBeNull();
+		// The id as the Inbox writes it, exactly: a lowercased one names no machine.
+		expect(htmlAssetRouteFromDocument(`<base href="/api/inbox/m/${machine.toLowerCase()}/html-assets/tok/">`)).toBeNull();
+	});
+
 	test("a page without the server's base has no asset route", () => {
 		expect(htmlAssetRouteFromDocument('<base href="https://example.com/">')).toBeNull();
 		expect(htmlAssetRouteFromDocument('<base href="about:blank">')).toBeNull();
