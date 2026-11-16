@@ -320,7 +320,7 @@ export const INBOX_ROWS_USAGE = [
   "'rows' prints every option, what it changes and its value now.",
   "'rows set' changes options in one save; every open window shows it at once.",
   "'rows undo' puts the last change back.",
-  "It changes row options only: no other setting.",
+  "It changes row options only, except agent-icons=project, which also shows in the Agents list and threads.",
 ].join("\n");
 
 /** The line in `plannotator inbox --help`'s usage. */
