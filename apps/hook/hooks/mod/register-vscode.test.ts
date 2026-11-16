@@ -1,12 +1,12 @@
 /**
  * The mod in sessions that are not interactive, through the real registered hooks on a fake `$` (the engine
  * harness in apps/hook/tests needs `claude plugin test`). The panel hosts (Claude Code's VS Code extension, #3111;
- * Orca, #3325) and T3 Code host Claude Code through the Agent SDK, so
+ * Orca, #3325; the Claude desktop app's Code tab, #3239) and T3 Code host Claude Code through the Agent SDK, so
  * `session.start` says `isInteractive: false` and `surface: null`; they run the CLI with `CLAUDE_CODE_ENTRYPOINT`
- * `claude-vscode`, `orca`, T3 with `t3-code` and `T3CODE_THREAD_ID`.
+ * `claude-vscode`, `orca`, `claude-desktop` (`-3p`), T3 with `t3-code` and `T3CODE_THREAD_ID`.
  * What can regress: a panel host or a T3 thread left without `plannotator_inbox` or the wake; a Plannotator plan
  * review opened beside Orca's own plan card; a T3 thread filed as a
- * Claude Code session instead of the thread; any other session (`claude -p`, an Agent SDK app, Claude Desktop, a
+ * Claude Code session instead of the thread; any other session (`claude -p`, an Agent SDK app, Cowork, a
  * `claude -p` started from inside a panel or thread) left with no Inbox tool, or promised a wake its run may not
  * live to deliver; Plannotator's own Ask AI child or the switch turned off reaching the Inbox; and a wake the SDK
  * host refuses being lost or tried again in a loop.
@@ -43,8 +43,11 @@ const REGISTRY = JSON.stringify({ v: 1, pid: 4242, port: PORT, token: 't'.repeat
 const PANEL = { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode' }
 /** What Orca's chat starts the CLI with (#3325). */
 const ORCA = { CLAUDE_CODE_ENTRYPOINT: 'orca' }
+/** What the Claude desktop app's Code tab starts the CLI with (read in the 4.23118 app; `-3p` with a third-party provider). */
+const DESKTOP = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }
+const DESKTOP_3P = { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop-3p' }
 /** Every panel host: a person reads its chat, a plugin's turn shows there. */
-const PANEL_HOSTS = [PANEL, ORCA]
+const PANEL_HOSTS = [PANEL, ORCA, DESKTOP, DESKTOP_3P]
 /** What T3 Code starts a thread's Claude with (`mergeClaudeProcessEnvironment` and the thread's env, in T3's source). */
 const T3 = { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001' }
 /** How the engine raises `session.start` for an Agent SDK host, the VS Code extension's included. */
@@ -226,7 +229,7 @@ async function inboxCall(hook: Awaited<ReturnType<typeof freshHooks>>, world: Re
   return { args: call!.body.params.arguments as Record<string, unknown>, meta: call!.body.params._meta as Record<string, unknown> | undefined }
 }
 
-describe('a panel host: the VS Code extension, Orca (not interactive)', () => {
+describe('a panel host: the VS Code extension, Orca, the Claude desktop Code tab (not interactive)', () => {
   test.each(PANEL_HOSTS)('the mod runs: both tools registered, the session tagged, the Inbox polled as this session, and a reply goes in once as a turn (%j)', async (env) => {
     const { world } = await started(`panel-wake-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
 
@@ -253,7 +256,7 @@ describe('a panel host: the VS Code extension, Orca (not interactive)', () => {
     'the run reached its --max-turns limit',
     'the session was stopped and nobody has sent input since',
   ]) {
-    test.each([PANEL, ORCA])(`a wake the host refuses ("${reason}") is not lost and not tried again until the person sends input; then it goes in once (%j)`, async (env) => {
+    test.each([PANEL, DESKTOP])(`a wake the host refuses ("${reason}") is not lost and not tried again until the person sends input; then it goes in once (%j)`, async (env) => {
       const { hook, world } = await started(`panel-drop-${reason.length}-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
       world.answer = { drop: reason }
 
@@ -282,7 +285,7 @@ describe('a panel host: the VS Code extension, Orca (not interactive)', () => {
 const launched = (world: ReturnType<typeof engine>, cli: string) => world.runs.some((argv) => argv.includes('plannotator-launch') && argv.includes(cli))
 
 describe('ExitPlanMode in a panel host', () => {
-  test.each([PANEL])("the mod's plan review opens (%j)", async (env) => {
+  test.each([PANEL, DESKTOP])("the mod's plan review opens (%j)", async (env) => {
     const { hook, world } = await started(`panel-plan-${env.CLAUDE_CODE_ENTRYPOINT}`, env)
     const below = (e: unknown) => ({ passed: e })
     const answer = await hook('tool.call')(world.$, { tool: 'ExitPlanMode', tool_use_id: 'toolu_plan', plan: '# Plan\n' }, below)
@@ -305,6 +308,7 @@ describe('ExitPlanMode in a panel host', () => {
     ['Orca', ORCA, '0', {}],
     ['a T3 thread', T3, '0', { listed: T3_OWN_TOOLS }],
     ['the VS Code panel', PANEL, undefined, {}],
+    ['the desktop Code tab', DESKTOP, undefined, {}],
     ['claude -p', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, undefined, {}],
     ['claude -p from Claude\'s Bash in an Orca session', { ...ORCA, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }, undefined, {}],
   ])("%s: the session's hooks get PLANNOTATOR_PLAN_REVIEW=%p", async (name, env, value, options) => {
@@ -354,10 +358,12 @@ const HEADLESS: [string, Record<string, string>][] = [
   ['an Agent SDK app (sdk-py)', { CLAUDE_CODE_ENTRYPOINT: 'sdk-py' }],
   ['claude -p (sdk-cli)', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }],
   ['claude -p naming itself cli', { CLAUDE_CODE_ENTRYPOINT: 'cli' }],
-  ['Claude Desktop (claude-desktop)', { CLAUDE_CODE_ENTRYPOINT: 'claude-desktop' }],
+  ["the desktop app's Cowork (local-agent)", { CLAUDE_CODE_ENTRYPOINT: 'local-agent' }],
   ['no entrypoint', {}],
   ['a child of an Orca panel', { ...ORCA, CLAUDE_CODE_CHILD_SESSION: '1' }],
   ['a different Orca session inherits a tag', { ...ORCA, PLANNOTATOR_SESSION_TAG: 'claude-code:other' }],
+  ['claude -p from Claude\'s Bash in a desktop Code tab session', { ...DESKTOP, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }],
+  ['a different desktop Code tab session inherits a tag', { ...DESKTOP, PLANNOTATOR_SESSION_TAG: 'claude-code:other' }],
   ['an entrypoint only near the panel one', { CLAUDE_CODE_ENTRYPOINT: 'claude-vscode-insiders' }],
   ['a Claude T3 runs for no thread (t3-code, no T3CODE_THREAD_ID)', { CLAUDE_CODE_ENTRYPOINT: 't3-code' }],
   // A `claude -p` started from inside a panel session or a T3 thread inherits its entrypoint (and the thread id).
