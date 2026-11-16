@@ -41,7 +41,7 @@ import {
 } from '@plannotator/core/forge-ref-card';
 import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
-import { getRefCardProblemExtra, loadRefCard, refCardTarget } from '../utils/refCard';
+import { loadRefCard, refCardTarget } from '../utils/refCard';
 import { ProblemNotice } from './ProblemNotice';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
@@ -83,7 +83,7 @@ export function refKindName(ref: Pick<ForgeRef, 'platform' | 'kind'>): string {
   return ref.kind === 'issue' ? 'Issue' : FORGE_SPECS[ref.platform].pullName;
 }
 
-/** Bitbucket has no CLI: Plannotator reads it with an API token, so its failures keep their own lines. */
+/** Bitbucket has no CLI: Plannotator reads it with an API token, so its failures keep their own lines (`unavailable` also: no answer at all). */
 const BITBUCKET_FAILURE_TEXT: Record<ForgeRefCardError, string> = {
   unsupported: 'Details show for Bitbucket Cloud pull requests in the Inbox.',
   cli_missing: "Details couldn't load right now.",
@@ -411,8 +411,8 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
   if (!result || !result.ok) {
     const error = result && 'error' in result ? result.error : 'unavailable';
     // The tool's state in the one table's words (problem-words.ts): the same lines the Inbox's PR card and Pull
-    // requests page say. No answer at all reads as the tool having failed.
-    const problem = cardProblem(result ?? { ok: false, error: 'unavailable', fetchedAt: 0 }, target);
+    // requests page say. No answer at all (the route failed) claims nothing about the tool: a neutral line.
+    const problem = result ? cardProblem(result, target) : null;
     return (
       <div>
         <div className="px-3.5 pt-3">
@@ -423,11 +423,11 @@ export function RefCardView({ target, href, result, pinned, onClose, sheet, tigh
         </div>
         {problem ? (
           <div className="-mt-1" data-ref-card-error={error}>
-            <ProblemNotice problem={problem} touch={sheet} linked={href} extra={getRefCardProblemExtra()?.(problem, target, href)} />
+            <ProblemNotice problem={problem} touch={sheet} linked={href} />
           </div>
         ) : (
           <p className="px-3.5 pb-3 pt-1.5 text-[12px] leading-relaxed text-muted-foreground" data-ref-card-error={error}>
-            {target.platform === 'bitbucket' ? BITBUCKET_FAILURE_TEXT[error] : refUnsupportedLine(target.platform === 'gitlab' ? 'glab' : 'gh')}
+            {!result || target.platform === 'bitbucket' ? BITBUCKET_FAILURE_TEXT[error] : refUnsupportedLine(target.platform === 'gitlab' ? 'glab' : 'gh')}
           </p>
         )}
         {footer()}

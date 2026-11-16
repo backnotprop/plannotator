@@ -9,8 +9,8 @@
 
 import type { ForgeRefCardResult } from "@plannotator/core/forge-ref-card";
 import type { Problem, ProblemDiag } from "@plannotator/core/problem";
-import { toolProblem, type ToolCli, type ToolState } from "@plannotator/core/problem-words";
-import { REF_TIMEOUT_MS, type RefCards, type RefCommandResult } from "./ref-cards";
+import { commandHostTrusted, toolProblem, type ToolCli, type ToolState } from "@plannotator/core/problem-words";
+import { REF_TIMEOUT_MS, type CliHosts, type RefCards, type RefCommandResult } from "./ref-cards";
 import { refineToolState, tokenEnvFor, toolDiagOf, toolStateOfRun, type ToolStatus } from "@plannotator/shared/tool-state";
 
 export interface ThreadPullFailure {
@@ -20,15 +20,30 @@ export interface ThreadPullFailure {
 
 const STATES = new Set<string>(["missing", "signed_out", "timed_out", "refused", "rate_limited", "failed"]);
 
-function failure(state: ToolState, cli: ToolCli, host: string, url: string, at: number, diag: ProblemDiag | null, ran = true): ThreadPullFailure {
-  const problem = toolProblem(state, { cli, host, kind: "pull", url, envToken: ran && state === "signed_out" ? tokenEnvFor(cli, host) : null, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(at));
+function failure(state: ToolState, cli: ToolCli, host: string, url: string, at: number, diag: ProblemDiag | null, trusted: boolean, ran = true): ThreadPullFailure {
+  const envToken = ran && state === "signed_out" ? tokenEnvFor(cli, host) : null;
+  const problem = toolProblem(state, { cli, host, kind: "pull", url, trusted, envToken, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(at));
   return { problem, diag };
 }
 
 /**
- * A GitHub batch that got no answer: from the run, made precise by the status check. Nothing ran: held for a rate
- * limit, or a host gh lists no login for, which is signed out and is never named in a command (not even the check).
+ * Nothing ran: the CLI lists no signed-in login for this host. Not installed says `missing`. A host in the CLI's own
+ * configuration (an expired login, a host behind a VPN that is off) gets the cached status check, safe there, and
+ * reads as failed or timed out when the check cannot tell. A project's own origin host the CLI has never heard of is
+ * signed out. Any other host is named only by a link: `toolProblem` then names neither it nor a command.
  */
+async function unreadFailure(options: { tools: Pick<ToolStatus, "check">; cli: ToolCli; host: string; url: string; at: () => number; hosts: CliHosts | null; projectHosts: readonly string[] }): Promise<ThreadPullFailure> {
+  const { tools, cli, host, url, hosts, projectHosts } = options;
+  const trusted = commandHostTrusted(host, { configured: hosts?.configured, projectHosts });
+  if (hosts?.missing) return failure("missing", cli, host, url, options.at(), null, trusted, false);
+  if (hosts?.configured.has(host.toLowerCase())) {
+    const state = await refineToolState(tools, cli, host, null);
+    return failure(state, cli, host, url, options.at(), null, trusted, false);
+  }
+  return failure("signed_out", cli, host, url, options.at(), null, trusted, false);
+}
+
+/** A GitHub batch that got no answer: from the run, made precise by the status check; `unread` when nothing ran. */
 export async function githubPullFailure(options: {
   tools: Pick<ToolStatus, "check">;
   host: string;
@@ -37,12 +52,16 @@ export async function githubPullFailure(options: {
   /** The run, or null when nothing ran; `rateLimited`: the host is held. */
   run: { result: RefCommandResult; ms: number } | null;
   rateLimited?: boolean;
+  /** Nothing ran: what gh says about its hosts, and the projects' own origin hosts. */
+  hosts?: CliHosts | null;
+  projectHosts?: readonly string[];
 }): Promise<ThreadPullFailure> {
   const { tools, host, url, run } = options;
-  if (options.rateLimited) return failure("rate_limited", "gh", host, url, options.at(), null);
-  if (!run) return failure("signed_out", "gh", host, url, options.at(), null, false);
+  // A read ran for this host (github.com, or a host gh is signed in to): it is trusted.
+  if (options.rateLimited) return failure("rate_limited", "gh", host, url, options.at(), null, true);
+  if (!run) return unreadFailure({ tools, cli: "gh", host, url, at: options.at, hosts: options.hosts ?? null, projectHosts: options.projectHosts ?? [] });
   const state = await refineToolState(tools, "gh", host, toolStateOfRun("gh", run.result));
-  return failure(state, "gh", host, url, options.at(), toolDiagOf(run.result, run.ms));
+  return failure(state, "gh", host, url, options.at(), toolDiagOf(run.result, run.ms), true);
 }
 
 /** A GitLab card that came back failed (or not at all): its problem, made precise by the status check. */
@@ -53,13 +72,17 @@ export async function gitlabPullFailure(options: {
   url: string;
   at: () => number;
   result: ForgeRefCardResult | null;
+  /** `unsupported`: what glab says about its hosts, and the projects' own origin hosts. */
+  hosts?: CliHosts | null;
+  projectHosts?: readonly string[];
 }): Promise<ThreadPullFailure> {
   const { tools, host, url, result } = options;
-  // `unsupported`: glab lists no login for that host. Signed out, and the host is never named in a command.
-  if (result && !result.ok && result.error === "unsupported") return failure("signed_out", "glab", host, url, options.at(), null, false);
-  const code = result && !result.ok ? result.problem?.code.replace(/^tool\./, "") : undefined;
+  // `unsupported`: glab lists no signed-in login for that host, so nothing ran.
+  if (!result || (!result.ok && result.error === "unsupported")) {
+    return unreadFailure({ tools, cli: "glab", host, url, at: options.at, hosts: options.hosts ?? null, projectHosts: options.projectHosts ?? [] });
+  }
+  const code = !result.ok ? result.problem?.code.replace(/^tool\./, "") : undefined;
   const fromCard = code && STATES.has(code) ? (code as ToolState) : null;
-  // No card at all: nothing ran, the status check decides.
-  const state = await refineToolState(tools, "glab", host, fromCard ?? (result ? "failed" : null));
-  return failure(state, "glab", host, url, options.at(), (result && options.refCards?.diagOf?.(result)) ?? null);
+  const state = await refineToolState(tools, "glab", host, fromCard ?? "failed");
+  return failure(state, "glab", host, url, options.at(), options.refCards?.diagOf?.(result) ?? null, true);
 }

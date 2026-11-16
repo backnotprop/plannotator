@@ -32,6 +32,29 @@ export interface ToolProblemContext {
   envToken?: string | null;
   /** timed_out: the deadline it was given. */
   seconds?: number;
+  /**
+   * The host is one the person already uses (`commandHostTrusted`). Only then do the words name it in a claim or a
+   * command. Default: only github.com and gitlab.com.
+   */
+  trusted?: boolean;
+}
+
+/** The public forges: the only hosts trusted by name alone. */
+const PUBLIC_FORGE_HOSTS = new Set(["github.com", "gitlab.com"]);
+
+/**
+ * May a sign-in command (and "isn't signed in to <host>") name this host? Only a host the person already uses: the
+ * exact github.com or gitlab.com, a host in the CLI's own configuration (any state), or a project's own origin host.
+ * Never a host named only by a link an agent wrote: `gh auth login --hostname github.corn` would send the person's
+ * sign-in to whoever runs that host. Every surface decides through this one rule (`toolProblem`).
+ */
+export function commandHostTrusted(host: string, known: { configured?: Iterable<string>; projectHosts?: Iterable<string> } = {}): boolean {
+  const h = host.toLowerCase();
+  if (PUBLIC_FORGE_HOSTS.has(h)) return true;
+  for (const list of [known.configured, known.projectHosts]) {
+    for (const k of list ?? []) if (k.toLowerCase() === h) return true;
+  }
+  return false;
 }
 
 export const TOOL_INSTALL_URL: Record<ToolCli, string> = {
@@ -47,22 +70,24 @@ function nounOf(ctx: ToolProblemContext): string {
   return "one";
 }
 
-type Words = { title: string; detail: string; action?: ProblemAction };
+type Words = { title: string; detail: string; action?: ProblemAction; retry?: true };
 
 /** The table: one entry per state. A short bold line, at most one short muted line, one next step. */
 export const TOOL_WORDS: Record<ToolState, (ctx: ToolProblemContext) => Words> = {
   missing: ({ cli }) => ({
     title: `${cli} isn't installed`,
-    detail: `Install the ${forgeOf(cli)} CLI to see details here.`,
+    detail: `Install the ${forgeOf(cli)} CLI, then try again.`,
     action: { kind: "open_url", value: TOOL_INSTALL_URL[cli], label: `Install ${cli}` },
+    retry: true,
   }),
   signed_out: ({ cli, host, envToken }) =>
     envToken
-      ? { title: `${cli} isn't signed in to ${host}`, detail: `${forgeOf(cli)} refused the token in ${envToken}. Replace it, or remove it and sign in.` }
+      ? { title: `${cli} isn't signed in to ${host}`, detail: `${forgeOf(cli)} refused the token in ${envToken}. Replace it, or remove it and sign in.`, retry: true }
       : {
           title: `${cli} isn't signed in to ${host}`,
-          detail: "Run this once in a terminal to sign in.",
+          detail: "Run this once in a terminal, then try again.",
           action: { kind: "copy_command", value: `${cli} auth login --hostname ${host}` },
+          retry: true,
         },
   timed_out: ({ cli, seconds = 8 }) => ({
     title: `${cli} didn't answer in ${seconds} seconds`,
@@ -85,10 +110,20 @@ export const TOOL_WORDS: Record<ToolState, (ctx: ToolProblemContext) => Words> =
   }),
 };
 
-/** A tool's state as a problem, its words from the table. */
+/**
+ * A tool's state as a problem, its words from the table. Signed out on a host the person does not already use
+ * (`commandHostTrusted`) names neither the host nor a command: it says what the hover card says for such a host
+ * (`tool.unsupported`, `refUnsupportedLine`).
+ */
 export function toolProblem(state: ToolState, ctx: ToolProblemContext, at: Date = new Date()): Problem {
+  if (state === "signed_out" && !(ctx.trusted ?? commandHostTrusted(ctx.host))) {
+    return { code: "tool.unsupported", kind: "tool", ...UNSUPPORTED_WORDS(ctx.cli), retry: true, at: at.toISOString() };
+  }
   return { code: `tool.${state}`, kind: "tool", ...TOOL_WORDS[state](ctx), at: at.toISOString() };
 }
+
+/** A host this computer's CLI does not read: no claim about the host, no command. */
+const UNSUPPORTED_WORDS = (cli: ToolCli) => ({ title: `Details show for hosts your ${cli} is signed in to`, detail: "This one isn't, so nothing was fetched." });
 
 /**
  * An older server's bare card error as a tool state (`unsupported` is not one: a host this computer does not read).
@@ -117,7 +152,7 @@ export function cardErrorOfToolState(state: ToolState): ForgeRefCardError {
 }
 
 /** The hover card's line for a host this computer's CLI does not read (no tool state: nothing was run). */
-export const refUnsupportedLine = (cli: ToolCli) => `Details show for hosts your ${cli} is signed in to. This one isn't, so nothing was fetched.`;
+export const refUnsupportedLine = (cli: ToolCli) => `${UNSUPPORTED_WORDS(cli).title}. ${UNSUPPORTED_WORDS(cli).detail}`;
 
 /**
  * A failed hover card's problem: the server's own (newer servers), else its older bare error code in the same words

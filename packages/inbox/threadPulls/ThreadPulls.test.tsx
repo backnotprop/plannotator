@@ -510,7 +510,8 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
   });
 
   test("a PR the Inbox could not read: why shows under what is known, Copy copies the exact command, Try again asks again", async () => {
-    const problem = toolProblem('signed_out', { cli: 'glab', host: 'gitlab.example.dev', kind: 'pull' });
+    // The project's own GitLab (the server found it trusted): the command names it.
+    const problem = toolProblem('signed_out', { cli: 'glab', host: 'gitlab.example.dev', kind: 'pull', trusted: true });
     answer = answerOf([pull('https://gitlab.example.dev/acme/api/-/merge_requests/45', 'open', 'main', 'a', { problem, title: null })]);
     const copied: string[] = [];
     const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
@@ -526,13 +527,16 @@ describe.skipIf(!hasDom)("the thread's button and its card", () => {
       expect(card.querySelector('[data-problem="tool.signed_out"] [data-problem-title]')!.textContent).toBe(problem.title);
       await click(card.querySelector('[data-problem-copy]'));
       expect(copied).toEqual(['glab auth login --hostname gitlab.example.dev']);
-      // A timeout offers Try again, which reads with retry.
-      answer = answerOf([pull('o/r#8', 'open', 'main', 'b', { problem: toolProblem('timed_out', { cli: 'gh', host: 'github.com', kind: 'pull' }) })]);
+      // Signed in since: Try again, under the command, reads with retry.
+      reads = [];
+      await click(card.querySelector('[data-problem="tool.signed_out"] [data-problem-retry]'));
+      expect(reads.some((path) => path.endsWith('/pulls?retry=1'))).toBe(true);
+      // A host the person never used (only an agent's link named it): no command, no claim about it, still Try again.
+      answer = answerOf([pull('https://gitlab-acme.com/acme/api/-/merge_requests/8', 'open', 'main', 'b', { problem: toolProblem('signed_out', { cli: 'glab', host: 'gitlab-acme.com', kind: 'pull' }) })]);
       await act(async () => threadPullsBus.emit(THREAD));
       await settle();
-      reads = [];
-      await click(popover()!.querySelector('[data-problem-retry]'));
-      expect(reads.some((path) => path.endsWith('/pulls?retry=1'))).toBe(true);
+      const untrusted = popover()!.querySelector('[data-problem="tool.unsupported"]')!;
+      expect([untrusted.querySelector('[data-problem-command]'), untrusted.textContent!.includes('auth login'), !!untrusted.querySelector('[data-problem-retry]')]).toEqual([null, false, true]);
     } finally {
       if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
       else delete (navigator as { clipboard?: unknown }).clipboard;

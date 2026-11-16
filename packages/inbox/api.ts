@@ -19,7 +19,6 @@ import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
-import { PROBLEM_FACTS_READ_MS, problemFactsQuery, type InboxProblemFacts } from './problems/wire';
 import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
@@ -1545,8 +1544,6 @@ export const inboxApi = {
       throw cause;
     }
   },
-  /** "Ask your agent to look": versions, the tool's recent failed runs (redacted there) and the thread's agent. */
-  problemFacts: (query: Parameters<typeof problemFactsQuery>[0]) => getWithin<InboxProblemFacts>(inboxUrl('/problem-facts', problemFactsQuery(query)), PROBLEM_FACTS_READ_MS),
   /**
    * A thread's PRs (approval "inbox-pr-binding"): the live list with stack groups and state, and what was removed
    * lately, read on the thread's own machine. An Inbox older than PRs on threads, or a linked machine older than

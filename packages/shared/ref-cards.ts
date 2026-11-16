@@ -474,9 +474,10 @@ function refPageUrl(ref: ForgeRef): string {
 export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardError | "refused" {
   const err = `${result.stderr}\n${result.stdout}`;
   if (result.exitCode === 127 || /executable file not found|command not found|^(gh|glab): not found$/im.test(err)) return "cli_missing";
-  if (/rate limit|\b429\b|RATE_LIMITED|Too Many Requests/i.test(err)) return "rate_limited";
+  // A status in the tool's own shape, never a bare number (a PR numbered 429, a project called svc-401).
+  if (/rate limit|\bHTTP 429\b|\b429 Too Many|\(429\)|RATE_LIMITED|Too Many Requests/i.test(err)) return "rate_limited";
   if (/not logged in|auth login|authentication required|not authenticated|has not been authenticated/i.test(err)) return "signed_out";
-  if (cli === "glab" && /\b401\b|Unauthorized/i.test(err)) return "signed_out";
+  if (cli === "glab" && /\bHTTP 401\b|\b401 Unauthorized\b|\(401\)|\bUnauthorized\b/i.test(err)) return "signed_out";
   if (/Could not resolve to|NOT_FOUND|\bHTTP (404|401|403)\b|\b404\b|Not Found|Bad credentials|SAML|\b403\b|Forbidden/i.test(err)) return "refused";
   return "unavailable";
 }
@@ -489,31 +490,59 @@ export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardE
  * no hosts.
  */
 export async function readSignedInHosts(run: RefRunner, cli: RefCli): Promise<Set<string>> {
-  const hosts = new Set<string>();
-  const fromText = (text: string) => {
-    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+(?::\d+)?)/g)) hosts.add(m[1].toLowerCase());
+  return (await readCliHosts(run, cli)).signedIn;
+}
+
+/**
+ * What a CLI's own configuration says, lowercased (never a token): `signedIn`, the hosts it can read now (as
+ * readSignedInHosts); `configured`, every host it has a login for in any state (an expired or unchecked one too);
+ * `missing`, the CLI is not installed.
+ */
+export interface CliHosts {
+  signedIn: Set<string>;
+  configured: Set<string>;
+  missing: boolean;
+}
+
+const HOST = "[A-Za-z0-9.-]+\\.[A-Za-z]{2,}(?::\\d+)?";
+
+export async function readCliHosts(run: RefRunner, cli: RefCli): Promise<CliHosts> {
+  const out: CliHosts = { signedIn: new Set(), configured: new Set(), missing: false };
+  const fromText = (raw: string) => {
+    const text = raw.replace(/\u001b\[[0-9;]*m/g, "");
+    for (const m of text.matchAll(/Logged in to ([A-Za-z0-9.-]+(?::\d+)?)/g)) {
+      out.signedIn.add(m[1]!.toLowerCase());
+      out.configured.add(m[1]!.toLowerCase());
+    }
+    // Every host the CLI lists (a heading line of its own, or "log in to <host>" in a failed account's line).
+    for (const m of text.matchAll(new RegExp(`^(${HOST})\\s*$`, "gm"))) out.configured.add(m[1]!.toLowerCase());
+    for (const m of text.matchAll(new RegExp(`log(?:ged)? in(?:to)? to (${HOST})`, "gi"))) out.configured.add(m[1]!.toLowerCase());
   };
+  const notFound = (r: RefCommandResult) => r.exitCode === 127 || /executable file not found|command not found/i.test(r.stderr);
   if (cli === "gh") {
     const json = await run("gh", ["auth", "status", "--json", "hosts"]);
-    if (json.exitCode === 0) {
+    if (notFound(json)) return { ...out, missing: true };
+    if (json.exitCode === 0 || json.stdout.trim().startsWith("{")) {
       try {
         const parsed = JSON.parse(json.stdout) as { hosts?: Record<string, { state?: string }[]> };
         for (const [host, accounts] of Object.entries(parsed.hosts ?? {})) {
+          out.configured.add(host.toLowerCase());
           // Only an account gh says is signed in: every gh with `--json hosts` writes `state`, so one without it is not trusted.
-          if (Array.isArray(accounts) && accounts.some((a) => a?.state === "success")) hosts.add(host.toLowerCase());
+          if (Array.isArray(accounts) && accounts.some((a) => a?.state === "success")) out.signedIn.add(host.toLowerCase());
         }
-        return hosts;
+        return out;
       } catch {
         // Not that JSON: read the text form below.
       }
     }
     const text = await run("gh", ["auth", "status"], { NO_COLOR: "1" });
     fromText(`${text.stdout}\n${text.stderr}`);
-    return hosts;
+    return out;
   }
   const status = await run("glab", ["auth", "status"], { NO_COLOR: "1" });
+  if (notFound(status)) return { ...out, missing: true };
   fromText(`${status.stdout}\n${status.stderr}`);
-  return hosts;
+  return out;
 }
 
 /** Fetch a small avatar and inline it. Null on any failure: the card draws the initial. */
@@ -656,18 +685,19 @@ export function createRefCards(options: {
    * that). No host at all (the CLI failed, timed out, or is signed in nowhere) is kept only for
    * REF_FAILURE_MS, so one slow `auth status` does not hide enterprise hosts for minutes.
    */
-  const authHosts = new Map<RefCli, { at: number; ttl: number; hosts: Promise<Set<string>> }>();
-  const signedInHosts = (cli: RefCli): Promise<Set<string>> => {
+  const authHosts = new Map<RefCli, { at: number; ttl: number; hosts: Promise<CliHosts> }>();
+  const cliHosts = (cli: RefCli): Promise<CliHosts> => {
     const hit = authHosts.get(cli);
     if (hit && now() - hit.at < hit.ttl) return hit.hosts;
-    const hosts = readSignedInHosts(run, cli).catch(() => new Set<string>());
+    const hosts = readCliHosts(run, cli).catch((): CliHosts => ({ signedIn: new Set(), configured: new Set(), missing: false }));
     const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, hosts };
     authHosts.set(cli, entry);
-    void hosts.then((set) => {
-      if (set.size === 0) entry.ttl = REF_FAILURE_MS;
+    void hosts.then((found) => {
+      if (found.signedIn.size === 0) entry.ttl = REF_FAILURE_MS;
     });
     return hosts;
   };
+  const signedInHosts = async (cli: RefCli): Promise<Set<string>> => (await cliHosts(cli)).signedIn;
   /**
    * github.com and gitlab.com always; any other host only when this computer's own CLI is signed in to it.
    * Bitbucket Cloud pull requests when the host passed a reader.
@@ -694,7 +724,7 @@ export function createRefCards(options: {
       if (auth === undefined) void tools.check(cli, ref.host);
       else if (auth === "missing" || auth === "signed_out") state = auth;
     }
-    const problem = toolProblem(state, { cli, host: ref.host, kind: ref.kind, url: refPageUrl(ref), envToken: state === "signed_out" ? tokenEnvFor(cli, ref.host) : null, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(now()));
+    const problem = toolProblem(state, { cli, host: ref.host, kind: ref.kind, url: refPageUrl(ref), trusted: true, envToken: state === "signed_out" ? tokenEnvFor(cli, ref.host) : null, seconds: Math.round(REF_TIMEOUT_MS / 1000) }, new Date(now()));
     // Older windows read `error` only: a sign-in found later (a refused token) says so there too.
     const card: ForgeRefCardResult = { ok: false, error: state === "signed_out" || state === "missing" ? cardErrorOfToolState(state) : error, problem, fetchedAt: now() };
     diags.set(card, toolDiagOf(result, now() - startedAt));
@@ -814,7 +844,21 @@ export function createRefCards(options: {
     async get(href, { retry = false } = {}) {
       const ref = parseForgeRefUrl(href);
       if (!ref) return null;
-      if (!(await fetchesFrom(ref))) return fail("unsupported");
+      // Try again after signing in or installing: what the CLI said about its hosts, and its status check for this
+      // host, are read again now, not after their cache period.
+      if (retry && ref.platform !== "bitbucket") {
+        const cli = ref.platform === "github" ? "gh" : "glab";
+        authHosts.delete(cli);
+        tools.forget(cli, ref.host);
+      }
+      if (!(await fetchesFrom(ref))) {
+        // Not installed says so on any host (its words name no host); otherwise nothing runs for a host the CLI does not read.
+        if (ref.platform !== "bitbucket" && (await cliHosts(ref.platform === "github" ? "gh" : "glab")).missing) {
+          const problem = toolProblem("missing", { cli: ref.platform === "github" ? "gh" : "glab", host: ref.host, kind: ref.kind }, new Date(now()));
+          return { ok: false, error: "cli_missing", problem, fetchedAt: now() };
+        }
+        return fail("unsupported");
+      }
       const key = forgeRefKey(ref);
       const hit = cache.get(key);
       // Try again: a failure still being held is asked again now (one person's click; hovers never pass it).

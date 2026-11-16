@@ -7,7 +7,7 @@
  * - `missing`: exit 127 (the runners' answer when the program is not there),
  *   or the shell's "not found".
  * - `timed_out`: the runner's hard deadline ended it (`timedOut`).
- * - `rate_limited`: "rate limit", 429, "Too Many Requests".
+ * - `rate_limited`: "rate limit", "HTTP 429", "Too Many Requests" (never a bare 429).
  * - `signed_out`: gh exit 4 with "gh auth login" (no account), "Bad
  *   credentials" or HTTP 401 (a token GitHub refused); glab "401" /
  *   "Unauthorized" / "has not been authenticated".
@@ -15,7 +15,7 @@
  * - `failed`: anything else; the tool's last line is kept as private detail.
  *
  * Then, for a run that says only "refused", "timed out", "failed", or that
- * never ran (a host the CLI lists no login for), the cheap status check
+ * never ran on a host in the CLI's own configuration, the cheap status check
  * (`<cli> auth status --hostname <host>`) can say better: not installed, or
  * no login for that host at all. It has its own deadline (3 s), is cached
  * (a login 5 min, anything else 30 s) and shared by every caller, and
@@ -49,10 +49,12 @@ export function toolStateOfRun(cli: ToolCli, result: RefCommandResult): ToolStat
   const text = `${result.stderr}\n${result.stdout}`;
   if (result.timedOut || new RegExp(`^${cli}: timed out$`, "m").test(result.stderr)) return "timed_out";
   if (result.exitCode === 127 || /executable file not found|command not found|^(gh|glab): not found$/im.test(text)) return "missing";
-  if (/rate limit|\b429\b|RATE_LIMITED|Too Many Requests/i.test(text)) return "rate_limited";
+  // A status in the tool's own shape ("HTTP 429", "429 Too Many Requests", "(429)"), never a bare number: a PR, issue
+  // or project called 429 or svc-401 is not a rate limit or a sign-in problem.
+  if (/rate limit|\bHTTP 429\b|\b429 Too Many|\(429\)|RATE_LIMITED|Too Many Requests/i.test(text)) return "rate_limited";
   if (/not logged in|auth login|authentication required|not authenticated|has not been authenticated/i.test(text)) return "signed_out";
   // A token the forge does not accept (an expired login, a stale GH_TOKEN) is a sign-in problem, not a refusal.
-  if (/Bad credentials|\bHTTP 401\b/i.test(text) || (cli === "glab" && /\b401\b|Unauthorized/i.test(text))) return "signed_out";
+  if (/Bad credentials|\bHTTP 401\b|\b401 Unauthorized\b|\(401\)/i.test(text) || (cli === "glab" && /\bUnauthorized\b/i.test(text))) return "signed_out";
   if (/Could not resolve to|NOT_FOUND|\bHTTP (404|403)\b|\b404\b|Not Found|SAML|\b403\b|Forbidden/i.test(text)) return "refused";
   return "failed";
 }
@@ -89,6 +91,8 @@ export interface ToolStatus {
   check(cli: ToolCli, host: string): Promise<ToolAuthState>;
   /** The cached answer, or undefined; never runs anything. */
   peek(cli: ToolCli, host: string): ToolAuthState | undefined;
+  /** Drop the cached answer (the person's Try again, after signing in): the next check runs again. */
+  forget(cli: ToolCli, host: string): void;
 }
 
 export function createToolStatus(options: { run: RefRunner; now?: () => number; deadlineMs?: number }): ToolStatus {
@@ -128,13 +132,17 @@ export function createToolStatus(options: { run: RefRunner; now?: () => number; 
       const hit = cache.get(key(cli, host));
       return hit && fresh(hit) ? hit.state : undefined;
     },
+    forget(cli, host) {
+      cache.delete(key(cli, host));
+    },
   };
 }
 
 /**
  * A run's state, made precise by the status check where the run alone cannot tell: a refusal, a timeout or a failure
- * from a CLI with no login for that host is `signed_out`; one not installed is `missing`. `ran: false`: nothing ran
- * (a host the CLI lists no login for); the status check alone decides, `failed` when it cannot.
+ * from a CLI with no login for that host is `signed_out`; one not installed is `missing`. `state` null: nothing ran
+ * (a host in the CLI's configuration, not signed in now); the status check alone decides, `failed` or `timed_out`
+ * when it cannot tell.
  */
 export async function refineToolState(status: Pick<ToolStatus, "check">, cli: ToolCli, host: string, state: ToolState | null): Promise<ToolState> {
   if (state === "missing" || state === "signed_out" || state === "rate_limited") return state;

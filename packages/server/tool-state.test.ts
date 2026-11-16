@@ -16,6 +16,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ToolCli, ToolState } from "@plannotator/core/problem-words";
+import { readCliHosts, refErrorOf, type RefCommandResult } from "@plannotator/shared/ref-cards";
 import { createNodeRefCliRunner } from "@plannotator/shared/ref-cards-node";
 import { createToolStatus, refineToolState, toolAuthStateOf, toolStateOfRun } from "@plannotator/shared/tool-state";
 import { createBunRefCliRunner } from "./ref-cards";
@@ -116,5 +117,54 @@ describe("the status check", () => {
     expect(await refineToolState(status, "glab", "gitlab.example.dev", null)).toBe("signed_out");
     const signedIn = createToolStatus({ run: async () => ({ stdout: "", stderr: "", exitCode: 0 }) });
     expect(await refineToolState(signedIn, "gh", "github.com", "timed_out")).toBe("timed_out");
+    // Nothing ran and the check cannot tell (a token it could not check, a check that hangs): never "signed out".
+    const unsure = createToolStatus({ run: async () => ({ stdout: "", stderr: "X Failed to log in to ghe.acme.internal account dana (keyring)", exitCode: 1 }) });
+    expect(await refineToolState(unsure, "gh", "ghe.acme.internal", null)).toBe("failed");
+    const hangs = createToolStatus({ run: () => new Promise(() => {}), deadlineMs: 20 });
+    expect(await refineToolState(hangs, "gh", "ghe.acme.internal", null)).toBe("timed_out");
+  });
+
+  test("forget: Try again after signing in runs the check again", async () => {
+    let signedIn = false;
+    const status = createToolStatus({ run: async () => (signedIn ? { stdout: "", stderr: "", exitCode: 0 } : { stdout: "", stderr: "You are not logged into any accounts on ghe.acme.internal", exitCode: 1 }) });
+    expect(await status.check("gh", "ghe.acme.internal")).toBe("signed_out");
+    signedIn = true;
+    expect(await status.check("gh", "ghe.acme.internal")).toBe("signed_out");
+    status.forget("gh", "GHE.acme.internal");
+    expect(await status.check("gh", "ghe.acme.internal")).toBe("signed_in");
+  });
+});
+
+describe("a number in a name is not a status", () => {
+  const r = (stderr: string): RefCommandResult => ({ stdout: "", stderr, exitCode: 1 });
+  test("a PR numbered 429 or a project called svc-401 is neither a rate limit nor a sign-in problem", () => {
+    for (const text of ["GraphQL: Could not resolve to a PullRequest with the number of 429. (repository.pullRequest)", "ERROR: 404 Not Found: acme/svc-401!429"]) {
+      expect([text, toolStateOfRun("gh", r(text)), toolStateOfRun("glab", r(text)), refErrorOf("glab", r(text))]).toEqual([text, "refused", "refused", "refused"]);
+    }
+    for (const text of ["error connecting to api.github.com (pull 429)", "fetching acme/svc-401 failed: connection reset"]) {
+      expect([text, toolStateOfRun("gh", r(text)), refErrorOf("gh", r(text))]).toEqual([text, "failed", "unavailable"]);
+    }
+    // The tool's own shapes still read as what they are.
+    expect(toolStateOfRun("gh", r("HTTP 429: too many"))).toBe("rate_limited");
+    expect(toolStateOfRun("glab", r("ERROR: 429 Too Many Requests"))).toBe("rate_limited");
+    expect(toolStateOfRun("gh", r("HTTP 401: Requires authentication"))).toBe("signed_out");
+  });
+});
+
+describe("what a CLI says about its hosts", () => {
+  const runner = (answers: Record<string, RefCommandResult>) => async (cli: string, args: string[]) => answers[`${cli} ${args.join(" ")}`] ?? { stdout: "", stderr: "unknown command", exitCode: 1 };
+  test("gh: every host it lists is configured; only a working account is signed in", async () => {
+    const stdout = JSON.stringify({ hosts: { "github.com": [{ state: "success", login: "a" }], "GHE.acme.internal": [{ state: "error", login: "a" }] } });
+    const hosts = await readCliHosts(runner({ "gh auth status --json hosts": { stdout, stderr: "", exitCode: 1 } }), "gh");
+    expect([[...hosts.signedIn], [...hosts.configured].sort(), hosts.missing]).toEqual([["github.com"], ["ghe.acme.internal", "github.com"], false]);
+  });
+  test("glab: a heading host and a failed login are configured, not signed in", async () => {
+    const stderr = "gitlab.com\n  ✓ Logged in to gitlab.com as dana\ngitlab.acme.dev\n  x gitlab.acme.dev has not been authenticated with glab. Run `glab auth login --hostname gitlab.acme.dev` to authenticate.";
+    const hosts = await readCliHosts(runner({ "glab auth status": { stdout: "", stderr, exitCode: 1 } }), "glab");
+    expect([[...hosts.signedIn], [...hosts.configured].sort(), hosts.missing]).toEqual([["gitlab.com"], ["gitlab.acme.dev", "gitlab.com"], false]);
+  });
+  test("not installed says so", async () => {
+    expect((await readCliHosts(runner({ "glab auth status": { stdout: "", stderr: "glab: not found", exitCode: 127 } }), "glab")).missing).toBe(true);
+    expect((await readCliHosts(runner({ "gh auth status --json hosts": { stdout: "", stderr: "", exitCode: 127 } }), "gh")).missing).toBe(true);
   });
 });

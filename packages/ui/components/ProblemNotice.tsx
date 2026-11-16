@@ -6,15 +6,19 @@
  * host that never passes a problem draws nothing new.
  */
 
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Problem } from '@plannotator/core/problem';
 import { copyTextToClipboard } from '../utils/clipboard';
 
-/** A clock for "still trying" (a timeout, a pause the forge asked for); a warning for everything else outside us. */
+/**
+ * A clock for "still trying" (a timeout, a pause the forge asked for), muted, as is a host this computer does not read
+ * (nothing went wrong); a warning for everything else outside us.
+ */
 function ProblemIcon({ code }: { code: string }) {
   const waiting = code === 'tool.timed_out' || code === 'tool.rate_limited';
+  const quiet = waiting || code === 'tool.unsupported';
   return (
-    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={`mt-[2px] flex-none ${waiting ? 'text-muted-foreground' : 'text-amber-600 dark:text-amber-400'}`}>
+    <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={`mt-[2px] flex-none ${quiet ? 'text-muted-foreground' : 'text-amber-600 dark:text-amber-400'}`}>
       {waiting ? (
         <>
           <circle cx="8" cy="8" r="6.25" />
@@ -32,7 +36,7 @@ function ProblemIcon({ code }: { code: string }) {
 
 export interface ProblemNoticeProps {
   problem: Problem;
-  /** Try again (a `retry` action): drawn only when the host can ask again. */
+  /** Try again (a `retry` action, or a problem with `retry`): drawn only when the host can ask again. */
   onRetry?: () => void;
   /** A Try again in flight: the button says so and waits. */
   retrying?: boolean;
@@ -40,14 +44,9 @@ export interface ProblemNoticeProps {
   touch?: boolean;
   /** A page the surface already links (its own "Open on GitHub"): not offered twice. */
   linked?: string;
-  /**
-   * A quieter second step the host adds after the problem's own (the Plannotator Inbox: "Ask your agent to look").
-   * Beside a Try again or an open link, under a command or alone. Default: none, nothing drawn.
-   */
-  extra?: ReactNode;
 }
 
-export function ProblemNotice({ problem, onRetry, retrying = false, touch = false, linked, extra }: ProblemNoticeProps) {
+export function ProblemNotice({ problem, onRetry, retrying = false, touch = false, linked }: ProblemNoticeProps) {
   const [copied, setCopied] = useState<'yes' | 'no' | null>(null);
   const timer = useRef<number | null>(null);
   useEffect(() => () => {
@@ -55,7 +54,7 @@ export function ProblemNotice({ problem, onRetry, retrying = false, touch = fals
   }, []);
   const action = problem.action;
   const opens = action?.kind === 'open_url' && action.value !== linked;
-  const retries = action?.kind === 'retry' && !!onRetry;
+  const retries = (action?.kind === 'retry' || problem.retry === true) && !!onRetry;
   const btn = touch ? 'min-h-11 px-3' : 'h-7 px-2.5';
   const copy = async (text: string) => {
     const ok = await copyTextToClipboard(text);
@@ -70,9 +69,11 @@ export function ProblemNotice({ problem, onRetry, retrying = false, touch = fals
         <div className="font-semibold text-foreground" data-problem-title="">
           {problem.title}
         </div>
-        <div className="mt-0.5 text-muted-foreground" data-problem-detail="">
-          {problem.detail}
-        </div>
+        {problem.detail && (
+          <div className="mt-0.5 text-muted-foreground" data-problem-detail="">
+            {problem.detail}
+          </div>
+        )}
         {action?.kind === 'copy_command' && (
           <div className="mt-2 flex items-center gap-2">
             <code className="min-w-0 flex-1 break-words font-mono text-[11.5px] text-foreground" data-problem-command="">
@@ -89,7 +90,7 @@ export function ProblemNotice({ problem, onRetry, retrying = false, touch = fals
             </button>
           </div>
         )}
-        {(opens || retries || extra) && (
+        {(opens || retries) && (
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
             {opens && (
               <a href={action.value} target="_blank" rel="noopener noreferrer" className={`${btn} inline-flex items-center gap-1 rounded-md bg-primary/10 text-[11.5px] font-medium text-primary hover:bg-primary/15`} data-problem-open="">
@@ -108,7 +109,6 @@ export function ProblemNotice({ problem, onRetry, retrying = false, touch = fals
                 {retrying ? 'Trying again…' : 'Try again'}
               </button>
             )}
-            {extra}
           </div>
         )}
       </div>

@@ -2,15 +2,12 @@
  * The window's settings for the document UI it reuses (@plannotator/ui), set once when the window loads, before the
  * first render. Imported by App.tsx for this alone.
  */
-import { createElement } from 'react';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { inboxApi, REF_CARD_READ_MS, signalWithin } from './api';
 import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
-import { openRoute } from './debugLog';
 import { inboxImageSrcResolver } from './images';
 import { inboxUrl } from './inboxUrl';
-import { AskAgentToLook } from './problems/AskAgentToLook';
 import { inboxRefTransport } from './refTransport';
 import { applyRememberedTextSize } from './textSize';
 import { inboxServerSync } from './theme';
@@ -56,14 +53,6 @@ configurePlannotatorUI({
     const within = signalWithin(REF_CARD_READ_MS, signal);
     return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
   }),
-  // A failed card's problem offers "Ask your agent to look" after its own next step (problems/AskAgentToLook.tsx): To the
-  // agent of the thread open now, the report linking back to it.
-  refCardProblemExtra: (problem, ref, href) =>
-    createElement(AskAgentToLook, {
-      problem,
-      place: { surface: 'link_card', clis: [ref.platform === 'gitlab' ? 'glab' : 'gh'], hosts: [ref.host], url: href },
-      threadId: openRoute(window.location.hash).thread ?? null,
-    }),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it

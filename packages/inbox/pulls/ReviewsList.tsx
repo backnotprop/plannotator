@@ -14,7 +14,6 @@ import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
 import { pullFilterEmptyWords, pullNounWord, stackTitle, type PullFilter } from './model';
 import { initials, repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
-import { NoticeAsk } from '../problems/AskAgentToLook';
 import { chainMarks } from './topology';
 import { readReviewFolds, reviewRowLanding, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
 import { riskOrder, rowStack, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
@@ -293,7 +292,6 @@ export function ReviewsList({
                   </a>
                 </>
               )}
-              <NoticeAsk notice={n} />
             </span>
           </p>
         ))}
@@ -360,11 +358,6 @@ export function ReviewsList({
           {[empty.line, ...notices.map((n) => n.line)].map((line) => (
             <p key={line}>{line}</p>
           ))}
-          {notices.find((n) => n.tool) && (
-            <p>
-              <NoticeAsk notice={notices.find((n) => n.tool)!} lead="" />
-            </p>
-          )}
         </div>
       );
     }
@@ -375,11 +368,6 @@ export function ReviewsList({
         <div className="ib-pr-empty">
           <p className="ib-pr-empty-h">{nothing ? 'No reviews yet' : empty.head}</p>
           {nothing ? <p>Reviews your agents send, and your open pull requests, show here.</p> : empty.lines.map((line) => <p key={line}>{line}</p>)}
-          {!nothing && notices.find((n) => n.tool) && (
-            <p>
-              <NoticeAsk notice={notices.find((n) => n.tool)!} lead="" />
-            </p>
-          )}
           <button type="button" className="ib-btn ib-pri" onClick={onNew} data-reviews-new="empty">
             <Icon name="plus" size={15} />
             New review

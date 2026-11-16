@@ -63,7 +63,7 @@ import { sessionLastSawThread } from "./inbox-session-reads";
 import type { ProblemDiag } from "@plannotator/core/problem";
 import { createToolStatus, type ToolStatus } from "@plannotator/shared/tool-state";
 import { githubPullFailure, gitlabPullFailure, type ThreadPullFailure } from "./inbox-thread-pull-problem";
-import { createRefSlots, REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCards, type RefRunner } from "./ref-cards";
+import { createRefSlots, REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readCliHosts, refCliRunner, refErrorOf, type CliHosts, type RefCards, type RefCli, type RefRunner } from "./ref-cards";
 
 /** What the reader learns about one PR. */
 export interface ThreadPullRead {
@@ -162,6 +162,8 @@ export function createThreadPullStates(options: {
    * a `thread_pull` record already.
    */
   onLiveChange?: (threadIds: readonly string[]) => void;
+  /** A project's own origin host (cached; null when not known yet): a host a sign-in command may name. */
+  projectHostOf?: (projectId: string) => string | null;
 }): ThreadPullStates {
   const { store } = options;
   const run = options.run ?? refCliRunner;
@@ -170,20 +172,22 @@ export function createThreadPullStates(options: {
   const pending = new Map<string, Promise<void>>();
   const holdUntil = new Map<string, number>();
   const tools = options.tools ?? options.refCards?.tools ?? createToolStatus({ run, now });
-  let hosts: { at: number; ttl: number; set: Promise<Set<string>> } | null = null;
+  const hostsOf = new Map<RefCli, { at: number; ttl: number; hosts: Promise<CliHosts> }>();
   // At most CARD_MARKS_MAX_CONCURRENT reads; never stuck (createRefSlots): a stalled queue fails its reads, kept as failures.
   const slots = createRefSlots(CARD_MARKS_MAX_CONCURRENT);
   const slot = <T>(job: () => Promise<T>): Promise<T> => slots.run(job);
 
-  const signedIn = (): Promise<Set<string>> => {
-    if (hosts && now() - hosts.at < hosts.ttl) return hosts.set;
-    const set = readSignedInHosts(run, "gh").catch(() => new Set<string>());
-    const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, set };
-    hosts = entry;
-    void set.then((found) => {
-      if (found.size === 0) entry.ttl = REF_FAILURE_MS;
+  /** What a CLI says about its hosts, read once per REF_AUTH_HOSTS_MS (none signed in: REF_FAILURE_MS); Try again reads it now. */
+  const cliHosts = (cli: RefCli): Promise<CliHosts> => {
+    const hit = hostsOf.get(cli);
+    if (hit && now() - hit.at < hit.ttl) return hit.hosts;
+    const hosts = readCliHosts(run, cli).catch((): CliHosts => ({ signedIn: new Set(), configured: new Set(), missing: false }));
+    const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, hosts };
+    hostsOf.set(cli, entry);
+    void hosts.then((found) => {
+      if (found.signedIn.size === 0) entry.ttl = REF_FAILURE_MS;
     });
-    return set;
+    return hosts;
   };
 
   const fresh = (hit: Cached | undefined, refresh: boolean, retry = false): boolean => {
@@ -222,7 +226,7 @@ export function createThreadPullStates(options: {
     }
   };
 
-  const readGithub = (host: string, owner: string, repo: string, items: readonly { key: string; number: number; url: string }[]): Promise<void> => {
+  const readGithub = (host: string, owner: string, repo: string, items: readonly { key: string; number: number; url: string; projectHost: string | null }[]): Promise<void> => {
     const batchKey = `${host}/${owner}/${repo}`.toLowerCase() + "#" + items.map((i) => i.number).sort((a, b) => a - b).join(",");
     const inFlight = pending.get(batchKey);
     if (inFlight) return inFlight;
@@ -230,13 +234,18 @@ export function createThreadPullStates(options: {
       for (const item of items) land(item.key, null);
     };
     /** Every PR of the batch failed: why, per PR (its own page for "Open on GitHub"), outside the slot. */
-    const failWhy = async (run: Parameters<typeof githubPullFailure>[0]["run"], rateLimited = false) => {
-      const why = await Promise.all(items.map((item) => githubPullFailure({ tools, host, url: item.url, at: now, run, rateLimited }).catch(() => undefined)));
+    const failWhy = async (run: Parameters<typeof githubPullFailure>[0]["run"], rateLimited = false, hosts: CliHosts | null = null) => {
+      const why = await Promise.all(
+        items.map((item) => githubPullFailure({ tools, host, url: item.url, at: now, run, rateLimited, hosts, projectHosts: item.projectHost ? [item.projectHost] : [] }).catch(() => undefined)),
+      );
       items.forEach((item, i) => land(item.key, null, why[i]));
     };
     const job = slot(async (): Promise<(() => Promise<void>) | void> => {
       if (now() < (holdUntil.get(host) ?? 0)) return () => failWhy(null, true);
-      if (host !== "github.com" && !(await signedIn()).has(host)) return () => failWhy(null);
+      if (host !== "github.com") {
+        const hosts = await cliHosts("gh");
+        if (!hosts.signedIn.has(host)) return () => failWhy(null, false, hosts);
+      }
       const numbers = [...new Set(items.map((i) => i.number))];
       const startedAt = now();
       const result = await run("gh", ["api", "graphql", "--hostname", host, "-f", `query=${githubThreadPullsQuery(numbers)}`, "-f", `owner=${owner}`, "-f", `repo=${repo}`]);
@@ -264,13 +273,16 @@ export function createThreadPullStates(options: {
     return job;
   };
 
-  const readCard = async (key: string, url: string, ref: { host: string; platform: ForgePlatform }, retry: boolean): Promise<void> => {
+  const readCard = async (key: string, url: string, ref: { host: string; platform: ForgePlatform }, retry: boolean, projectHost: string | null): Promise<void> => {
     const result = options.refCards ? await options.refCards.get(url, retry ? { retry } : undefined).catch(() => null) : null;
     const read = result?.ok ? cardDataThreadPullRead(result.data) : null;
     if (read || result?.ok) return land(key, read);
     // Bitbucket is read with an API token, not a CLI: no tool state to name.
     if (ref.platform !== "gitlab") return land(key, null);
-    const why = await gitlabPullFailure({ tools, refCards: options.refCards ?? null, host: ref.host, url, at: now, result }).catch(() => undefined);
+    const unread = !result || (!result.ok && result.error === "unsupported");
+    const hosts = unread ? await cliHosts("glab") : null;
+    const projectHosts = projectHost ? [projectHost] : [];
+    const why = await gitlabPullFailure({ tools, refCards: options.refCards ?? null, host: ref.host, url, at: now, result, hosts, projectHosts }).catch(() => undefined);
     land(key, null, why);
   };
 
@@ -295,10 +307,12 @@ export function createThreadPullStates(options: {
       return cache.get(key)?.failure?.diag;
     },
     async refresh(pulls, { refresh = false, retry = false } = {}) {
-      const githubBatches = new Map<string, { host: string; owner: string; repo: string; items: { key: string; number: number; url: string }[] }>();
+      const githubBatches = new Map<string, { host: string; owner: string; repo: string; items: { key: string; number: number; url: string; projectHost: string | null }[] }>();
       const jobs: Promise<void>[] = [];
       const seen = new Set<string>();
       const fixture = options.fixture?.() ?? null;
+      // The person's Try again (after signing in or installing): what the CLIs say about their hosts is read again now.
+      if (retry) hostsOf.clear();
       for (const pull of pulls) {
         // Merged and closed are final: never read again.
         if (pull.state === "merged" || pull.state === "closed") continue;
@@ -309,15 +323,17 @@ export function createThreadPullStates(options: {
           continue;
         }
         const ref = parseForgeRefUrl(pull.url);
+        if (retry && ref && ref.platform !== "bitbucket") tools.forget(ref.platform === "github" ? "gh" : "glab", ref.host);
+        const projectHost = options.projectHostOf?.(pull.project_id) ?? null;
         if (!ref || ref.kind !== "pull" || forgeRefKey(ref) !== pull.pull) {
           land(pull.pull, null);
         } else if (ref.platform === "github") {
           const repoKey = `${ref.host}/${ref.owner}/${ref.repo}`.toLowerCase();
           const batch = githubBatches.get(repoKey) ?? { host: ref.host, owner: ref.owner, repo: ref.repo, items: [] };
-          batch.items.push({ key: pull.pull, number: ref.number, url: pull.url });
+          batch.items.push({ key: pull.pull, number: ref.number, url: pull.url, projectHost });
           githubBatches.set(repoKey, batch);
         } else {
-          jobs.push(readCard(pull.pull, pull.url, ref, retry));
+          jobs.push(readCard(pull.pull, pull.url, ref, retry, projectHost));
         }
       }
       for (const batch of githubBatches.values()) {

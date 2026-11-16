@@ -58,6 +58,7 @@ function world(
     bitbucket?: BitbucketRefReader;
     cards?: boolean;
     projectHost?: (projectId: string) => Promise<string | null>;
+    projectHostOf?: (projectId: string) => string | null;
   } = {},
 ) {
   const dir = mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-route-"));
@@ -68,7 +69,7 @@ function world(
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
   const refCards = options.bitbucket || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
-  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
+  const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange, projectHostOf: options.projectHostOf });
   const route = createThreadPullsRoute({
     store,
     states,
@@ -378,6 +379,99 @@ describe("why a PR could not be read (the card's tool state)", () => {
       if (token === undefined) delete process.env.GH_TOKEN;
       else process.env.GH_TOKEN = token;
     }
+  });
+
+  /** Run `work` with no GH_ENTERPRISE_TOKEN / GITLAB_TOKEN (the preload's fake token would name the variable instead). */
+  const noTokens = async (work: () => Promise<void>) => {
+    const saved = { GH_ENTERPRISE_TOKEN: process.env.GH_ENTERPRISE_TOKEN, GITHUB_ENTERPRISE_TOKEN: process.env.GITHUB_ENTERPRISE_TOKEN, GITLAB_TOKEN: process.env.GITLAB_TOKEN };
+    for (const k of Object.keys(saved)) delete process.env[k];
+    try {
+      await work();
+    } finally {
+      for (const [k, v] of Object.entries(saved)) if (v !== undefined) process.env[k] = v;
+    }
+  };
+  const problemsOf = async (w: ReturnType<typeof world>, query = "") => {
+    await w.get(w.thread, query);
+    await settle();
+    return ((await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer).pulls.map((p) => [p.host, p.problem?.code, p.problem?.action ?? null, p.problem?.retry ?? null]);
+  };
+
+  test("a GitHub Enterprise host in gh's configuration, signed out: the command names it, and Try again recovers right after the sign-in", async () => {
+    await noTokens(async () => {
+      let signedIn = false;
+      const answered = fakeGh({ 5: { state: "OPEN" } });
+      const calls: string[][] = [];
+      const run = async (cli: string, args: string[]) => {
+        calls.push([cli, ...args]);
+        if (args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.acme.dev": [{ state: signedIn ? "success" : "error", login: "dana" }] } }), stderr: "", exitCode: signedIn ? 0 : 1 };
+        if (args[0] === "auth") return signedIn ? { stdout: "", stderr: "", exitCode: 0 } : { stdout: "", stderr: "You are not logged into any accounts on github.acme.dev", exitCode: 1 };
+        return answered.run(cli, args);
+      };
+      const w = world({ gh: { run, calls } });
+      w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5");
+      expect(await problemsOf(w)).toEqual([["github.acme.dev", "tool.signed_out", { kind: "copy_command", value: "gh auth login --hostname github.acme.dev" }, true]]);
+      // The person runs the command, then presses Try again (the card's button: `?retry=1`).
+      signedIn = true;
+      await w.get(w.thread);
+      await settle();
+      expect(((await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer).pulls[0]!.problem?.code).toBe("tool.signed_out");
+      const retried = (await (await w.get(w.thread, "?retry=1"))!.json()) as InboxThreadPullsAnswer;
+      expect(retried.pulls.map((p) => [p.state, p.problem])).toEqual([["open", undefined]]);
+    });
+  });
+
+  test("a host gh only knows from its configuration and cannot check now: failed, never signed out", async () => {
+    await noTokens(async () => {
+      const run = async (_cli: string, args: string[]) => {
+        if (args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.acme.dev": [{ state: "error", login: "dana" }] } }), stderr: "", exitCode: 1 };
+        if (args[0] === "auth") return { stdout: "", stderr: "X Failed to log in to github.acme.dev account dana (keyring)", exitCode: 1 };
+        return { stdout: "", stderr: "unexpected", exitCode: 1 };
+      };
+      const w = world({ gh: { run, calls: [] } });
+      w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5");
+      expect(await problemsOf(w)).toEqual([["github.acme.dev", "tool.failed", { kind: "retry" }, null]]);
+    });
+  });
+
+  test("gh or glab not installed: a self-managed host says missing, with the install link and Try again", async () => {
+    const run = async () => ({ stdout: "", stderr: "", exitCode: 127 });
+    const w = world({ gh: { run, calls: [] }, cards: true });
+    w.agentAdd(w.thread, "https://github.acme.dev/acme/api/pull/5", "https://gitlab.acme.dev/acme/api/-/merge_requests/9");
+    expect(await problemsOf(w)).toEqual([
+      ["github.acme.dev", "tool.missing", { kind: "open_url", value: "https://cli.github.com", label: "Install gh" }, true],
+      ["gitlab.acme.dev", "tool.missing", { kind: "open_url", value: "https://gitlab.com/gitlab-org/cli#installation", label: "Install glab" }, true],
+    ]);
+  });
+
+  test("a sign-in command names only a host the person uses: the project's own GitLab yes; look-alikes an agent linked get no command and are never asked", async () => {
+    await noTokens(async () => {
+      const calls: string[][] = [];
+      // Signed in nowhere but the public forges; nothing in either CLI's configuration for these hosts.
+      const run = async (cli: string, args: string[]) => {
+        calls.push([cli, ...args]);
+        if (cli === "gh" && args.join(" ") === "auth status --json hosts") return { stdout: JSON.stringify({ hosts: { "github.com": [{ state: "success", login: "dana" }] } }), stderr: "", exitCode: 0 };
+        if (args[0] === "auth") return { stdout: "", stderr: "gitlab.com\n  ✓ Logged in to gitlab.com as dana\n", exitCode: 0 };
+        return { stdout: "", stderr: "unexpected", exitCode: 1 };
+      };
+      const w = world({ gh: { run, calls }, cards: true, projectHostOf: () => "gitlab.acme.dev" });
+      w.agentAdd(
+        w.thread,
+        "https://gitlab.acme.dev/acme/api/-/merge_requests/9",
+        "https://github.corn/acme/api/pull/1",
+        "https://gitlab-acme.com/acme/api/-/merge_requests/2",
+      );
+      // A host that only starts like a public forge is no forge link at all: it never reaches a card.
+      expect(() => w.agentAdd(w.thread, "https://gitlab.com.evil.example/acme/api/-/merge_requests/3")).toThrow();
+      const unsupported = ["tool.unsupported", null, true];
+      expect(await problemsOf(w)).toEqual([
+        ["gitlab.acme.dev", "tool.signed_out", { kind: "copy_command", value: "glab auth login --hostname gitlab.acme.dev" }, true],
+        ["github.corn", ...unsupported],
+        ["gitlab-acme.com", ...unsupported],
+      ]);
+      // No tool was ever run naming a look-alike, the status check included.
+      expect(calls.filter((call) => call.some((arg) => /github\.corn|gitlab-acme|evil\.example/.test(arg)))).toEqual([]);
+    });
   });
 });
 

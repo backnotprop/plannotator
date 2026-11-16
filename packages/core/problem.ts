@@ -30,6 +30,8 @@ export interface Problem {
   title: string;
   detail: string;
   action?: ProblemAction;
+  /** Try again is offered too, after the action (signed out, missing: the person fixes it, then asks again). */
+  retry?: true;
   /** When it was seen (ISO). */
   at: string;
 }
@@ -43,6 +45,8 @@ export interface ProblemDiag {
 }
 
 const ACTIONS = new Set(["copy_command", "open_url", "retry"]);
+/** The one command a problem offers: `gh` / `glab auth login --hostname <host>`. */
+const COMMAND = /^(gh|glab) auth login --hostname [a-z0-9][a-z0-9.-]*(:\d+)?$/;
 
 /**
  * A problem from the wire, or null when `value` is not one: a window reads an answer from a newer or older server, so
@@ -57,9 +61,17 @@ export function problemOf(value: unknown): Problem | null {
   if (a && typeof a === "object" && ACTIONS.has(a.kind as string)) {
     if (a.kind === "retry") action = { kind: "retry" };
     else if (typeof a.value === "string" && a.value !== "") {
-      // A page is only ever an https link: a server's answer never opens anything else.
-      action = a.kind === "copy_command" ? { kind: "copy_command", value: a.value } : typeof a.label === "string" && /^https:\/\//.test(a.value) ? { kind: "open_url", value: a.value, label: a.label } : undefined;
+      // A page is only ever an https link, and a command only ever a sign-in to a plain host: a server's answer never
+      // opens or offers anything else.
+      action =
+        a.kind === "copy_command"
+          ? COMMAND.test(a.value)
+            ? { kind: "copy_command", value: a.value }
+            : undefined
+          : typeof a.label === "string" && /^https:\/\//.test(a.value)
+            ? { kind: "open_url", value: a.value, label: a.label }
+            : undefined;
     }
   }
-  return { code: p.code, kind: "tool", title: p.title, detail: p.detail, ...(action ? { action } : {}), at: typeof p.at === "string" ? p.at : "" };
+  return { code: p.code, kind: "tool", title: p.title, detail: p.detail, ...(action ? { action } : {}), ...(p.retry === true ? { retry: true as const } : {}), at: typeof p.at === "string" ? p.at : "" };
 }
