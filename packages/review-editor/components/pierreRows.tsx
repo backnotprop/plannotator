@@ -105,7 +105,7 @@ export function hasBadge(file: DiffFile, p: FileRowState): boolean {
   return (p.annotationCounts.get(file.path) ?? 0) > 0 || (p.threadCount?.(file.path) ?? 0) > 0 || !!p.markdownPreviewedPaths?.has(file.path);
 }
 
-export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean): FileTreeRowParts {
+export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean, stageInLead = false): FileTreeRowParts {
   const isViewed = p.viewedFiles.has(file.path);
   const isStaged = p.stagedFiles.has(file.path);
   const section = p.getSectionEntry?.(file.path);
@@ -128,6 +128,7 @@ export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean
     else if (isStaged) stage = { id: 'staged', icon: STAGED_ICON, disabled: true, title: 'Staged (git add)' };
     else if (stageable) stage = { id: 'stage', icon: STAGE_ICON, label: `Stage ${file.path}`, title: 'Stage file (git add)' };
   }
+  if (withStage && stageInLead) lead.push(stage);
   const notes = p.annotationCounts.get(file.path) ?? 0;
   const previewed = p.markdownPreviewedPaths?.has(file.path);
   const threads = p.threadCount?.(file.path) ?? 0;
@@ -143,7 +144,7 @@ export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean
           : previewed
             ? { icon: EYE_ICON, title: 'Shown rendered' }
             : null,
-      stage,
+      stageInLead ? null : stage,
       ...countParts(file.additions, file.deletions, false),
     ],
   };
@@ -151,8 +152,8 @@ export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean
 
 export const TREE_ROW_HEIGHT = 28;
 
-export function leadColumnsFor(showViewedControls: boolean): string {
-  return showViewedControls ? 'var(--tree-lead-w)' : 'none';
+export function leadColumnsFor(showViewedControls: boolean, stageInLead = false): string {
+  return [showViewedControls ? 'var(--tree-lead-w)' : null, stageInLead ? 'var(--tree-stage-w)' : null].filter(Boolean).join(' ') || 'none';
 }
 
 export const TreeRowMenu: React.FC<{

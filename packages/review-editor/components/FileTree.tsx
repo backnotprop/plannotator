@@ -28,8 +28,8 @@ import type { RepoFiles } from '../hooks/useRepoFiles';
 import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/OverlayScrollArea';
 
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
-import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './PanelChrome';
-import { countColumnVars, compactRowsProps } from './FileRowBits';
+import { PanelControlsRow, PanelSearchField } from './PanelChrome';
+import { COMPACT_ROWS_WIDTH, countColumnVars, compactRowsProps } from './FileRowBits';
 import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 
@@ -381,7 +381,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
       isSearchVisible={isSearchVisible}
       onOpenSearch={onOpenSearch}
       onCloseSearch={searchQuery.trim() ? onSearchClear : onSearchClose}
-      oneRow={panelWidth >= TOOLS_ONE_ROW_WIDTH}
       onToggleAllFolders={showAllFiles ? toggleAllRepoFolders : handleToggleAllFolders}
       areAllFoldersExpanded={showAllFiles ? repoFoldersOpen : foldersExpanded}
       collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
@@ -587,6 +586,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
           {treeMounts && <ChangesTreeView
             key={touchRows ? 'touch' : 'pointer'}
             touch={touchRows}
+            compact={panelWidth < COMPACT_ROWS_WIDTH}
             handleRef={changesTreeRef}
             grouping={blocks ? effectiveGroupBy : 'none'}
             tree={plainTree}
@@ -619,6 +619,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             <RepoTreeView
               key={touchRows ? 'touch' : 'pointer'}
               touch={touchRows}
+              compact={panelWidth < COMPACT_ROWS_WIDTH}
               handleRef={repoTreeRef}
               repo={repoReady}
               loadDir={repoFiles!.loadDir}

@@ -184,6 +184,17 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(part(el, 'edited.ts', 'viewed').closest('[data-item-section]')?.getAttribute('data-item-section')).toBe('lead');
   });
 
+  test('a narrow panel hides the numbers but keeps git add on every stageable row', async () => {
+    const onStageFile = mock((_path: string) => {});
+    const el = await mount(<Tree width={200} files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} onStageFile={onStageFile} />);
+    expect(el.querySelector('[data-compact-rows]')).not.toBeNull();
+    const section = (path: string, id: string) => part(el, path, id).closest('[data-item-section]')?.getAttribute('data-item-section');
+    expect(section('edited.ts', 'stage')).toBe('lead');
+    expect(section('staged.ts', 'unstage')).toBe('lead');
+    await act(async () => part(el, 'edited.ts', 'stage').click());
+    expect(onStageFile).toHaveBeenCalledWith('src/edited.ts');
+  });
+
   test('group by git status: staging a file from its row moves it to Staged', async () => {
     const tree = (staged: string[]) => (
       <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(staged)} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable onStageFile={() => {}} />

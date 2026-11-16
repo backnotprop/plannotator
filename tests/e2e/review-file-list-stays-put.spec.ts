@@ -9,10 +9,6 @@
  *    first header's place.
  *  - Hide viewed on: the file you leave (auto-marked viewed) keeps its row
  *    while the pointer is in the panel, and goes once the pointer leaves.
- *  - A file header's Open in shows on hover left of its actions; nothing in
- *    the header moves and no empty room is left at its right edge.
- *  - Collapse all files in the tree header folds every file and expands them
- *    again, and the file you were reading stays in view both ways.
  *
  * Nothing is mocked: `plannotator review` runs in a scratch git repository
  * under a temp PLANNOTATOR_DATA_DIR and HOME, with a PATH of its own (no agent

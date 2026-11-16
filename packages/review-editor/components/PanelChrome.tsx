@@ -21,9 +21,10 @@ import { Tooltip } from "@plannotator/ui/components/Tooltip";
  * source so both views keep the same tools in the same places. In a narrow
  * panel the icons wrap under the scope instead of drawing over it.
  */
-/** From this panel width the scope and the tools always share one line (they
- *  fit at the default 256 px in either scope); narrower, the tools always
- *  wrap under the scope. Either way switching scope never moves the list. */
+/** From this panel width the scope pills take their short labels so they and
+ *  the tools share one line at the default 256 px; whenever they don't fit
+ *  (narrower, or a long count beside Collapse all files) the tools wrap under
+ *  the scope instead of drawing over it. */
 export const TOOLS_ONE_ROW_WIDTH = 256;
 
 export interface PanelControlsProps {
@@ -33,8 +34,6 @@ export interface PanelControlsProps {
   /** Closes the search a second click on Search in diff finds open. Without
    *  it the button is a plain button (no pressed state). */
   onCloseSearch?: () => void;
-  /** Keep the scope and the tools on one line (`TOOLS_ONE_ROW_WIDTH`). */
-  oneRow?: boolean;
   /** Tree view only — the sections view has no folders to collapse. */
   onToggleAllFolders?: () => void;
   areAllFoldersExpanded?: boolean;
@@ -306,7 +305,6 @@ export function PanelControlsRow(props: PanelControlsProps) {
     isSearchVisible = false,
     onOpenSearch,
     onCloseSearch,
-    oneRow = false,
     copyRawDiffStatus = "idle",
     scope,
     showViewedControls = true,
@@ -320,7 +318,7 @@ export function PanelControlsRow(props: PanelControlsProps) {
   return (
     <StickyTools>
       <div
-        className={`flex ${oneRow ? "flex-nowrap" : "flex-wrap"} items-center min-h-7 gap-y-1`}
+        className="flex flex-wrap items-center min-h-7 gap-y-1"
         data-panel-controls-row=""
       >
         {scope ?? <span className="px-2 text-[13px] font-medium text-muted-foreground">Files</span>}
