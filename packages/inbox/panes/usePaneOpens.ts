@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { PaneId, PaneSet } from './model';
+import type { QueryClient } from '@tanstack/react-query';
 import { createPaneReads, type PaneOpenView, type PaneReads, type PaneReadsDeps } from './paneReads';
+import { createShownReads, type ShownReads, type ShownReadsDeps } from './shownReads';
+import { useStaleOpenRead } from '../threadFlights';
 
 /** Every pane's reads and open (paneReads.ts), with their views as the window's state. */
 export function usePaneReads(deps: Omit<PaneReadsDeps, 'drawn' | 'panes'>, panes: PaneSet): PaneReads {
@@ -74,4 +77,12 @@ export function usePaneOpening(reads: PaneReads, panes: PaneSet, opened: (thread
       all.clear();
     };
   }, [reads]);
+}
+
+/** The reads that follow every thread on screen (shownReads.ts), and the re-read of one left stale (threadFlights.ts). */
+export function useShownReads(reads: PaneReads, deps: Omit<ShownReadsDeps, 'reads'>, client: QueryClient): ShownReads {
+  const [shown] = useState(() => createShownReads({ ...deps, reads }));
+  useStaleOpenRead(client, reads.shown, (id) => void reads.refreshThread(id));
+  useEffect(() => shown.stop, [shown]);
+  return shown;
 }

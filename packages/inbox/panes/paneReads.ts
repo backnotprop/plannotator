@@ -311,6 +311,8 @@ export function createPaneReads(deps: PaneReadsDeps) {
     close,
     remove,
     retry,
+    /** The threads on screen, one per pane that shows one. */
+    shown: (): string[] => deps.panes().panes.flatMap((pane) => (pane.thread ? [pane.thread] : [])),
     /** The thread was missing here, and the list now names the machine that holds it: its pane reads it there. */
     retryMissing: (threadId: string) => {
       const pane = shownIn(threadId);

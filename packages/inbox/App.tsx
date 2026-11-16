@@ -67,7 +67,7 @@ import {
 } from './api';
 import { listReadRefused, readFirstList } from './firstListRead';
 import { adoptRestartedInbox, type RestartHello } from './sessionAdopt';
-import { listsThread, newRecordBatch, noteOwnRecord, noteRecord, openThreadRead } from './openThreadReads';
+import { newRecordBatch, noteOwnRecord, noteRecord } from './openThreadReads';
 import { archivedRowPatch, patchShownRow, readRowPatch, shownRowOf } from './rowActions';
 import { createOwnSaves } from './ownSaves';
 import { createKeyedSignal } from './signal';
@@ -127,7 +127,7 @@ import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
 import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SETTINGS_STEP, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, type TourAction, type TourDegraded, type TourUi } from './tour/model';
 import { addressThread, MAIN_PANE, paneThread } from './panes/model';
 import { createPanesOnScreen } from './panes/onScreen';
-import { usePaneOpening, usePaneReads } from './panes/usePaneOpens';
+import { usePaneOpening, usePaneReads, useShownReads } from './panes/usePaneOpens';
 import { useRoutePanes } from './panes/useRoutePanes';
 import { EmptyThreadPanel } from './components/EmptyThreadPanel';
 import { AgentNoteDialog } from './components/AgentNoteDialog';
@@ -181,7 +181,6 @@ import { projectWrites } from './projectWrites';
 import { priorityWrites } from './priorityWrites';
 import { snoozeWrites } from './snoozeWrites';
 import { agentWrites, type AgentDeleteAsk } from './agentWrites';
-import { useStaleOpenRead } from './threadFlights';
 import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settingsAtLoad';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
@@ -401,7 +400,7 @@ function Inbox() {
      */
     textOnly: true,
     read: () => {},
-    readOwn: () => {},
+    readOwn: (_thread: string | null) => {},
     readHeld: (_held: InboxEvent[], _quiet?: boolean) => {},
   });
   /** What this window's own question saves brought back: their records are echoes, not news (ownSaves.ts). */
@@ -1119,7 +1118,7 @@ function Inbox() {
 
 
   const refreshThread = paneReads.refreshThread;
-  useStaleOpenRead(queryClient, routeRef, (id) => void refreshThread(id));
+  const shownReads = useShownReads(paneReads, { latest: () => latestRef.current, filesSignals }, queryClient);
 
   /** A settings read arrived: the moment the Inbox named for the line, kept on this page's clock (`useLineLatch`). */
   const noteLineAgain = useCallback((reveal: SettingsModel['reveal']) => {
@@ -1471,7 +1470,6 @@ function Inbox() {
     let priorityTimer: ReturnType<typeof setTimeout> | null = null;
     let cardsTimer: ReturnType<typeof setTimeout> | null = null;
     let machinesTimer: ReturnType<typeof setTimeout> | null = null;
-    let machineThreadTimer: ReturnType<typeof setTimeout> | null = null;
     /** The machines as last read (state and list cursor each), and whether one was linked. */
     let machinesSignature = '';
     let machinesLinked = false;
@@ -1506,28 +1504,8 @@ function Inbox() {
         const listRead = refreshList(false);
         void listRead.then((next) => next && flushNotifications(next));
         void refreshDecisions();
-        const open = routeRef.current.thread;
-        let threadRead: Promise<unknown> = Promise.resolve(null);
-        if (open) {
-          const { load, loaded, loadedAt } = paneReads.readOf(open);
-          const read = openThreadRead(records, {
-            threadId: open,
-            remote: machineOf(open) !== null,
-            loaded,
-            loadedAt,
-            now: Date.now(),
-            settled: load === null || load.threadId !== open,
-            listed: listsThread(latestRef.current, open),
-          });
-          if (read === 'thread') threadRead = refreshThread(open);
-          else {
-            if (read === 'files') filesSignals.emit(open);
-            // Gone from the list this read brought (deleted elsewhere, which no record says): read it, as before.
-            void listRead.then((next) => {
-              if (routeRef.current.thread === open && !listsThread(next, open)) void refreshThread(open);
-            });
-          }
-        }
+        // Each thread on screen reads what these records owe it (panes/shownReads.ts).
+        const threadRead = shownReads.afterRecords(records, listRead);
         // pn:record-refresh: the event heard → the list and the open thread read again and drawn.
         if (heard !== null) void Promise.allSettled([listRead, threadRead]).then(() => perfUntilNextFrame('record-refresh', heard));
         // Picks and comments are unsent work too: the Drafts row follows them. Read only when these records can change
@@ -1549,9 +1527,8 @@ function Inbox() {
       event.kind === 'question' && typeof event.thread_id === 'string' && event.thread_id !== '' && ownSaves.explains(event.question) ? event.thread_id : null;
     // The window's own pick saves owe a read with no record of their own: everything is read, the open thread too.
     pickSaves.current.read = () => readAfterRecord(null);
-    // A run of saves on the open thread ended with no record held: what shows the pick besides the pane, at once.
-    pickSaves.current.readOwn = () => {
-      const open = routeRef.current.thread;
+    // A run of saves on a thread on screen ended with no record held: what shows the pick besides the pane, at once.
+    pickSaves.current.readOwn = (open) => {
       // No thread open (a save that landed after its pane closed): the list, as before.
       if (open) readAfterRecord(null, { own: open, now: true });
       else void refreshList(false);
@@ -1581,8 +1558,7 @@ function Inbox() {
           readHealth: () => inboxApi.healthWithin(STALE_HEALTH_MS),
           // What a reload would bring, before any write carries the new session.
           catchUp: async () => {
-            const open = routeRef.current.thread;
-            const [list] = await Promise.all([refreshList(false), open ? refreshThread(open) : null, refreshDrafts(), refreshSettings()]);
+            const [list] = await Promise.all([refreshList(false), shownReads.all(), refreshDrafts(), refreshSettings()]);
             // The run the read came from (a read that changed nothing answers the list held, which names the old run).
             return cancelled || !list ? null : (listCursor.current?.session ?? null);
           },
@@ -1772,9 +1748,8 @@ function Inbox() {
         // The live sessions moved (approval "inbox-row-delivery"): read the list again while a row's
         // delivery can still change (queued, sending, saved, not delivered), so its glyph follows.
         onDeliveries: (change) => {
-          // A launched thread's run line moves with the same signature: the open one is read again.
-          const open = routeRef.current.thread;
-          if (open && paneReads.readOf(open).loaded?.thread_id === open && paneReads.readOf(open).loaded?.messages[0]?.launch) void refreshThread(open);
+          // A launched thread's run line moves with the same signature: one on screen is read again.
+          void shownReads.launched();
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
@@ -1814,8 +1789,7 @@ function Inbox() {
           emitAskChange(null);
           void refreshList(false).then((next) => next && flushNotifications(next));
           void refreshDecisions();
-          const open = routeRef.current.thread;
-          if (open) void refreshThread(open);
+          void shownReads.all();
           void refreshDrafts();
           // A steps line meanwhile (a record, so replayed too, but read once here like the thread).
           stepsBus.emit('*');
@@ -1834,10 +1808,7 @@ function Inbox() {
         // has read that machine's list again, which the `machines` frame says.
         onMachine: (frame) => {
           if (frame.live && frame.record) observeEvent(frame.record);
-          const open = routeRef.current.thread;
-          if (!open || machineOf(open) !== frame.machine) return;
-          if (machineThreadTimer) clearTimeout(machineThreadTimer);
-          machineThreadTimer = setTimeout(() => void refreshThread(open), 80);
+          shownReads.machineFrame(frame.machine);
         },
         onMachines: (next) => {
           machineViewsGate.frame(next);
@@ -1847,11 +1818,7 @@ function Inbox() {
           if (linked) {
             // The held writes, whole: a snapshot follows every reconnect, and an `outbox` frame may have been missed. One
             // that settled meanwhile is in its thread now: the open thread of that machine is read again.
-            void reloadOutbox().then((settled) => {
-              const open = routeRef.current.thread;
-              const owner = open ? machineOf(open) : null;
-              if (open && owner && settled.has(owner)) void refreshThread(open);
-            });
+            void reloadOutbox().then((settled) => shownReads.onMachines(settled));
           }
           const signature = next.map((m) => `${m.id}:${m.state}:${m.list_cursor ?? ''}`).join('|');
           if ((!linked && !machinesLinked) || signature === machinesSignature) return;
@@ -1874,8 +1841,7 @@ function Inbox() {
         onOutbox: (entry) => {
           setOutbox((current) => new Map(current).set(entry.key, entry));
           // Delivered: the reply is in that machine's thread now; the open thread shows it there.
-          const open = routeRef.current.thread;
-          if (entry.state === 'delivered' && open && machineOf(open) === entry.machine) void refreshThread(open);
+          if (entry.state === 'delivered') void shownReads.onMachines(new Set([entry.machine]));
           // Its machine's link went (here, or on that machine): what waited for it was not sent, and its thread is gone
           // from this list. Said at once; Settings → Machines keeps the words to copy.
           if (entry.state === 'dropped' && entry.machine_name && entry.notice && !entry.dismissed) {
@@ -1908,7 +1874,7 @@ function Inbox() {
       if (snoozesTimer) clearTimeout(snoozesTimer);
       if (priorityTimer) clearTimeout(priorityTimer);
       if (machinesTimer) clearTimeout(machinesTimer);
-      if (machineThreadTimer) clearTimeout(machineThreadTimer);
+      shownReads.stop();
     };
   }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient, takeRecordList]);
 
@@ -2552,7 +2518,7 @@ function Inbox() {
    * `paneClosed` only ends the hold: nothing landed, and a read here would put
    * the list on screen ahead of the close's own settle (settle.ts).
    */
-  const onPickSaves = useCallback((saving: ReadonlySet<string>, paneClosed = false) => {
+  const onPickSaves = useCallback((saving: ReadonlySet<string>, paneClosed = false, threadId: string | null = null) => {
     pickSaves.current.saving = saving;
     if (saving.size > 0) return;
     // While a thread is open the person's own writes never reorder the list
@@ -2569,7 +2535,7 @@ function Inbox() {
     if (!pickSaves.current.owed) {
       // The records of these saves are still to come: read now what they will owe, so they owe nothing then.
       if (quiet) ownSaves.readsStarted();
-      else if (!paneClosed) pickSaves.current.readOwn();
+      else if (!paneClosed) pickSaves.current.readOwn(threadId);
       return;
     }
     pickSaves.current.owed = false;
@@ -2588,8 +2554,7 @@ function Inbox() {
    * else keeps waiting for Show.
    */
   const afterWrite = async (written: readonly string[] = []) => {
-    const open = routeRef.current.thread;
-    if (open) await refreshThread(open);
+    await shownReads.all();
     const next = await refreshList(false);
     if (!next || written.length === 0) return;
     const groups = listGroups(next);
@@ -2674,8 +2639,7 @@ function Inbox() {
     }
     void refreshDrafts();
     void refreshSettings();
-    const open = routeRef.current.thread;
-    if (open) void refreshThread(open);
+    void shownReads.all();
     say(`${label} refreshed`);
   };
   const dismissToast = useCallback(() => {
@@ -5778,7 +5742,7 @@ function Inbox() {
     );
   }
   // Shift+R: the refresh of the page on screen (keyboard/appKeys.ts `refreshKind` decides which).
-  const refreshOpen = route.page === 'inbox' ? route.thread : null;
+  const refreshOpen = route.page === 'inbox' ? paneThread(panes, panes.active) : null;
   refreshRef.current = refreshAction(
     refreshKind({
       page: route.page,

@@ -112,6 +112,7 @@ packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
 packages/inbox/panes/twoSlots.test.tsx
 packages/inbox/panes/usePaneOpens.test.tsx
+packages/inbox/panes/shownReads.test.tsx
 packages/inbox/projectList.test.tsx
 packages/inbox/rowBadges.test.tsx
 packages/inbox/readWaitingRow.test.tsx

@@ -192,7 +192,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           replyPart={host.shapeReply?.threadId === thread.thread_id ? host.shapeReply : null}
           onReplyPartTaken={() => host.setShapeReply(null)}
           onQuestions={host.patchQuestions}
-          onPickSaves={host.onPickSaves}
+          onPickSaves={(ids, paneClosed) => host.onPickSaves(ids, paneClosed, threadId)}
           onChanged={host.afterWrite}
           onTakenBack={(draft) => openTakenBack(draft, host.openCompose, host.afterWrite)}
           readPending={host.rowPatches.get(thread.thread_id)?.read_at !== undefined}

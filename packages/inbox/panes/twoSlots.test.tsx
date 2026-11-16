@@ -131,6 +131,8 @@ afterEach(() => {
 });
 
 const noop = () => {};
+/** Each pane's pick-save calls, with the thread the pane named. */
+const pickSaves: [string | null, boolean | undefined][] = [];
 const none = async () => null;
 
 /** The window's side of one slot: its look at the open, and where its seen-on-sight goes. */
@@ -148,7 +150,7 @@ function hostFor(threadId: string, seen: (threadId: string, through: number) => 
     snoozeOn: false, snooze: noop, unsnooze: noop, setMachineUpdateOpen: noop, threadAgentContext: null, replyFor: null, setReplyFor: noop,
     draftSignals: createKeyedSignal(), filesSignals: createKeyedSignal(), shapes: { byThread: new Map() } as unknown as ThreadSlotHost['shapes'],
     ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop, shapeReply: null, setShapeReply: noop,
-    patchQuestions: noop, onPickSaves: noop, afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
+    patchQuestions: noop, onPickSaves: (_ids, paneClosed, threadId) => void pickSaves.push([threadId, paneClosed]), afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
     searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
     seenOnSight: seen, covered: false, panesOnScreen: createPanesOnScreen(), setOpenThreadCovered: noop, listTitle: 'Inbox', fullSidebar: true,
     setThreadFull: noop, leaveFull: noop, showToast: noop, toastNow: { current: null }, dismissToast: noop, inboxLink: () => null,
@@ -231,6 +233,18 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(seen).toEqual([
       [A, 6],
       [B, 6],
+    ]);
+  });
+
+  test("a pane's pick saves name its own thread, not the other pane's", async () => {
+    pickSaves.length = 0;
+    draw('a', false, []);
+    await wait(0);
+    act(() => root!.unmount());
+    root = null;
+    expect([...pickSaves].sort()).toEqual([
+      [A, true],
+      [B, true],
     ]);
   });
 });
