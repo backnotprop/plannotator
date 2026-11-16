@@ -192,6 +192,17 @@ test.skipIf(!hasDom)('under the setting the tile is checked for an agent with no
   await until(() => !document.querySelector('[data-agent-tile="ses_o"] .ib-pf'), 'the own mark back');
 });
 
+test.skipIf(!hasDom)('under the setting an agent whose project has nothing to draw shows its own mark, and its picker checks it', async () => {
+  adoptSavedRows(['smallNames', 'agentProjectIcons'], 1, -1);
+  const icon = sidebarMark('ses_n');
+  await wait(0);
+  expect(document.querySelector('[data-agent-tile="ses_n"]')).toBeNull();
+  key(icon, 'Enter');
+  await until(() => radios().length > 0, 'the picker');
+  expect(radios().map((r) => r.getAttribute('data-face-choice'))).not.toContain('project');
+  expect(radios().filter((r) => r.getAttribute('aria-checked') === 'true').map((r) => r.getAttribute('data-face-choice'))).toEqual(['agent']);
+});
+
 /** Every place an agent's icon is drawn, for one agent: the sidebar's mark, a row's (and an author's) mark, the reply
  *  box's pill and mark, the thread header's pile. */
 function everywhere(id: string, other: string, fromProject: boolean): HTMLElement {

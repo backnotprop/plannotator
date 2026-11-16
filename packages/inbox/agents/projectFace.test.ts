@@ -14,7 +14,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readInboxAgentFaces } from '@plannotator/core/inbox-types';
 import type { AgentFace } from './faceChoices';
-import { learnProjects, resetKnownProjectsForTests } from '../projectPictures';
+import { learnProjects, onSessionProjects, resetKnownProjectsForTests, sessionProjectOf } from '../projectPictures';
 import { hueOf, projectLetters } from '../letterMarks';
 import { agentProjectLabel, keptAgentFace, projectSeed, projectTileOf, resetProjectFaces, shownAgentFace } from './projectFace';
 
@@ -88,6 +88,36 @@ describe('the hue', () => {
     // A project with the same letters never moves another's colour: each keeps its own name's hue.
     expect(projectTileOf('apex-ui')!.letters.text).toBe('AU');
     expect(tile('ses_apex')!.hue).toBe(hueOf(projectSeed('apex-ui')));
+  });
+});
+
+describe("an ended agent's project, from the rows", () => {
+  type Row = NonNullable<Parameters<typeof learnProjects>[1]>[number];
+  const wrote = (id: string, session: string): Row => ({ project: { id, name: id.slice(4) }, author: { kind: 'agent', session } });
+  const tookPart = (id: string, session: string): Row => ({ project: { id, name: id.slice(4) }, author: { kind: 'human' }, participants: [{ session }] });
+
+  test('one rule in any order: a project it wrote in over one it only took part in, then the lowest id; a read with nothing new redraws nothing', () => {
+    let heard = 0;
+    const stop = onSessionProjects(() => heard++);
+    try {
+      for (const rows of [
+        [tookPart('prj_a', 's1'), wrote('prj_z', 's1'), wrote('prj_m', 's2'), wrote('prj_c', 's2')],
+        [wrote('prj_c', 's2'), wrote('prj_z', 's1'), wrote('prj_m', 's2'), tookPart('prj_a', 's1')],
+      ]) {
+        resetKnownProjectsForTests();
+        learnProjects([], rows);
+        expect([sessionProjectOf('s1')?.id, sessionProjectOf('s2')?.id]).toEqual(['prj_z', 'prj_c']);
+      }
+      // The same rows again, and in another order: no change, so no tile hears of it.
+      heard = 0;
+      learnProjects([], [wrote('prj_m', 's2'), tookPart('prj_a', 's1'), wrote('prj_z', 's1'), wrote('prj_c', 's2')]);
+      expect(heard).toBe(0);
+      // A renamed project is heard.
+      learnProjects([], [{ project: { id: 'prj_c', name: 'renamed' }, author: { kind: 'agent', session: 's2' } }]);
+      expect([sessionProjectOf('s2')?.name, heard]).toEqual(['renamed', 1]);
+    } finally {
+      stop();
+    }
   });
 });
 

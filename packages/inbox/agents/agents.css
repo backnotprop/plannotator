@@ -260,5 +260,5 @@
 /* A phone's column is too narrow for the three in a line: one under another, each the control's full width. */
 @media (max-width: 480px) {
   .ib-rws-ctl [data-rows-control="agents"] .ib-seg { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; width: 100%; }
-  .ib-rws-ctl [data-rows-control="agents"] .ib-seg-o { justify-content: flex-start; height: 36px; padding: 0 10px; gap: 8px; }
+  .ib-rws-ctl [data-rows-control="agents"] .ib-seg-o { justify-content: flex-start; padding: 0 10px; gap: 8px; }
 }

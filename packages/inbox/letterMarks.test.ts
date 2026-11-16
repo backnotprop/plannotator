@@ -38,6 +38,14 @@ describe('the letters: first and last letter of the title, by grapheme', () => {
     }
   });
 
+  test('a letter whose capital is two ("ß" is "SS", "ﬁ" is "FI") stays one: a mark never draws more letters than it took', () => {
+    expect(markLetters('fuß')).toMatchObject({ text: 'Fß', count: 2 });
+    expect(markLetters('ﬁle')).toMatchObject({ text: 'ﬁE', count: 2 });
+    expect(markLetters('ß')).toMatchObject({ text: 'ß', count: 1 });
+    expect(projectLetters('maß')).toMatchObject({ text: 'Mß', count: 2 });
+    expect(projectLetters('ﬁle-tools')).toMatchObject({ text: 'ﬁT', count: 2 });
+  });
+
   test('a letter with a combining accent stays one grapheme, written either way', () => {
     // "é" decomposed (e + U+0301) and composed read the same: never a bare "E" with its accent dropped.
     expect(markLetters('été').text).toBe('ÉÉ');

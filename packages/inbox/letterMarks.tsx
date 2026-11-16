@@ -86,10 +86,19 @@ function noLetters(parts: readonly string[], none: string): Letters {
   return emoji ? { text: emoji, kind: 'emoji', count: 1 } : { text: none, kind: 'none', count: 1 };
 }
 
+/**
+ * One letter's capital, the same in every locale; the letter itself when its capital is more than one ("ß" is "SS",
+ * "ﬁ" is "FI"), so a mark never draws more letters than it took.
+ */
+function capitalOf(letter: string): string {
+  const upper = letter.toLocaleUpperCase('en-US');
+  return graphemesOf(upper).length === 1 ? upper : letter;
+}
+
 /** Two letters as one mark: both when both read as a pair, else the first alone. */
 function pairOf(first: string, second: string | null | undefined): Letters {
-  if (!second || !PAIRS.test(first) || !PAIRS.test(second)) return { text: first.toLocaleUpperCase('en-US'), kind: 'letters', count: 1 };
-  return { text: (first + second).toLocaleUpperCase('en-US'), kind: 'letters', count: 2 };
+  if (!second || !PAIRS.test(first) || !PAIRS.test(second)) return { text: capitalOf(first), kind: 'letters', count: 1 };
+  return { text: capitalOf(first) + capitalOf(second), kind: 'letters', count: 2 };
 }
 
 /** First and last letter of the name (the owner's rule), letters and digits only: emoji and punctuation are skipped. */

@@ -39,6 +39,8 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
   // The project's tile is a still in the mark's place; with nothing to draw, the agent's own mark, alive as ever.
   const project = useAgentProjectTile(face === 'project' ? id : null);
   const tiled = face === 'project' && project !== null;
+  // What the mark draws: under the setting, an agent whose project has nothing to draw shows (and the picker checks) its own mark.
+  const drawn = face === 'project' && !tiled ? 'agent' : face;
   const moving = face === 'project' || face === 'mark' ? 'agent' : face;
   const rig = agentRigOf(host);
   const clicked = useRef(false);
@@ -247,7 +249,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
       </button>
       {plain && createPortal(<HostMark host={host} />, plain)}
       {fan && button.current && (
-        <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} agent={id} name={name} face={face} sources={sources} onChoose={choose} onOwn={picks === 'all' ? () => openDialog('own') : undefined} onSets={() => openDialog('sets')} onMark={() => toggle(pointer.current === 'touch' ? 'touch' : 'hover')} onClose={() => closeFan()} />
+        <FaceFan anchor={button.current} open={fan.open} openedBy={fan.by} host={host} agent={id} name={name} face={drawn} sources={sources} onChoose={choose} onOwn={picks === 'all' ? () => openDialog('own') : undefined} onSets={() => openDialog('sets')} onMark={() => toggle(pointer.current === 'touch' ? 'touch' : 'hover')} onClose={() => closeFan()} />
       )}
       {dialog && (
         <AgentIconDialog
@@ -255,7 +257,7 @@ export function AgentMark({ id, host, name, agent, picks = 'all' }: { id: string
           agent={agent ?? id}
           host={host}
           name={name}
-          face={face}
+          face={drawn}
           shared={picks === 'shared'}
           onClose={() => {
             clicked.current = true;
