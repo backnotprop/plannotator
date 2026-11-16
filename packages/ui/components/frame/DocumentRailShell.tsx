@@ -73,7 +73,7 @@ export function DocumentRailShell({
   useEffect(() => {
     railWidthApplyRef.current = (nextWidth) => railMotion.width.set(nextWidth);
   });
-  const flagsVisible = !rail.railOpen && !railMotion.mounted;
+  const flagsVisible = !rail.railOpen && !railMotion.mounted && fits;
   useLayoutEffect(() => {
     onFlagsChange?.(flagsVisible);
   }, [onFlagsChange, flagsVisible]);
@@ -89,12 +89,16 @@ export function DocumentRailShell({
     if (!flagsVisible) setFocusTab(false);
   }, [flagsVisible]);
   useLayoutEffect(() => {
-    if (!focusRail || !rail.railOpen) return;
+    if (!focusRail) return;
+    if (!rail.railOpen || !fits) {
+      setFocusRail(false);
+      return;
+    }
     const group = railGroupRef.current;
     if (group === null) return;
     group.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     setFocusRail(false);
-  }, [focusRail, rail.railOpen, railMotion.mounted]);
+  }, [focusRail, rail.railOpen, fits, railMotion.mounted]);
   const openFromTab = () => {
     setFocusRail(true);
     rail.openFiles();

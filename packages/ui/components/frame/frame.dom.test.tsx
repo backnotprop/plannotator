@@ -279,6 +279,42 @@ describe.skipIf(!hasDom)('DocumentRailShell', () => {
       expect(document.activeElement?.textContent).toBe('Filter');
     }));
 
+  test('a controlled host that ignores the open request leaves focus alone when it opens the rail later', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const rail = (open: boolean) => (
+        <DocumentRailShell head={<button type="button">Filter</button>} defaults={{ open: false }} open={open} onOpenChange={() => {}} storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>
+      );
+      const frame = mount(rail(false));
+      const tab = frame.querySelector<HTMLButtonElement>('[aria-label="Show files"]')!;
+      act(() => tab.focus());
+      act(() => tab.click());
+      await act(async () => {});
+      expect(document.activeElement).toBe(tab);
+      const elsewhere = document.createElement('button');
+      document.body.appendChild(elsewhere);
+      act(() => elsewhere.focus());
+      act(() => root!.render(rail(true)));
+      await act(async () => {});
+      expect(frame.querySelector('[data-document-rail]')).not.toBeNull();
+      expect(document.activeElement).toBe(elsewhere);
+      elsewhere.remove();
+    }));
+
+  test('while the rail does not fit there is no tab to press, so no press can drop focus; the host offers the sheet', () => {
+    const { DocumentRailShell } = shellModule!;
+    const fits: boolean[] = [];
+    const frame = mount(
+      <DocumentRailShell head={head} defaults={{ open: false }} fitsForWidth={() => false} onFitChange={(value) => fits.push(value)} storage={memoryStorage()}>
+        rows
+      </DocumentRailShell>,
+    );
+    expect(fits.at(-1)).toBe(false);
+    expect(frame.querySelector('[aria-label="Show files"]')).toBeNull();
+  });
+
   test('a rail that does not fit says so, and the rail sheet is then offered at a desktop width', () => {
     const { DocumentRailShell } = shellModule!;
     const { RailSheet } = sheetModule!;
