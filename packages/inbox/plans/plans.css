@@ -127,9 +127,9 @@
 .ib-plan-annotate > .ib-view:not(.ib-full) { background: transparent; }
 .ib-plan-send { flex: none; display: flex; align-items: center; justify-content: flex-end; gap: 12px; padding: 8px 12px 8px 16px; border-top: 1px solid var(--border); }
 .ib-plan-send-t { margin: 0; min-width: 0; font-size: 12.5px; color: var(--muted-foreground); }
-.ib-plan-banner { display: flex; align-items: center; gap: 12px; margin: 4px 16px 4px; padding: 8px 12px 8px 14px; border-radius: 10px; background: color-mix(in oklch, var(--primary) 9%, transparent); font-size: 13px; }
+.ib-plan-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 4px 16px 4px; padding: 8px 12px 8px 14px; border-radius: 10px; background: color-mix(in oklch, var(--primary) 9%, transparent); font-size: 13px; }
 .ib-plan-banner > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--primary); }
-.ib-plan-banner p { margin: 0; flex: 1; min-width: 0; }
+.ib-plan-banner p { margin: 0; flex: 1 1 260px; min-width: 0; }
 /* Approval "plans-editing": a refusal or a stale edit reads as a warning; the line about the newest version's approval */
 .ib-plan-banner[role="alert"] { background: color-mix(in oklch, var(--warning, oklch(0.75 0.15 75)) 14%, transparent); }
 .ib-plan-banner[role="alert"] > .ib-ic { color: var(--warning-foreground, var(--foreground)); }
