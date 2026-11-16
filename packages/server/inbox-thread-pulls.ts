@@ -309,10 +309,10 @@ export type ProjectHostOf = (projectId: string) => Promise<string | null>;
  * the project's own GitLab host (`parseForgePullRef`). The host is looked up
  * only when a ref landed on gitlab.com, so a list without one never waits on git.
  *
- * `onThread` (a removal): a short ref that is not on the thread on the project's
- * host but is on gitlab.com is that one, so a row stored on gitlab.com before
- * short refs followed every self-managed host (an older Inbox) still comes
- * off by the text it shows (`group/project!45`).
+ * `onThread` (a removal): a short ref takes off the row written back as that
+ * text. A row an older Inbox stored on gitlab.com for a self-managed project
+ * shows as `group/project!45` (the project's own row shows as its URL), so
+ * when it is on the thread the short ref is that row; else the project's.
  */
 export async function parseProjectPullRefs(
   values: unknown,
@@ -327,13 +327,15 @@ export async function parseProjectPullRefs(
   if (!host) return parsed;
   const here = parseInboxThreadPullRefs(values, field, host);
   if (!onThread || "error" in here || !Array.isArray(values)) return here;
-  const stale = new Map<string, InboxThreadPullRef>();
+  const refs: InboxThreadPullRef[] = [];
   for (const value of values) {
     const there = parseInboxThreadPullRef(value);
     const mine = parseInboxThreadPullRef(value, host);
-    if ("key" in there && "key" in mine && there.key !== mine.key) stale.set(mine.key, there);
+    if (!("key" in mine)) continue;
+    const ref = "key" in there && there.key !== mine.key && onThread(there.key) ? there : mine;
+    if (!refs.some((known) => known.key === ref.key)) refs.push(ref);
   }
-  return { refs: here.refs.map((ref) => (!onThread(ref.key) && stale.has(ref.key) && onThread(stale.get(ref.key)!.key) ? stale.get(ref.key)! : ref)) };
+  return { refs };
 }
 
 /** A thread's PRs as the window reads them: the live list with stack groups, and what was removed in the last 7 days. */

@@ -130,7 +130,7 @@ describe("the window's route", () => {
     expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["github.com/o/r#1", "gitlab.acme.dev/acme/api#2:pull"]);
   });
 
-  test("an MR stored on gitlab.com in a self-managed project is never rewritten; the row's own remove takes it off and its Undo re-adds it on the project's host", async () => {
+  test("an MR stored on gitlab.com in a self-managed project is never rewritten; its short text takes it off, and added again it lands on the project's host", async () => {
     const w = world({ projectHost: async () => "gitlab-master.example.com" });
     // How an older Inbox stored `acme/api!3` in a project whose host it did not know as a GitLab.
     w.agentAdd(w.thread, "acme/api!3");
@@ -141,12 +141,15 @@ describe("the window's route", () => {
     expect(w.store.threadPulls(w.thread)).toEqual([]);
     await w.post(w.thread, { add: ["acme/api!3"] });
     expect(w.store.threadPulls(w.thread).map((p) => p.url)).toEqual(["https://gitlab-master.example.com/acme/api/-/merge_requests/3"]);
-    // With both on the thread, the short ref is the project's; the gitlab.com one comes off by its URL.
+    // With both on the thread, each comes off by the text it shows: the gitlab.com row by `acme/api!3`, the project's by its URL.
     w.agentAdd(w.thread, "acme/api!3");
+    const pair = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(pair.pulls.map((p) => p.ref).sort()).toEqual(["acme/api!3", "https://gitlab-master.example.com/acme/api/-/merge_requests/3"]);
     await w.post(w.thread, { remove: ["acme/api!3"] });
+    expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["gitlab-master.example.com/acme/api#3:pull"]);
+    w.agentAdd(w.thread, "acme/api!3");
+    await w.post(w.thread, { remove: ["https://gitlab-master.example.com/acme/api/-/merge_requests/3"] });
     expect(w.store.threadPulls(w.thread).map((p) => p.pull)).toEqual(["gitlab.com/acme/api#3:pull"]);
-    await w.post(w.thread, { remove: ["https://gitlab.com/acme/api/-/merge_requests/3"] });
-    expect(w.store.threadPulls(w.thread)).toEqual([]);
   });
 
   test("remove [\"all\"] takes every PR off, and the answer lists them as removed", async () => {
