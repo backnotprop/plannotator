@@ -16,11 +16,12 @@
  *   which the bridge calls from its click handlers. It sends a `link-click` on
  *   its port only while a person's click is being dispatched, and only for the
  *   link that click is on (`kind: 'link'`: the same href, read from the
- *   clicked element), or for a GET form's address (`kind: 'form'`: the click
- *   is on a button or input; a query, no fragment). A page that calls it can
- *   at most make a real click on a link follow (where Annotate would have
- *   pinned it) or, during a real click on a button or input, choose the query
- *   address sent; it can never send anything without a person's click.
+ *   clicked element at that moment), or for a GET form's address (`kind:
+ *   'form'`: the click is on a button or input; a query, no fragment). The
+ *   page owns its DOM: during a real click its script can rewrite the link or
+ *   wrap the clicked element in one, so it controls the address sent (never
+ *   `javascript:`), and the host's own scheme and origin checks decide what
+ *   that opens. It can never send anything without a person's click.
  *
  * The host takes ONE offer per document it loaded itself, and only with that
  * load's key (`armLinkOffer` in useHtmlAnnotation): the key is new for every
@@ -34,6 +35,12 @@
  * it. A dependency-free string, like BRIDGE_SCRIPT and the sandbox shim: no
  * backslashes, backticks or closing script tag.
  */
+
+/** The frame's one offer per load: `{ type, key }`, with the port the guard keeps the other end of. */
+export const LINK_OFFER_MESSAGE = "plannotator-bridge-link-offer";
+
+/** What the guard sends on that port for a person's click: `{ type, href }` (the raw href, at most 2048 chars). */
+export const LINK_CLICK_MESSAGE = "plannotator-bridge-link-click";
 
 /** The query parameter that carries a served frame's key (removed by the guard). */
 export const LINK_KEY_PARAM = "__pnk";

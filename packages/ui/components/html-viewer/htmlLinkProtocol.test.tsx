@@ -233,25 +233,50 @@ describe.if(hasDom)('HtmlViewer link delivery', () => {
     expect(seen).toEqual(['b.html']);
   });
 
-  // The Inbox serves its attached pages (`frameUrl`): the same guard, the same rule. A served web address carries
-  // its own key (`__pnk`, see linkGuard.test.ts); one that is not a web address keeps the document's.
-  test('a served frame takes one offer too, never a window link-click', async () => {
+  // The Inbox serves its attached pages (`frameUrl`): the same guard, the same rule. Every serve carries its own new
+  // key in the address (`__pnk`, see linkGuard.test.ts), on any scheme; the document's inline key is never armed.
+  test('a served frame at a non-web address takes one offer too, with its own key, never a window link-click', async () => {
     let served = '';
     const seen: string[] = [];
-    const { offer, onPort, postFromFrame } = await mountViewer({
+    const { iframe, offer, onPort, postFromFrame, key } = await mountViewer({
       frameUrl: async (doc: string) => {
         served = doc;
         return 'about:blank#served';
       },
       onOpenLink: (href: string) => seen.push(href),
     });
-    const key = /\)\('([0-9a-f]{32})'\);<\/script>/.exec(served)?.[1] ?? null;
-    expect(key).toMatch(/^[0-9a-f]{32}$/);
-    const port = await offer(key);
+    const documentKey = /\)\('([0-9a-f]{32})'\);<\/script>/.exec(served)?.[1] ?? null;
+    expect(iframe.getAttribute('src')).toMatch(/^about:blank\?__pnk=[0-9a-f]{32}#served$/);
+    expect(key()).not.toBe(documentKey);
+    await onPort(await offer(documentKey), { type: LINK_CLICK, href: 'document-key.html' });
+    const port = await offer(key());
     await postFromFrame({ type: LINK_CLICK, href: 'forged.html' });
-    await onPort(await offer(key), { type: LINK_CLICK, href: 'second.html' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: 'second.html' });
     await onPort(port, { type: LINK_CLICK, href: '?variant=2' });
     expect(seen).toEqual(['?variant=2']);
+  });
+
+  // A page can say its served copy is gone (`plannotator-frame-gone`), and the host serves it again: a new load,
+  // so a new key; the old document, still in the frame until then, read only the old one.
+  test('a frame served again gets a new key: the old one is refused', async () => {
+    const seen: string[] = [];
+    const { iframe, offer, onPort, postFromFrame, key } = await mountViewer({
+      frameUrl: async () => 'about:blank#served',
+      onOpenLink: (href: string) => seen.push(href),
+    });
+    const oldKey = key();
+    await onPort(await offer(oldKey), { type: LINK_CLICK, href: 'first-load.html' });
+    await postFromFrame({ type: 'plannotator-frame-gone' });
+    for (let i = 0; i < 4 && key() === oldKey; i++) {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+    }
+    expect(iframe.getAttribute('src')).toMatch(/^about:blank\?__pnk=[0-9a-f]{32}#served$/);
+    expect(key()).not.toBe(oldKey);
+    await onPort(await offer(oldKey), { type: LINK_CLICK, href: 'old-key.html' });
+    await onPort(await offer(key()), { type: LINK_CLICK, href: 'second-load.html' });
+    expect(seen).toEqual(['first-load.html', 'second-load.html']);
   });
 
   test("a served path (the Inbox's /api/inbox/pages/<id>) carries its own key: the document's is refused", async () => {

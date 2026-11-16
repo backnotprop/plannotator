@@ -141,11 +141,12 @@ describe("link guard placement", () => {
   const GUARD = linkGuardScriptTag(KEY);
   const INJECTION = "<style></style><script>bridge()</script>";
 
-  test("first in <head>: before the sandbox shim, the page's head script and the bridge", () => {
+  // Placement read by a spec parser, page tricks included: packages/shared/link-guard-placement.test.ts.
+  test("right after the doctype: before the sandbox shim, the page's head script and the bridge", () => {
     const page = `<!DOCTYPE html><html><head><script>window.headScript = 1</script></head><body></body></html>`;
     const out = injectLinkGuard(injectSandboxShim(injectIntoHead(page, INJECTION)), KEY);
     const at = out.indexOf(GUARD);
-    expect(out.startsWith(`<!DOCTYPE html><html><head>${GUARD}`)).toBe(true);
+    expect(out.startsWith(`<!DOCTYPE html>${GUARD}<html><head>`)).toBe(true);
     expect(at).toBeLessThan(out.indexOf("plannotatorSandboxShim"));
     expect(at).toBeLessThan(out.indexOf("window.headScript"));
     expect(at).toBeLessThan(out.indexOf("bridge()"));

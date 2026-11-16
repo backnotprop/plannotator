@@ -206,6 +206,16 @@ const SECTION_BREAK_PRINT_CSS = `
 `;
 
 /**
+ * A comment as the HTML tokenizer ends it: `<!-->` and `<!--->` (abrupt), or
+ * the first `-->` or `--!>`. The body can never contain an end, so the match
+ * is the browser's and no backtracking can stretch it over a later one.
+ */
+const HTML_COMMENT = "<!--(?:>|->|(?!-?>)(?:(?!--!?>)[\\s\\S])*--!?>)";
+
+/** The rest of an end tag after its name: `>`, or whitespace or `/` and anything up to `>` (`</title x>`). */
+const END_TAG_REST = "(?:[\\t\\n\\f\\r /][^>]*)?>";
+
+/**
  * Where an injection goes so it comes before everything the author wrote in
  * `<head>`: just inside the real `<head>`, or right after the doctype when
  * there is no `<head>` (before it would put the page in quirks mode). A
@@ -219,9 +229,9 @@ function headStart(rawHtml: string): { position: number; firstScript: number | n
   const attributes = "(?:\"[^\"]*\"|'[^']*'|[^>\"'])*";
   const tokens = new RegExp(
     [
-      "<!--[\\s\\S]*?(?:-->|$)",
-      "<script\\b[\\s\\S]*?(?:</script\\s*>|$)",
-      "<(style|title|textarea)\\b[\\s\\S]*?(?:</\\1\\s*>|$)",
+      `${HTML_COMMENT}|<!--[\\s\\S]*$`,
+      `<script\\b[\\s\\S]*?(?:</script${END_TAG_REST}|$)`,
+      `<(style|title|textarea)\\b[\\s\\S]*?(?:</\\1${END_TAG_REST}|$)`,
       "<!doctype\\b[^>]*>",
       `<head\\b${attributes}>`,
       "<body\\b",
@@ -327,8 +337,27 @@ export function hasNoNetworkMarker(rawHtml: string): boolean {
 export const NO_NETWORK_CSP_META =
   `<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">`;
 
-/** A doctype at the very start, after only a BOM, whitespace and comments. */
-const LEADING_DOCTYPE_RE = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*<!doctype\b[^>]*>/i;
+/**
+ * A doctype the document starts with: after only a BOM, ASCII whitespace,
+ * comments (ended as the tokenizer ends them, {@link HTML_COMMENT}) and `<?...>`
+ * prologs. Every part is deterministic, so a match is exactly how a browser
+ * reads those bytes; anything else before the doctype (a script, text, an
+ * unclosed comment) is no match.
+ */
+const LEADING_DOCTYPE_RE = new RegExp(`^\uFEFF?(?:[\\t\\n\\f\\r ]|${HTML_COMMENT}|<\\?[^>]*>)*<!doctype[^>]*>`, "i");
+
+/**
+ * The first position a browser runs before anything the page wrote: right
+ * after a leading doctype (standards mode kept), else the very start. Found
+ * without reading the page past its doctype, so nothing the page contains
+ * (a comment, a `<title>`, a `<script>` the parser reads differently) can
+ * come before it or swallow what goes there. Fails closed: when the start is
+ * anything else, it is 0.
+ */
+export function documentStart(html: string): number {
+  const doctype = LEADING_DOCTYPE_RE.exec(html);
+  return doctype ? doctype[0].length : 0;
+}
 
 /**
  * Put {@link NO_NETWORK_CSP_META} first in the document: right after the
@@ -340,8 +369,7 @@ const LEADING_DOCTYPE_RE = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*<!doctype\b[^>]*>/i;
  * CSP tags).
  */
 export function injectNoNetworkCsp(html: string): string {
-  const doctype = LEADING_DOCTYPE_RE.exec(html);
-  const at = doctype ? doctype[0].length : 0;
+  const at = documentStart(html);
   return html.slice(0, at) + NO_NETWORK_CSP_META + html.slice(at);
 }
 
@@ -360,14 +388,15 @@ export function injectSandboxShim(html: string): string {
 
 /**
  * The link guard (`linkGuard.ts`) for this load, ahead of every script in the
- * document, the sandbox shim and the page's own head scripts included: at the
- * start of `<head>` (or after the doctype when there is none), or just before
- * a script that comes ahead of `<head>`. Run it on the finished srcdoc, after
- * {@link injectSandboxShim}, so it lands before the shim too.
+ * document: at {@link documentStart}, right after a leading doctype or at the
+ * very start, never where a scan of the page says `<head>` is. A script there
+ * runs first whatever the page contains (the parser opens `<head>` for it and
+ * folds the page's own `<html>`/`<head>` onto the same elements). Run it on
+ * the finished srcdoc, after {@link injectSandboxShim}, so it lands before the
+ * shim too; {@link injectNoNetworkCsp} after it puts the policy first.
  */
 export function injectLinkGuard(html: string, key: string): string {
-  const { position, firstScript } = headStart(html);
-  const at = firstScript ?? position;
+  const at = documentStart(html);
   return `${html.slice(0, at)}${linkGuardScriptTag(key)}${html.slice(at)}`;
 }
 

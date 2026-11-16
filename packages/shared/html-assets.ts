@@ -423,12 +423,20 @@ export const HTML_NO_NETWORK_MARKER = '<meta name="plannotator-network" content=
 
 /**
  * `html` with {@link HTML_NO_NETWORK_MARKER} added without parsing it: right
- * after a leading doctype (only a BOM, whitespace and comments before it), so
- * the page keeps standards mode, else first. For a document the rewrite could
- * not read.
+ * after a leading doctype (only a BOM, ASCII whitespace, comments and `<?...>`
+ * prologs before it), so the page keeps standards mode, else first. For a
+ * document the rewrite could not read. Comments end as the HTML tokenizer ends
+ * them (`<!-->`, `<!--->`, the first `-->` or `--!>`), the same reading as
+ * `documentStart` in packages/ui/components/html-viewer/srcdoc.ts, which puts
+ * the viewer's policy at the same place.
  */
+const LEADING_DOCTYPE_RE = new RegExp(
+  "^\\uFEFF?(?:[\\t\\n\\f\\r ]|<!--(?:>|->|(?!-?>)(?:(?!--!?>)[\\s\\S])*--!?>)|<\\?[^>]*>)*<!doctype[^>]*>",
+  "i",
+);
+
 export function prependNoNetworkMarker(html: string): string {
-  const doctype = /^\uFEFF?(?:\s|<!--[\s\S]*?-->)*<!doctype\b[^>]*>/i.exec(html);
+  const doctype = LEADING_DOCTYPE_RE.exec(html);
   const at = doctype ? doctype[0].length : 0;
   return html.slice(0, at) + HTML_NO_NETWORK_MARKER + html.slice(at);
 }

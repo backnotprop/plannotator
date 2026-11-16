@@ -134,12 +134,98 @@ Everything a host needs around `HtmlViewer` to match Plannotator's HTML annotati
 - **`hooks/useHtmlRefresh({ fetchSnapshot, onSnapshot, onUnanchored?, onResult? })`**: the refresh cycle with the stale-response and document-change guards, backend behind `fetchSnapshot`.
 - **`components/HtmlSurfaceControls`**: the eye / refresh / pen header controls with Plannotator's markup and `labels` overrides.
 - **`AnnotationPanel` `unanchoredIds`**: an "Unanchored" chip on the listed cards.
-- **Links travel on the link guard's port (bridge protocol 2).** A person's link click (`onOpenLink`) reaches the viewer only on a `MessagePort` that a small link guard, the first script in the frame's document, offers once per load with that load's key; the viewer takes one offer per load it started and never hands the frame a port. A `link-click` on the window, a forged `ready`, a second offer and a link with no person's click are ignored. Nothing changes for a host using the inline bridge. A host serving `bridge-script.asset.js` must serve the asset of the same package version: an older cached asset reports version 1, gets the version-mismatch banner, and its link clicks are not followed. Limit on that path: the asset runs the guard at the end of `<head>`, so a script the page puts earlier in `<head>` can take the guard's place and send links without a click; the inline path (Plannotator's) has no such limit.
+- **Links travel on the link guard's port (bridge protocol 2).** A person's link click (`onOpenLink`) reaches the viewer only on a `MessagePort` that a small link guard, the first script in the frame's document, offers once per load with that load's key; the viewer takes one offer per load it started and never hands the frame a port. A `link-click` on the window, a forged `ready`, a second offer and a link with no person's click are ignored. During a person's click the page controls the address sent (it can rewrite or wrap the clicked target), so the host's own scheme and origin checks still decide what it opens. Nothing changes for a host that renders `HtmlViewer`; a host that builds the frame's document itself must change: see "What a host must change for bridge protocol 2" below.
 - **`HtmlViewer` `scrollBehavior`** (`'auto'` for reduced motion) and **`maxAdditionalTargets`** (a product cap the bridge honors too). With the cap enforced upstream (bridge toggle, parent trust boundary on submit and on restore, `projectHostThreads` `maxTargets` on read), a composed comment never reaches the host with more targets than the cap, so a host's own cap-dropped handling (`capDroppedTargets` from `buildPersistedHtmlAnchor`, or a message-counting listener) is unreachable in normal operation; keep it only as a backstop for rows written by an older host build or by another writer. Byte-budget drops (`sizeDroppedTargets`) are a separate path and remain reachable.
 - **`HtmlViewer` `scrollClear`** (optional `() => { left, top, bottom } | null`, frame pixels): where a host's own panel floats over the frame's right side. Read when an annotation is selected and sent as `clear` on `scroll-to`: a mark under the panel scrolls to just below it where the page can scroll and there is room, else it is centred as before. Absent or null: the message and the scroll are unchanged; an older bridge ignores the field.
 - An `ExternalAnnotationTransport` whose `subscribe` emits `snapshot` on a host push keeps `useExternalAnnotations` off its fallback poll.
 
 See HANDOFF.md § "HTML annotation parity seams".
+
+#### What a host must change for bridge protocol 2
+
+Bridge protocol 2 takes a person's link clicks off the window. The bridge no longer posts `plannotator-bridge-link-click` on the window, and the viewer no longer takes one from there.
+
+**A host that renders `HtmlViewer`** (inline bridge or `bridgeScriptUrl`) changes no code. `onOpenLink(href, frame?)` fires as before. On `bridgeScriptUrl`, serve the `bridge-script.asset.js` of the same package version: an older asset reports version 1, the banner shows, and its links are not followed.
+
+**A host that builds the frame's document itself** puts `BRIDGE_SCRIPT` or the asset into its own srcdoc or served page and listens for the bridge's messages. It does these steps for every load it starts:
+
+1. **Mint a key** for every load it starts: every new srcdoc, every new `src`, every reload. Use `const key = newLinkKey()`, which gives 16 random bytes as 32 lowercase hex characters.
+2. **Put the link guard first.** Make `html = injectLinkGuard(html, key)` the last step of building the document. The guard goes right after a leading doctype, or at the very start, so no byte of the page comes before it.
+   - For a served frame, also put the key in the address: `src = withLinkKey(url, key, location.href)`. This adds `__pnk=<key>` to the address.
+   - The guard reads that key in preference to the inline one, and removes it with `replaceState` before the page's scripts run.
+3. **Arm the load before the frame can post.** Keep `key` as the expected key, mark the load "not taken", and close the previous load's port.
+4. **Accept exactly one offer per load.** The guard creates a `MessageChannel` and posts `{ type: LINK_OFFER_MESSAGE, key }` to the parent, transferring one port. In the host's window `message` listener:
+   - Take the offer only when all of these hold: `event.source === iframe.contentWindow`, the type is the offer, the load is not taken, `event.data.key === expected`, and `event.ports[0]` exists. Then mark the load taken and listen on the port.
+   - Otherwise close `event.ports[0]` and ignore the message.
+   - A wrong key does not use up the load. A second offer, even with the right key, is refused.
+5. **Take links from that port only.** Each link arrives as `{ type: LINK_CLICK_MESSAGE, href }`, the raw href, at most 2048 characters.
+   - Treat it as untrusted: refuse control characters, resolve it, and check its scheme and origin.
+   - Never post a port to the frame. Ignore a window `link-click`.
+
+**A host that stays on protocol 1 with the new bridge script fails closed for links.** On a link click:
+
+- The bridge still stops the frame from navigating.
+- In-page `#` links still scroll.
+- The bridge never posts `link-click` on the window. Without a guard in the document it has nowhere to send the link, so no link is followed.
+
+Annotation, selection and the other window messages are unchanged. The bridge's `ready` message reports `protocolVersion: 2`.
+
+Before (protocol 1):
+
+```ts
+iframe.srcdoc = withMyBridge(page);
+window.addEventListener("message", (e) => {
+  if (e.source !== iframe.contentWindow) return;
+  if (e.data?.type === "plannotator-bridge-link-click") openLink(e.data.href);
+});
+```
+
+After (protocol 2):
+
+```ts
+import { LINK_CLICK_MESSAGE, LINK_OFFER_MESSAGE, injectLinkGuard, newLinkKey } from "@plannotator/ui/components/html-viewer";
+
+let load = { key: "", taken: false, port: null as MessagePort | null };
+
+function show(page: string) {
+  load.port?.close();
+  const key = newLinkKey();
+  load = { key, taken: false, port: null }; // armed before the frame can post
+  iframe.srcdoc = injectLinkGuard(withMyBridge(page), key); // last step: the guard goes first
+}
+
+window.addEventListener("message", (e) => {
+  if (e.source !== iframe.contentWindow || e.data?.type !== LINK_OFFER_MESSAGE) return;
+  const port = e.ports[0];
+  if (!port || load.taken || e.data.key !== load.key) return port?.close();
+  load.taken = true;
+  load.port = port;
+  port.onmessage = (m) => {
+    if (m.data?.type === LINK_CLICK_MESSAGE && typeof m.data.href === "string") openLink(m.data.href); // check it first
+  };
+});
+```
+
+**What a page can still do.** During a person's click, the page's own script controls the address that is sent.
+
+- It can rewrite the clicked link's `href`, or wrap the clicked element in a link, before the guard reads it.
+- So a real click anywhere on a hostile page, even a click meant to place a pin, can send any address except `javascript:`.
+- With no person's click, it sends nothing.
+
+The host's own checks are what limit that address:
+
+- `parseBridgeMessage` caps the href at 2048 characters and refuses control characters.
+- In annotate and plan review, `resolveHtmlLinkIntent` decides what the address means:
+  - A relative or root path opens as a linked document through `/api/doc`.
+  - An image opens only from the page's own folder.
+  - Another local file type only shows a toast.
+  - Another origin opens in a new tab (`noopener,noreferrer`).
+  - `data:`, `file:`, `mailto:` and `blob:` are dropped.
+- In the Inbox, a link to a thread on the Inbox's own origin opens in place. Another port, another host or the web opens in a new tab.
+
+So a hostile page can use a person's click to do what a link it drew could do, including moving the Inbox to another thread.
+
+On the inline path the guard is placed without scanning the page, so no script of the page runs before it, whatever the page contains. On `bridgeScriptUrl` the asset runs the guard at the end of `<head>`, so a script the page puts earlier in `<head>` runs first there and can take the guard's place.
 
 #### The bridge script as an asset (`bridgeScriptUrl`; 0.33.0)
 

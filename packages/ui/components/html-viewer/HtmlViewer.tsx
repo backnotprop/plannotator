@@ -73,7 +73,7 @@ import {
   injectSandboxShim,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
-import { isRootPath, newLinkKey, withLinkKey } from "./linkGuard";
+import { newLinkKey, withLinkKey } from "./linkGuard";
 
 const PREFIX = "plannotator-bridge-";
 
@@ -587,15 +587,6 @@ export function servedFrameReloadUrl(servedUrl: string | undefined, base: string
   return next.origin === own.origin && next.pathname === own.pathname ? next.href : null;
 }
 
-/** An http(s) address, resolved against `base`. */
-function isWebAddress(url: string, base: string): boolean {
-  try {
-    return /^https?:$/i.test(new URL(url, base).protocol);
-  } catch {
-    // A path on the host's own server, under a base that is not a web address.
-    return isRootPath(url);
-  }
-}
 
 /**
  * The served frame's first address (`frameStart`): its own URL with the query
@@ -832,23 +823,19 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const framedSrc = useMemo(() => {
       const start = servedUrl && frameStart && typeof window !== "undefined" ? servedFrameStartUrl(servedUrl, window.location.href, frameStart) : servedUrl;
       if (start === undefined) return undefined;
-      if (start === "about:blank") return { src: start, linkKey: null };
-      // Only a web address carries a key; anything else keeps the document's own.
-      if (typeof window === "undefined" || !isWebAddress(start, window.location.href)) return { src: start, linkKey: undefined };
+      if (start === "about:blank" || typeof window === "undefined") return { src: start, linkKey: null };
+      // A new key for every serve, on any scheme. An address that cannot carry
+      // one (not a URL) cannot load the page either: no link is taken there.
       const linkKey = newLinkKey();
-      return { src: withLinkKey(start, linkKey, window.location.href), linkKey };
+      const src = withLinkKey(start, linkKey, window.location.href);
+      return { src, linkKey: src === start ? null : linkKey };
     }, [servedUrl, frameStart]);
     const frameSrc = framedSrc?.src;
     // The key the frame's next link offer must carry: the srcdoc's, or the
     // served address's. Armed when it changes, which is every load the host
     // starts (a reload arms its own, below).
     const armLinkOfferRef = useRef<(key: string | null) => void>(() => {});
-    const documentLinkKey = framedDocument?.linkKey ?? null;
-    const expectedLinkKey = liveMode
-      ? null
-      : servesFrame
-        ? framedSrc === undefined ? null : framedSrc.linkKey === undefined ? documentLinkKey : framedSrc.linkKey
-        : documentLinkKey;
+    const expectedLinkKey = liveMode ? null : servesFrame ? framedSrc?.linkKey ?? null : framedDocument?.linkKey ?? null;
     useLayoutEffect(() => {
       armLinkOfferRef.current(expectedLinkKey);
     }, [expectedLinkKey]);
