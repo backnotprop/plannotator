@@ -82,15 +82,22 @@ function useOpenInActions(path: string | null, open: (id: string) => Promise<{ o
 }
 
 /**
- * Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer), or
- * a file on another machine (`here: false`): no list is read, no menu.
+ * Everything an attachment's control needs: the menu, and picking from it. `enabled: false` (off this computer): no
+ * list is read, no menu. A file on another machine (`here: false`): no list is read either, and the menu is what
+ * works from here (`openInMenu`).
  */
 function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent', enabled = true) {
   const here = !onAnotherMachine(attachment);
   // A read that did not answer (a restarting Inbox) is asked again for the next file.
   const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, enabled && here, attachment.id);
   const [remembered, remember] = useRememberedOpenInApp();
-  const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
+  const menu: OpenInMenu | null = !enabled
+    ? null
+    : !here
+      ? openInMenu(attachment, [], 'linux', remembered, version)
+      : answer?.available
+        ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version)
+        : null;
   const actions = useOpenInActions(attachment.path, (id) => inboxApi.openIn(attachment.id, id), remember);
   return { here, answer, menu, ...actions };
 }
@@ -192,12 +199,27 @@ function NewTabButton({ attachment, version, big }: { attachment: InboxAttachmen
 
 function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; label: boolean }) {
   const { here, answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version);
-  // A file on another machine: only what works from here, a plain new-tab button for an image (nothing for a page).
-  if (!here) return <NewTabButton attachment={attachment} version={version} big={false} />;
+  // A file on another machine with nothing but Copy path: a plain button, not a one-item list.
+  if (!here && menu && menu.items.length === 0) return <CopyPathButton id={attachment.id} status={status} copyPath={copyPath} />;
+  if (!here && menu) return <SplitButton id={attachment.id} kind={attachment.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
   if (!answer) return null;
   // A server without the local app list (an older Inbox): a new tab is all there is.
   if (!menu) return <NewTabButton attachment={attachment} version={version} big={false} />;
   return <SplitButton id={attachment.id} kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
+}
+
+/** Copy path alone (a file on another machine that has no new tab): one action, one button. */
+function CopyPathButton({ id, status, copyPath }: { id: string; status: { text: string; error: boolean } | null; copyPath: () => Promise<void> }) {
+  return (
+    <span className="ib-openin" data-open-in={id}>
+      <Tip content="Copy path">
+        <button type="button" className="ib-iconbtn" onClick={() => void copyPath()} aria-label="Copy path" data-open-in-copy-path="">
+          <Icon name="copy" size={16} />
+        </button>
+      </Tip>
+      <Status status={status} />
+    </span>
+  );
 }
 
 /** The split button: the app's icon (and "Open"), and a caret for the list. */

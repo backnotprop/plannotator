@@ -2,11 +2,11 @@
  * "Open in" for a file of a thread on another linked machine
  * (docs/agent-guides/inbox-machines.md: Open in stays on this computer). The
  * file is on that machine's disk: this computer's editors, Default app and
- * Finder cannot open it, Copy path would copy that machine's path, and that
- * machine's door has no new-tab page. So none of them is offered: the pane's
- * header keeps only what works (an image's new tab, as a plain button; nothing
- * for a page), and a tile's ⋯ keeps Open side by side / full screen and
- * Download. This computer's own file keeps its whole list.
+ * Finder cannot open it, and that machine's door has no new-tab page, so none
+ * of them is offered. What works stays: Copy path (that machine's path, for a
+ * shell there), an image's new tab and Download. The pane's header is a plain
+ * Copy path button when that is all there is, the split button when an image
+ * adds its tab. This computer's own file keeps its whole list.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -113,7 +113,7 @@ async function unmount() {
 const itemsIn = (menu: ParentNode) => [...menu.querySelectorAll<HTMLElement>('[data-open-in-item]')].map((item) => item.dataset.openInItem);
 const labelsOf = (menu: ParentNode) => [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].map((item) => item.textContent);
 
-test.skipIf(!hasDom)("the pane's header: this computer's page has the whole list; the linked machine's page has none, its image a plain new-tab button", async () => {
+test.skipIf(!hasDom)("the pane's header: this computer's page has the whole list; the linked machine's page a plain Copy path button, its image a new tab and Copy path", async () => {
   // This computer's page: the split button, Browser first, then the apps and Copy path.
   await render(<OpenInControl attachment={page} version="current" surface="apps" label />);
   await until(() => host!.querySelector('[data-open-in-caret]') !== null, 'the split button');
@@ -123,25 +123,39 @@ test.skipIf(!hasDom)("the pane's header: this computer's page has the whole list
   expect(itemsIn(document.querySelector(`[data-open-in-menu="${page.id}"]`)!)).toEqual(['browser', 'vscode', 'reveal', 'copy-path']);
   await unmount();
 
-  // The linked machine's page: no control at all (no app list read, no Browser, no new tab).
+  // The linked machine's page: Copy path alone, as a plain button (no list, no Browser, no app list read).
   asked = [];
   await render(<OpenInControl attachment={farPage} version="current" surface="apps" label />);
-  for (let i = 0; i < 5; i += 1) await settle();
-  expect(host!.querySelector('[data-open-in]')).toBeNull();
+  await until(() => host!.querySelector('[data-open-in-copy-path]') !== null, 'the Copy path button');
+  expect(host!.querySelector('[data-open-in-caret]')).toBeNull();
   expect(host!.querySelector('[data-open-in-tab]')).toBeNull();
   expect(host!.querySelector('a')).toBeNull();
   expect(asked.filter((url) => url.includes('/open-in/apps'))).toEqual([]);
+  // It copies that machine's path.
+  const copied: string[] = [];
+  const savedClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (text: string) => void copied.push(text) } });
+  try {
+    await act(async () => host!.querySelector<HTMLButtonElement>('[data-open-in-copy-path]')!.click());
+    await until(() => copied.length === 1, 'the copy');
+  } finally {
+    if (savedClipboard) Object.defineProperty(navigator, 'clipboard', savedClipboard);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
+  }
+  expect(copied).toEqual([farPage.path]);
   await unmount();
 
-  // The linked machine's image: one action, a plain new-tab link through the forward (no caret, no list).
+  // The linked machine's image: two actions, the split button: its new tab through the forward, then Copy path.
   await render(<OpenInControl attachment={farShot} version="current" surface="apps" label />);
-  await until(() => host!.querySelector('[data-open-in-tab]') !== null, 'the new-tab button');
-  expect(host!.querySelector<HTMLAnchorElement>('a[data-open-in-tab]')!.getAttribute('href')).toBe(`/api/inbox/m/${OTHER}/attachments/${farShot.id}/image`);
-  expect(host!.querySelector('[data-open-in-caret]')).toBeNull();
-  expect(host!.querySelector('[data-open-in]')).toBeNull();
+  await until(() => host!.querySelector('[data-open-in-caret]') !== null, 'the split button');
+  expect(host!.querySelector<HTMLAnchorElement>('a[data-open-in-primary="browser"]')!.getAttribute('href')).toBe(`/api/inbox/m/${OTHER}/attachments/${farShot.id}/image`);
+  await act(async () => host!.querySelector<HTMLButtonElement>('[data-open-in-caret]')!.click());
+  await until(() => document.querySelector(`[data-open-in-menu="${farShot.id}"]`) !== null, 'the list');
+  expect(itemsIn(document.querySelector(`[data-open-in-menu="${farShot.id}"]`)!)).toEqual(['browser', 'copy-path']);
+  expect(asked.filter((url) => url.includes('/open-in/apps'))).toEqual([]);
 });
 
-test.skipIf(!hasDom)("a tile's ⋯: the linked machine's file keeps Open as and Download, with no apps and no Copy path; this computer's keeps them", async () => {
+test.skipIf(!hasDom)("a tile's ⋯: the linked machine's file keeps Open as, Download and Copy path, with no apps; this computer's keeps them", async () => {
   await render(<AttachmentTiles attachments={[plan, farPlan]} annotationCounts={new Map()} onOpen={() => {}} onOpenAs={() => {}} openIn="apps" />);
   const open = async (attachment: InboxAttachmentState) => {
     await until(() => host!.querySelector(`button[data-open-in-more="${attachment.id}"]`) !== null, `${attachment.name}'s ⋯`);
@@ -155,8 +169,8 @@ test.skipIf(!hasDom)("a tile's ⋯: the linked machine's file keeps Open as and 
   };
 
   const far = await open(farPlan);
-  expect(labelsOf(far)).toEqual(['Open side by side', 'Open full screen', 'Download']);
-  expect(itemsIn(far)).toEqual([]);
+  expect(labelsOf(far)).toEqual(['Open side by side', 'Open full screen', 'Download', 'Copy path']);
+  expect(itemsIn(far)).toEqual(['copy-path']);
   // Download still works across machines: through the forward.
   expect(far.querySelector<HTMLAnchorElement>('[data-tile-download]')!.getAttribute('href')).toBe(`/api/inbox/m/${OTHER}/attachments/${farPlan.id}/download`);
   await close(farPlan);

@@ -89,15 +89,18 @@ describe("openInMenu and newTabUrl for a file on another machine", () => {
     expect(newTabUrl(plan, "current")).toBeNull();
   });
 
-  test("another machine's file: no apps, no Finder, no Default app, no Copy path, no page tab; an image still opens in a new tab", () => {
+  test("another machine's file: no editors, no Default app, no Finder, no page tab; an image keeps its new tab (Copy path ends every list)", () => {
     setSelfMachine(SELF);
     rememberMachine([page.id, plan.id, shot.id], OTHER);
-    // No list at all: the editors, Default app and Finder would launch on this computer, which does not have the file.
-    for (const attachment of [page, plan, shot]) expect([attachment.name, openInMenu(attachment, detected, "mac", null, "current")]).toEqual([attachment.name, null]);
-    // That machine's door has no page route: no new tab for the page, from the menu or the tailnet's icon.
+    // The editors, Default app and Finder would launch on this computer, which does not have the file; that machine's
+    // door has no page route. Pinned item by item: an empty list still shows Copy path (OpenInMenuItems adds it).
+    expect(openInMenu(page, detected, "mac", null, "current")).toEqual({ items: [], primary: null, missing: false });
+    expect(openInMenu(plan, detected, "mac", null, "current")).toEqual({ items: [], primary: null, missing: false });
+    const tab = { kind: "browser" as const, id: "browser" as const, label: "Browser", href: `/api/inbox/m/${OTHER}/attachments/${shot.id}/image` };
+    expect(openInMenu(shot, detected, "mac", null, "current")).toEqual({ items: [tab], primary: tab, missing: false });
+    // From the tailnet's icon too: no page tab, the image's through the forward.
     expect(newTabUrl(page, "current")).toBeNull();
     expect(newTabUrl(page, "sent")).toBeNull();
-    // What works across machines stays: the image route goes through the forward.
     expect(newTabUrl(shot, "current")).toBe(`/api/inbox/m/${OTHER}/attachments/${shot.id}/image`);
     expect(newTabUrl(plan, "current")).toBeNull();
   });
