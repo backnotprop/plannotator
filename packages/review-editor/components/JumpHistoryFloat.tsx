@@ -16,13 +16,13 @@ const VIA: Record<JumpCrumb['via'], string> = {
 
 const samePlace = (a: NavLocation, b: NavLocation) => a.path === b.path && (a.line ?? null) === (b.line ?? null);
 
-export function backLabel(to: NavLocation | null | undefined, crumb: JumpCrumb | null | undefined): string {
+function backLabel(to: NavLocation | null | undefined, crumb: JumpCrumb | null | undefined): string {
   if (!to) return 'Go back';
   const via = crumb && samePlace(crumb.from, to) ? ` · ${VIA[crumb.via]}` : '';
   return `Back to ${navLocationLabel(to)}${via}`;
 }
 
-export function forwardLabel(to: NavLocation | null | undefined): string {
+function forwardLabel(to: NavLocation | null | undefined): string {
   return to ? `Forward to ${navLocationLabel(to)}` : 'Go forward';
 }
 
@@ -41,9 +41,10 @@ export const JumpHistoryFloat: React.FC<{ active: boolean; focusHome?: () => HTM
   useLayoutEffect(() => {
     if (shown || !hadFocus.current) return;
     hadFocus.current = false;
+    if (!active) return;
     const current = document.activeElement;
     if (!current || current === document.body || !current.isConnected) focusHome?.()?.focus({ preventScroll: true });
-  }, [shown, focusHome]);
+  }, [shown, active, focusHome]);
 
   if (!shown || !navigation) return null;
   const compact = !!state?.isCompactTouchLayout;

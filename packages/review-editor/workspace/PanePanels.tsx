@@ -11,8 +11,6 @@ import { REVIEW_PANEL_TYPES } from '../dock/reviewPanelTypes';
 type PanelComponent = React.ComponentType<{ api: unknown; params: Record<string, unknown>; containerApi: unknown }>;
 type ScrollMemory = Map<Element, { top: number; left: number }>;
 
-const JUMP_LANDINGS = new Set<string>([REVIEW_PANEL_TYPES.DIFF, REVIEW_PANEL_TYPES.FILE, REVIEW_PANEL_TYPES.ALL_FILES]);
-
 const hosts = new WeakMap<WorkspaceStore, Map<string, HTMLDivElement>>();
 
 function hostFor(store: WorkspaceStore, id: string): HTMLDivElement {
@@ -86,7 +84,7 @@ export const PanePanels: React.FC<{ pane: Pane; paneIndex: number; store: Worksp
   const ready = useAfterFirstPaint(deferFirstMount);
   const layout = useSyncExternalStore(store.subscribe, store.getLayout, store.getLayout);
   const activeComponent = pane.tabs.find((tab) => tab.id === pane.activeId)?.component;
-  const jumpable = layout.activePane === paneIndex && !!activeComponent && JUMP_LANDINGS.has(activeComponent);
+  const jumpable = layout.activePane === paneIndex && !!activeComponent && activeComponent !== REVIEW_PANEL_TYPES.CODE_NAV;
   const frameHome = useCallback(() => {
     const frame = frameRef.current;
     if (!frame) return null;

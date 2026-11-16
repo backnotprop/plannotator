@@ -102,4 +102,14 @@ describe.skipIf(!hasDom)('the jump history float', () => {
     expect(float().length).toBe(0);
     expect(document.activeElement).toBe(host!.querySelector('[data-pane="0"] [data-pane-frame]'));
   });
+
+  test('a focused float does not pull the active pane back when another pane takes over', async () => {
+    await mount();
+    await render({ path: null });
+    await act(async () => { api!.addPanel({ id: 'review-file:src/b.ts', component: 'review-file', title: 'b.ts', params: { filePath: 'src/b.ts' }, position: { referencePanel: 'review-all-files', direction: 'right' } }); });
+    backButton().focus();
+    await act(async () => { api!.getPanel('review-all-files')!.api.setActive(); });
+    expect(float().length).toBe(1);
+    expect(float()[0].closest('[data-pane]')!.getAttribute('data-pane')).toBe('0');
+  });
 });
