@@ -680,6 +680,7 @@ export function FullScreenComposer({
               destination="your reply"
               tags={reply.tags}
               skillFilter={reply.skillFilter}
+              mentionThread={threadId}
               value={reply.value}
               onChange={(text) => {
                 // Writing here keeps the card on Reply for the thread (a draft emptied never flips it back).

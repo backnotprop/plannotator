@@ -201,6 +201,7 @@ import { measureOpenPlaces } from '../thread/openPlaces';
 import { takeMergedFiles as takeMergedFilesInto, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
 import { ReplyTextField } from '../parts/ReplyTextField';
+import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
 
@@ -3325,7 +3326,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const files = withPictures(last ? uploads : [], own);
         requests.push({ messageId: target.message.id, input: {
           idempotency_key: sendKeys.current.get(part.key) ?? newUuid(),
-          words: last ? words : '',
+          words: last ? replyWordsWithMentions(thread.thread_id, words) : '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
           ...(target.actions.length > 0 ? { actions: target.actions } : {}),
@@ -3338,12 +3339,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The message the words answer (approval "inbox-reply-quote") rides the reply that carries them.
           ...(last && sendQuote && words.trim() !== '' ? { quote: sendQuote } : {}),
           ...(tags.length > 0 ? { tags } : {}),
-          // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
-          // exactly these words when the `updated_at` they were saved as is not known here).
+          // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding exactly these words when the `updated_at` they were saved as is not known here).
           ...(last && sendClears ? { clear_draft: draftSavedAs ?? '' } : {}),
-          // Only a message an ended session of this Send asked goes to the session picked;
-          // an answer to a live session's message still goes to that session.
-          // The words aimed with the pill at a session that never wrote here go to it alone.
+          // Only a message an ended session of this Send asked goes to the session picked; an answer to a live session's message still goes to that session. The words aimed with the pill at a session that never wrote here go to it alone.
           ...(part.wordsTo
             ? { to: part.wordsTo }
             : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session) && ('session' in to || target.message.author.session === asking?.session)
@@ -4340,6 +4338,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     </div>
   );
 
+  // A thread mentioned from outside the box (approval "inbox-drag-threads"): a closed box opens and takes it.
+  useMentionBoxOpener(thread.thread_id, box.open, sending, openBox);
   // The warning toast's Reply: the reply box opens, once.
   useEffect(() => {
     if (replyRequest !== thread.thread_id) return;
@@ -4360,9 +4360,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyWords, sending]);
 
-  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes
-  // out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send,
-  // Discard or another thread ends it.
+  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send, Discard or another thread ends it.
   const changeReplyLive = useRef(changeReply);
   changeReplyLive.current = changeReply;
   // `/side` in the reply box's "/" list, only where the thread can ask: the words go to the side chat, and the reply
@@ -5655,6 +5653,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
                 <ReplyTextField
                   replyText={replyText}
+                  mentionThread={thread.thread_id}
                   sendingWords={wordsAway === thread.thread_id}
                   textareaRef={textRef}
                   voice={voice}

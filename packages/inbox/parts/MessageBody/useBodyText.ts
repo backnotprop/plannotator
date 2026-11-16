@@ -4,6 +4,7 @@ import { inboxNoteBlocks } from '@plannotator/core/inbox-context-notes';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { withoutInboxReplyQuoteLead } from '@plannotator/core/inbox-reply-quote';
+import { linkInboxThreadMentions } from '@plannotator/core/inbox-thread-mention';
 import { linkReplyFeedback } from '../../replyFileLinks';
 import { splitReplyFeedback } from '../../replyFeedback';
 import { sentReplyParts } from '../../sentReply';
@@ -20,7 +21,9 @@ export function useBodyText({ message, sentActions, sentAnswers, replyFiles, pro
   const actionsSent = (sentActions?.length ?? 0) > 0;
   const sent = useMemo(() => {
     const raw = skills ? skills.before : message.body;
-    const words = message.author.kind === 'person' && message.quote ? withoutInboxReplyQuoteLead(raw) : raw;
+    const unquoted = message.author.kind === 'person' && message.quote ? withoutInboxReplyQuoteLead(raw) : raw;
+    // A mentioned thread is a link to it; the list the agent reads after the words is left out (inbox-thread-mention.ts).
+    const words = message.author.kind === 'person' ? linkInboxThreadMentions(unquoted) : unquoted;
     return actionsSent ? withoutInboxActionsSection(words) : words;
   }, [skills, message.body, message.author.kind, message.quote, actionsSent]);
   const replyParts = useMemo(() => sentReplyParts(message, sent, sentAnswers ?? []), [message, sent, sentAnswers]);
