@@ -35,6 +35,7 @@ import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, is
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { createMachinePulls } from "./inbox-machine-pulls";
+import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
@@ -439,6 +440,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const outbox = InboxOutbox.open(context.dataDir, context.now);
   const peers = new Map<string, PeerLink>();
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
+  /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
+  const launchReads = createMachineLaunchReads();
   const listeners = new Set<(frame: MachineFrame) => void>();
   /** An offer that published the door: the door comes down when it expires unused. */
   let offerTimer: ReturnType<typeof setTimeout> | null = null;
@@ -573,6 +576,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     peers.get(id)?.stop();
     peers.delete(id);
     machinePulls.forget(id);
+    launchReads.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
     outbox.dropMachine(id, link?.name ?? null);
@@ -841,8 +845,13 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
       // A file a message names: only the window's read gets here (`forwardedFileReadRefusal`), said so to that machine.
       if (FILE_READ_ROUTE.test(route)) headers[MACHINE_WINDOW_HEADER] = "1";
+      // Its launch block and home are kept for a window opened while it sleeps (`launch_reads` on the machines read),
+      // numbered as the read starts so an older answer that ends later never replaces a newer one.
+      const sessionsRead = route === MACHINE_SESSIONS_ROUTE ? launchReads.begin() : null;
       try {
-        return passAnswer(await peer.request(route, search, { method: "GET", headers, signal: req.signal }));
+        const answer = await peer.request(route, search, { method: "GET", headers, signal: req.signal });
+        if (sessionsRead !== null && answer.ok) void launchReads.keep(machine, sessionsRead, answer.clone(), () => peers.has(machine));
+        return passAnswer(answer);
       } catch {
         return offline();
       }
@@ -1061,7 +1070,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!, via);
     if (path === "/api/inbox/machines") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-      return json({ self: links.selfId, machines: machinesView() });
+      const machines = machinesView();
+      // Each linked machine's last launch read, only for compose, which asks: every other reader of this route skips it.
+      if (url.searchParams.get("launch_reads") !== "1") return json({ self: links.selfId, machines });
+      return json({ self: links.selfId, machines, launch_reads: launchReads.view(machines.filter((m) => !m.self).map((m) => m.id)) });
     }
     if (path === "/api/inbox/outbox") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
