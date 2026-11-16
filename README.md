@@ -51,8 +51,6 @@ Plannotator is a local, browser-based review surface for AI coding agents: Claud
 
 Annotate plans, specs, messages, html, then send the feedback to your agent. 
 
-<p><strong>Demo:</strong> <a href="https://youtu.be/XqFun9XCXPw">Plan review with Pi</a></p>
-
 </td>
 <td width="60%">
 
