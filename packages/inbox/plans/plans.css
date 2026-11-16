@@ -130,11 +130,13 @@
 .ib-plan-on { color: var(--muted-foreground); }
 /* The rail head's quiet line: the plan's project */
 .ib-plan-railproj { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.ib-plan-railproj > .ib-ic { width: 12px; height: 12px; flex: none; }
+/* The Inbox's icon rule (inbox.css) again for our marks in the frame's sheets, which portal out of `.pn-inbox`. */
+:is(.ib-plan-railproj, .ib-plan-seen, .ib-plan-activity, .ib-plans-dmark) svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ib-plan-railproj > svg.ib-ic, .pn-inbox .ib-plan-railproj > svg.ib-ic { width: 12px; height: 12px; }
 .ib-plan-railproj > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The versions panel: "You saw this" under a row */
 .ib-plan-seen { display: inline-flex; align-items: center; gap: 6px; }
-.ib-plan-seen > .ib-ic { width: 12px; height: 12px; flex: none; }
+.ib-plan-seen > svg.ib-ic, .pn-inbox .ib-plan-seen > svg.ib-ic { width: 12px; height: 12px; }
 /* An artifact's line on its card: no versions, and what the file is */
 .ib-plan-artline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 16px 6px; font-size: 13px; color: var(--muted-foreground); }
 /* The rail's list (the frame's rows and headings), the Main mark at a row's end, the filter field */
