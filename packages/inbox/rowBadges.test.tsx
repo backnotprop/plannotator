@@ -375,18 +375,17 @@ describe.if(hasDom)('the marks in the list', () => {
   test("the row's name stays short; the card's words are its description", () => {
     const el = mount();
     const r = el.querySelector<HTMLElement>('[data-thread-id="msg_stop"]')!;
-    // The card's words first, then the drag help every row has (listDrops.tsx `THREAD_DRAG_HELP_ID`).
-    const [id, help] = r.getAttribute('aria-describedby')!.split(' ');
+    // The card's words alone: this list has no row actions, so no drag and no drag help (listDrops.tsx).
+    const id = r.getAttribute('aria-describedby')!;
     expect(id).toBeTruthy();
-    expect(help).toBe('ib-thread-drag-help');
-    const words = document.getElementById(id!)!;
+    expect(r.hasAttribute('aria-roledescription')).toBe(false);
+    const words = document.getElementById(id)!;
     expect(words.hidden).toBe(true);
     expect(words.textContent).toBe(badgeDescription(STOP));
     // The words sit beside the row, not in it: its name reads as before.
     expect(r.contains(words)).toBe(false);
     expect(r.textContent).not.toContain('cannot ship');
-    // No badge: no card words, only the drag help.
-    expect(el.querySelector('[data-thread-id="msg_wait"]')!.getAttribute('aria-describedby')).toBe('ib-thread-drag-help');
+    expect(el.querySelector('[data-thread-id="msg_wait"]')!.hasAttribute('aria-describedby')).toBe(false);
   });
 
   test('card A on hover of a filled mark: the header (the bubble, no triangle), one row per item, the footer', async () => {

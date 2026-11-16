@@ -291,8 +291,8 @@ async function twoPanes(page: Page, first: string, second: string, side: 'right'
   await expect(paneHost(page, first)).toBeVisible();
   const box = await settledBox(paneHost(page, first));
   await pickUp(page, second);
-  // The bottom edge zone is the pane's lowest 30%; its last ~80 px are the thread's foot (the reply bar), which takes
-  // no pane drop (paneDrop.ts), so aim at 80% of the height, inside the zone and above the foot.
+  // The bottom edge zone is the pane's lowest 30%, its closed reply bar included (paneDrop.ts); 80% of the height is
+  // well inside it and clear of the area's 24 px rim strip, whose drop is the whole bottom instead.
   await carryTo(page, side === 'right' ? { x: box.x + box.width - 60, y: box.y + box.height / 2 } : { x: box.x + box.width / 2, y: box.y + box.height * 0.8 });
   await expect(page.locator('[data-thread-ghost] .ib-tdrag-w').last()).toHaveText(side === 'right' ? 'Open on the right' : 'Open below');
   await page.mouse.up();

@@ -619,8 +619,37 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     drag(400, 870);
     expect(word()).toBe('');
     expect(document.querySelector('.ib-droppreview')).toBeNull();
-    release(400, 870);
+    // The foot's part of the area's rim strip (the bottom 24 px) takes none either.
+    drag(400, 892);
+    expect(word()).toBe('');
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
+    release(400, 892);
     expect(calls).toEqual([]);
+  });
+
+  test("a pane's header nudged within its own pane moves nothing, the rim strip over its header included; carried out to another pane's top rim, it moves to the whole top", async () => {
+    putThread(queries, B, heldOf(B, false));
+    const calls: string[] = [];
+    drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    calls.length = 0;
+    const head = paneOf(B).querySelector<HTMLElement>('.ib-phead')!;
+    const press = (x: number, y: number) => act(() => void head.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse' })));
+    // Pressed 4 px below the area's top (inside the 24 px rim strip and B's own box), moved 6 px, let go.
+    press(1200, 4);
+    drag(1203, 5);
+    drag(1206, 5);
+    expect(document.querySelector('.ib-dragghost')).not.toBeNull();
+    expect(document.querySelector('.ib-dragghost')!.textContent).not.toContain('full width');
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
+    release(1206, 5);
+    expect(calls.filter((call) => call.startsWith('move'))).toEqual([]);
+    // The same press carried over pane A's top rim: the whole top.
+    press(1200, 4);
+    drag(400, 6);
+    expect(document.querySelector('.ib-dragghost')?.textContent).toContain('Move above, full width');
+    release(400, 6);
+    expect(calls.filter((call) => call.startsWith('move'))).toEqual(['move:p1:*:top']);
   });
 
   test('a press on a row that does not move is a click; Escape mid-drag puts it back', async () => {

@@ -7,7 +7,7 @@
  *   stays, each its own pane with its own header, reply box and ✕, the person in the new one. A message arriving in
  *   the other pane stays unread there until the person clicks into that pane. The list's edge hides the list (the
  *   pair takes the window) and the first pane's ‹ Inbox brings it back. Closing the second pane is today's one pane.
- * - On, at 1440 with the sidebar docked: offered; choosing it folds the sidebar on screen (the person's choice not
+ * - On, at 1330 with the sidebar docked (two panes fit only with it folded): offered; choosing it folds the sidebar on screen (the person's choice not
  *   written) and closing the second pane brings it back. At 1180 the list and two threads cannot fit: still offered,
  *   the new pane shows, a toast names the pane that stepped aside, and its Undo brings that pane back.
  * - On, at 1920: a row dragged onto a pane's edge opens beside it; a pane dragged by its header goes to another's
@@ -159,8 +159,16 @@ async function freshPair(tag: string): Promise<[string, string]> {
 
 const sidebar = (page: Page) => page.locator('.pn-inbox .ib-sb');
 
-test('at 1440 with the sidebar docked: offered; choosing it folds the sidebar, and closing the second pane brings it back', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
+/**
+ * A window where the list and two panes fit only with the docked sidebar folded, with a wide margin both ways
+ * (sidebarHold.ts `listAndThreads`: the list's 380 px, two 400 px panes and the gutters, 1180 to 1212 px): 1330 less the
+ * 232 px sidebar is 1098, about 100 px short; 1330 is about 120 px more. (1440 folds too, but by 4 px, and only with
+ * the Soft panes' 8 px gutters.)
+ */
+const FOLDS_FOR_TWO = 1330;
+
+test('with room for two panes only without the docked sidebar: offered; choosing it folds the sidebar, and closing the second pane brings it back', async ({ page }) => {
+  await page.setViewportSize({ width: FOLDS_FOR_TWO, height: 900 });
   const [a, b] = await freshPair('docked');
   await openThread(page, on, a);
   await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');

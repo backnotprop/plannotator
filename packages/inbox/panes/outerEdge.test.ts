@@ -153,4 +153,17 @@ describe('the rim strip and its zone', () => {
     expect(rect.left + rect.width).toBe(1700);
     expect(rect.width).toBeCloseTo((1100 - GAP) / 3, 5);
   });
+
+  test('a column that stepped aside takes no share of the preview: the new column shares the area with what draws', () => {
+    // Three columns a | b | c and the new one on the right, c (p2) stepped aside: the new column's share is of the
+    // drawn three's weights and room (two gaps), not of all four's (three gaps).
+    const three = L.openAt(L.openAt(single(), 't2', 'main', 'right'), 't3', 'p1', 'right');
+    const place = outerPlace(three, thread('t9'), 'right', { width: 4000, height: 1000 }, GAP)!;
+    const root = place.next.root!;
+    if (root.type !== 'split') throw new Error('a split');
+    expect(root.children.map((child) => child.id)).toEqual(['main', 'p1', 'p2', 'p3']);
+    const [a, b, c, n] = root.sizes as number[];
+    expect(outerRect(area, 'right', place.next, GAP).width).toBeCloseTo(((1100 - 3 * GAP) * n!) / (a! + b! + c! + n!), 5);
+    expect(outerRect(area, 'right', place.next, GAP, new Set(['p2'])).width).toBeCloseTo(((1100 - 2 * GAP) * n!) / (a! + b! + n!), 5);
+  });
 });

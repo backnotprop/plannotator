@@ -53,7 +53,8 @@ export interface ThreadDropTarget {
   show: (answer: DropAnswer, ids: readonly string[]) => void;
   /** The pointer is over it (`point`), or left it (null). */
   over: (point: { x: number; y: number } | null) => void;
-  drop: (ids: readonly string[], point: { x: number; y: number }) => void;
+  /** The drop. `false`: it changed nothing (a "No room" it said), so the source's `dropped` does not run (picking stays). */
+  drop: (ids: readonly string[], point: { x: number; y: number }) => void | boolean;
   /** Whether a drop at `point` lands (a row held long enough for Combine). Absent: anywhere on it. Where it does not,
    * the ghost says nothing, the list may scroll, and a drop there is a cancel. */
   takesAt?: (point: { x: number; y: number }) => boolean;
@@ -397,8 +398,7 @@ function end(x: number, y: number): void {
   const d = finish(take !== null);
   if (!d) return;
   if (take) {
-    take.drop(d.ids, { x, y });
-    source.dropped?.(d.ids);
+    if (take.drop(d.ids, { x, y }) !== false) source.dropped?.(d.ids);
   } else say(d.root, `${reason ?? 'Cancelled'}. Nothing changed.`);
 }
 

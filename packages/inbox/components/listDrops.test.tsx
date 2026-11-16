@@ -33,7 +33,7 @@ const { EmptyThreadPanel } = (hasDom ? await import('./EmptyThreadPanel') : {}) 
 const { useListPicks } = (hasDom ? await import('./useListPicks') : {}) as typeof import('./useListPicks');
 const { bulkWrites } = (hasDom ? await import('../bulkWrites') : {}) as typeof import('../bulkWrites');
 const { registerThreadDropTarget, scrollStep, setThreadDragHitTestForTests, threadDragging } = (hasDom ? await import('../threadDrag') : {}) as typeof import('../threadDrag');
-const { COMBINE_DWELL_MS } = (hasDom ? await import('./listDrops') : {}) as typeof import('./listDrops');
+const { COMBINE_DWELL_MS, useRowDragA11y } = (hasDom ? await import('./listDrops') : {}) as typeof import('./listDrops');
 
 const NOW = '2026-11-16T09:00:00.000Z';
 const PROJECT = { id: 'prj_1', key: 'harbor-abcdef', name: 'harbor', root: '/work/harbor', created_at: NOW };
@@ -361,6 +361,33 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     expect(document.querySelector('[data-pick-bar]')).toBeNull();
   });
 
+  test('a drop that changes nothing (a place that took it, then had no room) keeps the picks; one that does something ends them', async () => {
+    draw();
+    cmdClick(RATE.thread_id);
+    cmdClick(SEARCH.thread_id);
+    const spot = document.createElement('div');
+    document.body.appendChild(spot);
+    let did = false;
+    const off = registerThreadDropTarget({ element: () => spot, layer: 40, what: 'Somewhere', accepts: () => 'take', show: () => {}, over: () => {}, drop: () => did });
+    setThreadDragHitTestForTests(() => spot);
+    try {
+      pickUp(FLAKY.thread_id);
+      move(700, 700);
+      release(700, 700);
+      await wait(20);
+      expect(document.querySelector('[data-pick-bar]')).not.toBeNull();
+      did = true;
+      pickUp(FLAKY.thread_id);
+      move(700, 700);
+      release(700, 700);
+      await wait(20);
+      expect(document.querySelector('[data-pick-bar]')).toBeNull();
+    } finally {
+      off();
+      spot.remove();
+    }
+  });
+
   test('Escape while over Archive: nothing is archived, the places go, and it says so', async () => {
     draw();
     pickUp(RATE.thread_id);
@@ -516,6 +543,58 @@ describe.skipIf(!hasDom)('held on another row: Combine opens its dialog', () => 
     move(300, 450);
     expect(rowEl(OLD.thread_id).hasAttribute('data-thread-combine')).toBe(false);
     release(300, 450);
+  });
+});
+
+describe.skipIf(!hasDom)("a row's drag role and help: only where a drag can happen, naming only the places offered", () => {
+  /** A row as InboxList.tsx draws its description: its badge's words (`words`), then the drag help. */
+  function Row({ words }: { words?: string }) {
+    return <button type="button" className="ib-nrow" data-thread-id={RATE.thread_id} {...useRowDragA11y(words)} />;
+  }
+  const menu = (props: { disabled?: boolean; canMarkRead?: boolean }) => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(
+        <ThreadRowMenu className="ib-lbody" rowOf={() => RATE} canMarkRead={props.canMarkRead ?? true} held={false} disabled={props.disabled} onAction={() => {}} onTarget={() => {}}>
+          <Row words="ib-badge-words" />
+        </ThreadRowMenu>,
+      );
+    });
+    return rowEl(RATE.thread_id);
+  };
+
+  test('with row actions: "draggable thread", the badge words then the help, whose words name no Quiet and no Combine the list lacks', () => {
+    const row = menu({ canMarkRead: false });
+    expect(row.getAttribute('aria-roledescription')).toBe('draggable thread');
+    expect(row.getAttribute('aria-describedby')).toBe('ib-badge-words ib-thread-drag-help');
+    expect(document.getElementById('ib-thread-drag-help')!.textContent).toBe('Drag to the reply box to mention it, to the top for Priority, or to the bottom for Archive. Or open the menu with Shift F10.');
+  });
+
+  test('the full list (Mark read, Combine): the help names Quiet and Combine', () => {
+    draw();
+    expect(document.getElementById('ib-thread-drag-help')!.textContent).toBe('Drag to the reply box to mention it, to the top for Priority, to the bottom for Quiet or Archive, or hold over another thread to combine. Or open the menu with Shift F10.');
+  });
+
+  test('no row actions: no role words, no help, the badge words kept, and no id pointing at nothing', () => {
+    const row = menu({ disabled: true });
+    expect(row.hasAttribute('aria-roledescription')).toBe(false);
+    expect(row.getAttribute('aria-describedby')).toBe('ib-badge-words');
+    expect(document.getElementById('ib-thread-drag-help')).toBeNull();
+  });
+
+  test('a touch screen with no fine pointer (touch never drags): no role words, no help', () => {
+    const real = window.matchMedia;
+    window.matchMedia = ((query: string) => ({ matches: query.includes('coarse'), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    try {
+      const row = menu({});
+      expect(row.hasAttribute('aria-roledescription')).toBe(false);
+      expect(row.getAttribute('aria-describedby')).toBe('ib-badge-words');
+      expect(document.getElementById('ib-thread-drag-help')).toBeNull();
+    } finally {
+      window.matchMedia = real;
+    }
   });
 });
 

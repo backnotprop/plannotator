@@ -19,7 +19,7 @@
  * that takes none of the carried threads still shows, greyed, its second line saying why, and a drop there changes
  * nothing. Never on a phone: the row's sheet and its swipe do the same there.
  */
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
@@ -88,7 +88,28 @@ const PLACES: { place: EdgePlace; edge: 'top' | 'bottom'; label: string; icon: I
 
 /** The rows' drag help (their `aria-describedby`, InboxList.tsx), with their `aria-roledescription` "draggable thread". */
 export const THREAD_DRAG_HELP_ID = 'ib-thread-drag-help';
-const DRAG_HELP = 'Drag to the reply box to mention it, to the top for Priority, to the bottom for Quiet or Archive, or hold over another thread to combine. Or open the menu with Shift F10.';
+
+/** The drag help's words: only the places this list offers (Quiet where it marks read, Combine where it combines). */
+export function dragHelp(canMarkRead: boolean, combines: boolean): string {
+  const ways = ['to the reply box to mention it', 'to the top for Priority', canMarkRead ? 'to the bottom for Quiet or Archive' : 'to the bottom for Archive'];
+  if (combines) ways.push('hold over another thread to combine');
+  return `Drag ${ways.slice(0, -1).join(', ')}, or ${ways.at(-1)}. Or open the menu with Shift F10.`;
+}
+
+/** A touch screen with no mouse, trackpad or fine pen: touch never drags a row (threadDrag.ts), so nothing says it does. */
+export function touchOnly(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(any-pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+}
+
+/** The drag help's id while the list's rows can be dragged (RowMenu.tsx provides it); null where they cannot. */
+export const RowDragHelp = createContext<string | null>(null);
+
+/** A row's description and role words: its badge's words (`words`), then the drag help where a drag can happen. */
+export function useRowDragA11y(words?: string): { 'aria-roledescription'?: string; 'aria-describedby'?: string } {
+  const help = useContext(RowDragHelp);
+  const describedBy = [words, help].filter(Boolean).join(' ');
+  return { 'aria-roledescription': help ? 'draggable thread' : undefined, 'aria-describedby': describedBy || undefined };
+}
 
 /** How long a row is held before it takes a Combine, and the middle of it that counts (approval: 500 ms, 60%). */
 export const COMBINE_DWELL_MS = 500;
@@ -179,7 +200,7 @@ export function ListDrops(props: ListDropsProps) {
           else if (taken[0]) {
             follow?.(taken[0].thread_id, action === 'priority-add');
             onAction(taken[0], action);
-          }
+          } else return false;
         },
       }),
     );
@@ -190,7 +211,7 @@ export function ListDrops(props: ListDropsProps) {
   if (props.off) return null;
   const help = (
     <span id={THREAD_DRAG_HELP_ID} className="ib-sr">
-      {DRAG_HELP}
+      {dragHelp(props.canMarkRead, props.picks?.combineWith !== undefined)}
     </span>
   );
   if (!shown) return help;

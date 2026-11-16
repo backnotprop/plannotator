@@ -59,7 +59,7 @@ export function outerPlace(layout: L.FreeLayout, carried: OuterCarried, edge: Ed
 }
 
 /** The strip the new column (row) takes in `area` once `next` draws: its share of the root split toward `edge`. */
-export function outerRect(area: AreaBox, edge: Edge, next: L.FreeLayout, gap: number): { left: number; top: number; width: number; height: number } {
+export function outerRect(area: AreaBox, edge: Edge, next: L.FreeLayout, gap: number, aside: ReadonlySet<string> = new Set()): { left: number; top: number; width: number; height: number } {
   const width = area.right - area.left;
   const height = area.bottom - area.top;
   const horizontal = edge === 'left' || edge === 'right';
@@ -67,11 +67,13 @@ export function outerRect(area: AreaBox, edge: Edge, next: L.FreeLayout, gap: nu
   let share = 0.5;
   let count = 2;
   if (root?.type === 'split') {
+    // Only what draws shares the area: a child whose panes all stepped aside (`aside`) takes no room and no gap.
+    const shown = root.children.map((child) => !L.panesOf(child).every((pane) => aside.has(pane.id)));
     const end = edge === 'left' || edge === 'top' ? 0 : root.sizes.length - 1;
-    const weights = root.sizes.map((size) => (typeof size === 'number' ? size : 0));
+    const weights = root.sizes.map((size, i) => (shown[i] && typeof size === 'number' ? size : 0));
     const total = weights.reduce((sum, w) => sum + w, 0);
-    share = total > 0 ? weights[end]! / total : 1 / root.sizes.length;
-    count = root.sizes.length;
+    count = Math.max(1, shown.filter(Boolean).length);
+    share = total > 0 ? weights[end]! / total : 1 / count;
   }
   const along = Math.max(0, ((horizontal ? width : height) - gap * (count - 1)) * share);
   if (edge === 'left') return { left: area.left, top: area.top, width: along, height };
