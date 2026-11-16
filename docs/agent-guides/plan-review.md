@@ -29,6 +29,8 @@ Approve → stdout: {"hookSpecificOutput":{"decision":{"behavior":"allow"}}}
 Deny    → stdout: {"hookSpecificOutput":{"decision":{"behavior":"deny","message":"..."}}}
 ```
 
+Only the agent that ran the hook reads that stdout. When it dies before a decision, the review (this default mode only: Claude Code's classic hook, the Codex Stop hook, Gemini CLI, Qwen Code, Mistral Vibe) exits on its own: a 10 s timer sees its parent pid change and ends the process, so no orphaned server keeps its port. It does this only while stdout is a pipe or socket and no `PLANNOTATOR_HOST_RESULT_FILE` was given; stdout to a file or terminal (`nohup`), `claude-mod-plan`, `review`, `annotate` and the Inbox never watch their parent (`apps/hook/server/orphan-plan-review.ts`, #3350). Not on Windows, where a process is not reparented.
+
 ### Qwen Code plan review
 
 Qwen Code runs the `plannotator` Qwen extension (`apps/qwen-code/extension/`): a `PermissionRequest` hook on `exit_plan_mode` that runs `plannotator` (timeout 345600000: Qwen reads a command-hook timeout of 1000 or more as milliseconds) and a `PreToolUse` hook on `enter_plan_mode` that runs `plannotator improve-context` (timeout 5000: 5 s both on Qwen before 2026-09-12, which read every timeout as milliseconds, and after). Both set `PLANNOTATOR_ORIGIN=qwen-code` through the hook's `env` field (no shell prefix, so it works on Windows). The plan arrives inline (`tool_input.plan`), as Claude Code's does.

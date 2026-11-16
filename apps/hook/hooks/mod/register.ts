@@ -90,7 +90,7 @@
 import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND, hidesReloadOutput } from './auto-reload'
 import { PlannotatorMod } from './controller'
 import {
-  isVsCodePanelSession,
+  isPanelSession,
   promptOriginKind,
   sessionKindOf,
   SESSION_KIND_FEATURES,
@@ -106,7 +106,11 @@ import {
   resolveInboxReminderRules,
   resolveInboxToolEnabled,
   resolvePlanReviewEnabled,
-  VSCODE_PANEL_ENTRYPOINT,
+  isPanelEntrypoint,
+  panelHostOwnsPlanMode,
+  planSwitchAction,
+  HOST_PLAN_CARD_ENV,
+  HOST_PLAN_CARD_MARKER,
 } from './enabled'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
@@ -324,8 +328,15 @@ interface Allowed {
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
   inboxReminderRules: string | null
-  /** A chat panel of Claude Code's VS Code extension (`isVsCodePanelSession`): not interactive, a person reading it. */
+  /** A panel host's chat (`isPanelSession`: VS Code, Orca): not interactive, a person reading it. */
   panel: boolean
+  /**
+   * The host draws its own plan card (`panelHostOwnsPlanMode`: Orca's entrypoint, whatever the panel guard said):
+   * ExitPlanMode is left to it.
+   */
+  hostPlanMode: boolean
+  /** What `session.start` does with the plan review switch (`planSwitchAction`), and this session's marker value. */
+  planSwitch: 'set' | 'clear' | 'keep'
   /** The T3 Code thread this session is (`t3ThreadOf`), or null. */
   t3Thread: string | null
   kind: SessionKind
@@ -641,6 +652,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     const previous = mod
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', settings.t3Thread ? `t3:${settings.t3Thread}` : `claude-code:${sessionId}`)
+    // The switch's marker follows the session id (`/clear`, a resume): a binary honors a marked `0` only in its session's hook.
+    if (settings.planSwitch === 'set') await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW_SET_BY', `claude-code:${sessionId}`)).catch(() => undefined)
     const host = hostOf($, settings.debugPath)
     const title = sessionTitleOf($, host, String(sessionId))
     // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
@@ -813,23 +826,65 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
 }
 
 /**
- * Which SDK host this non-interactive session is: a chat panel of Claude
- * Code's VS Code extension (`isVsCodePanelSession`) or a T3 Code thread
- * (`t3ThreadOf`), both in enabled.ts. Each variable is named as a literal
- * (env-get-literal.test.ts).
+ * Which SDK host this non-interactive session is: a panel host's chat (VS
+ * Code, Orca: `isPanelSession`), whether its host draws its own plan card
+ * (`panelHostOwnsPlanMode`), or a T3 Code thread (`t3ThreadOf`), all in
+ * enabled.ts. Each variable is named as a literal (env-get-literal.test.ts).
  */
-async function sdkHostOf($: Engine): Promise<{ panel: boolean; t3Thread: string | null }> {
+async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boolean; t3Thread: string | null }> {
+  const none = { panel: false, hostPlanMode: false, t3Thread: null }
   const entrypoint = await $.env.get('CLAUDE_CODE_ENTRYPOINT')
-  // Read the rest only for the panel's or T3's entrypoint: every other session decides on the first read.
-  if (entrypoint !== VSCODE_PANEL_ENTRYPOINT && entrypoint !== T3_ENTRYPOINT) return { panel: false, t3Thread: null }
+  // Read the rest only for a panel host's or T3's entrypoint: every other session decides on the first read.
+  if (!isPanelEntrypoint(entrypoint) && entrypoint !== T3_ENTRYPOINT) return none
   const env = {
     entrypoint,
     claudecode: await $.env.get('CLAUDECODE'),
     childSession: await $.env.get('CLAUDE_CODE_CHILD_SESSION'),
     sessionTag: await $.env.get('PLANNOTATOR_SESSION_TAG'),
   }
-  if (entrypoint === VSCODE_PANEL_ENTRYPOINT) return { panel: isVsCodePanelSession(env, String(await $.session.id())), t3Thread: null }
-  return { panel: false, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
+  if (isPanelEntrypoint(entrypoint)) {
+    const panel = isPanelSession(env, String(await $.session.id()))
+    // Whatever the guard said: a process with Orca's entrypoint that is not the
+    // panel (an inherited tag, a nested run) still sits under Orca's card.
+    return { ...none, panel, hostPlanMode: panelHostOwnsPlanMode(entrypoint) }
+  }
+  return { ...none, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
+}
+
+/** Why the mod passes an ExitPlanMode on, for the debug log. */
+function planPassReason(settings: Allowed | null): string {
+  if (!settings) return 'the mod is not running here'
+  if (settings.hostPlanMode) return `the host draws its own plan card (${settings.kind}); the classic hook gives no decision`
+  if (!SESSION_KIND_FEATURES[settings.kind].planReview) return `a ${settings.kind} session keeps the classic hook`
+  if (!settings.planReview) return 'plan review is turned off'
+  return 'a subagent keeps the classic hook'
+}
+
+/**
+ * The plan review switch in the session's environment (`planSwitchAction`).
+ * `set`: where the host draws its own plan card (Orca), `PLANNOTATOR_PLAN_REVIEW=0`
+ * beside the marker naming this session: when the mod passes ExitPlanMode on,
+ * Claude Code runs the plugin's classic PermissionRequest command hook
+ * (hooks.json), which inherits the environment and exits with no decision,
+ * leaving the host's card to decide. `clear`: another session's `0` reached
+ * this one (it inherited it through a server, an "Open in" terminal, a tmux
+ * server): both go, so this session's hooks review plans again. Names as
+ * literals: Claude Code refuses to load a module whose `$.env.set` takes
+ * anything else (env-get-literal.test.ts).
+ */
+async function applyPlanSwitch($: Engine, settings: Allowed): Promise<void> {
+  const log = (text: string) => settings.debugPath && hostOf($, settings.debugPath).debug(text)
+  if (settings.planSwitch === 'set') {
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW', HOST_PLAN_CARD_ENV.value)).catch(() => undefined)
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW_SET_BY', `claude-code:${String(await $.session.id())}`)).catch(() => undefined)
+    log(`plan review: the host draws its own plan card (${settings.kind}); ${HOST_PLAN_CARD_ENV.name}=${HOST_PLAN_CARD_ENV.value} set for the session's hooks`)
+  } else if (settings.planSwitch === 'clear') {
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW', '')).catch(() => undefined)
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW_SET_BY', '')).catch(() => undefined)
+    log(`plan review: ${HOST_PLAN_CARD_ENV.name}=${HOST_PLAN_CARD_ENV.value} came from another session (${HOST_PLAN_CARD_MARKER}); cleared`)
+  } else if (settings.hostPlanMode) {
+    log(`plan review: the host draws its own plan card (${settings.kind}), but the person's own ${HOST_PLAN_CARD_ENV.name} stays`)
+  }
 }
 
 /** Whether the mod runs here (on unless the user turned it off), in which kind of session, and where its data dir is; null: stay inert. */
@@ -838,7 +893,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   // there would hand Plannotator's own agent Plannotator's tools and the person's Inbox.
   if ((await $.env.get('PLANNOTATOR_ASK_AI_CHILD')) === '1') return null
   const isInteractive = e.isInteractive === true
-  const host = isInteractive ? { panel: false, t3Thread: null } : await sdkHostOf($)
+  const host = isInteractive ? { panel: false, hostPlanMode: false, t3Thread: null } : await sdkHostOf($)
   const kind = sessionKindOf({ isInteractive, ...host })
   const features = SESSION_KIND_FEATURES[kind]
   const dataDir = await resolveDataDir(
@@ -860,16 +915,26 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   if (!shell) return null
   useShell(shell)
   const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
+  const planSwitchValue = await $.env.get('PLANNOTATOR_PLAN_REVIEW')
+  const planSwitch = planSwitchAction({
+    hostPlanCard: host.hostPlanMode,
+    value: planSwitchValue,
+    setBy: await $.env.get('PLANNOTATOR_PLAN_REVIEW_SET_BY'),
+    sessionId: String(await $.session.id()),
+  })
   return {
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: features.reviews && resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
-    planReview: features.planReview && resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
+    // Another session's `0` (its marker names that session) counts as unset here.
+    planReview: features.planReview && !host.hostPlanMode && resolvePlanReviewEnabled(planSwitch === 'clear' ? undefined : planSwitchValue, configText),
     inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
     panel: host.panel,
+    hostPlanMode: host.hostPlanMode,
+    planSwitch,
     t3Thread: host.t3Thread,
     kind,
     reviews: features.reviews,
@@ -951,6 +1016,8 @@ export function register(on: On) {
     if (allowed) return result
     try {
       const decided = await resolveAllowed($, e)
+      // First, before any request of the mod's own: the plan review switch.
+      if (decided) await applyPlanSwitch($, decided)
       // Before `allowed` is set: a turn.start that beats this hook (a
       // --reply-on-resume launch) would build the instance without the Inbox link.
       if (decided?.inboxTool) await registerInboxTool($, decided)
@@ -1144,10 +1211,14 @@ export function register(on: On) {
       return answerShellCall(instance, input)
     }
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
-    if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) return next(e)
+    if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) {
+      if (allowed?.debugPath && e.tool === PLAN_TOOL) hostOf($, allowed.debugPath).debug(`ExitPlanMode (${e.agentId ? 'subagent' : 'main'}): passed on (${planPassReason(allowed)})`)
+      return next(e)
+    }
     const instance = await currentMod($)
     if (!instance) return next(e)
     const answer = await instance.onPlanCall({ tool_use_id: e.tool_use_id, plan: e.plan, planFilePath: e.planFilePath })
+    if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`ExitPlanMode (main): ${'deny' in answer ? "the mod's review (denied while it waits)" : 'an approved plan; passed on'}`)
     if ('deny' in answer) return { deny: answer.deny }
     try {
       return await next(e)
@@ -1165,8 +1236,12 @@ export function register(on: On) {
   on('classic.PermissionRequest', { tool_name: PLAN_TOOL }, async ($: Engine, e: any, next: Next) => {
     const instance = mod
     // A subagent's ExitPlanMode keeps the classic hook (its tool.call was not ours).
-    if (!instance || instance.isDisposed || !allowed?.planReview || e.tool_name !== PLAN_TOOL || e.agent_id) return next(e)
+    if (!instance || instance.isDisposed || !allowed?.planReview || e.tool_name !== PLAN_TOOL || e.agent_id) {
+      if (allowed?.debugPath && e.tool_name === PLAN_TOOL) hostOf($, allowed.debugPath).debug(`ExitPlanMode permission request (${e.agent_id ? 'subagent' : 'main'}): passed on (${planPassReason(allowed)})`)
+      return next(e)
+    }
     const decision = instance.onPlanPermission(typeof e.tool_use_id === 'string' ? e.tool_use_id : undefined, e.tool_input)
+    if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`ExitPlanMode permission request (main): ${decision ? `${String(decision.behavior)}, the approved plan` : 'no approved plan; passed on'}`)
     // Answered here, without next(e): the plugin's own classic command hook
     // below never runs for this call, so it cannot open a second review.
     return decision ? { decision } : next(e)
