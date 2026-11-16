@@ -12,7 +12,8 @@ import type { PlanArtifact, PlanDocument, PlanDocumentKind } from '@plannotator/
 import { FileRow, FilesRailFilter, FilesRailHeading, FilesRailNoMatch, FilesRailRows, FilesRailEmpty, PagesRailHead, fileIcon, type FileIconKind } from '@plannotator/ui/components/frame';
 import { Icon } from '../icons';
 import { hashOf, writeRoute } from '../app/writeRoute';
-import { artifactKind, artifactName, byName, noFileMatches, PLAN_FILES_WORDS, type PlanArtifactKind } from './words';
+import { artifactKind, artifactName, byName, noFileMatches, PLAN_FILES_WORDS, type PlanArtifactKind, type PlanDecisionTone } from './words';
+import { DecisionMark } from './parts';
 
 /** The file on screen: a document (the main page when it is the plan's own) or an artifact. */
 export type PlanFileRef = { kind: 'doc'; id: string } | { kind: 'artifact'; path: string };
@@ -71,17 +72,42 @@ function routeClick(go: () => void) {
   };
 }
 
-/** The frame's rail head: back to Plans, with the plan's name; its project (when it has one) on the quiet line under it. */
-export function PlanRailHead({ name, project }: { name: string; project: string | null }) {
+/** The plan's current decision for the rail head: its words ("Approved with notes on v2 · changed since") and tone. */
+export interface PlanRailDecision {
+  words: string;
+  tone: PlanDecisionTone;
+}
+
+/**
+ * The frame's rail head: back to Plans, with the plan's name; on the quiet line under it the project (when it has
+ * one), then the plan's current decision (when there is one), so it shows with the versions panel closed too.
+ */
+export function PlanRailHead({ name, project, decision }: { name: string; project: string | null; decision: PlanRailDecision | null }) {
+  const title = [project, decision?.words].filter(Boolean).join(' · ');
   return (
     <PagesRailHead
       label={name}
       backLink={<a href={hashOf(plansRoute)} onClick={routeClick(() => writeRoute(plansRoute))} data-plan-files-back="" />}
       meta={
-        project ? (
-          <span className="ib-plan-railproj" title={project} data-plan-rail-project="">
-            <Icon name="folder" />
-            <span>{project}</span>
+        project || decision ? (
+          <span className="ib-plan-railmeta" title={title}>
+            {project && (
+              <span className="ib-plan-railproj" data-plan-rail-project="">
+                <Icon name="folder" />
+                <span>{project}</span>
+              </span>
+            )}
+            {project && decision && (
+              <span className="ib-plan-railsep" aria-hidden="true">
+                ·
+              </span>
+            )}
+            {decision && (
+              <span className="ib-plan-raildec" data-plan-decision={decision.tone} data-plan-rail-decision="">
+                <DecisionMark tone={decision.tone} />
+                <span>{decision.words}</span>
+              </span>
+            )}
           </span>
         ) : null
       }

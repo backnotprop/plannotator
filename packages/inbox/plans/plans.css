@@ -125,15 +125,16 @@
 .ib-plan-banner { display: flex; align-items: center; gap: 12px; margin: 4px 16px 4px; padding: 8px 12px 8px 14px; border-radius: 10px; background: color-mix(in oklch, var(--primary) 9%, transparent); font-size: 13px; }
 .ib-plan-banner > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--primary); }
 .ib-plan-banner p { margin: 0; flex: 1; min-width: 0; }
-/* The reading line's start: the newest decision on this file */
-.ib-plan-decision { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); font-size: 13px; white-space: nowrap; }
-.ib-plan-on { color: var(--muted-foreground); }
-/* The rail head's quiet line: the plan's project */
-.ib-plan-railproj { display: flex; align-items: center; gap: 6px; min-width: 0; }
+/* The rail head's quiet line: the plan's project, then its current decision; the project gives way first */
+.ib-plan-railmeta { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-plan-railproj { display: flex; align-items: center; gap: 6px; min-width: 0; flex: 0 2 auto; }
+.ib-plan-raildec { display: flex; align-items: center; gap: 5px; min-width: 0; flex: 0 1 auto; }
+.ib-plan-railsep { flex: none; }
+:is(.ib-plan-railproj, .ib-plan-raildec) > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The Inbox's icon rule (inbox.css) again for our marks in the frame's sheets, which portal out of `.pn-inbox`. */
 :is(.ib-plan-railproj, .ib-plan-seen, .ib-plan-activity, .ib-plans-dmark) svg.ib-ic { flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.ib-plan-railproj > svg.ib-ic, .pn-inbox .ib-plan-railproj > svg.ib-ic { width: 12px; height: 12px; }
-.ib-plan-railproj > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-plan-railproj > svg.ib-ic, .pn-inbox .ib-plan-railproj > svg.ib-ic,
+.ib-plan-raildec svg.ib-ic, .pn-inbox .ib-plan-raildec svg.ib-ic { width: 12px; height: 12px; }
 /* The versions panel: "You saw this" under a row */
 .ib-plan-seen { display: inline-flex; align-items: center; gap: 6px; }
 .ib-plan-seen > svg.ib-ic, .pn-inbox .ib-plan-seen > svg.ib-ic { width: 12px; height: 12px; }

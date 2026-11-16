@@ -2,9 +2,9 @@
  * One plan (approval "inbox-plans"), drawn from the shared frame (@plannotator/ui/components/frame, the Space page
  * screen) on its ground (`FrameGround as="div"`, theme colours): its top bar outside the cards (the Inbox's sidebar
  * toggle, then Plans / the project / the plan on the main page, Plans / the plan / the file on another), and from
- * 768 px three cards: the frame's left rail with the plan's files (PlanFiles.tsx), the frame's page card whose
- * reading line starts with the newest decision and ends with which version is on screen (or which two are compared)
- * and how many there are, holding the file (a Markdown page in the Inbox's own reader, PlanDocument.tsx; an artifact
+ * 768 px three cards: the frame's left rail with the plan's files (PlanFiles.tsx; its head's quiet line carries the
+ * project and the plan's current decision), the frame's page card whose reading line says which version is on screen
+ * (or which two are compared) and how many there are, holding the file (a Markdown page in the Inbox's own reader, PlanDocument.tsx; an artifact
  * by what it is, PlanArtifactView.tsx), and the frame's versions panel (PlanRail.tsx), open until the person closes
  * it (kept), reopened from the reading line. "Changed since you looked" compares with the version the person had
  * seen of that document when the page opened, and Show changes opens the diff from it to the newest. The address
@@ -35,12 +35,12 @@ import { hashOf, writeRoute } from '../app/writeRoute';
 import type { PlanRead } from './client';
 import { recordPlanLook, useDocVersions, usePlan } from './store';
 import { changedSinceDecision, decisionLabel, decisionTone, PLAN_FILES_WORDS } from './words';
-import { DecisionMark, PlansMessage } from './parts';
+import { PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
 import { PlanDiffView } from './PlanDiffView';
 import { PlanArtifactView } from './PlanArtifactView';
 import { ArtifactLine, PlanVersions } from './PlanRail';
-import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanFiles, PlanRailHead, planFileRoute, type PlanFileRef } from './PlanFiles';
+import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanFiles, PlanRailHead, planFileRoute, type PlanFileRef, type PlanRailDecision } from './PlanFiles';
 
 const plansRoute = { page: 'plans' as const, project: null, thread: null };
 const toList = () => writeRoute(plansRoute);
@@ -170,7 +170,17 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
   // for one project); Plans / the plan / the file on another (its path when it has one).
   const onMain = !artifact && document.id === primary;
   const fileName = artifact ? artifact.asset_path : document.doc_path || document.title || read.plan.name;
-  const head = <PlanRailHead name={read.plan.name} project={project} />;
+  // The plan's current decision (its main page's newest), in the rail head so it shows with the versions closed; a
+  // decision on an older version says so ("… on v2 · changed since"), never reading as current.
+  const mainHead = versions[versions.length - 1]!.version_number;
+  const planDecision = decisionsOf(read.decisions, primary).newest;
+  const railDecision: PlanRailDecision | null = planDecision
+    ? {
+        words: `${decisionLabel(planDecision.decision)}${planDecision.version_number && planDecision.version_number < mainHead ? ` on v${planDecision.version_number}${changedSinceDecision(planDecision, mainHead)}` : ''}`,
+        tone: decisionTone(planDecision.decision),
+      }
+    : null;
+  const head = <PlanRailHead name={read.plan.name} project={project} decision={railDecision} />;
   const band = (
     <AppRail
       variant="dense"
@@ -315,7 +325,7 @@ function DocLoaded({
   const known = (n: number | null | undefined) => !!n && versions.some((v) => v.version_number === n);
   const compare = diff && known(diff.from) && known(diff.to) ? { from: Math.min(diff.from, diff.to), to: Math.max(diff.from, diff.to) } : null;
   const shown = compare ? compare.to : known(version) ? version! : head;
-  const { byVersion, newest } = useMemo(() => decisionsOf(read.decisions, document.id), [read.decisions, document.id]);
+  const { byVersion } = useMemo(() => decisionsOf(read.decisions, document.id), [read.decisions, document.id]);
   const docRef = isMain ? null : document.id;
   const motion = useRailMotion(place.docked && place.open, VERSIONS_WIDTH);
 
@@ -354,21 +364,6 @@ function DocLoaded({
       onClose={() => place.setOpen(false)}
     />
   );
-  // The reading line's start: the newest decision on this file (the main page says "No decision" too).
-  const decision =
-    isMain || newest ? (
-      <span className="ib-plan-decision" data-plan-decision={decisionTone(newest?.decision)}>
-        <DecisionMark tone={decisionTone(newest?.decision)} />
-        {decisionLabel(newest?.decision)}
-        {newest?.version_number ? (
-          <span className="ib-plan-on">
-            {' '}
-            on v{newest.version_number}
-            {changedSinceDecision(newest, head)}
-          </span>
-        ) : null}
-      </span>
-    ) : null;
   const older = !compare && shown !== head ? { back: routeLink(routeOf({ version: null }), { 'data-plan-newest': '' }, { replace: true }), restore: null } : null;
   return (
     <>
@@ -380,7 +375,6 @@ function DocLoaded({
               currentNumber={head}
               versionsOpen={place.open}
               onToggleVersions={place.setOpen}
-              start={decision}
               older={older}
               comparing={compare ? `Comparing v${compare.from} with v${compare.to}` : null}
               // On an older version "v2 of 4" already says how many: a count beside it would read "of 4 4".
