@@ -40,3 +40,6 @@ The menu shape since then:
 - A tag that is None today (an earlier Inbox) reads as Highlight rows off with no kept color. The Color row shows the color a new tag would get, and picking sets it.
 - The chevron after the value sits on the text's center line, in every menu row of that shape.
 - Storage stays compatible: off is still `colour: null`, which an older Inbox reads as None. The kept color goes in an extra optional field, `kept_colour`, which v0.28.66's check ignores.
+
+## 2026-11-16 19:22Z merge approval
+The owner reacted "ship it" to the message showing the built two-row menu (Highlight rows checkbox, Color row), the review fixes and the doom-64 light theme shot (Inbox thread "tags colors"). Covers PR #3553. Merge only after the second review says MERGE and the full browser suite is green.

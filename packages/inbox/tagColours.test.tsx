@@ -94,7 +94,8 @@ test('a colour is drawn by its stored value: a name keeps its name, a code its c
 
 /** The four fills the tint sheet holds for one stored colour. */
 const sheetFills = (colour: string) => {
-  const rule = new RegExp(`\\[data-tint="${colour}"\\]\\{([^}]*)\\}`).exec(document.querySelector('style[data-tag-tints]')?.textContent ?? '')?.[1] ?? '';
+  const text = [...document.querySelectorAll('style[data-tag-tints], style[data-tag-tints-tried]')].map((el) => el.textContent).join('\n');
+  const rule = new RegExp(`\\[data-tint="${colour}"\\]\\{([^}]*)\\}`).exec(text)?.[1] ?? '';
   return [0, 1, 2, 3].map((i) => new RegExp(`--ib-tint-${i}:(#[0-9a-f]{6})`).exec(rule)?.[1]);
 };
 
@@ -196,6 +197,21 @@ function List(props: { rows: InboxListRow[]; colours?: ListTagColours; narrow?: 
 }
 
 const rowEl = (id: string) => document.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
+
+test.skipIf(!hasDom)('the tint sheet stays small: 300 colours tried on the square leave the stored colours and a few others; a colour no tag holds any more is dropped', async () => {
+  const { keepTints, tintRuleCount, TRANSIENT_MAX } = await import('./tagTintSheet');
+  keepTints([{ key: '#0b9488', hex: '#0b9488' }, { key: 'green', hex: '#8ed09c' }]);
+  for (let i = 0; i < 300; i++) tintAttrs(`#${(0x103000 + i * 97).toString(16).padStart(6, '0')}`);
+  expect(tintRuleCount()).toBeLessThanOrEqual(2 + TRANSIENT_MAX);
+  expect(sheetFills('#0b9488').every(Boolean)).toBe(true);
+  // The latest one tried still draws.
+  expect(sheetFills(`#${(0x103000 + 299 * 97).toString(16).padStart(6, '0')}`).every(Boolean)).toBe(true);
+  // A pick lands on the tag: its colour is kept; the one it replaced goes.
+  keepTints([{ key: '#ff6a00', hex: '#ff6a00' }, { key: 'green', hex: '#8ed09c' }]);
+  expect(sheetFills('#ff6a00').every(Boolean)).toBe(true);
+  expect(sheetFills('#0b9488').some(Boolean)).toBe(false);
+  expect(tintRuleCount()).toBeLessThanOrEqual(2 + TRANSIENT_MAX);
+});
 
 test.skipIf(!hasDom)('wide, three-line and phone rows: tinted whole with the tag’s name, before the time where the time is on line one; a plain row stays plain', async () => {
   const rows = [row('a', [RELEASE.id, WINDOWS.id]), row('b', [WINDOWS.id]), row('c', []), row('d', [DOCS.id])];

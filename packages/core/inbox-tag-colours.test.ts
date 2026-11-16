@@ -157,6 +157,21 @@ describe("one colour per tag across machines", () => {
     expect(inboxTagLookOf([...held].reverse())).toEqual(off);
   });
 
+  test("off at the same time on this machine and an older one (no kept colour): the look that kept the colour wins, whichever machine id is lower, in any order", () => {
+    const at = "2026-11-16T10:00:00.000Z";
+    const off = inboxTagLook(null, "person", at, "#0b9488");
+    const olderOff = person(null, at);
+    const held = [
+      { machine: "ibx_a_older", created_at: "2026-11-01T00:00:00.000Z", look: olderOff },
+      { machine: "ibx_z_new", created_at: "2026-11-01T00:00:00.000Z", look: off },
+    ];
+    expect(inboxTagLookOf(held)).toEqual(off);
+    expect(inboxTagLookOf([...held].reverse())).toEqual(off);
+    // A later pick still beats it.
+    const later = { machine: "ibx_a_older", created_at: "2026-11-01T00:00:00.000Z", look: person("#ff6a00", "2026-11-16T10:01:00.000Z") };
+    expect(inboxTagLookOf([...held, later])?.colour).toBe("#ff6a00");
+  });
+
   test("a far machine's malformed tag_colours reads as nothing set", () => {
     expect(inboxTagColoursRead(undefined)).toBeNull();
     expect(inboxTagColoursRead({ show: "no", show_at: null, recent: [] })).toBeNull();

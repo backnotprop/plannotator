@@ -5,11 +5,23 @@
  * tagTintTheme.ts against the live theme's card, text and plain row. A theme or mode change rewrites the sheet, so
  * memoized rows need no new render. Where the window cannot read its theme (no `.pn-inbox` yet, no canvas), the
  * default theme's values stand in until it can.
+ *
+ * Bounded (review of #3553, R1): the sheet holds the colours stored on tags (`keepTints`, from the tags host; a colour
+ * no tag holds any more is dropped), and at most TRANSIENT_MAX others, the latest drawn (a colour being tried on the
+ * square or the strip, a pick not yet in the list), in a second sheet rewritten whole, so a drag through hundreds of
+ * colours leaves a handful of rules.
  */
 import { DEFAULT_TINT_THEMES, tintRows, type Rgb, type TintTheme } from './tagTintTheme';
 
+/** Colours drawn that no tag stores, kept at most this many (the latest). */
+export const TRANSIENT_MAX = 4;
+
+/** By key (the stored value an element carries): the hex it shows as. `stored`: kept while a tag holds it. */
 const drawn = new Map<string, string>();
+const transient = new Map<string, string>();
+let stored = new Set<string>();
 let sheet: HTMLStyleElement | null = null;
+let trySheet: HTMLStyleElement | null = null;
 let theme: TintTheme | null = null;
 let read = false;
 let watching = false;
@@ -77,9 +89,25 @@ const rule = (key: string, hex: string, t: TintTheme) => {
 };
 
 function write(): void {
-  if (!sheet) return;
   const t = theme ?? fallback();
-  sheet.textContent = [...drawn].map(([key, hex]) => rule(key, hex, t)).join('\n');
+  if (sheet) sheet.textContent = [...drawn].map(([key, hex]) => rule(key, hex, t)).join('\n');
+  writeTried();
+}
+
+function writeTried(): void {
+  const t = theme ?? fallback();
+  if (trySheet) trySheet.textContent = [...transient].map(([key, hex]) => rule(key, hex, t)).join('\n');
+}
+
+function sheets(): void {
+  if (sheet?.isConnected && trySheet?.isConnected) return;
+  sheet = document.createElement('style');
+  sheet.setAttribute('data-tag-tints', '');
+  trySheet = document.createElement('style');
+  trySheet.setAttribute('data-tag-tints-tried', '');
+  document.head.append(sheet, trySheet);
+  watch();
+  write();
 }
 
 /** Read the theme again (after the first paint, a theme or mode change) and rewrite the sheet if it moved. */
@@ -106,24 +134,57 @@ function watch(): void {
 }
 
 /**
- * Make sure the sheet has `colour`'s row (`#rrggbb`, the hex it shows as) under the key `key` (the stored value the
+ * Make sure a sheet has `colour`'s row (`#rrggbb`, the hex it shows as) under the key `key` (the stored value the
  * element carries). Called while a tinted element renders, so the rule is there by its first paint.
  */
 export function drawTint(key: string, hex: string): void {
   if (typeof document === 'undefined') return;
-  if (!sheet || !sheet.isConnected) {
-    sheet = document.createElement('style');
-    sheet.setAttribute('data-tag-tints', '');
-    document.head.appendChild(sheet);
-    watch();
-  }
+  sheets();
   if (!read) later();
-  if (drawn.get(key) === hex) return;
-  drawn.set(key, hex);
-  sheet.appendChild(document.createTextNode(`\n${rule(key, hex, theme ?? fallback())}`));
+  if (stored.has(key)) {
+    if (drawn.get(key) === hex) return;
+    drawn.set(key, hex);
+    sheet!.appendChild(document.createTextNode(`\n${rule(key, hex, theme ?? fallback())}`));
+    return;
+  }
+  if (transient.get(key) === hex) return;
+  transient.delete(key);
+  transient.set(key, hex);
+  while (transient.size > TRANSIENT_MAX) transient.delete(transient.keys().next().value!);
+  writeTried();
 }
 
-/** The sheet's text (for tests). */
+/**
+ * The colours tags store now (`key` the stored value, `hex` what it shows as): their rules stay; a colour no tag
+ * holds any more leaves the sheet. Called by the tags host as it draws, before the rows.
+ */
+export function keepTints(colours: readonly { key: string; hex: string }[]): void {
+  if (typeof document === 'undefined') return;
+  const next = new Set(colours.map((c) => c.key));
+  if (next.size === stored.size && [...next].every((k) => stored.has(k))) return;
+  stored = next;
+  sheets();
+  let changed = false;
+  for (const key of [...drawn.keys()]) {
+    if (stored.has(key)) continue;
+    drawn.delete(key);
+    changed = true;
+  }
+  for (const { key, hex } of colours) {
+    if (drawn.get(key) === hex) continue;
+    drawn.set(key, hex);
+    transient.delete(key);
+    changed = true;
+  }
+  if (changed) write();
+}
+
+/** How many rules the two sheets hold (for tests). */
+export function tintRuleCount(): number {
+  return drawn.size + transient.size;
+}
+
+/** Both sheets' text (for tests). */
 export function tintSheetText(): string {
-  return sheet?.textContent ?? '';
+  return `${sheet?.textContent ?? ''}\n${trySheet?.textContent ?? ''}`;
 }

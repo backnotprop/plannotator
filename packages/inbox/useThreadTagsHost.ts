@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import { inboxNextTagColour, inboxTagLook, inboxTagLookColour, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagColours, type InboxTagLook } from '@plannotator/core/inbox-types';
+import { inboxNextTagColour, inboxTagLook, inboxTagLookColour, inboxTagShownHex, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagColours, type InboxTagLook } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
@@ -8,6 +8,7 @@ import { canTagThread, rowTagsHere, tagById, tagsOnOwnRows, threadTagsHere, tags
 import { initiativeDeletedToast } from './board/model';
 import { showTagColoursAcross, type TagsAcross } from './tagsAcross';
 import { rowTint } from './tagColours';
+import { keepTints } from './tagTintSheet';
 import type { ListTagColours } from './parts/RowTint';
 import type { InboxToastModel } from './components/Toast';
 import { eachRow, tagsToast } from './bulkWrites';
@@ -214,6 +215,11 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   const coloursKept = listTags !== null && tagColours !== null;
   const showColours = showPatch ?? tagColours?.show ?? true;
   const lookOf = useCallback((tagId: string): InboxTagLook | undefined => colourPatches.get(tagId) ?? (listTags ? tagById(listTags, tagId) : null)?.look, [colourPatches, listTags]);
+  // The tint sheet keeps the colours tags store (with this window's picks not yet read back), before any row draws;
+  // a colour being tried is drawn apart and never piles up (tagTintSheet.ts).
+  useMemo(() => {
+    if (listTags) keepTints(listTags.flatMap((t) => { const c = lookOf(t.id)?.colour; return c ? [{ key: c, hex: inboxTagShownHex(c) }] : []; }));
+  }, [listTags, lookOf]);
   const colourOf = useCallback(
     (tagId: string): string | null => {
       if (colourPreviews.has(tagId)) return colourPreviews.get(tagId)!;

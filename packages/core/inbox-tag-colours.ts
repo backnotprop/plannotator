@@ -146,8 +146,9 @@ export function inboxNextTagColour(used: readonly (string | null)[]): string {
 
 /**
  * The one look of a tag that several machines hold, the same whichever machine reads it: a colour the person set
- * beats one given at creation; of two the person set, the later; of two given, the one of the tag made first (the
- * machine that made it first keeps its colour); then the machine id, so equal times still agree.
+ * beats one given at creation; of two the person set, the later, then the one that keeps a colour while off; of two
+ * given, the one of the tag made first (the machine that made it first keeps its colour); then the machine id, so
+ * equal times still agree.
  */
 export function inboxTagLookOf(held: readonly { machine: string; created_at: string; look: InboxTagLook | undefined }[]): InboxTagLook | undefined {
   let best: (typeof held)[number] | null = null;
@@ -156,6 +157,11 @@ export function inboxTagLookOf(held: readonly { machine: string; created_at: str
     const pb = b.look!.by === "person";
     if (pa !== pb) return pa;
     if (pa && a.look!.at !== b.look!.at) return a.look!.at > b.look!.at;
+    // Off at the same time on two machines, one an older Inbox that keeps no colour while off: the one that kept it,
+    // so turning highlight on again brings it back. Every machine of this version settles on it; an older one (which
+    // still takes the lower id) shows the same: off.
+    const ka = a.look!.kept_colour !== undefined;
+    if (pa && ka !== (b.look!.kept_colour !== undefined)) return ka;
     if (!pa && a.created_at !== b.created_at) return a.created_at < b.created_at;
     return a.machine < b.machine;
   };
