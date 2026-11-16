@@ -289,7 +289,6 @@ test.skipIf(!hasDom)('the speed button opens 1x to 2x; a pick plays the film at 
   // A new source (the next file, a reload of this one) starts at the default rate: that holds the speed too.
   expect(video().defaultPlaybackRate).toBe(1.5);
   expect(button().textContent).toBe('1.5x');
-  expect(button().hasAttribute('data-off-normal')).toBe(true);
   // The pick closes the list.
   expect(button().getAttribute('aria-expanded')).toBe('false');
 

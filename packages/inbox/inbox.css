@@ -3032,14 +3032,19 @@ pre code.pn-code[data-keep-layout] {
 .ib-vidstage { container-type: size; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 22px 24px 14px; overflow: hidden; background: color-mix(in oklch, var(--muted) 55%, var(--background)); }
 .ib-vidbox { position: relative; width: min(100cqw, calc((100cqh - 30px) * var(--ib-ar, 1.7778))); max-width: 100%; display: flex; flex-direction: column; }
 .ib-video { display: block; width: 100%; aspect-ratio: var(--ib-ar, 1.7778); max-height: calc(100cqh - 30px); border-radius: 6px; background: #000; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 8px 28px rgba(0, 0, 0, 0.18); }
-/* playback speed (PlaybackSpeed.tsx): a "1x" pill on the film's top-right corner that opens the speeds under it; shown
-   while the pointer is over the film, while it has focus or its list is open, or while a speed other than 1x is on */
+/* playback speed (PlaybackSpeed.tsx): a "1x" button in the native control bar's row, left of its volume button (Chrome
+   draws that row 48 px above the film's foot, its right buttons 48 px apart; WebKit's floating bar below), shown with
+   those controls: paused, the pointer over the film, focus or its list open. Its list opens upward. */
+.ib-vidwrap { position: relative; }
 .pn-inbox .ib-speed { display: inline-flex; align-items: center; justify-content: center; min-width: 40px; height: 26px; padding: 0 8px; border: 0; border-radius: 999px; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); font-weight: 600; font-variant-numeric: tabular-nums; cursor: pointer; }
 .pn-inbox .ib-speed:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.pn-inbox .ib-speed-vid { position: absolute; top: 10px; right: 10px; z-index: 1; background: rgba(0, 0, 0, 0.6); color: #fff; opacity: 0; transition: opacity 120ms ease; }
-.pn-inbox .ib-speed-vid:hover { background: rgba(0, 0, 0, 0.78); }
-.pn-inbox .ib-vidbox:hover .ib-speed-vid, .pn-inbox .ib-speed-vid:focus-visible, .pn-inbox .ib-speed-vid[data-popup-open], .pn-inbox .ib-speed-vid[data-off-normal] { opacity: 1; }
-@media (hover: none) { .pn-inbox .ib-speed-vid { opacity: 1; } }
+.pn-inbox .ib-speed-vid { position: absolute; right: 140px; bottom: 35px; z-index: 1; background: transparent; color: #fff; text-shadow: 0 0 3px rgba(0, 0, 0, 0.6); opacity: 0; transition: opacity 120ms ease; }
+.pn-inbox .ib-speed-vid:hover, .pn-inbox .ib-speed-vid[data-popup-open] { background: rgba(255, 255, 255, 0.18); }
+.pn-inbox .ib-vidwrap:not([data-playing]) .ib-speed-vid, .pn-inbox .ib-vidwrap:hover .ib-speed-vid, .pn-inbox .ib-speed-vid:focus-visible, .pn-inbox .ib-speed-vid[data-popup-open] { opacity: 1; }
+@media (hover: none) { .pn-inbox .ib-vidwrap:hover[data-playing] .ib-speed-vid:not([data-popup-open]) { opacity: 0; } }
+/* WebKit's floating control bar: the button rests just above its right end, as a dark pill over the film */
+.pn-inbox .ib-vidwrap[data-native-bar="webkit"] .ib-speed-vid { right: 14px; bottom: 64px; background: rgba(0, 0, 0, 0.55); text-shadow: none; }
+.pn-inbox .ib-vidwrap[data-native-bar="webkit"] .ib-speed-vid:hover, .pn-inbox .ib-vidwrap[data-native-bar="webkit"] .ib-speed-vid[data-popup-open] { background: rgba(0, 0, 0, 0.75); }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-speed-vid { transition: none; } }
 .pn-inbox .ib-speed-aud { flex: none; margin-top: 15px; background: color-mix(in oklch, var(--muted) 80%, transparent); color: var(--foreground); }
 .pn-inbox .ib-speed-aud:hover, .pn-inbox .ib-speed-aud[data-popup-open] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }

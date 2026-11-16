@@ -1,8 +1,9 @@
 /**
  * Playback speed for a video or a recording: a small "1x" button that opens a
- * short list of speeds under it (1x, 1.2x, 1.5x, 1.7x, 2x). The film's button
- * sits on its top-right corner, shown while the pointer is over the film or a
- * speed other than 1x is on; the recording's sits after its time.
+ * short list of speeds (1x, 1.2x, 1.5x, 1.7x, 2x). The film's button sits in
+ * the native control bar's row, left of its volume button, and comes and goes
+ * with those controls (paused, or the pointer over the film); its list opens
+ * upward. The recording's sits after its time.
  *
  * The speed picked holds for every video and recording opened in this tab
  * until it closes (sessionStorage), so a person who watches at 1.5x does not
@@ -56,15 +57,15 @@ export function formatPlaybackRate(rate: number): string {
   return `${Number(rate.toFixed(2))}x`;
 }
 
-export function PlaybackSpeed({ rate, onRate, className }: { rate: number; onRate: (rate: number) => void; className?: string }) {
+export function PlaybackSpeed({ rate, onRate, side, className }: { rate: number; onRate: (rate: number) => void; side: 'top' | 'bottom'; className?: string }) {
   const label = formatPlaybackRate(rate);
   return (
     <Menu.Root modal={false}>
-      <Menu.Trigger className={`ib-speed${className ? ` ${className}` : ''}`} aria-label={`Playback speed, ${label}`} data-playback-speed={rate} data-off-normal={rate !== 1 ? '' : undefined}>
+      <Menu.Trigger className={`ib-speed${className ? ` ${className}` : ''}`} aria-label={`Playback speed, ${label}`} data-playback-speed={rate}>
         {label}
       </Menu.Trigger>
       <Menu.Portal>
-        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6}>
+        <Menu.Positioner className="ib-pm-pos" side={side} align="end" sideOffset={6}>
           <Menu.Popup className="ib-pm ib-speed-menu" aria-label="Playback speed" data-playback-speed-menu="">
             <Menu.RadioGroup value={rate} onValueChange={(next: number) => onRate(next)}>
               {PLAYBACK_RATES.map((value) => (
