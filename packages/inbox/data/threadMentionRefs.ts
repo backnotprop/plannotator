@@ -5,8 +5,9 @@
  */
 import type { QueryClient } from '@tanstack/react-query';
 import { displayInboxSubject, type InboxListRow, type InboxThread } from '@plannotator/core/inbox-types';
-import { inboxThreadMentionTitle, isInboxThreadMentionId, type InboxThreadMentionRef } from '@plannotator/core/inbox-thread-mention';
-import { machineOf } from '../inboxUrl';
+import { inboxThreadMentionTitle, isInboxThreadMentionId } from '@plannotator/core/inbox-thread-mention';
+import { machineOf, selfMachineId } from '../inboxUrl';
+import type { MentionRef } from '../threadMentions';
 import { heldList } from './queries/list';
 import { heldThread, readThread } from './queries/thread';
 
@@ -20,14 +21,19 @@ export function mentionTitleOf(row: Pick<InboxListRow, 'thread_name' | 'subject'
   return inboxThreadMentionTitle(row.thread_name?.trim() ? row.thread_name : (displayInboxSubject(row.subject) ?? 'Untitled thread'));
 }
 
-/** A list row (or a thread's own record) as a mention. */
-export function mentionRefOf(row: Titled): InboxThreadMentionRef {
+/**
+ * A list row (or a thread's own record) as a mention. `machine`: the machine whose Inbox holds it, named absolutely
+ * (a linked machine's id, else this window's own), so whether the reply's agent can open it is worked out against
+ * the reply's machine, wherever the draft is opened (threadMentions.ts `mentionReadable`).
+ */
+export function mentionRefOf(row: Titled): MentionRef {
+  const machine = row.machine || machineOf(row.thread_id) || selfMachineId();
   return {
     id: row.thread_id,
     title: mentionTitleOf(row),
     project: row.project?.name ?? null,
     ...(row.resolved_at ? { archived: true } : {}),
-    ...(row.machine || machineOf(row.thread_id) ? { elsewhere: true } : {}),
+    ...(machine ? { machine } : {}),
   };
 }
 
@@ -41,12 +47,12 @@ function listRows(client: QueryClient): Map<string, InboxListRow> {
   return rows;
 }
 
-const ofThread = (thread: InboxThread, row: InboxListRow | null | undefined): InboxThreadMentionRef =>
+const ofThread = (thread: InboxThread, row: InboxListRow | null | undefined): MentionRef =>
   mentionRefOf(row ?? { thread_id: thread.thread_id, thread_name: thread.thread_name, subject: thread.subject, resolved_at: thread.resolved_at, project: thread.project });
 
 /** Rows a drag or a menu just named (an Archived group's row is in no list read): the latest few, by id. */
-const noted = new Map<string, InboxThreadMentionRef>();
-export function noteMentionRefs(refs: readonly InboxThreadMentionRef[]): void {
+const noted = new Map<string, MentionRef>();
+export function noteMentionRefs(refs: readonly MentionRef[]): void {
   for (const ref of refs) {
     noted.delete(ref.id);
     noted.set(ref.id, ref);
@@ -55,7 +61,7 @@ export function noteMentionRefs(refs: readonly InboxThreadMentionRef[]): void {
 }
 
 /** The thread as a mention from what the window holds now, or null when it holds nothing of it. */
-export function knownMentionRef(client: QueryClient, id: string): InboxThreadMentionRef | null {
+export function knownMentionRef(client: QueryClient, id: string): MentionRef | null {
   const row = listRows(client).get(id);
   if (row) return mentionRefOf(row);
   const named = noted.get(id);
@@ -65,7 +71,7 @@ export function knownMentionRef(client: QueryClient, id: string): InboxThreadMen
 }
 
 /** The thread as a mention: what the window holds, else one read of it; null when it is no thread of this Inbox. */
-export async function resolveMentionRef(client: QueryClient, id: string): Promise<InboxThreadMentionRef | null> {
+export async function resolveMentionRef(client: QueryClient, id: string): Promise<MentionRef | null> {
   if (!isInboxThreadMentionId(id)) return null;
   const known = knownMentionRef(client, id);
   if (known) return known;

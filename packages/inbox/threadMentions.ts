@@ -1,146 +1,185 @@
 /**
  * Threads mentioned in a reply (approval "inbox-drag-threads", piece 1, treatment A "in the words").
  *
- * The reply box holds plain words; a mention is a thread's label (its title, and its project when that is not the
- * reply's) standing in them. This module keeps, per reply (the thread it answers), which threads the person mentioned
- * and under which label, so the field paints each label that still stands as a token and the Send writes the words
- * the agent reads (core inbox-thread-mention.ts). Typing inside a label turns it back into plain words: it no longer
- * matches. The list is kept in this browser (localStorage), so a reload or another thread and back keeps the tokens.
+ * A mention is a token the draft carries: the thread's id, its title when it was mentioned, and the range its label
+ * holds in the words (`InboxReplyMention`, core inbox-thread-mention.ts). It is saved with the draft
+ * (`InboxReplyDraft.mentions`), so another device, a reload or Take back has it too, and it goes with the draft at
+ * Send or Discard. Nothing here is ever recovered from the words: an edit moves the mentions after it, ends any it
+ * touches (its words stay as plain words), and words never become a mention.
+ *
+ * Per reply (the thread it answers) this module holds two views: the box's (its words and mentions after the
+ * person's last edit, `commitReplyEdit`) and the draft's (as the Inbox last answered it, `noteDraftMentions`). The
+ * words on screen take the mentions of the one that holds exactly those words, else the box's moved by the change
+ * (`mentionsFor`). The field paints them and the Send writes them (`replyWordsWithMentions`), so what the box shows
+ * is what is sent.
  *
  * It is also the one way into a reply box from outside it: the row menu's Mention in reply, a drop and the phone's
  * sheet all call `requestMention`. The box that is open for that thread takes the mention at once; a closed one opens
  * (`useMentionBoxOpener`) and takes it as its field mounts.
  */
 import { useEffect, useRef } from 'react';
-import { inboxThreadMentionWords, type InboxThreadMentionRef, type InboxThreadMentionSpan } from '@plannotator/core/inbox-thread-mention';
+import { inboxThreadMentionWords, remapReplyMentions, standingReplyMentions } from '@plannotator/core/inbox-thread-mention';
+import type { InboxReplyDraft, InboxReplyMention } from '@plannotator/core/inbox-types';
 import { readRoute } from './app/route';
 import { writeRoute } from './app/writeRoute';
+import { machineOf, selfMachineId } from './inboxUrl';
 
-/** A mention as the reply box holds it: the thread, and the label its words show. */
-export interface ReplyMention extends InboxThreadMentionRef {
-  label: string;
+/** A thread as a mention names it: its id, title, project, whether it is archived, and the machine whose Inbox holds it. */
+export interface MentionRef {
+  id: string;
+  title: string;
+  project?: string | null;
+  archived?: boolean;
+  /** The linked machine whose Inbox holds the thread (absent: this window's own Inbox). */
+  machine?: string | null;
 }
 
 /** The project after the title only when it is not the reply's own ("Rate limit for the public API · ledger-api"). */
-export function mentionLabel(ref: InboxThreadMentionRef, replyProject: string | null): string {
+export function mentionLabel(ref: Pick<MentionRef, 'title' | 'project'>, replyProject: string | null): string {
   return ref.project && replyProject !== null && ref.project !== replyProject ? `${ref.title} · ${ref.project}` : ref.title;
 }
 
-const STORE_KEY = 'plannotator-inbox-reply-mentions';
-/** At most this many replies keep their mentions (the oldest goes), and this many mentions each. */
-const REPLIES_MAX = 60;
-const PER_REPLY_MAX = 40;
+/** A mention of `ref` at `at` in the words, as the draft keeps it. */
+export function mentionAt(ref: MentionRef, label: string, at: number): InboxReplyMention {
+  return {
+    thread_id: ref.id,
+    title: ref.title,
+    label,
+    at,
+    ...(ref.project ? { project: ref.project } : {}),
+    ...(ref.archived ? { archived: true } : {}),
+    ...(ref.machine ? { machine: ref.machine } : {}),
+  };
+}
 
-type Saved = Record<string, { at: number; mentions: ReplyMention[] }>;
-let saved: Saved | null = null;
+// ── The mentions of each reply ─────────────────────────────────────────────────────────────────────────────────────
+
+type Held = { text: string; mentions: readonly InboxReplyMention[] };
+/** The box's words and mentions after the person's last edit, per reply. */
+const boxes = new Map<string, Held>();
+/** The draft's words and mentions as the Inbox last answered, per reply. */
+const drafts = new Map<string, Held>();
 const listeners = new Set<() => void>();
-
-function storage(): Storage | null {
-  try {
-    return typeof localStorage === 'undefined' ? null : localStorage;
-  } catch {
-    return null;
-  }
-}
-
-function load(): Saved {
-  if (saved) return saved;
-  saved = {};
-  try {
-    const raw = storage()?.getItem(STORE_KEY);
-    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      for (const [thread, entry] of Object.entries(parsed as Saved)) {
-        if (entry && Array.isArray(entry.mentions)) saved[thread] = { at: Number(entry.at) || 0, mentions: entry.mentions.filter((m) => m && typeof m.id === 'string' && typeof m.label === 'string' && m.label !== '') };
-      }
-    }
-  } catch {
-    // Unreadable: none kept.
-  }
-  return saved;
-}
-
-function persist(): void {
-  const all = load();
-  const threads = Object.keys(all).sort((a, b) => all[b]!.at - all[a]!.at);
-  for (const thread of threads.slice(REPLIES_MAX)) delete all[thread];
-  try {
-    storage()?.setItem(STORE_KEY, JSON.stringify(all));
-  } catch {
-    // Full or refused: the mentions still work on this page.
-  }
+let version = 0;
+const changed = () => {
+  version += 1;
   for (const listener of [...listeners]) listener();
-}
-
-const NONE: readonly ReplyMention[] = [];
-
-/** Every mention this reply has had, oldest first (a label may no longer stand in the words). The same array until it changes (a store snapshot). */
-export function replyMentions(threadId: string): readonly ReplyMention[] {
-  return load()[threadId]?.mentions ?? NONE;
-}
-
-/** Keep these mentions for the reply (one per thread: a newer label replaces the older). */
-export function keepReplyMentions(threadId: string, mentions: readonly ReplyMention[]): void {
-  if (mentions.length === 0) return;
-  const all = load();
-  const ids = new Set(mentions.map((m) => m.id));
-  const kept = [...(all[threadId]?.mentions ?? []).filter((m) => !ids.has(m.id)), ...mentions].slice(-PER_REPLY_MAX);
-  all[threadId] = { at: Date.now(), mentions: kept };
-  persist();
-}
-
-/** For a test: forget every reply's mentions and the last reply, here and in storage. */
-export function resetReplyMentionsForTests(): void {
-  saved = null;
-  lastReply = undefined;
-  try {
-    storage()?.removeItem(STORE_KEY);
-    storage()?.removeItem(LAST_KEY);
-  } catch {
-    // No storage: nothing kept there.
-  }
-}
+};
 
 export function subscribeReplyMentions(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-/** One label standing in the words: which mention, and where. */
-export interface MentionSpan {
-  mention: ReplyMention;
-  start: number;
-  end: number;
+/** Raised by every change here (a store snapshot). */
+export function replyMentionsVersion(): number {
+  return version;
+}
+
+const NONE: readonly InboxReplyMention[] = [];
+
+/** The mentions `held` has, as they stand in `text`: as held, or moved by the change (one edit, or the words trimmed). */
+function heldIn(held: Held, text: string): readonly InboxReplyMention[] | null {
+  if (held.text === text) return held.mentions;
+  const lead = held.text.length - held.text.trimStart().length;
+  if (held.text.trim() === text) return standingReplyMentions(text, held.mentions.map((m) => ({ ...m, at: m.at - lead })));
+  return null;
 }
 
 /**
- * Where the mentions' labels stand in the words, in order, never overlapping: at one place the longest label wins (a
- * title that starts another), and every place a label stands counts (what is painted is what is sent).
+ * The mentions standing in the reply's words `text`: those of the view (box, then draft) that holds exactly these
+ * words (or them trimmed, as a Send takes them), else the box's (or the draft's) moved by the change. Never words
+ * matched against titles.
  */
-export function mentionSpans(text: string, mentions: readonly ReplyMention[]): MentionSpan[] {
-  const found: MentionSpan[] = [];
-  for (const mention of mentions) {
-    if (!mention.label) continue;
-    for (let at = text.indexOf(mention.label); at >= 0; at = text.indexOf(mention.label, at + mention.label.length)) {
-      found.push({ mention, start: at, end: at + mention.label.length });
-    }
-  }
-  found.sort((a, b) => a.start - b.start || b.end - a.end);
-  const out: MentionSpan[] = [];
-  let pos = 0;
-  for (const span of found) {
-    if (span.start < pos) continue;
-    out.push(span);
-    pos = span.end;
-  }
-  return out;
+export function mentionsFor(threadId: string, text: string): readonly InboxReplyMention[] {
+  const box = boxes.get(threadId);
+  const draft = drafts.get(threadId);
+  const exact = (box && heldIn(box, text)) ?? (draft && heldIn(draft, text));
+  if (exact) return exact;
+  const from = box ?? draft;
+  if (!from || from.mentions.length === 0) return NONE;
+  return remapReplyMentions(from.mentions, from.text, text);
 }
 
-/** The words the agent reads for this reply: each standing mention in its place, then the list (core). */
+/** The draft as the Inbox holds it now (a read, a save's answer; null: none): its mentions, for the words it holds. */
+export function noteDraftMentions(threadId: string, draft: Pick<InboxReplyDraft, 'body' | 'mentions'> | null | undefined): void {
+  const was = drafts.get(threadId);
+  if (!draft) {
+    if (drafts.delete(threadId)) changed();
+    return;
+  }
+  const mentions = standingReplyMentions(draft.body, draft.mentions ?? []);
+  if (was && was.text === draft.body && sameMentions(was.mentions, mentions)) return;
+  drafts.set(threadId, { text: draft.body, mentions });
+  changed();
+}
+
+const sameMentions = (a: readonly InboxReplyMention[], b: readonly InboxReplyMention[]) =>
+  a.length === b.length && a.every((m, i) => m.thread_id === b[i]!.thread_id && m.at === b[i]!.at && m.label === b[i]!.label && m.title === b[i]!.title);
+
+/**
+ * What a save of the reply's words `text` says of its mentions: those standing in them, once this window knows the
+ * reply's mentions (the person edited here, or a draft was read). Otherwise nothing: the draft keeps its own, moved
+ * with its words (a window that never knew them never drops them).
+ */
+export function replyMentionsSave(threadId: string, text: string): { mentions?: readonly InboxReplyMention[] } {
+  return boxes.has(threadId) || drafts.has(threadId) ? { mentions: mentionsFor(threadId, text) } : {};
+}
+
+/** The person changed the words from `from` to `to` (`caret`: where the caret is after it): the mentions move with them. */
+export function commitReplyEdit(threadId: string, from: string, to: string, caret?: number | null): void {
+  if (from === to && boxes.get(threadId)?.text === to) return;
+  const before = mentionsFor(threadId, from);
+  const box = boxes.get(threadId);
+  if (before.length === 0 && (!box || box.mentions.length === 0)) {
+    if (box) boxes.set(threadId, { text: to, mentions: NONE });
+    return;
+  }
+  boxes.set(threadId, { text: to, mentions: remapReplyMentions(before, from, to, caret) });
+  changed();
+}
+
+/** New mentions in the words `text` (just typed in): beside those already standing, one per range. */
+export function addReplyMentions(threadId: string, text: string, added: readonly InboxReplyMention[]): void {
+  boxes.set(threadId, { text, mentions: standingReplyMentions(text, [...mentionsFor(threadId, text), ...added]) });
+  changed();
+}
+
+/** The reply was sent or discarded: its mentions go with its words (the draft's, as the Inbox answers next, stay apart). */
+export function clearReplyMentions(threadId: string, opts: { draft?: boolean } = {}): void {
+  const had = boxes.delete(threadId);
+  const hadDraft = opts.draft ? drafts.delete(threadId) : false;
+  if (had || hadDraft) changed();
+}
+
+/** For a test: forget every reply's mentions and the last reply. */
+export function resetReplyMentionsForTests(): void {
+  boxes.clear();
+  drafts.clear();
+  lastReply = undefined;
+  try {
+    storage()?.removeItem(LAST_KEY);
+  } catch {
+    // No storage: nothing kept there.
+  }
+  changed();
+}
+
+/** The machine whose Inbox the reply's agent reads: the reply thread's (every recipient of a reply is a session there). */
+export function replyReaderMachine(threadId: string): string | null {
+  return machineOf(threadId) ?? selfMachineId();
+}
+
+/** Whether the agent the reply to `threadId` goes to can open the mentioned thread (its Inbox holds it). */
+export function mentionReadable(threadId: string, mention: { machine?: string | null }): boolean {
+  return (mention.machine ?? selfMachineId()) === replyReaderMachine(threadId);
+}
+
+/** The words the agent reads for this reply: each mention standing in them in its place, then the list (core). */
 export function replyWordsWithMentions(threadId: string, words: string): string {
-  const spans = mentionSpans(words, replyMentions(threadId));
-  if (spans.length === 0) return words;
-  return inboxThreadMentionWords(words, spans.map((s): InboxThreadMentionSpan => ({ ref: s.mention, start: s.start, end: s.end })));
+  const mentions = mentionsFor(threadId, words);
+  if (mentions.length === 0) return words;
+  return inboxThreadMentionWords(words, mentions, (m) => mentionReadable(threadId, m));
 }
 
 /** A drop never splits a word: an offset inside one moves to its end. */
@@ -152,29 +191,36 @@ export function snapToWordEnd(text: string, offset: number): number {
 
 /**
  * The words with labels put in at `offset` (several are comma separated), with the spaces the spot needs: one before
- * unless it follows a space or starts the words, one after unless a space already follows. `caret`: just after them.
+ * unless it follows a space or starts the words, one after unless a space already follows. `caret`: just after them;
+ * `starts`: where each label starts in the new words.
  */
-export function withMentionsAt(text: string, offset: number, labels: readonly string[]): { text: string; caret: number; insert: string; at: number } {
+export function withMentionsAt(text: string, offset: number, labels: readonly string[]): { text: string; caret: number; insert: string; at: number; starts: number[] } {
   const at = Math.max(0, Math.min(offset, text.length));
   const before = text[at - 1];
   const after = text[at];
   const lead = before !== undefined && !/\s/.test(before) ? ' ' : '';
   const trail = after !== undefined && /\s/.test(after) ? '' : ' ';
   const insert = `${lead}${labels.join(', ')}${trail}`;
-  return { text: `${text.slice(0, at)}${insert}${text.slice(at)}`, caret: at + insert.length, insert, at };
+  const starts: number[] = [];
+  let next = at + lead.length;
+  for (const label of labels) {
+    starts.push(next);
+    next += label.length + 2;
+  }
+  return { text: `${text.slice(0, at)}${insert}${text.slice(at)}`, caret: at + insert.length, insert, at, starts };
 }
 
 /**
- * Backspace with the caret right after a label (or after the one space a mention put after it) takes the label
+ * Backspace with the caret right after a mention (or after the one space a mention put after it) takes the mention
  * whole, and that space. Null: an ordinary Backspace.
  */
-export function backspaceMention(text: string, caret: number, mentions: readonly ReplyMention[]): { text: string; caret: number; mention: ReplyMention } | null {
-  for (const span of mentionSpans(text, mentions)) {
-    const spaced = span.end < text.length && text[span.end] === ' ' && caret === span.end + 1;
-    if (caret !== span.end && !spaced) continue;
-    const from = span.start;
-    const to = spaced ? span.end + 1 : span.end;
-    return { text: `${text.slice(0, from)}${text.slice(to)}`, caret: from, mention: span.mention };
+export function backspaceMention(text: string, caret: number, mentions: readonly InboxReplyMention[]): { text: string; caret: number; mention: InboxReplyMention } | null {
+  for (const m of standingReplyMentions(text, mentions)) {
+    const end = m.at + m.label.length;
+    const spaced = end < text.length && text[end] === ' ' && caret === end + 1;
+    if (caret !== end && !spaced) continue;
+    const to = spaced ? end + 1 : end;
+    return { text: `${text.slice(0, m.at)}${text.slice(to)}`, caret: m.at, mention: m };
   }
   return null;
 }
@@ -182,9 +228,9 @@ export function backspaceMention(text: string, caret: number, mentions: readonly
 // ── The way in from outside the box ────────────────────────────────────────────────────────────────────────────────
 
 /** A reply box's field, open for its thread: it puts mentions in (at its caret, else at the end of its words). */
-type MentionTaker = (refs: readonly InboxThreadMentionRef[]) => void;
+type MentionTaker = (refs: readonly MentionRef[]) => void;
 const takers = new Map<string, MentionTaker>();
-const waiting = new Map<string, InboxThreadMentionRef[]>();
+const waiting = new Map<string, MentionRef[]>();
 const openers = new Map<string, () => void>();
 
 /** The reply box's field registers while it is mounted; what waited for it goes in at once. */
@@ -207,7 +253,7 @@ export function mentionTakerOpen(threadId: string): boolean {
 }
 
 /** Put these threads in the reply to `threadId`: the open box takes them now; a closed one opens and takes them. */
-export function requestMention(threadId: string, refs: readonly InboxThreadMentionRef[]): void {
+export function requestMention(threadId: string, refs: readonly MentionRef[]): void {
   const shown = refs.filter((ref) => ref.id !== threadId);
   if (shown.length === 0) return;
   const take = takers.get(threadId);
@@ -248,7 +294,15 @@ export function useMentionBoxOpener(threadId: string, boxOpen: boolean, busy: bo
 const LAST_KEY = 'plannotator-inbox-last-reply';
 let lastReply: string | null | undefined;
 
-/** The reply the person last wrote in (a phone's sheet names it, and it is the reply when no thread is open). */
+function storage(): Storage | null {
+  try {
+    return typeof localStorage === 'undefined' ? null : localStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** The reply the person last wrote in (the menu names it, and it is the reply when no thread is open). */
 export function noteReplyThread(threadId: string): void {
   if (lastReply === threadId) return;
   lastReply = threadId;
@@ -272,19 +326,22 @@ function lastReplyThread(): string | null {
 
 /**
  * The reply a Mention in reply goes to: the thread open beside the list (a computer), else the reply the person last
- * wrote in (a phone, or no thread open). Null: none, and the item is not offered.
+ * wrote in (a phone, or no thread open). `open`: whether that reply is the thread open now (the menu names it when not).
+ * Null: none, and the item is not offered.
  */
-export function mentionTarget(phone: boolean): string | null {
+export function mentionTarget(phone: boolean): { thread: string; open: boolean } | null {
   const route = readRoute();
   const open = !phone && (route.page === 'inbox' || route.page === 'reviews') ? (route.thread ?? null) : null;
-  return open ?? lastReplyThread();
+  if (open) return { thread: open, open: true };
+  const last = lastReplyThread();
+  return last ? { thread: last, open: false } : null;
 }
 
 /**
  * Mention these threads in the reply `target`. A phone (or a computer with that thread not open) goes to the thread
  * first: its box opens with the mention at the end of its words.
  */
-export function mentionInReply(target: string, refs: readonly InboxThreadMentionRef[]): void {
+export function mentionInReply(target: string, refs: readonly MentionRef[]): void {
   const route = readRoute();
   if (route.thread !== target && !mentionTakerOpen(target)) writeRoute({ ...route, page: route.page === 'reviews' ? 'reviews' : 'inbox', thread: target, file: null, msg: null });
   requestMention(target, refs);

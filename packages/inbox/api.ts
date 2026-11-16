@@ -51,7 +51,7 @@ import type {
   InboxDraft,
   InboxDraftPasted,
   InboxReplyDraft,
-  InboxReplyQuote,
+  InboxReplyQuote, InboxReplyMention,
   InboxReplyDraftRow,
   InboxDraftStatus,
   InboxUpload,
@@ -1036,7 +1036,7 @@ export function replyDraftSaveBody(
   baseBody: string | null,
   files: ReplyDraftFileOps,
   recipients?: readonly string[],
-  quote?: InboxReplyQuote | null,
+  quote?: InboxReplyQuote | null, mentions?: readonly InboxReplyMention[],
 ): Record<string, unknown> {
   // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
   // a save without them is an older page's, which names long pastes only. `recipients` (the recipient pill) only
@@ -1051,7 +1051,7 @@ export function replyDraftSaveBody(
     ...(files.order ? { files_order: files.order } : {}),
     ...(recipients !== undefined ? { recipients } : {}),
     // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
-    ...(quote !== undefined ? { quote } : {}),
+    ...(quote !== undefined ? { quote } : {}), ...(mentions !== undefined ? { mentions } : {}), // the threads mentioned (absent: the draft's own stay)
   };
 }
 
@@ -1927,8 +1927,8 @@ export const inboxApi = {
     baseBody: string | null = null,
     files: ReplyDraftFileOps = NO_FILE_OPS,
     recipients?: readonly string[],
-    quote?: InboxReplyQuote | null,
-  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote)),
+    quote?: InboxReplyQuote | null, mentions?: readonly InboxReplyMention[],
+  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote, mentions)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),

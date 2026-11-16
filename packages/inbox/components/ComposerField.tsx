@@ -156,6 +156,17 @@ export function InboxComposerField({
     return voiceSession.attach(textareaField(innerRef.current, isTouchScreen));
   }, [voiceSession]);
   const voiceLive = voice ? voiceHidesCaret(voice.view) : false;
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  // Thread mentions (a reply's field only): every change of the words goes through `setText`, so the mentions move with them.
+  const threadMentions = useReplyMentions({ threadId: mentionThread ?? '', text: value, fieldRef: innerRef, wrapRef, voiceLive, off: mentionThread === undefined });
+  const commitMentions = threadMentions.commit;
+  const setText = useCallback(
+    (next: string, caret?: number | null) => {
+      commitMentions(next, caret);
+      onChange(next);
+    },
+    [commitMentions, onChange],
+  );
   // The commands as the list's rows: the built-ins' own row ("Plannotator" at its right end), and never a reference.
   const commandRows = useMemo<SkillCatalogEntry[] | undefined>(
     () => (commands?.length ? commands.map((command) => ({ name: command.name, root: 'plannotator', description: command.description, humanOnly: false })) : undefined),
@@ -164,7 +175,7 @@ export function InboxComposerField({
   const runCommand = useCallback((row: SkillCatalogEntry, words: string) => commands?.find((command) => command.name === row.name)?.run(words), [commands]);
   const skills = useSkillReferenceAutocomplete({
     text: value,
-    setText: onChange,
+    setText,
     textareaRef: innerRef,
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
@@ -195,10 +206,10 @@ export function InboxComposerField({
         : undefined,
     [options, people, onTagsChange],
   );
-  const mention = useMentionAutocomplete({ text: value, setText: onChange, textareaRef: innerRef, source });
+  const mention = useMentionAutocomplete({ text: value, setText, textareaRef: innerRef, source });
   // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
   const initiativeTags = useInitiativeTags();
-  const hash = useHashtagPicker({ text: value, setText: onChange, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
+  const hash = useHashtagPicker({ text: value, setText, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
   const hashListboxId = `ib-hash-${useId().replace(/:/g, '')}`;
   const hashMenu = hash.menu && !mention.menu && !skills.menu ? hash.menu : null;
   const [hashShown, setHashShown] = useState(false);
@@ -234,8 +245,6 @@ export function InboxComposerField({
     mention.select(index);
     if (option?.taggable) setAnnounce(tagPickedWords(option));
   };
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const threadMentions = useReplyMentions({ threadId: mentionThread ?? '', text: value, fieldRef: innerRef, wrapRef, voiceLive, off: mentionThread === undefined });
   // Whether the skill list is drawn (FloatingSkillMenu draws it only while the field is in sight): its keys and
   // `aria-expanded` follow what the person sees, so arrows never move through a list nobody can see.
   const [skillShown, setSkillShown] = useState(false);
@@ -298,7 +307,7 @@ export function InboxComposerField({
         textareaRef={attach}
         value={value}
         onChange={(event) => {
-          onChange(event.target.value);
+          setText(event.target.value, event.target.selectionEnd);
           skills.onSelect();
           mention.onSelect();
           hash.onSelect();

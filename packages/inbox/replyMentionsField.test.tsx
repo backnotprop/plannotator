@@ -1,9 +1,12 @@
 /**
  * A thread mentioned in the reply box, as the person does it (approval "inbox-drag-threads", piece 1, treatment A):
- * a row dragged onto the box, the row menu's Mention in reply, a pasted thread link, Backspace over a mention, and a
- * sent mention drawn as a link. What regresses: a drop that lands at the end instead of where it was let go, a box
- * that looks like a target when nothing is dragged (or takes your own thread), a mention lost when the box's other
- * parts change, a file drop or file paste that stops attaching, and a sent mention drawn as the agent's text.
+ * a row dragged onto the box, the row menu's Mention in reply, a pasted thread link, Backspace over a mention, a
+ * draft opened elsewhere, and a sent mention drawn as a link. What regresses: a drop that lands at the end instead of
+ * where it was let go, a box that looks like a target when nothing is dragged (or takes your own thread), typed words
+ * painted as a mention, a mention lost when the box's other parts change or the draft is opened on another device, a
+ * paste whose late read takes out other words, a file drop or file paste that stops attaching, no word that the
+ * reply's agent cannot open a mention, a press whose release was lost arming a drag, and a sent mention drawn as the
+ * agent's text or unable to wrap.
  *
  * Happy-dom lays nothing out, so the pointer's hit test and the caret under it are stood in for (the real look and
  * the real drag are in the build's shots and recording); the engine, the field and the words are the product's.
@@ -13,23 +16,27 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxThreadMentionRef } from '@plannotator/core/inbox-thread-mention';
+import type { MentionRef } from './threadMentions';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxComposerField } = (hasDom ? await import('./components/ComposerField') : {}) as typeof import('./components/ComposerField');
 const { pressThreadRow, scrollStep, setThreadDragHitTestForTests } = (hasDom ? await import('./threadDrag') : {}) as typeof import('./threadDrag');
-const { requestMention, resetReplyMentionsForTests } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
+const { clearReplyMentions, noteDraftMentions, requestMention, resetReplyMentionsForTests } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
+const { rememberMachine, resetMachineRoutes, setSelfMachine } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 const { noteMentionRefs } = (hasDom ? await import('./data/threadMentionRefs') : {}) as typeof import('./data/threadMentionRefs');
 const { replyWordsWithMentions } = (hasDom ? await import('./threadMentions') : {}) as typeof import('./threadMentions');
-const { linkInboxThreadMentions } = (hasDom ? await import('@plannotator/core/inbox-thread-mention') : {}) as typeof import('@plannotator/core/inbox-thread-mention');
+const { INBOX_THREAD_MENTION_WORDS: W, inboxThreadMentionHref, linkInboxThreadMentions } = (hasDom ? await import('@plannotator/core/inbox-thread-mention') : {}) as typeof import('@plannotator/core/inbox-thread-mention');
 const { InlineMarkdown } = (hasDom ? await import('@plannotator/ui/components/InlineMarkdown') : {}) as typeof import('@plannotator/ui/components/InlineMarkdown');
 const { Menu } = (hasDom ? await import('@base-ui/react/menu') : {}) as typeof import('@base-ui/react/menu');
 const { MentionMenuItem } = (hasDom ? await import('./components/MentionMenuItem') : {}) as typeof import('./components/MentionMenuItem');
 
-const HERE = 'msg_01JD5LOGINREDIRECTLOOP00';
-const FLAKY: InboxThreadMentionRef = { id: 'msg_01JD5FLAKYLOGINTESTCI000', title: 'Flaky login test on CI', project: null };
-const RATE: InboxThreadMentionRef = { id: 'msg_01JD5RATELIMITPUBLICAPI0', title: 'Rate limit for the public API', project: null };
-const OLD: InboxThreadMentionRef = { id: 'msg_01JD5COOKIEDOMAINSSTAGE0', title: 'Cookie domains in staging', project: null, archived: true };
+const idOf = (seed: string) => `msg_${seed.padEnd(26, '0')}`;
+const HERE = idOf('01JD5HERE');
+const FLAKY: MentionRef = { id: idOf('01JD5F1AKY'), title: 'Flaky login test on CI', project: null };
+const RATE: MentionRef = { id: idOf('01JD5RATE'), title: 'Rate limit for the public API', project: null };
+const OLD: MentionRef = { id: idOf('01JD5C00K1E'), title: 'Cookie domains in staging', project: null, archived: true };
+/** A thread the window holds nothing of (a link pasted from elsewhere): one read names it. */
+const LATE: MentionRef = { id: idOf('01JD5WA1T'), title: 'Session cookie rotation', project: null, archived: true };
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -51,6 +58,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   setThreadDragHitTestForTests(null);
   resetReplyMentionsForTests();
+  resetMachineRoutes();
   delete (document as { caretRangeFromPoint?: unknown }).caretRangeFromPoint;
   window.location.hash = '';
 });
@@ -87,7 +95,7 @@ function draw(node: ReactNode) {
 
 const box = () => document.querySelector<HTMLElement>('[data-testid="box"]')!;
 const field = () => document.querySelector<HTMLTextAreaElement>('textarea')!;
-const tokens = () => [...document.querySelectorAll('[data-skill-ref-token^="thread"]')].map((t) => [t.getAttribute('data-skill-ref-token'), t.textContent]);
+const tokens = () => [...document.querySelectorAll('[data-skill-ref-token^="ib-mention"]')].map((t) => [t.getAttribute('data-skill-ref-token'), t.textContent]);
 
 /** The caret a pointer would put in the words: `offset` in the mirror's text. */
 function caretAt(offset: number) {
@@ -100,11 +108,33 @@ function caretAt(offset: number) {
   };
 }
 
+/** The person's typing: the field's words become `text`, the caret at their end (the field's own input event). */
+function type(text: string) {
+  act(() => {
+    const el = field();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, text);
+    el.setSelectionRange(text.length, text.length);
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+/** A paste in the field (`clipboardData` as a browser hands it); true when the box let it go through. */
+function pasteIn(data: { text?: string; files?: File[] }, at: number): boolean {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { getData: () => data.text ?? '', files: data.files ?? [], items: [], types: data.files ? ['Files'] : ['text/plain'] } });
+  act(() => {
+    field().focus();
+    field().setSelectionRange(at, at);
+    field().dispatchEvent(event);
+  });
+  return !event.defaultPrevented;
+}
+
 /** A row picked up and carried: below the threshold it is still a press, past it a drag. */
 function pickUp(ids: string[]) {
   const row = document.createElement('button');
   document.body.appendChild(row);
-  const at = (x: number, y: number) => ({ clientX: x, clientY: y, button: 0, pointerType: 'mouse', pointerId: 1, bubbles: true });
+  const at = (x: number, y: number) => ({ clientX: x, clientY: y, button: 0, buttons: 1, pointerType: 'mouse', pointerId: 1, bubbles: true });
   act(() => pressThreadRow(new PointerEvent('pointerdown', at(0, 0)), { ids: () => ids, label: () => 'thread', rows: () => [row], spoken: () => 'Picked up.' }, document.querySelector('.pn-inbox')!));
   act(() => void window.dispatchEvent(new PointerEvent('pointermove', at(2, 1))));
   const before = box().getAttribute('data-thread-drop');
@@ -115,7 +145,7 @@ function pickUp(ids: string[]) {
       setThreadDragHitTestForTests(() => target);
       act(() => void window.dispatchEvent(new PointerEvent('pointermove', at(60, 60))));
     },
-    drop: () => act(() => void window.dispatchEvent(new PointerEvent('pointerup', at(60, 60)))),
+    drop: () => act(() => void window.dispatchEvent(new PointerEvent('pointerup', { ...at(60, 60), buttons: 0 }))),
     escape: () => act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))),
   };
 }
@@ -135,7 +165,7 @@ describe.skipIf(!hasDom)('a row dragged onto the reply box', () => {
     drag.drop();
     // Snapped to the end of the word under the pointer, with its spaces.
     expect(words).toBe('Same as the failure Flaky login test on CI we saw.');
-    expect(tokens()).toEqual([[`thread:${FLAKY.id}`, FLAKY.title]]);
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
     expect(box().hasAttribute('data-thread-drop')).toBe(false);
     expect(box().querySelector('.ib-tdrop')).toBeNull();
   });
@@ -184,7 +214,7 @@ describe.skipIf(!hasDom)('every state of the box', () => {
     draw(<Box initial="See " />);
     act(() => requestMention(HERE, [FLAKY]));
     act(() => root!.render(<Box initial="ignored" extras={<><div className="ib-rquote">Replying to</div><div className="ib-rfiles">trace.har</div><div className="ib-ranswers">Q1 → Yes</div></>} />));
-    expect(tokens()).toEqual([[`thread:${FLAKY.id}`, FLAKY.title]]);
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
   });
 
   test('while sending (the field is read-only) the box is no target', () => {
@@ -202,7 +232,7 @@ describe.skipIf(!hasDom)('every state of the box', () => {
     caretAt('Settled in '.length);
     drag.over(field());
     drag.drop();
-    expect(tokens()).toEqual([[`thread-archived:${OLD.id}`, OLD.title]]);
+    expect(tokens()).toEqual([[`ib-mention-archived:${OLD.id}`, OLD.title]]);
   });
 });
 
@@ -279,7 +309,7 @@ describe.skipIf(!hasDom)('the ways that are not a drag', () => {
     };
     paste({ text: `http://localhost:19432/#thread=${FLAKY.id}` });
     expect(words).toBe(`Like ${FLAKY.title} `);
-    expect(tokens()).toEqual([[`thread:${FLAKY.id}`, FLAKY.title]]);
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
     paste({ files: [new File(['x'], 'shot.png', { type: 'image/png' })] });
     expect(boxPastes).toBe(1);
   });
@@ -344,7 +374,7 @@ describe.skipIf(!hasDom)('the list scrolls while a thread is held near its edge'
     const el = list(200);
     const row = document.createElement('button');
     el.appendChild(row);
-    const at = (x: number, y: number) => ({ clientX: x, clientY: y, button: 0, pointerType: 'mouse', pointerId: 1, bubbles: true });
+    const at = (x: number, y: number) => ({ clientX: x, clientY: y, button: 0, buttons: 1, pointerType: 'mouse', pointerId: 1, bubbles: true });
     act(() => pressThreadRow(new PointerEvent('pointerdown', at(150, 250)), { ids: () => [FLAKY.id], label: () => 'thread', rows: () => [row], spoken: () => 'Picked up.', scroller: () => el }, document.querySelector('.pn-inbox')!));
     setThreadDragHitTestForTests(() => field());
     act(() => void window.dispatchEvent(new PointerEvent('pointermove', at(150, 104))));
@@ -366,12 +396,118 @@ describe.skipIf(!hasDom)('after Send', () => {
   test('the person\'s sent message shows the mention as a link that opens the thread, not the agent\'s words', () => {
     draw(<Box initial="Same as " />);
     act(() => requestMention(HERE, [FLAKY]));
-    const sent = replyWordsWithMentions(HERE, words);
-    expect(sent).toContain(`(thread ${FLAKY.id})`);
+    const sent = replyWordsWithMentions(HERE, words.trim());
+    expect(sent).toContain(W.inline(1, FLAKY.id));
     act(() => root!.render(<div className="ib-body"><InlineMarkdown text={linkInboxThreadMentions(sent)} /></div>));
     const link = document.querySelector<HTMLAnchorElement>('a[href^="#thread="]')!;
-    expect(link.getAttribute('href')).toBe(`#thread=${FLAKY.id}`);
+    expect(link.getAttribute('href')).toBe(inboxThreadMentionHref(FLAKY.id));
     expect(link.textContent).toBe(FLAKY.title);
     expect(document.body.textContent).not.toContain(FLAKY.id);
+  });
+
+  test('the link wraps on a phone, and only a mention\'s link takes its paint (other thread links stay as they are)', async () => {
+    const css = await Bun.file(new URL('./inbox.css', import.meta.url)).text();
+    const rule = css.split('\n').find((line) => line.startsWith('.pn-inbox .ib-body a[href^="#thread="]') && line.includes('{'))!;
+    expect(rule).toContain('[href$="&mention"] {');
+    expect(rule).not.toContain('nowrap');
+    expect(rule).toContain('box-decoration-break: clone');
+    expect(css).not.toMatch(/\.ib-body a\[href\^="#thread="\]\s*[{:]/);
+  });
+});
+
+describe.skipIf(!hasDom)('the mentions are the draft\'s, not words', () => {
+  test('a title typed by hand is plain words; words typed after a mention never join it', () => {
+    draw(<Box initial="" />);
+    type(`${FLAKY.title} `);
+    expect(tokens()).toEqual([]);
+    act(() => requestMention(HERE, [FLAKY]));
+    type(`${words}then Flaky login test on CIDR`);
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
+    expect(replyWordsWithMentions(HERE, words.trim()).split(W.inline(1, FLAKY.id)).length).toBe(2);
+  });
+
+  test('a draft opened on another device shows its mentions, and the Send writes those same ones', () => {
+    const body = `Same cause as ${FLAKY.title}.`;
+    noteDraftMentions(HERE, { body, mentions: [{ thread_id: FLAKY.id, title: FLAKY.title, label: FLAKY.title, at: 14 }] });
+    draw(<Box initial={body} />);
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
+    expect(replyWordsWithMentions(HERE, words)).toContain(W.inline(1, FLAKY.id));
+  });
+
+  test('after a Send (or Discard) the same words typed again are plain', () => {
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    const text = words;
+    act(() => clearReplyMentions(HERE));
+    type('');
+    type(text);
+    expect(tokens()).toEqual([]);
+    expect(replyWordsWithMentions(HERE, words)).toBe(words);
+  });
+
+  test('a mention the reply\'s agent cannot open (another machine\'s) is said under the field before Send', () => {
+    setSelfMachine(`ibx_${'01JD5SE1F'.padEnd(26, '0')}`);
+    rememberMachine([HERE], `ibx_${'01JD5THER'.padEnd(26, '0')}`);
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [{ ...FLAKY, machine: null }]));
+    const note = document.querySelector('[data-mention-unreadable]');
+    expect(note?.textContent).toContain(FLAKY.title);
+    expect(field().getAttribute('aria-describedby')).toContain(note!.id);
+    expect(replyWordsWithMentions(HERE, words)).toContain(W.unreadable);
+  });
+
+  test('a link the window must read first pastes as words, and becomes the mention only where it still stands', async () => {
+    let answer: (value: Response) => void = () => {};
+    globalThis.fetch = (async (input: RequestInfo | URL) =>
+      String(input).includes(`/threads/${LATE.id}`)
+        ? new Promise<Response>((resolve) => (answer = resolve))
+        : Response.json({ skills: [] })) as unknown as typeof fetch;
+    draw(<Box initial="Like " />);
+    const link = `http://localhost:19432/#thread=${LATE.id}`;
+    // Not a thread the window holds: the browser pastes the words (here, as it would), and the read goes out.
+    expect(pasteIn({ text: link }, 5)).toBe(true);
+    type(`Like ${link}`);
+    // The person keeps typing before it while the read is out.
+    type(`Very much like ${link}`);
+    await act(async () => {
+      answer(Response.json({ thread: { thread_id: LATE.id, thread_name: LATE.title, subject: null, resolved_at: '2026-11-01T00:00:00.000Z', project: null, messages: [] }, row: null }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(words).toBe(`Very much like ${LATE.title} `);
+    expect(tokens()).toEqual([[`ib-mention-archived:${LATE.id}`, LATE.title]]);
+  });
+
+  test('an edited link waiting for its read stays words, and nothing else is taken out', async () => {
+    let answer: (value: Response) => void = () => {};
+    globalThis.fetch = (async (input: RequestInfo | URL) =>
+      String(input).includes(`/threads/${LATE.id}`)
+        ? new Promise<Response>((resolve) => (answer = resolve))
+        : Response.json({ skills: [] })) as unknown as typeof fetch;
+    draw(<Box initial="Like " />);
+    const link = `http://localhost:19432/#thread=${LATE.id}`;
+    expect(pasteIn({ text: link }, 5)).toBe(true);
+    type(`Like ${link}`);
+    type(`Like ${link.slice(0, -3)} and more`);
+    await act(async () => {
+      answer(Response.json({ thread: { thread_id: LATE.id, thread_name: LATE.title, subject: null, resolved_at: null, project: null, messages: [] }, row: null }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(words).toBe(`Like ${link.slice(0, -3)} and more`);
+    expect(tokens()).toEqual([]);
+  });
+});
+
+describe.skipIf(!hasDom)('a press whose release was lost', () => {
+  test('a move with no button held never starts a drag', () => {
+    draw(<Box initial="Keep me." />);
+    const row = document.createElement('button');
+    document.body.appendChild(row);
+    const at = (x: number, y: number, buttons: number) => ({ clientX: x, clientY: y, button: 0, buttons, pointerType: 'mouse', pointerId: 1, bubbles: true });
+    act(() => pressThreadRow(new PointerEvent('pointerdown', at(0, 0, 1)), { ids: () => [FLAKY.id], label: () => 'thread', rows: () => [row], spoken: () => 'Picked up.' }, document.querySelector('.pn-inbox')!));
+    // The release went to another window: the next moves come with no button held.
+    act(() => void window.dispatchEvent(new PointerEvent('pointermove', at(40, 40, 0))));
+    act(() => void window.dispatchEvent(new PointerEvent('pointermove', at(80, 80, 1))));
+    expect(box().hasAttribute('data-thread-drop')).toBe(false);
+    expect(document.querySelector('[data-thread-ghost]')).toBeNull();
   });
 });

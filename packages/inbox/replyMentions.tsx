@@ -1,20 +1,36 @@
 /**
  * The reply box's half of a thread mention (approval "inbox-drag-threads", piece 1, treatment A "in the words"):
- * the field paints each mention still standing in its words as a token (`tokens`, painted like the `#` and `/`
- * tokens), Backspace right after one takes it whole, a pasted thread link (or thread id) of this Inbox becomes one,
- * and the box is a drop target while a thread is dragged (threadDrag.ts): today's file-drop look, a pill over the box
- * that says what a drop does, and a caret where the mention will land, snapped to the end of a word.
+ * the field paints each mention the draft carries as a token (`tokens`, painted like the `#` and `/` tokens), every
+ * edit moves them (`commit`, threadMentions.ts), Backspace right after one takes it whole, a pasted thread link (or
+ * thread id) of this Inbox becomes one, a mention the reply's agent cannot open is said under the field, and the box
+ * is a drop target while a thread is dragged (threadDrag.ts, layer `reply`): a tint over the box, a pill that says
+ * what a drop does, and a caret where the mention will land, snapped to the end of a word.
  *
  * What goes in is typed in as if by the person (one undo step, the host's onChange runs), so ⌘Z takes it back.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import type { SkillReferenceToken } from '@plannotator/ui/utils/skillReferences';
-import type { InboxThreadMentionRef } from '@plannotator/core/inbox-thread-mention';
+import type { InboxReplyMention } from '@plannotator/core/inbox-types';
 import { useInboxQueryClient } from './data/client';
 import { knownMentionRef, resolveMentionRef } from './data/threadMentionRefs';
-import { registerThreadDropTarget, sayThreadDrag, type DropAnswer } from './threadDrag';
-import { backspaceMention, keepReplyMentions, mentionLabel, mentionSpans, noteReplyThread, registerMentionTaker, replyMentions, snapToWordEnd, subscribeReplyMentions, withMentionsAt, type ReplyMention } from './threadMentions';
+import { registerThreadDropTarget, sayThreadDrag, THREAD_DROP_LAYER, type DropAnswer } from './threadDrag';
+import {
+  addReplyMentions,
+  backspaceMention,
+  commitReplyEdit,
+  mentionAt,
+  mentionLabel,
+  mentionReadable,
+  mentionsFor,
+  noteReplyThread,
+  registerMentionTaker,
+  replyMentionsVersion,
+  snapToWordEnd,
+  subscribeReplyMentions,
+  withMentionsAt,
+  type MentionRef,
+} from './threadMentions';
 import { isTouchScreen } from './phone';
 
 /** A thread link this Inbox gave out (`…/#thread=msg_…`, Copy link), or a bare thread id: the thread's id, else null. */
@@ -27,13 +43,23 @@ export function pastedThreadId(text: string): string | null {
   return link ? link[1]! : null;
 }
 
-/** The token's paint (inbox.css `[data-skill-ref-token^="thread"]`): a thread, or an archived one in grey. */
-const tokenName = (m: ReplyMention) => `${m.archived ? 'thread-archived' : 'thread'}:${m.id}`;
+/**
+ * The token's paint (inbox.css `[data-skill-ref-token^="ib-mention"]`): a thread, or an archived one in grey. The
+ * prefix is no plugin's name, so a skill reference (`plugin:skill`) never paints as a mention.
+ */
+const tokenName = (m: InboxReplyMention) => `${m.archived ? 'ib-mention-archived' : 'ib-mention'}:${m.thread_id}`;
 
 /** How a mention is named to assistive technology: its title, and what is not ordinary about it. */
-function spokenMention(m: ReplyMention): string {
-  const notes = [m.project ? `project ${m.project}` : null, m.archived ? 'archived' : null, m.elsewhere ? 'on another machine' : null].filter(Boolean);
+function spokenMention(m: Pick<InboxReplyMention, 'title' | 'archived'> & { project?: string | null }, unreadable = false): string {
+  const notes = [m.project ? `project ${m.project}` : null, m.archived ? 'archived' : null, unreadable ? 'its agent cannot open it' : null].filter(Boolean);
   return `${m.title}${notes.length ? ` (${notes.join(', ')})` : ''}`;
+}
+
+/** The quiet line under the field when the reply's agent cannot open a mentioned thread (another machine's). */
+export function unreadableMentionLine(titles: readonly string[]): string {
+  return titles.length === 1
+    ? `The agent you reply to is on another machine and cannot open “${titles[0]}”: it gets the title only.`
+    : `The agent you reply to is on another machine and cannot open ${titles.length} of these threads: it gets their titles only.`;
 }
 
 /** The field's words at a point on screen, through its painted mirror (the textarea itself has no text positions). */
@@ -138,18 +164,36 @@ export interface ReplyMentionsHost {
   off?: boolean;
 }
 
-const NO_MENTIONS: readonly ReplyMention[] = [];
+const NO_MENTIONS: readonly InboxReplyMention[] = [];
 
 export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive, off = false }: ReplyMentionsHost) {
   const client = useInboxQueryClient();
-  const read = () => (off ? NO_MENTIONS : replyMentions(threadId));
-  const all = useSyncExternalStore(subscribeReplyMentions, read, read);
-  const spans = useMemo(() => mentionSpans(text, all), [text, all]);
-  const tokens = useMemo<SkillReferenceToken[]>(() => spans.map((s) => ({ start: s.start, end: s.end, entry: { name: tokenName(s.mention), root: 'plannotator', humanOnly: false } })), [spans]);
+  const version = useSyncExternalStore(subscribeReplyMentions, replyMentionsVersion, replyMentionsVersion);
+  // The mentions standing in the words on screen: the same ones the Send writes (threadMentions.ts `mentionsFor`).
+  // `version`: read again when the store changes.
+  const mentions = useMemo(() => (off ? NO_MENTIONS : mentionsFor(threadId, text)), [off, threadId, text, version]);
+  const tokens = useMemo<SkillReferenceToken[]>(() => mentions.map((m) => ({ start: m.at, end: m.at + m.label.length, entry: { name: tokenName(m), root: 'plannotator', humanOnly: false } })), [mentions]);
   const describedId = `ib-tmention-${useId().replace(/:/g, '')}`;
-  const standing = useMemo(() => [...new Map(spans.map((s) => [s.mention.id, s.mention])).values()], [spans]);
+  const noteId = `${describedId}-note`;
+  const standing = useMemo(() => [...new Map(mentions.map((m) => [m.thread_id, m])).values()], [mentions]);
+  // Worked out for the reply's own agent at every draw, so a change of reply (or of its machine) shows at once.
+  const unreadable = standing.filter((m) => !mentionReadable(threadId, m));
   const live = useRef({ voiceLive });
   live.current = { voiceLive };
+  /** The words as the field last had them: an edit is told from them to the new words. */
+  const seen = useRef(text);
+  seen.current = text;
+
+  /** The person changed the words (`caret`: where the caret is after it, when known): the mentions move with them. */
+  const commit = useCallback(
+    (next: string, caret?: number | null) => {
+      if (off) return;
+      const from = seen.current;
+      seen.current = next;
+      commitReplyEdit(threadId, from, next, caret);
+    },
+    [off, threadId],
+  );
 
   /** A mention already in the words lights up instead of going in twice. */
   const flash = useCallback(
@@ -170,11 +214,11 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
 
   /** Put mentions in at `where` (an offset; null: the caret when the field has focus, else the end of the words). */
   const putIn = useCallback(
-    (refs: readonly InboxThreadMentionRef[], where: number | null) => {
+    (refs: readonly MentionRef[], where: number | null) => {
       const field = fieldRef.current;
       if (!field || field.readOnly || field.disabled) return false;
       const now = field.value;
-      const there = new Set(mentionSpans(now, replyMentions(threadId)).map((s) => s.mention.id));
+      const there = new Set(mentionsFor(threadId, now).map((m) => m.thread_id));
       const seen = new Set<string>();
       const fresh = refs.filter((ref) => ref.id !== threadId && !there.has(ref.id) && !seen.has(ref.id) && seen.add(ref.id));
       const again = refs.filter((ref) => there.has(ref.id)).map((ref) => ref.id);
@@ -184,15 +228,16 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
         return true;
       }
       const replyProject = knownMentionRef(client, threadId)?.project ?? null;
-      const mentions: ReplyMention[] = fresh.map((ref) => ({ ...ref, label: mentionLabel(ref, replyProject) }));
-      keepReplyMentions(threadId, mentions);
+      const labels = fresh.map((ref) => mentionLabel(ref, replyProject));
       const focused = field.ownerDocument.activeElement === field;
       const spot = live.current.voiceLive ? now.length : where ?? (focused ? field.selectionEnd : now.length);
-      const put = withMentionsAt(now, snapToWordEnd(now, spot), mentions.map((m) => m.label));
+      const put = withMentionsAt(now, snapToWordEnd(now, spot), labels);
+      // Typed in first (the field's onChange moves the mentions already there), then the new ones join at their ranges.
       typeIn(field, put.at, put.insert, put.caret);
+      if (field.value === put.text) addReplyMentions(threadId, field.value, fresh.map((ref, i) => mentionAt(ref, labels[i]!, put.starts[i]!)));
       noteReplyThread(threadId);
-      requestAnimationFrame(() => flash(mentions.map((m) => m.id)));
-      sayThreadDrag(`Mentioned ${mentions.map((m) => spokenMention(m)).join(', ')} in your reply.`);
+      requestAnimationFrame(() => flash(fresh.map((ref) => ref.id)));
+      sayThreadDrag(`Mentioned ${fresh.map((ref) => spokenMention(ref, !mentionReadable(threadId, ref))).join(', ')} in your reply.`);
       return true;
     },
     [client, fieldRef, flash, threadId],
@@ -215,6 +260,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
     () =>
       off ? undefined : registerThreadDropTarget({
         element: boxOf,
+        layer: THREAD_DROP_LAYER.reply,
         what: 'Mention',
         accepts: (ids) => {
           const field = fieldRef.current;
@@ -262,7 +308,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
       if (off || event.key !== 'Backspace' || event.metaKey || event.ctrlKey || event.altKey || event.nativeEvent.isComposing) return false;
       const field = event.currentTarget;
       if (field.selectionStart !== field.selectionEnd) return false;
-      const gone = backspaceMention(field.value, field.selectionStart, replyMentions(threadId));
+      const gone = backspaceMention(field.value, field.selectionStart, mentionsFor(threadId, field.value));
       if (!gone) return false;
       event.preventDefault();
       typeOut(field, gone.caret, gone.caret + (field.value.length - gone.text.length));
@@ -281,21 +327,25 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
       const pasted = event.clipboardData.getData('text/plain');
       const id = pastedThreadId(pasted);
       if (!id) return;
-      event.preventDefault();
       const from = field.selectionStart;
       const to = field.selectionEnd;
       const known = knownMentionRef(client, id);
       if (known) {
+        event.preventDefault();
         if (to > from) typeOut(field, from, to);
         putIn([known], from);
         return;
       }
-      // Not in the list (an archived thread, one of another project): one read; no thread of this Inbox pastes as words.
+      // Not in the list (an archived thread, one of another project): the link pastes as words at once, and one read
+      // turns it into the mention only while those words still stand, untouched. Typing meanwhile never loses a word,
+      // and nothing else is ever taken out. No thread of this Inbox: it stays as words.
       void resolveMentionRef(client, id).then((ref) => {
-        if (!fieldRef.current) return;
-        if (to > from) typeOut(fieldRef.current, from, to);
-        if (ref && ref.id !== threadId) putIn([ref], from);
-        else typeIn(fieldRef.current, from, pasted, from + pasted.length);
+        const now = fieldRef.current;
+        if (!now || !ref || ref.id === threadId || now.readOnly) return;
+        const at = pastedStill(now.value, pasted, from);
+        if (at === null) return;
+        typeOut(now, at, at + pasted.length);
+        putIn([ref], at);
       });
     },
     [client, fieldRef, putIn, threadId, off],
@@ -306,8 +356,13 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
     <>
       {standing.length > 0 && (
         <span id={describedId} className="ib-sr">
-          {`Mentions: ${standing.map(spokenMention).join('; ')}.`}
+          {`Mentions: ${standing.map((m) => spokenMention(m, unreadable.includes(m))).join('; ')}.`}
         </span>
+      )}
+      {unreadable.length > 0 && (
+        <p id={noteId} className="ib-tmnote" data-mention-unreadable="">
+          {unreadableMentionLine(unreadable.map((m) => m.title))}
+        </p>
       )}
       {look.over && look.caret && <span className="ib-tcaret" aria-hidden="true" style={{ left: look.caret.left, top: look.caret.top, height: look.caret.height }} />}
       {box &&
@@ -322,7 +377,19 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
         )}
     </>
   );
-  return { tokens, onKeyDown, onPaste, overlay, describedBy: standing.length > 0 ? describedId : undefined };
+  const describedBy = [standing.length > 0 ? describedId : null, unreadable.length > 0 ? noteId : null].filter(Boolean).join(' ') || undefined;
+  return { tokens, commit, onKeyDown, onPaste, overlay, describedBy };
+}
+
+/**
+ * Where the pasted words stand now: at the offset they went in at, else their one place in the words (the person
+ * typed before them meanwhile). Null: edited, gone or there twice; the paste stays as words.
+ */
+export function pastedStill(text: string, pasted: string, at: number): number | null {
+  if (pasted === '') return null;
+  if (text.startsWith(pasted, at)) return at;
+  const first = text.indexOf(pasted);
+  return first >= 0 && text.indexOf(pasted, first + 1) < 0 ? first : null;
 }
 
 const sameCaret = (a: DropLook['caret'], b: DropLook['caret']) => a === b || (!!a && !!b && a.left === b.left && a.top === b.top && a.height === b.height);

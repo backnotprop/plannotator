@@ -12399,15 +12399,18 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 @media (prefers-reduced-motion: no-preference) { .ib-tcaret { animation: ib-tcaret 900ms steps(2) infinite; } @keyframes ib-tcaret { 50% { opacity: 0; } } }
 /* A mention in the words: the `@` tag's paint (a tint, paint only, so the caret never drifts; no ring); an archived
    thread in grey. */
-.pn-inbox [data-skill-ref-token^="thread:"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 3px; }
-.pn-inbox [data-skill-ref-token^="thread-archived:"] { color: var(--muted-foreground); background: color-mix(in oklch, var(--foreground) 8%, transparent); border-radius: 3px; }
+.pn-inbox [data-skill-ref-token^="ib-mention:"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 3px; }
+.pn-inbox [data-skill-ref-token^="ib-mention-archived:"] { color: var(--muted-foreground); background: color-mix(in oklch, var(--foreground) 8%, transparent); border-radius: 3px; }
 @media (prefers-reduced-motion: no-preference) {
-  .pn-inbox [data-skill-ref-token^="thread"][data-flash] { animation: ib-tflash 700ms ease-out; }
+  .pn-inbox [data-skill-ref-token^="ib-mention"][data-flash] { animation: ib-tflash 700ms ease-out; }
   @keyframes ib-tflash { 0% { background: color-mix(in oklch, var(--primary) 45%, transparent); } }
 }
-/* A sent mention: a link to the thread, in the token's paint, the thread mark before its name. */
-.pn-inbox .ib-body a[href^="#thread="] { color: var(--primary); text-decoration-line: none; font-weight: 550; background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 5px; padding: 0 5px 0 3px; white-space: nowrap; }
-.pn-inbox .ib-body a[href^="#thread="]::before { content: ""; display: inline-block; width: 13px; height: 13px; margin-right: 4px; vertical-align: -1.5px; background: currentColor; -webkit-mask: var(--ib-thread-mark) center / contain no-repeat; mask: var(--ib-thread-mark) center / contain no-repeat; }
-.pn-inbox .ib-body a[href^="#thread="]:hover { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+/* The line under the field when the reply's agent cannot open a mentioned thread: quiet, like the skill notice. */
+.ib-cfield .ib-tmnote { margin: -2px 0 0; padding: 0 12px 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); line-height: 1.35; overflow-wrap: anywhere; }
+/* A sent mention (its link ends `&mention`; other thread links stay as they are): a link to the thread, in the
+   token's paint, the thread mark before its name. A long title wraps, each line keeping the paint. */
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"] { color: var(--primary); text-decoration-line: none; font-weight: 550; background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 5px; padding: 0 5px 0 3px; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"]::before { content: ""; display: inline-block; width: 13px; height: 13px; margin-right: 4px; vertical-align: -1.5px; background: currentColor; -webkit-mask: var(--ib-thread-mark) center / contain no-repeat; mask: var(--ib-thread-mark) center / contain no-repeat; }
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"]:hover { background: color-mix(in oklch, var(--primary) 20%, transparent); }
 .pn-inbox { --ib-thread-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z'/%3E%3Cpath d='M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1'/%3E%3C/svg%3E"); }
 .ib-pmi-hint { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }

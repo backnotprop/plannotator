@@ -17,14 +17,28 @@
  * edge. A drop target under the pointer always wins over scrolling: the list's own edge places (Priority on top,
  * Quiet and Archive at the bottom, the next piece) register as targets over those bands and stop the scroll while
  * the pointer is on them; the band stays the strip just inside them.
+ *
+ * The API (the window's one thread drag: every place that takes a dragged thread registers here, none runs its own):
+ *  - `pressThreadRow(event, source, root)`: a row's `pointerdown` (useThreadRowDrag.ts wires the list's rows). The
+ *    source says which threads a drag carries, the ghost's words, the rows to fade and the list that scrolls.
+ *  - `registerThreadDropTarget(target)`: a place that takes threads while it is mounted; returns its unregister.
+ *    `layer` (THREAD_DROP_LAYER) settles overlapping targets: of those under the pointer the highest layer wins
+ *    (a tie: the one whose element lies inside the other's). The reply box is one target (replyMentions.tsx, layer
+ *    `reply`); a pane of a free layout registers at `pane`, the list's edge places at `list`.
+ *  - `sayThreadDrag(words)`: a target's result in the drag's live region. `threadDragging()`: whether one is on.
  */
 
 /** What a target answers for the threads being dragged: takes them, refuses them (shown, but a drop does nothing), or is no place for them (hidden). */
 export type DropAnswer = 'take' | 'refuse' | null;
 
+/** Where a target lies in the stack of places: of the targets under the pointer the highest layer takes the drop. */
+export const THREAD_DROP_LAYER = { list: 10, pane: 20, reply: 30 } as const;
+
 export interface ThreadDropTarget {
   /** The element a drop lands on (its whole box). */
   element: () => HTMLElement | null;
+  /** Its layer (THREAD_DROP_LAYER; absent: `list`). */
+  layer?: number;
   accepts: (ids: readonly string[]) => DropAnswer;
   /** The ghost's second word over it ("Mention"). */
   what: string;
@@ -123,10 +137,16 @@ export function sayThreadDrag(words: string, root?: HTMLElement | null): void {
  */
 export function pressThreadRow(event: PointerEvent, source: ThreadDragSource, root: HTMLElement): void {
   if (event.button !== 0 || event.pointerType === 'touch' || drag) return;
+  // A pen on a screen with no fine pointer (an iPad's) scrolls the list: it never drags.
+  if (event.pointerType === 'pen' && typeof matchMedia === 'function' && !matchMedia('(pointer: fine)').matches) return;
+  if (press) stopListening();
   press = { x: event.clientX, y: event.clientY, source, root, pointerId: event.pointerId };
   window.addEventListener('pointermove', onMove, true);
   window.addEventListener('pointerup', onUp, true);
   window.addEventListener('pointercancel', onCancel, true);
+  // From the press on: a press whose release is lost (the window lost focus) never arms a drag later.
+  window.addEventListener('keydown', onKey, true);
+  window.addEventListener('blur', onBlur);
 }
 
 function stopListening(): void {
@@ -138,6 +158,13 @@ function stopListening(): void {
 }
 
 function onMove(event: PointerEvent): void {
+  // The main button is no longer held (its release went elsewhere): the press, or the drag, ends here.
+  if ((event.buttons & 1) === 0) {
+    if (drag) cancel();
+    else stopListening();
+    press = null;
+    return;
+  }
   if (press && !drag) {
     if (event.pointerId !== press.pointerId) return;
     if (Math.hypot(event.clientX - press.x, event.clientY - press.y) <= THRESHOLD) return;
@@ -160,7 +187,13 @@ function onCancel(): void {
 }
 
 function onKey(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || !drag) return;
+  if (event.key !== 'Escape') return;
+  if (!drag) {
+    // Before a drag: Escape only drops the press (the key goes on as it would).
+    stopListening();
+    press = null;
+    return;
+  }
   // Escape is the drag's: it never closes the thread or a sheet under it.
   event.preventDefault();
   event.stopPropagation();
@@ -169,6 +202,8 @@ function onKey(event: KeyboardEvent): void {
 
 function onBlur(): void {
   if (drag) cancel();
+  else stopListening();
+  press = null;
 }
 
 /** The click that ends a drag (on the row it started on) opens nothing. */
@@ -211,20 +246,22 @@ function start(event: PointerEvent): void {
   drag = { ids, ghost, what, origin: { x: press.x, y: press.y }, over: null, rows, root, scroller: source.scroller?.() ?? null, scroll: { step: 0, frame: null } };
   document.documentElement.setAttribute('data-thread-drag', '');
   for (const target of targets) target.show(target.accepts(ids), ids);
-  window.addEventListener('keydown', onKey, true);
-  window.addEventListener('blur', onBlur);
   say(root, `${source.spoken(ids)} Drop it on the reply box to mention it. Escape cancels.`);
   move(event.clientX, event.clientY);
 }
 
+/** The target a drop at (x, y) goes to: of those whose element holds the point, the highest layer, then the innermost. */
 function targetAt(x: number, y: number): ThreadDropTarget | null {
   const hit = hitTest(x, y);
   if (!hit) return null;
+  let best: { target: ThreadDropTarget; el: HTMLElement; layer: number } | null = null;
   for (const target of targets) {
     const el = target.element();
-    if (el && el.contains(hit)) return target;
+    if (!el || !el.contains(hit)) continue;
+    const layer = target.layer ?? THREAD_DROP_LAYER.list;
+    if (!best || layer > best.layer || (layer === best.layer && best.el.contains(el))) best = { target, el, layer };
   }
-  return null;
+  return best?.target ?? null;
 }
 
 function place(ghost: HTMLElement, x: number, y: number): void {
