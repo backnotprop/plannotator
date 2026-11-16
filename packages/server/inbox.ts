@@ -46,7 +46,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
-import { inboxSidebarCheck, inboxSidebarRead, type InboxSidebarLayout } from "@plannotator/core/inbox-sidebar";
+import { type InboxSidebarLayout } from "@plannotator/core/inbox-sidebar";
+import { inboxSidebarState, saveInboxSidebar } from "./inbox-sidebar-save";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import {
   INBOX_APP_ID,
@@ -2720,20 +2721,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * `inboxSidebarRead`: a name this build does not know is dropped, an item the layout does not name takes its
    * default place), strict on write (a `422`). `inboxSidebarRev` counts the saves, as `inboxRowsRev` does.
    */
-  const sidebarState = (): { sidebar: InboxSidebarLayout | null; rev: number } => {
-    const config = loadConfig();
-    const rev = config.inboxSidebarRev;
-    return { sidebar: inboxSidebarRead(config.inboxSidebar), rev: typeof rev === "number" && Number.isSafeInteger(rev) && rev > 0 ? rev : 0 };
-  };
+  const sidebarState = inboxSidebarState;
 
   const saveSidebar = (input: unknown, validateOnly = false): { sidebar: InboxSidebarLayout; rev: number } => {
-    const sidebar = inboxSidebarCheck(input);
-    if (!sidebar) throw new InboxError("validation_error", "sidebar: { top, bottom, hidden }, each a list of sidebar item names.", { field: "sidebar" });
-    const rev = sidebarState().rev + 1;
+    // An item of a capability that is off (Plans) is never written (inbox-sidebar-save.ts).
+    const { sidebar, rev } = saveInboxSidebar(input, { off: capabilities.filter((capability) => !capability.on()).map((capability) => capability.key), validateOnly });
     if (validateOnly) return { sidebar, rev };
-    saveConfig({ inboxSidebar: sidebar, inboxSidebarRev: rev });
-    const saved = sidebarState();
-    if (saved.rev !== rev || JSON.stringify(saved.sidebar) !== JSON.stringify(sidebar)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     for (const listener of sidebarListeners) listener(sidebar, rev);
     return { sidebar, rev };
   };

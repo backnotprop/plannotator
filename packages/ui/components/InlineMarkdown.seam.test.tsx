@@ -130,7 +130,7 @@ describe('LocalLinkMatchContext seam', () => {
     });
     return host;
   }
-  const TEXT = '[spec](docs/spec.md) [mail](mailto:a@example.com) [site](https://example.com/)';
+  const TEXT = '[spec](docs/spec.md) [mail](mailto:a@example.com) [site](https://example.com/) <b@example.com>';
   const inert = (href: string) => ({ kind: 'unavailable' as const, title: href });
 
   test.skipIf(!hasDom)('absent, the resolver is asked about local paths only; given, about what the host’s test takes', async () => {
@@ -139,7 +139,7 @@ describe('LocalLinkMatchContext seam', () => {
         <InlineMarkdown text={TEXT} />
       </LocalLinkContext.Provider>,
     );
-    expect(Array.from(asIs.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'))).toEqual(['mailto:a@example.com', 'https://example.com/']);
+    expect(Array.from(asIs.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'))).toEqual(['mailto:a@example.com', 'https://example.com/', 'mailto:b@example.com']);
 
     const wider = await draw(
       <LocalLinkMatchContext.Provider value={(href) => !/^https?:/.test(href)}>
@@ -149,6 +149,6 @@ describe('LocalLinkMatchContext seam', () => {
       </LocalLinkMatchContext.Provider>,
     );
     expect(Array.from(wider.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'))).toEqual(['https://example.com/']);
-    expect(Array.from(wider.querySelectorAll('[data-local-link="unavailable"]')).map((s) => s.textContent)).toEqual(['spec', 'mail']);
+    expect(Array.from(wider.querySelectorAll('[data-local-link="unavailable"]')).map((s) => s.textContent)).toEqual(['spec', 'mail', 'b@example.com']);
   });
 });

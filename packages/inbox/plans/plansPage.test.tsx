@@ -243,7 +243,7 @@ test.skipIf(!hasDom)('an agent’s plan fetches no remote picture and no link ta
     '',
     '![tracker](https://tracker.example/p.png) ![inline](data:image/png;base64,iVBORw0KGgo=)',
     '',
-    '[spec](docs/spec.md) [mail](mailto:someone@example.com) [editor](vscode://file/x.ts) [site](https://example.com/x) [top](#links)',
+    '[spec](docs/spec.md) [mail](mailto:someone@example.com) [editor](vscode://file/x.ts) [site](https://example.com/x) [top](#links) <auto@example.com>',
     '',
     '<p><a href="docs/raw.md">raw</a> <img src="https://tracker.example/h.png" alt="raw tracker"></p>',
     '',
@@ -255,7 +255,7 @@ test.skipIf(!hasDom)('an agent’s plan fetches no remote picture and no link ta
     expect(srcs.filter((src) => !src.startsWith('data:'))).toEqual([]);
     const hrefs = [...scope.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'));
     // A relative path, a mail link and an editor link are inert text; a web link opens in a new tab.
-    for (const inert of ['docs/spec.md', 'mailto:someone@example.com', 'vscode://file/x.ts', 'docs/raw.md']) expect(hrefs).not.toContain(inert);
+    for (const inert of ['docs/spec.md', 'mailto:someone@example.com', 'mailto:auto@example.com', 'vscode://file/x.ts', 'docs/raw.md']) expect(hrefs).not.toContain(inert);
     expect(text(scope)).toContain('spec');
     const site = scope.querySelector('a[href="https://example.com/x"]')!;
     expect(site.getAttribute('target')).toBe('_blank');
@@ -270,6 +270,35 @@ test.skipIf(!hasDom)('an agent’s plan fetches no remote picture and no link ta
   window.location.hash = `#plans=${id}&from=1&to=2`;
   await settle();
   check(host.querySelector('[data-plan-diff="1-2"]')!);
+});
+
+test.skipIf(!hasDom)('a Mermaid fence that could load a picture is shown as its source, never drawn; a plain one is still a diagram', async () => {
+  const text = [
+    '# Diagrams',
+    '',
+    '```mermaid',
+    'flowchart TD',
+    '  A@{ img: "https://tracker.example/m.png" }',
+    '```',
+    '',
+    '```mermaid',
+    'flowchart TD',
+    '  Start --> Ship',
+    '```',
+    '',
+  ].join('\n');
+  const id = plan('Diagrams', 'harbor-api', [text]);
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  const doc = host.querySelector('[data-plan-document="1"]')!;
+  const diagrams = [...doc.querySelectorAll('[data-diagram-block="mermaid"]')];
+  // The plain one goes to the diagram renderer; the one with a picture does not.
+  expect(diagrams).toHaveLength(1);
+  expect(diagrams[0]!.textContent).toContain('Start --> Ship');
+  const source = [...doc.querySelectorAll('pre')].find((pre) => pre.textContent?.includes('tracker.example/m.png'));
+  expect(source).toBeDefined();
+  expect(source!.closest('[data-diagram-block]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('off: the page draws nothing, reads nothing, and a #plans link goes to the Inbox in place', async () => {

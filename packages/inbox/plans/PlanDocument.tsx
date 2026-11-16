@@ -1,11 +1,12 @@
 /**
  * A plan version drawn by the document UI's Viewer (@plannotator/ui), read only, as the Inbox draws a linked
  * Markdown page (components/LinkedMarkdown.tsx), under the rules for a plan's own words (planContent.tsx): no picture
- * is fetched but one written into the plan, and no link but a web one does anything.
+ * is fetched but one written into the plan, no link but a web one does anything, and a diagram that could load
+ * something is shown as its source.
  */
 import { useMemo, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
-import { PlanContentRules, resolvePlanLink } from './planContent';
+import { PlanContentRules, planBlocks, resolvePlanLink } from './planContent';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { useVersionText } from './store';
@@ -17,7 +18,7 @@ export function PlanDocument({ id, version }: { id: string; version: number }) {
   const [retry, setRetry] = useState(0);
   const { text, error } = useVersionText(id, version, retry);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
-  const blocks = useMemo(() => (text === null ? [] : parseMarkdownToBlocks(text)), [text]);
+  const blocks = useMemo(() => (text === null ? [] : planBlocks(parseMarkdownToBlocks(text))), [text]);
   if (error) {
     return (
       <div className="ib-plan-docstate" role="alert">

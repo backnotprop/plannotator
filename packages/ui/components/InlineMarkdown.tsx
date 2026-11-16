@@ -812,6 +812,21 @@ export const InlineMarkdown: React.FC<{
     match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
     if (match && !linkLabel) {
       const email = match[1];
+      // A host whose test takes `mailto:` (LocalLinkMatchContext) and answers `unavailable` gets inert text. Absent,
+      // `isLocalLinkTarget` never takes a scheme, so the mail link draws as always.
+      const mailLink = resolveLocalLink && matchLocalLink(`mailto:${email}`) ? resolveLocalLink(`mailto:${email}`) : null;
+      if (mailLink?.kind === 'unavailable') {
+        parts.push(
+          <HostTitle key={key++} title={mailLink.title}>
+            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+              {email}
+            </span>
+          </HostTitle>,
+        );
+        remaining = remaining.slice(match[0].length);
+        previousChar = ">";
+        continue;
+      }
       parts.push(
         <a
           key={key++}
