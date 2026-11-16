@@ -44,6 +44,7 @@ export function sidePlace(layout: L.FreeLayout, threadId: string): SidePlace | n
 /** What the window tells the person when a pane steps aside for one opened to the side. */
 export interface BesideNotice {
   toast: (toast: Omit<InboxToastModel, 'id'>) => void;
+  dismiss: () => void;
   rowOf: (threadId: string) => InboxListRow | null;
 }
 
@@ -73,7 +74,10 @@ export function besideOf(panes: WindowPanes, open: string | null, makeRoom?: (co
       if (place.stepsAside.length === 0) makeRoom?.(L.columns(place.next.root));
       panes.openAt(threadId, place.target, place.edge);
       const added = place.next.active!;
-      if (place.stepsAside.length && notice) notice.toast(steppedAsideToast(place.stepsAside.map((id) => panes.layout.threads[id]!), notice.rowOf, () => panes.closePane(added)));
+      if (place.stepsAside.length && notice) notice.toast(steppedAsideToast(place.stepsAside.map((id) => panes.layout.threads[id]!), notice.rowOf, () => {
+          notice.dismiss();
+          panes.closePane(added);
+        }));
     },
   };
 }

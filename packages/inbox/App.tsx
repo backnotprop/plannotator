@@ -5736,7 +5736,7 @@ function Inbox() {
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
-    <BesideContext.Provider value={!windowPanes.allowed ? null : besideOf(windowPanes,route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, holdSidebarIfTight, { toast: showToast, rowOf: (id) => latestRows.get(id) ?? null })}>
+    <BesideContext.Provider value={!windowPanes.allowed ? null : besideOf(windowPanes,route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, holdSidebarIfTight, { toast: showToast, dismiss: dismissToast, rowOf: (id) => latestRows.get(id) ?? null })}>
     <div
       ref={rootRef}
       className="pn-inbox"

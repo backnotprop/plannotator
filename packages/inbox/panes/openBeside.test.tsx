@@ -62,7 +62,7 @@ const SIDEBAR = 232;
  * wide that the person keeps open (`sidebarOpen`) or folded. The window is as wide as `window.innerWidth`.
  */
 function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = true) {
-  const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {}, toasts: [] as Omit<InboxToastModel, 'id'>[] };
+  const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {}, toasts: [] as Omit<InboxToastModel, 'id'>[], dismissed: 0 };
   function Window() {
     const [thread, setThread] = useState<string | null>(start);
     out.thread = thread;
@@ -94,7 +94,7 @@ function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = t
         <div className="ib-main" ref={(el) => measured(el, () => window.innerWidth)}>
           <div className="ib-listcol" ref={(el) => measured(el, () => LIST_MIN_WIDTH)} />
         </div>
-        <BesideContext.Provider value={besideOf(panes, thread, hold.holdIfTight, { toast: (toast) => void out.toasts.push(toast), rowOf: (id) => (ROWS.includes(id) ? rowOf(id) : null) })}>
+        <BesideContext.Provider value={besideOf(panes, thread, hold.holdIfTight, { toast: (toast) => void out.toasts.push(toast), dismiss: () => void (out.dismissed += 1), rowOf: (id) => (ROWS.includes(id) ? rowOf(id) : null) })}>
           <ThreadRowMenu className="ib-lbody" rowOf={(id) => (ROWS.includes(id) ? rowOf(id) : null)} canMarkRead={true} held={thread !== null} onAction={() => {}} onTarget={() => {}}>
             {ROWS.map((id) => (
               <div key={id} className="ib-rw" data-row={id}>
@@ -288,6 +288,8 @@ describe.skipIf(!hasDom)('Open to the side', () => {
     expect(w.toasts.map((toast) => [toast.lead, toast.detail])).toEqual([['No room for another pane', '“Thread thr_a” stepped aside']]);
     act(() => w.toasts[0]!.onUndo!());
     expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a'], active: 0 });
+    // Undo takes its toast away, as every Undo does: no second Undo is left on screen.
+    expect(w.dismissed).toBe(1);
     expect(w.thread).toBe('thr_a');
     setWidth(two);
     act(() => w.panes!.openBeside('thr_b'));

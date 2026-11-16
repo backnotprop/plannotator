@@ -207,6 +207,7 @@ test('a window where the list and two threads cannot fit even with the sidebar f
   await expect(pane(page, a)).toBeVisible();
   await expect(pane(page, b)).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`#thread=${a}`));
+  await expect(toast).toHaveCount(0);
 });
 
 /** A real pointer drag from `from` to `to`, in steps, as a person's mouse moves. */
