@@ -84,6 +84,16 @@ export function opensFile(el: HTMLElement, fileId: string): boolean {
   return hash !== null && new URLSearchParams(hash).get('file') === fileId;
 }
 
+/**
+ * What holds the place for an opener: itself, except a tile in a message's header band (under its sender row) with
+ * that row in view, where the row does, so a narrower column keeps it on screen with the band under it (with no
+ * heading above it in the body, nothing else takes the row's growth to two lines).
+ */
+export function placeOfOpener(opener: HTMLElement, body: HTMLElement): HTMLElement {
+  const head = opener.closest('.ib-hatts-tiles') ? opener.closest('[data-message-article]')?.querySelector<HTMLElement>('[data-open-head], [data-fold-head]') : null;
+  return head && laidOut(head) && placeInView(body, { el: head, selector: null, offset: 0, scrollTop: 0 }) ? head : opener;
+}
+
 /** The place on screen now, or null when the thread is not laid out (hidden, covered by the Artifacts grid). */
 export function capturePlace(body: HTMLElement, preferred: HTMLElement | null): ThreadPlace | null {
   if (body.clientHeight === 0 || !laidOut(body)) return null;

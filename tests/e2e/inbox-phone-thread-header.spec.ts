@@ -181,7 +181,8 @@ test('the widest phone keeps every word: "‹ Inbox", the title and the count', 
     await expect(title.locator('[data-header-name-words]')).toHaveText('qa');
     await expect(title.locator('[data-header-after]')).toHaveText('Visual QA for the checkout drawer redesign');
     await expect(title.locator('[data-header-after]')).toBeVisible();
-    await expect(title).toHaveAttribute('aria-label', 'qa: Visual QA for the checkout drawer redesign');
+    // Cut here (a tap opens it whole), the heading takes its name, said once, from the title's button.
+    await expect(title).toHaveAccessibleName('qa: Visual QA for the checkout drawer redesign');
     await expect(pane.locator('.ib-pbody h2')).toHaveCount(0);
     await expect(pane.locator('.ib-phead')).not.toHaveAttribute('data-fit', /./);
     await expect(pane.locator('[data-artifacts-button] .ib-artbtn-n')).toBeVisible();

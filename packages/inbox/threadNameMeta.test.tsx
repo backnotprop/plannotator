@@ -223,6 +223,9 @@ test.skipIf(!hasDom)('a cut title is a button: a click opens it whole, wrapped, 
     // Said once: the heading takes its name from the button, not a label of its own as well.
     expect(bar()!.hasAttribute('aria-label')).toBe(false);
     expect(button.getAttribute('aria-label')).toBe(name === null ? null : `${name}: ${SUBJECT}`);
+    // The pointer's tooltip hangs on the button now, not on the words it replaced (CI run 43852392859: it never opened).
+    expect(await tooltipOf(button)).toBe(SUBJECT);
+    unhover(button);
     act(() => button.click());
     expect(bar()!.hasAttribute('data-open')).toBe(true);
     expect(barWords()).toBe(button);

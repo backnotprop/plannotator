@@ -64,7 +64,8 @@ export function ThreadBarTitle({ thread, name, heading }: { thread: TitleThread;
   const quiet = useRef(false);
   return (
     <h2 ref={box} className="ib-phsubj ib-subject" dir="auto" tabIndex={-1} data-header-subject="" data-header-name={name !== null ? '' : undefined} data-open={open ? '' : undefined} aria-label={toggles ? undefined : label}>
-      <Tip content={tip} cut={name === null || after !== null}>
+      {/* Keyed: the tooltip's hover listens on the element it first mounted on, so the button gets a tooltip of its own. */}
+      <Tip key={toggles ? 'button' : 'words'} content={tip} cut={name === null || after !== null}>
         {toggles ? (
           <button
             type="button"

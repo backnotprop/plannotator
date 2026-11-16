@@ -171,8 +171,14 @@ test('at 1440 with the sidebar docked: offered; choosing it folds the sidebar, a
   // The sidebar folded for room: the list stays left of the two, nothing covers it.
   await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
   await expect(page.locator('.ib-listcol')).toBeVisible();
-  const list = (await page.locator('.ib-listcol').boundingBox())!;
-  expect(list.x + list.width).toBeLessThanOrEqual((await pane(page, a).boundingBox())!.x + 1);
+  // Measured once the fold has settled (data-state flips as it starts), both boxes in one frame: during the spring
+  // the list and the panes slide left together, so two reads a frame apart differ by the slide.
+  await expect(page.locator('.ib-sb-panel[data-hidden]')).toHaveCount(1);
+  const [listRight, paneLeft] = await page.evaluate(
+    (id) => [document.querySelector('.ib-listcol')!.getBoundingClientRect().right, document.querySelector(`section.ib-pane[data-thread-id="${id}"]`)!.getBoundingClientRect().left],
+    a,
+  );
+  expect(listRight).toBeLessThanOrEqual(paneLeft + 1);
   // The person's choice was not written: a reload would draw it docked.
   expect(await page.evaluate(() => document.cookie)).not.toContain('plannotator-inbox-sidebar-open=false');
   await pane(page, b).getByRole('button', { name: 'Close the thread' }).click();

@@ -264,7 +264,7 @@ test('a whole message withdrawn: the held list says "1 new"; shown, the row leav
   await expect(tags).toHaveText(['No longer applies', 'No longer applies']);
   await expect(pane.locator('[data-replaced-row]').first()).toContainText(/Claude Code said at \d{1,2}:\d{2} [AP]M that this no longer applies\. Read why/);
   // The subject never followed a withdrawal (the bar shows the thread's name, the subject after it; its label carries both).
-  await expect(pane.locator('h2.ib-subject')).toHaveAttribute('aria-label', 'refund-webhooks: Which way should the worker go on a Stripe 409?');
+  await expect(pane.locator('h2.ib-subject')).toHaveAccessibleName('refund-webhooks: Which way should the worker go on a Stripe 409?');
   await expect(pane.locator('h2.ib-subject [data-header-after]')).toHaveText('Which way should the worker go on a Stripe 409?');
   await pane.locator('[data-replaced-row]').first().scrollIntoViewIfNeeded();
   await shot('7-no-longer-applies');
