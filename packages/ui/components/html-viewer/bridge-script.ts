@@ -10,6 +10,7 @@
  * the Pi extension vendors both files (apps/pi-extension/vendor.sh).
  */
 import { SANDBOX_SHIM_SCRIPT } from "./sandboxShim";
+import { LINK_GUARD_FUNCTION } from "./linkGuard";
 
 /**
  * Reads only viewer-namespaced \`--pn-*\` variables (with fallbacks): arbitrary
@@ -278,8 +279,12 @@ body[data-plannotator-vim-focus-owner]:focus {
  * they match by construction; the check exists for hosts that serve the
  * generated `bridge-script.asset.js` separately (`bridgeScriptUrl`), where a
  * cached asset from a previous package version can outlive the parent code.
+ *
+ * 2: link-clicks travel only on the link guard's MessagePort (linkGuard.ts),
+ * offered once per load in a `link-offer` message with that load's key,
+ * never on the window.
  */
-export const BRIDGE_PROTOCOL_VERSION = 1;
+export const BRIDGE_PROTOCOL_VERSION = 2;
 
 export const BRIDGE_SCRIPT = `(function() {
   var PREFIX = 'plannotator-bridge-';
@@ -324,6 +329,28 @@ ${SANDBOX_SHIM_SCRIPT}
       return;
     }
     parent.postMessage(msg, '*');
+  }
+
+  // --- Links go out through the link guard (linkGuard.ts; never live) ---
+  // A link the person followed moves the host (in the Inbox: to another
+  // thread), so it never rides the window-wide postMessage the page's own
+  // script can forge. The guard runs first in the document (the inline path
+  // injects it before any page script), holds the only port the host takes
+  // links on, and sends on it only while a person's click is being dispatched,
+  // for the link that click is on. The bridge only decides WHETHER a click
+  // follows (Interact, Annotate's pin rules, forms) and hands it to the guard.
+  // On the URL path (bridgeScriptUrl) the guard is installed here, from the
+  // key on this script's tag; there a script the page put before the bridge
+  // in <head> runs first and is not covered.
+  if (!LIVE && !window.__plannotatorLinkGuard) {
+    var guardKey = null;
+    try { guardKey = document.currentScript && document.currentScript.getAttribute('data-plannotator-link-key'); } catch (ex) {}
+    if (guardKey) ${LINK_GUARD_FUNCTION}(guardKey);
+  }
+  var linkGuard = LIVE ? null : window.__plannotatorLinkGuard || null;
+  function sendOnLinkPort(msg, kind) {
+    if (!linkGuard || typeof linkGuard.follow !== 'function') return;
+    try { linkGuard.follow(kind, msg); } catch (ex) {}
   }
   // Page identity for multi-page live sessions: annotations are stamped with
   // the page they were made on, and restore filters to the current page.
@@ -4780,7 +4807,9 @@ ${SANDBOX_SHIM_SCRIPT}
         try { window.open(target && target.href ? target.href : raw, '_blank', 'noopener'); } catch (ex) {}
         return;
       }
-      postToParent({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) });
+      // Through the link guard only (see "Links go out through the link
+      // guard"): the host takes a link from nowhere else.
+      sendOnLinkPort({ type: PREFIX + 'link-click', href: raw.slice(0, 2048) }, 'link');
     }, true);
   }
 
@@ -4827,7 +4856,8 @@ ${SANDBOX_SHIM_SCRIPT}
     var query = new URLSearchParams();
     data.forEach(function(value, key) { if (typeof value === 'string') query.append(key, value); });
     var path = action.split('#')[0].split('?')[0];
-    postToParent({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) });
+    // Through the link guard, as a form's address (see "Links go out through the link guard").
+    sendOnLinkPort({ type: PREFIX + 'link-click', href: (path + '?' + query.toString()).slice(0, 2048) }, 'form');
   }
   if (!LIVE) window.addEventListener('click', submitPageForm, false);
 

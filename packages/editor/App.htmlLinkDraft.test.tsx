@@ -3,13 +3,14 @@
  * (DOM-gated): the link waits. The draft stays where it is, a toast says why,
  * and the linked document is not requested. With no typed comment the same
  * link opens its document. The page's bridge is played by a `link-click`
- * message from the page's own frame, as the bridge posts it.
+ * on the port the viewer hands the frame, as the bridge posts it.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { resetStorageBackend, setStorageBackend, type StorageBackend } from "@plannotator/ui/utils/storage";
 import { LINK_WAITS_FOR_DRAFT_TITLE, typedCommentDraft } from "./htmlLinkDraftGuard";
+import { followLinkInFrame } from "../ui/test-setup/bridgeLinkPort";
 
 const hasDom = typeof document !== "undefined";
 const appModule = hasDom ? await import("./App") : null;
@@ -91,9 +92,7 @@ async function mount(): Promise<HTMLIFrameElement> {
 }
 
 async function clickLink(frame: HTMLIFrameElement, href: string): Promise<void> {
-  await act(async () => {
-    window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: "plannotator-bridge-link-click", href } }));
-  });
+  await followLinkInFrame(frame, href);
   await settle(3);
 }
 
