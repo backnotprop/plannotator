@@ -4,9 +4,10 @@
  * iPhone read "‹ I…", Mark read, a stray glyph, then the icons). Since the
  * approval "inbox-thread-header" (2026-11-02) the bar is ‹ Inbox, its title,
  * Artifacts, Expand, ⋯ (the read actions and Snooze lead the ⋯ sheet), with
- * the room the read button left. The title is the thread's name (this thread
- * is named, so it shows at once; with no name, the subject once the heading
- * scrolls away). headFit.ts gives way so the title has room to be read:
+ * the room the read button left. The title is the thread's name with its
+ * subject after it (this thread is named; with no name, the subject), cut with
+ * "…" when it has no room; a tap on a cut title opens it whole, wrapped, and a
+ * second tap closes it. headFit.ts gives way so the title has room to be read:
  * tighter padding, the Artifacts count, and last the way back's label; the
  * title is never a sliver (the stray glyph was a few pixels of it).
  *
@@ -115,7 +116,8 @@ for (const size of [14, 15]) {
           const m = await head.evaluate((el) => {
             const h = el.getBoundingClientRect();
             const end = h.right - parseFloat(getComputedStyle(el).paddingRight);
-            const buttons = [...el.querySelectorAll('button')]
+            // The controls: the title, a button when cut (a tap opens it whole), is measured as the title below.
+            const buttons = [...el.querySelectorAll('button:not([data-header-title])')]
               .map((b) => ({ name: b.getAttribute('aria-label') ?? b.textContent?.trim() ?? '', r: b.getBoundingClientRect() }))
               .filter((b) => b.r.width > 0)
               .sort((a, b) => a.r.x - b.r.x)
@@ -173,14 +175,69 @@ test('the widest phone keeps every word: "‹ Inbox", the title and the count', 
     const pane = page.locator(`section.ib-pane[data-thread-id="${world.thread}"]`);
     await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
     await expect(pane.locator('[data-phone-back] .ib-pback-l')).toBeVisible();
-    // A named thread: the bar shows its name (the list's rule), the thread's only heading; the subject is its label's rest.
+    // A named thread: the bar shows its name (the list's rule) with the subject after it, the thread's only heading.
     const title = pane.locator('.ib-phead [data-header-subject]');
     await expect(title).toHaveAttribute('data-header-name', '');
-    await expect(title).toHaveText('qa');
+    await expect(title.locator('[data-header-name-words]')).toHaveText('qa');
+    await expect(title.locator('[data-header-after]')).toHaveText('Visual QA for the checkout drawer redesign');
+    await expect(title.locator('[data-header-after]')).toBeVisible();
     await expect(title).toHaveAttribute('aria-label', 'qa: Visual QA for the checkout drawer redesign');
     await expect(pane.locator('.ib-pbody h2')).toHaveCount(0);
     await expect(pane.locator('.ib-phead')).not.toHaveAttribute('data-fit', /./);
     await expect(pane.locator('[data-artifacts-button] .ib-artbtn-n')).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test('a cut title opens whole on a tap, wrapped in a taller bar, and a second tap closes it', async ({ browser }) => {
+  await textSize(14);
+  const context = await phone(browser, 360, 'light');
+  try {
+    const page = await context.newPage();
+    await page.goto(`${world.url}#thread=${world.thread}`);
+    const pane = page.locator(`section.ib-pane[data-thread-id="${world.thread}"]`);
+    const head = pane.locator('.ib-phead');
+    const title = head.locator('[data-header-subject]');
+    const words = title.locator('[data-header-title]');
+    await expect(pane.locator('[data-artifacts-button]')).toBeVisible();
+    // "qa Visual QA for the checkout drawer redesign" has no room on one line at 360: cut, the title is a button.
+    await expect(words).toHaveAttribute('aria-expanded', 'false');
+    await expect(title).not.toHaveAttribute('data-open');
+    const closed = await title.evaluate((h) => h.getBoundingClientRect().height);
+    expect((await head.boundingBox())!.height).toBeLessThanOrEqual(48.5);
+
+    await words.tap();
+    await expect(title).toHaveAttribute('data-open', '');
+    await expect(words).toHaveAttribute('aria-expanded', 'true');
+    // Open: the whole subject wraps onto more lines, inside the title, nothing cut or scrolled away; the bar grows.
+    const open = await title.evaluate((h) => {
+      const box = h.getBoundingClientRect();
+      const after = h.querySelector<HTMLElement>('[data-header-after]')!;
+      const lines = [...after.getClientRects()];
+      const t = h.querySelector<HTMLElement>('[data-header-title]')!;
+      return {
+        height: box.height,
+        lines: new Set(lines.map((r) => Math.round(r.top))).size,
+        inside: lines.every((r) => r.right <= box.right + 0.5 && r.bottom <= box.bottom + 0.5 && r.left >= box.left - 0.5 && r.top >= box.top - 0.5),
+        clipped: t.scrollWidth > t.clientWidth + 1 || h.scrollHeight > h.clientHeight + 1,
+      };
+    });
+    expect(open.lines, 'the subject wraps beyond one line').toBeGreaterThanOrEqual(2);
+    expect(open.height).toBeGreaterThan(closed);
+    expect(open.inside, 'every line of the subject is inside the title').toBe(true);
+    expect(open.clipped, 'nothing of the title is cut').toBe(false);
+    await expect(title.locator('[data-header-after]')).toBeVisible();
+    expect((await head.boundingBox())!.height).toBeGreaterThan(48);
+    // The bar's controls are still there beside it.
+    await expect(pane.locator('[data-phone-back]')).toBeInViewport();
+    await expect(head.locator('[data-thread-more]')).toBeInViewport();
+    await page.screenshot({ path: join(proofDir, '360-title-open.png'), clip: { x: 0, y: 0, width: 360, height: 160 } });
+
+    await words.tap();
+    await expect(title).not.toHaveAttribute('data-open');
+    await expect(words).toHaveAttribute('aria-expanded', 'false');
+    await expect.poll(async () => (await head.boundingBox())!.height).toBeLessThanOrEqual(48.5);
   } finally {
     await context.close();
   }
