@@ -4,7 +4,7 @@ import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { machineOf } from '../inboxUrl';
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
+import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeLayoutKey, placeSelector, placeShown, restorePlace, stayBeside, type ThreadPlace } from '../threadPlace';
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
 import type { InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
 import { noteReviews } from '../contextNotes/model';
@@ -1753,13 +1753,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const placed = () => {
       place.current.placedTop = body.scrollTop;
     };
-    // A file opening beside the thread moves the thread only when what was opened would leave the view: the
-    // narrower column keeps what the person sees above it (the message's head row) where it can.
-    if (saved && now.file === 'side' && was.file === 'none' && placeInView(body, saved)) placed();
-    else if (saved && restorePlace(body, saved)) {
+    // A file opening beside the thread moves the thread only when what was opened would leave the view (`stayBeside`);
+    // held either way, so the browser's scroll anchoring moves nothing as the narrower column settles, frames later at times.
+    const stays = !!saved && now.file === 'side' && was.file === 'none' && stayBeside(body, saved);
+    if (saved && (stays || restorePlace(body, saved))) {
       placed();
       stopHold();
-      holdRef.current = holdPlace(body, saved, placed, undefined, sectionRef.current ?? body);
+      holdRef.current = holdPlace(body, saved, placed, undefined, sectionRef.current ?? body, stays);
     }
     const lost = () => {
       const active = document.activeElement;

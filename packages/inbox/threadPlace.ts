@@ -126,6 +126,16 @@ export function restorePlace(body: HTMLElement, place: ThreadPlace): boolean {
   return true;
 }
 
+/**
+ * A file opening beside the thread: the view goes back to where the person had it (the browser's scroll anchoring can
+ * move it in the frame the column narrows, by the rows that grew above what it anchored on: #3528's CI, the sender
+ * row pushed out of view), and true when the place is still wholly in view there, so nothing needs to move.
+ */
+export function stayBeside(body: HTMLElement, place: ThreadPlace): boolean {
+  if (body.scrollTop !== place.scrollTop) body.scrollTop = place.scrollTop;
+  return placeInView(body, place);
+}
+
 /** How long a place is held after the last change of the thread's size (the sidebar's spring, a thumbnail loading). */
 export const PLACE_HOLD_MS = 1200;
 
@@ -141,8 +151,10 @@ export const PLACE_HOLD_MS = 1200;
  * dragged) or the app (a search result landing, a jump to a card, `n`, an
  * arrival followed; those also stop it before they scroll). Returns a
  * function that stops it. `onPlaced` hears each time it puts the place back.
+ * `stay` (a file opened beside, the place still in view): the view stays where it is while the place is in
+ * view, and the place is put back only once it would leave the view.
  */
-export function holdPlace(body: HTMLElement, place: ThreadPlace, onPlaced?: () => void, holdMs = PLACE_HOLD_MS, inputRoot: HTMLElement = body): () => void {
+export function holdPlace(body: HTMLElement, place: ThreadPlace, onPlaced?: () => void, holdMs = PLACE_HOLD_MS, inputRoot: HTMLElement = body, stay = false): () => void {
   if (typeof ResizeObserver !== 'function') return () => {};
   let timer: ReturnType<typeof setTimeout> | null = null;
   /** The scrollTop the hold last left the view at; a scroll that finds the view elsewhere is not the hold's. */
@@ -157,7 +169,11 @@ export function holdPlace(body: HTMLElement, place: ThreadPlace, onPlaced?: () =
     if (Math.abs(body.scrollTop - heldAt) > 1) stop();
   };
   const observer = new ResizeObserver(() => {
-    if (restorePlace(body, place)) {
+    if (stay && placeInView(body, place)) {
+      if (body.scrollTop !== heldAt) body.scrollTop = heldAt;
+      heldAt = body.scrollTop;
+      onPlaced?.();
+    } else if (restorePlace(body, place)) {
       heldAt = body.scrollTop;
       onPlaced?.();
     }

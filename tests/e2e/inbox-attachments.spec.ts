@@ -963,59 +963,13 @@ test('the header says the message has files: its count opens the same tiles unde
   // The keyboard opens it again; a tile there opens the file beside the thread, as the foot's does.
   await page.keyboard.press('Enter');
   await expect(band).toBeVisible();
-  // TEMPORARY (#3528 CI evidence, to be removed): what moves the thread's body while the file opens beside it.
-  await page.evaluate(() => {
-    const log: unknown[] = [];
-    (window as unknown as { __ibDiag: unknown[] }).__ibDiag = log;
-    const body = document.querySelector<HTMLElement>('section.ib-pane .ib-pbody')!;
-    const stack = () => (new Error().stack ?? '').split('\n').slice(2, 9).map((l) => l.trim().replace(/^at /, '').replace(/https?:\/\/[^/]+/, '')).join(' < ');
-    const at = () => Math.round(performance.now());
-    const desc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
-    Object.defineProperty(Element.prototype, 'scrollTop', {
-      configurable: true,
-      get() {
-        return desc.get!.call(this);
-      },
-      set(v: number) {
-        if ((this as Element).classList?.contains('ib-pbody')) log.push({ t: at(), set: v, from: desc.get!.call(this), by: stack() });
-        desc.set!.call(this, v);
-      },
-    });
-    for (const name of ['scrollTo', 'scrollBy', 'scroll', 'scrollIntoView'] as const) {
-      const orig = Element.prototype[name] as (...a: unknown[]) => void;
-      (Element.prototype as unknown as Record<string, unknown>)[name] = function (this: Element, ...args: unknown[]) {
-        if (this.classList.contains('ib-pbody') || (name === 'scrollIntoView' && this.closest('.ib-pbody'))) log.push({ t: at(), call: name, on: this.className.slice(0, 40), args: JSON.stringify(args), by: stack() });
-        return orig.apply(this, args);
-      };
-    }
-    const focus = HTMLElement.prototype.focus;
-    HTMLElement.prototype.focus = function (this: HTMLElement, opts?: FocusOptions) {
-      if (this.closest('.ib-pbody') && !opts?.preventScroll) log.push({ t: at(), focus: this.outerHTML.slice(0, 80), by: stack() });
-      return focus.call(this, opts);
-    };
-    const sample = (why: string) => {
-      const head = body.querySelector('[data-open-head], [data-fold-head]')?.getBoundingClientRect();
-      log.push({ t: at(), why, st: body.scrollTop, sh: body.scrollHeight, ch: body.clientHeight, w: Math.round(body.getBoundingClientRect().width), top: Math.round(body.getBoundingClientRect().top), head: head ? [Math.round(head.top), Math.round(head.bottom)] : null, anchor: body.style.overflowAnchor });
-    };
-    body.addEventListener('scroll', () => sample('scroll'), { passive: true });
-    new ResizeObserver(() => sample('resize')).observe(body);
-    sample('before');
-    let frames = 0;
-    const tick = () => {
-      if (frames++ % 3 === 0) sample('frame');
-      if (frames < 90) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  });
   await band.getByRole('button', { name: 'Open retry-plan.md' }).click();
   const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
   await expect(pane).toBeVisible();
   expect(page.url()).toContain(`file=${world.attachments.plan}`);
   // The thread beside the file is 440 px: the head row goes to two lines, and the count is drawn whole (inbox-polish, item 5).
   expect(Math.round((await page.locator('section.ib-pane').first().boundingBox())!.width)).toBe(440);
-  const diag = await page.evaluate(() => JSON.stringify((window as unknown as { __ibDiag: unknown[] }).__ibDiag));
-  console.log(`IBDIAG ${diag}`);
-  expect(await cutInHeadRow(count), `IBDIAG ${diag}`).toBeNull();
+  expect(await cutInHeadRow(count)).toBeNull();
   expect(await cutInHeadRow(count.locator('.ib-hflag'))).toBeNull();
   await pane.getByRole('button', { name: 'Close retry-plan.md' }).click();
   await expect(pane).toHaveCount(0);
