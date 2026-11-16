@@ -404,11 +404,11 @@ export function VersionsPanel({
   const onScreen =
     status === "success" ? (entries.find((entry) => entry.viewing) ?? null) : null;
   const compared = compareEntry(entries);
-  const toggle = (key: string) =>
+  const toggle = (fold: { readonly key: string; readonly entries: readonly FrameVersionEntry[]; readonly open: boolean }) =>
     setOpened((previous) => {
       const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (fold.open) for (const entry of fold.entries) next.delete(entry.key);
+      else next.add(fold.key);
       return next;
     });
   return (
@@ -469,7 +469,7 @@ export function VersionsPanel({
                   entries={item.entries}
                   open={item.open}
                   holdsViewing={item.holdsViewing}
-                  onToggle={() => toggle(item.key)}
+                  onToggle={() => toggle(item)}
                 />
               ),
             )}

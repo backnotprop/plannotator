@@ -52,6 +52,7 @@ export function CollapsibleEdge({
         role: "separator",
         "aria-orientation": "vertical",
         "aria-valuenow": Math.round(resize.value),
+        "aria-valuetext": `${Math.round(resize.value)} pixels wide`,
         "aria-valuemin": resize.min,
         "aria-valuemax": resize.max,
       } as const)

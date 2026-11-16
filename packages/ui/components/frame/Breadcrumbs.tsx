@@ -121,12 +121,8 @@ export function Breadcrumbs({
               <TooltipTrigger
                 render={
                   <span
-                    tabIndex={0}
                     aria-current="page"
-                    className={cn(
-                      "min-w-0 flex-1 truncate rounded-frame-structure font-sans text-frame-sm font-medium text-foreground",
-                      FOCUS_RING,
-                    )}
+                    className="min-w-0 flex-1 truncate font-sans text-frame-sm font-medium text-foreground"
                   />
                 }
               >

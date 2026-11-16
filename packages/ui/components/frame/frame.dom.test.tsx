@@ -6,7 +6,8 @@
  * embedded ground, the rail tab in its own column, keyboard resize, a
  * controlled rail and its sheet, rail headings and rows, version decisions,
  * notes and footer, the reading line's placements, a path-less crumb and
- * the rail head's meta line.
+ * the rail head's meta line; focus across the rail's collapse and open, a
+ * stable version fold and a combined motion value that subscribes once.
  * Requires DOM (DOM_TESTS=1).
  */
 import { afterEach, describe, expect, test } from 'bun:test';
@@ -26,6 +27,8 @@ const railModule = hasDom ? await import('./rail/FilesRail') : null;
 const readingModule = hasDom ? await import('./page/ReadingLine') : null;
 const crumbsModule = hasDom ? await import('./Breadcrumbs') : null;
 const headModule = hasDom ? await import('./rail/PagesRailHead') : null;
+const motionModule = hasDom ? await import('./lib/shellMotion') : null;
+const motionValues = hasDom ? await import('motion/react') : null;
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -100,6 +103,24 @@ describe.skipIf(!hasDom)('VersionsPanel folds', () => {
     expect(frame.querySelector('[data-version-fold]')!.hasAttribute('data-version-fold-open')).toBe(true);
     const onScreen = frame.querySelector('[data-version-row][data-version="v3"] a');
     expect(onScreen?.getAttribute('aria-current')).toBe('true');
+  });
+  test('an opened fold stays open when "Show older versions" adds an older save to it', () => {
+    const { VersionsPanel } = versionsModule!;
+    const place = { rowLink: (row: FrameVersionEntry) => <a href={`#${row.version}`} /> };
+    const first = [entry(5, 4, 'Maya Chen', true), entry(4, 50, 'Alex Rivera', false), entry(3, 62, 'Alex Rivera', false)];
+    const panel = (entries: FrameVersionEntry[]) => (
+      <VersionsPanel status="success" entries={entries} place={place} onRetry={() => {}} />
+    );
+    const frame = mount(panel(first));
+    const fold = frame.querySelector('[data-version-fold]')!;
+    act(() => frame.querySelector<HTMLButtonElement>('[data-version-fold-toggle]')!.click());
+    expect(fold.hasAttribute('data-version-fold-open')).toBe(true);
+    act(() => root!.render(panel([...first, entry(2, 75, 'Alex Rivera', false)])));
+    expect(frame.querySelector('[data-version-fold]')).toBe(fold);
+    expect(fold.hasAttribute('data-version-fold-open')).toBe(true);
+    expect(fold.querySelectorAll('[data-version-row]').length).toBe(3);
+    act(() => frame.querySelector<HTMLButtonElement>('[data-version-fold-toggle]')!.click());
+    expect(fold.hasAttribute('data-version-fold-open')).toBe(false);
   });
 });
 
@@ -206,6 +227,7 @@ describe.skipIf(!hasDom)('DocumentRailShell', () => {
     expect(edge.getAttribute('aria-valuenow')).toBe('306');
     press(edge, 'ArrowRight');
     expect(frame.querySelector('[role="separator"]')!.getAttribute('aria-valuenow')).toBe('316');
+    expect(frame.querySelector('[role="separator"]')!.getAttribute('aria-valuetext')).toBe('316 pixels wide');
     press(frame.querySelector('[role="separator"]')!, 'End');
     expect(frame.querySelector('[role="separator"]')!.getAttribute('aria-valuenow')).toBe('400');
   });
@@ -434,6 +456,15 @@ describe.skipIf(!hasDom)('Breadcrumbs without a file', () => {
     expect(current[0]!.tagName).toBe('A');
     expect([...frame.querySelectorAll('span')].some((span) => span.textContent === '/')).toBe(false);
   });
+  test('with a file, the file crumb is the current page and not a tab stop, since it does nothing', () => {
+    const { Breadcrumbs } = crumbsModule!;
+    const frame = mount(<Breadcrumbs collectionName="Porto launch plan" collectionLink={<a href="#porto" />} path="plans/brief.md" />);
+    const current = frame.querySelectorAll<HTMLElement>('[aria-current="page"]');
+    expect(current.length).toBe(1);
+    expect(current[0]!.textContent).toBe('brief.md');
+    expect(current[0]!.tabIndex).toBe(-1);
+    expect(current[0]!.hasAttribute('tabindex')).toBe(false);
+  });
 });
 
 describe.skipIf(!hasDom)('PagesRailHead meta', () => {
@@ -449,5 +480,32 @@ describe.skipIf(!hasDom)('PagesRailHead meta', () => {
     expect(frame.querySelector('[data-pages-rail-meta]')).toBeNull();
     act(() => root!.render(<PagesRailHead label={null} backLink={<a href="#porto" />} meta={meta} />));
     expect(frame.querySelector('[data-pages-rail-meta]')).toBeNull();
+  });
+});
+
+describe.skipIf(!hasDom)('useCombinedMotionValue', () => {
+  test('subscribes once across renders and reads the latest combine', () => {
+    const { useCombinedMotionValue } = motionModule!;
+    const a = motionValues!.motionValue(2);
+    const b = motionValues!.motionValue(3);
+    let subscriptions = 0;
+    for (const value of [a, b]) {
+      const on = value.on.bind(value);
+      value.on = ((event: Parameters<typeof on>[0], callback: Parameters<typeof on>[1]) => {
+        subscriptions += 1;
+        return on(event, callback);
+      }) as typeof value.on;
+    }
+    const seen: number[] = [];
+    function Harness({ scale }: { scale: number }) {
+      const combined = useCombinedMotionValue([a, b], ([x, y]) => (x! + y!) * scale);
+      seen.push(combined.get());
+      return null;
+    }
+    mount(<Harness scale={1} />);
+    act(() => root!.render(<Harness scale={2} />));
+    act(() => root!.render(<Harness scale={3} />));
+    expect(subscriptions).toBe(2);
+    expect(seen.at(-1)).toBe(15);
   });
 });

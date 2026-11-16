@@ -91,7 +91,7 @@ function folds(entry: FrameVersionEntry): boolean {
 }
 
 export function foldKeyOf(run: readonly FrameVersionEntry[]): string {
-  return run.at(-1)!.key;
+  return run[0]!.key;
 }
 
 export function versionItems(
@@ -107,7 +107,7 @@ export function versionItems(
         kind: "fold",
         key,
         entries: run,
-        open: opened.has(key),
+        open: run.some((entry) => opened.has(entry.key)),
         holdsViewing: run.some((entry) => entry.viewing),
       });
     } else {
