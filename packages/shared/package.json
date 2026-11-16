@@ -133,6 +133,7 @@
     "./live-proxy-port": "./live-proxy-port.ts",
     "./live-proxy-core": "./live-proxy-core.ts",
     "./loopback-host": "./loopback-host.ts",
+    "./loopback-proxy": "./loopback-proxy.ts",
     "./request-origin": "./request-origin.ts",
     "./ref-cards": "./ref-cards.ts",
     "./ref-cards-node": "./ref-cards-node.ts",

@@ -62,6 +62,7 @@ import {
   type InboxReplyCommand,
   type InboxToolInfo,
 } from "./connection";
+import { directFetchInit } from "../loopback-proxy";
 
 /** The longest a host's start waits for a running Inbox's `tools/list` (the mod's bound). */
 export const INBOX_DISCOVER_TIMEOUT_MS = 2_000;
@@ -152,12 +153,12 @@ async function mcpCall(
   params: Record<string, unknown>,
   signal?: AbortSignal,
 ): Promise<{ result?: unknown; error?: { message?: string } } | null> {
-  const response = await fetch(`http://127.0.0.1:${port}/mcp`, {
+  const response = await fetch(`http://127.0.0.1:${port}/mcp`, directFetchInit({
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     signal,
-  });
+  }));
   return mcpAnswerOfResponse(response.status, await response.text());
 }
 
@@ -283,7 +284,7 @@ export class InboxAgentConnection {
     if (!registry || !at.sessionId || !at.cwd) return null;
     const signal = AbortSignal.timeout(timeoutMs);
     try {
-      const health = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, { signal });
+      const health = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, directFetchInit({ signal }));
       if (health.status !== 200 || !inboxHealthPeeks(await health.json(), registry.serverSession)) return null;
       const answer = await mcpCall(registry.port, "tools/call", inboxSessionThreadsParams(at.cwd, at.sessionId), signal);
       if (!answer || !("result" in answer)) return null;
@@ -297,7 +298,7 @@ export class InboxAgentConnection {
   /** Running: the registry's port answers health with the registry's serverSession. */
   private async isRunning(registry: InboxRegistryView): Promise<boolean> {
     try {
-      const response = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, { signal: AbortSignal.timeout(5_000) });
+      const response = await fetch(`http://127.0.0.1:${registry.port}/api/inbox/health`, directFetchInit({ signal: AbortSignal.timeout(5_000) }));
       if (response.status !== 200) return false;
       return ((await response.json()) as { serverSession?: unknown }).serverSession === registry.serverSession;
     } catch {
@@ -337,12 +338,12 @@ export class InboxAgentConnection {
     const registry = readRegistry(this.dataDir);
     if (!registry) return null;
     try {
-      const response = await fetch(`http://127.0.0.1:${registry.port}${path}`, {
+      const response = await fetch(`http://127.0.0.1:${registry.port}${path}`, directFetchInit({
         method: "POST",
         headers: { "content-type": "application/json", authorization: `Bearer ${registry.token}` },
         body: JSON.stringify({ session, host: this.options.host, ...body }),
         signal,
-      });
+      }));
       return { status: response.status, text: await response.text() };
     } catch {
       return null;

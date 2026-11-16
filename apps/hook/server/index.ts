@@ -83,6 +83,8 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
+// First import: loopback requests ignore a proxy from here on (loopback-no-proxy.ts).
+import "./loopback-no-proxy";
 import { childEnv, GIT_REPO_ENV, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
