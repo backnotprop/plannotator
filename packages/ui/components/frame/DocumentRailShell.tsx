@@ -69,11 +69,13 @@ export function DocumentRailShell({
   useLayoutEffect(() => {
     onFitChange?.(fits);
   }, [onFitChange, fits]);
-  const railMotion = useRailMotion(rail.railOpen && fits, tocResize.width);
+  const [forced, setForced] = useState(false);
+  const shown = enabled && (fits || forced);
+  const railMotion = useRailMotion(rail.railOpen && shown, tocResize.width);
   useEffect(() => {
     railWidthApplyRef.current = (nextWidth) => railMotion.width.set(nextWidth);
   });
-  const flagsVisible = !rail.railOpen && !railMotion.mounted && fits;
+  const flagsVisible = !railMotion.mounted && (!rail.railOpen || (enabled && !shown));
   useLayoutEffect(() => {
     onFlagsChange?.(flagsVisible);
   }, [onFlagsChange, flagsVisible]);
@@ -83,24 +85,28 @@ export function DocumentRailShell({
   const [focusTab, setFocusTab] = useState(false);
   const [focusRail, setFocusRail] = useState(false);
   useLayoutEffect(() => {
-    if (!rail.railOpen && railGroupRef.current?.contains(document.activeElement)) setFocusTab(true);
+    if (rail.railOpen) return;
+    setForced(false);
+    if (railGroupRef.current?.contains(document.activeElement)) setFocusTab(true);
   }, [rail.railOpen]);
   useLayoutEffect(() => {
     if (!flagsVisible) setFocusTab(false);
   }, [flagsVisible]);
   useLayoutEffect(() => {
     if (!focusRail) return;
-    if (!rail.railOpen || !fits) {
+    if (!rail.railOpen || !shown) {
       setFocusRail(false);
+      setForced(false);
       return;
     }
     const group = railGroupRef.current;
     if (group === null) return;
     group.querySelector<HTMLElement>(FOCUSABLE)?.focus();
     setFocusRail(false);
-  }, [focusRail, rail.railOpen, fits, railMotion.mounted]);
+  }, [focusRail, rail.railOpen, shown, railMotion.mounted]);
   const openFromTab = () => {
     setFocusRail(true);
+    if (!fits) setForced(true);
     rail.openFiles();
   };
 

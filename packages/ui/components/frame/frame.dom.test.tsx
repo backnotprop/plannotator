@@ -321,17 +321,29 @@ describe.skipIf(!hasDom)('DocumentRailShell', () => {
       elsewhere.remove();
     }));
 
-  test('while the rail does not fit there is no tab to press, so no press can drop focus; the host offers the sheet', () => {
-    const { DocumentRailShell } = shellModule!;
-    const fits: boolean[] = [];
-    const frame = mount(
-      <DocumentRailShell head={head} defaults={{ open: false }} fitsForWidth={() => false} onFitChange={(value) => fits.push(value)} storage={memoryStorage()}>
-        rows
-      </DocumentRailShell>,
-    );
-    expect(fits.at(-1)).toBe(false);
-    expect(frame.querySelector('[aria-label="Show files"]')).toBeNull();
-  });
+  test('a rail that does not fit keeps its tab; pressing it opens the rail anyway and focus moves into it', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const frame = mount(
+        <DocumentRailShell head={<button type="button">Filter</button>} defaults={{ open: true }} fitsForWidth={() => false} storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>,
+      );
+      expect(frame.querySelector('[data-document-rail]')).toBeNull();
+      const tab = frame.querySelector<HTMLButtonElement>('[aria-label="Show files"]')!;
+      expect(tab).not.toBeNull();
+      act(() => tab.focus());
+      act(() => tab.click());
+      await act(async () => {});
+      expect(frame.querySelector('[data-document-rail]')).not.toBeNull();
+      expect(document.activeElement?.textContent).toBe('Filter');
+      const edge = frame.querySelector<HTMLElement>('[role="separator"]')!;
+      act(() => edge.focus());
+      press(edge, 'Enter');
+      await act(async () => {});
+      expect(frame.querySelector('[data-document-rail]')).toBeNull();
+      expect(document.activeElement).toBe(frame.querySelector('[aria-label="Show files"]'));
+    }));
 
   test('a rail that does not fit says so, and the rail sheet is then offered at a desktop width', () => {
     const { DocumentRailShell } = shellModule!;
