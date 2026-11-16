@@ -326,7 +326,7 @@ interface Allowed {
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
   inboxReminderRules: string | null
-  /** A panel host's chat (`isPanelSession`: VS Code, Orca, the desktop Code tab): not interactive, a person reading it. */
+  /** A panel host's chat (`isPanelSession`: VS Code, Orca): not interactive, a person reading it. */
   panel: boolean
   /**
    * The host draws its own plan card (Orca: `panelHostOwnsPlanMode`; a T3 thread): ExitPlanMode is left to it, and
@@ -821,7 +821,7 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
 
 /**
  * Which SDK host this non-interactive session is: a panel host's chat (VS
- * Code, Orca, the desktop Code tab: `isPanelSession`, and whether that host
+ * Code, Orca: `isPanelSession`, and whether that host
  * draws its own plan card: `panelHostOwnsPlanMode`) or a T3 Code thread
  * (`t3ThreadOf`; T3 draws its own plan card too), all in enabled.ts. Each variable is named as a literal
  * (env-get-literal.test.ts).

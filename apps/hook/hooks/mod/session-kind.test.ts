@@ -103,11 +103,11 @@ describe('a T3 Code thread', () => {
 
 describe('what the mod does in each kind of session', () => {
   test('the panel hosts, and which of them draws its own plan card (Orca only, for now)', () => {
-    for (const entrypoint of ['claude-vscode', 'orca', 'claude-desktop', 'claude-desktop-3p']) expect([entrypoint, isPanelEntrypoint(entrypoint)]).toEqual([entrypoint, true])
-    for (const entrypoint of ['local-agent', 'sdk-ts', 'sdk-cli', 'cli', 't3-code', 'claude-vscode-insiders', 'Claude-Desktop', 'constructor', 'toString', '', undefined, 1]) {
+    for (const entrypoint of ['claude-vscode', 'orca']) expect([entrypoint, isPanelEntrypoint(entrypoint)]).toEqual([entrypoint, true])
+    for (const entrypoint of ['claude-desktop', 'sdk-ts', 'sdk-cli', 'cli', 't3-code', 'claude-vscode-insiders', 'Claude-Desktop', 'constructor', 'toString', '', undefined, 1]) {
       expect([entrypoint, isPanelEntrypoint(entrypoint), panelHostOwnsPlanMode(entrypoint)]).toEqual([entrypoint, false, false])
     }
-    expect(['claude-vscode', 'orca', 'claude-desktop', 'claude-desktop-3p'].filter(panelHostOwnsPlanMode)).toEqual(['orca'])
+    expect(['claude-vscode', 'orca'].filter(panelHostOwnsPlanMode)).toEqual(['orca'])
   })
 
   test('sorted: the terminal first, then the VS Code panel, then a T3 thread, else headless', () => {
