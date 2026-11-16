@@ -43,9 +43,11 @@ import {
   inboxThreadPullText,
   inboxThreadPullWire,
   INBOX_THREAD_PULLS_REMOVED_MS,
+  parseInboxThreadPullRef,
   parseInboxThreadPullRefs,
   type InboxThreadPull,
   type InboxThreadPullChecks,
+  type InboxThreadPullRef,
   type InboxThreadPullReview,
   type InboxThreadPullsAnswer,
   type InboxThreadPullState,
@@ -306,17 +308,32 @@ export type ProjectHostOf = (projectId: string) => Promise<string | null>;
  * `parseInboxThreadPullRefs` in a project: a short `group/project!45` is on
  * the project's own GitLab host (`parseForgePullRef`). The host is looked up
  * only when a ref landed on gitlab.com, so a list without one never waits on git.
+ *
+ * `onThread` (a removal): a short ref that is not on the thread on the project's
+ * host but is on gitlab.com is that one, so a row stored on gitlab.com before
+ * short refs followed every self-managed host (an older Inbox) still comes
+ * off by the text it shows (`group/project!45`).
  */
 export async function parseProjectPullRefs(
   values: unknown,
   field: string,
   projectId: string,
   hostOf: ProjectHostOf | undefined,
+  onThread?: (key: string) => boolean,
 ): Promise<ReturnType<typeof parseInboxThreadPullRefs>> {
   const parsed = parseInboxThreadPullRefs(values, field);
   if ("error" in parsed || !hostOf || !parsed.refs.some(({ ref }) => ref.platform === "gitlab" && ref.host === "gitlab.com")) return parsed;
   const host = await hostOf(projectId).catch(() => null);
-  return host ? parseInboxThreadPullRefs(values, field, host) : parsed;
+  if (!host) return parsed;
+  const here = parseInboxThreadPullRefs(values, field, host);
+  if (!onThread || "error" in here || !Array.isArray(values)) return here;
+  const stale = new Map<string, InboxThreadPullRef>();
+  for (const value of values) {
+    const there = parseInboxThreadPullRef(value);
+    const mine = parseInboxThreadPullRef(value, host);
+    if ("key" in there && "key" in mine && there.key !== mine.key) stale.set(mine.key, there);
+  }
+  return { refs: here.refs.map((ref) => (!onThread(ref.key) && stale.has(ref.key) && onThread(stale.get(ref.key)!.key) ? stale.get(ref.key)! : ref)) };
 }
 
 /** A thread's PRs as the window reads them: the live list with stack groups, and what was removed in the last 7 days. */
@@ -365,7 +382,7 @@ export function createThreadPullsRoute(options: {
         const add = body.add === undefined ? { refs: [] } : await parseProjectPullRefs(body.add, "add", message.project_id, options.projectHost);
         if ("error" in add) throw new InboxError("validation_error", add.error, { field: add.field });
         const all = Array.isArray(body.remove) && body.remove.length === 1 && body.remove[0] === "all";
-        const remove = all || body.remove === undefined ? { refs: [] } : await parseProjectPullRefs(body.remove, "remove", message.project_id, options.projectHost);
+        const remove = all || body.remove === undefined ? { refs: [] } : await parseProjectPullRefs(body.remove, "remove", message.project_id, options.projectHost, (key) => store.threadPulls(threadId).some((pull) => pull.pull === key));
         if ("error" in remove) throw new InboxError("validation_error", remove.error, { field: remove.field });
         const change = store.changeThreadPulls({ thread_id: threadId, add: add.refs, remove: all ? "all" : remove.refs, by: { kind: "person" } });
         // A PR just added is read at once, so the popover shows its state; a forge slower than
