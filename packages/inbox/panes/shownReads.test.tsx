@@ -192,6 +192,21 @@ describe.skipIf(!hasDom)('reads that follow every thread on screen', () => {
     await settle(() => w.reads().park(new Set()));
     expect(w.asked).toEqual([]);
   });
+
+  // Re-check 2 of #3528: a pane off the page whose thread was deleted elsewhere came back still showing it.
+  test('a pane kept off the page whose thread the list stops listing reads it once back; still listed, it does not', async () => {
+    const w = await mountTwo('thr_a', 'thr_b', listOf('thr_a', 'thr_b'));
+    const off = new Set(['p2'] as PaneSet['active'][]);
+    await settle(() => w.reads().park(off));
+    await settle(() => w.shown().afterRecords(newRecordBatch(), Promise.resolve(listOf('thr_a', 'thr_b'))));
+    await settle(() => w.reads().park(new Set()));
+    expect(w.asked).toEqual([]);
+    await settle(() => w.reads().park(off));
+    await settle(() => w.shown().afterRecords(newRecordBatch(), Promise.resolve(listOf('thr_a'))));
+    expect(w.asked).toEqual([]);
+    await settle(() => w.reads().park(new Set()));
+    expect(w.asked).toEqual(['thr_b']);
+  });
 });
 
 // Without the switch every read here is main's (App.tsx before panes: `routeRef.current.thread` read inline, one

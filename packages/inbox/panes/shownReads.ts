@@ -84,6 +84,8 @@ export function createShownReads({ reads, latest, filesSignals, split, open }: S
         });
       };
       owe((threadId) => readFor(threadId) !== 'none');
+      // One off the page the list no longer lists is owed its read too, so its pane closes once back.
+      void listRead.then((next) => owe((threadId) => !listsThread(next, threadId)));
       for (const threadId of shown()) {
         const read = readFor(threadId);
         if (read === 'thread') {
