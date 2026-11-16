@@ -20,7 +20,7 @@
  */
 
 import { forwardRef, useEffect, useRef, useState } from 'react';
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { useShortcutScope } from '../panes/scope';
 import {
   formatInboxVideoTime,
   inboxAttachmentKindLabel,
