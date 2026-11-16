@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from 'react';
-import type { InboxInitiative, InboxListRow, InboxListSection, InboxTagColours } from '@plannotator/core/inbox-types';
+import { inboxNextTagColour, inboxTagLook, inboxTagLookColour, inboxTagShownHex, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagColours, type InboxTagLook } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
@@ -8,6 +8,7 @@ import { canTagThread, rowTagsHere, tagById, tagsOnOwnRows, threadTagsHere, tags
 import { initiativeDeletedToast } from './board/model';
 import { showTagColoursAcross, type TagsAcross } from './tagsAcross';
 import { rowTint } from './tagColours';
+import { keepTints } from './tagTintSheet';
 import type { ListTagColours } from './parts/RowTint';
 import type { InboxToastModel } from './components/Toast';
 import { eachRow, tagsToast } from './bulkWrites';
@@ -43,11 +44,16 @@ interface TagsInputs {
 export interface TagColourControls {
   /** "Show tag colors": off, no sidebar tag is tinted either. */
   show: boolean;
+  /** What the tag's rows show: its colour, or null with Highlight rows off. */
   colourOf: (tagId: string) => string | null;
+  /** The tag's colour, on or off (the Color item and the picker show it): the one kept while off, else the one it would get. */
+  pickOf: (tagId: string) => string;
   /** The person's own colours, newest first (the menu's second line). */
   recent: readonly string[];
-  /** Drawn at once and kept: written to every machine that holds the tag. */
-  set: (tag: ListTag, colour: string | null) => void;
+  /** A colour picked: drawn at once, Highlight rows on, written to every machine that holds the tag. */
+  set: (tag: ListTag, colour: string) => void;
+  /** Highlight rows on (the tag's colour back) or off (its colour kept): drawn at once and written. */
+  highlight: (tag: ListTag, on: boolean) => void;
   /** Drawn at once, not written (the hue strip while it is dragged); `set` or `preview(tag, undefined)` ends it. */
   preview: (tag: ListTag, colour: string | null | undefined) => void;
 }
@@ -203,46 +209,63 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
   };
   // Tag colours (tagColours.ts): what this window just picked shows at once, until the list read after the write has
   // it; a colour being tried (the hue strip, a typed code) shows over it until it is kept or the menu closes.
-  const [colourPatches, setColourPatches] = useState<ReadonlyMap<string, string | null>>(() => new Map());
+  const [colourPatches, setColourPatches] = useState<ReadonlyMap<string, InboxTagLook>>(() => new Map());
   const [colourPreviews, setColourPreviews] = useState<ReadonlyMap<string, string | null>>(() => new Map());
   const [showPatch, setShowPatch] = useState<boolean | null>(null);
   const coloursKept = listTags !== null && tagColours !== null;
   const showColours = showPatch ?? tagColours?.show ?? true;
+  const lookOf = useCallback((tagId: string): InboxTagLook | undefined => colourPatches.get(tagId) ?? (listTags ? tagById(listTags, tagId) : null)?.look, [colourPatches, listTags]);
+  // The tint sheet keeps the colours tags store (with this window's picks not yet read back), before any row draws;
+  // a colour being tried is drawn apart and never piles up (tagTintSheet.ts).
+  useMemo(() => {
+    if (listTags) keepTints(listTags.flatMap((t) => { const c = lookOf(t.id)?.colour; return c ? [{ key: c, hex: inboxTagShownHex(c) }] : []; }));
+  }, [listTags, lookOf]);
   const colourOf = useCallback(
     (tagId: string): string | null => {
       if (colourPreviews.has(tagId)) return colourPreviews.get(tagId)!;
-      if (colourPatches.has(tagId)) return colourPatches.get(tagId)!;
-      return (listTags ? tagById(listTags, tagId) : null)?.look?.colour ?? null;
+      return lookOf(tagId)?.colour ?? null;
     },
-    [colourPreviews, colourPatches, listTags],
+    [colourPreviews, lookOf],
+  );
+  // A tag never coloured (an earlier Inbox's None): the colour a new tag would get now, so the Color item names one and
+  // turning Highlight rows on shows it.
+  const pickOf = useCallback(
+    (tagId: string): string =>
+      inboxTagLookColour(lookOf(tagId)) ?? inboxNextTagColour((listTags ?? []).filter((t) => t.id !== tagId).map((t) => inboxTagLookColour(lookOf(t.id)))),
+    [lookOf, listTags],
   );
   const recentKey = (tagColours?.recent ?? []).map((r) => r.colour).join(' ');
   // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the colours, so a list read with the same ones keeps it
   const recent = useMemo(() => (recentKey ? recentKey.split(' ') : []), [recentKey]);
-  const setTagColour = async (tag: ListTag, colour: string | null) => {
+  const writeColour = async (tag: ListTag, colour: string | null, kept: string | null) => {
     if (!across) return;
+    const at = new Date().toISOString();
+    const look = inboxTagLook(colour, 'person', at, kept);
     setColourPreviews((current) => withEntry<string | null>(current, tag.id, undefined));
-    setColourPatches((current) => withEntry<string | null>(current, tag.id, colour));
-    const { refused, held } = await across.colour(tag, colour, new Date().toISOString());
+    setColourPatches((current) => withEntry(current, tag.id, look));
+    const { refused, held } = await across.colour(tag, colour, at, kept);
     await refreshList(false);
-    setColourPatches((current) => (current.get(tag.id) === colour ? withEntry<string | null>(current, tag.id, undefined) : current));
+    setColourPatches((current) => (current.get(tag.id) === look ? withEntry<InboxTagLook>(current, tag.id, undefined) : current));
     if (refused) showError(refused);
     else if (held) showError(held);
   };
-  const setTagColourRef = useRef(setTagColour);
-  setTagColourRef.current = setTagColour;
+  const writeColourRef = useRef(writeColour);
+  writeColourRef.current = writeColour;
   const colourControls = useMemo<TagColourControls | null>(
     () =>
       coloursKept
         ? {
             show: showColours,
             colourOf,
+            pickOf,
             recent,
-            set: (tag, colour) => void setTagColourRef.current(tag, colour),
+            // Picking a colour while Highlight rows is off turns it on: the person chose it to see it.
+            set: (tag, colour) => void writeColourRef.current(tag, colour, null),
+            highlight: (tag, on) => void writeColourRef.current(tag, on ? pickOf(tag.id) : null, on ? null : pickOf(tag.id)),
             preview: (tag, colour) => setColourPreviews((current) => withEntry<string | null>(current, tag.id, colour)),
           }
         : null,
-    [coloursKept, showColours, colourOf, recent],
+    [coloursKept, showColours, colourOf, pickOf, recent],
   );
   const setShow = useCallback(
     async (on: boolean) => {
