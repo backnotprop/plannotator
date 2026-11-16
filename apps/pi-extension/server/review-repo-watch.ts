@@ -137,6 +137,7 @@ export function createReviewRepoWatch(): ReviewRepoWatch {
 				shared.releases.delete(release);
 				if (handle) registry.release(handle, subscriber);
 				shared.subscribers.delete(subscriber);
+				if (!res.destroyed && !res.writableEnded) res.end();
 				if (shared.subscribers.size === 0) {
 					if (shared.poll) clearTimeout(shared.poll);
 					shared.poll = null;

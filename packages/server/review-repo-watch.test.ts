@@ -34,7 +34,9 @@ const options = (extra: Record<string, unknown> = {}) => ({
 
 class FakeResponse extends EventEmitter {
   destroyed = false;
+  writableEnded = false;
   writeHead() {}
+  end() { this.writableEnded = true; }
   write() {
     return true;
   }
@@ -61,12 +63,19 @@ describe("review repo watch (Bun)", () => {
     const controller = new AbortController();
     const response = await watch.stream(dir, options({ mode: "poll", pollMs: 60_000, signal: controller.signal }));
     expect(response.status).toBe(200);
-    await watch.stream(dir, options({ mode: "poll", pollMs: 60_000 }));
+    const second = await watch.stream(dir, options({ mode: "poll", pollMs: 60_000 }));
+    const readers = [response.body!.getReader(), second.body!.getReader()];
+    await Promise.all(readers.map((reader) => reader.read()));
     expect(watch.stats()).toEqual({ lives: 1, subscribers: 2, heartbeats: 2 });
     controller.abort();
     expect(watch.stats()).toEqual({ lives: 1, subscribers: 1, heartbeats: 1 });
     watch.closeAll();
     expect(watch.stats()).toEqual({ lives: 0, subscribers: 0, heartbeats: 0 });
+    for (const reader of readers) {
+      const next = await Promise.race([reader.read(), Bun.sleep(100).then(() => null)]);
+      await reader.cancel();
+      expect(next?.done).toBe(true);
+    }
   });
 });
 
@@ -91,11 +100,14 @@ describe("review repo watch (Pi)", () => {
     const dir = root();
     const first = new FakeResponse();
     await watch.stream(first as never, dir, options({ mode: "poll", pollMs: 60_000 }));
-    await watch.stream(new FakeResponse() as never, dir, options({ mode: "poll", pollMs: 60_000 }));
+    const second = new FakeResponse();
+    await watch.stream(second as never, dir, options({ mode: "poll", pollMs: 60_000 }));
     expect(watch.stats()).toEqual({ lives: 1, subscribers: 2, heartbeats: 2 });
+    first.destroyed = true;
     first.emit("close");
     expect(watch.stats()).toEqual({ lives: 1, subscribers: 1, heartbeats: 1 });
     watch.closeAll();
     expect(watch.stats()).toEqual({ lives: 0, subscribers: 0, heartbeats: 0 });
+    expect(second.writableEnded).toBe(true);
   });
 });

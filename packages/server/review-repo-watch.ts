@@ -122,7 +122,13 @@ export function createReviewRepoWatch(): ReviewRepoWatch {
 					// stale unseen (a hidden tree, a closed page): the next list reads again.
 					options.onChange();
 				}
+				const controller = subscriber.controller;
 				subscriber = null;
+				try {
+					controller.close();
+				} catch {
+					// A cancelled or already closed stream has no remaining reader.
+				}
 			};
 			shared.releases.add(release);
 			options.signal?.addEventListener("abort", release, { once: true });
