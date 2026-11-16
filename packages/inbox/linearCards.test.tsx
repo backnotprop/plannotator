@@ -12,7 +12,7 @@ import { RefCardView } from '@plannotator/ui/components/RefHoverCard';
 import { refCardTarget, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { providedRefCardLabel, registerPlainTextLinker, registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
-import { linearIdentifierLinker, linearRefCardProvider } from './linearCards';
+import { installLinearCards, linearIdentifierLinker, linearRefCardProvider } from './linearCards';
 
 const undo: (() => void)[] = [];
 afterEach(() => {
@@ -75,4 +75,27 @@ test('a Linear link is a card target once a provider is registered, and its card
   expect(card).not.toContain('GitHub');
   const failed = renderToStaticMarkup(createElement(RefCardView, { target, href, result: { ok: false, error: 'signed_out', fetchedAt: 0 } }));
   expect(failed).toContain('Settings → Accounts');
+});
+
+test('nothing is fetched on page load: the teams are asked once, when prose first shows a candidate identifier', async () => {
+  const asked: string[] = [];
+  const fetchTeams = async (url: string) => {
+    asked.push(url);
+    return Response.json({ workspace: 'acme', teams: ['ENG'] });
+  };
+  undo.push(installLinearCards(fetchTeams));
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  await settle();
+  expect(asked).toEqual([]);
+  html('No identifiers here, just a sentence.');
+  await settle();
+  expect(asked).toEqual([]);
+  html('See ENG-123.');
+  await settle();
+  expect(asked).toHaveLength(1);
+  expect(asked[0]).toContain('/linear-refs');
+  expect(links('See ENG-123.')).toEqual([['https://linear.app/acme/issue/ENG-123', 'ENG-123']]);
+  html('And OPS-4, ENG-5.');
+  await settle();
+  expect(asked).toHaveLength(1);
 });

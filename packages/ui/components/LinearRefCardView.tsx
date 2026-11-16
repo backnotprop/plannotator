@@ -6,6 +6,7 @@
 import type React from 'react';
 import type { ForgeRefCardError } from '@plannotator/core/forge-ref-card';
 import type { LinearCardData, LinearCardFields } from '@plannotator/core/linear-ref-card';
+import { HTML_BLOCK_OPEN_RE, HTML_BLOCK_TAGS } from '@plannotator/core/markdown-structure';
 import { RefCardAvatar, RefCardMarkdown, RefCardStateIcon, refCardTimeAgo, type RefCardViewProps } from './RefHoverCard';
 
 const BODY_MAX = 216;
@@ -19,6 +20,36 @@ const FAILURE_TEXT: Record<ForgeRefCardError, string> = {
   rate_limited: 'Linear asked for a short break. Details come back in a minute.',
   unavailable: "Details couldn't load right now.",
 };
+
+/**
+ * Linear's text with raw HTML kept as text: a line that would open an HTML block is shown as code, so nothing from
+ * Linear reaches the renderer's HTML path (fenced code is text already).
+ */
+export function htmlAsText(markdown: string): string {
+  let fence: string | null = null;
+  return markdown
+    .split('\n')
+    .map((line) => {
+      const trimmed = line.trim();
+      const opens = /^(`{3,}|~{3,})/.exec(trimmed)?.[1];
+      if (fence) {
+        if (opens && opens[0] === fence[0] && opens.length >= fence.length) fence = null;
+        return line;
+      }
+      if (opens) {
+        fence = opens;
+        return line;
+      }
+      // A quote's lines are parsed again as blocks, so `> <div>` counts too.
+      const quote = /^(?:>\s*)*/.exec(trimmed)![0];
+      const body = trimmed.slice(quote.length);
+      const tag = HTML_BLOCK_OPEN_RE.exec(body)?.[1];
+      if (!tag || !HTML_BLOCK_TAGS.has(tag.toLowerCase())) return line;
+      const ticks = '`'.repeat(Math.max(0, ...(body.match(/`+/g) ?? []).map((run) => run.length)) + 1);
+      return `${quote}${ticks} ${body} ${ticks}`;
+    })
+    .join('\n');
+}
 
 /** Linear's own state marks: a dashed ring (backlog), a ring (todo), a part-filled ring (started), a filled check or cross (done, canceled). */
 export function LinearStateIcon({ type, color, className = '' }: { type: LinearCardFields['stateType']; color: string; className?: string }) {
@@ -172,11 +203,11 @@ export function LinearRefCardView({ target, href, result, pinned, onClose, sheet
           data-ref-card-body=""
           {...(together ? {} : { ...scroller, 'aria-label': 'Issue description' })}
         >
-          {d.body.trim() ? <RefCardMarkdown markdown={d.body} /> : <p className="text-[12px] italic text-muted-foreground">No description.</p>}
+          {d.body.trim() ? <RefCardMarkdown markdown={htmlAsText(d.body)} /> : <p className="text-[12px] italic text-muted-foreground">No description.</p>}
           {d.bodyCut ? <p className="mt-1 text-[11px] text-muted-foreground">The rest is in Linear.</p> : null}
           {d.linked.length > 0 ? (
             <div className="mt-2.5 space-y-1">
-              <div className="text-[10.5px] font-semibold uppercase tracking-wide text-muted-foreground">Pull requests</div>
+              <div className="text-[11.5px] font-medium text-muted-foreground">Pull requests</div>
               {d.linked.map((l) => (
                 <div key={l.number} className="flex items-center gap-1.5 text-[12px]">
                   <RefCardStateIcon kind="pull" tone={l.state === 'open' ? 'open' : l.state === 'merged' ? 'merged' : 'closed'} />
@@ -187,14 +218,14 @@ export function LinearRefCardView({ target, href, result, pinned, onClose, sheet
             </div>
           ) : null}
           {d.lastComment ? (
-            <div className="mt-2.5 rounded-md border border-border bg-muted/30 px-2.5 py-2" data-ref-card-comment="">
+            <div className="mt-2.5 border-t border-border pt-2" data-ref-card-comment="">
               <div className="mb-1 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                 {d.lastComment.author ? <RefCardAvatar person={d.lastComment.author} size={14} /> : null}
                 <span className="font-medium text-foreground">{d.lastComment.author?.login ?? 'someone'}</span>
                 <span>commented {refCardTimeAgo(d.lastComment.at)}</span>
                 <span className="ml-auto">latest</span>
               </div>
-              <RefCardMarkdown markdown={d.lastComment.body} />
+              <RefCardMarkdown markdown={htmlAsText(d.lastComment.body)} />
             </div>
           ) : null}
         </div>

@@ -1,11 +1,12 @@
 /**
  * Linear hover cards in the Inbox window (core `linear-ref-card.ts`, server `inbox-linear-cards.ts`). A
- * call in App.tsx installs them through the ref card providers seam (`@plannotator/ui/utils/refCardProviders`):
+ * call in configureUI.ts installs them through the ref card providers seam (`@plannotator/ui/utils/refCardProviders`):
  *
  * - A pasted `https://linear.app/<workspace>/issue/ENG-123` names a Linear ref; the Inbox's own ref transport
  *   (`GET /api/inbox/ref?url=`) fetches it, and `LinearRefCardView` draws the card.
  * - A bare `ENG-123` of one of the workspace's teams links to its issue, so the card opens on it too. The teams come
- *   from `GET /api/inbox/linear-refs` (read with this computer's Linear key); no key, no teams, nothing linked.
+ *   from `GET /api/inbox/linear-refs` (read with this computer's Linear key), asked once prose on screen shows a
+ *   candidate identifier, never on page load; no key, no teams, nothing linked.
  */
 import { findLinearIdentifiers, isLinearRef, linearAsForgeRef, linearIssueUrl, parseLinearRefUrl, type LinearIssueRefs } from '@plannotator/core/linear-ref-card';
 import { LinearRefCardView } from '@plannotator/ui/components/LinearRefCardView';
@@ -42,32 +43,57 @@ export const linearRefCardProvider: RefCardProvider = {
   label: (ref) => `Linear issue ${ref.repo}-${ref.number}`,
 };
 
-let installed = false;
-let fetchTeams: (url: string, init?: RequestInit) => Promise<Response> = (url, init) => fetch(url, init);
+type FetchTeams = (url: string, init?: RequestInit) => Promise<Response>;
+
+/** Text that could hold a bare identifier: the teams are read only once prose on screen shows one. */
+const MAYBE_IDENTIFIER = /(?<![\w/.-])[A-Za-z][A-Za-z0-9]{0,9}-[1-9]\d{0,8}(?![\w-])/;
+
+let installed: { fetchTeams: FetchTeams; undo: (() => void)[] } | null = null;
+let teamsAsked = false;
 let unlink: (() => void) | null = null;
 
 function linkTeams(): Promise<void> {
-  return fetchTeams(inboxUrl('/linear-refs'), { headers: { accept: 'application/json' } })
+  if (!installed) return Promise.resolve();
+  return installed
+    .fetchTeams(inboxUrl('/linear-refs'), { headers: { accept: 'application/json' } })
     .then((res) => (res.ok ? (res.json() as Promise<{ workspace?: string | null; teams?: string[] }>) : null))
     .then((body) => {
       unlink?.();
       unlink = null;
-      if (body?.workspace && Array.isArray(body.teams) && body.teams.length > 0) unlink = registerPlainTextLinker(linearIdentifierLinker({ workspace: body.workspace, teams: body.teams }));
+      if (installed && body?.workspace && Array.isArray(body.teams) && body.teams.length > 0) unlink = registerPlainTextLinker(linearIdentifierLinker({ workspace: body.workspace, teams: body.teams }));
     })
     .catch(() => {});
 }
 
-/** Install once: the provider at once, the bare identifiers once the server has read the teams. */
-export function installLinearCards(fetchImpl?: (url: string, init?: RequestInit) => Promise<Response>): void {
-  if (installed) return;
-  installed = true;
-  if (fetchImpl) fetchTeams = fetchImpl;
-  registerRefCardProvider(linearRefCardProvider);
-  void linkTeams();
+/** Links nothing; the first prose with something shaped like `ENG-123` asks for the teams, after the render. */
+const askOnFirstCandidate: PlainTextLinker = (text) => {
+  if (!teamsAsked && MAYBE_IDENTIFIER.test(text)) {
+    teamsAsked = true;
+    queueMicrotask(() => void linkTeams());
+  }
+  return [];
+};
+
+/**
+ * Install once: the provider at once; nothing is fetched until a card is hovered or prose shows a candidate
+ * identifier. Returns the uninstall (tests).
+ */
+export function installLinearCards(fetchImpl?: FetchTeams): () => void {
+  if (installed) return () => {};
+  installed = { fetchTeams: fetchImpl ?? ((url, init) => fetch(url, init)), undo: [] };
+  installed.undo.push(registerRefCardProvider(linearRefCardProvider), registerPlainTextLinker(askOnFirstCandidate));
+  return () => {
+    for (const undo of installed?.undo ?? []) undo();
+    unlink?.();
+    unlink = null;
+    installed = null;
+    teamsAsked = false;
+  };
 }
 
+/** After the key changes: drop the cached cards, and read the teams again if prose already asked for them. */
 export function refreshLinearCards(): Promise<void> {
   if (!installed) return Promise.resolve();
   setRefCardTransport(getRefCardTransport());
-  return linkTeams();
+  return teamsAsked ? linkTeams() : Promise.resolve();
 }
