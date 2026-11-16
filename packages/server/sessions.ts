@@ -187,7 +187,7 @@ function inProcessDir(host: InProcessHost): string {
   return join(getPlannotatorDataDir(), "sessions", host);
 }
 
-const ownInProcessFiles = new Set<string>();
+const ownInProcessFiles = new Map<string, symbol>();
 let exitCleanupArmed = false;
 
 /**
@@ -199,24 +199,27 @@ let exitCleanupArmed = false;
  */
 export function registerInProcessSession(host: InProcessHost, info: Omit<SessionInfo, "pid" | "host">): () => void {
   let path: string;
+  const registration = Symbol();
   try {
     const dir = inProcessDir(host);
     path = join(dir, `${process.pid}-${info.port}.json`);
     mkdirSync(dir, { recursive: true });
     sweepDeadEntries(dir);
     writeAtomic(path, JSON.stringify({ ...info, pid: process.pid, host }, null, 2));
-    ownInProcessFiles.add(path);
+    ownInProcessFiles.set(path, registration);
   } catch {
     return () => {};
   }
   if (!exitCleanupArmed) {
     exitCleanupArmed = true;
     process.on("exit", () => {
-      for (const file of ownInProcessFiles) removeFile(file);
+      for (const file of ownInProcessFiles.keys()) removeFile(file);
     });
   }
   return () => {
-    if (ownInProcessFiles.delete(path)) removeFile(path);
+    if (ownInProcessFiles.get(path) !== registration) return;
+    ownInProcessFiles.delete(path);
+    removeFile(path);
   };
 }
 

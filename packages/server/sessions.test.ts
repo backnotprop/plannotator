@@ -113,6 +113,21 @@ describe("in-process sessions (OpenCode)", () => {
     }
   });
 
+  test("a delayed unregister leaves a replacement session on the same port discoverable", async () => {
+    const server = serve();
+    const unregisterOld = registerInProcessSession("opencode", entry(server.port));
+    const unregisterNew = registerInProcessSession("opencode", { ...entry(server.port), label: "replacement" });
+    try {
+      unregisterOld();
+      expect(await listInProcessSessions("opencode")).toMatchObject([{ label: "replacement" }]);
+      unregisterNew();
+      expect(await listInProcessSessions("opencode")).toEqual([]);
+    } finally {
+      unregisterNew();
+      server.stop(true);
+    }
+  });
+
   test("a stale entry is dropped and removed: its server stopped, its process gone, or unreadable", async () => {
     const stopped = serve();
     registerInProcessSession("opencode", entry(stopped.port));
