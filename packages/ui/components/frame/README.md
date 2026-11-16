@@ -41,7 +41,23 @@ In the host's Tailwind v4 entry, after Tailwind and the theme:
 
 `--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--primary`, `--primary-foreground`, `--muted`, `--muted-foreground`, `--destructive`, `--destructive-foreground`, `--success`, `--border`, `--ring`, and the `font-sans` / `font-mono` families. Light is the `.light` class on an ancestor (the root, as the themes set it); anything else is dark.
 
-Every `--frame-*` value can be set by the host. `--frame-selected`, `--frame-surface-hover` and `--frame-border-subtle` are fixed colours today, so a host with several themes may set them per theme.
+Every `--frame-*` value can be set by the host.
+
+### Fixed or theme colours
+
+By default the selected row, the hover fill and the subtle border (`--frame-selected`, `--frame-surface-hover`, `--frame-border-subtle`) are fixed colours: a violet selection and a cool grey hover and border, whatever the theme. The selected row's text (`--frame-selected-fg`) is already the theme's `--primary`.
+
+`<FrameGround colors="theme">` sets `data-frame-colors="theme"`, and under it the three are mixed from the theme instead:
+
+| Token | Dark | Light |
+|---|---|---|
+| `--frame-selected` | `--primary` at 13% | `--primary` at 7.5% |
+| `--frame-surface-hover` | `--foreground` at 7% | `--foreground` at 5.5% |
+| `--frame-border-subtle` | `--foreground` at 5.5% | `--foreground` at 7.5% |
+
+(each is `color-mix(in oklch, var(--token) N%, transparent)`). The amounts were chosen so that, with the frame's own violet as primary (`oklch(0.72 0.15 280)` dark, `oklch(0.50 0.25 280)` light) and foreground `oklch(0.90 0.01 260)` dark, `oklch(0.18 0.02 260)` light, each colour drawn on the card lands within 0.002 (OKLab distance) of the fixed one, about a tenth of a just-visible step. Dark selected and dark hover match exactly; the largest gap is the light selected row (0.0019), whose fixed colour has a little less chroma than that primary.
+
+Pick `theme` when the host offers more than one theme, so the selection takes each theme's accent (Plannotator's own themes included). Keep `fixed` only when the host has one theme and wants this exact look. The phone sheets render outside the ground, so to reach them put `data-frame-colors="theme"` on the root element instead.
 
 ## Usage
 
@@ -143,7 +159,7 @@ A fuller page, with the versions panel, its phone sheet and the rail sheet, is `
 | `VersionActions` | `onCompare`, `onCopyLink` | Compare and copy link. |
 | `ReadingLine` | `onToggleVersions`, `approved`, `older: { back, actions, restore }` | The versions toggle, an approval slot, and the controls shown while an older version is on screen. |
 | `PageHeader` | `identity`, `actions`, `actionsClassName` | The identity and actions slots, and extra classes for the actions group. |
-| `FrameGround` | `tone` | `plain` or `tinted` ground; unset is tinted in light and plain in dark. |
+| `FrameGround` | `tone`, `colors` | `plain` or `tinted` ground (unset is tinted in light and plain in dark); `fixed` (default) or `theme` colours for selected, hover and subtle border. |
 
 ## Third-party notices
 

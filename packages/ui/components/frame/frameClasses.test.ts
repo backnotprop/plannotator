@@ -143,3 +143,28 @@ describe('the frame cn', () => {
     expect(cn('rounded-frame-pane', 'rounded-md')).toBe('rounded-md');
   });
 });
+
+describe('theme colours opt-in', () => {
+  const OPT_IN_TOKENS = ['--frame-border-subtle', '--frame-selected', '--frame-surface-hover'];
+
+  /** The custom properties a rule with exactly this selector list sets in frame.css. */
+  function declared(selector: string): Record<string, string> {
+    const rule = frameCss.split('}').find((block) => block.split('{')[0].replace(/\/\*[\s\S]*?\*\//g, '').trim() === selector);
+    expect(rule).toBeDefined();
+    const body = rule!.split('{')[1];
+    return Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()]));
+  }
+
+  test('dark and light each derive the same three tokens from the theme, and the fixed defaults stay on :root', () => {
+    const dark = declared('[data-frame-colors="theme"]');
+    const light = declared('.light[data-frame-colors="theme"],\n.light [data-frame-colors="theme"]');
+    for (const tokens of [dark, light]) {
+      expect(Object.keys(tokens).sort()).toEqual(OPT_IN_TOKENS);
+      for (const value of Object.values(tokens)) {
+        expect(value).toMatch(/^color-mix\(in oklch, var\(--(primary|foreground)\) [\d.]+%, transparent\)$/);
+      }
+    }
+    const root = declared(':root');
+    for (const name of OPT_IN_TOKENS) expect(root[name]).toMatch(/^oklch\(/);
+  });
+});
