@@ -21,6 +21,7 @@ import { FrameBox, DocumentRailShell, PageCard, VersionsPanel } from "@plannotat
 | `VersionsPanel`, `VersionActions` | The versions list: consecutive saves by one author within 30 minutes fold together, and the fold holding the version on screen opens itself. |
 | `DockedPanelClip`, `useRailMotion` | The spring that opens and closes a docked panel (through `motion`). |
 | `RailSheet`, `VersionsSheet`, `CommentsSheet` | The phone sheets. A `VersionsPanel` inside `VersionsSheet` fills the sheet's width at every window width. What a host passes into a sheet renders in a portal, outside the host app's subtree, so the host's scoped rules (its icon sizing, for example) do not reach it: style what you pass in. |
+| `Card`, `CardFaceDocument`, `CardGrid`, `CardGroup`, `CardGroups` | A plan, document or page as a card with a preview, for a home of plans (see Card below). |
 | `PanelEdge`, `CollapsibleEdge` | The edge between rail and page, over the package's `ResizeHandle`. With `keyboard` (the rail passes it), arrow keys, Home and End resize. |
 
 The frame brings its own small button, sheet, skeleton and tooltip (in `primitives/`), drawn with the frame tokens. `FrameButton` and `frameCn` are exported for host controls that sit inside the frame; `frameCn` knows the `frame-*` class names, so `text-frame-sm` is kept next to a text colour.
@@ -39,7 +40,7 @@ In the host's Tailwind v4 entry, after Tailwind and the theme:
 
 ### Host tokens it reads
 
-`--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--primary`, `--primary-foreground`, `--muted`, `--muted-foreground`, `--destructive`, `--destructive-foreground`, `--success`, `--border`, `--ring`, and the `font-sans` / `font-mono` families. Light is the `.light` class on an ancestor (the root, as the themes set it); anything else is dark.
+`--background`, `--foreground`, `--card`, `--card-foreground`, `--popover`, `--popover-foreground`, `--primary`, `--primary-foreground`, `--muted`, `--muted-foreground`, `--destructive`, `--destructive-foreground`, `--success`, `--warning`, `--border`, `--ring`, and the `font-sans` / `font-mono` families. Light is the `.light` class on an ancestor (the root, as the themes set it); anything else is dark.
 
 Every `--frame-*` value can be set by the host.
 
@@ -145,6 +146,34 @@ export function PortoLaunchPlan() {
 ```
 
 A fuller page, with the versions panel, its phone sheet and the rail sheet, is `test-consumer/frame-example.tsx`.
+
+## Card
+
+`Card` draws one plan, document or page for a home or a list of plans: a preview well, then the title (up to two lines) and one grey line. `CardGrid`, `CardGroup` and `CardGroups` lay cards out in rows that wrap, at a fixed width per size (`large` 352 px, `regular` 256 px); on a phone each card fills the column.
+
+```tsx
+<Card
+  kind="document"
+  size="large"
+  title="Move sessions from signed cookies to Redis"
+  href="/plans/redis"
+  linkComponent={RouterLink}
+  fact="Your move"
+  unread
+  face={<CardFaceDocument title="Move sessions from signed cookies to Redis">{renderedMarkdown}</CardFaceDocument>}
+/>
+```
+
+- **One link.** The whole card is one link (the host's `linkComponent`, or `<a>`), named by the title, the grey line and "new" when `unread`. Keyboard focus draws one ring around the card. The unread mark is a small dot before the title, with no number.
+- **The grey line** is `factMark` plus `fact` (for example an agent's 14 px mark and "Codex is working"); without `fact` it is the date from `time`. When `time` is given, the full date and time are also in the line's `title` attribute. `working` makes the mark breathe.
+- **The face.** The card owns the preview well: 4:3, a quiet ground per kind from the theme (`--primary` for a document, `--foreground` for a page, `--warning` for an image, `--success` for data), the face cropped by the well's bottom edge. Faces are laid out on a page 420 (document), 400 (page and data) or 320 (image) px wide and scaled to the card. The face is `inert` and `aria-hidden`, so nothing in it can be reached or read on its own. It mounts only when the card comes near the screen; until then the well shows its quiet ground. `face={{ src }}` draws a lazy `<img>`; no `face` draws the designed empty face (a dashed sheet).
+- **The host draws a face only from what the viewer may read.** The card shows whatever it is given.
+- **Kinds.** A `document` always has exactly one sheet behind it, slightly turned; a `page` is a flat window with three dots; an `image` sits on a panel; `data` shows its first rows. No other kind has a sheet behind.
+- **`CardFaceDocument`** gives rendered Markdown the sheet's type (body 13/19, first heading 17/22, other headings as quiet 11/14 captions) and hides the first heading when it repeats `title`, which the card already shows.
+- **Motion** is in `card/motions.css` (imported by `frame.css`), named in `CARD_MOTIONS`, each timing a `--frame-card-*` custom property at the top of that file. `arrive`: wrap the line or row that just landed in a face in `CardArrival`; it opens in place and is tinted for a moment. `breathe`: the agent mark while `working`, in phase across cards, the only loop. `settle`: `settle` brings a new card to rest once and shows its dot; `flipReorder(list)` re-sorts without a jump (call it before the change, then call what it returns after). `fan`: hover or focus turns the sheet behind a document a little further and lifts the front. `open`: `transitionName` sets the preview's `view-transition-name` (with the `frame-card-open` view-transition class); give the page it opens the same name and class. Idle, nothing moves but `breathe`; under reduced motion nothing moves and `open` is a plain cut.
+- A face renders inside the card, not in a portal, but it is scaled: give it fixed pixel sizes at its page width rather than sizes that depend on the viewport.
+
+See `test-consumer/frame-card-example.tsx` for a whole home.
 
 ## Props for host behaviours
 

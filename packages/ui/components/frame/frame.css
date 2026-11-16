@@ -6,6 +6,8 @@
  * the frame's own attributes; no host token is redefined, so the package
  * themes and a host document inside the frame are untouched.
  */
+@import "./card/motions.css";
+
 @source "./**/*.tsx";
 @source "./**/*.ts";
 @source not "./**/*.test.tsx";
@@ -184,6 +186,202 @@
 :root:not(.light) [data-frame-pane] {
   --frame-muted-fg: var(--frame-quiet-fg);
   --frame-tertiary: color-mix(in oklch, var(--frame-quiet-fg) 86%, var(--background));
+}
+
+/* ── the card (card/Card.tsx): preview well, paper and the document type scale; its motions are in card/motions.css ── */
+:root {
+  --frame-paper: color-mix(in oklch, var(--card) 94%, var(--foreground));
+  --frame-paper-edge: color-mix(in oklch, var(--foreground) 12%, transparent);
+  --frame-ink-2: color-mix(in oklch, var(--foreground) 55%, transparent);
+  --frame-ink-3: color-mix(in oklch, var(--foreground) 22%, transparent);
+  --frame-card-ring: color-mix(in oklch, var(--foreground) 8%, transparent);
+  --frame-card-ring-hover: color-mix(in oklch, var(--foreground) 16%, transparent);
+}
+
+.light {
+  --frame-paper: var(--card);
+  --frame-paper-edge: color-mix(in oklch, var(--foreground) 11%, transparent);
+}
+
+[data-frame-card] {
+  box-shadow: 0 0 0 1px var(--frame-card-ring);
+}
+[data-frame-card]:hover {
+  box-shadow: 0 0 0 1px var(--frame-card-ring-hover), 0 10px 24px -14px color-mix(in oklch, var(--frame-shadow-ink) 30%, transparent);
+}
+[data-frame-card]:has(:focus-visible) {
+  box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--primary);
+}
+
+[data-frame-card-well] {
+  --frame-card-ground: color-mix(in oklch, var(--foreground) 4%, var(--card));
+  background: var(--frame-card-ground);
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 6%, transparent);
+  color: var(--foreground);
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="document"] {
+  --frame-card-ground: color-mix(in oklab, var(--primary) 12%, var(--card));
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="page"] {
+  --frame-card-ground: color-mix(in oklch, var(--foreground) 5%, var(--card));
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="image"] {
+  --frame-card-ground: color-mix(in oklab, var(--warning) 12%, var(--card));
+}
+[data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="data"] {
+  --frame-card-ground: color-mix(in oklab, var(--success) 11%, var(--card));
+}
+.light [data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="document"] {
+  --frame-card-ground: color-mix(in oklab, var(--primary) 8%, var(--card));
+}
+.light [data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="image"] {
+  --frame-card-ground: color-mix(in oklab, var(--warning) 10%, var(--card));
+}
+.light [data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="data"] {
+  --frame-card-ground: color-mix(in oklab, var(--success) 9%, var(--card));
+}
+
+.frame-card-sheet,
+.frame-card-window,
+.frame-card-panel {
+  position: absolute;
+  overflow: hidden;
+  background: var(--frame-paper);
+  box-shadow: 0 0 0 1px var(--frame-paper-edge), 0 2px 8px -4px color-mix(in oklch, var(--frame-shadow-ink) 18%, transparent);
+}
+.frame-card-sheet {
+  inset: 10% 10% -14px;
+  border-radius: 6px 6px 0 0;
+}
+[data-frame-card-back] {
+  transform: var(--frame-card-back-rest);
+  transform-origin: 50% 100%;
+  background: color-mix(in oklch, var(--frame-paper) 92%, var(--foreground));
+  box-shadow: 0 0 0 1px var(--frame-paper-edge);
+}
+.frame-card-window {
+  inset: 9% 8% -10px;
+  border-radius: 8px 8px 0 0;
+}
+.frame-card-window-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 16px;
+  padding: 0 8px;
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 7%, transparent);
+}
+.frame-card-window-bar > i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--foreground) 18%, transparent);
+}
+.frame-card-window-body {
+  position: absolute;
+  inset: 16px 0 0;
+  overflow: hidden;
+}
+.frame-card-panel {
+  inset: 9% 8%;
+  border-radius: 6px;
+  box-shadow: 0 0 0 1px var(--frame-paper-edge);
+}
+.frame-card-panel-rows {
+  bottom: -10px;
+  border-radius: 6px 6px 0 0;
+}
+[data-frame-card-blank] {
+  background: transparent;
+  box-shadow: none;
+  outline: 1px dashed color-mix(in oklch, var(--foreground) 24%, transparent);
+  outline-offset: -1px;
+}
+
+/* The sheet's type: rendered Markdown on a 420 px page, scaled with the card */
+.frame-card-document {
+  padding: 22px 24px;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--foreground);
+}
+.frame-card-document :is(h1, h2, h3, h4, h5, h6) {
+  margin: 14px 0 10px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 500;
+  color: var(--frame-ink-2);
+}
+.frame-card-document :is(h1, h2, h3, h4, h5, h6):first-child,
+.frame-card-document [data-frame-card-title-repeat] + * {
+  margin-top: 0;
+}
+.frame-card-document h1 {
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+  color: var(--foreground);
+}
+.frame-card-document :is(p, li) {
+  margin: 0 0 8px;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--frame-ink-2);
+}
+.frame-card-document :is(ul, ol) {
+  margin: 0 0 8px;
+  padding-left: 20px;
+}
+.frame-card-document ul {
+  list-style: disc;
+}
+.frame-card-document ol {
+  list-style: decimal;
+}
+.frame-card-document li {
+  margin-bottom: 7px;
+  padding-left: 4px;
+}
+.frame-card-document li::marker {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--frame-ink-2);
+}
+.frame-card-document table {
+  width: 100%;
+  margin: 0 0 8px;
+  border-collapse: collapse;
+  font-size: 12px;
+  line-height: 16px;
+}
+.frame-card-document th {
+  padding: 0 8px 6px 0;
+  text-align: left;
+  font-weight: 500;
+  color: var(--frame-ink-2);
+  box-shadow: inset 0 -1px 0 var(--frame-ink-3);
+}
+.frame-card-document td {
+  padding: 8px 8px 8px 0;
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 9%, transparent);
+}
+.frame-card-document td:first-child {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+.frame-card-document pre {
+  margin: 0 0 8px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: color-mix(in oklch, var(--foreground) 5%, transparent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 17px;
+  white-space: pre;
+}
+.frame-card-document code {
+  font-family: var(--font-mono);
+  font-size: 12px;
 }
 
 .frame-scrim {

@@ -12,12 +12,33 @@ import { compile } from 'tailwindcss';
 import ts from 'typescript';
 import { cn } from './lib/utils';
 import { fileIcon } from './rail/fileIcons';
+import { CARD_MOTIONS } from './card/motions';
 
 const folder = import.meta.dir;
 const frameCss = readFileSync(join(folder, 'frame.css'), 'utf8');
+const motionsCss = readFileSync(join(folder, 'card', 'motions.css'), 'utf8');
 
 /** Plain classes frame.css styles itself, and Tailwind group markers: no utility rule is expected. */
-const NOT_UTILITIES = new Set(['frame-scrim', 'frame-sheet', 'frame-sheet-overlay', 'frame-tooltip', 'collapsible-edge']);
+const NOT_UTILITIES = new Set([
+  'frame-scrim',
+  'frame-sheet',
+  'frame-sheet-overlay',
+  'frame-tooltip',
+  'collapsible-edge',
+  'frame-card-sheet',
+  'frame-card-window',
+  'frame-card-window-bar',
+  'frame-card-window-body',
+  'frame-card-panel',
+  'frame-card-panel-rows',
+  'frame-card-document',
+  'frame-card-arrive',
+  'frame-card-arrive-tint',
+  'frame-card-breathe',
+  'frame-card-settle',
+  'frame-card-fan',
+  'frame-card-open',
+]);
 
 async function loadStylesheet(id: string, base: string) {
   const path = id.startsWith('.')
@@ -125,7 +146,7 @@ describe('frame classes compile with theme.css and frame.css', () => {
   });
 
   test('the plain classes left out above are styled by frame.css', () => {
-    for (const name of NOT_UTILITIES) expect(frameCss).toContain(`.${name}`);
+    for (const name of NOT_UTILITIES) expect(frameCss + motionsCss).toContain(`.${name}`);
   });
 
   test('a made-up frame class is caught, so a pass below means something', async () => {
@@ -187,9 +208,50 @@ describe('the versions sheet', () => {
   });
 });
 
+describe('card motions', () => {
+  const css = motionsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+
+  test('every named motion is a class in motions.css, and under reduced motion none of them moves', () => {
+    expect(reduced.length).toBeGreaterThan(100);
+    for (const name of Object.values(CARD_MOTIONS)) {
+      expect(css).toContain(`.${name}`);
+      expect(reduced).toContain(name);
+    }
+    expect(reduced).toMatch(/\.frame-card-breathe,[\s\S]*?\{\s*animation: none;\s*\}/);
+    expect(reduced).toMatch(/\.frame-card-fan,\s*\[data-frame-card-hero\],\s*\.frame-card-arrive \{\s*transition: none;\s*\}/);
+    expect(reduced).toMatch(/::view-transition-new\(\*\.frame-card-open\) \{\s*animation: none;\s*\}/);
+    const animated = [...reduced.matchAll(/([^{}]+)\{\s*animation: none;/g)].map(([, selectors]) => selectors).join(',');
+    for (const name of ['frame-card-breathe', 'frame-card-settle', 'frame-card-arrive-tint']) expect(animated).toContain(name);
+  });
+
+  test('idle, only breathe loops, and its timings are custom properties in one place', () => {
+    const loops = [...css.matchAll(/animation:[^;]*infinite/g)];
+    expect(loops.length).toBe(1);
+    expect(loops[0]![0]).toContain('frame-card-breathe');
+    for (const name of ['--frame-card-ease', '--frame-card-fan-duration', '--frame-card-breathe-duration', '--frame-card-arrive-open-duration', '--frame-card-arrive-tint-duration', '--frame-card-settle-duration', '--frame-card-open-duration']) {
+      expect([...css.matchAll(new RegExp(`${name}:`, 'g'))].length).toBe(1);
+    }
+    expect(css).toContain('--frame-card-ease: cubic-bezier(0.22, 1, 0.36, 1);');
+  });
+
+  test('the card styles only its own data-frame-card attributes, so a host attribute such as data-card-back is left alone', () => {
+    expect(frameCss + motionsCss).not.toMatch(/\[data-card[-\]=]/);
+    expect(frameCss + motionsCss).toContain('[data-frame-card-back]');
+  });
+
+  test('frame.css brings the card styles and motions with it, so a host scanning only frame.css gets them', async () => {
+    const { build } = await compileHost();
+    const out = build([]);
+    expect(out).toContain('frame-card-breathe');
+    expect(out).toContain('.frame-card-document');
+    expect(out).toContain('[data-frame-card-back]');
+  });
+});
+
 describe('host tokens', () => {
   test('frame.css sets only --frame-* properties and frame-* theme names, never a host token', () => {
-    const names = [...frameCss.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name);
+    const names = [...(frameCss + motionsCss).replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name);
     expect(names.length).toBeGreaterThan(40);
     const foreign = names.filter((name) => !/^--frame-/.test(name) && !/^--(text|spacing|ease|color|shadow|radius)-frame-/.test(name));
     expect(foreign).toEqual([]);
