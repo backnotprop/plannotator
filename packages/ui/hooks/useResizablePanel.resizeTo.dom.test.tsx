@@ -3,7 +3,7 @@
  * hook's min and max, applied, and saved under the drag's key in the drag's
  * format, so the next mount reads it back. Requires DOM (DOM_TESTS=1).
  */
-import { afterEach, describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, jest, test } from 'bun:test';
 import { act, type PointerEvent } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -21,6 +21,7 @@ afterEach(() => {
   act(() => roots.forEach((root) => root.unmount()));
   roots = [];
   storage?.resetStorageBackend();
+  jest.useRealTimers();
 });
 
 function memoryBackend() {
@@ -47,11 +48,14 @@ function mountPanel(apply?: (width: number) => void): { current: Panel } {
 
 /** A real drag on the handle: pointer down, move by `dx`, one animation frame, pointer up. */
 async function drag(panel: { current: Panel }, dx: number) {
+  jest.useFakeTimers();
   act(() => panel.current.handleProps.onPointerDown({ button: 0, clientX: 100, clientY: 0, preventDefault() {} } as unknown as PointerEvent));
   act(() => {
     window.dispatchEvent(new MouseEvent('pointermove', { clientX: 100 + dx, clientY: 0 }));
   });
-  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  await act(async () => {
+    jest.advanceTimersByTime(50);
+  });
   act(() => {
     window.dispatchEvent(new MouseEvent('pointerup', { clientX: 100 + dx, clientY: 0 }));
   });
@@ -79,6 +83,16 @@ describe.if(hasDom)('useResizablePanel resizeTo', () => {
     act(() => panel.current.resizeTo(410));
     expect([...memory.entries()]).toEqual([[KEY, '410']]);
     expect(mountPanel().current.width).toBe(410);
+  });
+
+  test('a width that is not a number is ignored: nothing applied, nothing saved', () => {
+    const memory = memoryBackend();
+    const applied: number[] = [];
+    const panel = mountPanel((width) => applied.push(width));
+    for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) act(() => panel.current.resizeTo(bad));
+    expect(panel.current.width).toBe(300);
+    expect(applied).toEqual([]);
+    expect(memory.size).toBe(0);
   });
 
   test('a hook nobody calls resizeTo on saves nothing and keeps its default', () => {
