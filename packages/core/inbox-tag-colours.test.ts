@@ -1,12 +1,13 @@
 /**
  * Tag row colours (approval "inbox-thread-tags", step 3): what a new tag is given, and the one colour and switch every
- * linked machine shows. What this catches: a new tag given a colour another tag already has while a calm one is free,
- * or red; two linked machines showing a tag in different colours (each preferring its own); an automatic colour
+ * linked machine shows. What this catches: a new tag given a colour another tag already has while one of the twelve is
+ * free, or not alternating vivid and calm; a colour stored in a form an older linked Inbox refuses; a quick swatch
+ * kept among the person's own colours; two linked machines showing a tag in different colours (each preferring its own); an automatic colour
  * overriding the one the person picked; an older machine's missing switch read as off.
  */
 import { describe, expect, test } from "bun:test";
 import { inboxMachineTags, type InboxInitiative } from "./inbox-initiatives";
-import { inboxNextTagColour, inboxTagColoursOf, inboxTagColoursRead, inboxTagHex, inboxTagLookOf, isInboxTagColour, type InboxTagLook } from "./inbox-tag-colours";
+import { INBOX_TAG_AUTO_COLOURS, INBOX_TAG_PRESET_HEX, INBOX_TAG_SWATCHES, inboxNextTagColour, inboxTagColoursOf, inboxTagColoursRead, inboxTagHex, inboxTagLookOf, inboxTagOwnColour, isInboxTagColour, isInboxTagLook, type InboxTagLook } from "./inbox-tag-colours";
 
 const auto = (colour: string, at = "2026-11-12T09:00:00.000Z"): InboxTagLook => ({ colour, by: "auto", at });
 const person = (colour: string | null, at: string): InboxTagLook => ({ colour, by: "person", at });
@@ -20,28 +21,57 @@ const tag = (id: string, name: string, at: string, look?: InboxTagLook): InboxIn
   ...(look ? { look } : {}),
 });
 
+const SW = (name: string) => INBOX_TAG_SWATCHES.find((s) => s.name === name)!.hex;
+
 describe("inboxNextTagColour", () => {
-  test("the next unused colour of the calm set, in order, then the least used; never red", () => {
-    expect(inboxNextTagColour([])).toBe("green");
-    expect(inboxNextTagColour(["green"])).toBe("amber");
-    expect(inboxNextTagColour(["green", "amber"])).toBe("accent");
-    expect(inboxNextTagColour(["green", "amber", "accent"])).toBe("grey");
-    expect(inboxNextTagColour(["green", "amber", "accent", "grey"])).toBe("green");
-    // A colour freed by a delete (or a None) is the next one again.
-    expect(inboxNextTagColour(["green", "accent", "grey", null, "#ff6a00"])).toBe("amber");
-    expect(inboxNextTagColour(["red", "red"])).toBe("green");
+  test("a new tag walks all twelve swatches, vivid and calm in turn, before any repeats; red late", () => {
+    const given: string[] = [];
+    for (let i = 0; i < 12; i++) given.push(inboxNextTagColour(given));
+    expect(given).toEqual(["Green", "Indigo", "Amber", "Pink", "Blue", "Lime", "Teal", "Orange", "Violet", "Cyan", "Red", "Grey"].map(SW));
+    expect(new Set(given).size).toBe(12);
+    // Vivid (the first row) and calm (the second) alternate.
+    const vivid = new Set(INBOX_TAG_SWATCHES.slice(0, 6).map((s) => s.hex));
+    expect(given.map((hex) => vivid.has(hex))).toEqual([true, false, true, false, true, false, true, false, true, false, true, false]);
+    // Then round again, from the start.
+    expect(inboxNextTagColour(given)).toBe(SW("Green"));
+    // A colour freed by a delete (or a None) is the next one again; an own colour takes none.
+    expect(inboxNextTagColour([SW("Green"), null, "#ff6a00", SW("Amber")])).toBe(SW("Indigo"));
+  });
+
+  test("a stored name counts as its hue's swatch, so an earlier Inbox's tags are not given their hue again", () => {
+    expect(inboxNextTagColour(["green"])).toBe(SW("Indigo"));
+    expect(inboxNextTagColour(["green", "accent"])).toBe(SW("Amber"));
+    expect(inboxNextTagColour(["green", "accent", "amber", "grey"])).toBe(SW("Pink"));
   });
 });
 
 describe("colours as stored", () => {
   test("a preset or a lowercase #rrggbb; a typed code in any common form reads as one", () => {
-    expect(isInboxTagColour("green")).toBe(true);
+    for (const name of ["accent", "green", "amber", "red", "grey"]) expect(isInboxTagColour(name)).toBe(true);
     expect(isInboxTagColour("#ff6a00")).toBe(true);
     expect(isInboxTagColour("#FF6A00")).toBe(false);
     expect(isInboxTagColour("purple")).toBe(false);
+    expect(isInboxTagColour("teal")).toBe(false);
+    expect(isInboxTagColour("#0b9488ff")).toBe(false);
     expect(inboxTagHex("#FF6A00")).toBe("#ff6a00");
     expect(inboxTagHex("f60")).toBe("#ff6600");
     expect(inboxTagHex("#12")).toBeNull();
+  });
+
+  test("everything this Inbox gives or offers is a lowercase #rrggbb an older Inbox already takes", () => {
+    // An older Inbox's check, as it shipped: a preset name or /^#[0-9a-f]{6}$/.
+    const older = (v: string) => ["accent", "green", "amber", "red", "grey"].includes(v) || /^#[0-9a-f]{6}$/.test(v);
+    for (const hex of [...INBOX_TAG_SWATCHES.map((s) => s.hex), ...INBOX_TAG_AUTO_COLOURS, ...Object.values(INBOX_TAG_PRESET_HEX)]) {
+      expect(older(hex)).toBe(true);
+      expect(isInboxTagLook({ colour: hex, by: "auto", at: "2026-11-16T00:00:00.000Z" })).toBe(true);
+    }
+  });
+
+  test("a quick swatch is not one of the person's own colours; any other code is", () => {
+    expect(inboxTagOwnColour(SW("Teal"))).toBe(false);
+    expect(inboxTagOwnColour("#3a7bd5")).toBe(true);
+    expect(inboxTagOwnColour("green")).toBe(false);
+    expect(inboxTagOwnColour(null)).toBe(false);
   });
 });
 

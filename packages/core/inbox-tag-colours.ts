@@ -1,23 +1,73 @@
 /**
- * A tag's row colour (approval "inbox-thread-tags", build step 3: "C · The whole row, plus the tag's name"; own
- * colour "B · A colour strip and a code field"). A colour is a preset name, each a theme token the window already
- * has (accent `--primary`, green `--success`, amber `--warning`, red `--destructive`, grey the muted text), or a
- * person's own `#rrggbb`, from which the window derives one colour per theme (inbox/tagColours.ts). `null` is None:
- * that tag's rows look as usual.
+ * A tag's row colour (approval "inbox-thread-tags", build step 3: "C · The whole row, plus the tag's name"; the picker
+ * and the row that follows it: approval "inbox-tag-colors-picker", `.product/approved/inbox-tag-colors-picker/`). A
+ * colour is stored as a lowercase `#rrggbb`, from which the window derives the row per theme (inbox/tagColourMap.ts),
+ * or one of the five names an earlier Inbox gave (accent, green, amber, red, grey), still read and still written by an
+ * older linked Inbox: each shows as a calm colour of its hue (`INBOX_TAG_PRESET_HEX`), accent as calm Indigo. `null`
+ * is None: that tag's rows look as usual.
  *
- * A new tag gets a colour by itself (the owner: "Yes", rows coloured right away), the next unused one of the calm set
- * (`INBOX_TAG_AUTO_COLOURS`), never asked for. Kept in `inbox/tags.json` beside the marks (shared/inbox/thread-tags.ts),
- * by tag id, and on every linked machine that holds a tag of the same name: `inboxTagLookOf` picks one look for the
- * merged tag the same way on every machine. One switch, "Show tag colors" in the list's ⋮, turns every row colour
- * on or off; it is kept the same way, the latest change winning.
+ * A new tag gets a colour by itself (the owner: "Yes", rows coloured right away), the next of the twelve quick
+ * swatches, vivid and calm in turn (the owner: "Half vivid, half calm, in turn"), never asked for. Kept in
+ * `inbox/tags.json` beside the marks (shared/inbox/thread-tags.ts), by tag id, and on every linked machine that holds a
+ * tag of the same name: `inboxTagLookOf` picks one look for the merged tag the same way on every machine. One switch,
+ * "Show tag colors" in the list's ⋮, turns every row colour on or off; it is kept the same way, the latest change
+ * winning.
  */
 
-/** The presets, in the colour menu's order. */
+const HEX = /^#[0-9a-f]{6}$/;
+
+/** The names an earlier Inbox stored (and an older linked Inbox still may): every one is still a valid colour. */
 export const INBOX_TAG_PRESETS = ["accent", "green", "amber", "red", "grey"] as const;
 export type InboxTagPreset = (typeof INBOX_TAG_PRESETS)[number];
 
-/** What a new tag is given, in this order, the least used first: red is left out (it reads as an error). */
-export const INBOX_TAG_AUTO_COLOURS: readonly InboxTagPreset[] = ["green", "amber", "accent", "grey"];
+/** The twelve quick swatches, in the menu's order: the first six vivid, the next six calm, each hue once. */
+export const INBOX_TAG_SWATCHES: readonly { name: string; hex: string }[] = [
+  { name: "Red", hex: "#ff7e77" },
+  { name: "Amber", hex: "#d6a20a" },
+  { name: "Green", hex: "#14cc61" },
+  { name: "Teal", hex: "#0b9488" },
+  { name: "Blue", hex: "#047df1" },
+  { name: "Violet", hex: "#a454d7" },
+  { name: "Orange", hex: "#c8875a" },
+  { name: "Lime", hex: "#8aa35d" },
+  { name: "Cyan", hex: "#6ccdea" },
+  { name: "Indigo", hex: "#b1b7fd" },
+  { name: "Pink", hex: "#eda4cc" },
+  { name: "Grey", hex: "#97989b" },
+];
+
+const SWATCH = (name: string): string => INBOX_TAG_SWATCHES.find((s) => s.name === name)!.hex;
+
+/** How each stored name shows: the calm colour of its hue (accent and grey are the Indigo and Grey swatches). */
+export const INBOX_TAG_PRESET_HEX: Readonly<Record<InboxTagPreset, string>> = {
+  accent: SWATCH("Indigo"),
+  green: "#8ed09c",
+  amber: "#dbb970",
+  red: "#f8a49d",
+  grey: SWATCH("Grey"),
+};
+
+/** The swatch of each stored name's hue, for counting which colours are taken. */
+const PRESET_HUE: Readonly<Record<InboxTagPreset, string>> = { accent: "Indigo", green: "Green", amber: "Amber", red: "Red", grey: "Grey" };
+
+/** What a new tag is given, the least used first: vivid and calm in turn, all twelve before any repeats; red late. */
+export const INBOX_TAG_AUTO_COLOURS: readonly string[] = ["Green", "Indigo", "Amber", "Pink", "Blue", "Lime", "Teal", "Orange", "Violet", "Cyan", "Red", "Grey"].map(SWATCH);
+
+/** A stored colour as the `#rrggbb` it shows as: a name as its calm colour, a code as itself. */
+export function inboxTagShownHex(colour: string): string {
+  return isInboxTagPreset(colour) ? INBOX_TAG_PRESET_HEX[colour] : colour;
+}
+
+/** A quick swatch's name for a colour that shows as one ("Teal"), else null. */
+export function inboxTagSwatchName(colour: string): string | null {
+  const hex = inboxTagShownHex(colour);
+  return INBOX_TAG_SWATCHES.find((s) => s.hex === hex)?.name ?? null;
+}
+
+/** Whether a picked colour goes among the person's own recent ones: a code that is not a quick swatch. */
+export function inboxTagOwnColour(colour: unknown): colour is string {
+  return typeof colour === "string" && HEX.test(colour) && !INBOX_TAG_SWATCHES.some((s) => s.hex === colour);
+}
 
 /** The person's own colours kept for the menu's second line, newest first. */
 export const INBOX_TAG_RECENT_MAX = 3;
@@ -37,8 +87,6 @@ export interface InboxTagColours {
   /** The person's own colours, newest first, at most INBOX_TAG_RECENT_MAX. */
   recent: { colour: string; at: string }[];
 }
-
-const HEX = /^#[0-9a-f]{6}$/;
 
 export function isInboxTagPreset(value: unknown): value is InboxTagPreset {
   return typeof value === "string" && (INBOX_TAG_PRESETS as readonly string[]).includes(value);
@@ -62,12 +110,16 @@ export function isInboxTagLook(value: unknown): value is InboxTagLook {
   return (look.colour === null || isInboxTagColour(look.colour)) && (look.by === "auto" || look.by === "person") && typeof look.at === "string";
 }
 
-/** The colour a new tag gets: of the calm set, the one fewest live tags have, the first in the set on a tie. */
-export function inboxNextTagColour(used: readonly (string | null)[]): InboxTagPreset {
-  let best: InboxTagPreset = INBOX_TAG_AUTO_COLOURS[0]!;
+/**
+ * The colour a new tag gets: of the twelve in `INBOX_TAG_AUTO_COLOURS`' order, the one fewest live tags show, the
+ * first on a tie. A stored name counts as the swatch of its hue (accent as Indigo), so its hue is not given twice.
+ */
+export function inboxNextTagColour(used: readonly (string | null)[]): string {
+  const shown = used.flatMap((c) => (c === null ? [] : [isInboxTagPreset(c) ? SWATCH(PRESET_HUE[c]) : c]));
+  let best = INBOX_TAG_AUTO_COLOURS[0]!;
   let fewest = Infinity;
   for (const colour of INBOX_TAG_AUTO_COLOURS) {
-    const n = used.filter((c) => c === colour).length;
+    const n = shown.filter((c) => c === colour).length;
     if (n < fewest) {
       best = colour;
       fewest = n;

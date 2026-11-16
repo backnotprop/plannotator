@@ -3,7 +3,7 @@
  * catches: a new tag left without a colour (its rows would not tint at once, as the owner asked); tags made before
  * colours coloured differently on each load, or not written; a colour lost with a delete's Undo; a person's pick
  * replaced by an automatic one; the marks dropped by a colour write; a bad colour stored; the own colours growing past
- * three or repeating; a held write landing late over a newer pick; a clock far ahead pinning its pick.
+ * three or repeating, or holding a quick swatch; a held write landing late over a newer pick; a clock far ahead pinning its pick.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -35,21 +35,27 @@ function world() {
   return { dir, store, thread, reopen, file, onDisk };
 }
 
-test("a new tag gets the next unused calm colour at once, kept across a restart", () => {
+const GREEN = "#14cc61";
+const INDIGO = "#b1b7fd";
+const AMBER = "#d6a20a";
+
+test("a new tag gets the next unused of the twelve colours at once, vivid and calm in turn, kept across a restart", () => {
   const { store, reopen, onDisk } = world();
   const release = store.createInitiative({ name: "Release", by: PERSON });
   const docs = store.createInitiative({ name: "Docs move", by: PERSON });
   const windows = store.createInitiative({ name: "Windows", by: PERSON });
-  expect([release, docs, windows].map((t) => store.tagLook(t.id)?.colour)).toEqual(["green", "amber", "accent"]);
+  expect([release, docs, windows].map((t) => store.tagLook(t.id)?.colour)).toEqual([GREEN, INDIGO, AMBER]);
   expect(store.tagLook(release.id)?.by).toBe("auto");
-  expect(onDisk().looks?.[docs.id]?.colour).toBe("amber");
-  expect(reopen().tagLook(windows.id)?.colour).toBe("accent");
+  expect(onDisk().looks?.[docs.id]?.colour).toBe(INDIGO);
+  expect(reopen().tagLook(windows.id)?.colour).toBe(AMBER);
+  // A colour given by itself is not one of the person's own.
+  expect(store.tagColours().recent).toEqual([]);
   // A tag deleted frees its colour for the next one; its own is kept for the Undo.
   store.deleteInitiative(docs.id);
   const billing = store.createInitiative({ name: "Billing", by: PERSON });
-  expect(store.tagLook(billing.id)?.colour).toBe("amber");
+  expect(store.tagLook(billing.id)?.colour).toBe(INDIGO);
   store.restoreInitiative(docs.id);
-  expect(store.tagLook(docs.id)?.colour).toBe("amber");
+  expect(store.tagLook(docs.id)?.colour).toBe(INDIGO);
 });
 
 test("tags made before colours get theirs at the first load, oldest first, the same every time, written once", () => {
@@ -60,11 +66,11 @@ test("tags made before colours get theirs at the first load, oldest first, the s
   // What an Inbox before colours leaves: the marks only.
   writeFileSync(file, `${JSON.stringify({ v: 1, marks: [] })}\n`);
   const first = reopen();
-  expect([a, b, c].map((t) => first.tagLook(t.id)?.colour)).toEqual(["green", "amber", "accent"]);
+  expect([a, b, c].map((t) => first.tagLook(t.id)?.colour)).toEqual([GREEN, INDIGO, AMBER]);
   const written = readFileSync(file, "utf8");
   expect(onDisk().looks?.[c.id]?.by).toBe("auto");
   const second = reopen();
-  expect([a, b, c].map((t) => second.tagLook(t.id)?.colour)).toEqual(["green", "amber", "accent"]);
+  expect([a, b, c].map((t) => second.tagLook(t.id)?.colour)).toEqual([GREEN, INDIGO, AMBER]);
   expect(readFileSync(file, "utf8")).toBe(written);
 });
 
@@ -96,6 +102,10 @@ test("own colours: the last three, newest first, each once, on any tag", () => {
   store.setTagColour(b.id, "#ff6a00", null);
   store.setTagColour(b.id, "#112233", null);
   expect(reopen().tagColours().recent.map((r) => r.colour)).toEqual(["#112233", "#ff6a00", "#c2185b"]);
+  // A quick swatch is a pick, not an own colour: the recent ones stay as they were.
+  store.setTagColour(a.id, "#0b9488", null);
+  expect(store.tagLook(a.id)?.colour).toBe("#0b9488");
+  expect(store.tagColours().recent.map((r) => r.colour)).toEqual(["#112233", "#ff6a00", "#c2185b"]);
 });
 
 test("Show tag colors: on until set, then as set, kept across a restart", () => {

@@ -3,19 +3,17 @@
  * this catches: a row in a coloured tag left plain, or tinted with the wrong tag's colour, or naming no tag, in any of
  * the three row shapes; a tag's own list tinting every row with that tag; the switch off still tinting; the colour
  * menu unreachable by keyboard or losing its place; a pick not written to the linked machine that holds the tag; a
- * tint strong enough to make a row's quieter text hard to read; and a list read with the same colours drawing all
- * 200+ rows again (ListRow's memo).
+ * pick on the square lost or written once per arrow step; and a list read with the same colours drawing all 200+ rows
+ * again (ListRow's memo). The pick-to-row mapping and its contrast: tagColourMap.test.ts.
  *
  * DOM-gated parts run under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { drawsDuring } from '../../tests/helpers/react-draws';
 import { afterEach, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import type { InboxInitiative, InboxListRow, InboxListSection, InboxTagColours } from '@plannotator/core/inbox-types';
 import type { MachinesModel } from './machines';
 import type { ListTag } from './threadTags';
-import { ownColour, rowTint, rowTintTitle, tintAttrs } from './tagColours';
+import { rowTint, rowTintTitle, tintAttrs } from './tagColours';
 import type { ListTagColours, TagColourControls } from './useThreadTagsHost';
 import { LIST_LOOK_DEFAULT } from './listLook';
 
@@ -89,66 +87,13 @@ test('a row takes the colour of its first coloured tag by name; the others are n
   expect(rowTintTitle({ colour: '#ff6a00', name: 'Release', also: [] })).toBe('Highlighted: Release, Custom #ff6a00');
 });
 
-test('an own colour keeps its hue at the theme’s lightness; one with no hue tints as Grey', () => {
-  expect(tintAttrs('green')).toEqual({ 'data-tint': 'green' });
+test('a colour is drawn as its row in both themes: a stored name keeps its name, a code is custom, black is a grey row', () => {
+  expect(tintAttrs('green')['data-tint']).toBe('green');
   const own = tintAttrs('#ff6a00');
   expect(own['data-tint']).toBe('custom');
-  expect(own.style?.['--ib-tint-l']).toMatch(/^oklch\(0\.52 0\.180 /);
-  expect(own.style?.['--ib-tint-d']).toMatch(/^oklch\(0\.72 0\.180 /);
-  // A near-black navy keeps its hue, drawn at the theme's lightness, its chroma within the band.
-  expect(ownColour('#0b1e4a')?.dark).toMatch(/^oklch\(0\.72 0\.(0[89]|1)\d* 263\.\d\)$/);
-  expect(tintAttrs('#000000')).toEqual({ 'data-tint': 'grey' });
-  expect(tintAttrs('#808080')).toEqual({ 'data-tint': 'grey' });
-});
-
-/** WCAG contrast of two OKLCH colours. */
-function contrast(a: [number, number, number], b: [number, number, number]): number {
-  const lum = ([L, C, H]: [number, number, number]) => {
-    const A = C * Math.cos((H * Math.PI) / 180);
-    const B = C * Math.sin((H * Math.PI) / 180);
-    const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
-    const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
-    const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
-    const rgb = [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s].map((v) => Math.max(0, Math.min(1, v)));
-    return 0.2126 * rgb[0]! + 0.7152 * rgb[1]! + 0.0722 * rgb[2]!;
-  };
-  const [x, y] = [lum(a), lum(b)];
-  return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05);
-}
-
-test('the strongest tint keeps a row’s quieter text at 4.5:1 on the default theme, for every preset and any own colour, light and dark', () => {
-  const css = readFileSync(join(import.meta.dir, 'threadTags.css'), 'utf8');
-  const theme = readFileSync(join(import.meta.dir, '../ui/themes/plannotator.css'), 'utf8');
-  const block = (selector: string) => theme.slice(theme.indexOf(`${selector} {`), theme.indexOf('}', theme.indexOf(`${selector} {`)));
-  const token = (text: string, name: string): [number, number, number] => {
-    const m = new RegExp(`--${name}: oklch\\(([\\d.]+) ([\\d.]+) ([\\d.]+)\\)`).exec(text);
-    if (!m) throw new Error(`no ${name}`);
-    return [Number(m[1]), Number(m[2]), Number(m[3])];
-  };
-  const strongest = (scope: string) => {
-    const line = css.split('\n').find((l) => l.startsWith(scope) && l.includes('--ib-tint-sh'));
-    return Number(/--ib-tint-sh: (\d+)%/.exec(line ?? '')?.[1]) / 100;
-  };
-  const toLab = ([L, C, H]: [number, number, number]) => [L, C * Math.cos((H * Math.PI) / 180), C * Math.sin((H * Math.PI) / 180)];
-  const fromLab = ([L, A, B]: number[]): [number, number, number] => [L!, Math.hypot(A!, B!), ((Math.atan2(B!, A!) * 180) / Math.PI + 360) % 360];
-  const mix = (tint: [number, number, number], card: [number, number, number], p: number) => {
-    const [t, c] = [toLab(tint), toLab(card)];
-    return fromLab(t.map((v, i) => v * p + c[i]! * (1 - p)));
-  };
-  for (const [mode, selector, scope, ownL] of [
-    ['dark', '.theme-plannotator', '.pn-inbox, .ib-lightscope {', 0.72],
-    ['light', '.theme-plannotator.light', ':root.light .pn-inbox', 0.52],
-  ] as const) {
-    const t = block(selector);
-    const p = strongest(scope);
-    expect(p).toBeGreaterThan(0.1);
-    const card = token(t, 'card');
-    const muted = token(t, 'muted-foreground');
-    const tints: [number, number, number][] = ['primary', 'success', 'warning', 'destructive', 'muted-foreground'].map((name) => token(t, name));
-    for (let h = 0; h < 360; h += 5) for (const c of [0.08, 0.13, 0.18]) tints.push([ownL, c, h]);
-    const worst = Math.min(...tints.map((tint) => contrast(muted, mix(tint, card, p))));
-    expect({ mode, ok: worst >= 4.5 }).toEqual({ mode, ok: true });
-  }
+  expect(Object.keys(own.style).sort()).toEqual(['--ib-tint-dc', '--ib-tint-dd', '--ib-tint-hue', '--ib-tint-lc', '--ib-tint-ld']);
+  expect(Number(own.style['--ib-tint-lc'])).toBeGreaterThan(0.05);
+  expect(Number(tintAttrs('#000000').style['--ib-tint-lc'])).toBeLessThanOrEqual(0.006);
 });
 
 let root: ReturnType<typeof createRoot> | null = null;
@@ -252,7 +197,8 @@ test.skipIf(!hasDom)('an own colour on a row carries its two theme colours; no c
   const own = [tag(RELEASE.id, 'Release', '#ff6a00'), DOCS, WINDOWS];
   draw(<List rows={[row('a', [RELEASE.id])]} colours={listColours(own)} />);
   expect(rowEl('a').getAttribute('data-tint')).toBe('custom');
-  expect(rowEl('a').style.getPropertyValue('--ib-tint-d')).toMatch(/^oklch\(0\.72 /);
+  expect(Number(rowEl('a').style.getPropertyValue('--ib-tint-dd'))).toBeGreaterThan(0);
+  expect(Number(rowEl('a').style.getPropertyValue('--ib-tint-ld'))).toBeLessThan(0);
   act(() => root!.render(<List rows={[row('a', [RELEASE.id])]} colours={{ ...listColours(own), show: false, tintOf: () => null }} />));
   expect(rowEl('a').hasAttribute('data-tint')).toBe(false);
   expect(rowEl('a').querySelector('[data-row-tag]')).toBeNull();
@@ -312,7 +258,7 @@ function Section({ colours }: { colours: TagColourControls }) {
   );
 }
 
-test.skipIf(!hasDom)('a sidebar tag wears its colour; Highlight rows opens the colours in place: presets, own colours, strip, Hex, None, by keyboard too', async () => {
+test.skipIf(!hasDom)('a sidebar tag wears its colour; Highlight rows opens the colours in place: twelve swatches, own colours, square, strip, Hex, None, by keyboard too', async () => {
   const picks: (string | null)[] = [];
   const colours: TagColourControls = { show: true, colourOf: colourIn(TAGS), recent: ['#0b1e4a'], set: (_t, c) => picks.push(c), preview: () => {} };
   draw(<Section colours={colours} />);
@@ -326,23 +272,34 @@ test.skipIf(!hasDom)('a sidebar tag wears its colour; Highlight rows opens the c
   await press(tagMenu()!.querySelector('[data-tag-action="colour"]'));
   await until(() => !!tagMenu()?.querySelector('[data-tag-colour-list]'), 'the colours');
   const list = tagMenu()!.querySelector<HTMLElement>('[data-tag-colour-list]')!;
-  expect(list.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Highlight colour for Release');
+  expect(list.querySelector('[role="group"]')?.getAttribute('aria-label')).toBe('Highlight color for Release');
   const radios = [...list.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
-  expect(radios.map((r) => r.getAttribute('aria-label') ?? r.textContent?.trim())).toEqual(['Accent', 'Green', 'Amber', 'Red', 'Grey', 'Custom #0b1e4a', 'None']);
-  expect(list.querySelector('[data-colour="green"]')!.getAttribute('aria-checked')).toBe('true');
+  // Twelve quick swatches (vivid, then calm); Release's stored "green" (an earlier Inbox's name) shows as its calm
+  // colour among the own ones, named Green; then the recent own colour; None.
+  expect(radios.map((r) => r.getAttribute('aria-label') ?? r.textContent?.trim())).toEqual(['Red', 'Amber', 'Green', 'Teal', 'Blue', 'Violet', 'Orange', 'Lime', 'Cyan', 'Indigo', 'Pink', 'Grey', 'Green', 'Custom #0b1e4a', 'None']);
+  const stored = list.querySelector<HTMLElement>('[data-colour="#8ed09c"]')!;
+  expect(stored.getAttribute('aria-checked')).toBe('true');
   expect(list.querySelector('[data-tag-colour-caption]')!.textContent).toBe('Green: rows tagged Release');
-  await until(() => document.activeElement === list.querySelector('[data-colour="green"]'), 'focus on the colour that is on');
+  await until(() => document.activeElement === stored, 'focus on the colour that is on');
   // A pick is written and the menu stays open.
-  await press(list.querySelector('[data-colour="amber"]'));
-  expect(picks).toEqual(['amber']);
+  await press(list.querySelector('[data-colour="#d6a20a"]'));
+  expect(picks).toEqual(['#d6a20a']);
   expect(tagMenu()?.querySelector('[data-tag-colour-list]')).not.toBeNull();
-  // By keyboard: Down from the last swatch to the strip, then the Hex field, then None; Up from None back to Hex.
+  // By keyboard: Down from the last swatch to the square, then the strip, the Hex field, None; Up from None back to Hex.
   const last = list.querySelector<HTMLElement>('[data-colour="#0b1e4a"]')!;
   act(() => last.focus());
   await key(last, 'ArrowDown');
+  const square = list.querySelector<HTMLElement>('[data-tag-colour-square]')!;
+  expect(document.activeElement).toBe(square);
+  // Down the square to its bottom edge (brightness 0), then out to the strip: the move is kept once, on leaving.
+  for (let i = 0; i < 12; i++) await key(square, 'PageDown');
+  expect(square.getAttribute('aria-valuetext')).toMatch(/, brightness 0%$/);
+  expect(picks).toEqual(['#d6a20a']);
+  await key(square, 'ArrowDown');
   const strip = list.querySelector<HTMLInputElement>('[data-tag-colour-hue]')!;
   expect(document.activeElement).toBe(strip);
-  expect(strip.getAttribute('aria-label')).toBe('Colour, any hue');
+  expect(picks).toEqual(['#d6a20a', '#000000']);
+  expect(strip.getAttribute('aria-label')).toBe('Hue');
   await key(strip, 'ArrowDown');
   const hex = list.querySelector<HTMLInputElement>('[data-tag-colour-hex]')!;
   expect(document.activeElement).toBe(hex);
@@ -356,32 +313,98 @@ test.skipIf(!hasDom)('a sidebar tag wears its colour; Highlight rows opens the c
     hex.dispatchEvent(new Event('input', { bubbles: true }));
   });
   await key(hex, 'Enter');
-  expect(picks).toEqual(['amber', '#ff6a00']);
+  expect(picks).toEqual(['#d6a20a', '#000000', '#ff6a00']);
   await press(list.querySelector('[data-colour="none"]'));
-  expect(picks).toEqual(['amber', '#ff6a00', null]);
+  expect(picks).toEqual(['#d6a20a', '#000000', '#ff6a00', null]);
   // Steps on the strip by key are kept once, when the keys rest: one colour, not one per step.
   for (let i = 0; i < 3; i++) {
     await act(async () => {
       strip.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
     });
   }
-  expect(picks).toHaveLength(3);
-  await until(() => picks.length === 4, 'the strip kept');
+  expect(picks).toHaveLength(4);
+  await until(() => picks.length === 5, 'the strip kept');
   expect(picks.at(-1)).toMatch(/^#[0-9a-f]{6}$/);
   await act(async () => {
     await new Promise((r) => setTimeout(r, 900));
   });
-  expect(picks).toHaveLength(4);
+  expect(picks).toHaveLength(5);
   // A screen reader's swipe moves the strip with no key and no pointer: kept once it rests too.
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(strip, '200');
     strip.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await until(() => picks.length === 5, 'the swipe kept');
+  await until(() => picks.length === 6, 'the swipe kept');
   expect(picks.at(-1)).not.toBe(picks.at(-2));
   // Back: the menu again, focus on Highlight rows.
   await press(list.querySelector('[data-tag-colour-back]'));
   await until(() => document.activeElement === tagMenu()?.querySelector('[data-tag-action="colour"]'), 'focus back on Highlight rows');
+});
+
+async function openColours(colours: TagColourControls): Promise<HTMLElement> {
+  draw(<Section colours={colours} />);
+  await act(async () => {
+    tagRow(RELEASE.id)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
+  });
+  await until(() => !!tagMenu(), 'the tag menu');
+  await press(tagMenu()!.querySelector('[data-tag-action="colour"]'));
+  await until(() => !!tagMenu()?.querySelector('[data-tag-colour-list]'), 'the colours');
+  return tagMenu()!.querySelector<HTMLElement>('[data-tag-colour-list]')!;
+}
+
+test.skipIf(!hasDom)('the square: a named slider whose arrows move saturation and brightness by 1%, previewing at once and kept once it rests; Up at its top edge steps out; a drag keeps on letting go', async () => {
+  const picks: (string | null)[] = [];
+  const previews: (string | null | undefined)[] = [];
+  const teal = [tag(RELEASE.id, 'Release', '#0b9488'), DOCS, WINDOWS];
+  const list = await openColours({ show: true, colourOf: colourIn(teal), recent: [], set: (_t, c) => picks.push(c), preview: (_t, c) => previews.push(c) });
+  const square = list.querySelector<HTMLElement>('[data-tag-colour-square]')!;
+  expect(square.getAttribute('role')).toBe('slider');
+  expect(square.getAttribute('aria-label')).toBe('Color');
+  // #0b9488: saturation 93%, brightness 58%.
+  expect(square.getAttribute('aria-valuetext')).toBe('Saturation 93%, brightness 58%');
+  act(() => square.focus());
+  await key(square, 'ArrowRight');
+  expect(square.getAttribute('aria-valuetext')).toBe('Saturation 94%, brightness 58%');
+  await key(square, 'ArrowUp');
+  await key(square, 'ArrowLeft');
+  await key(square, 'ArrowLeft');
+  expect(square.getAttribute('aria-valuetext')).toBe('Saturation 92%, brightness 59%');
+  // Each step shows on the rows at once; none is kept yet, and the menu's own arrows did not move focus.
+  expect(previews.filter(Boolean)).toHaveLength(4);
+  expect(picks).toEqual([]);
+  expect(document.activeElement).toBe(square);
+  await until(() => picks.length === 1, 'the square kept once it rests');
+  expect(picks[0]).toBe(previews.at(-1)!);
+  expect(list.querySelector<HTMLInputElement>('[data-tag-colour-hex]')!.value).toBe(picks[0]!);
+  // Home and End take saturation to its ends; PageUp brightness up by 10%.
+  await key(square, 'End');
+  await key(square, 'PageUp');
+  expect(square.getAttribute('aria-valuetext')).toBe('Saturation 100%, brightness 69%');
+  await key(square, 'Home');
+  expect(square.getAttribute('aria-valuetext')).toBe('Saturation 0%, brightness 69%');
+  // Up to the top edge, then one more Up steps out to the last swatch (Grey).
+  for (let i = 0; i < 4; i++) await key(square, 'PageUp');
+  expect(square.getAttribute('aria-valuetext')).toBe('Saturation 0%, brightness 100%');
+  await key(square, 'ArrowUp');
+  expect(document.activeElement).toBe(list.querySelector('[data-colour="#97989b"]'));
+  // Leaving keeps the move still resting: white (no saturation, full brightness), once.
+  expect(picks).toEqual([picks[0]!, '#ffffff']);
+  // A drag: the rows follow, and the colour is kept when let go (vivid: top right is the hue at full strength).
+  square.getBoundingClientRect = () => ({ left: 0, top: 0, width: 200, height: 100, right: 200, bottom: 100, x: 0, y: 0, toJSON: () => ({}) }) as DOMRect;
+  const pointer = (type: string, x: number, y: number) =>
+    act(async () => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+      Object.defineProperty(event, 'pointerId', { value: 1 });
+      square.dispatchEvent(event);
+    });
+  await pointer('pointerdown', 20, 80);
+  await pointer('pointermove', 200, 0);
+  expect(square.getAttribute('aria-valuetext')).toBe('Saturation 100%, brightness 100%');
+  expect(picks).toHaveLength(2);
+  await pointer('pointerup', 200, 0);
+  expect(picks).toHaveLength(3);
+  expect(picks.at(-1)).toMatch(/^#[0-9a-f]{6}$/);
+  expect(picks.at(-1)).not.toBe('#ffffff');
 });
 
 test.skipIf(!hasDom)('"Show tag colors" off hides the sidebar tags’ colours too', () => {

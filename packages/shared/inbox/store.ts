@@ -220,6 +220,7 @@ import {
   type InboxInitiative,
   inboxNextTagColour,
   isInboxTagColour,
+  inboxTagOwnColour,
   INBOX_TAG_RECENT_MAX,
   type InboxTagColours,
   type InboxTagLook,
@@ -8276,7 +8277,7 @@ export class InboxStore {
   /**
    * The person picked a tag's colour (a preset, their own `#rrggbb`, or null for None). `at` is when they picked it,
    * the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own colour
-   * goes first in the recent ones. Writes no store line.
+   * (not a quick swatch) goes first in the recent ones. Writes no store line.
    */
   setTagColour(tagId: unknown, colour: unknown, at: unknown): InboxTagLook {
     const tag = this.liveInitiative(tagId);
@@ -8287,7 +8288,7 @@ export class InboxStore {
     if (kept?.by === "person" && this.colourKeptAt(kept.at) > Date.parse(when)) return kept;
     const look: InboxTagLook = { colour, by: "person", at: when };
     const looks = new Map(this.tagColourState.looks).set(tag.id, look);
-    const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
+    const recent = inboxTagOwnColour(colour) ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
     this.commitTagColours({ ...this.tagColourState, looks, recent });
     return look;
   }

@@ -1962,15 +1962,16 @@ describe("a star or Priority on a linked machine's thread lives on that machine 
       const bId = (JSON.parse(readFileSync(join(dataA, "inbox", "machines.json"), "utf8")) as Json).links[0].id as string;
       const colourOf = async (port: number, name: string) => ((await list(port)).tags as Json[]).find((tag) => (tag.name as string).toLowerCase() === name)?.look?.colour;
       const shownOn = async (port: number) => ((await list(port)).tag_colours as Json).show;
-      // A's Release first, so its colour is the one both keep; B's own first tag takes green, so its Release is amber.
+      // A's Release first, so its colour is the one both keep; B's own first tag takes Green, so its Release is Indigo.
+      const GREEN = "#14cc61";
       const release = a.store.createInitiative({ name: "Release", by: { kind: "person" } });
       b.store.createInitiative({ name: "Windows", by: { kind: "person" } });
       const bRelease = b.store.createInitiative({ name: "release", by: { kind: "person" } });
-      expect(a.store.tagLook(release.id)?.colour).toBe("green");
-      expect(b.store.tagLook(bRelease.id)?.colour).toBe("amber");
-      await waitFor("B's tags on A", async () => (await colourOf(a.port, "windows")) === "green", 30_000);
-      expect(await colourOf(a.port, "release")).toBe("green");
-      await waitFor("A's Release on B", async () => (await colourOf(b.port, "release")) === "green", 30_000);
+      expect(a.store.tagLook(release.id)?.colour).toBe(GREEN);
+      expect(b.store.tagLook(bRelease.id)?.colour).toBe("#b1b7fd");
+      await waitFor("B's tags on A", async () => (await colourOf(a.port, "windows")) === GREEN, 30_000);
+      expect(await colourOf(a.port, "release")).toBe(GREEN);
+      await waitFor("A's Release on B", async () => (await colourOf(b.port, "release")) === GREEN, 30_000);
       expect(((((await (await fetch(`${at(a.port)}/api/inbox/machines`)).json()) as Json).machines as Json[]).find((m) => m.id === bId)!.marks as string[])).toContain("tag-colours");
 
       // Picked on A: A's copy, then B's by its id there (the window's write); both read the pick.
