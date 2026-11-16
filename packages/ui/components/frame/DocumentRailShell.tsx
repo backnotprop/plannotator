@@ -30,6 +30,7 @@ export function DocumentRailShell({
   open,
   onOpenChange,
   onFitChange,
+  narrowRail = "tab",
 }: {
   head: ReactNode;
   children: ReactNode;
@@ -48,6 +49,11 @@ export function DocumentRailShell({
   onOpenChange?: (open: boolean) => void;
   /** Whether the docked rail fits the row; while it does not, show `RailSheet` with `docked={false}`. */
   onFitChange?: (fits: boolean) => void;
+  /**
+   * While the rail does not fit: `"tab"` (default) keeps the tab, which opens the rail anyway;
+   * `"host"` hides it, for a host that offers `RailSheet docked={false}` then.
+   */
+  narrowRail?: "tab" | "host";
 }) {
   const keys = railStorageKeys(storageKeys);
   const rail = useDocumentRailState(defaults, storage, keys.open, { open, onOpenChange });
@@ -75,7 +81,11 @@ export function DocumentRailShell({
   useEffect(() => {
     railWidthApplyRef.current = (nextWidth) => railMotion.width.set(nextWidth);
   });
-  const flagsVisible = !railMotion.mounted && (!rail.railOpen || (enabled && !shown));
+  const tabWhileNarrow = narrowRail === "tab";
+  const flagsVisible =
+    !railMotion.mounted &&
+    (!rail.railOpen || (enabled && !shown && tabWhileNarrow)) &&
+    (tabWhileNarrow || !enabled || fits);
   useLayoutEffect(() => {
     onFlagsChange?.(flagsVisible);
   }, [onFlagsChange, flagsVisible]);

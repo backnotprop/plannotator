@@ -321,7 +321,7 @@ describe.skipIf(!hasDom)('DocumentRailShell', () => {
       elsewhere.remove();
     }));
 
-  test('a rail that does not fit keeps its tab; pressing it opens the rail anyway and focus moves into it', () =>
+  test('narrowRail="tab" (the default): a rail that does not fit keeps its tab; pressing it opens the rail anyway and focus moves into it', () =>
     withReducedMotion(async () => {
       const { DocumentRailShell } = shellModule!;
       const frame = mount(
@@ -343,6 +343,22 @@ describe.skipIf(!hasDom)('DocumentRailShell', () => {
       await act(async () => {});
       expect(frame.querySelector('[data-document-rail]')).toBeNull();
       expect(document.activeElement).toBe(frame.querySelector('[aria-label="Show files"]'));
+    }));
+
+  test('narrowRail="host": no tab while the rail does not fit, and none for focus to land on; the tab returns when it fits', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const shell = (fit: boolean) => (
+        <DocumentRailShell head={head} defaults={{ open: false }} fitsForWidth={() => fit} narrowRail="host" storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>
+      );
+      const frame = mount(shell(false));
+      expect(frame.querySelector('[aria-label="Show files"]')).toBeNull();
+      expect(frame.querySelector('[data-document-rail]')).toBeNull();
+      act(() => root!.render(shell(true)));
+      expect(frame.querySelector('[aria-label="Show files"]')).not.toBeNull();
+      expect(document.activeElement).not.toBe(frame.querySelector('[aria-label="Show files"]'));
     }));
 
   test('a rail that does not fit says so, and the rail sheet is then offered at a desktop width', () => {
