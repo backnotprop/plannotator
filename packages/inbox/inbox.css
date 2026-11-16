@@ -1025,14 +1025,14 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 /* main list */
 .ib-main { background: var(--ib-main-bg); display: flex; flex: 1; min-width: 0; height: 100%; padding: var(--ib-gutter); gap: var(--ib-gutter); }
 /* Each pane is a card on the ground: the list, a thread, a file beside its thread, Settings, Drafts, What's new. */
-.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
+.ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview), :where(.ib-main > .ib-panehost) > .ib-panedock > :is(.ib-pane, .ib-view) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; }
 /* Each takes the card's colour under the panes switch. Off, today's: the thread pane its own card, a file the
    window's background, and the rest none of their own (an opaque scroller draws its text differently). */
 .ib-main > :is(.ib-listcol, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage) { background: var(--ib-pane-bg-s, transparent); }
-.ib-main > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
+.ib-main > .ib-view, :where(.ib-main > .ib-panehost) > .ib-panedock > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
 /* The list keeps its resize edge in the gutter beside it (never clipped); its scroll box follows the card's corners instead.
    Settings, Drafts and What's new scroll themselves, which clips them to their corners already. */
-.ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview) { overflow: var(--ib-clip-s, visible); }
+.ib-main > :is(.ib-pane, .ib-view:not(.ib-full), .ib-prreview), :where(.ib-main > .ib-panehost) > .ib-panedock > :is(.ib-pane, .ib-view:not(.ib-full)) { overflow: var(--ib-clip-s, visible); }
 .ib-main > .ib-listcol > .ib-lbody { border-radius: 0 0 var(--ib-pane-r) var(--ib-pane-r); }
 .ib-listcol { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
 .ib-listcol.ib-narrow { flex: none; width: 380px; border-right: 1px solid var(--ib-pane-line); }
@@ -1478,7 +1478,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 /* Answers held for an asleep machine, under the line, as the thread draws them. */
 .ib-pwait-held { width: 100%; max-width: 640px; margin-top: 20px; text-align: left; }
 /* A full-screen file covers the window: no card of its own. */
-.ib-main > .ib-view.ib-full { border-radius: 0; box-shadow: none; }
+.ib-main > .ib-view.ib-full, :where(.ib-main > .ib-panehost) > .ib-panedock > .ib-view.ib-full { border-radius: 0; box-shadow: none; }
 .ib-phead { height: 46px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 14px 0 max(14px, var(--ib-controls-left, 0px)); border-bottom: 1px solid var(--ib-hair); }
 .ib-phead .ib-sp { flex: 1; }
 .ib-pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 30px 18px; container: ib-thread / inline-size; }
@@ -3340,17 +3340,25 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-npill-wrap { position: sticky; bottom: 12px; height: 0; display: flex; justify-content: center; z-index: 60; pointer-events: none; }
 .pn-inbox .ib-npill { pointer-events: auto; transform: translateY(-100%); display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 11px; border-radius: 999px; border: 1px solid color-mix(in oklch, var(--primary) 50%, var(--border)); background: var(--popover); box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22); font-size: var(--ib-fs-13, 13px); font-weight: 600; color: var(--primary); transition: opacity 160ms ease-out, transform 160ms cubic-bezier(0.23, 1, 0.32, 1); }
 .pn-inbox .ib-npill[data-off] { opacity: 0; transform: translateY(-60%); pointer-events: none; visibility: hidden; transition: opacity 120ms ease-out, transform 120ms ease-out, visibility 0s 120ms; }
-/* the header: its title (the thread's name; with none, the subject once the body's heading has scrolled away) and
+/* the header: its title (the thread's name and heading; with no name, its heading) and
    Expand all / Fold all. `text-align: left` with `dir="auto"`: a short right-to-left title still sits after the icons
    before it, and a long one still cuts at its logical end. */
-.ib-phsubj { flex: 1; min-width: 0; padding: 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; opacity: 0; transition: opacity 120ms ease-out; }
-.ib-phsubj[data-on] { opacity: 1; }
+/* The thread's title (its h2, in the bar always): `.ib-subject` is the body heading's type elsewhere (a scheduled message, the tour). */
+.ib-phead h2.ib-phsubj { flex: 1; min-width: 0; margin: 0; padding: 0 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 600; line-height: inherit; letter-spacing: normal; overflow-wrap: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
 /* The title's words, as wide as they are (at most the box): its tooltip's anchor, so the tip opens under the words. */
 .ib-phsubj-t { display: inline-block; max-width: 100%; vertical-align: top; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* After a name, the heading in the same line, muted (thread/ThreadBarTitle.tsx). */
+.ib-phsubj-sub { color: var(--muted-foreground); font-weight: 400; }
+/* A cut title is a button: a click or a tap opens it whole. It looks like the title it is. */
+.pn-inbox button.ib-phsubj-t { margin: 0; padding: 0; border: 0; background: none; color: inherit; font: inherit; letter-spacing: inherit; text-align: inherit; cursor: pointer; border-radius: 4px; }
+/* Open: the whole title, wrapped, the bar as tall as it needs up to about five lines, then the title scrolls. */
+.ib-phead:has(> h2.ib-phsubj[data-open]) { height: auto; min-height: 46px; }
+.ib-phead h2.ib-phsubj[data-open] { white-space: normal; overflow-wrap: anywhere; text-overflow: clip; line-height: 1.4; max-height: calc(5 * 1.4em + 16px); overflow-y: auto; padding-block: 8px; }
+.ib-phead h2.ib-phsubj[data-open] .ib-phsubj-t { white-space: normal; text-overflow: clip; }
 .pn-inbox .ib-ptool { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
 .pn-inbox .ib-ptool:hover { background: var(--muted); color: var(--foreground); }
 @media (prefers-reduced-motion: reduce) {
-  .pn-inbox .ib-npill, .ib-phsubj, .ib-phead .ib-vsep { transition: none; }
+  .pn-inbox .ib-npill, .ib-phead .ib-vsep { transition: none; }
 }
 /* The same pill at the list's edge (ListNewPill.tsx): news came while the list's "N new" line is out of view. Its
    box sits between the header and the rows and takes no room. The pill is 12 px inside the edge the row will land
@@ -3418,8 +3426,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-phead .ib-vsep { width: 1px; height: 18px; background: var(--ib-line); margin: 0 4px; flex: none; }
 /* The divider after the way back shows only with something after it (the owner, 2026-11-11): it fades in and out
    with the bar's title, and stays hidden when no title follows. No layout shift: it keeps its room. */
-.ib-phead .ib-vsep:has(+ .ib-sp), .ib-phead .ib-vsep:has(+ .ib-phsubj:not([data-on])) { opacity: 0; }
-.ib-phead .ib-vsep:has(+ .ib-phsubj) { transition: opacity 120ms ease-out; }
+.ib-phead .ib-vsep:has(+ .ib-sp) { opacity: 0; }
 .ib-kbd { font-family: var(--font-mono); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; line-height: 16px; font-weight: 500; }
 /* The line under the subject while the thread is marked read. */
 .ib-readline { display: flex; align-items: flex-start; gap: 9px; margin: -4px 0 14px; padding: 9px 12px; border-radius: 8px; background: var(--ib-band); font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
@@ -3650,7 +3657,7 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   :root[data-ib-keyboard-pin]:has(.pn-inbox) { height: var(--ib-vvh, 100%); overflow: hidden; overscroll-behavior: none; }
   .ib-main { padding: 0 env(safe-area-inset-right) 0 env(safe-area-inset-left); gap: 0; position: relative; overflow: hidden; }
   /* One screen at a time: the pane is the screen, edge to edge, with no card around it. */
-  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview) { border-radius: 0; box-shadow: none; }
+  .ib-main > :is(.ib-listcol, .ib-pane, .ib-view, .ib-spage, .ib-dpage, .ib-wn, .ib-bpage, .ib-prreview), :where(.ib-main > .ib-panehost) > .ib-panedock > :is(.ib-pane, .ib-view) { border-radius: 0; box-shadow: none; }
   .ib-main > .ib-listcol > .ib-lbody { border-radius: 0; }
   body:has(.pn-inbox) :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), textarea, select) { font-size: 16px !important; }
   .ib-lbody, .ib-pbody, .ib-spage, .ib-dpage, .ib-docscroll, .ib-gbody, .ib-wn { overscroll-behavior: contain; }
@@ -3722,7 +3729,11 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .pn-inbox .ib-pback svg.ib-ic { width: 22px; height: 22px; stroke-width: 2; }
   .ib-pback-l { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ib-phead > .ib-sp { flex: 1; }
-  .ib-phead .ib-phsubj { padding: 0 4px; }
+  .ib-phead h2.ib-phsubj { padding: 0 4px; }
+  .ib-phead:has(> h2.ib-phsubj[data-open]) { min-height: calc(48px + env(safe-area-inset-top)); }
+  /* A cut title is a 44 px target like the bar's other controls: its line is the bar's height, the words where they were. */
+  .pn-inbox button.ib-phsubj-t { min-height: 44px; }
+  .ib-phead h2.ib-phsubj:not([data-open]) button.ib-phsubj-t { line-height: 44px; }
   .pn-inbox .ib-iconbtn { width: 44px; height: 44px; }
   .pn-inbox .ib-ptool { min-width: 44px; height: 44px; justify-content: center; }
   .ib-ptool-l { display: none; }
@@ -9333,7 +9344,8 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .ib-zband-tri { display: inline-flex; color: var(--ib-badge-hold-fg-soft); }
 .ib-zband-tri[data-stopped] { color: var(--ib-badge-stop-fg-soft); }
 .pn-inbox .ib-band .ib-zband-tri .ib-ic { margin-left: 0; color: inherit; }
-.ib-zsub { margin-left: auto; display: inline-flex; padding-left: 16px; }
+/* The value and the chevron on one centre line (a value's line box is taller than the 13px chevron). */
+.ib-zsub { margin-left: auto; display: inline-flex; align-items: center; padding-left: 16px; }
 .ib-zi { justify-content: space-between; gap: 24px; }
 .ib-zw { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-zb { color: var(--muted-foreground); }
@@ -11704,8 +11716,6 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-lm-dot[data-hue="4"] { --lm-rot: 180; } .ib-lm-dot[data-hue="5"] { --lm-rot: 225; } .ib-lm-dot[data-hue="6"] { --lm-rot: 270; } .ib-lm-dot[data-hue="7"] { --lm-rot: 315; }
 .ib-lm-tt[data-take="dot"] { gap: 8px; }
 .ib-mrow .ib-lm-tt[data-take="dot"] > .ib-lm-dot, .ib-nrow .ib-l2 > .ib-lm-tt[data-take="dot"] > .ib-lm-dot { margin-top: 6px; }
-.ib-lm-hero { display: flex; align-items: flex-end; gap: 0; margin: 0 0 10px; }
-.ib-lm-hero > .ib-lm-heroP { margin-left: -6px; box-shadow: 0 0 0 2px var(--background); }
 
 /* Take "avatar": one mark per row in a column of its own (30 px in three-line and phone rows, 24 px in a wide row),
    the project's on its corner, cut out of the row by a ring in the page's colour. */
@@ -12369,3 +12379,52 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 @media (pointer: coarse) {
   .pn-cbox .ib-vmic { width: 44px; height: 44px; border-radius: 10px; }
 }
+
+/* Dragging threads (approval "inbox-drag-threads"; threadDrag.ts, replyMentions.tsx). Fills and tints only: never an
+   outline on a row. The ghost is a pill of the thread under the pointer; the row it came from keeps its fill, its words
+   faded. Reduced motion: no lift, no fly-back, no flash, no blinking caret. */
+:root[data-thread-drag] .pn-inbox, :root[data-thread-drag] .pn-inbox * { cursor: grabbing !important; }
+.ib-tdrag { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; display: flex; align-items: center; gap: 8px; max-width: 280px; height: 34px; padding: 0 12px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-13, 13px); font-weight: 550; white-space: nowrap; transform-origin: 16px 17px; }
+.ib-tdrag-t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-tdrag-n { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-11-5, 11.5px); display: grid; place-items: center; }
+.ib-tdrag-w { flex: none; font-weight: 500; color: var(--primary); font-size: var(--ib-fs-12, 12px); }
+.ib-tdrag-w::before { content: "·"; margin-right: 8px; color: var(--muted-foreground); }
+.ib-tdrag-w:empty { display: none; }
+.ib-tdrag[data-refused] { color: var(--muted-foreground); }
+.ib-tdrag-stack { box-shadow: var(--ib-float-shadow), 4px 4px 0 -1px var(--popover), 4px 4px 0 0 color-mix(in oklch, var(--foreground) 8%, transparent), 8px 8px 0 -1px var(--popover), 8px 8px 0 0 color-mix(in oklch, var(--foreground) 6%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-tdrag-lift { animation: ib-tdrag-lift 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .ib-tdrag-back { transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms ease-out; opacity: 0; }
+  @keyframes ib-tdrag-lift { from { scale: 0.96; opacity: 0.6; } }
+}
+.ib-lbody [data-thread-lifted] > * { opacity: 0.4; }
+.ib-lbody [data-thread-lifted] { background: color-mix(in oklch, var(--foreground) 7%, transparent); }
+/* The reply box while a thread is carried: a faint tint laid over the box's own colour (light or dark); over it, a
+   stronger tint and the label above it. Fills only: the box's edge never changes (no dashed edge, no ring). Your own thread: no tint, the label says so. */
+.pn-inbox .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-fcomp[data-thread-drop="target"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 9%, transparent), color-mix(in oklch, var(--primary) 9%, transparent)); }
+.pn-inbox .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-fcomp[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 18%, transparent), color-mix(in oklch, var(--primary) 18%, transparent)); }
+:root:not(.light) .pn-inbox :is(.ib-rbox, .ib-fcomp)[data-thread-drop="target"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 14%, transparent), color-mix(in oklch, var(--primary) 14%, transparent)); }
+:root:not(.light) .pn-inbox :is(.ib-rbox, .ib-fcomp)[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 26%, transparent), color-mix(in oklch, var(--primary) 26%, transparent)); }
+.ib-tdrop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 6; display: none; justify-content: center; pointer-events: none; }
+.ib-tdrop > span { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); color: var(--primary); font-weight: 600; font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+[data-thread-drop="over"] > .ib-tdrop, [data-thread-drop="refuse"] > .ib-tdrop { display: flex; }
+.ib-tdrop[data-thread-drop-label="refuse"] > span { color: var(--muted-foreground); }
+.ib-tcaret { position: absolute; z-index: 2; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--primary); pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) { .ib-tcaret { animation: ib-tcaret 900ms steps(2) infinite; } @keyframes ib-tcaret { 50% { opacity: 0; } } }
+/* A mention in the words: the `@` tag's paint (a tint, paint only, so the caret never drifts; no ring); an archived
+   thread in grey. */
+.pn-inbox [data-skill-ref-token^="ib-mention:"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 3px; }
+.pn-inbox [data-skill-ref-token^="ib-mention-archived:"] { color: var(--muted-foreground); background: color-mix(in oklch, var(--foreground) 8%, transparent); border-radius: 3px; }
+@media (prefers-reduced-motion: no-preference) {
+  .pn-inbox [data-skill-ref-token^="ib-mention"][data-flash] { animation: ib-tflash 700ms ease-out; }
+  @keyframes ib-tflash { 0% { background: color-mix(in oklch, var(--primary) 45%, transparent); } }
+}
+/* The line under the field when the reply's agent cannot open a mentioned thread: quiet, like the skill notice. */
+.ib-cfield .ib-tmnote { margin: -2px 0 0; padding: 0 12px 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); line-height: 1.35; overflow-wrap: anywhere; }
+/* A sent mention (its link ends `&mention`; other thread links stay as they are): a link to the thread, in the
+   token's paint, the thread mark before its name. A long title wraps, each line keeping the paint. */
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"] { color: var(--primary); text-decoration-line: none; font-weight: 550; background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 5px; padding: 0 5px 0 3px; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"]::before { content: ""; display: inline-block; width: 13px; height: 13px; margin-right: 4px; vertical-align: -1.5px; background: currentColor; -webkit-mask: var(--ib-thread-mark) center / contain no-repeat; mask: var(--ib-thread-mark) center / contain no-repeat; }
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"]:hover { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+.pn-inbox { --ib-thread-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z'/%3E%3Cpath d='M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1'/%3E%3C/svg%3E"); }
+.ib-pmi-hint { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }

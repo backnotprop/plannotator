@@ -19,6 +19,8 @@ import { useToastAbove } from '../toastAbove';
 import { BulkTagList, useBulkTagsShown } from './BulkTags';
 import { TagIcon } from './InitiativePeek';
 import { Tip } from './Tip';
+import { MentionMenuItem } from './MentionMenuItem';
+import { isPhone } from '../phone';
 
 /** Combine… with one thread picked: greyed, and its tooltip says why. */
 export const COMBINE_NEEDS_TWO = 'Pick two or more threads to combine';
@@ -141,6 +143,8 @@ export function BulkItems({ act, onTags }: { act: PickActions; onTags: () => voi
   const tags = useBulkTagsShown(act.rows);
   return (
     <>
+      {/* Mention 3 in reply (approval "inbox-drag-threads"): the picked rows, in the reply on screen. */}
+      <MentionMenuItem rows={act.rows} phone={isPhone()} />
       {shown.map(({ action, label, icon, iconClass }) => (
         <Menu.Item key={action} className="ib-pmi" label={label} data-bulk-action={action} onClick={() => runBulk(act, action)}>
           <Icon name={icon} size={15} className={iconClass} />

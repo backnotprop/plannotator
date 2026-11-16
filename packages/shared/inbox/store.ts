@@ -149,6 +149,8 @@ import {
   type InboxLiveSiteRef,
 } from "@plannotator/core/inbox-types";
 import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
+import { remapReplyMentions } from "@plannotator/core/inbox-thread-mention";
+import type { InboxReplyMention } from "@plannotator/core/inbox-types";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
@@ -220,6 +222,9 @@ import {
   type InboxInitiative,
   inboxNextTagColour,
   isInboxTagColour,
+  inboxTagOwnColour,
+  inboxTagLook,
+  inboxTagLookColour,
   INBOX_TAG_RECENT_MAX,
   type InboxTagColours,
   type InboxTagLook,
@@ -6179,7 +6184,7 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote, mentions } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
@@ -6203,7 +6208,7 @@ export class InboxStore {
         this.deleteReplyDraft(threadId);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after, given, quote);
+      return this.writeReplyDraft(threadId, existing, body, after, given, quote, mentions);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -6235,13 +6240,14 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given, quote);
+    return this.writeReplyDraft(threadId, existing, body, files, given, quote, mentions);
   }
 
   /**
    * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
    * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own. `quote`: the
-   * message the reply quotes; null takes it away, undefined keeps the draft's own.
+   * message the reply quotes; null takes it away, undefined keeps the draft's own. `mentions`: the threads mentioned
+   * in the words; undefined keeps the draft's own that still stand once its words become these (remapped, never matched).
    */
   private writeReplyDraft(
     threadId: string,
@@ -6250,6 +6256,7 @@ export class InboxStore {
     files: readonly InboxDraftFile[],
     recipients: readonly string[] | null = null,
     quote: InboxReplyQuote | null | undefined = undefined,
+    mentions: readonly InboxReplyMention[] | undefined = undefined,
   ): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
@@ -6267,6 +6274,9 @@ export class InboxStore {
     // The quote (approval "inbox-reply-quote"): a save that names one sets it, `null` takes it away, absent keeps it.
     const quoted = quote === undefined ? (existing?.quote ?? null) : quote;
     if (quoted) draft.quote = { ...quoted };
+    // The mentions (approval "inbox-drag-threads"): a save that names them sets them; absent, the draft's own move with its words.
+    const mentioned = mentions ?? remapReplyMentions(existing?.mentions ?? [], existing?.body ?? "", body);
+    if (mentioned.length > 0) draft.mentions = mentioned.map((m) => ({ ...m }));
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.changes += 1;
@@ -8248,7 +8258,7 @@ export class InboxStore {
     if (missing.length === 0) return false;
     const next = new Map(looks);
     for (const tag of missing) {
-      const used = live.flatMap((t) => (next.has(t.id) ? [next.get(t.id)!.colour] : []));
+      const used = live.flatMap((t) => (next.has(t.id) ? [inboxTagLookColour(next.get(t.id))] : []));
       next.set(tag.id, { colour: inboxNextTagColour(used), by: "auto", at: tag.created_at });
     }
     const state = { ...this.tagColourState, looks: next };
@@ -8274,20 +8284,22 @@ export class InboxStore {
   }
 
   /**
-   * The person picked a tag's colour (a preset, their own `#rrggbb`, or null for None). `at` is when they picked it,
-   * the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own colour
-   * goes first in the recent ones. Writes no store line.
+   * The person picked a tag's colour (a preset or their own `#rrggbb`), or turned Highlight rows off (null), keeping
+   * `kept` (the colour it had) so turning it on brings it back; an older Inbox's None sends no `kept`. `at` is when
+   * they chose, the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own
+   * colour (not a quick swatch) goes first in the recent ones. Writes no store line.
    */
-  setTagColour(tagId: unknown, colour: unknown, at: unknown): InboxTagLook {
+  setTagColour(tagId: unknown, colour: unknown, at: unknown, kept?: unknown): InboxTagLook {
     const tag = this.liveInitiative(tagId);
     if (colour !== null && !isInboxTagColour(colour)) throw new InboxError("validation_error", "colour: accent, green, amber, red, grey, a #rrggbb, or null.", { field: "colour" });
+    if (kept !== undefined && kept !== null && !isInboxTagColour(kept)) throw new InboxError("validation_error", "kept_colour: a preset or a #rrggbb.", { field: "kept_colour" });
     const when = this.colourStamp(at);
     // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
-    const kept = this.tagColourState.looks.get(tag.id);
-    if (kept?.by === "person" && this.colourKeptAt(kept.at) > Date.parse(when)) return kept;
-    const look: InboxTagLook = { colour, by: "person", at: when };
+    const had = this.tagColourState.looks.get(tag.id);
+    if (had?.by === "person" && this.colourKeptAt(had.at) > Date.parse(when)) return had;
+    const look = inboxTagLook(colour, "person", when, kept as string | null | undefined);
     const looks = new Map(this.tagColourState.looks).set(tag.id, look);
-    const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
+    const recent = inboxTagOwnColour(colour) ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
     this.commitTagColours({ ...this.tagColourState, looks, recent });
     return look;
   }

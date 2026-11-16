@@ -3302,6 +3302,33 @@ export interface InboxReplyDraft {
   recipients?: string[];
   /** The message the reply quotes (approval "inbox-reply-quote"), kept with the words. Absent: none. */
   quote?: InboxReplyQuote;
+  /**
+   * The threads mentioned in the words (approval "inbox-drag-threads"), each where its label stands in `body`, kept
+   * with the words so any window or device that opens the draft has them. Absent: none, or an older Inbox's draft.
+   */
+  mentions?: InboxReplyMention[];
+}
+
+/**
+ * A thread mentioned in a reply box (approval "inbox-drag-threads"): a token in the words, carried as an id and a
+ * range, never recovered from the words. `label` stands in the draft's words at `at`; an edit inside it ends the
+ * mention (the words stay as plain words).
+ */
+export interface InboxReplyMention {
+  /** The mentioned thread (its root message id). */
+  thread_id: string;
+  /** Its title when it was mentioned: one line, capped (`inboxThreadMentionTitle`). */
+  title: string;
+  /** What the box shows: the title, with ` · project` when that differs from the reply's project. */
+  label: string;
+  /** Where `label` starts in the words (UTF-16 offset). */
+  at: number;
+  /** Its project's name, when known. */
+  project?: string;
+  /** It was archived when mentioned (read_thread still reads it). */
+  archived?: boolean;
+  /** The Inbox that holds it (`ibx_…`), when the window knew. Absent: the window's own Inbox. */
+  machine?: string;
 }
 
 /** The quote a person's reply carries (approval "inbox-reply-quote"): a message of the thread and, when the person selected some, its words. */

@@ -641,6 +641,11 @@ export interface PlannotatorConfig {
    */
   inboxSystem?: boolean;
   /**
+   * A preview of the Inbox's second thread pane ("Open to the side" in a row's menu): off unless `true`. Config only, no
+   * Settings row; the settings read carries `split_view` only while on. Read on every request.
+   */
+  inboxSplitView?: boolean;
+  /**
    * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser";
    * packages/shared/inbox/theme-chooser.ts). Written only by the Inbox server,
    * at the first release start of the version that ships the dialog: `dueAt`

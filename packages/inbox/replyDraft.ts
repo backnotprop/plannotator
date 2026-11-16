@@ -65,6 +65,7 @@ import {
   type ReplyDraftStore,
 } from '@plannotator/core/inbox-reply-draft';
 import { httpReplyDraftStore } from './replyDraftHttp';
+import { clearReplyMentions, noteDraftMentions, replyMentionsSave } from './threadMentions';
 
 /** The files a reply draft keeps beside its words: each finished upload, a long paste with its place. */
 export type ReplyDraftFiles = readonly ReplyDraftFileRef[];
@@ -426,6 +427,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
   };
   /** The server holds this draft for the thread now: its base and words, as this window knows them. */
   const adopt = (target: string, draft: InboxReplyDraft | null) => {
+    // The threads its words mention (approval "inbox-drag-threads"): the box paints them for these words.
+    noteDraftMentions(target, draft);
     bases.current.set(target, draft?.updated_at ?? null);
     synced.current.set(target, draftKey(draft));
     syncedWords.current.set(target, draft?.body ?? null);
@@ -580,7 +583,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
         let answer: { draft: InboxReplyDraft | null };
         sentWords.current.set(target, text);
         try {
-          answer = await storeRef.current.save(target, { body: text, base: baseOf(target), baseBody: baseBody ?? null, files: ops, ...aimOf(target), ...quoteOf(target) }, { keepalive: false });
+          answer = await storeRef.current.save(target, { body: text, base: baseOf(target), baseBody: baseBody ?? null, files: ops, ...aimOf(target), ...quoteOf(target), ...replyMentionsSave(target, text) }, { keepalive: false });
         } catch (cause) {
           if (codeOf(cause) === 'validation_error') {
             // Refused: not saved. For its size (the Inbox's own limit, a `body:` refusal) the line above the box
@@ -716,7 +719,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
       const ops = composeReplyDraftFileOps(carried.get(next.threadId) ?? NO_FILE_OPS, next.ops);
       // `base` may be a step behind a save still on its way; `base_body` names the words that save carries.
       void storeRef.current
-        .save(next.threadId, { body: next.text, base: baseOf(next.threadId), baseBody: lastWords.current, files: ops, ...aimOf(next.threadId), ...quoteOf(next.threadId) }, { keepalive: true })
+        .save(next.threadId, { body: next.text, base: baseOf(next.threadId), baseBody: lastWords.current, files: ops, ...aimOf(next.threadId), ...quoteOf(next.threadId), ...replyMentionsSave(next.threadId, next.text) }, { keepalive: true })
         .catch(() => {});
       sentWords.current.set(next.threadId, next.text);
       keptAlive.current = { threadId: next.threadId, text: next.text, ops, generation: generationOf(next.threadId) };
@@ -832,6 +835,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     held.current.set(target, []);
     // Dropped: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
+    clearReplyMentions(target);
     learn(target, null);
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
@@ -896,6 +900,8 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     held.current.set(target, []);
     // Sent: a draft holding these words later is another window's, never this one's (`base_body`).
     sentWords.current.delete(target);
+    // Its mentions went with it: none is left to paint in words typed next (another window's draft keeps its own).
+    clearReplyMentions(target);
     tooLongThreads.delete(target);
     refusedThreads.delete(target);
     unsavedChanged();
