@@ -271,7 +271,7 @@ the file list. The first time it fires, a toast points at both.
 
 ### Optional analysis layers
 
-**Semantic Changes** (the **Sem** tab) summarizes added, modified, moved, and deleted named entities in TypeScript, JavaScript, Python, Go, and Rust files, read by Plannotator's built-in engine in the browser. Files in other languages show the ordinary diff.
+**Semantic Changes** (the **Semantic diff** row in the left panel, and the **sem** count on each file) summarizes added, modified, moved, and deleted named entities in TypeScript, JavaScript, Python, Go, and Rust files, read by Plannotator's built-in engine in the browser. Files in other languages show the ordinary diff.
 
 Open **Settings → Analysis** to turn Call Flow on or off. Disabling it avoids its analysis work and leaves the ordinary patch unchanged. **Call Flow** compares CallDiff's inferred call trees across the exact before/after Git snapshots behind the current review. Call Flow is off by default and requires Node.js 22.18 or newer. Its toggle names the current review's languages and estimated footprint; enabling it consents to one background install of the roughly 5 MB pruned core plus only the needed grammar packs. A later missing language does not block installed ones: affected files are listed as skipped while support installs automatically, and analysis refreshes in the same session. Each target gets one automatic attempt per review session; failed targets expose a quiet Retry in the panel. When enabled, Call Flow appears in two places:
 

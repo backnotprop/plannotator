@@ -44,7 +44,7 @@ export interface DiffLayoutToggleProps extends Omit<React.ButtonHTMLAttributes<H
   splitTooNarrow?: boolean;
 }
 
-export const SPLIT_TOO_NARROW_TIP = 'Split needs a wider pane. Showing Unified.';
+const SPLIT_TOO_NARROW_TIP = 'Split needs a wider pane. Showing Unified.';
 
 /** Other button props (a tooltip trigger's handlers) and the ref reach the button. */
 export const DiffLayoutToggle = React.forwardRef<HTMLButtonElement, DiffLayoutToggleProps>(function DiffLayoutToggle(

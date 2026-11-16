@@ -13,6 +13,7 @@ import { imagePreviewHeight } from '../../components/image-diff/previewHeight';
 import { imageDiffSettings } from '../../components/image-diff/imageDiffSettings';
 import { COMPACT_FILE_HEADER_HEIGHT, FILE_HEADER_HEIGHT } from '../../utils/diffChromeMetrics';
 import { isImagePreviewCandidate } from '@plannotator/core/diff-paths';
+import { useConfigValue } from '@plannotator/ui/config';
 import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
 import { PackageChangesCard } from '../../components/PackageChangesCard';
 // Lazy: loaded the first time a Markdown file is previewed.
@@ -78,6 +79,7 @@ function usePaneWidth(enabled: boolean): number {
 export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   const state = useReviewState();
   const paneDiffStyle = usePaneDiffStyle(state.diffStyle);
+  const semanticKey = useConfigValue('semanticDiffEnabled') ? 'semantic' : 'plain';
   // Comments outside the diff live in whole-file views, not on the diff.
   const diffOnlyAnnotations = useMemo(
     () => (state.allAnnotations.some((a) => a.outsideDiff) ? state.allAnnotations.filter((a) => !a.outsideDiff) : state.allAnnotations),
@@ -272,6 +274,7 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   return (
     <>
     <AllFilesCodeView
+      key={semanticKey}
       files={state.files}
       {...(state.callTreeHunkNotes && state.callTreeHunkNotes.length > 0 ? { hostLineNotes: state.callTreeHunkNotes } : {})}
       diffStyle={paneDiffStyle}

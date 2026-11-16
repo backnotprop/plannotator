@@ -2261,7 +2261,6 @@ const ReviewApp: React.FC = () => {
     (job: AgentJobInfo) => jobMatchesReviewContext(job, prMetadata?.url, activeWorktreePath),
     [prMetadata, activeWorktreePath],
   );
-  const guideHasContent = activeGuideJobId !== null || agentJobs.jobs.some((j) => j.provider === 'guide' && jobMatchesCurrentContext(j));
   const toggleGuide = useCallback(() => {
     setGuideOpen((prev) => !prev);
   }, []);
@@ -2642,7 +2641,7 @@ const ReviewApp: React.FC = () => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'g' && !isTypingTarget(e.target)) {
         if (aiUIEnabled && hasSearchableFiles) {
           e.preventDefault();
-          if (isCompactTouchLayout && !guideOpen && guideHasContent) {
+          if (isCompactTouchLayout && !guideOpen) {
             setIsCompactNavigatorOpen(false);
             reviewSidebar.close();
           }
@@ -2660,7 +2659,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator, guideHasContent, toggleGuide]);
+  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator, toggleGuide]);
 
 
   // Load diff content - try API first, fall back to demo
