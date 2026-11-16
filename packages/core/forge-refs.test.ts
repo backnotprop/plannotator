@@ -103,6 +103,21 @@ describe("classifyForgeHost", () => {
     expect(classifyForgeHost("notgithub.com")).toBeNull();
   });
 
+  test("a label that is gitlab or starts gitlab- names a GitLab; a look-alike or a gitlab inside a word does not", () => {
+    for (const host of ["gitlab-master.example.com", "gitlab-ce.corp.net", "code.gitlab-prod.example.org", "gitlab.acme.dev", "gitlab.com", "gitlab-acme.example.com:8443"]) {
+      expect(classifyForgeHost(host)).toBe("gitlab");
+    }
+    for (const host of ["mygitlabproxy.example.com", "corp-gitlab.example.com", "notgitlab.example.com", "example.gitlab", "gitlab"]) {
+      expect(classifyForgeHost(host)).toBeNull();
+    }
+    expect(classifyForgeHost("github-enterprise.corp.net")).toBeNull();
+    // A look-alike of gitlab.com is a host of its own: never gitlab.com, and its links go to it, not to gitlab.com.
+    for (const host of ["gitlab.com-evil.example", "gitlab.com.evil.example"]) {
+      expect(normalizeForgeHost(host)).toBe(host);
+      expect(forgeRefLinks({ display: "g/p", host })?.issue(1)).toBe(`https://${host}/g/p/-/issues/1`);
+    }
+  });
+
   test("bitbucket.org is Bitbucket Cloud, and its bare #N refs stay unlinked as before", () => {
     expect(classifyForgeHost("bitbucket.org")).toBe("bitbucket");
     // Bitbucket Data Center has another API: an opaque self-hosted name, not Bitbucket.
