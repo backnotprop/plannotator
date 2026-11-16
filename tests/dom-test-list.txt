@@ -645,6 +645,7 @@ packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
 packages/inbox/guideExpandContext.test.tsx
+packages/inbox/guideCollapseAllAfterSwitch.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/pullAllFiles.test.tsx
