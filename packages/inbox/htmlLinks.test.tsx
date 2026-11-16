@@ -44,9 +44,12 @@ let savedEventSource: unknown;
 let savedOpen: typeof window.open;
 let opened: string[] = [];
 
-function loopback(path: string, method = 'GET', body?: string): Promise<{ status: number; text: string }> {
+function loopback(path: string, method = 'GET', body?: string | Uint8Array, encoding?: string | null): Promise<{ status: number; text: string }> {
   return new Promise((done, fail) => {
-    const req = request({ host: '127.0.0.1', port, path, method, headers: { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` } }, (res) => {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json', Host: `127.0.0.1:${port}` };
+    // The window sends a page gzipped (api.ts `post`, `gzip: true`): its bytes and their encoding go through as they are.
+    if (encoding) headers['Content-Encoding'] = encoding;
+    const req = request({ host: '127.0.0.1', port, path, method, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c: Buffer) => chunks.push(c));
       res.on('end', () => done({ status: res.statusCode ?? 0, text: Buffer.concat(chunks).toString('utf8') }));
@@ -101,7 +104,9 @@ beforeEach(() => {
   world = worlds.shift()!;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const answer = await loopback(String(input), init?.method ?? 'GET', init?.body ? String(init.body) : undefined);
+    const raw = init?.body;
+    const body = raw === undefined || raw === null ? undefined : typeof raw === 'string' ? raw : new Uint8Array(await new Response(raw).arrayBuffer());
+    const answer = await loopback(String(input), init?.method ?? 'GET', body, new Headers(init?.headers).get('content-encoding'));
     return new Response(answer.text, { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   savedEventSource = (globalThis as Record<string, unknown>).EventSource;
