@@ -9,8 +9,11 @@
  *   "changed since you looked" banner; opening it does not record the look;
  * - a decision on an older version reads as current in the list or the page line (it must say "changed since");
  * - the files panel loses the main page's place or mark, mixes artifacts in with pages, shows Artifacts with none,
- *   opens a row without the rail and the address following, draws an HTML artifact that can run or load, or forgets
- *   that it was folded;
+ *   opens a row without the rail and the address following, draws an HTML artifact that can run, load or follow a
+ *   link, shows a picture the server sends as a download, or forgets that it was folded;
+ * - a kept panel width wider than the room folds the panel for good, or the edge offers more than fits;
+ * - another page's activity shows the main page's history, or an artifact's shows anything plan-wide;
+ * - opening a plan through another page's link marks every version new in the list;
  * - the compact list leaves out a plan or orders it differently, loses a column, is not a link, is not remembered,
  *   or search and the empty search stop working in it;
  * - picking a version in the rail does not show that version;
@@ -245,14 +248,20 @@ test.skipIf(!hasDom)('the compact list: the switch shows the same plans one line
 });
 
 test.skipIf(!hasDom)('the files panel: main page first, other pages and artifacts by name; a row opens its file, the rail and the address follow', async () => {
-  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n'], { seen: 1 });
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n'], { seen: 1, approvedOn: 1 });
   const rollout = store.addDocument(id, { title: 'Rollout', created_at: at(3) });
   store.addVersion(id, rollout.id, { bytes: bytes('# Rollout\n\nFirst.\n'), committed_at: at(3), source: 'agent-tool' });
   store.addVersion(id, rollout.id, { bytes: bytes('# Rollout\n\nRollout second version.\n'), committed_at: at(4), source: 'agent-tool' });
   const flow = store.addDocument(id, { title: 'Flow', kind: 'mermaid', created_at: at(3) });
   store.addVersion(id, flow.id, { bytes: bytes('flowchart LR\n  A --> B\n'), committed_at: at(3), source: 'agent-tool' });
-  store.addArtifact(id, { asset_path: 'mockup.html', bytes: bytes('<h1>Mockup</h1><img src="https://example.com/x.png">'), content_type: 'text/html', created_at: at(5) });
+  store.addArtifact(id, {
+    asset_path: 'mockup.html',
+    bytes: bytes('<base target="_self"><h1>Mockup</h1><img src="https://example.com/x.png"><a href="https://example.com/">plain</a> <a href="https://example.com/2" target="_self">self</a> <a href="https://example.com/3" target="_top">top</a>'),
+    content_type: 'text/html',
+    created_at: at(5),
+  });
   store.addArtifact(id, { asset_path: 'pics/screen.png', bytes: new Uint8Array([137, 80, 78, 71]), content_type: 'image/png', title: 'Screen', created_at: at(5) });
+  store.addArtifact(id, { asset_path: 'scan.bmp', bytes: new Uint8Array([66, 77]), content_type: 'image/bmp', created_at: at(5) });
   const bare = plan('Ledger import', null, ['# Ledger import\n']);
   // Plannotator's storage in memory for this test (happy-dom keeps no cookie here); put back in afterEach.
   const kept = new Map<string, string>();
@@ -267,9 +276,12 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   expect(names('[data-plan-files-pages]')).toEqual(['Rotate refresh tokens', 'Flow', 'Rollout']);
   expect(text(panel.querySelector('[data-plan-files-pages] li:first-child [data-plan-file-main]'))).toBe('Main');
   expect(panel.querySelectorAll('[data-plan-file-main]').length).toBe(1);
-  expect(names('[data-plan-files-artifacts]')).toEqual(['mockup.html', 'Screen']);
-  expect(text(panel)).toContain('Artifacts 2');
+  expect(names('[data-plan-files-artifacts]')).toEqual(['mockup.html', 'scan.bmp', 'Screen']);
+  expect(text(panel)).toContain('Artifacts 3');
   expect(panel.querySelector(`[data-plan-file="d:${store.get(id)!.primary_doc_id}"]`)?.getAttribute('aria-current')).toBe('page');
+  // The main page's activity: its versions and your decisions.
+  const activity = () => [...host.querySelectorAll('.ib-plan-activity li')].map(text);
+  expect(activity().some((line) => line.startsWith('You approved v1'))).toBe(true);
 
   // A page: the middle shows it, the rail its versions, the address carries it.
   await act(async () => (panel.querySelector(`[data-plan-file="d:${rollout.id}"]`) as HTMLAnchorElement).click());
@@ -279,6 +291,8 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   expect(text(host.querySelector('.ib-plan-railh'))).toBe('Versions 2');
   expect(host.querySelector(`[data-plan-file="d:${rollout.id}"]`)?.getAttribute('aria-current')).toBe('page');
   expect(text(host.querySelector('[data-plan-reading]'))).toBe('Reading v2 · newest');
+  // Its activity is its own history only: nothing of the main page's versions or decisions.
+  expect(activity().map((line) => line.split(' saved')[0])).toEqual(['v2', 'v1']);
 
   // An artifact: an HTML page in a frame that runs and loads nothing; the rail says it has no versions.
   await act(async () => (host.querySelector('[data-plan-file="a:mockup.html"]') as HTMLAnchorElement).click());
@@ -286,8 +300,23 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   expect(window.location.hash).toBe(`#plans=${id}&file=mockup.html`);
   const frame = host.querySelector('iframe[data-plan-html-frame]')!;
   expect(frame.getAttribute('sandbox')).toBe('');
-  expect(frame.getAttribute('srcdoc')!.startsWith(`<meta http-equiv="Content-Security-Policy" content="default-src 'none';`)).toBe(true);
+  const srcdoc = frame.getAttribute('srcdoc')!;
+  expect(srcdoc.startsWith(`<meta http-equiv="Content-Security-Policy" content="default-src 'none';`)).toBe(true);
+  // Its links open nowhere: every one asks for a new window (which the sandbox refuses), the page's own base is gone.
+  const inside = new DOMParser().parseFromString(srcdoc, 'text/html');
+  expect([...inside.querySelectorAll('base')].map((b) => b.getAttribute('target'))).toEqual(['_blank']);
+  expect([...inside.querySelectorAll('a')].map((a) => a.getAttribute('target'))).toEqual(['_blank', '_blank', '_blank']);
   expect(host.querySelector('[data-plan-no-versions]')).not.toBeNull();
+  expect(host.querySelector('.ib-plan-activity')).toBeNull();
+
+  // A picture type the server sends as a download (BMP) is a file to download, not a broken picture.
+  await act(async () => (host.querySelector('[data-plan-file="a:scan.bmp"]') as HTMLAnchorElement).click());
+  await settle();
+  expect(host.querySelector('[data-plan-artifact="scan.bmp"] img')).toBeNull();
+  expect(host.querySelector('[data-plan-artifact-download]')).not.toBeNull();
+  await act(async () => (host.querySelector('[data-plan-file="a:pics/screen.png"]') as HTMLAnchorElement).click());
+  await settle();
+  expect(host.querySelector('[data-plan-artifact="pics/screen.png"] img')).not.toBeNull();
 
   // Filter files.
   await act(async () => (host.querySelector('[data-plan-files-filter]') as HTMLButtonElement).click());
@@ -313,6 +342,65 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   expect([...host.querySelectorAll('[data-plan-files] .ib-plan-file-n')].map(text)).toEqual(['Ledger import']);
   expect(host.querySelector('[data-plan-files-artifacts]')).toBeNull();
   expect(text(host.querySelector('[data-plan-files]'))).not.toContain('Artifacts');
+});
+
+test.skipIf(!hasDom)('a kept panel width wider than the room is drawn narrower, never folded; the rail floats when the document would be cramped', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n'], { seen: 1 });
+  const kept = new Map<string, string>([['plannotator-inbox-plan-files-width', '400']]);
+  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  // The plan's pane is 780 px: beside the document's least 480 px, only 300 px of panel fit.
+  const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const inherited = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.hasAttribute('data-plan-page')) return 780;
+      return (own ?? inherited)?.get?.call(this) ?? 0;
+    },
+  });
+  try {
+    window.location.hash = `#plans=${id}`;
+    const host = draw();
+    await settle();
+    const page = host.querySelector('[data-plan-page]')!;
+    expect(page.getAttribute('data-files')).toBe('docked');
+    expect((host.querySelector('.ib-plan-filespane') as HTMLElement).style.width).toBe('300px');
+    // The edge offers no more than fits: End can never push the document under its least width.
+    expect(host.querySelector('.ib-plan-filesedge [aria-valuemax]')?.getAttribute('aria-valuemax')).toBe('300');
+    // 780 - 300 leaves the document too little beside the rail: the rail is a button on the top bar.
+    expect(page.getAttribute('data-rail')).toBe('float');
+    expect(host.querySelector('aside.ib-plan-rail')).toBeNull();
+    const toggle = host.querySelector('[data-plan-rail-toggle]') as HTMLButtonElement;
+    expect(text(toggle)).toBe('Versions 1');
+    await act(async () => toggle.click());
+    expect(host.querySelector('[data-plan-rail-float] [data-plan-version="1"]')).not.toBeNull();
+    await act(async () => host.querySelector('[data-plan-rail-float]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host.querySelector('[data-plan-rail-float]')).toBeNull();
+    // The kept width is not overwritten by drawing it narrower.
+    expect(kept.get('plannotator-inbox-plan-files-width')).toBe('400');
+  } finally {
+    if (own) Object.defineProperty(HTMLElement.prototype, 'clientWidth', own);
+    else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+  }
+});
+
+test.skipIf(!hasDom)('only the main page counts as looking: a link to another page of a never-opened plan marks nothing new', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n']);
+  const notes = store.addDocument(id, { title: 'Notes', created_at: at(3) });
+  store.addVersion(id, notes.id, { bytes: bytes('# Notes\n'), committed_at: at(3), source: 'agent-tool' });
+  window.location.hash = `#plans=${id}&doc=${notes.id}`;
+  const host = draw();
+  await settle();
+  expect(text(host.querySelector('[data-plan-reading]'))).toBe('Reading v1 · newest');
+  // That page's versions are remembered; the plan is still unlooked, so the list marks nothing.
+  expect(store.looks().plans[id]?.docs[notes.id]).toBe(1);
+  expect(store.list()[0]).toMatchObject({ seen_version_number: null, changed: false });
+  resetPlansForTests(null, true);
+  window.location.hash = '#plans';
+  await settle();
+  expect(host.querySelector(`[data-plan-row="${id}"]`)).not.toBeNull();
+  expect(host.querySelector(`[data-plan-row="${id}"] [data-plan-changed]`)).toBeNull();
+  expect(host.querySelector('[data-plans-group="since"]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on the get-started screen; Try again reads again with ?retry=1', async () => {

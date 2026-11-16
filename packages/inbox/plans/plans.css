@@ -108,16 +108,18 @@
 .ib-plans-steps { margin: 18px 0 0; padding: 14px 18px 14px 36px; border-radius: 12px; background: color-mix(in oklch, var(--card) 92%, transparent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--border); font-size: var(--ib-fs-14, 14px); line-height: 1.6; }
 .ib-plans-steps li + li { margin-top: 4px; }
 
-/* A plan: its files on the left (a pane of its own when docked), then the file and its rail in one pane */
-.ib-plan-frame { display: flex; flex: 1; min-width: 0; min-height: 0; gap: 8px; }
-.ib-plan { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--card); }
-.ib-main > .ib-plan-frame > .ib-plan, .ib-plan-filespane { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); overflow: hidden; }
-.ib-plan-filespane { position: relative; flex: none; display: flex; min-height: 0; background: var(--card); overflow: visible; }
+/* A plan: one pane (as Shape's page), its files a column on the left behind a hairline, then the file and its rail.
+   The files' head and the document's top bar are one bar: the same height and one bottom border. */
+.ib-plan-frame { display: flex; flex: 1; min-width: 0; min-height: 0; background: var(--card); }
+.ib-main > .ib-plan-frame { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); overflow: hidden; }
+.ib-plan { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; }
+.ib-plan-filespane { position: relative; flex: none; display: flex; min-height: 0; border-right: 1px solid var(--border); }
 .ib-plan-filesedge { position: absolute; top: 0; bottom: 0; right: -4px; z-index: 5; display: flex; }
 
-/* The files panel (as a Workspaces space's): 28 px rows, 8 px corners, the file on screen a soft tint with primary text */
+/* The files column: rows as Shape's boards list (.ib-rj-row): 36 px, 8 px corners, the file on screen a muted fill */
 .ib-plan-files { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; font-size: var(--ib-fs-13, 13px); }
-.ib-plan-files-head { display: flex; align-items: center; gap: 4px; min-height: 52px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+.ib-plan-files-head { display: flex; align-items: center; gap: 4px; min-height: 52px; padding: 0 8px 0 max(8px, var(--ib-controls-left, 0px)); border-bottom: 1px solid var(--border); }
+.ib-plan-files-head .ib-sb-trigger { margin-right: 2px; }
 .ib-plan-files-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
 .ib-plan-files-icon { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--muted-foreground); cursor: pointer; }
 .ib-plan-files-icon:hover, .ib-plan-files-icon[data-on] { background: var(--muted); color: var(--foreground); }
@@ -128,12 +130,12 @@
 .ib-plan-files-list + .ib-plan-files-sec { margin-top: 14px; }
 .ib-plan-files-sec h2 { margin: 0; font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--muted-foreground); }
 .ib-plan-files-field { width: 100%; height: 30px; margin: 2px 0 6px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
-.ib-plan-files-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
-.ib-plan-file { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 8px; color: var(--muted-foreground); text-decoration: none; }
-.ib-plan-file .ib-ic { flex: none; width: 14px; height: 14px; }
-.ib-plan-file:hover { background: var(--muted); color: var(--foreground); }
-.ib-plan-file[data-on] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
-.ib-plans .ib-plan-file:focus-visible { outline: none; background: color-mix(in oklch, var(--primary) 18%, transparent); color: var(--foreground); }
+.ib-plan-files-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.ib-plan-file { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 8px; box-sizing: border-box; border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); text-decoration: none; }
+.ib-plan-file .ib-ic { flex: none; width: 15px; height: 15px; color: var(--muted-foreground); }
+.ib-plan-file:hover { background: var(--ib-hover-s, var(--muted)); }
+.ib-plan-file[data-on] { background: var(--muted); font-weight: 550; }
+.ib-plans .ib-plan-file:focus-visible { outline: none; background: var(--ib-hover-s, var(--muted)); }
 .ib-plan-file-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-plan-file-main { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-plan-files-none { margin: 8px; color: var(--muted-foreground); }
@@ -146,7 +148,7 @@
 .ib-plan-filesheet::backdrop { background: rgba(0, 0, 0, 0.32); }
 .ib-plan-filesheet .ib-plan-files-head { padding-top: env(safe-area-inset-top); }
 @media (max-width: 767px), (pointer: coarse) {
-  .ib-plan-filesheet .ib-plan-file { height: 44px; font-size: var(--ib-fs-15, 15px); }
+  .ib-plan-filesheet .ib-plan-file { min-height: 44px; font-size: var(--ib-fs-15, 15px); }
   .ib-plan-filesheet .ib-plan-files-icon { width: 40px; height: 40px; }
 }
 @media (prefers-reduced-motion: no-preference) {
@@ -169,8 +171,11 @@
 .ib-plan-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); padding-left: 10px; }
 .ib-plan-crumb-p { color: var(--muted-foreground); }
 .ib-plan-crumb-n { font-weight: 600; }
-.ib-plan-body { flex: 1; min-height: 0; display: flex; }
-.ib-plan-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 24px 0; }
+.ib-plan-body { position: relative; flex: 1; min-height: 0; display: flex; }
+.ib-plan-topend { margin-left: auto; display: flex; align-items: center; }
+.ib-plan-railbtn { font-weight: 500; }
+.ib-plan-railbtn[data-on] { background: var(--muted); }
+.ib-plan-main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; padding: 12px 24px 0; isolation: isolate; }
 .ib-plan-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); padding: 4px 0 10px; }
 .ib-plan-project { color: var(--foreground); font-weight: 550; }
 .ib-plan-decision { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); }
@@ -200,7 +205,16 @@
 .ib-plan-diff .plan-diff-modified { background: transparent; }
 
 /* The rail */
-.ib-plan-rail { flex: none; width: 372px; min-height: 0; overflow-y: auto; border-left: 1px solid var(--border); overscroll-behavior: contain; }
+.ib-plan-rail { flex: none; width: 340px; min-height: 0; overflow-y: auto; border-left: 1px solid var(--border); overscroll-behavior: contain; }
+/* With less room the rail floats over the pane's right side: Shape's one panel (.shp-sidep), opened from the top bar */
+.ib-plan-railfloat { position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 30; width: min(380px, calc(100% - 24px)); display: flex; flex-direction: column; background: var(--popover); color: var(--popover-foreground, var(--foreground)); border-radius: 14px; box-shadow: 0 22px 60px -20px rgb(0 0 0 / 0.38), 0 0 0 1px var(--border); overflow: hidden; }
+.ib-plan-railfloat-head { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 8px 0 16px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-plan-railfloat-head > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-plan-railfloat-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-plan-railfloat { animation: ib-plan-float-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+}
+@keyframes ib-plan-float-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
 .ib-plan-railin { padding: 12px; }
 .ib-plan-railh { margin: 4px 4px 10px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
 .ib-plan-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 4px 4px; font-size: var(--ib-fs-13, 13px); }
@@ -257,7 +271,7 @@
   .ib-plans-c-dwords { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
   .ib-plans-table .ib-plans-c-date { text-align: right; }
   .ib-plans-c-date .ib-plans-new-n { display: block; width: fit-content; margin: 4px 0 0 auto; }
-  .ib-main > .ib-plan-frame > .ib-plan { border-radius: 0; box-shadow: none; }
+  .ib-main > .ib-plan-frame { border-radius: 0; box-shadow: none; }
   .ib-plan-frame[data-phone] .ib-plan-body { flex-direction: column; }
   .ib-plan-top { min-height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
   .ib-plan-main { padding: 8px 16px 0; }

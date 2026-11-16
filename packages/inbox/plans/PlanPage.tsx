@@ -1,14 +1,17 @@
 /**
- * One plan (approval "inbox-plans", layout B, with a space's left panel): the plan's files on the left (PlanFiles.tsx),
- * the file on screen in the middle, and a right rail with the versions of that file and the plan's activity. A
- * document is drawn by the document UI's own Viewer, read only; an artifact by what it is (PlanArtifactView.tsx). The
- * header says which version is being read ("Reading v5 · newest"); versions change only in the rail. "Changed since
- * you looked" compares with the version the person had seen of that document when the page opened, and Show changes
- * opens the diff from it to the newest. The address carries the file (`&doc=`, `&file=`); the main page keeps the
- * plan's own address. On a phone the rail is a bar at the bottom that opens as a sheet, and the files open from the
- * top bar as a sheet from the left. Comments, Send and the plan's thread come later.
+ * One plan (approval "inbox-plans", layout B, with a left panel), in one pane as Shape's page: the plan's files a
+ * column on the left (PlanFiles.tsx), the file on screen in the middle, and a right rail with that file's versions and
+ * its own activity; one top bar across. A document is drawn by the document UI's own Viewer, read only; an artifact
+ * by what it is (PlanArtifactView.tsx). The header says which version is being read ("Reading v5 · newest");
+ * versions change only in the rail. "Changed since you looked" compares with the version the person had seen of that
+ * document when the page opened, and Show changes opens the diff from it to the newest. The address carries the file
+ * (`&doc=`, `&file=`); the main page keeps the plan's own address. Short of room the rail floats from the top bar
+ * first; the files go to a sheet only when even their least width does not fit. On a phone the rail is a bar at the
+ * bottom that opens as a sheet, and the files open from the top bar as a sheet from the left. Comments, Send and the
+ * plan's thread come later.
  */
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { PlanArtifact, PlanDecision, PlanDocument as PlanDocumentRecord, PlanVersion } from '@plannotator/core/plans';
 import { storage } from '@plannotator/ui/utils/storage';
 import { SidebarTrigger } from '../shell/sidebar';
@@ -40,9 +43,18 @@ import {
 
 const toList = () => writeRoute({ page: 'plans', project: null, thread: null });
 
-/** The right rail's width and the gap between the panes (plans.css): the room the document has is what is left. */
-const RAIL_WIDTH = 373;
-const PANE_GAP = 8;
+/** The right rail's width with its hairline (plans.css `.ib-plan-rail`). */
+const RAIL_WIDTH = 341;
+/** The document's room beside a docked rail: narrower, the rail floats from the top bar instead. */
+const PLAN_DOC_ROOM = 560;
+
+/** Where the rail is: beside the document, floating over the pane from the top bar, or a phone's bottom sheet. */
+type RailMode = 'docked' | 'float' | 'phone';
+interface RailPlacement {
+  mode: RailMode;
+  /** The top bar's end, where a floating rail's button goes. */
+  slot: HTMLElement | null;
+}
 
 export interface PlanPageProps {
   id: string;
@@ -112,9 +124,12 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
   const onScreen: PlanFileRef = artifact ? { kind: 'artifact', path: artifact.asset_path } : { kind: 'doc', id: document.id };
   const project = read.plan.project_name;
 
-  // The panel: docked while there is room and the person has not folded it; otherwise Show files opens the sheet.
+  // The panel: docked while the pane holds its least width beside the document and the person has not folded it;
+  // otherwise Show files opens the sheet. A kept width wider than the room is drawn narrower (the hook's live
+  // maximum), never a reason to fold: the fold is decided from the least width only.
   const [frame, setFrame] = useState<HTMLElement | null>(null);
   const frameWidth = useWidth(frame);
+  const container = useCallback(() => frame, [frame]);
   const [hidden, setHidden] = useStoredFlag(PLAN_FILES_HIDDEN_KEY);
   const resize = useResizablePanel({
     storageKey: PLAN_FILES_WIDTH_KEY,
@@ -122,36 +137,44 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
     minWidth: PLAN_FILES_MIN,
     maxWidth: PLAN_FILES_MAX,
     side: 'left',
+    reserveViewport: PLAN_DOC_MIN,
+    container,
     onSnapClose: () => setHidden(true),
     onClick: () => setHidden(true),
   });
-  const panelWidth = Math.min(resize.width, PLAN_FILES_MAX);
-  const squeezed = frameWidth > 0 && frameWidth - RAIL_WIDTH - PANE_GAP - panelWidth < PLAN_DOC_MIN;
+  const squeezed = frameWidth > 0 && frameWidth - PLAN_FILES_MIN < PLAN_DOC_MIN;
   const docked = !phone && !hidden && !squeezed;
+  const panelWidth = Math.min(resize.width, resize.maxWidth);
+  // The rail: beside the document while the document keeps `PLAN_DOC_ROOM` next to it; else it floats over the
+  // pane's right side from a "Versions" button on the top bar, as Shape's one panel does.
+  const docRoom = frameWidth - (docked ? panelWidth : 0) - RAIL_WIDTH;
+  const rail: RailMode = phone ? 'phone' : frameWidth > 0 && docRoom < PLAN_DOC_ROOM ? 'float' : 'docked';
+  const [railSlot, setRailSlot] = useState<HTMLElement | null>(null);
   const [sheet, setSheet] = useState(false);
   useEffect(() => {
     if (docked) setSheet(false);
   }, [docked]);
   const showFiles = () => (phone || squeezed ? setSheet(true) : setHidden(false));
   const filesProps = { plan: id, name: read.plan.name, primary, documents: read.documents, artifacts, onScreen };
+  const place = { mode: rail, slot: railSlot };
 
   const middle = artifact ? (
-    <ArtifactPane id={id} artifact={artifact} read={read} activityVersions={versions} phone={phone} project={project} />
+    <ArtifactPane id={id} artifact={artifact} place={place} project={project} />
   ) : (
-    <DocPane key={document.id} id={id} document={document} primary={primary} read={read} mainVersions={versions} version={version} diff={diff} phone={phone} project={project} />
+    <DocPane key={document.id} id={id} document={document} primary={primary} read={read} mainVersions={versions} version={version} diff={diff} place={place} project={project} />
   );
   return (
-    <section className="ib-plans ib-plan-frame" ref={setFrame} aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={docked ? 'docked' : 'hidden'}>
+    <section className="ib-plans ib-plan-frame" ref={setFrame} aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={docked ? 'docked' : 'hidden'} data-rail={rail}>
       {docked && (
         <aside className="ib-plan-filespane" style={{ width: panelWidth }} id={`${id}-files`}>
-          <PlanFiles {...filesProps} onHide={() => setHidden(true)} />
+          <PlanFiles {...filesProps} onHide={() => setHidden(true)} start={<SidebarTrigger />} />
           <div className="ib-plan-filesedge">
             <CollapsibleEdge
               label={PLAN_FILES_WORDS.width}
               onCollapse={() => setHidden(true)}
               controls={`${id}-files`}
               isDragging={resize.isDragging}
-              resize={{ value: panelWidth, min: resize.minWidth, max: PLAN_FILES_MAX, resizeTo: resize.resizeTo }}
+              resize={{ value: panelWidth, min: resize.minWidth, max: resize.maxWidth, resizeTo: resize.resizeTo }}
             >
               <ResizeHandle {...resize.handleProps} />
             </CollapsibleEdge>
@@ -160,7 +183,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
       )}
       <div className="ib-plan">
         <header className="ib-plan-top">
-          <SidebarTrigger />
+          {!docked && <SidebarTrigger />}
           {!docked && (
             <button type="button" className="ib-plans-back ib-plan-showfiles" onClick={showFiles} aria-label={PLAN_FILES_WORDS.show} data-plan-show-files="">
               <Icon name="contents" />
@@ -177,6 +200,7 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
             {project && <span className="ib-plan-crumb-p">{project} /</span>} <span className={onScreen.kind === 'doc' && document.id === primary ? 'ib-plan-crumb-n' : 'ib-plan-crumb-p'}>{read.plan.name}</span>
             {(artifact || document.id !== primary) && <span className="ib-plan-crumb-n"> / {artifact ? artifactName(artifact) : document.title}</span>}
           </span>
+          <span className="ib-plan-topend" ref={setRailSlot} />
         </header>
         {middle}
       </div>
@@ -194,7 +218,7 @@ function DocPane({
   mainVersions,
   version,
   diff,
-  phone,
+  place,
   project,
 }: {
   id: string;
@@ -204,7 +228,7 @@ function DocPane({
   mainVersions: readonly PlanVersion[];
   version: number | null;
   diff: { from: number; to: number } | null;
-  phone: boolean;
+  place: RailPlacement;
   project: string | null;
 }) {
   const isMain = document.id === primary;
@@ -237,7 +261,7 @@ function DocPane({
       </div>
     );
   }
-  return <DocLoaded id={id} document={document} isMain={isMain} read={read} versions={versions} mainVersions={mainVersions} version={version} diff={diff} phone={phone} project={project} />;
+  return <DocLoaded id={id} document={document} isMain={isMain} read={read} versions={versions} version={version} diff={diff} place={place} project={project} />;
 }
 
 function DocLoaded({
@@ -246,10 +270,9 @@ function DocLoaded({
   isMain,
   read,
   versions,
-  mainVersions,
   version,
   diff,
-  phone,
+  place,
   project,
 }: {
   id: string;
@@ -257,10 +280,9 @@ function DocLoaded({
   isMain: boolean;
   read: PlanRead;
   versions: readonly PlanVersion[];
-  mainVersions: readonly PlanVersion[];
   version: number | null;
   diff: { from: number; to: number } | null;
-  phone: boolean;
+  place: RailPlacement;
   project: string | null;
 }) {
   const head = versions[versions.length - 1]!.version_number;
@@ -285,7 +307,7 @@ function DocLoaded({
   const rail = (
     <PlanRail
       versions={versions}
-      activityVersions={mainVersions}
+      documentId={document.id}
       read={read}
       shown={shown}
       head={head}
@@ -354,13 +376,13 @@ function DocLoaded({
           )}
         </div>
       </div>
-      <RailPlace phone={phone} rail={rail} count={versions.length} sheet={sheet} setSheet={setSheet} host={sheetHost} title={isMain ? read.plan.name : document.title} />
+      <RailPlace place={place} rail={rail} count={versions.length} sheet={sheet} setSheet={setSheet} host={sheetHost} title={isMain ? read.plan.name : document.title} />
     </div>
   );
 }
 
 /** The middle and the rail for an artifact: the file as it is, and a rail that says it has no versions. */
-function ArtifactPane({ id, artifact, read, activityVersions, phone, project }: { id: string; artifact: PlanArtifact; read: PlanRead; activityVersions: readonly PlanVersion[]; phone: boolean; project: string | null }) {
+function ArtifactPane({ id, artifact, place, project }: { id: string; artifact: PlanArtifact; place: RailPlacement; project: string | null }) {
   const [sheet, setSheet] = useState(false);
   const [sheetHost, setSheetHost] = useState<HTMLElement | null>(null);
   return (
@@ -376,20 +398,75 @@ function ArtifactPane({ id, artifact, read, activityVersions, phone, project }: 
           <PlanArtifactView id={id} artifact={artifact} />
         </div>
       </div>
-      <RailPlace phone={phone} rail={<ArtifactRail artifact={artifact} read={read} activityVersions={activityVersions} />} count={0} sheet={sheet} setSheet={setSheet} host={sheetHost} title={artifactName(artifact)} />
+      <RailPlace place={place} rail={<ArtifactRail artifact={artifact} />} count={null} sheet={sheet} setSheet={setSheet} host={sheetHost} title={artifactName(artifact)} />
     </div>
   );
 }
 
-/** The rail beside the file on a desktop; on a phone a bar at the bottom whose Versions opens it as a sheet. */
-function RailPlace({ phone, rail, count, sheet, setSheet, host, title }: { phone: boolean; rail: ReactNode; count: number; sheet: boolean; setSheet: (open: boolean) => void; host: HTMLElement | null; title: string }) {
-  if (!phone) return <aside className="ib-plan-rail" aria-label="Versions and activity">{rail}</aside>;
+/**
+ * The rail beside the file on a wide desktop. With less room it floats over the pane's right side (Shape's one
+ * panel), opened from "Versions" at the end of the top bar and closed by its own button or Escape inside it; picking
+ * a version closes it. On a phone, a bar at the bottom whose Versions opens it as a sheet.
+ */
+function RailPlace({ place, rail, count, sheet, setSheet, host, title }: { place: RailPlacement; rail: ReactNode; count: number | null; sheet: boolean; setSheet: (open: boolean) => void; host: HTMLElement | null; title: string }) {
+  const toggle = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLElement>(null);
+  const label = count === null ? 'Versions' : `Versions ${count}`;
+  useEffect(() => {
+    if (place.mode !== 'float') setSheet(false);
+  }, [place.mode, setSheet]);
+  useEffect(() => {
+    if (place.mode === 'float' && sheet) panel.current?.querySelector<HTMLElement>('[data-plan-rail-close]')?.focus();
+  }, [place.mode, sheet]);
+  if (place.mode === 'docked') return <aside className="ib-plan-rail" aria-label="Versions and activity">{rail}</aside>;
+  if (place.mode === 'float') {
+    const close = () => {
+      setSheet(false);
+      toggle.current?.focus();
+    };
+    return (
+      <>
+        {place.slot &&
+          createPortal(
+            <button ref={toggle} type="button" className="ib-plans-back ib-plan-railbtn" aria-expanded={sheet} aria-controls="ib-plan-railfloat" onClick={() => setSheet(!sheet)} data-on={sheet ? '' : undefined} data-plan-rail-toggle="">
+              <Icon name="stack" />
+              {label}
+            </button>,
+            place.slot,
+          )}
+        {sheet && (
+          <aside
+            ref={panel}
+            id="ib-plan-railfloat"
+            className="ib-plan-railfloat"
+            role="dialog"
+            aria-label="Versions and activity"
+            onKeyDown={(e) => {
+              if (e.key !== 'Escape') return;
+              e.preventDefault();
+              e.stopPropagation();
+              close();
+            }}
+            data-plan-rail-float=""
+          >
+            <div className="ib-plan-railfloat-head">
+              <span>{title}</span>
+              <button type="button" className="ib-plan-files-icon" aria-label="Close" onClick={close} data-plan-rail-close="">
+                <Icon name="x" />
+              </button>
+            </div>
+            <div className="ib-plan-railfloat-body">{rail}</div>
+          </aside>
+        )}
+      </>
+    );
+  }
   return (
     <>
       <nav className="ib-plan-phonebar" aria-label="Plan">
         <button type="button" onClick={() => setSheet(true)} data-plan-phone-tab="versions">
           <Icon name="stack" />
-          Versions {count}
+          {label}
         </button>
       </nav>
       <BottomSheet open={sheet} onClose={() => setSheet(false)} title={title} host={host} attrs={{ 'data-plan-sheet': '' }}>

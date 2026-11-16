@@ -14,7 +14,7 @@
  *                                            version the person last saw (else the one before `to`)
  *   POST /api/plans/:id/look                 { doc?, seen? }: the person looked (and saw version `seen`)
  */
-import { checkPlanLookInput, isPlanId, isPlanVersionNumber, type PlanVersion } from "@plannotator/core/plans";
+import { checkPlanLookInput, isPlanId, isPlanPictureType, isPlanVersionNumber, planMediaType, type PlanVersion } from "@plannotator/core/plans";
 import type { PlanStore } from "./store";
 
 export const PLANS_ROUTE_PREFIX = "/api/plans";
@@ -49,9 +49,6 @@ const CONTENT_TYPE: Record<string, string> = {
   dot: "text/plain; charset=utf-8",
 };
 
-/** Raster pictures, served as what they are: a picture runs nothing. */
-const SERVED_PICTURES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
-
 /**
  * The type an artifact's bytes are served as. An artifact is an agent's file on this Inbox's own origin, so nothing
  * that could run there is served as itself: a raster picture keeps its type; text of any kind (HTML, SVG, JSON…)
@@ -59,8 +56,9 @@ const SERVED_PICTURES = new Set(["image/png", "image/jpeg", "image/gif", "image/
  * anything else is a download.
  */
 export function artifactServedType(contentType: string): string {
-  const type = contentType.split(";")[0]!.trim().toLowerCase();
-  if (SERVED_PICTURES.has(type)) return type;
+  const type = planMediaType(contentType);
+  // Raster pictures (`PLAN_PICTURE_TYPES`, the list the window draws as pictures) as what they are: they run nothing.
+  if (isPlanPictureType(type)) return type;
   if (type.startsWith("text/") || type === "image/svg+xml" || type === "application/json" || type.endsWith("+json") || type.endsWith("+xml")) return "text/plain; charset=utf-8";
   return "application/octet-stream";
 }

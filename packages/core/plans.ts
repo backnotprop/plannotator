@@ -291,15 +291,33 @@ export function isPlanVersion(value: unknown): value is PlanVersion {
   );
 }
 
+/** Names Windows keeps for devices (with or without an extension): such a file cannot be written or copied there. */
+const WINDOWS_DEVICE_NAME = /^(con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(\.|$)/i;
+
 /**
- * An artifact's path under its plan's `files/`: relative, `/`-separated, each segment a plain name (no `.` or `..`,
- * no backslash, no control character, no leading dot), at most 200 characters. Anything else names no artifact.
+ * An artifact's path under its plan's `files/`: relative, `/`-separated, each segment a plain name that every disk
+ * can hold (no `.` or `..`, no leading dot, no trailing dot or space, no backslash, no control character, none of
+ * `<>:"|?*`, no Windows device name such as `CON` or `com1.txt`), at most 200 characters. Anything else names no
+ * artifact.
  */
 export function isPlanAssetPath(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0 || value.length > 200) return false;
-  if (/[\\\u0000-\u001f\u007f]/.test(value)) return false;
-  return value.split("/").every((segment) => segment.length > 0 && !segment.startsWith("."));
+  if (/[\\\u0000-\u001f\u007f<>:"|?*]/.test(value)) return false;
+  return value
+    .split("/")
+    .every((segment) => segment.length > 0 && !segment.startsWith(".") && !/[. ]$/.test(segment) && !WINDOWS_DEVICE_NAME.test(segment));
 }
+
+/**
+ * The picture types an artifact is shown as a picture for, and served as itself: raster formats every browser draws.
+ * Anything else under `image/` (BMP, TIFF, HEIC…) is a download, as the server sends it. One list for both sides.
+ */
+export const PLAN_PICTURE_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"];
+
+/** A media type without its parameters, lower case: `Image/PNG; x=1` → `image/png`. */
+export const planMediaType = (contentType: string) => contentType.split(";")[0]!.trim().toLowerCase();
+
+export const isPlanPictureType = (contentType: string) => PLAN_PICTURE_TYPES.includes(planMediaType(contentType));
 
 export function isPlanArtifact(value: unknown): value is PlanArtifact {
   if (!isObject(value)) return false;

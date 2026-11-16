@@ -1,16 +1,18 @@
 /**
- * A plan's left panel, as a Workspaces space's (the owner, 2026-11-16: "the same panel we have in spaces"): this
- * plan's files in one flat list, read only. Head: back to Plans and the plan's name. "Pages" and their count, with
- * Filter files; the plan's main page first, marked "Main", then its other documents by name. "Artifacts" and their
- * count only when it has some, by name. A row is a link to its file (the address carries it); the file on screen is
- * a soft tinted row with primary text, never an outline or a side bar.
+ * A plan's left panel (the owner, 2026-11-16: "the same panel we have in spaces", then "within the same pane… Shape's
+ * look & feel"): this plan's files in one flat list, read only. Head: back to Plans and the plan's name, on the
+ * pane's one top bar. "Pages" and their count, with Filter files; the plan's main page first, marked "Main", then its
+ * other documents by name. "Artifacts" and their count only when it has some, by name. A row is a link to its file
+ * (the address carries it). Rows look like Shape's boards list (`.ib-rj-row`): 36 px, 8 px corners, the file on
+ * screen a muted fill and a heavier weight, never an outline or a side bar.
  *
- * Docked on a desktop (a pane of its own, 306 px, 240–400 by its edge, the width kept; a click on the edge, a drag
- * under half its least width or Hide files folds it, kept too, and Show files brings it back). It gives way first
- * when the document would get narrower than `PLAN_DOC_MIN`: then Show files opens it as a sheet from the left, as on
- * a phone, where it is never docked. No file management, no shortcut.
+ * Docked on a desktop: a column of the plan's one pane, a hairline from the document (256 px, 240–400 by its edge,
+ * never wider than leaves the document `PLAN_DOC_MIN`; the width kept, and a kept width wider than the room is drawn
+ * narrower, never folded). A click on the edge, a drag under half its least width or Hide files folds it, kept too,
+ * and Show files brings it back. Only a pane too narrow for its least width beside `PLAN_DOC_MIN` opens it as a sheet
+ * from the left instead, as on a phone, where it is never docked. No file management, no shortcut.
  */
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'react';
 import type { PlanArtifact, PlanDocument, PlanDocumentKind } from '@plannotator/core/plans';
 import { Icon, type IconName } from '../icons';
 import { Tip } from '../components/Tip';
@@ -20,10 +22,10 @@ import { artifactKind, artifactName, byName, noFileMatches, PLAN_FILES_WORDS, ty
 /** The file on screen: a document (the main page when it is the plan's own) or an artifact. */
 export type PlanFileRef = { kind: 'doc'; id: string } | { kind: 'artifact'; path: string };
 
-export const PLAN_FILES_DEFAULT = 306;
+export const PLAN_FILES_DEFAULT = 256;
 export const PLAN_FILES_MIN = 240;
 export const PLAN_FILES_MAX = 400;
-/** The document's least width beside the docked panel and the rail; narrower, the panel gives way first. */
+/** The document's least width beside the docked panel: the panel is never wider than leaves it this. */
 export const PLAN_DOC_MIN = 480;
 export const PLAN_FILES_WIDTH_KEY = 'plannotator-inbox-plan-files-width';
 export const PLAN_FILES_HIDDEN_KEY = 'plannotator-inbox-plan-files-hidden';
@@ -78,9 +80,11 @@ export interface PlanFilesProps {
   onPicked?: () => void;
   /** Docked: Hide files folds it. Absent in the sheet. */
   onHide?: () => void;
+  /** Docked at the pane's left edge: the Inbox's sidebar toggle, first in the head (the page's top bar). */
+  start?: ReactNode;
 }
 
-export function PlanFiles({ plan, name, primary, documents, artifacts, onScreen, onPicked, onHide }: PlanFilesProps) {
+export function PlanFiles({ plan, name, primary, documents, artifacts, onScreen, onPicked, onHide, start }: PlanFilesProps) {
   const rows = useMemo(() => planFileRows(primary, documents, artifacts), [primary, documents, artifacts]);
   const [filtering, setFiltering] = useState(false);
   const [query, setQuery] = useState('');
@@ -133,6 +137,7 @@ export function PlanFiles({ plan, name, primary, documents, artifacts, onScreen,
   return (
     <nav className="ib-plan-files" aria-label={PLAN_FILES_WORDS.panel} data-plan-files="">
       <div className="ib-plan-files-head">
+        {start}
         <button type="button" className="ib-plan-files-icon" onClick={() => writeRoute({ page: 'plans', project: null, thread: null })} aria-label={PLAN_FILES_WORDS.back} data-plan-files-back="">
           <Icon name="chevL" />
         </button>

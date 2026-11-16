@@ -12,9 +12,9 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { planId } from "@plannotator/core/plans";
+import { PLAN_PICTURE_TYPES, planId } from "@plannotator/core/plans";
 import { createPlanStore } from "./store";
-import { handlePlanRoute, isPlansPath, type PlanRouteResult } from "./routes";
+import { artifactServedType, handlePlanRoute, isPlansPath, type PlanRouteResult } from "./routes";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -138,6 +138,10 @@ describe("Plans' routes", () => {
     expect((await served("mockup.html") as { type: string }).type).toBe("text/plain; charset=utf-8");
     expect((await served("flow.svg") as { type: string }).type).toBe("text/plain; charset=utf-8");
     expect((await served("spec.pdf") as { type: string }).type).toBe("application/octet-stream");
+    // Only the shared picture list is served as a picture (the window draws the same list): a BMP is a download.
+    expect(PLAN_PICTURE_TYPES.map(artifactServedType)).toEqual([...PLAN_PICTURE_TYPES]);
+    expect(artifactServedType("image/bmp")).toBe("application/octet-stream");
+    expect(artifactServedType("Image/PNG; x=1")).toBe("image/png");
     // Only a recorded path: nothing else under files/, nothing outside it.
     expect(await served("nope.png")).toBe(404);
     expect(await served("..%2F..%2Fplan.jsonl")).toBe(404);

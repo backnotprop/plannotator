@@ -2,16 +2,17 @@
  * The plan library on disk, on a scratch data dir. What regresses if these fail:
  * - a plan, its versions or its decisions do not read back as written, or the list loses or misorders a plan;
  * - a version stops being a plain file a person can open without Plannotator;
- * - "changed since you looked" is wrong after a new version;
+ * - "changed since you looked" is wrong after a new version, or reading another page first marks every version new;
+ * - an artifact is served through a symlink, from a case twin, or under a name a disk cannot hold;
  * - a crash mid-write (a torn line, a version file with no line, a line with no document update, a plan record never
  *   written) loses data, reuses a version number, glues two lines together or duplicates a document;
  * - the library is readable by other users of the machine (0700 folders, 0600 files);
  * - opening the store writes anything.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { gitBlobSha, planId } from "@plannotator/core/plans";
 import { createPlanStore, planLibraryDir } from "./store";
 
@@ -110,6 +111,53 @@ describe("plan store", () => {
     store.recordLook(plan.id, { seen: 1 });
     expect(store.looks().plans[plan.id]!.docs[doc]).toBe(2);
     expect(() => store.recordLook(planId("pln"))).toThrow();
+  });
+
+  test("only the main page counts: reading another page first never marks every version new", () => {
+    const { store, plan, doc } = world();
+    for (const text of ["one", "two", "three"]) store.addVersion(plan.id, doc, { bytes: bytes(text), committed_at: at(2), source: "plan-review" });
+    const notes = store.addDocument(plan.id, { title: "Notes", created_at: at(2) });
+    store.addVersion(plan.id, notes.id, { bytes: bytes("n1"), committed_at: at(2), source: "agent-tool" });
+    store.recordLook(plan.id, { doc: notes.id, seen: 1 });
+    expect(store.looks().plans[plan.id]!.docs[notes.id]).toBe(1);
+    expect(store.list()[0]).toMatchObject({ seen_version_number: null, changed: false });
+    store.recordLook(plan.id, { seen: 2 });
+    expect(store.list()[0]).toMatchObject({ seen_version_number: 2, changed: true });
+  });
+
+  test("an artifact is served only from its own recorded file: no symlink, no case twin, no name a disk cannot hold", () => {
+    const { dataDir, store, plan } = world();
+    const put = (asset_path: string) => store.addArtifact(plan.id, { asset_path, bytes: bytes(asset_path), content_type: "text/plain", created_at: at(2) });
+    put("shots/a.txt");
+    expect(readFileSync(store.artifactPath(plan.id, "shots/a.txt")!, "utf8")).toBe("shots/a.txt");
+    // A second path that a case- or form-insensitive disk holds as the same file or folder is refused.
+    expect(() => put("shots/A.txt")).toThrow(/only by case/);
+    expect(() => put("Shots/b.txt")).toThrow(/only by case/);
+    expect(() => put("shots/café.txt")).not.toThrow();
+    expect(() => put("shots/café.txt")).toThrow(/only by case/);
+    // Writing the same path again is a new version of its record, not a twin.
+    expect(() => put("shots/a.txt")).not.toThrow();
+    // Names Windows cannot hold.
+    for (const bad of ["CON", "nul.txt", "shots/com1.png", "LPT9", "aux.tar.gz", "trailing.", "trailing ", "a:b", "q?.txt", "pipe|x"]) expect(() => put(bad)).toThrow(/Not an artifact path/);
+    expect(() => put("console.txt")).not.toThrow();
+    if (process.platform === "win32") return;
+    // A file replaced by a symlink (outside the plan, or to another artifact inside it) is refused, as is a symlinked folder.
+    const files = join(planLibraryDir(dataDir), plan.id, "files");
+    const secret = join(scratch(), "secret.txt");
+    writeFileSync(secret, "secret");
+    put("link.txt");
+    rmSync(join(files, "link.txt"));
+    symlinkSync(secret, join(files, "link.txt"));
+    expect(store.artifactPath(plan.id, "link.txt")).toBeNull();
+    rmSync(join(files, "link.txt"));
+    symlinkSync(join(files, "console.txt"), join(files, "link.txt"));
+    expect(store.artifactPath(plan.id, "link.txt")).toBeNull();
+    put("dir/x.txt");
+    rmSync(join(files, "dir"), { recursive: true });
+    mkdirSync(join(dirname(secret), "dir"));
+    writeFileSync(join(dirname(secret), "dir", "x.txt"), "secret");
+    symlinkSync(join(dirname(secret), "dir"), join(files, "dir"));
+    expect(store.artifactPath(plan.id, "dir/x.txt")).toBeNull();
   });
 
   test("folders are 0700 and files 0600", () => {

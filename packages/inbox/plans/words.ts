@@ -3,7 +3,7 @@
  * A decision reads from the plan's decision record: "Approved" (with or without notes), "Changes asked" (denied, or
  * feedback sent; both local to this computer), or "No decision".
  */
-import type { PlanDecisionKind, PlanSummary, PlanVersion } from '@plannotator/core/plans';
+import { isPlanPictureType, planMediaType, type PlanDecisionKind, type PlanSummary, type PlanVersion } from '@plannotator/core/plans';
 
 export type PlanDecisionTone = 'approved' | 'changes' | 'none';
 
@@ -137,11 +137,14 @@ export const noFileMatches = (query: string) => `No files match “${query}”.`
 
 export type PlanArtifactKind = 'image' | 'svg' | 'html' | 'pdf' | 'video' | 'other';
 
-/** What an artifact is, by its media type (an SVG is drawn as a picture, from its text). */
+/**
+ * What an artifact is, by its media type (an SVG is drawn as a picture, from its text). A picture only for the types
+ * the server serves as pictures (`PLAN_PICTURE_TYPES`); another image type (BMP, TIFF, HEIC) is a file to download.
+ */
 export function artifactKind(contentType: string): PlanArtifactKind {
-  const type = contentType.split(';')[0]!.trim().toLowerCase();
+  const type = planMediaType(contentType);
   if (type === 'image/svg+xml') return 'svg';
-  if (type.startsWith('image/')) return 'image';
+  if (isPlanPictureType(type)) return 'image';
   if (type === 'text/html' || type === 'application/xhtml+xml') return 'html';
   if (type === 'application/pdf') return 'pdf';
   if (type.startsWith('video/')) return 'video';

@@ -1,8 +1,9 @@
 /**
  * The plan page's right rail (layout B): the versions of the file on screen, newest first, each with who saved it (a
  * display name only), when, and the decision on it; the version the person had seen marked "You saw this"; Compare;
- * then the plan's activity. The plan's files are in the left panel (PlanFiles.tsx). An artifact has no versions: the
- * rail says so, with what the file is, above the activity. Comments and the plan's thread come later.
+ * then that file's own activity (its versions saved, the decisions on it; nothing plan-wide, so another page never
+ * reads as the main page's history). The plan's files are in the left panel (PlanFiles.tsx). An artifact has no
+ * versions: the rail says so, with what the file is and when it was kept. Comments and the plan's thread come later.
  */
 import type { PlanArtifact, PlanDecision, PlanVersion } from '@plannotator/core/plans';
 import { fullTime, whenTime } from '@plannotator/core/inbox-format';
@@ -14,8 +15,8 @@ import { DecisionMark } from './parts';
 export interface PlanRailProps {
   /** The versions of the document on screen. */
   versions: readonly PlanVersion[];
-  /** The plan's main page's versions: its activity says when each was saved. */
-  activityVersions: readonly PlanVersion[];
+  /** The document on screen: its activity is its own versions and the decisions on it, nothing plan-wide. */
+  documentId: string;
   read: PlanRead;
   shown: number;
   head: number;
@@ -45,8 +46,8 @@ export function PlanRail(props: PlanRailProps) {
   );
 }
 
-/** The rail beside an artifact: no versions, said plainly, what the file is, then the plan's activity. */
-export function ArtifactRail({ artifact, read, activityVersions }: { artifact: PlanArtifact; read: PlanRead; activityVersions: readonly PlanVersion[] }) {
+/** The rail beside an artifact: no versions, said plainly, then what the file is and when it was kept. */
+export function ArtifactRail({ artifact }: { artifact: PlanArtifact }) {
   return (
     <div className="ib-plan-railin">
       <h2 className="ib-plan-railh">Versions</h2>
@@ -65,12 +66,11 @@ export function ArtifactRail({ artifact, read, activityVersions }: { artifact: P
           </time>
         </dd>
       </dl>
-      <Activity versions={activityVersions} read={read} />
     </div>
   );
 }
 
-function Versions({ versions, activityVersions, shown, head, seen, compare, decisions, read, onPick, onCompare }: PlanRailProps) {
+function Versions({ versions, documentId, shown, head, seen, compare, decisions, read, onPick, onCompare }: PlanRailProps) {
   const pair = compare ? null : comparePair(shown, seen);
   const newestFirst = [...versions].reverse();
   return (
@@ -115,15 +115,16 @@ function Versions({ versions, activityVersions, shown, head, seen, compare, deci
           Compare v{pair.from} with v{pair.to}
         </button>
       )}
-      <Activity versions={activityVersions} read={read} />
+      <Activity versions={versions} decisions={read.decisions.filter((d) => d.document_id === documentId)} />
     </>
   );
 }
 
-function Activity({ versions, read }: { versions: readonly PlanVersion[]; read: PlanRead }) {
+/** One document's history: when each of its versions was saved and the decisions on it. */
+function Activity({ versions, decisions }: { versions: readonly PlanVersion[]; decisions: readonly PlanDecision[] }) {
   const items = [
     ...versions.map((v) => ({ at: v.committed_at, key: `v${v.version_number}`, line: `v${v.version_number} saved`, tone: null })),
-    ...read.decisions.map((d, i) => {
+    ...decisions.map((d, i) => {
       const tone = decisionTone(d.decision);
       const on = d.version_number ? ` v${d.version_number}` : '';
       return { at: d.at, key: `d${i}`, line: tone === 'approved' ? `You approved${on}` : tone === 'changes' ? `You asked for changes${on ? ` on${on}` : ''}` : decisionLabel(d.decision), tone };

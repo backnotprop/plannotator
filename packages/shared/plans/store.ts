@@ -23,7 +23,7 @@
  *
  * Nothing here runs unless a caller asks: creating the store reads and writes nothing.
  */
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, appendFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, appendFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -352,8 +352,10 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       return [...latest.values()]
         .map((line): PlanSummary => {
           const look = seen[line.id];
+          // Only the main page counts: a plan is changed when a newer version of its main page came after one you
+          // read. Reading only another page (or an artifact) leaves the plan unlooked here, never "every version new".
           const seenVersion = look ? (look.docs[line.primary_doc_id] ?? null) : null;
-          return { ...line, looked_at: look?.looked_at ?? null, seen_version_number: seenVersion, changed: look !== undefined && line.head_version_number > (seenVersion ?? 0) };
+          return { ...line, looked_at: look?.looked_at ?? null, seen_version_number: seenVersion, changed: seenVersion !== null && line.head_version_number > seenVersion };
         })
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id));
     },
@@ -505,14 +507,33 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
 
     artifactPath(id, assetPath) {
       if (!isPlanAssetPath(assetPath) || !artifactsOf(id).some((a) => a.asset_path === assetPath)) return null;
-      const path = join(folder(id), FILES_DIR, ...assetPath.split("/"));
-      return existsSync(path) ? path : null;
+      const files = join(folder(id), FILES_DIR);
+      const path = join(files, ...assetPath.split("/"));
+      // The file on disk must be exactly the recorded path under the plan's own files/: a symlink anywhere below it
+      // (to inside or outside), or a name the disk folds to another case or form, resolves elsewhere and is refused.
+      try {
+        const real = realpathSync.native(path);
+        if (real !== join(realpathSync.native(files), ...assetPath.split("/")) || !lstatSync(real).isFile()) return null;
+        return real;
+      } catch {
+        return null;
+      }
     },
 
     addArtifact(id, input) {
       if (!planOf(id)) throw new Error(`No plan ${id}.`);
       if (!isPlanAssetPath(input.asset_path)) throw new Error(`Not an artifact path: ${input.asset_path}`);
       const segments = input.asset_path.split("/");
+      // Two paths a case- or form-insensitive disk (the Mac's, Windows') holds as one file or folder are refused: one
+      // recorded artifact would be served with the other's bytes.
+      const fold = (s: string) => s.normalize("NFC").toLowerCase();
+      const prefixes = (path: string) => path.split("/").map((_, i, all) => all.slice(0, i + 1).join("/"));
+      const held = new Map<string, string>();
+      for (const a of artifactsOf(id)) for (const p of prefixes(a.asset_path)) held.set(fold(p), p);
+      for (const p of prefixes(input.asset_path)) {
+        const other = held.get(fold(p));
+        if (other !== undefined && other !== p) throw new Error(`${input.asset_path} differs from ${other} only by case.`);
+      }
       ensureDir(join(folder(id), FILES_DIR, ...segments.slice(0, -1)));
       // The bytes first: a line never names a file that is not there.
       writeWhole(join(folder(id), FILES_DIR, ...segments), input.bytes);
