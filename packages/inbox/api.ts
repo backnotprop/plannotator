@@ -19,6 +19,7 @@ import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
 import { learnDefaultRefHost } from './defaultRefHost';
@@ -1089,16 +1090,6 @@ export function pageServerSession(): string | null {
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
 
-/** A thread's PRs answer as the window uses it: anything missing reads as none. */
-function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
-  const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
-  return {
-    pulls: Array.isArray(value.pulls) ? value.pulls : [],
-    groups: Array.isArray(value.groups) ? value.groups : [],
-    removed: Array.isArray(value.removed) ? value.removed : [],
-  };
-}
-
 /** A browser takes at most 64 KiB of keepalive bodies in flight: a larger one goes as an ordinary request. */
 const KEEPALIVE_BODY_MAX = 60_000;
 
@@ -1179,8 +1170,8 @@ function learnMachines(model: ListModel): void {
   rememberLocal(localIdsIn(model));
   for (const row of rows) rememberMachine([row.thread_id], row.machine);
   for (const project of model.projects) rememberMachine([project.id], project.machine);
-  // Letter marks (letterMarks.tsx): the projects' names (a Board card names only an id) and their pictures' keys.
-  learnProjects(model.projects);
+  // Letter marks (letterMarks.tsx): the projects' names, their pictures' keys, and each agent session's project.
+  learnProjects(model.projects, rows);
   // The host an owner/repo#123 links on in a thread with no repo: the one most projects use (defaultRefHost.ts).
   learnDefaultRefHost(model.projects);
 }
@@ -1558,12 +1549,13 @@ export const inboxApi = {
    * lately, read on the thread's own machine. An Inbox older than PRs on threads, or a linked machine older than
    * reading them through its door, answers 404: both read as none.
    */
-  threadPulls: async (threadId: string, signal?: AbortSignal): Promise<InboxThreadPullsAnswer> => {
+  threadPulls: async (threadId: string, signal?: AbortSignal, options?: { retry?: boolean }): Promise<InboxThreadPullsAnswer> => {
     // Aborted when the card closes or a newer read starts, and given up after THREAD_PULLS_READ_MS: an unanswered
-    // read never holds one of the browser's few connections to this Inbox.
+    // read never holds one of the browser's few connections to this Inbox. `retry`: the card's Try again (the
+    // server reads a held failure again and waits a little for it; an older server ignores it).
     const within = signalWithin(THREAD_PULLS_READ_MS, signal);
     try {
-      return threadPullsOf(await get<unknown>(threadUrl(threadId, '/pulls'), within.signal));
+      return threadPullsOf(await get<unknown>(threadUrl(threadId, '/pulls', options?.retry ? 'retry=1' : undefined), within.signal));
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { pulls: [], groups: [], removed: [] };
       throw cause;

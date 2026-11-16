@@ -419,8 +419,24 @@ function lockHeld(lock: { mtimeMs: number; content: string }, now: number = Date
   if (lockHolderGone(lock.content, lock.mtimeMs, now)) return false;
   if (!lockExpired(lock.mtimeMs, now)) return true;
   if (process.platform === "win32" || Math.abs(now - lock.mtimeMs) >= AUTO_UPDATE_LOCK_LIVE_MAX_MS) return false;
-  if (!parseUpdateLockHolder(lock.content)?.boot && lock.mtimeMs <= now - uptime() * 1000) return false;
+  if (!parseUpdateLockHolder(lock.content)?.boot && lock.mtimeMs <= bootTime(now)) return false;
   return judgeLockHolder(lock.content) === "alive";
+}
+
+let bootTimeOverride: number | undefined;
+
+/** When this machine booted (wall clock, ms). */
+function bootTime(now: number): number {
+  return bootTimeOverride ?? now - uptime() * 1000;
+}
+
+/**
+ * Tests only: set or clear (undefined) the boot time lockHeld compares a
+ * macOS lock with, so a test that backdates a lock past the hour does not
+ * depend on how long the machine has been up (restore it in finally).
+ */
+export function setBootTimeForTests(at: number | undefined): void {
+  bootTimeOverride = at;
 }
 
 /**

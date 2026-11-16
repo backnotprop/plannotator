@@ -528,6 +528,8 @@ packages/ui/hooks/useLinkedDoc.reapplyFilter.test.tsx
 packages/ui/hooks/useLinkedDoc.scrollRestore.test.tsx
 packages/ui/components/html-viewer/htmlLinkProtocol.test.tsx
 packages/ui/components/html-viewer/bridgePageNavigation.test.ts
+packages/ui/components/html-viewer/linkGuard.test.ts
+packages/ui/components/html-viewer/bridgeAssetLinkKey.test.ts
 packages/editor/hooks/useAnnotationJump.test.tsx
 packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
@@ -617,6 +619,7 @@ packages/inbox/voiceComposeRenders.test.tsx
 packages/inbox/voiceKeptWords.test.tsx
 packages/inbox/voiceDebugLog.test.ts
 packages/inbox/voiceMiss.test.ts
+packages/inbox/linearKeySettings.test.tsx
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
 packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
@@ -790,3 +793,5 @@ packages/inbox/plans/plansPage.test.tsx
 packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
+packages/inbox/agents/projectFaceMarks.test.tsx
+packages/ui/components/frame/frame.dom.test.tsx
