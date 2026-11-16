@@ -4,8 +4,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { RepoRevisionInfo } from '@plannotator/shared/repo-files';
 import { useRepoFileText, repoFileEmptyMessage } from '../hooks/useRepoFileText';
 import { useScrollMemory } from '../hooks/useScrollMemory';
-import { findSymbolLine, type JumpCrumb as JumpCrumbData, type RevealTarget } from '../utils/explorerNavigation';
-import { JumpCrumb } from './JumpCrumb';
+import { findSymbolLine, type RevealTarget } from '../utils/explorerNavigation';
 
 /** Code navigation's tokens in a whole-file view (where F12 looks, Cmd+click). */
 export interface FileTokenHandlers {
@@ -74,9 +73,6 @@ export interface RepoFileViewProps {
   onSelectAnnotation: (id: string | null) => void;
   /** A jump to a line of this file. */
   revealTarget?: RevealTarget | null;
-  /** The jump that opened this file, shown with the way back. */
-  crumb?: JumpCrumbData | null;
-  onNavigateBack?: () => void;
   tokens?: FileTokenHandlers;
   /** How the file is read (default `fetch` of `/api/repo-file`); a host serving it elsewhere maps the URL. */
   fetchImpl?: typeof fetch;
@@ -99,8 +95,6 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   onDeleteAnnotation,
   onSelectAnnotation,
   revealTarget,
-  crumb,
-  onNavigateBack,
   tokens,
   fetchImpl,
 }) => {
@@ -120,7 +114,6 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   return (
     <div className="h-full flex flex-col" data-repo-file-view={filePath}>
       <div className="flex-none flex items-center gap-2 px-3 border-b border-border min-w-0" style={{ height: 'var(--panel-header-h, 36px)' }}>
-        {crumb && crumb.targetPath === filePath && <JumpCrumb crumb={crumb} onBack={onNavigateBack} />}
         <span className="truncate text-[13px] min-w-0" title={filePath}>
           <span className="text-muted-foreground">{dir}</span>
           <span className="font-medium text-foreground">{name}</span>

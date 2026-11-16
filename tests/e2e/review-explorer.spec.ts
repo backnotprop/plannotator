@@ -395,11 +395,16 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await page.keyboard.press('Enter');
     await expect(page.locator('[data-go-to-file]')).toHaveCount(0);
     await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
-    await expect(page.locator('[data-repo-file-view="README.md"] [data-jump-crumb]')).toContainText('From fileKindTree.ts · Go to File');
+    const floatBack = page.locator('[data-jump-float-back]');
+    const floatForward = page.locator('[data-jump-float-forward]');
+    await expect(page.locator('[data-jump-float]')).toHaveCount(1);
+    await expect(floatBack).toHaveAttribute('aria-label', 'Back to fileKindTree.ts · Go to File');
+    await expect(floatForward).toHaveAttribute('aria-disabled', 'true');
 
     // Back returns to the diff; Forward to the file.
-    await page.keyboard.press(back);
+    await floatBack.click();
     await expect(activeTab).toHaveText('fileKindTree.ts');
+    await expect(floatForward).not.toHaveAttribute('aria-disabled', 'true');
     await page.keyboard.press(forward);
     await expect(page.locator('[data-repo-file-view="README.md"]')).toBeVisible();
     await page.keyboard.press(back);
@@ -411,7 +416,7 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     await page.keyboard.press('F12');
     const kinds = page.locator('[data-repo-file-view="packages/shared/kinds.ts"]');
     await expect(kinds).toBeVisible({ timeout: 20_000 });
-    await expect(kinds.locator('[data-jump-crumb]')).toContainText('From fileKindTree.ts:5 · Go to Definition (F12)');
+    await expect(floatBack).toHaveAttribute('aria-label', 'Back to fileKindTree.ts:5 · Go to Definition');
     await expect(kinds.locator('[data-line="3"][data-selected-line]').first()).toBeAttached();
     await page.screenshot({ path: join(proofDir, '07-definition.png') });
 
@@ -440,8 +445,8 @@ test('Go to File, Go to Definition and References into tabs, Back / Forward, nex
     const reference = page.locator('[data-code-nav-location^="packages/review-editor/utils/fileKindTree.ts:"]').first();
     await expect(reference).toBeVisible({ timeout: 20_000 });
     await reference.click();
-    await expect(page.locator('[data-jump-crumb]', { hasText: 'References' }).first()).toBeVisible();
-    await expect(page.locator('[data-nav-history="back"]').first()).toBeEnabled();
+    await expect(floatBack).toHaveAttribute('aria-label', /^Back to kinds\.ts:\d+ · References$/);
+    await expect(floatBack).not.toHaveAttribute('aria-disabled', 'true');
     await page.screenshot({ path: join(proofDir, '07-refs.png') });
 
     // Next change: this diff fits the screen, so on to the next changed file.

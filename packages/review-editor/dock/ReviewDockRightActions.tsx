@@ -4,13 +4,7 @@ import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { DiffDisplayOptionsPopover } from '@plannotator/ui/components/DiffDisplayOptions';
 import { DiffLayoutToggle } from '@plannotator/ui/components/DiffLayoutToggle';
 import { useReviewStateOptional } from './ReviewStateContext';
-import { REVIEW_ALL_FILES_PANEL_ID, REVIEW_CODE_NAV_PANEL_ID } from './reviewPanelTypes';
-import { formatShortcutBindingText, getShortcutPlatform, resolveShortcutBindings, reviewExplorerShortcuts } from '@plannotator/ui/shortcuts';
-
-const keyHint = (action: 'navigateBack' | 'navigateForward') => {
-  const binding = resolveShortcutBindings(reviewExplorerShortcuts.shortcuts[action])[0];
-  return binding ? ` (${formatShortcutBindingText(binding, getShortcutPlatform())})` : '';
-};
+import { REVIEW_ALL_FILES_PANEL_ID } from './reviewPanelTypes';
 
 const ICON_BUTTON = 'h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
 
@@ -30,29 +24,6 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
     configStore.set('diffStyle', style);
   });
   const showCollapseAll = !!state && (props.activePanel?.id === REVIEW_ALL_FILES_PANEL_ID || !!props.allChangesShown);
-
-  const navigation = state?.navigation ?? null;
-  const navHidden = props.activePanel?.id === REVIEW_CODE_NAV_PANEL_ID;
-  const navButton = (direction: 'back' | 'forward') => {
-    const enabled = !navHidden && (direction === 'back' ? navigation!.canBack : navigation!.canForward);
-    const label = direction === 'back' ? `Go back${keyHint('navigateBack')}` : `Go forward${keyHint('navigateForward')}`;
-    return (
-      <button
-        type="button"
-        onClick={direction === 'back' ? navigation!.back : navigation!.forward}
-        disabled={!enabled}
-        tabIndex={navHidden ? -1 : undefined}
-        className={ICON_BUTTON}
-        title={label}
-        aria-label={direction === 'back' ? 'Go back' : 'Go forward'}
-        data-nav-history={direction}
-      >
-        <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-          <path d={direction === 'back' ? 'M15 18l-6-6 6-6' : 'M9 18l6-6-6-6'} strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </button>
-    );
-  };
 
   const collapseAction = showCollapseAll && state ? (
     <button
@@ -80,18 +51,6 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
 
   return (
     <div className="flex items-center gap-0.5" data-review-diff-controls="">
-      {navigation && (
-        <div
-          className={`flex items-center gap-0.5${navHidden ? ' invisible' : ''}`}
-          role="group"
-          aria-label="Jump history"
-          aria-hidden={navHidden || undefined}
-          data-jump-history=""
-        >
-          {navButton('back')}
-          {navButton('forward')}
-        </div>
-      )}
       {state && (
         <button
           type="button"

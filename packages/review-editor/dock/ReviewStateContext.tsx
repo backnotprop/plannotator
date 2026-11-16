@@ -165,7 +165,14 @@ export interface ReviewState {
   revealTarget?: import('../utils/explorerNavigation').RevealTarget | null;
   jumpCrumb?: import('../utils/explorerNavigation').JumpCrumb | null;
   /** Back / forward across jumps (absent: no history in this host). */
-  navigation?: { canBack: boolean; canForward: boolean; back: () => void; forward: () => void };
+  navigation?: {
+    canBack: boolean;
+    canForward: boolean;
+    back: () => void;
+    forward: () => void;
+    backTo?: import('../utils/explorerNavigation').NavLocation | null;
+    forwardTo?: import('../utils/explorerNavigation').NavLocation | null;
+  };
   /** Where F12 looks: the token under the pointer in a diff, and the last one clicked. */
   onTokenTarget?: import('../utils/tokenTarget').TokenTargetHandler;
   /** The same for a whole-file view, and its Cmd+click (references). */

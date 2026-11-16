@@ -12,7 +12,6 @@ import { OriginalFileView } from '../../components/OriginalFileView';
 import type { ChangedFileView } from '../../components/FileViewSwitch';
 import { usesPaneLayout } from '../../workspace/layoutEngine';
 import { paneFileView, type PaneFileViewParams } from '../../workspace/paneFileView';
-import { JumpCrumb } from '../../components/JumpCrumb';
 import { usePaneDiffStyle } from '../../workspace/paneContext';
 
 /**
@@ -107,7 +106,6 @@ export const ReviewDiffBody: React.FC<{
   // new side, for a file that has one (not a deletion), and not for Markdown,
   // whose Read view already shows the whole document.
   const fileView = view ?? (state.fileViewOf ? state.fileViewOf(file.path) : 'changes');
-  const crumb = state.jumpCrumb?.targetPath === file.path ? state.jumpCrumb : null;
   const markdownFile = !!state.markdownPreview?.isPreviewable(file);
   const wholeUnavailableReason = file.status === 'deleted'
     ? 'The diff deletes this file'
@@ -133,7 +131,7 @@ export const ReviewDiffBody: React.FC<{
     <div key={`${file.path}:${state.reviewBase ?? ''}:${state.activeDiffBase ?? ''}:${state.feedbackDiffContext?.snapshotId ?? ''}`} className="h-full flex flex-col">
       <div className="flex-1 min-h-0 relative">
       <DiffViewer
-        headerAccessory={crumb ? <><JumpCrumb crumb={crumb} onBack={state.navigation?.back} />{switchControl}</> : switchControl}
+        headerAccessory={switchControl}
         bodyOverride={originalView ? (
           <OriginalFileView
             filePath={file.path}

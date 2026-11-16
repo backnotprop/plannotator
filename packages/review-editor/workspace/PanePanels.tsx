@@ -1,13 +1,17 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import type { Pane, PaneTab } from './paneLayout';
 import type { WorkspaceStore } from './workspaceStore';
 import { reviewPanelComponents } from '../dock/reviewPanelComponents';
 import { PaneSlotContext } from './paneContext';
 import { PaneTabRow } from './PaneTabRow';
+import { JumpHistoryFloat } from '../components/JumpHistoryFloat';
+import { REVIEW_PANEL_TYPES } from '../dock/reviewPanelTypes';
 
 type PanelComponent = React.ComponentType<{ api: unknown; params: Record<string, unknown>; containerApi: unknown }>;
 type ScrollMemory = Map<Element, { top: number; left: number }>;
+
+const JUMP_LANDINGS = new Set<string>([REVIEW_PANEL_TYPES.DIFF, REVIEW_PANEL_TYPES.FILE, REVIEW_PANEL_TYPES.ALL_FILES]);
 
 const hosts = new WeakMap<WorkspaceStore, Map<string, HTMLDivElement>>();
 
@@ -80,6 +84,16 @@ export const PanePanels: React.FC<{ pane: Pane; paneIndex: number; store: Worksp
   const frameRef = useRef<HTMLDivElement>(null);
   const scrolls = useRef(new Map<string, ScrollMemory>());
   const ready = useAfterFirstPaint(deferFirstMount);
+  const layout = useSyncExternalStore(store.subscribe, store.getLayout, store.getLayout);
+  const activeComponent = pane.tabs.find((tab) => tab.id === pane.activeId)?.component;
+  const jumpable = layout.activePane === paneIndex && !!activeComponent && JUMP_LANDINGS.has(activeComponent);
+  const frameHome = useCallback(() => {
+    const frame = frameRef.current;
+    if (!frame) return null;
+    frame.tabIndex = -1;
+    frame.addEventListener('blur', () => frame.removeAttribute('tabindex'), { once: true });
+    return frame;
+  }, []);
   const [attachedId, setAttachedId] = useState<string | null>(null);
   const mounted = useRef(new Set<string>());
   const shown = (id: string) => {
@@ -117,9 +131,10 @@ export const PanePanels: React.FC<{ pane: Pane; paneIndex: number; store: Worksp
   return (
     <>
       <PaneTabRow store={store} paneIndex={paneIndex} />
-      <div ref={frameRef} className="relative flex-1 min-h-0" data-pane-frame="">
+      <div ref={frameRef} className="relative flex-1 min-h-0 outline-none" data-pane-frame="">
         {ready && pane.tabs.map((tab) => shown(tab.id) && <PanelSlot key={tab.id} tab={tab} store={store} paneIndex={paneIndex} />)}
       </div>
+      <JumpHistoryFloat active={jumpable} focusHome={frameHome} />
     </>
   );
 };

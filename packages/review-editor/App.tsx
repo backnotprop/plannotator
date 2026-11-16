@@ -2225,6 +2225,8 @@ const ReviewApp: React.FC = () => {
   const reviewNavigation = useMemo(() => ({
     canBack: navHistory.back.length > 0,
     canForward: navHistory.forward.length > 0,
+    backTo: navHistory.back[navHistory.back.length - 1] ?? null,
+    forwardTo: navHistory.forward[navHistory.forward.length - 1] ?? null,
     back: () => navigateHistory('back'),
     forward: () => navigateHistory('forward'),
   }), [navHistory, navigateHistory]);

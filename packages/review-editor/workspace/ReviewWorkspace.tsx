@@ -100,7 +100,7 @@ export const ReviewWorkspace: React.FC<{
             data-pane-active={two && layout.activePane === index ? '' : undefined}
             data-active-pane-group={layout.activePane === index ? '' : undefined}
             aria-label={index === 0 ? 'Main pane' : 'Side pane'}
-            className="min-w-0 min-h-0 flex flex-col"
+            className="relative min-w-0 min-h-0 flex flex-col"
             style={two ? { flex: `${index === 0 ? ratio : 1 - ratio} 1 0`, minWidth: `min(${PANE_MIN_WIDTH}px, 50%)` } : { flex: '1 1 0' }}
             onPointerDownCapture={() => store.focusPane(index)}
             onFocusCapture={() => store.focusPane(index)}

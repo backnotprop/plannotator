@@ -4,6 +4,7 @@ import { reviewPanelComponents } from '../dock/reviewPanelComponents';
 import { ReviewDockTabRenderer } from '../dock/ReviewDockTabRenderer';
 import { ReviewWorkspace } from './ReviewWorkspace';
 import { usesPaneLayout } from './layoutEngine';
+import { JumpHistoryFloat } from '../components/JumpHistoryFloat';
 
 export const ReviewCenterArea: React.FC<{
   onReady: (event: DockviewReadyEvent) => void;
@@ -16,12 +17,15 @@ export const ReviewCenterArea: React.FC<{
     return <ReviewWorkspace onReady={onReady as unknown as Parameters<typeof ReviewWorkspace>[0]['onReady']} singlePane={singlePane} reviewKey={reviewKey} />;
   }
   return (
-    <DockviewReact
-      className={`h-full ${mode === 'light' ? 'dockview-theme-light' : 'dockview-theme-dark'}`}
-      components={reviewPanelComponents}
-      defaultTabComponent={ReviewDockTabRenderer}
-      onReady={onReady}
-      disableFloatingGroups
-    />
+    <div className="relative h-full">
+      <DockviewReact
+        className={`h-full ${mode === 'light' ? 'dockview-theme-light' : 'dockview-theme-dark'}`}
+        components={reviewPanelComponents}
+        defaultTabComponent={ReviewDockTabRenderer}
+        onReady={onReady}
+        disableFloatingGroups
+      />
+      <JumpHistoryFloat active />
+    </div>
   );
 };

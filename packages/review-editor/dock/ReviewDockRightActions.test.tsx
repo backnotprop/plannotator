@@ -5,7 +5,6 @@ import type { IDockviewHeaderActionsProps } from 'dockview-react';
 import { configStore } from '@plannotator/ui/config';
 import { ReviewDockRightActions } from './ReviewDockRightActions';
 import { ReviewStateProvider, type ReviewState } from './ReviewStateContext';
-import { REVIEW_CODE_NAV_PANEL_ID } from './reviewPanelTypes';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -84,39 +83,31 @@ describe('ReviewDockRightActions', () => {
     expect(popup.textContent).not.toContain('Unified');
   });
 
-  test.skipIf(!hasDom)('back and forward sit in the header from load, disabled until the first jump, and keep their place on the References tab, so the cluster never moves', async () => {
-    const render = async (canBack: boolean, panel: string | null = null) => {
+  test.skipIf(!hasDom)('the top bar has no jump history buttons, and its buttons are the same with or without history', async () => {
+    const render = async (canBack: boolean, canForward: boolean) => {
       const state = {
         diffStyle: 'split',
         onDiffStyleChange: () => {},
         isCompactTouchLayout: false,
         allFilesAllCollapsed: false,
         onToggleAllFilesCollapsed: () => {},
-        navigation: { canBack, canForward: false, back: () => {}, forward: () => {} },
+        navigation: { canBack, canForward, back: () => {}, forward: () => {} },
       } as unknown as ReviewState;
       await act(async () => root?.render(
         <ReviewStateProvider value={state}>
-          <ReviewDockRightActions activePanel={panel ? { id: panel } : null} />
+          <ReviewDockRightActions activePanel={null} />
         </ReviewStateProvider>,
       ));
+      return [...host!.querySelectorAll('button')].map((button) => button.getAttribute('aria-label') ?? button.title);
     };
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    await render(false);
-    const group = host.querySelector<HTMLElement>('[data-jump-history]')!;
-    expect(group).not.toBeNull();
-    const buttons = [...group.querySelectorAll<HTMLButtonElement>('[data-nav-history]')];
-    expect(buttons).toHaveLength(2);
-    expect(buttons.every((button) => button.disabled)).toBe(true);
-    expect(group.className).not.toContain('invisible');
-    await render(true);
-    expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(false);
-    await render(true, REVIEW_CODE_NAV_PANEL_ID);
-    const kept = host.querySelector<HTMLElement>('[data-jump-history]')!;
-    expect(kept.className).toContain('invisible');
-    expect(kept.querySelectorAll('[data-nav-history]')).toHaveLength(2);
-    expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(true);
+    const empty = await render(false, false);
+    const full = await render(true, true);
+    expect(full).toEqual(empty);
+    expect(full.some((label) => /back|forward/i.test(label))).toBe(false);
+    expect(host.querySelector('[data-jump-history], [data-nav-history]')).toBeNull();
   });
 
   test.skipIf(!hasDom)('Collapse all files sits just left of Split/Unified while All changes is shown in either pane; elsewhere its place stays empty so the bar never moves', async () => {
