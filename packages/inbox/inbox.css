@@ -12385,10 +12385,10 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 }
 .ib-lbody [data-thread-lifted] > * { opacity: 0.4; }
 .ib-lbody [data-thread-lifted] { background: color-mix(in oklch, var(--foreground) 7%, transparent); }
-/* The reply box while a thread is carried: a faint tint of the whole box; over it, a stronger tint and the label above
-   it. Fills only: the box's edge never changes (no dashed edge, no ring). Your own thread: no tint, the label says so. */
-.pn-inbox .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-fcomp[data-thread-drop="target"] { background: color-mix(in srgb, var(--primary) 6%, var(--card)); }
-.pn-inbox .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-fcomp[data-thread-drop="over"] { background: color-mix(in srgb, var(--primary) 13%, var(--card)); }
+/* The reply box while a thread is carried: a faint tint laid over the box's own colour (light or dark); over it, a
+   stronger tint and the label above it. Fills only: the box's edge never changes (no dashed edge, no ring). Your own thread: no tint, the label says so. */
+.pn-inbox .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-fcomp[data-thread-drop="target"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 6%, transparent), color-mix(in oklch, var(--primary) 6%, transparent)); }
+.pn-inbox .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-fcomp[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 14%, transparent), color-mix(in oklch, var(--primary) 14%, transparent)); }
 .ib-tdrop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 6; display: none; justify-content: center; pointer-events: none; }
 .ib-tdrop > span { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); color: var(--primary); font-weight: 600; font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
 [data-thread-drop="over"] > .ib-tdrop, [data-thread-drop="refuse"] > .ib-tdrop { display: flex; }
