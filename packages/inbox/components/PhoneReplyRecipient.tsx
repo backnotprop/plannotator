@@ -17,7 +17,7 @@ import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import { labelOf, type SessionLabels } from '../sessionLabels';
 import { agentName, namesList } from '../tags';
-import { recipientNames, useRecipientLabels } from '../thread/recipientNames';
+import { recipientNames } from '../thread/recipientNames';
 import { AgentMark, AgentPill } from './AgentPill';
 import { BottomSheet } from './BottomSheet';
 import { SheetLine, SheetRow } from './SheetRow';
@@ -58,9 +58,8 @@ export function PhoneReplyRecipient({
   /** The folder a session works in, as the thread knows it. */
   folderOf: (session: string) => string;
 }) {
-  const titles = useRecipientLabels(labels);
-  const titleOf = (row: RecipientRow) => labelOf(titles, row.session);
-  const names = recipientNames(rows, titles, folderOf);
+  const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
+  const names = recipientNames(rows, labels, folderOf);
   const chosenIds = chosen.map((r) => r.session);
   const first = chosen[0];
   const ended = chosen.length === 1 && first!.state === 'ended';
