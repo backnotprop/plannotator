@@ -326,6 +326,71 @@ describe("linked machines, on three real Inboxes", () => {
       expect(download.headers.get("content-security-policy")).toStartWith("sandbox");
       await download.arrayBuffer();
 
+      // An HTML page on B with a folder, opened from A in a tab of its own (the owner, 2026-11-16): made on A from B's
+      // existing door routes (`view`, `html-assets`), under exactly the headers B's own new tab gets.
+      const site = join(B.w.project, "site");
+      mkdirSync(site, { recursive: true });
+      writeFileSync(join(site, "pricing.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>Pricing</h1></body></html>');
+      writeFileSync(join(site, "style.css"), "h1 { color: rebeccapurple }");
+      const pageSent = await agent.send("The pricing page.", { thread: "case-1", attachments: [join(site, "pricing.html")] });
+      const withPage = await getJson(A, `/api/inbox/m/${B.id}/threads/${pageSent.thread_id}`);
+      const htmlFile = (withPage.thread.messages as Json[]).find((m) => m.id === pageSent.message_id)!.attachments[0] as Json;
+      const farTab = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${htmlFile.id}/page`, { redirect: "manual", headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" } });
+      const localTab = await fetch(`${base(B)}/api/inbox/attachments/${htmlFile.id}/page`, { redirect: "manual" });
+      expect([farTab.status, localTab.status]).toEqual([303, 303]);
+      const localAt = localTab.headers.get("location")!;
+      expect(localAt).toMatch(/^\/api\/html-assets\/[A-Za-z0-9_-]+\/pricing\.html$/);
+      // The same file under the same token, through the forward.
+      const farAt = farTab.headers.get("location")!;
+      expect(farAt).toBe(`/api/inbox/m/${B.id}${localAt.replace(/^\/api/, "")}`);
+      for (const name of ["cache-control", "referrer-policy"]) expect([name, farTab.headers.get(name)]).toEqual([name, localTab.headers.get(name)]);
+      // The page as the tab gets it: the same document headers as B's own (the sandbox, no network), on A's origin.
+      const farDoc = await fetch(`${base(A)}${farAt}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } });
+      const localDoc = await fetch(`${base(B)}${localAt}`);
+      expect(farDoc.status).toBe(200);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cache-control", "access-control-allow-origin"]) {
+        expect([name, farDoc.headers.get(name)]).toEqual([name, localDoc.headers.get(name)]);
+      }
+      expect(farDoc.headers.get("content-security-policy")).toStartWith("sandbox allow-scripts allow-modals");
+      expect(farDoc.headers.get("content-security-policy")).not.toContain("allow-same-origin");
+      expect(await farDoc.text()).toContain("<h1>Pricing</h1>");
+      await localDoc.arrayBuffer();
+      // Its stylesheet, asked as the sandboxed page asks (an opaque origin: cross-site), loads through the forward.
+      const style = await fetch(new URL("style.css", `${base(A)}${farAt}`), { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors", "Sec-Fetch-Dest": "style" } });
+      expect(style.status).toBe(200);
+      expect(style.headers.get("content-type")).toContain("text/css");
+      expect(style.headers.get("content-security-policy")).toStartWith("sandbox");
+      expect(await style.text()).toContain("rebeccapurple");
+      // A font or module script asks in CORS mode with `Origin: null`: allowed, as on B.
+      const cors = await fetch(new URL("style.css", `${base(A)}${farAt}`), { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", Origin: "null" } });
+      expect([cors.status, cors.headers.get("access-control-allow-origin")]).toEqual([200, "*"]);
+      await cors.arrayBuffer();
+      // Nothing else under the forward opens cross-site: B's threads, the page route, the view.
+      for (const route of [`threads/${pageSent.thread_id}`, `attachments/${htmlFile.id}/page`, `attachments/${htmlFile.id}/view`]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/${route}`, { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" } });
+        expect([route, refused.status]).toEqual([route, 403]);
+        await refused.arrayBuffer();
+      }
+      // The sent version: the page itself, its folder named through the forward, under B's own sent-page headers.
+      const farSent = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${htmlFile.id}/page?version=sent`);
+      const localSent = await fetch(`${base(B)}/api/inbox/attachments/${htmlFile.id}/page?version=sent`);
+      expect([farSent.status, localSent.status]).toEqual([200, 200]);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cache-control", "cross-origin-resource-policy", "referrer-policy"]) {
+        expect([name, farSent.headers.get(name)]).toEqual([name, localSent.headers.get(name)]);
+      }
+      const sentBody = await farSent.text();
+      expect(sentBody).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      expect(sentBody).not.toContain('"/api/html-assets/');
+      await localSent.arrayBuffer();
+      // The viewer in the thread: its page names its folder through the forward too.
+      const viewed = await getJson(A, `/api/inbox/m/${B.id}/attachments/${htmlFile.id}/view`);
+      expect(viewed.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      // B's door is unchanged: it still has no page route, for a linked machine as for a phone.
+      const tokenForB = linksFile(A).links.find((l: Json) => l.id === B.id).token as string;
+      const atDoor = await fetch(`${base(B)}/api/inbox/device/attachments/${htmlFile.id}/page`, { headers: { Authorization: `Bearer ${tokenForB}` } });
+      expect(atDoor.status).toBe(404);
+      expect(((await atDoor.json()) as Json).code).toBe("device_route_not_found");
+
       // A file sent to B from A's window: never held, streamed through by its route; A's page session is checked here, never sent on.
       const { serverSession } = await getJson(A, "/api/inbox/health");
       const upload = (session: string) =>
