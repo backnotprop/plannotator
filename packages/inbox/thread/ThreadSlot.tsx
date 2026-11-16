@@ -12,6 +12,7 @@ import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
+import type { PaneOnScreen } from '../panes/onScreen';
 import { PaneScopeContext } from '../panes/scope';
 import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
@@ -29,6 +30,8 @@ export interface ThreadSlotProps {
   threadId: string | null;
   /** Only the active pane takes the thread keys and counts messages as seen. */
   active: boolean;
+  /** On the page; false: mounted off it (panes/paneKeeper.tsx), so its thread is not on screen. Default true. */
+  shown?: boolean;
   /** The thread as the window holds it for this pane; absent, the slot reads it from the cache itself. */
   held?: HeldThread | null;
   host: ThreadSlotHost;
@@ -38,9 +41,11 @@ export interface ThreadSlotProps {
  * One thread pane: the "opening…" place until the thread's read lands, then the thread. Its keys, its seen-on-sight
  * and its place on screen are its own, keyed by `paneId`; what it reads from the window it reads by thread id.
  */
-export function ThreadSlot({ paneId, threadId, active, held: given, host }: ThreadSlotProps) {
+export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, held: given, host }: ThreadSlotProps) {
   const { route, routeRef, phone, stack, full, fromCard, fileOpen, settings, machines, go, leave, close, listTitle } = host;
-  const own = useHeldThread(given === undefined ? threadId : null);
+  // A pane that stops being the active one reads its thread itself and keeps showing what it showed.
+  const shown = useRef<string | null>(null);
+  const own = useHeldThread(given === undefined ? threadId : null, shown.current === threadId);
   const held = given === undefined ? own : given;
   const thread = held?.thread ?? null;
   const open = host.paneReads.view(paneId);
@@ -50,6 +55,9 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
   const away = owner ? threadAwayLine(owner) : null;
   const awayWait = !!load && !(thread && thread.thread_id === threadId) && (((!!away || !!load.waiting) && load.state === 'failed') || load.state === 'refused');
   const ready = !!threadId && !!thread && thread.thread_id === threadId && !host.rowsPending;
+  useEffect(() => {
+    if (ready) shown.current = threadId;
+  });
   const scope = useMemo(() => ({ paneId, active }), [paneId, active]);
   const activeRef = useRef(active);
   activeRef.current = active;
@@ -64,6 +72,19 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
     focusSubject.current = false;
     document.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
   }, [thread, threadId]);
+  // What the thread says of itself on screen, held back while the pane waits off the page.
+  const screen = useRef<PaneOnScreen | null>(null);
+  const reportScreen = () => {
+    const state = onPage ? screen.current : null;
+    host.panesOnScreen.set(paneId, state);
+    if (paneId === MAIN_PANE) host.setOpenThreadCovered(state?.covered ?? false);
+  };
+  const pageRef = useRef(onPage);
+  useEffect(() => {
+    if (pageRef.current === onPage) return;
+    pageRef.current = onPage;
+    reportScreen();
+  });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   // The board named in the address, in this pane while it shows that thread (the window's one board). Only one the
   // window draws takes the messages' place (none with Shape off, or while a review draws its own).
@@ -205,7 +226,7 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           replyPart={host.shapeReply?.threadId === thread.thread_id ? host.shapeReply : null}
           onReplyPartTaken={() => host.setShapeReply(null)}
           onQuestions={host.patchQuestions}
-          onPickSaves={host.onPickSaves}
+          onPickSaves={(ids, paneClosed) => host.onPickSaves(ids, paneClosed, threadId)}
           onChanged={host.afterWrite}
           onTakenBack={(draft) => openTakenBack(draft, host.openCompose, host.afterWrite)}
           readPending={host.rowPatches.get(thread.thread_id)?.read_at !== undefined}
@@ -249,15 +270,17 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           // Only the active pane counts what it shows as seen (panes/model.ts).
           onSeen={(through) => activeRef.current && host.seenOnSight(thread.thread_id, through)}
           covered={host.covered}
+          parked={!onPage}
           onScreenChange={(state) => {
-            host.panesOnScreen.set(paneId, state);
-            if (paneId === MAIN_PANE) host.setOpenThreadCovered(state?.covered ?? false);
+            screen.current = state;
+            reportScreen();
           }}
           backLabel={phone && boardNode ? 'Thread' : fromCard ? 'Board' : route.reviews ? 'Reviews' : listTitle}
           cardChip={fromCard ? <CardChip card={host.cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={host.backToCard} /> : undefined}
           phone={phone}
           stacked={stack.thread || !!fromCard}
           threadAlone={full}
+          paired={host.paired}
           fullSidebar={host.fullSidebar}
           onFull={fromCard ? undefined : (on) => (on ? host.setThreadFull(true) : host.leaveFull())}
           fileStacked={stack.file}

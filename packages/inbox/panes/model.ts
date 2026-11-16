@@ -86,6 +86,17 @@ export function close(set: PaneSet, id: PaneId): PaneSet {
   return { panes, active };
 }
 
+/**
+ * The person closes pane `id`: beside another pane it goes, and the main pane, which never goes, takes the thread of
+ * the pane beside it instead (so one pane left is the main pane, as before any split). Alone, it only empties.
+ */
+export function closePane(set: PaneSet, id: PaneId): PaneSet {
+  if (id !== MAIN_PANE || set.panes.length < 2) return close(set, id);
+  const [next, ...rest] = set.panes.filter((pane) => pane.id !== MAIN_PANE);
+  const active = set.active === MAIN_PANE || set.active === next!.id ? MAIN_PANE : set.active;
+  return { panes: [{ id: MAIN_PANE, thread: next!.thread }, ...rest], active };
+}
+
 export function focusPane(set: PaneSet, id: PaneId): PaneSet {
   return set.active === id || !hasPane(set, id) ? set : { ...set, active: id };
 }

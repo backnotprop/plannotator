@@ -86,10 +86,14 @@ function trimThreads(client: QueryClient): void {
   for (const query of idle.slice(THREAD_KEEP)) client.removeQueries({ queryKey: query.queryKey, exact: true });
 }
 
-export function useHeldThread(threadId: string | null): HeldThread | null {
+/**
+ * `onScreen`: the caller already shows this thread (another pane did, or this pane before it stopped being the active
+ * one), so what the cache holds stays drawn; only an opening waits for a fresh read instead of drawing an old copy.
+ */
+export function useHeldThread(threadId: string | null, onScreen = false): HeldThread | null {
   const client = useQueryClient();
   const { data } = useQuery<HeldThread>({ queryKey: inboxKeys.thread(threadId ?? ''), queryFn: skipToken, notifyOnChangeProps: ['data'] });
-  const unshowable = () => (threadId && data && !showableThread(client, threadId) ? data : null);
+  const unshowable = () => (threadId && data && !onScreen && !showableThread(client, threadId) ? data : null);
   const [opened, setOpened] = useState(() => ({ threadId, hidden: unshowable() }));
   let hidden = opened.hidden;
   if (opened.threadId !== threadId) {
