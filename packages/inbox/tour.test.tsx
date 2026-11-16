@@ -881,7 +881,8 @@ test.skipIf(!hasDom)('content that cannot be had never starts the tour: no error
   // The entry screen and the first-run screen's tour line stand down; nothing recorded.
   expect($(el, '[data-tour-entry]')).toBeNull();
   expect($(el, '[data-tour-again]')).toBeNull();
-  expect(existsSync(join(dir!, 'data', 'config.json')) ? (config().inboxTour?.skipped_at ?? null) : null).toBeNull();
+  // config.json and state.json together (a missing file reads as nothing): neither skipped nor finished.
+  expect([config().inboxTour?.skipped_at ?? null, config().inboxTour?.finished_at ?? null]).toEqual([null, null]);
   await until(() => !activeIsPage(), 'focus on the Inbox');
   // Settings → Getting started keeps it: once the content can be had, it starts.
   intercept = null;

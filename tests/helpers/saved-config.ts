@@ -3,7 +3,7 @@ import { join } from "node:path";
 
 /**
  * What a data dir holds on disk, as loadConfig reads it: config.json's settings with state.json's machine state
- * over them (#2852; MACHINE_STATE_KEYS in packages/shared/config.ts). For tests that check a record the server
+ * (#2852; MACHINE_STATE_KEYS in packages/shared/config.ts). For tests that check a record the server
  * wrote, such as a one-time dialog's claim, without starting a second reader. A missing file reads as `{}`.
  */
 export function savedConfig(dataDir: string): Record<string, any> {
@@ -16,8 +16,14 @@ export function savedConfig(dataDir: string): Record<string, any> {
   };
   const config = read("config.json");
   const state = read("state.json");
+  // The server saves each record from loadConfig's merged view, so once state.json holds a record it is the merged
+  // one: state.json's copy stands in for loadConfig's field-by-field merge (mergeMachineRecord), which config.test.ts
+  // proves. The sound: config.json's settings with state.json's dialog fields.
   const merged = { ...config, ...state };
-  if (config.inboxSound || state.inboxSound) merged.inboxSound = { ...config.inboxSound, ...state.inboxSound };
+  if (state.inboxSound) {
+    const { dialogDueFor: _due, dialogShownFor: _shown, ...settings } = config.inboxSound ?? {};
+    merged.inboxSound = { ...settings, ...state.inboxSound };
+  }
   return merged;
 }
 
