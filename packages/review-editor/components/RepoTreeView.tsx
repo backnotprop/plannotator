@@ -16,6 +16,7 @@ export interface RepoTreeHandle {
 
 interface RepoTreeViewProps extends FileRowState {
   touch?: boolean;
+  compact?: boolean;
   repo: ReadyRepoFiles;
   loadDir: (dir: string) => void;
   files: DiffFile[];
@@ -103,12 +104,12 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     const at = index.get(row.path);
     const onDisk = p.repo.onDisk[row.path];
     if (at !== undefined) {
-      const parts = fileRowParts(p.files[at], p, withStage);
+      const parts = fileRowParts(p.files[at], p, withStage, withStage && !!p.compact);
       if (onDisk && parts.trail) parts.trail = [{ text: '\u25cf', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] }, ...parts.trail.slice(1)];
       return parts;
     }
     const notes = p.annotationCounts.get(row.path) ?? 0;
-    const lead = p.showViewedControls ? [null] : [];
+    const lead = [...(p.showViewedControls ? [null] : []), ...(withStage && p.compact ? [null] : [])];
     return {
       tone: 'repo',
       title: row.path,
@@ -211,7 +212,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, props.viewedFiles, props.stagedFiles, props.stagingFile, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.showStageControls, repo.onDisk, columns]);
+  }, [model, props.viewedFiles, props.stagedFiles, props.stagingFile, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.showStageControls, repo.onDisk, columns, props.compact]);
 
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
@@ -275,7 +276,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, ensureLoaded]);
 
-  const leadColumns = leadColumnsFor(props.showViewedControls);
+  const leadColumns = leadColumnsFor(props.showViewedControls, stageColumn && !!props.compact);
 
   return (
     <PierreFileTree

@@ -29,6 +29,7 @@
   --trees-icon-width-override: 12px;
   --trees-git-lane-width-override: 10px;
   --tree-lead-w: 12px;
+  --tree-stage-w: 14px;
   --trees-git-added-color-override: var(--success);
   --trees-git-deleted-color-override: var(--destructive);
   --trees-git-modified-color-override: var(--muted-foreground);
@@ -96,8 +97,6 @@
 }
 .review-changes-tree::part(row-part-viewed row-part-pressed) {
   opacity: 1;
-}
-.review-changes-tree::part(row-part-viewed row-part-pressed) {
   color: var(--success);
 }
 .review-changes-tree::part(row-part-viewed):hover {
@@ -184,5 +183,5 @@ html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-p
 html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-part-viewed)::before,
 html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-part-stage)::before,
 html:has([data-pn-compact-touch-layout='true']) .review-changes-tree::part(row-part-unstage)::before {
-  inset: -12px -6px;
+  inset: -12px;
 }

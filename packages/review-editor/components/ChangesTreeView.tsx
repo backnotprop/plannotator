@@ -21,6 +21,7 @@ export interface ChangesTreeHandle {
 
 interface ChangesTreeViewProps {
   touch?: boolean;
+  compact?: boolean;
   tree: FileTreeNode[];
   groups: ChangesTreeGroup[] | null;
   initiallyFoldedGroups?: ReadonlySet<string>;
@@ -161,7 +162,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     if (entry.kind === 'folder') {
       return { trail: [null, ...countParts(entry.node.additions, entry.node.deletions, true)] };
     }
-    return fileRowParts(entry.file, p, withStage);
+    return fileRowParts(entry.file, p, withStage, withStage && !!p.compact);
   };
 
   const gitStatus = useMemo(() => {
@@ -294,7 +295,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, viewedFiles, stagedFiles, stagingFile, annotationCounts, markdownPreviewedPaths, showViewedControls, showStageControls, props.threadCount]);
+  }, [model, viewedFiles, stagedFiles, stagingFile, annotationCounts, markdownPreviewedPaths, showViewedControls, showStageControls, props.threadCount, props.compact]);
 
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
@@ -321,7 +322,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, syncSelection]);
 
-  const leadColumns = leadColumnsFor(showViewedControls);
+  const leadColumns = leadColumnsFor(showViewedControls, stageColumn && !!props.compact);
 
   return (
     <PierreFileTree
