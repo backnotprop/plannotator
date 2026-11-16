@@ -17,8 +17,18 @@ const saveLinearKey = (key: string | null) => post<{ key: InboxLinearKeyState }>
 
 const HINT = 'Shows Linear issues when you hover their links.';
 
+/**
+ * The last save's answer, and the settings read it replaced: the page's settings model is not reread after a save, so
+ * leaving Settings and coming back would show the old state. A newer read (another object) wins again.
+ */
+let lastSave: { over: InboxLinearKeyState; key: InboxLinearKeyState } | null = null;
+
 export function LinearKeySettings({ initial, where }: { initial: InboxLinearKeyState; /** The computer that keeps it. */ where: string }) {
-  const [key, setKey] = useState(initial);
+  const [key, setKeyState] = useState(() => (lastSave?.over === initial ? lastSave.key : initial));
+  const setKey = (next: InboxLinearKeyState) => {
+    lastSave = { over: initial, key: next };
+    setKeyState(next);
+  };
   const [replacing, setReplacing] = useState(false);
   const [typed, setTyped] = useState('');
   const [saving, setSaving] = useState(false);
