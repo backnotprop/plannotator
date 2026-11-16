@@ -12,7 +12,7 @@
  * bump file list drifting from scripts/check-release-version.mjs.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
@@ -187,6 +187,16 @@ describe('anything else runs the full tests', () => {
   test('a search index that is not valid JSON or lost its lists', () => {
     expect(withExtra({ [FEEDBACK_INDEX_FILE]: '{"features": [' }).reuse).toBe(false);
     expect(withExtra({ [FEEDBACK_INDEX_FILE]: '{"features": []}\n' }).reuse).toBe(false);
+  });
+
+  test.skipIf(process.platform === 'win32')('a versioned JSON file replaced by a symlink cannot reuse', () => {
+    const base = fresh();
+    const path = join(repo, JSON_VERSION_FILES[0]!);
+    unlinkSync(path);
+    // Git shows a symlink's target as its blob, so this still parses as a version bump.
+    symlinkSync(pkg('1.0.1').trim(), path);
+    commit({}, 'replace versioned file with a symlink');
+    expect(decide(ENV, deps([passedRun(9, base)])).reuse).toBe(false);
   });
 
   test('a new search index (not a rewrite of the one Test saw)', () => {

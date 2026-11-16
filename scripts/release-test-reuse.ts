@@ -158,12 +158,20 @@ function withoutVersion(file: string, text: string): string {
  * one. Also says whether the search index changed.
  */
 export function bumpOnly(base: string, head: string, git: Deps['git']): { problem: string; indexChanged: boolean } {
-  const changed = git(['diff', '--name-only', '--no-renames', '-z', base, head]).split('\0').filter(Boolean);
+  const changed = git(['diff', '--raw', '--no-renames', '-z', base, head, '--']).split('\0');
   let indexChanged = false;
-  for (const file of changed) {
+  // With renames disabled, each raw entry has one metadata record and one path.
+  for (let i = 0; i < changed.length - 1; i += 2) {
+    const info = changed[i];
+    const file = changed[i + 1];
+    const modes = /^:(\d{6}) (\d{6}) /.exec(info ?? '');
+    if (!file || !modes) throw new Error('git diff did not return a raw change entry');
     if (RELEASE_NOTES.test(file)) continue;
     if (!BUMP_FILES.includes(file)) return { problem: `${file} changed, and it is not a release bump file`, indexChanged };
-    // `git show` throws for a file that one side lacks (added or deleted): not a bump.
+    // git show returns symlink target text as a blob, which can parse as a bump.
+    if (modes[1] !== modes[2] || (modes[1] !== '100644' && modes[1] !== '100755')) {
+      return { problem: `${file} changed its file mode or is not a regular file`, indexChanged };
+    }
     const after = git(['show', `${head}:${file}`]);
     if (file === FEEDBACK_INDEX_FILE) {
       const index = parseObject(after, file);
