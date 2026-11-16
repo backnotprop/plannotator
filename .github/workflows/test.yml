@@ -1,4 +1,7 @@
 name: Test
+# A manual preview is named for it, so deploy.yml never takes it for a passed
+# Test run (an empty name keeps GitHub's own: the PR title, the commit message).
+run-name: "${{ inputs.as_if_changed && format('Test preview: as if {0} changed', inputs.as_if_changed) || '' }}"
 
 on:
   workflow_dispatch:

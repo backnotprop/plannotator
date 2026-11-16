@@ -15,14 +15,23 @@
  *    vendored copy or file name, or a DOM-list line (the "plan" rows and the
  *    real-graph rows);
  *  - a tree-scanning test alone starting a job, or lanes that do not cover the
- *    picked files.
+ *    picked files;
+ *  - a path built from parts (join, resolve, new URL, a template, a folder and
+ *    a name) making no edge, a read of the checkout by a path the graph cannot
+ *    tell not making a tree-scanning test, a deleted non-code file reaching no
+ *    test, a preload or an importer-side unresolved import not running
+ *    everything (the "paths built from parts" rows and the real-graph rows);
+ *  - the smoke skipping a file the binary is built from, a manual preview's
+ *    partial Semgrep scan reaching main's alerts or cancelling its scan, or
+ *    deploy.yml taking a preview for a passed Test run.
  */
 import { describe, expect, test } from 'bun:test';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  CORE_GUARDS, GATES, GATE_JOB, HEAVY_FAIL_SAFE, JOB_MAP, KNOWN_TOP, RUN_ALL, buildGraph, ciChanges, decideGates, gatePaths, knownKind, listsCheckout, plan,
-  repoRoot, semgrepPlan, type Change, type Graph, type Node,
+  CORE_GUARDS, GATES, GATE_JOB, HEAVY_FAIL_SAFE, JOB_MAP, KNOWN_TOP, RUN_ALL, SMOKE_ROOTS, buildGraph, builtPathRefs, ciChanges, decideGates, gatePaths,
+  knownKind, listsCheckout, plan, preloadClosure, repoRoot, semgrepPlan, type Change, type Graph, type Node, type PathRead,
 } from './ci-affected';
 import { HEAVY_LANES, domList, laneNames } from './ci-test-lane';
 
@@ -119,6 +128,16 @@ describe('every job', () => {
     expect(JSON.parse(fallback[0]![2]!)).toEqual(all.unit.lanes);
     expect(JSON.parse(fallback[1]![2]!)).toEqual(all.dom.lanes);
     expect([...all.unit.lanes, ...all.dom.lanes].sort()).toEqual(laneNames().sort());
+  });
+
+  test("a manual preview's partial Semgrep scan is never uploaded outside a PR, never cancels main's scan, and never passes for deploy", () => {
+    const sec = workflow('security.yml') as Workflow & { concurrency: { group: string } };
+    const upload = sec.jobs.semgrep!.steps!.find((s) => s.name === 'Upload Semgrep SARIF')!;
+    expect(upload.if!.replace(/\s+/g, ' ')).toContain("(github.event_name != 'pull_request' && needs.changes.outputs.semgrep != 'files')");
+    expect(sec.concurrency.group).toContain("inputs.as_if_changed && format('preview-{0}', github.run_id)");
+    const test = readFileSync(join(WF_DIR, 'test.yml'), 'utf8');
+    expect((Bun.YAML.parse(test) as { 'run-name': string })['run-name']).toContain("inputs.as_if_changed && format('Test preview: as if {0} changed'");
+    expect(readFileSync(join(WF_DIR, 'deploy.yml'), 'utf8')).toContain('startswith("Test preview:") | not');
   });
 
   test('a self-hosted runner never runs a fork or bot PR, and no workflow uses pull_request_target', () => {
@@ -233,10 +252,32 @@ describe('plan', () => {
     expect('why' in at({ GITHUB_EVENT_NAME: 'workflow_dispatch', CI_AFFECTED_AS_IF: 'README.md', CI_AFFECTED: 'off' }), 'off wins').toBe(true);
     expect('why' in at({ GITHUB_EVENT_NAME: 'workflow_dispatch', CI_AFFECTED_AS_IF: '../x.ts' }), 'a path outside').toBe(true);
     expect('why' in at({ GITHUB_EVENT_NAME: 'workflow_dispatch', CI_AFFECTED_AS_IF: 'a.ts;b' }), 'an odd path').toBe(true);
+    // The ci:full label on the PR, read from the event payload.
+    const dir = mkdtempSync(join(tmpdir(), 'ci-affected-label-'));
+    const payload = (labels: string[]) => { const f = join(dir, `${labels.join('-') || 'none'}.json`); writeFileSync(f, JSON.stringify({ pull_request: { labels: labels.map((name) => ({ name })) } })); return f; };
+    expect(at({ GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: payload(['ci:full', 'bug']) })).toEqual({ why: 'the PR has the ci:full label' });
+    expect(at({ GITHUB_EVENT_NAME: 'pull_request', GITHUB_EVENT_PATH: payload(['bug']) })).not.toEqual({ why: 'the PR has the ci:full label' });
     const docs = at({ GITHUB_EVENT_NAME: 'workflow_dispatch', CI_AFFECTED_AS_IF: 'README.md' });
     expect(docs).toMatchObject({ docsOnly: true, preview: true, changes: [{ status: 'M', path: 'README.md' }] });
     const code = at({ GITHUB_EVENT_NAME: 'workflow_dispatch', CI_AFFECTED_AS_IF: ' scripts/ci-test-lane.ts  packages/none/gone.ts ' });
     expect(code).toMatchObject({ docsOnly: false, changes: [{ status: 'M', path: 'scripts/ci-test-lane.ts' }, { status: 'D', path: 'packages/none/gone.ts' }] });
+  });
+
+  test('a deleted or renamed file that is not code still reaches the tests that name it', () => {
+    expect(picked([ch('apps/x/SKILL.md', 'D')])).toContain('scripts/named.test.ts');
+  });
+
+  test('an import that did not resolve on the importer side runs everything when it may be the changed file', () => {
+    const g = graph();
+    g.graph['packages/a/mid.ts']!.unresolvedAt = ['packages/b/other'];
+    expect(plan(g, { changes: [ch('packages/b/other.ts')], docsOnly: false }).mode).toBe('all');
+    expect(plan(g, { changes: [ch('packages/a/src.ts')], docsOnly: false }).mode).toBe('subset');
+    g.graph['packages/a/mid.ts']!.unresolvedAt = ['packages/b'];
+    expect(plan(g, { changes: [ch('packages/b/other.ts')], docsOnly: false }).mode, 'a workspace package folder').toBe('all');
+    // A file no test runs does not count.
+    g.graph['packages/a/mid.ts']!.unresolvedAt = [];
+    g.graph['tests/manual/x.ts'] = N([], { unresolvedAt: ['packages/b/other'] });
+    expect(plan(g, { changes: [ch('packages/b/other.ts')], docsOnly: false }).mode).toBe('subset');
   });
 
   test('a manifest that only adds exports plans file by file', () => {
@@ -274,6 +315,35 @@ describe('plan', () => {
   });
 });
 
+describe('paths built from parts', () => {
+  const repo = '/r';
+  const files = new Set(['packages/review-editor/App.tsx', 'packages/shared/inbox/connection.ts', 'packages/ui/themes/dark.css', 'packages/ui/themes/light.css', 'packages/x/a/package.json', 'packages/x/b/package.json', 'tests/fixtures/x.ts']);
+  const refs = (code: string, at = '/r/packages/review-editor/utils/pin.test.ts', trace?: PathRead[]) => builtPathRefs(code, at, repo, files, trace).sort();
+
+  test('a join or resolve of literal segments from the file, the repo root or a local binding', () => {
+    expect(refs("readFileSync(join(import.meta.dir, '..', 'App.tsx'), 'utf8')"), 'the source pin').toEqual(['packages/review-editor/App.tsx']);
+    expect(refs("const ROOT = resolve(import.meta.dir, '../../..');\nconst x = join(ROOT, 'packages', 'shared', 'inbox', 'connection.ts');"), 'a ROOT binding').toEqual(['packages/shared/inbox/connection.ts']);
+    expect(refs("contract(join(import.meta.dir, '..', '..', 'shared', 'inbox', 'connection.ts'))"), 'the drift guard').toEqual(['packages/shared/inbox/connection.ts']);
+    expect(refs("const f = join(someDir(), 'packages', 'shared', 'inbox', 'connection.ts')"), 'a base it cannot tell: from the repo root').toEqual(['packages/shared/inbox/connection.ts']);
+  });
+
+  test('new URL, a template, a folder joined with one of the file\'s own names', () => {
+    expect(refs("readFile(new URL('../App.tsx', import.meta.url))")).toEqual(['packages/review-editor/App.tsx']);
+    expect(refs("const R = resolve(import.meta.dir, '../../..'); const p = `${R}/packages/review-editor/App.tsx`")).toEqual(['packages/review-editor/App.tsx']);
+    expect(refs("const T = join(import.meta.dir, '../../ui/themes');\nfor (const f of ['dark.css', 'light.css']) readFileSync(join(T, f))")).toEqual(['packages/ui/themes/dark.css', 'packages/ui/themes/light.css']);
+    expect(refs("const P = resolve(import.meta.dir, '../../x');\nfor (const id of ids) readFileSync(join(P, id, 'package.json'))")).toEqual(['packages/x/a/package.json', 'packages/x/b/package.json']);
+  });
+
+  test('a read of the checkout by a path it cannot tell is flagged; a read of a temp folder is not', () => {
+    const trace: PathRead[] = [];
+    refs("const ROOT = resolve(import.meta.dir, '..');\nfunction read(name: string) { return readFileSync(join(ROOT, name), 'utf8'); }", undefined, trace);
+    expect(trace.some((r) => r.fn === 'readFileSync' && r.checkout)).toBe(true);
+    const scratch: PathRead[] = [];
+    refs("const dir = mkdtempSync(join(tmpdir(), 'x-'));\nreadFileSync(join(dir, name))", undefined, scratch);
+    expect(scratch.some((r) => r.checkout)).toBe(false);
+  });
+});
+
 describe('tree-scanning tests', () => {
   test('a listing of the checkout, or of a folder it cannot trace, makes a scanner; a listing of a temp folder does not', () => {
     expect(listsCheckout("const files = Bun.spawnSync(['git', 'ls-files'])")).toBe(true);
@@ -286,12 +356,15 @@ describe('tree-scanning tests', () => {
 });
 
 describe('gates', () => {
-  const runs = (wf: string, changes: Change[], mode: 'subset' | 'all' | 'docs' = 'subset', reasons: string[] = []) =>
-    Object.fromEntries(decideGates(wf, mode, reasons, changes).map((d) => [d.key, d.run]));
+  const runs = (wf: string, changes: Change[], mode: 'subset' | 'all' | 'docs' = 'subset', reasons: string[] = [], g?: Graph) =>
+    Object.fromEntries(decideGates(wf, mode, reasons, changes, undefined, g).map((d) => [d.key, d.run]));
 
   test('the smoke runs for what the binary is built from, and skips the rest', () => {
-    expect(runs('browser-smoke.yml', [ch('packages/inbox/x.tsx')]).smoke).toBe(true);
-    expect(runs('browser-smoke.yml', [ch('apps/marketing/src/x.astro')]).smoke).toBe(false);
+    const bin: Graph = { files: [], graph: { [SMOKE_ROOTS[0]!]: N(['apps/hook/server/cli.ts']), 'apps/hook/server/cli.ts': N(['packages/server/vcs.ts']) } };
+    expect(runs('browser-smoke.yml', [ch('packages/server/vcs.ts')], 'subset', [], bin).smoke, 'in the closure of the binary entry').toBe(true);
+    expect(runs('browser-smoke.yml', [ch('packages/inbox/x.tsx')], 'subset', [], bin).smoke, "inbox-e2e.yml's list").toBe(true);
+    expect(runs('browser-smoke.yml', [ch('apps/marketing/src/x.astro')], 'subset', [], bin).smoke).toBe(false);
+    expect(runs('browser-smoke.yml', [ch('apps/marketing/src/x.astro')]).smoke, 'no graph to check: it runs').toBe(true);
   });
 
   test('fast-tier gates all run on a run-everything change; Windows only for its own paths and its fail-safe', () => {
@@ -308,6 +381,7 @@ describe('gates', () => {
   test('Trivy and zizmor run for .github, Trivy also for a manifest', () => {
     expect(runs('security.yml', [ch('.github/dependabot.yml')])).toEqual({ trivy: true, zizmor: true });
     expect(runs('security.yml', [ch('apps/x/package.json')])).toEqual({ trivy: true, zizmor: false });
+    expect(runs('security.yml', [ch('packages/shared/call-flow-runtime/x/package-lock.json')]).trivy, 'a lockfile Trivy reads').toBe(true);
     expect(runs('security.yml', [ch('packages/a/src.ts')])).toEqual({ trivy: false, zizmor: false });
   });
 
@@ -338,6 +412,41 @@ describe('the real graph', () => {
     const source = g.graph[copy]!.vendored!;
     const p = plan(g, { changes: [ch(source)], docsOnly: false });
     expect(p.tests.some((t) => t.path.startsWith('apps/pi-extension/') && t.via === source), `${source} via ${copy}`).toBe(true);
+  });
+
+  test("the drift, parity and source-pin guards run for the file they read by a built path (the reviewer's misses)", () => {
+    const cases: [string, string[]][] = [
+      ['packages/review-editor/App.tsx', ['packages/review-editor/utils/autoViewedCallSites.test.ts', 'packages/review-editor/utils/codeNavHoverHandoff.test.ts', 'packages/review-editor/utils/decisionDraftGeneration.test.ts']],
+      ['packages/shared/inbox/connection.ts', ['apps/hook/hooks/mod/inbox-contract.test.ts']],
+      ['packages/shared/plannotator-tool.ts', ['apps/hook/hooks/mod/tool.test.ts']],
+      ['packages/system/src/react.ts', ['packages/system/test/browser-safe.test.ts']],
+      ['apps/amp-plugin/plannotator.ts', ['tests/data-dir-mirrors.test.ts']],
+      ['apps/vscode-extension/src/guides/mcp/relay-script.ts', ['apps/vscode-extension/src/guides/ask/session.test.ts', 'apps/vscode-extension/src/guides/generation.test.ts', 'apps/vscode-extension/src/guides/vscode/asks.test.ts']],
+      ['packages/shared/config.ts', ['scripts/install.test.ts']],
+      ['packages/t3-code/hook.ts', ['scripts/install.test.ts']],
+    ];
+    for (const [source, tests] of cases) {
+      const p = plan(g, { changes: [ch(source)], docsOnly: false });
+      expect(p.mode, source).toBe('subset');
+      for (const t of tests) expect(p.tests.map((x) => x.path), `${source} -> ${t}`).toContain(t);
+    }
+  });
+
+  test('a deleted fixture, command or skill reaches the tests that name it', () => {
+    const cases: [string, string][] = [
+      ['apps/guides-show/build/fallback-viewer-pin.json', 'apps/guides-show/build/fallback-viewer-pin.test.ts'],
+      ['apps/opencode-plugin/commands/plannotator-review.md', 'apps/opencode-plugin/postinstall.test.ts'],
+      ['apps/skills/core/plannotator/SKILL.md', 'apps/pi-extension/bundled-skill.test.ts'],
+    ];
+    for (const [gone, t] of cases) expect(plan(g, { changes: [ch(gone, 'D')], docsOnly: false }).tests.map((x) => x.path), gone).toContain(t);
+  });
+
+  test("what a test preload loads runs everything; the smoke runs for the binary entry's own imports", () => {
+    expect(preloadClosure(g)).toContain('packages/shared/data-dir.ts');
+    expect(plan(g, { changes: [ch('packages/shared/data-dir.ts')], docsOnly: false }).mode).toBe('all');
+    const smoke = (path: string) => decideGates('browser-smoke.yml', 'subset', [], [ch(path)], undefined, g)[0]!.run;
+    expect(smoke('apps/hook/server/cli.ts')).toBe(true);
+    expect(smoke('apps/marketing/src/pages/index.astro')).toBe(false);
   });
 
   test('the tree-scanning set includes the guards that read the whole tree', () => {

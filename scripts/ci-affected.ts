@@ -114,6 +114,8 @@ export type Gate = {
   title: string;
   /** Runs when a changed path matches one of these globs (`E2E` stands for e2ePaths()). */
   paths: string[];
+  /** Also runs when a changed file is in the import closure of these files (the job's entries), read from the graph. */
+  reaches?: string[];
   /** test.yml only: also runs when one of these test files is affected. */
   tests?: (test: string) => boolean;
 };
@@ -135,6 +137,31 @@ const oneOf = (files: string[]) => (t: string) => files.includes(t);
  * every gate on a RUN_ALL change; windows.yml is a heavy suite and runs a job only
  * for its own paths (its HEAVY_FAIL_SAFE included).
  */
+/**
+ * What the browser smoke builds: the compiled binary's entry and the app pages
+ * it embeds (with their build configs). A change in their import closure runs
+ * the smoke, beside inbox-e2e.yml's own path list.
+ */
+export const SMOKE_ROOTS = [
+  'apps/hook/server/index.ts',
+  'apps/hook/index.tsx', 'apps/hook/vite.config.ts',
+  'apps/review/index.tsx', 'apps/review/vite.config.ts', 'apps/review/diagram-engine/build.ts',
+  'apps/inbox/index.tsx', 'apps/inbox/shape.tsx', 'apps/inbox/surface.tsx',
+  'apps/inbox/vite.config.ts', 'apps/inbox/vite.shape.config.ts', 'apps/inbox/vite.surface.config.ts',
+];
+
+/** Every repo file the roots reach through imports and file paths named in their code. */
+export function closureOf(g: Graph, roots: string[]): Set<string> {
+  const seen = new Set(roots);
+  const stack = [...roots];
+  while (stack.length) {
+    const n = g.graph[stack.pop()!];
+    if (!n) continue;
+    for (const d of [...n.imports, ...n.refs]) if (!seen.has(d)) { seen.add(d); stack.push(d); }
+  }
+  return seen;
+}
+
 export const GATES: Record<string, Gate[]> = {
   'test.yml': [
     {
@@ -155,12 +182,12 @@ export const GATES: Record<string, Gate[]> = {
     },
   ],
   'browser-smoke.yml': [
-    { key: 'smoke', title: 'Browser smoke', paths: ['E2E', 'scripts/ci-e2e-in-image.sh'] },
+    { key: 'smoke', title: 'Browser smoke', paths: ['E2E', 'scripts/ci-e2e-in-image.sh'], reaches: SMOKE_ROOTS },
   ],
   'security.yml': [
     {
       key: 'trivy', title: 'Trivy',
-      paths: ['bun.lock', '**/package.json', '**/Dockerfile*', '.github/**'],
+      paths: ['bun.lock', '**/package.json', '**/package-lock.json', '**/Dockerfile*', '.github/**'],
     },
     { key: 'zizmor', title: 'zizmor', paths: ['.github/**'] },
   ],
@@ -263,7 +290,7 @@ export function semgrepPlan(mode: Mode, changes: Change[]): Semgrep {
 export type Decision = { key: string; title: string; run: boolean; why: string };
 
 /** Which gated jobs of a workflow run. `affected`: the tests the change changes or reaches (test.yml only). */
-export function decideGates(workflow: string, mode: Mode, reasons: string[], changes: Change[], affected?: Set<string>): Decision[] {
+export function decideGates(workflow: string, mode: Mode, reasons: string[], changes: Change[], affected?: Set<string>, graph?: Graph): Decision[] {
   const heavy = !FAST_WORKFLOWS.has(workflow);
   const failSafe = heavy ? changes.find((c) => HEAVY_FAIL_SAFE.some((g) => match(g, c.path))) : undefined;
   return (GATES[workflow] ?? []).map((gate) => {
@@ -274,6 +301,12 @@ export function decideGates(workflow: string, mode: Mode, reasons: string[], cha
     const globs = gatePaths(gate);
     const hit = changes.find((c) => globs.some((g) => match(g, c.path)));
     if (hit) return d(true, `${hit.path} changed`);
+    if (gate.reaches) {
+      if (!graph) return d(true, 'no import graph to check what it builds');
+      const builds = closureOf(graph, gate.reaches);
+      const reached = changes.find((c) => builds.has(c.path));
+      if (reached) return d(true, `${reached.path} is in what ${gate.reaches[0]} builds`);
+    }
     const test = gate.tests && affected ? [...affected].find(gate.tests) : undefined;
     if (test) return d(true, `affected: ${test}`);
     return d(false, 'nothing it covers changed');
@@ -283,7 +316,9 @@ export function decideGates(workflow: string, mode: Mode, reasons: string[], cha
 // ---------------------------------------------------------------------------
 // The import graph
 
-export type Node = { imports: string[]; refs: string[]; vendored?: string; lits: string[]; unresolved: string[]; listsRepo: boolean };
+/** listsRepo: lists the checkout, or reads it by a path the graph cannot tell (then opaqueRead too). */
+/** unresolvedAt: where each import it cannot resolve would land (a repo path without extension, or a package folder). */
+export type Node = { imports: string[]; refs: string[]; vendored?: string; lits: string[]; unresolved: string[]; unresolvedAt?: string[]; listsRepo: boolean; opaqueRead?: boolean };
 export type Graph = { files: string[]; graph: Record<string, Node> };
 
 /** Source with comments blanked out (strings and template literals kept). */
@@ -353,6 +388,184 @@ export function listsCheckout(code: string): boolean {
   return false;
 }
 
+/** The arguments of the call whose `(` is at `open`, split at top-level commas (strings and nesting respected). */
+function callArgs(s: string, open: number): { args: string[]; end: number } | null {
+  const args: string[] = [];
+  let depth = 0;
+  let start = open + 1;
+  for (let i = open + 1; i < s.length; i++) {
+    const c = s[i]!;
+    if (c === '"' || c === "'" || c === '`') {
+      for (i++; i < s.length && s[i] !== c; i++) if (s[i] === '\\') i++;
+      continue;
+    }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth === 0) { const last = s.slice(start, i).trim(); if (last || args.length) args.push(last); return { args, end: i }; }
+      depth--;
+    } else if (c === ',' && depth === 0) { args.push(s.slice(start, i).trim()); start = i + 1; }
+  }
+  return null;
+}
+
+/**
+ * A path value: absolute, a relative literal, literal segments after a base it
+ * cannot tell, or a known folder joined with a name it cannot tell (`under`,
+ * with the literal segments after that name).
+ */
+type PathValue = { abs: string } | { rel: string } | { tail: string } | { under: string; after: string[] } | null;
+
+/** What a variable is set to: the expression after `const|let|var name =`, up to a top-level `;` or line end. */
+export function bindings(code: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const m of code.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=;\n]+)?=\s*/g)) {
+    if (out.has(m[1]!)) continue;
+    const from = m.index! + m[0].length;
+    let depth = 0;
+    let i = from;
+    for (; i < code.length; i++) {
+      const c = code[i]!;
+      if (c === '"' || c === "'" || c === '`') { for (i++; i < code.length && code[i] !== c; i++) if (code[i] === '\\') i++; continue; }
+      if (c === '(' || c === '[' || c === '{') depth++;
+      else if (c === ')' || c === ']' || c === '}') { if (depth === 0) break; depth--; }
+      else if (depth === 0 && (c === ';' || c === '\n' || c === ',')) break;
+    }
+    out.set(m[1]!, code.slice(from, i).trim());
+  }
+  return out;
+}
+
+/** Calls that read a file's content or its presence. */
+const OPAQUE_READ = /^(readFileSync|readFile|file|existsSync|statSync)$/;
+const PATH_CALL = /(?<![\w$.])(?:path\.|posix\.|nodePath\.|Bun\.)?(join|resolve|dirname|fileURLToPath|realpathSync|readFileSync|readFile|existsSync|statSync|file)\s*\(|\bnew URL\s*\(/g;
+
+/**
+ * The repo files a source file names by a path it builds: `join(import.meta.dir,
+ * '..', 'App.tsx')`, `join(ROOT, 'packages', 'shared', 'x.ts')` with ROOT a
+ * local binding, `new URL('../x.ts', import.meta.url)`, a template such as
+ * `${ROOT}/x.ts`. Literal segments after a base it cannot tell are tried from
+ * the file's folder and from the repo root.
+ */
+export type PathRead = { fn: string; arg: string; value: PathValue; named: boolean; checkout: boolean };
+export function builtPathRefs(code: string, abs: string, repo: string, fileSet: Set<string>, trace?: PathRead[]): string[] {
+  const dir = dirname(abs);
+  const binds = bindings(code);
+  const evalExpr = (raw: string, depth: number): PathValue => {
+    let e = raw.trim().replace(/\s+as\s+[\w.<>[\]| ]+$/, '').replace(/!$/, '').trim();
+    while (e.startsWith('(') && callArgs(e, 0)?.end === e.length - 1) e = e.slice(1, -1).trim();
+    if (depth > 6 || !e) return null;
+    const lit = /^(['"])([^'"\\]*)\1$/.exec(e);
+    if (lit) return { rel: lit[2]! };
+    if (/^import\.meta\.(dir|dirname)$|^__dirname$/.test(e)) return { abs: dir };
+    if (/^import\.meta\.(url|path|filename)$|^__filename$/.test(e)) return { abs };
+    if (/^process\.cwd\(\)$/.test(e)) return { abs: repo };
+    const tpl = /^`([^`]*)`$/.exec(e);
+    if (tpl) {
+      let unknownBase = false;
+      const text = tpl[1]!.replace(/\$\{([^}]*)\}/g, (_, x: string) => {
+        const v = evalExpr(x, depth + 1);
+        if (v && 'abs' in v) return v.abs;
+        if (v && 'rel' in v) return v.rel;
+        unknownBase = true;
+        return '\u0000';
+      });
+      if (!unknownBase) return text.startsWith('/') ? { abs: text } : { rel: text };
+      const rest = text.split('\u0000').pop()!.replace(/^\//, '');
+      return rest && !rest.includes('\u0000') ? { tail: rest } : null;
+    }
+    const member = /^(.*)\.(pathname|href)$/.exec(e);
+    if (member) return evalExpr(member[1]!, depth + 1);
+    const call = /^(?:new\s+)?((?:path\.|posix\.|nodePath\.|Bun\.)?[A-Za-z_$][\w$]*)\s*\(/.exec(e);
+    if (call && callArgs(e, call[0].length - 1)?.end === e.length - 1) {
+      const fn = call[1]!.replace(/^(path|posix|nodePath|Bun)\./, '');
+      const args = callArgs(e, call[0].length - 1)!.args.map((a) => evalExpr(a, depth + 1));
+      if (fn === 'fileURLToPath' || fn === 'realpathSync' || fn === 'normalize') return args[0] ?? null;
+      if (fn === 'dirname') { const a = args[0]; return a && 'abs' in a ? { abs: dirname(a.abs) } : null; }
+      if (fn === 'URL') {
+        const [p, base] = args;
+        if (p && 'rel' in p && base && 'abs' in base) return { abs: resolve(base.abs.endsWith('/') ? base.abs : dirname(base.abs), p.rel) };
+        return null;
+      }
+      if (fn === 'join' || fn === 'resolve') {
+        if (!args.length) return null;
+        let anchor = -1;
+        args.forEach((a, i) => { if (a && 'abs' in a && (fn === 'resolve' || i === 0)) anchor = i; });
+        if (anchor >= 0) {
+          const rest = args.slice(anchor + 1);
+          const base = (args[anchor] as { abs: string }).abs;
+          const known = rest.findIndex((a) => !(a && 'rel' in a));
+          const rels = (xs: PathValue[]) => xs.map((a) => (a as { rel: string }).rel);
+          if (known < 0) return { abs: resolve(base, ...rels(rest)) };
+          const after = rest.slice(known + 1);
+          return { under: resolve(base, ...rels(rest.slice(0, known))), after: after.every((a) => a && 'rel' in a) ? rels(after) : [] };
+        }
+        if (args.every((a) => a && 'rel' in a)) return { rel: join(...args.map((a) => (a as { rel: string }).rel)) };
+        const rest = args.slice(1);
+        if (rest.length && rest.every((a) => a && 'rel' in a)) return { tail: join(...rest.map((a) => (a as { rel: string }).rel)) };
+        return null;
+      }
+      return null;
+    }
+    if (/^[A-Za-z_$][\w$]*$/.test(e)) { const b = binds.get(e); return b === undefined ? null : evalExpr(b, depth + 1); }
+    return null;
+  };
+  const out = new Set<string>();
+  const add = (candidate: string): boolean => {
+    const rel = relative(repo, candidate);
+    if (rel.startsWith('..')) return false;
+    const hit = ['', '.ts', '.tsx', '/index.ts', '/index.tsx'].map((x) => rel + x).find((c) => fileSet.has(c));
+    if (hit) out.add(hit);
+    return !!hit;
+  };
+  let literals: string[] | undefined;
+  /** Whether the value names a repo file (a known folder joined with a name: one of the file's own literals). */
+  const consider = (v: PathValue): boolean => {
+    if (!v) return false;
+    if ('abs' in v) return add(v.abs);
+    if ('under' in v) {
+      literals ??= [...new Set([...code.matchAll(STR)].map((m) => m[2]!).filter((x) => x.length > 1 && x.length < 200 && !/\s|\$\{/.test(x)))];
+      let hit = false;
+      for (const l of literals) if (add(resolve(v.under, l, ...v.after))) hit = true;
+      if (v.after.length) {
+        const prefix = relative(repo, v.under);
+        const tail = join(...v.after);
+        for (const f of fileSet) if (f.startsWith(prefix + '/') && f.endsWith('/' + tail) && f.slice(prefix.length + 1, -tail.length - 1).split('/').length === 1) { out.add(f); hit = true; }
+      }
+      return hit;
+    }
+    if ('tail' in v || ('rel' in v && v.rel.includes('/'))) {
+      const t = 'tail' in v ? v.tail : v.rel;
+      return add(resolve(dir, t)) || add(resolve(repo, t));
+    }
+    return false;
+  };
+  for (const m of code.matchAll(PATH_CALL)) {
+    const open = m.index! + m[0].length - 1;
+    const c = callArgs(code, open);
+    if (!c) continue;
+    const fn = m[1];
+    const expr = fn === 'join' || fn === 'resolve' || fn === 'dirname' || !fn ? code.slice(m.index!, c.end + 1) : c.args[0];
+    if (!expr) continue;
+    const value = evalExpr(expr, 0);
+    const named = consider(value);
+    trace?.push({ fn: fn ?? 'URL', arg: expr, value, named, checkout: !named && namesCheckout(expr) });
+  }
+  for (const m of code.matchAll(/`[^`]*\$\{[^`]*`/g)) consider(evalExpr(m[0], 0));
+  /** Whether an expression, through the file's own bindings, starts from the checkout. */
+  function namesCheckout(e: string, d = 4, seen = new Set<string>()): boolean {
+    if (NAMES_CHECKOUT.test(e) || /import\.meta\.path|__filename|\bREPO\b|\bREPO_DIR\b/.test(e)) return true;
+    if (d === 0) return false;
+    for (const id of e.replace(STR, '""').match(/(?<![.\w$])[A-Za-z_$][\w$]*/g) ?? []) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const b = binds.get(id);
+      if (b !== undefined && namesCheckout(b, d - 1, seen)) return true;
+    }
+    return false;
+  }
+  return [...out].filter((r) => r !== relative(repo, abs));
+}
+
 /** The graph of every tracked code file (plus apps/pi-extension/generated, and `extra` files such as untracked ones). */
 export function buildGraph(repo = repoRoot, extra: string[] = []): Graph {
   repo = realpathSync(repo);
@@ -367,12 +580,19 @@ export function buildGraph(repo = repoRoot, extra: string[] = []): Graph {
     return transpilers.get(loader)!;
   };
   const inRepo = (abs: string): string | null => {
+    if (!abs.startsWith('/')) return null; // a builtin: Bun resolves 'fs' to 'node:fs'
     let real = abs;
     try { real = realpathSync(abs); } catch { /* resolved, not on disk */ }
     const rel = relative(repo, real);
     return rel.startsWith('..') || rel.includes('node_modules/') ? null : rel;
   };
   const graph: Record<string, Node> = {};
+  /** Workspace package name -> its folder, for a bare import that does not resolve. */
+  const packages = new Map<string, string>();
+  for (const f of files) {
+    if (!/(^|\/)package\.json$/.test(f) || f.includes('node_modules/')) continue;
+    try { const name = JSON.parse(readFileSync(join(repo, f), 'utf8')).name; if (typeof name === 'string') packages.set(name, dirname(f)); } catch { /* not JSON */ }
+  }
   for (const f of files) {
     if (!CODE_RE.test(f)) continue;
     const abs = join(repo, f);
@@ -381,9 +601,12 @@ export function buildGraph(repo = repoRoot, extra: string[] = []): Graph {
     const node: Node = { imports: [], refs: [], lits: [], unresolved: [], listsRepo: false };
     graph[f] = node;
     let imports: { path: string }[];
+    const at = (where: string) => (node.unresolvedAt ??= []).push(where);
     try {
       imports = transpiler(f).scanImports(src.replace(/^#![^\n]*/, ''));
     } catch {
+      // Bun's scanner also throws on a JSX warning (a key after a spread). The
+      // regex reads every static form: from '...', import '...', import('...'), require('...').
       imports = [...src.matchAll(/(?:from\s+|import\s*\(\s*|require\s*\(\s*|import\s+)(['"])([^'"]+)\1/g)].map((m) => ({ path: m[2] }));
     }
     for (const { path: spec } of imports) {
@@ -396,6 +619,13 @@ export function buildGraph(repo = repoRoot, extra: string[] = []): Graph {
         if (guess && fileSet.has(guess)) node.imports.push(guess);
         // Build output (dist/) is absent on an unbuilt checkout; tests stub it.
         else if ((spec.startsWith('.') || spec.startsWith('@plannotator/')) && !spec.includes('/dist/')) node.unresolved.push(spec);
+        if (spec.includes('/dist/')) continue;
+        if (spec.startsWith('.')) at(guess!.replace(/\.[cm]?[jt]sx?$/, ''));
+        else {
+          const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0]!;
+          const dir = packages.get(name);
+          if (dir !== undefined) at(join(dir, spec.slice(name.length)).replace(/\/$/, '') || '.');
+        }
       }
     }
     const code = stripComments(src);
@@ -413,7 +643,13 @@ export function buildGraph(repo = repoRoot, extra: string[] = []): Graph {
         if (hit) { refs.add(hit); break; }
       }
     }
-    node.refs = [...refs].filter((r) => !node.imports.includes(r));
+    const reads: PathRead[] = [];
+    for (const r of builtPathRefs(code, abs, repo, fileSet, reads)) refs.add(r);
+    // A test-side read of the checkout by a path the graph cannot tell (a
+    // parameter, a name from elsewhere) could be any file: run it like a
+    // tree-scanning test, on every PR.
+    if (testSide(f) && reads.some((r) => OPAQUE_READ.test(r.fn) && r.checkout)) { node.listsRepo = true; node.opaqueRead = true; }
+    node.refs = [...refs].filter((r) => r !== f && !node.imports.includes(r));
     node.lits = [...lits];
     if (f.startsWith('apps/pi-extension/generated/')) node.vendored = /^\/\/ @generated[^\n]*Source: (\S+)/.exec(src)?.[1];
   }
@@ -503,6 +739,18 @@ export function pathReasons(changes: Change[]): string[] {
   return reasons;
 }
 
+/** Every file a bunfig.toml's test preload loads, with what those files import. */
+export function preloadClosure(g: Graph, repo = repoRoot): Set<string> {
+  const roots: string[] = [];
+  for (const f of g.files) {
+    if (!/(^|\/)bunfig\.toml$/.test(f)) continue;
+    let config: { preload?: unknown; test?: { preload?: unknown } };
+    try { config = Bun.TOML.parse(readFileSync(join(repo, f), 'utf8')) as typeof config; } catch { continue; }
+    for (const p of [config.preload, config.test?.preload].flat()) if (typeof p === 'string') roots.push(relative(repo, resolve(repo, dirname(f), p)));
+  }
+  return closureOf(g, roots);
+}
+
 export type PlanInput = {
   changes: Change[];
   /** Every change a plain docs file (scripts/ci-docs-only.sh). */
@@ -524,13 +772,30 @@ export function plan(g: Graph, input: PlanInput): Plan {
       const bad = g.graph[c.path]?.unresolved[0];
       if (bad) reasons.push(`${c.path}: an import the graph cannot resolve (${bad})`);
     }
+    // What a bunfig preloads runs before every test file under it: a change there runs everything.
+    const preloaded = preloadClosure(g);
+    for (const c of changes) if (preloaded.has(c.path)) reasons.push(`${c.path}: a test preload loads it (bunfig.toml)`);
+    // The other side: a file whose import of the changed path did not resolve has no edge to it.
+    // Only importers a test runs count (a stale manual script does not).
+    const run = new Set(all);
+    const stack = [...all];
+    while (stack.length) for (const d of g.graph[stack.pop()!]?.imports ?? []) if (!run.has(d)) { run.add(d); stack.push(d); }
+    const lost: [string, string][] = [];
+    for (const [f, n] of Object.entries(g.graph)) if (run.has(f)) for (const a of n.unresolvedAt ?? []) lost.push([f, a]);
+    for (const c of changes) {
+      if (!CODE_RE.test(c.path) && !/\.(json|css)$/.test(c.path)) continue;
+      const bare = c.path.replace(/\.[cm]?[jt]sx?$/, '');
+      const hit = lost.find(([, a]) => a === bare || a === c.path || bare === `${a}/index` || c.path.startsWith(`${a}/`));
+      if (hit) reasons.push(`${c.path}: ${hit[0]} has an import the graph cannot resolve that may be this file`);
+    }
   }
 
   const picked = new Map<string, Picked>();
   if (!reasons.length && !docs) {
     const seeds = new Map<string, string>();
     for (const c of changes) {
-      if (c.status[0] === 'D') continue;
+      // A deleted path (or a rename's old one) has no file left to import it, but
+      // its name still finds the tests that read it (the lookup by file name below).
       seeds.set(c.path, c.path);
       // The DOM lanes run exactly the list: a file added to it is a file to run.
       if (c.path === 'tests/dom-test-list.txt') for (const l of c.added) if (l.trim() && !l.trim().startsWith('#')) seeds.set(l.trim(), c.path);
@@ -595,7 +860,7 @@ export function plan(g: Graph, input: PlanInput): Plan {
     mode, reasons, notes, tests, total: all.length,
     changed: changes.map((c) => `${c.status}\t${c.path}`),
     unit, dom,
-    gates: decideGates('test.yml', mode, reasons, changes, affected),
+    gates: decideGates('test.yml', mode, reasons, changes, affected, g),
     semgrep: semgrepPlan(mode, changes),
   };
 }
@@ -646,6 +911,20 @@ export function docsOnly(base: string, head?: string, repo = repoRoot): boolean 
   return r.exitCode === 0 && r.stdout.toString().trim() === 'docs';
 }
 
+/** A PR with this label runs everything in every workflow with a gate job (read at the run's start). */
+export const RUN_ALL_LABEL = 'ci:full';
+
+/** The PR's labels when the run started, from the event payload; [] outside a PR or on a payload it cannot read. */
+export function prLabels(env = process.env): string[] {
+  if (env.GITHUB_EVENT_NAME !== 'pull_request' || !env.GITHUB_EVENT_PATH) return [];
+  try {
+    const labels = (JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')) as { pull_request?: { labels?: { name?: unknown }[] } }).pull_request?.labels ?? [];
+    return labels.map((l) => l.name).filter((n): n is string => typeof n === 'string');
+  } catch {
+    return [];
+  }
+}
+
 /** In a pull_request job: the PR's base tip and its merge commit, or why there is none. */
 export function prRange(env = process.env, repo = repoRoot): { base: string; head: string } | { why: string } {
   if ((env.CI_AFFECTED ?? '').trim().toLowerCase() === 'off') return { why: 'the repo variable CI_AFFECTED is off' };
@@ -681,6 +960,7 @@ export function ciChanges(env = process.env, repo = repoRoot): { changes: Change
     const changes = paths.map((path) => ({ status: existsSync(join(repo, path)) ? 'M' : 'D', path, added: [], removed: [] }));
     return { changes, docsOnly: docsOnlyPaths(changes), preview: true };
   }
+  if (prLabels(env).includes(RUN_ALL_LABEL)) return { why: `the PR has the ${RUN_ALL_LABEL} label` };
   const range = prRange(env, repo);
   if ('why' in range) return range;
   return { changes: changesBetween(range.base, range.head, repo), docsOnly: docsOnly(range.base, range.head, repo) };
@@ -833,7 +1113,8 @@ function ciGate(workflow: string) {
       else if (got.docsOnly) mode = 'docs';
       else { reasons = pathReasons(changes); mode = reasons.length ? 'all' : 'subset'; }
     }
-    decisions = decideGates(file, mode, reasons, changes);
+    const graph = mode === 'subset' && GATES[file]!.some((g) => g.reaches) ? buildGraph() : undefined;
+    decisions = decideGates(file, mode, reasons, changes, undefined, graph);
     if (file === 'security.yml') semgrep = semgrepPlan(mode, changes);
   } catch (e) {
     const why = `the gate failed: ${(e as Error).message.split('\n')[0]}`;
