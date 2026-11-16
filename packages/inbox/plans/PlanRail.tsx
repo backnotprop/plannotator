@@ -1,18 +1,21 @@
 /**
- * The plan page's right rail (layout B): the versions of the file on screen, newest first, each with who saved it (a
- * display name only), when, and the decision on it; the version the person had seen marked "You saw this"; Compare;
- * then that file's own activity (its versions saved, the decisions on it; nothing plan-wide, so another page never
- * reads as the main page's history). The plan's files are in the left panel (PlanFiles.tsx). An artifact has no
- * versions: the rail says so, with what the file is and when it was kept. Comments and the plan's thread come later.
+ * The plan page's versions, in the shared frame's versions panel (@plannotator/ui/components/frame `VersionsPanel`,
+ * the Space page screen's): the versions of the file on screen, newest first, consecutive saves by one author within
+ * 30 minutes folded; who saved each (a display name only) and when; an approval on its version. Under the version on
+ * screen: the frame's Compare and Copy link (`VersionActions`), our Compare of the version you saw with the newest
+ * when the newest is on screen, then that file's own activity (its versions saved, the decisions on it; nothing
+ * plan-wide). An artifact has no versions: the page's line says so (`ArtifactLine`).
  */
+import type { ReactElement } from 'react';
 import type { PlanArtifact, PlanDecision, PlanVersion } from '@plannotator/core/plans';
 import { fullTime, whenTime } from '@plannotator/core/inbox-format';
+import { FrameButton, VersionActions, VersionsPanel, type FrameVersionEntry, type VersionAuthor } from '@plannotator/ui/components/frame';
 import { Icon } from '../icons';
 import type { PlanRead } from './client';
 import { artifactKindLabel, authorOf, decisionLabel, decisionTone, PLAN_FILES_WORDS, sizeWords } from './words';
 import { DecisionMark } from './parts';
 
-export interface PlanRailProps {
+export interface PlanVersionsProps {
   /** The versions of the document on screen. */
   versions: readonly PlanVersion[];
   /** The document on screen: its activity is its own versions and the decisions on it, nothing plan-wide. */
@@ -24,99 +27,98 @@ export interface PlanRailProps {
   seen: number | null;
   compare: { from: number; to: number } | null;
   decisions: ReadonlyMap<number, PlanDecision>;
-  onPick: (n: number) => void;
+  /** A version's link (the address carries `&v=`). */
+  rowLink: (n: number) => ReactElement;
+  /** After a version opens (a phone's sheet closes). */
+  onPicked: () => void;
   onCompare: (from: number, to: number) => void;
+  onCopyLink: (n: number) => void;
+  onClose?: () => void;
 }
 
-/** The pair Compare offers: the version you saw (else the one before) with the one on screen, older first. */
+/** The pair our Compare offers: the version you saw (else the one before) with the one on screen, older first. */
 export function comparePair(shown: number, seen: number | null): { from: number; to: number } | null {
   const other = seen !== null && seen !== shown ? seen : shown - 1;
   if (other < 1) return null;
   return { from: Math.min(other, shown), to: Math.max(other, shown) };
 }
 
-export function PlanRail(props: PlanRailProps) {
-  return (
-    <div className="ib-plan-railin">
-      <h2 className="ib-plan-railh">
-        Versions <span className="ib-plans-count">{props.versions.length}</span>
-      </h2>
-      <Versions {...props} />
-    </div>
-  );
+function author(v: PlanVersion): VersionAuthor {
+  const name = authorOf(v);
+  return name ? { kind: 'person', name, key: `name:${name}` } : { kind: 'unnamed' };
 }
 
-/** The rail beside an artifact: no versions, said plainly, then what the file is and when it was kept. */
-export function ArtifactRail({ artifact }: { artifact: PlanArtifact }) {
-  return (
-    <div className="ib-plan-railin">
-      <h2 className="ib-plan-railh">Versions</h2>
-      <p className="ib-plan-empty" data-plan-no-versions="">
-        {PLAN_FILES_WORDS.noVersions}
-      </p>
-      <dl className="ib-plan-facts" data-plan-artifact-facts="">
-        <dt>Kind</dt>
-        <dd>{artifactKindLabel(artifact.content_type)}</dd>
-        <dt>Size</dt>
-        <dd>{sizeWords(artifact.size)}</dd>
-        <dt>Kept</dt>
-        <dd>
-          <time dateTime={artifact.created_at} title={fullTime(artifact.created_at)}>
-            {whenTime(artifact.created_at)}
-          </time>
-        </dd>
-      </dl>
-    </div>
-  );
+/** "you" or "you, with notes": the frame writes "Approved by …" (a denial has no place there; Activity has it). */
+function approvalWords(decision: PlanDecision | undefined): string | null {
+  if (!decision || decisionTone(decision.decision) !== 'approved') return null;
+  return decision.decision === 'approved-with-notes' ? 'you, with notes' : 'you';
 }
 
-function Versions({ versions, documentId, shown, head, seen, compare, decisions, read, onPick, onCompare }: PlanRailProps) {
-  const pair = compare ? null : comparePair(shown, seen);
-  const newestFirst = [...versions].reverse();
+/** The plan's versions as the frame's entries, newest first. */
+export function planVersionEntries(versions: readonly PlanVersion[], shown: number, head: number, decisions: ReadonlyMap<number, PlanDecision>): FrameVersionEntry[] {
+  return [...versions]
+    .sort((a, b) => b.version_number - a.version_number)
+    .map((v, i, all) => ({
+      key: String(v.version_number),
+      version: String(v.version_number),
+      number: v.version_number,
+      createdAt: v.committed_at,
+      author: author(v),
+      current: v.version_number === head,
+      viewing: v.version_number === shown,
+      linked: true,
+      sameAsOlder: !!all[i + 1] && all[i + 1]!.version === v.version,
+      approval: approvalWords(decisions.get(v.version_number)),
+      canCompare: v.version_number !== head,
+    }));
+}
+
+export function PlanVersions(props: PlanVersionsProps) {
+  const { versions, documentId, read, shown, head, seen, compare, decisions, rowLink, onPicked, onCompare, onCopyLink, onClose } = props;
+  const entries = planVersionEntries(versions, shown, head, decisions);
+  const pair = compare || shown !== head ? null : comparePair(shown, seen);
   return (
-    <>
-      <ol className="ib-plan-versions" aria-label="Versions, newest first">
-        {newestFirst.map((v) => {
-          const n = v.version_number;
-          const author = authorOf(v);
-          const decision = decisions.get(n);
-          const on = compare ? n === compare.from || n === compare.to : n === shown;
-          return (
-            <li key={n}>
-              <button type="button" className="ib-plan-version" aria-current={on ? 'true' : undefined} data-on={on ? '' : undefined} onClick={() => onPick(n)} data-plan-version={n}>
-                <span className="ib-plan-vtop">
-                  <b>v{n}</b>
-                  {author && <span className="ib-plan-vby">{author}</span>}
-                  <time dateTime={v.committed_at} title={fullTime(v.committed_at)}>
-                    {whenTime(v.committed_at)}
-                  </time>
-                  {n === head && <span className="ib-plan-vtag">Newest</span>}
-                  {seen === n && n !== head && (
-                    <span className="ib-plan-vseen" data-plan-seen="">
-                      <Icon name="eye" />
-                      You saw this
-                    </span>
-                  )}
-                </span>
-                {decision && (
-                  <span className="ib-plan-vdec" data-tone={decisionTone(decision.decision)}>
-                    <DecisionMark tone={decisionTone(decision.decision)} />
-                    {decisionLabel(decision.decision)}
-                  </span>
-                )}
-              </button>
-            </li>
-          );
-        })}
-      </ol>
-      {pair && (
-        <button type="button" className="ib-plans-soft ib-plan-compare" onClick={() => onCompare(pair.from, pair.to)} data-plan-compare="">
-          <Icon name="sideBySide" />
-          Compare v{pair.from} with v{pair.to}
-        </button>
+    <VersionsPanel
+      status="success"
+      entries={entries}
+      place={{ rowLink: (entry) => rowLink(entry.number!), onRowOpen: () => onPicked() }}
+      onRetry={() => {}}
+      onClose={onClose}
+      onScreenActions={(onScreen) => (
+        <div className="ib-plan-onscreen" data-plan-onscreen="">
+          {pair && (
+            <FrameButton variant="outline" size="sm" className="ib-plan-compare" onClick={() => onCompare(pair.from, pair.to)} data-plan-compare="">
+              Compare v{pair.from} with v{pair.to}
+            </FrameButton>
+          )}
+          <VersionActions
+            version={onScreen.version}
+            number={onScreen.number}
+            currentNumber={head}
+            canCompare={!compare && onScreen.canCompare}
+            soft
+            onCompare={() => onCompare(onScreen.number!, head)}
+            onCopyLink={() => onCopyLink(onScreen.number!)}
+          />
+          <Activity versions={versions} decisions={read.decisions.filter((d) => d.document_id === documentId)} />
+        </div>
       )}
-      <Activity versions={versions} decisions={read.decisions.filter((d) => d.document_id === documentId)} />
-    </>
+    />
+  );
+}
+
+/** An artifact's line on the page card: no versions, said plainly, then what the file is and when it was kept. */
+export function ArtifactLine({ artifact }: { artifact: PlanArtifact }) {
+  return (
+    <div className="ib-plan-artline" data-plan-artifact-facts="">
+      <span data-plan-no-versions="">{PLAN_FILES_WORDS.noVersions}</span>
+      <span className="ib-plan-artline-facts">
+        {artifactKindLabel(artifact.content_type)} · {sizeWords(artifact.size)} · kept{' '}
+        <time dateTime={artifact.created_at} title={fullTime(artifact.created_at)}>
+          {whenTime(artifact.created_at)}
+        </time>
+      </span>
+    </div>
   );
 }
 

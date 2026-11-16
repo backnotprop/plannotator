@@ -133,11 +133,6 @@ export const PLAN_FILES_WORDS = {
   noVersions: 'Artifacts have no versions: this file is kept as it is.',
 } as const;
 
-/** The right rail's close (its head) and its name. */
-export const PLAN_RAIL_WORDS = {
-  hide: 'Hide versions',
-} as const;
-
 export const noFileMatches = (query: string) => `No files match “${query}”.`;
 
 export type PlanArtifactKind = 'image' | 'svg' | 'html' | 'pdf' | 'video' | 'other';

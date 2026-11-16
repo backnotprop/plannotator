@@ -8,15 +8,17 @@
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
  * - a decision on an older version reads as current in the list or the page line (it must say "changed since");
- * - the files panel loses the main page's place or mark, mixes artifacts in with pages, shows Artifacts with none,
- *   opens a row without the rail and the address following, draws an HTML artifact that can run, load or follow a
- *   link, shows a picture the server sends as a download, or forgets that it was folded;
- * - a kept panel width wider than the room folds the panel for good, or the edge offers more than fits;
+ * - the page leaves the shared frame (its top bar, rail, page card and versions panel);
+ * - the files rail loses the main page's place or mark, mixes artifacts in with pages, shows Artifacts with none,
+ *   opens a row without the versions and the address following, draws an HTML artifact that can run, load or follow
+ *   a link, shows a picture the server sends as a download, or forgets that it was closed;
+ * - short of room the rail does not give way to our sheet first, then the versions to the frame's sheet;
+ * - the versions panel cannot be closed, forgets that it was, or cannot be opened again from the reading line;
  * - another page's activity shows the main page's history, or an artifact's shows anything plan-wide;
  * - opening a plan through another page's link marks every version new in the list;
  * - the compact list leaves out a plan or orders it differently, loses a column, is not a link, is not remembered,
  *   or search and the empty search stop working in it;
- * - picking a version in the rail does not show that version;
+ * - picking a version in the versions panel does not show that version, or Compare and Copy link are lost;
  * - the diff does not compare the two versions with the plan diff engine;
  * - with Plans off, the page draws nothing and a `#plans` link goes to the Inbox.
  *
@@ -53,6 +55,7 @@ let store: PlanStore;
 let importError: string | null = null;
 let retries = 0;
 const realFetch = globalThis.fetch;
+const realMatchMedia = hasDom ? window.matchMedia : undefined;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -62,6 +65,17 @@ beforeEach(() => {
   importError = null;
   retries = 0;
   window.history.replaceState(null, '', '/');
+  // Reduced motion (the frame's panels open and close at once) and a desktop window for the frame's docked rail.
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('reduce') || (query.includes('min-width: 768px') && window.innerWidth >= 768),
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
   // The Inbox's place: the real route handler over the scratch library.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
@@ -86,6 +100,7 @@ afterEach(() => {
   root = null;
   document.body.innerHTML = '';
   globalThis.fetch = realFetch;
+  window.matchMedia = realMatchMedia!;
   localStorage.removeItem(PLANS_VIEW_KEY);
   storageModule?.resetStorageBackend();
   resetPlansForTests();
@@ -138,6 +153,30 @@ function draw(on = true) {
 }
 
 const text = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
+/** A file row's name in the frame's rail (`FileRow`: the name, then our Main mark). */
+const fileNames = (scope: Element, sel = '') => [...scope.querySelectorAll(`${sel} [data-plan-file] span.truncate`)].map(text);
+/** Plannotator's storage in memory for one test (happy-dom keeps no cookie here); put back in afterEach. */
+function keptStorage(entries: [string, string][] = []) {
+  const kept = new Map<string, string>(entries);
+  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  return kept;
+}
+/** The frame row's width, as layout would give it (happy-dom lays nothing out); returns the restore. */
+function rowWidth(width: () => number) {
+  const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const inherited = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.hasAttribute('data-frame-row')) return width();
+      return (own ?? inherited)?.get?.call(this) ?? 0;
+    },
+  });
+  return () => {
+    if (own) Object.defineProperty(HTMLElement.prototype, 'clientWidth', own);
+    else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+  };
+}
 
 test.skipIf(!hasDom)('the list is the library: changed since you looked first, with how many versions are new; the decision from its record', async () => {
   const changed = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nv1\n', '# Rotate refresh tokens\n\nv2\n', '# Rotate refresh tokens\n\nv3\n'], { seen: 1, deniedOn: 1 });
@@ -176,13 +215,13 @@ test.skipIf(!hasDom)('a decision on an older version never reads as current: the
 
   window.location.hash = `#plans=${older}`;
   await settle();
-  expect(text(host.querySelector('.ib-plan-line [data-plan-decision]'))).toBe('Approved on v2 · changed since');
-  // The version row keeps its own mark, without the note.
-  expect(text(host.querySelector('[data-plan-version="2"] .ib-plan-vdec'))).toBe('Approved');
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-decision]'))).toBe('Approved on v2 · changed since');
+  // The version row keeps its own approval (the frame's), without the note.
+  expect(text(host.querySelector('[data-plan-version="2"] [data-version-approval]'))).toBe('Approved by you');
 
   window.location.hash = `#plans=${current}`;
   await settle();
-  expect(text(host.querySelector('.ib-plan-line [data-plan-decision]'))).toBe('Approved on v2');
+  expect(text(host.querySelector('[data-plan-reading] [data-plan-decision]'))).toBe('Approved on v2');
 });
 
 test.skipIf(!hasDom)('the compact list: the switch shows the same plans one line each, is remembered, and search works the same', async () => {
@@ -249,7 +288,7 @@ test.skipIf(!hasDom)('the compact list: the switch shows the same plans one line
   expect(host.querySelector(`[data-plan-page="${newer}"]`)).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('the files panel: main page first, other pages and artifacts by name; a row opens its file, the rail and the address follow', async () => {
+test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions panel; main page first, other pages and artifacts by name; a row opens its file, the versions and the address follow', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n'], { seen: 1, approvedOn: 1 });
   const rollout = store.addDocument(id, { title: 'Rollout', created_at: at(3) });
   store.addVersion(id, rollout.id, { bytes: bytes('# Rollout\n\nFirst.\n'), committed_at: at(3), source: 'agent-tool' });
@@ -265,18 +304,24 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   store.addArtifact(id, { asset_path: 'pics/screen.png', bytes: new Uint8Array([137, 80, 78, 71]), content_type: 'image/png', title: 'Screen', created_at: at(5) });
   store.addArtifact(id, { asset_path: 'scan.bmp', bytes: new Uint8Array([66, 77]), content_type: 'image/bmp', created_at: at(5) });
   const bare = plan('Ledger import', null, ['# Ledger import\n']);
-  // Plannotator's storage in memory for this test (happy-dom keeps no cookie here); put back in afterEach.
-  const kept = new Map<string, string>();
-  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  const kept = keptStorage();
 
   window.location.hash = `#plans=${id}`;
   const host = draw();
   await settle();
+  // The shared frame's pieces: the top bar outside the cards, then the rail, the page card and the versions panel.
+  const shell = host.querySelector('[data-frame]')!;
+  expect(shell.querySelector(':scope > [data-page-header]')).not.toBeNull();
+  const row = shell.querySelector('[data-frame-row]')!;
+  expect(row.querySelector('[data-document-rail] [data-plan-files]')).not.toBeNull();
+  expect(row.querySelector('[data-document-shell] [data-plan-document]')).not.toBeNull();
+  expect(row.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
+  expect(text(shell.querySelector('[data-page-header] [aria-current="page"]'))).toBe('Rotate refresh tokens');
+  expect(text(row.querySelector('[data-pages-back-link]'))).toBe('Rotate refresh tokens');
   const panel = host.querySelector('[data-plan-files]')!;
-  expect(panel).not.toBeNull();
-  const names = (sel: string) => [...panel.querySelectorAll(`${sel} .ib-plan-file-n`)].map(text);
+  const names = (sel: string) => fileNames(panel, sel);
   expect(names('[data-plan-files-pages]')).toEqual(['Rotate refresh tokens', 'Flow', 'Rollout']);
-  expect(text(panel.querySelector('[data-plan-files-pages] li:first-child [data-plan-file-main]'))).toBe('Main');
+  expect(text(panel.querySelector('[data-plan-files-pages] > :first-child [data-plan-file-main]'))).toBe('Main');
   expect(panel.querySelectorAll('[data-plan-file-main]').length).toBe(1);
   expect(names('[data-plan-files-artifacts]')).toEqual(['mockup.html', 'scan.bmp', 'Screen']);
   expect(text(panel)).toContain('Artifacts 3');
@@ -290,9 +335,11 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   await settle();
   expect(window.location.hash).toBe(`#plans=${id}&doc=${rollout.id}`);
   expect(text(host.querySelector('[data-plan-document]'))).toContain('Rollout second version.');
-  expect(text(host.querySelector('.ib-plan-railh'))).toBe('Versions 2');
+  expect(host.querySelectorAll('[data-versions-panel] [data-version-row]').length).toBe(2);
   expect(host.querySelector(`[data-plan-file="d:${rollout.id}"]`)?.getAttribute('aria-current')).toBe('page');
-  expect(text(host.querySelector('[data-plan-reading]'))).toBe('Reading v2 · newest');
+  // The top bar: Plans / the plan / the page.
+  expect(text(host.querySelector('[data-page-header] [aria-current="page"]'))).toBe('Rollout');
+  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions]'))).toBe('Reading v2 · newest');
   // Its activity is its own history only: nothing of the main page's versions or decisions.
   expect(activity().map((line) => line.split(' saved')[0])).toEqual(['v2', 'v1']);
 
@@ -308,7 +355,8 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   const inside = new DOMParser().parseFromString(srcdoc, 'text/html');
   expect([...inside.querySelectorAll('base')].map((b) => b.getAttribute('target'))).toEqual(['_blank']);
   expect([...inside.querySelectorAll('a')].map((a) => a.getAttribute('target'))).toEqual(['_blank', '_blank', '_blank']);
-  expect(host.querySelector('[data-plan-no-versions]')).not.toBeNull();
+  expect(host.querySelector('[data-document-shell] [data-plan-no-versions]')).not.toBeNull();
+  expect(host.querySelector('[data-versions-panel]')).toBeNull();
   expect(host.querySelector('.ib-plan-activity')).toBeNull();
 
   // A picture type the server sends as a download (BMP) is a file to download, not a broken picture.
@@ -321,7 +369,7 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
   expect(host.querySelector('[data-plan-artifact="pics/screen.png"] img')).not.toBeNull();
 
   // Filter files.
-  await act(async () => (host.querySelector('[data-plan-files-filter]') as HTMLButtonElement).click());
+  await act(async () => (host.querySelector('[data-plan-files] button[aria-label="Filter files"]') as HTMLButtonElement).click());
   const field = host.querySelector('[data-plan-files-query]') as HTMLInputElement;
   const type = async (value: string) =>
     act(async () => {
@@ -329,77 +377,73 @@ test.skipIf(!hasDom)('the files panel: main page first, other pages and artifact
       field.dispatchEvent(new Event('input', { bubbles: true }));
     });
   await type('roll');
-  expect([...host.querySelectorAll('[data-plan-files] .ib-plan-file-n')].map(text)).toEqual(['Rollout']);
+  expect(fileNames(host.querySelector('[data-plan-files]')!)).toEqual(['Rollout']);
   await type('zzz');
   expect(text(host.querySelector('[data-plan-files-none]'))).toBe('No files match “zzz”.');
 
-  // Hide files is kept: the panel stays folded on the next plan opened, and Show files docks it again.
-  await act(async () => (host.querySelector('[data-plan-files-hide]') as HTMLButtonElement).click());
+  // The frame's Collapse rail (its edge, by keyboard) is kept: the rail stays closed on the next plan opened, and the
+  // frame's Show files tab brings it back.
+  await act(async () => host.querySelector('.collapsible-edge[aria-label="Collapse rail"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await settle();
   expect(host.querySelector('[data-plan-files]')).toBeNull();
+  expect(kept.get('plannotator-inbox-plan-files-open')).toBe('0');
   window.location.hash = `#plans=${bare}`;
   await settle();
   expect(host.querySelector('[data-plan-files]')).toBeNull();
-  await act(async () => (host.querySelector('[data-plan-show-files]') as HTMLButtonElement).click());
+  await act(async () => (host.querySelector('button[aria-label="Show files"]') as HTMLButtonElement).click());
+  await settle();
   // A plan with no artifacts: one page, no Artifacts heading.
-  expect([...host.querySelectorAll('[data-plan-files] .ib-plan-file-n')].map(text)).toEqual(['Ledger import']);
+  expect(fileNames(host.querySelector('[data-plan-files]')!)).toEqual(['Ledger import']);
   expect(host.querySelector('[data-plan-files-artifacts]')).toBeNull();
   expect(text(host.querySelector('[data-plan-files]'))).not.toContain('Artifacts');
 });
 
-test.skipIf(!hasDom)('a kept panel width wider than the room is drawn narrower, never folded; the rail floats when the document would be cramped', async () => {
+test.skipIf(!hasDom)('short of room the rail gives way first, to our sheet; then the versions, to the frame\'s sheet', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n'], { seen: 1 });
-  const kept = new Map<string, string>([['plannotator-inbox-plan-files-width', '400']]);
-  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
-  // The plan's pane is 780 px: beside the document's least 480 px, only 300 px of panel fit.
-  const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-  const inherited = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (this.hasAttribute('data-plan-page')) return 780;
-      return (own ?? inherited)?.get?.call(this) ?? 0;
-    },
-  });
+  keptStorage();
+  let width = 1000;
+  const restore = rowWidth(() => width);
   try {
     window.location.hash = `#plans=${id}`;
-    const host = draw();
+    let host = draw();
     await settle();
-    const page = host.querySelector('[data-plan-page]')!;
-    expect(page.getAttribute('data-files')).toBe('docked');
-    expect((host.querySelector('.ib-plan-filespane') as HTMLElement).style.width).toBe('300px');
-    // The edge offers no more than fits: End can never push the document under its least width.
-    expect(host.querySelector('.ib-plan-filesedge [aria-valuemax]')?.getAttribute('aria-valuemax')).toBe('300');
-    // 780 - 300 leaves the document too little beside the rail: the rail is a button on the top bar.
-    expect(page.getAttribute('data-rail')).toBe('float');
-    expect(host.querySelector('aside.ib-plan-rail')).toBeNull();
-    const toggle = host.querySelector('[data-plan-rail-toggle]') as HTMLButtonElement;
-    expect(text(toggle)).toBe('Versions 1');
+    // 1000 px: the versions dock (288 beside 480 of document), the rail (306 more) does not: Show files opens our sheet.
+    const page = () => host.querySelector('[data-plan-page]')!;
+    expect(page().getAttribute('data-files')).toBe('hidden');
+    expect(page().getAttribute('data-rail')).toBe('docked');
+    expect(host.querySelector('[data-document-rail]')).toBeNull();
+    expect(host.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
+    await act(async () => (host.querySelector('[data-page-header] [data-plan-show-files]') as HTMLButtonElement).click());
+    expect(fileNames(host.querySelector('[data-plan-files-sheet]')!)).toEqual(['Rotate refresh tokens']);
+    // 700 px: the versions do not dock either; the reading line opens them as the frame's sheet.
+    width = 700;
+    unlisten();
+    act(() => root!.unmount());
+    document.body.innerHTML = '';
+    host = draw();
+    await settle();
+    expect(page().getAttribute('data-rail')).toBe('sheet');
+    expect(host.querySelector('[data-versions-panel]')).toBeNull();
+    const toggle = host.querySelector('[data-reading-versions]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
     await act(async () => toggle.click());
-    expect(host.querySelector('[data-plan-rail-float] [data-plan-version="1"]')).not.toBeNull();
-    await act(async () => host.querySelector('[data-plan-rail-float]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-    expect(host.querySelector('[data-plan-rail-float]')).toBeNull();
-    // The kept width is not overwritten by drawing it narrower.
-    expect(kept.get('plannotator-inbox-plan-files-width')).toBe('400');
+    await settle();
+    expect(document.querySelector('[data-versions-sheet] [data-plan-version="1"]')).not.toBeNull();
+    await act(async () => (document.querySelector('[data-versions-sheet] button[aria-label="Close versions"]') as HTMLButtonElement).click());
+    await settle();
+    expect(document.querySelector('[data-versions-sheet] [data-versions-panel]')).toBeNull();
   } finally {
-    if (own) Object.defineProperty(HTMLElement.prototype, 'clientWidth', own);
-    else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+    restore();
   }
 });
 
-test.skipIf(!hasDom)('the rail closes from its head and stays closed after a remount; Versions N opens it again; floating, a press outside closes it', async () => {
+test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, and the reading line opens it again; Compare and Copy link stay', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n', '# Rotate refresh tokens\n\nThe plan, again.\n'], { seen: 2 });
-  const kept = new Map<string, string>();
-  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
-  let paneWidth = 1400;
-  const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
-  const inherited = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
-  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (this.hasAttribute('data-plan-page')) return paneWidth;
-      return (own ?? inherited)?.get?.call(this) ?? 0;
-    },
-  });
+  const kept = keptStorage();
+  const restore = rowWidth(() => 1400);
+  const copied: string[] = [];
+  const clipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard');
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: async (value: string) => void copied.push(value) } });
   const redraw = async () => {
     unlisten();
     act(() => root!.unmount());
@@ -412,47 +456,40 @@ test.skipIf(!hasDom)('the rail closes from its head and stays closed after a rem
     window.location.hash = `#plans=${id}`;
     let host = draw();
     await settle();
-    // First use: open beside the document, with no reopen button on the top bar.
+    // First use: open, docked beside the page card.
     expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('docked');
-    expect(host.querySelector('aside.ib-plan-rail')).not.toBeNull();
-    expect(host.querySelector('[data-plan-rail-toggle]')).toBeNull();
-    const hide = host.querySelector('aside.ib-plan-rail [data-plan-rail-hide]') as HTMLButtonElement;
-    expect(hide.getAttribute('aria-label')).toBe('Hide versions');
-    // Escape does not close a docked rail.
-    await act(async () => hide.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-    expect(host.querySelector('aside.ib-plan-rail')).not.toBeNull();
-    await act(async () => hide.click());
-    // Closed: the document's column is the body's only column, and the top bar's Versions N (focused) opens it again.
-    expect(host.querySelector('aside.ib-plan-rail')).toBeNull();
-    expect([...host.querySelector('.ib-plan-body')!.children].map((el) => el.className)).toEqual(['ib-plan-main']);
-    let toggle = host.querySelector('.ib-plan-top [data-plan-rail-toggle]') as HTMLButtonElement;
-    expect(text(toggle)).toBe('Versions 2');
-    expect(document.activeElement).toBe(toggle);
+    expect(host.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
+    // The newest on screen: our Compare offers the one before; Copy link copies this version's address.
+    expect(text(host.querySelector('[data-plan-compare]'))).toBe('Compare v1 with v2');
+    await act(async () => (host.querySelector('[data-version-copy-link]') as HTMLButtonElement).click());
+    expect(copied).toEqual([`${window.location.href.split('#')[0]}#plans=${id}&v=2`]);
+    await act(async () => (host.querySelector('button[aria-label="Close versions"]') as HTMLButtonElement).click());
+    await settle();
+    // Closed: the row holds the rail and the page card only; the reading line's button opens it again.
+    expect(host.querySelector('[data-versions-panel]')).toBeNull();
+    expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('closed');
+    expect([...host.querySelector('[data-frame-row]')!.querySelectorAll(':scope > [data-docked-panel-clip]')]).toEqual([]);
+    expect(kept.get('plannotator-inbox-plan-rail-hidden')).toBe('1');
     // Kept on this computer: a remount draws it closed.
     host = await redraw();
-    expect(host.querySelector('aside.ib-plan-rail')).toBeNull();
-    toggle = host.querySelector('.ib-plan-top [data-plan-rail-toggle]') as HTMLButtonElement;
-    expect(text(toggle)).toBe('Versions 2');
+    expect(host.querySelector('[data-versions-panel]')).toBeNull();
+    const toggle = host.querySelector('[data-reading-versions]') as HTMLButtonElement;
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(toggle.getAttribute('aria-label')).toBe('Versions. Reading version 2, the newest');
     await act(async () => toggle.click());
-    expect(host.querySelector('aside.ib-plan-rail [data-plan-version="2"]')).not.toBeNull();
-    expect(host.querySelector('[data-plan-rail-toggle]')).toBeNull();
-    expect(document.activeElement).toBe(host.querySelector('[data-plan-rail-hide]'));
-    // Narrow: it floats from the top bar; its own Close and a press outside it both close it.
-    paneWidth = 1000;
-    host = await redraw();
-    expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('float');
-    toggle = host.querySelector('[data-plan-rail-toggle]') as HTMLButtonElement;
-    await act(async () => toggle.click());
-    await act(async () => (host.querySelector('[data-plan-rail-close]') as HTMLButtonElement).click());
-    expect(host.querySelector('[data-plan-rail-float]')).toBeNull();
-    await act(async () => toggle.click());
-    await act(async () => host.querySelector('[data-plan-rail-float] [data-plan-version="1"]')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-    expect(host.querySelector('[data-plan-rail-float]')).not.toBeNull();
-    await act(async () => host.querySelector('[data-plan-reading]')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
-    expect(host.querySelector('[data-plan-rail-float]')).toBeNull();
+    await settle();
+    expect(host.querySelector('[data-versions-panel] [data-plan-version="2"]')).not.toBeNull();
+    // An older version on screen: the frame's Compare (with the newest) and its way back to the newest.
+    await act(async () => (host.querySelector('[data-plan-version="1"]') as HTMLAnchorElement).click());
+    await settle();
+    expect(window.location.hash).toBe(`#plans=${id}&v=1`);
+    await act(async () => (host.querySelector('[data-version-compare]') as HTMLButtonElement).click());
+    await settle();
+    expect(window.location.hash).toBe(`#plans=${id}&from=1&to=2`);
   } finally {
-    if (own) Object.defineProperty(HTMLElement.prototype, 'clientWidth', own);
-    else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+    restore();
+    if (clipboard) Object.defineProperty(navigator, 'clipboard', clipboard);
+    else delete (navigator as { clipboard?: unknown }).clipboard;
   }
 });
 
@@ -496,7 +533,7 @@ test.skipIf(!hasDom)('only the main page counts as looking: a link to another pa
   window.location.hash = `#plans=${id}&doc=${notes.id}`;
   const host = draw();
   await settle();
-  expect(text(host.querySelector('[data-plan-reading]'))).toBe('Reading v1 · newest');
+  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions]'))).toBe('Reading v1 · newest');
   // That page's versions are remembered; the plan is still unlooked, so the list marks nothing.
   expect(store.looks().plans[id]?.docs[notes.id]).toBe(1);
   expect(store.list()[0]).toMatchObject({ seen_version_number: null, changed: false });
@@ -555,20 +592,20 @@ test.skipIf(!hasDom)('a plan opens on its newest version, versions newest first,
   const host = draw();
   await settle();
 
-  expect(text(host.querySelector('[data-plan-reading]'))).toBe('Reading v3 · newest');
+  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions]'))).toBe('Reading v3 · newest');
   expect(text(host.querySelector('[data-plan-document]'))).toContain('three keys now');
   expect([...host.querySelectorAll('[data-plan-version]')].map((b) => b.getAttribute('data-plan-version'))).toEqual(['3', '2', '1']);
-  expect(host.querySelector('[data-plan-version="1"] [data-plan-seen]')).not.toBeNull();
   expect(host.querySelector('[data-plan-version="3"]')?.getAttribute('aria-current')).toBe('true');
   // Changed since you looked: you saw v1, and Show changes is offered.
   expect(text(host.querySelector('[data-plan-banner="changed"]'))).toContain('You saw v1');
   // Opening it is seeing v3: the next list read says it is no longer changed.
   expect(store.looks().plans[id]?.docs[store.get(id)!.primary_doc_id]).toBe(3);
 
-  act(() => host.querySelector<HTMLButtonElement>('[data-plan-version="2"]')!.click());
+  act(() => host.querySelector<HTMLAnchorElement>('[data-plan-version="2"]')!.click());
   await settle();
   expect(window.location.hash).toBe(`#plans=${id}&v=2`);
-  expect(text(host.querySelector('[data-plan-reading]'))).toBe('Reading v2 of 3');
+  expect(text(host.querySelector('[data-plan-reading]'))).toContain('Reading v2 of 3');
+  expect(host.querySelector('[data-plan-reading] [data-plan-newest]')?.getAttribute('href')).toBe(`#plans=${id}`);
   expect(text(host.querySelector('[data-plan-document]'))).toContain('second pass');
   expect(host.querySelector('[data-plan-version="2"]')?.getAttribute('aria-current')).toBe('true');
   // The banner still compares with what was seen when the page opened.
@@ -583,7 +620,6 @@ test.skipIf(!hasDom)('Show changes compares the version you saw with the newest,
   act(() => host.querySelector<HTMLButtonElement>('[data-plan-show-changes]')!.click());
   await settle();
   expect(window.location.hash).toBe(`#plans=${id}&from=1&to=2`);
-  expect(text(host.querySelector('[data-plan-reading]'))).toBe('Comparing v1 with v2');
   expect(text(host.querySelector('[data-plan-banner="diff"]'))).toContain('the one you saw');
   const diff = host.querySelector('[data-plan-diff="1-2"]')!;
   expect(diff).not.toBeNull();
