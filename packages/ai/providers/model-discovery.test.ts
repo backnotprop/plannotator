@@ -174,7 +174,7 @@ describe("Claude model discovery", () => {
     test(`${relPath} defers Claude model discovery`, () => {
       const src = readFileSync(resolve(import.meta.dir, "../../..", relPath), "utf8");
       const start = src.indexOf('"claude-agent-sdk"');
-      const end = src.indexOf("Claude SDK not available", start);
+      const end = src.indexOf("} catch", start);
       expect(start).toBeGreaterThan(-1);
       expect(end).toBeGreaterThan(start);
       const block = src.slice(start, end);

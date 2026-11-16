@@ -262,7 +262,7 @@ describe("no eager opencode spawn at runtime startup", () => {
 			const src = readFileSync(resolve(repoRoot, relPath), "utf8");
 			const start = src.indexOf('"opencode-sdk"');
 			expect(start).toBeGreaterThan(-1);
-			const end = src.indexOf("OpenCode not available", start);
+			const end = src.indexOf("} catch", start);
 			expect(end).toBeGreaterThan(start);
 			const block = src.slice(start, end);
 			expect(block).toContain("deferModelDiscovery(providerId, provider)");
