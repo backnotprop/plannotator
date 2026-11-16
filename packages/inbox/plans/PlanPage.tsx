@@ -375,7 +375,7 @@ function DocLoaded({
       onClose={() => place.setOpen(false)}
     />
   );
-  const editing = usePlanEditing({ read, document, docRef, versions, head, shown, comparing: !!compare, onChanged, toNewest: () => go({ version: null }) });
+  const editing = usePlanEditing({ read, document, docRef, versions, head, shown, comparing: !!compare, onChanged, toNewest: () => go({ version: null }), showChanges: (from, to) => go({ diff: { from, to } }) });
   // An older version is read, compared or restored (approval "plans-editing"): never edited.
   const older = !compare && shown !== head ? { back: routeLink(routeOf({ version: null }), { 'data-plan-newest': '' }, { replace: true }), restore: editing.restore } : null;
   return (
@@ -410,7 +410,7 @@ function DocLoaded({
                 Show v{compare.to} only
               </button>
             </div>
-          ) : changedSince && !editing.editing ? (
+          ) : changedSince && !editing.editing && !editing.kept ? (
             <div className="ib-plan-banner" data-plan-banner="changed">
               <Icon name="eye" />
               <p>

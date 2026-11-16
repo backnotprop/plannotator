@@ -49,7 +49,9 @@ export function comparePair(shown: number, seen: number | null): { from: number;
 function author(v: PlanVersion): VersionAuthor {
   if (v.source === 'person' && !authorOf(v)) return { kind: 'person', name: 'You', key: 'person' };
   const name = authorOf(v);
-  return name ? { kind: 'person', name, key: `name:${name}` } : { kind: 'unnamed' };
+  // A version with no name has no author line: the frame's "pending" author has no words (not "No name recorded"),
+  // and plans.css folds its empty line away.
+  return name ? { kind: 'person', name, key: `name:${name}` } : { kind: 'pending' };
 }
 
 /** "you" or "you, with notes": the frame writes "Approved by …" (a denial has no place there; Activity has it). */

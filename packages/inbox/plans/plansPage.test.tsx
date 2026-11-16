@@ -852,8 +852,8 @@ test.skipIf(!hasDom)('Done makes a new version of the person’s words and sends
   expect(host.querySelector('[data-plan-banner="changed"]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a newer version that came while editing: nothing is saved, the newest shows, and the person’s text is kept to edit again', async () => {
-  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nv1\n']);
+test.skipIf(!hasDom)('a newer version that came while editing: nothing is saved, the newest shows, and the person’s text is kept to edit again; one banner carries Show changes', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nv1\n'], { seen: 1 });
   keptStorage();
   window.location.hash = `#plans=${id}`;
   const host = draw();
@@ -863,13 +863,25 @@ test.skipIf(!hasDom)('a newer version that came while editing: nothing is saved,
   const view = editorView();
   await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '# Mine\n\nMy words.\n' } }));
   // The agent writes v2 meanwhile.
-  store.addVersion(id, store.get(id)!.primary_doc_id, { bytes: bytes('# Rotate refresh tokens\n\nv2 by the agent\n'), committed_at: at(9), source: 'plan-review' });
+  store.addVersion(id, store.get(id)!.primary_doc_id, { bytes: bytes('# Rotate refresh tokens\n\nv2 by the agent\n'), committed_at: at(9), source: 'plan-review', agent_name: 'Claude Code' });
   await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-done]')!.click());
   await settle();
   expect(store.versions(id).length).toBe(2);
   expect(readingWords(host)).toBe('v2 · newest');
   expect(text(host.querySelector('[data-plan-document]'))).toContain('v2 by the agent');
   expect(text(host.querySelector('[data-plan-banner="stale"] p'))).toBe('v2 came while you were editing, so your edit was not saved. Your text is kept here.');
+  // The person saw v1, but the kept text's banner is the one about v2: no "Changed since you looked" beside it; its own Show changes compares what they edited with v2.
+  expect(host.querySelector('[data-plan-banner="changed"]')).toBeNull();
+  expect([...host.querySelectorAll('[data-plan-show-changes]')].map((b) => [text(b), b.closest('[data-plan-banner]')?.getAttribute('data-plan-banner')])).toEqual([['Show changes', 'stale']]);
+  // Authors: the agent's name where the library has it; a version with none has no author line, never "No name recorded".
+  expect(text(host.querySelector('[data-version-row][data-version="2"] [data-version-author]'))).toBe('Claude Code');
+  expect(text(host.querySelector('[data-version-row][data-version="1"] [data-version-author]'))).toBe('');
+  expect(text(host.querySelector('[data-versions-panel]'))).not.toContain('No name recorded');
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-show-changes]')!.click());
+  await settle();
+  expect(window.location.hash).toBe(`#plans=${id}&from=1&to=2`);
+  expect(host.querySelector('[data-plan-banner="stale"]')).not.toBeNull();
+  expect(host.querySelector('[data-plan-show-changes]')).toBeNull();
   // Edit v2 with your text: the editor opens on the person's words, on the newest.
   await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-kept-edit]')!.click());
   for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();

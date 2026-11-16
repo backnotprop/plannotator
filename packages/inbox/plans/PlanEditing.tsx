@@ -56,12 +56,14 @@ export interface PlanEditing {
   restore: ReactNode;
   /** What the last edit, Restore or Approve did, or the text a newer version kept from being saved. */
   banner: ReactNode;
+  /** A newer version kept the person's text from being saved: its banner carries "Show changes", so the page's own does not show. */
+  kept: boolean;
   /** The editor, in the page's place, while editing. */
   editor: ReactNode;
 }
 
-export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; head: number; shown: number; comparing: boolean; onChanged: () => void; toNewest: () => void }): PlanEditing {
-  const { read, document, docRef, versions, head, shown, comparing, onChanged, toNewest } = p;
+export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; head: number; shown: number; comparing: boolean; onChanged: () => void; toNewest: () => void; showChanges: (from: number, to: number) => void }): PlanEditing {
+  const { read, document, docRef, versions, head, shown, comparing, onChanged, toNewest, showChanges } = p;
   const id = read.plan.id;
   const project = read.plan.project_name;
   const session = planSession(versions);
@@ -69,8 +71,8 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
   const [editing, setEditing] = useState<{ base: number; original: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
-  /** The person's text a newer version kept from being saved. */
-  const [kept, setKept] = useState<string | null>(null);
+  /** The person's text a newer version kept from being saved, and the version they had edited. */
+  const [kept, setKept] = useState<{ text: string; base: number } | null>(null);
   const typed = useRef('');
   const handle = useRef<MarkdownEditorHandle | null>(null);
   const movedKey = planMovedDismissedKey(id, document.id);
@@ -96,6 +98,8 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
     try {
       const original = await plansApi.version(id, head, docRef);
       typed.current = text ?? original;
+      // From the kept text's banner the page may be showing changes: the editor is on the newest.
+      if (comparing) toNewest();
       setEditing({ base: head, original, text: text ?? original });
       setKept(null);
     } catch (error) {
@@ -124,7 +128,7 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
     } catch (error) {
       if (codeOf(error) === 'moved_on') {
         // Nothing is written over unseen: the newest shows, and the person's words wait here.
-        setKept(text);
+        setKept({ text, base: editing.base });
         setEditing(null);
         setNotice(null);
         toNewest();
@@ -248,11 +252,16 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
         <p>
           <b>v{head} came while you were editing,</b> so your edit was not saved. Your text is kept here.
         </p>
-        <button type="button" className="ib-plans-quiet" onClick={() => void navigator.clipboard?.writeText(kept).catch(() => {})} data-plan-kept-copy="">
+        {!comparing && kept.base < head && (
+          <button type="button" className="ib-plans-quiet" onClick={() => showChanges(kept.base, head)} data-plan-show-changes="">
+            Show changes
+          </button>
+        )}
+        <button type="button" className="ib-plans-quiet" onClick={() => void navigator.clipboard?.writeText(kept.text).catch(() => {})} data-plan-kept-copy="">
           Copy your text
         </button>
         {document.kind === 'markdown' && (
-          <button type="button" className="ib-plans-soft" onClick={() => void edit(kept)} data-plan-kept-edit="">
+          <button type="button" className="ib-plans-soft" onClick={() => void edit(kept.text)} data-plan-kept-edit="">
             Edit v{head} with your text
           </button>
         )}
@@ -289,5 +298,5 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
     </Suspense>
   ) : null;
 
-  return { editing: editing !== null, start, approved, restore: restoreButton, banner, editor };
+  return { editing: editing !== null, start, approved, restore: restoreButton, banner, kept: kept !== null, editor };
 }
