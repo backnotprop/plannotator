@@ -5,8 +5,9 @@
  */
 import type React from 'react';
 import type { ForgeRefCardError } from '@plannotator/core/forge-ref-card';
-import type { LinearCardData, LinearCardFields } from '@plannotator/core/linear-ref-card';
+import { parseLinearRefUrl, type LinearCardData, type LinearCardFields } from '@plannotator/core/linear-ref-card';
 import { HTML_BLOCK_OPEN_RE, HTML_BLOCK_TAGS } from '@plannotator/core/markdown-structure';
+import { parseMarkdownToBlocks } from '../utils/parser';
 import { RefCardAvatar, RefCardMarkdown, RefCardStateIcon, refCardTimeAgo, type RefCardViewProps } from './RefHoverCard';
 
 const BODY_MAX = 216;
@@ -21,26 +22,29 @@ const FAILURE_TEXT: Record<ForgeRefCardError, string> = {
   unavailable: "Details couldn't load right now.",
 };
 
-/**
- * Linear's text with raw HTML kept as text: a line that would open an HTML block is shown as code, so nothing from
- * Linear reaches the renderer's HTML path (fenced code is text already).
- */
-export function htmlAsText(markdown: string): string {
-  let fence: string | null = null;
+/** Open in Linear: the issue's own link only when it is an https link on linear.app, else the link the message had. */
+function openHref(result: RefCardViewProps['result'], href: string): string {
+  return result?.ok && parseLinearRefUrl(result.data.url) ? result.data.url : href;
+}
+
+/** Every line that could open an HTML block (also inside a quote, whose lines are parsed again) shown as code. */
+function codeOpeners(markdown: string, skipFences: boolean): string {
+  let fenceClose: RegExp | null = null;
   return markdown
     .split('\n')
     .map((line) => {
       const trimmed = line.trim();
-      const opens = /^(`{3,}|~{3,})/.exec(trimmed)?.[1];
-      if (fence) {
-        if (opens && opens[0] === fence[0] && opens.length >= fence.length) fence = null;
-        return line;
+      if (skipFences) {
+        // Backtick fences only, closed as the parser closes them (core `codeFenceCloseIndex`): `~~~` is plain text there.
+        if (fenceClose) {
+          if (fenceClose.test(line)) fenceClose = null;
+          return line;
+        }
+        if (trimmed.startsWith('```')) {
+          fenceClose = new RegExp('^\\s*`{' + trimmed.match(/^`+/)![0].length + ',}');
+          return line;
+        }
       }
-      if (opens) {
-        fence = opens;
-        return line;
-      }
-      // A quote's lines are parsed again as blocks, so `> <div>` counts too.
       const quote = /^(?:>\s*)*/.exec(trimmed)![0];
       const body = trimmed.slice(quote.length);
       const tag = HTML_BLOCK_OPEN_RE.exec(body)?.[1];
@@ -49,6 +53,23 @@ export function htmlAsText(markdown: string): string {
       return `${quote}${ticks} ${body} ${ticks}`;
     })
     .join('\n');
+}
+
+/** The renderer's own parse of this text would draw an HTML block somewhere (quotes are parsed again when drawn). */
+function reachesHtml(markdown: string, frontmatter = true): boolean {
+  return parseMarkdownToBlocks(markdown, frontmatter ? undefined : { frontmatter: false }).some(
+    (block) => block.type === 'html' || (block.type === 'blockquote' && reachesHtml(block.content, false)),
+  );
+}
+
+/**
+ * Linear's text with raw HTML kept as text: a line that would open an HTML block is shown as code, so nothing from
+ * Linear reaches the renderer's HTML path. Fenced code is left alone; the parser itself then checks the result, and
+ * when anything would still be HTML (a fence the scan read differently), every such line is shown as code.
+ */
+export function htmlAsText(markdown: string): string {
+  const scanned = codeOpeners(markdown, true);
+  return reachesHtml(scanned) ? codeOpeners(markdown, false) : scanned;
 }
 
 /** Linear's own state marks: a dashed ring (backlog), a ring (todo), a part-filled ring (started), a filled check or cross (done, canceled). */
@@ -87,7 +108,7 @@ export function LinearRefCardView({ target, href, result, pinned, onClose, sheet
         </button>
       ) : null}
       <a
-        href={result?.ok ? result.data.url : href}
+        href={openHref(result, href)}
         target="_blank"
         rel="noopener noreferrer"
         className={`${btn} inline-flex items-center gap-1 rounded-md bg-primary/10 font-medium text-primary hover:bg-primary/15`}

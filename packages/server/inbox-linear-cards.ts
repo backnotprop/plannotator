@@ -103,6 +103,8 @@ export function parseLinearRefAnswer(body: unknown): LinearCardData | "not_found
   const stateType = str(state.type);
   const team = obj(item.team);
   const description = cut(str(item.description), FORGE_REF_BODY_MAX);
+  // Only an https link on linear.app (the card's Open in Linear); anything else is dropped.
+  const url = parseLinearRefUrl(str(item.url)) ? str(item.url) : "";
   const last = nodes(item.comments).at(0);
   const assignee = personOf(item.assignee);
   const linked: ForgeRefLinked[] = nodes(item.attachments).flatMap((a) => {
@@ -116,7 +118,7 @@ export function parseLinearRefAnswer(body: unknown): LinearCardData | "not_found
     kind: "issue",
     repo: str(team.key),
     number: num(item.number),
-    url: str(item.url),
+    url,
     title: str(item.title),
     state: stateType === "completed" ? "completed" : stateType === "canceled" ? "not_planned" : "open",
     author: personOf(item.creator),
@@ -180,10 +182,13 @@ export function createLinearCards(options: {
   const apiKey = options.apiKey ?? (() => linearApiKey());
   const now = options.now ?? Date.now;
   const avatarOf = options.avatar ?? ((url: string) => fetchAvatarDataUri(url, options.fetch));
-  const cache = new Map<string, { result: ForgeRefCardResult; at: number }>();
+  /** `at`: when the answer was cached (or held off after a failed refresh); `goodAt`: its last good fetch. */
+  const cache = new Map<string, { result: ForgeRefCardResult; at: number; goodAt: number }>();
   const pending = new Map<string, Promise<ForgeRefCardResult>>();
   const avatars = new Map<string, Promise<string | null>>();
   let pausedUntil = 0;
+  /** Bumped by `forget()` (the key changed): an answer asked for under an older key is never kept or shown. */
+  let generation = 0;
 
   /** One read-only query with the key; "no_key" without one; null when it failed. */
   const ask = async (query: string, variables: Record<string, string>): Promise<{ res: Response; body: unknown } | "no_key" | null> => {
@@ -228,6 +233,8 @@ export function createLinearCards(options: {
       if (error === "rate_limited") pausedUntil = now() + REF_RATE_LIMIT_MS;
       return fail(error);
     }
+    // The key's workspace must be the link's: another workspace's ENG-1 is not this one's.
+    if (parseLinearRefUrl(data.url)?.owner !== ref.owner) return fail("not_found");
     await Promise.all([data.author, ...data.assignees, data.lastComment?.author ?? null].map(inline));
     return { ok: true, data: data as unknown as ForgeRefCardData, fetchedAt: now() };
   };
@@ -235,20 +242,26 @@ export function createLinearCards(options: {
   const refresh = (key: string, ref: LinearRef): Promise<ForgeRefCardResult> => {
     const inFlight = pending.get(key);
     if (inFlight) return inFlight;
-    const job = fetchOnce(ref)
+    const asked = generation;
+    const job: Promise<ForgeRefCardResult> = fetchOnce(ref)
       .then((result) => {
+        // The key changed while this was asked: ask again under the new one.
+        if (asked !== generation) return refresh(key, ref);
         const kept = cache.get(key);
-        // A failed refresh keeps a good answer (held off for REF_FAILURE_MS by its age below).
-        if (!result.ok && kept?.result.ok) {
+        // A failed refresh keeps a good answer (held off for REF_FAILURE_MS by its age below), never past the stale
+        // limit from its last good fetch, and never when Linear refused the key.
+        if (!result.ok && result.error !== "signed_out" && kept?.result.ok && now() - kept.goodAt < REF_STALE_MAX_MS) {
           kept.at = now() - REF_FRESH_MS + REF_FAILURE_MS;
           return kept.result;
         }
         cache.delete(key);
         if (cache.size >= REF_CACHE_MAX) cache.delete(cache.keys().next().value!);
-        cache.set(key, { result, at: now() });
+        cache.set(key, { result, at: now(), goodAt: result.ok ? now() : 0 });
         return result;
       })
-      .finally(() => pending.delete(key));
+      .finally(() => {
+        if (pending.get(key) === job) pending.delete(key);
+      });
     pending.set(key, job);
     return job;
   };
@@ -259,14 +272,14 @@ export function createLinearCards(options: {
     async get(href) {
       const ref = parseLinearRefUrl(href);
       if (!ref) return null;
-      // One identifier names one issue, whichever workspace key the link carries.
-      const key = `${ref.repo}-${ref.number}`;
+      // Per workspace: a link to another workspace's ENG-1 is never this one's card.
+      const key = `${ref.owner}/${ref.repo}-${ref.number}`;
       const kept = cache.get(key);
       if (kept) {
         const age = now() - kept.at;
         const fresh = kept.result.ok ? REF_FRESH_MS : REF_FAILURE_MS;
         if (age < fresh) return kept.result;
-        if (kept.result.ok && age < REF_STALE_MAX_MS) {
+        if (kept.result.ok && now() - kept.goodAt < REF_STALE_MAX_MS) {
           void refresh(key, ref);
           return kept.result;
         }
@@ -284,7 +297,9 @@ export function createLinearCards(options: {
       return refs;
     },
     forget() {
+      generation++;
       cache.clear();
+      pending.clear();
       teams = null;
       pausedUntil = 0;
     },

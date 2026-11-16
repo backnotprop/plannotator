@@ -32,11 +32,17 @@ export function linearIdentifierLinker(refs: LinearIssueRefs): PlainTextLinker {
 
 export const NO_KEY_TEXT = 'Add your Linear API key in Settings → Accounts to see details here.';
 
-/** The provider: Linear issue links, Linear's own card, and the identifier as the card's accessible name. */
+/**
+ * The provider: Linear issue links, Linear's own card, and the identifier as the card's accessible name. A link to
+ * another workspace than the key's is a plain link once that workspace is known (the server answers it not found
+ * until then); the first Linear link asks for it.
+ */
 export const linearRefCardProvider: RefCardProvider = {
   parse: (href) => {
     const ref = parseLinearRefUrl(href);
-    return ref ? linearAsForgeRef(ref) : null;
+    if (!ref) return null;
+    askTeams();
+    return keyWorkspace && ref.owner !== keyWorkspace ? null : linearAsForgeRef(ref);
   },
   owns: (ref) => isLinearRef(ref),
   View: (props) => <LinearRefCardView {...props} noKeyText={NO_KEY_TEXT} />,
@@ -51,6 +57,8 @@ const MAYBE_IDENTIFIER = /(?<![\w/.-])[A-Za-z][A-Za-z0-9]{0,9}-[1-9]\d{0,8}(?![\
 let installed: { fetchTeams: FetchTeams; undo: (() => void)[] } | null = null;
 let teamsAsked = false;
 let unlink: (() => void) | null = null;
+/** The key's workspace (its URL key), once read; null with no key or before. */
+let keyWorkspace: string | null = null;
 
 function linkTeams(): Promise<void> {
   if (!installed) return Promise.resolve();
@@ -60,17 +68,22 @@ function linkTeams(): Promise<void> {
     .then((body) => {
       unlink?.();
       unlink = null;
+      keyWorkspace = installed && body?.workspace ? body.workspace.toLowerCase() : null;
       if (installed && body?.workspace && Array.isArray(body.teams) && body.teams.length > 0) unlink = registerPlainTextLinker(linearIdentifierLinker({ workspace: body.workspace, teams: body.teams }));
     })
     .catch(() => {});
 }
 
-/** Links nothing; the first prose with something shaped like `ENG-123` asks for the teams, after the render. */
+/** Ask for the teams once, after the current render. */
+function askTeams(): void {
+  if (teamsAsked || !installed) return;
+  teamsAsked = true;
+  queueMicrotask(() => void linkTeams());
+}
+
+/** Links nothing; the first prose with something shaped like `ENG-123` asks for the teams. */
 const askOnFirstCandidate: PlainTextLinker = (text) => {
-  if (!teamsAsked && MAYBE_IDENTIFIER.test(text)) {
-    teamsAsked = true;
-    queueMicrotask(() => void linkTeams());
-  }
+  if (!teamsAsked && MAYBE_IDENTIFIER.test(text)) askTeams();
   return [];
 };
 
@@ -88,6 +101,7 @@ export function installLinearCards(fetchImpl?: FetchTeams): () => void {
     unlink = null;
     installed = null;
     teamsAsked = false;
+    keyWorkspace = null;
   };
 }
 
@@ -95,5 +109,6 @@ export function installLinearCards(fetchImpl?: FetchTeams): () => void {
 export function refreshLinearCards(): Promise<void> {
   if (!installed) return Promise.resolve();
   setRefCardTransport(getRefCardTransport());
+  keyWorkspace = null;
   return teamsAsked ? linkTeams() : Promise.resolve();
 }

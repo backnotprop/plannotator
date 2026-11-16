@@ -98,4 +98,8 @@ test('nothing is fetched on page load: the teams are asked once, when prose firs
   html('And OPS-4, ENG-5.');
   await settle();
   expect(asked).toHaveLength(1);
+  // Once the key's workspace is known, another workspace's link is a plain link: no card target.
+  setRefCardTransport(async () => null);
+  expect(refCardTarget('https://linear.app/acme/issue/ENG-1')).toMatchObject({ owner: 'acme' });
+  expect(refCardTarget('https://linear.app/othercorp/issue/ENG-1')).toBeNull();
 });

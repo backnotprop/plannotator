@@ -5,7 +5,7 @@
  * bare identifiers, and the route's guard. Every Linear answer is a stub; no network.
  */
 import { expect, test } from "bun:test";
-import { createLinearCards, LINEAR_API_URL, linearRefsRoute, parseLinearTeamsAnswer, withLinearCards } from "./inbox-linear-cards";
+import { createLinearCards, LINEAR_API_URL, linearRefsRoute, parseLinearRefAnswer, parseLinearTeamsAnswer, withLinearCards } from "./inbox-linear-cards";
 
 const ISSUE = {
   data: {
@@ -65,9 +65,61 @@ test("a Linear link: one query with the key as is, the card's fields, fresh answ
   expect(data.comments).toBe(2);
   // An avatar off Linear's own hosts is never fetched.
   expect(data.author.avatarUrl).toBeNull();
-  // Another workspace key, the same identifier: one issue, the cached answer.
-  await cards.get("https://linear.app/other/issue/ENG-123");
+  // The same identifier again: the cached answer.
+  await cards.get(`${LINK}?again`);
   expect(calls).toHaveLength(1);
+});
+
+test("another workspace's ENG-123 is not the key's: not found, never the key's issue", async () => {
+  const { calls, fetchImpl } = stub(() => ({ body: ISSUE }));
+  const cards = createLinearCards({ apiKey: () => "k", fetch: fetchImpl, avatar: async () => null });
+  expect(await cards.get("https://linear.app/othercorp/issue/ENG-123")).toMatchObject({ ok: false, error: "not_found" });
+  // Its own cache entry: the key's workspace still gets its card.
+  expect((await cards.get(LINK))?.ok).toBe(true);
+  expect(calls).toHaveLength(2);
+});
+
+test("Open in Linear: an issue url that is not an https linear.app link is dropped", async () => {
+  const odd = structuredClone(ISSUE);
+  odd.data.issue.url = "javascript:alert(1)//linear.app/acme/issue/ENG-123";
+  const { fetchImpl } = stub(() => ({ body: odd }));
+  // With no usable url the workspace can't be matched either, so no card data reaches the window.
+  expect(await createLinearCards({ apiKey: () => "k", fetch: fetchImpl, avatar: async () => null }).get(LINK)).toMatchObject({ ok: false, error: "not_found" });
+  expect((parseLinearRefAnswer(odd) as { url: string }).url).toBe("");
+});
+
+test("a removed or refused key: no card asked or cached under the old key is shown again", async () => {
+  // Removed while a fetch runs: the answer under the old key is dropped and asked again under the new one.
+  let key: string | null = "k";
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const asked: (string | null)[] = [];
+  const slow = (async (_url: string, init: RequestInit) => {
+    asked.push((init.headers as Record<string, string>).authorization);
+    await gate;
+    return Response.json(ISSUE);
+  }) as unknown as typeof fetch;
+  const cards = createLinearCards({ apiKey: () => key, fetch: slow, avatar: async () => null });
+  const first = cards.get(LINK);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  key = null;
+  cards.forget();
+  release();
+  expect(await first).toMatchObject({ ok: false, error: "signed_out" });
+  expect(await cards.get(LINK)).toMatchObject({ ok: false, error: "signed_out" });
+  expect(asked).toEqual(["k"]);
+
+  // Refused by Linear on a refresh: the good card cached before is not kept.
+  let t = 0;
+  let revoked = false;
+  const { fetchImpl } = stub(() => (revoked ? { status: 401, body: { errors: [{ message: "bad key", extensions: { code: "AUTHENTICATION_ERROR" } }] } } : { body: ISSUE }));
+  const later = createLinearCards({ apiKey: () => "k", fetch: fetchImpl, now: () => t, avatar: async () => null });
+  expect((await later.get(LINK))?.ok).toBe(true);
+  revoked = true;
+  t = 61_000; // stale: served once while it refreshes
+  expect((await later.get(LINK))?.ok).toBe(true);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(await later.get(LINK)).toMatchObject({ ok: false, error: "signed_out" });
 });
 
 test("not a Linear link: null, and withLinearCards hands it to the forge cards", async () => {
