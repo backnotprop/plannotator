@@ -93,17 +93,68 @@ async function hoverBadge(page: Page, threadId: string): Promise<void> {
   await expect(card(page)).toHaveCount(0);
   const words = page.locator(`[data-thread-id="${threadId}"] [data-wait-words]`);
   const target = (await words.count()) ? words : filled(page, threadId);
+  // TEMPORARY (#3528 CI evidence, to be removed): what happens under a resting pointer when the card does not open.
+  await page.evaluate(() => {
+    const w = window as unknown as { __rbLog?: unknown[] };
+    if (w.__rbLog) return;
+    const log: unknown[] = [];
+    w.__rbLog = log;
+    const at = () => Math.round(performance.now());
+    const desc = (n: Node) => (n instanceof Element ? `${n.tagName.toLowerCase()}.${String(n.className).slice(0, 24)}${n.getAttribute('data-thread-id') ? `#${n.getAttribute('data-thread-id')!.slice(0, 8)}` : ''}` : n.nodeName);
+    new MutationObserver((records) => {
+      for (const r of records) {
+        for (const n of [...r.removedNodes, ...r.addedNodes]) {
+          if (!(n instanceof Element)) continue;
+          const words = n.matches('[data-wait-words]') ? 1 : n.querySelectorAll('[data-wait-words]').length;
+          const tip = n.matches('[data-pn-tooltip]') || n.querySelector('[data-pn-tooltip]') !== null;
+          if (words || tip) log.push({ t: at(), m: r.removedNodes.length && [...r.removedNodes].includes(n) ? 'removed' : 'added', node: desc(n), words, tip, parent: desc(r.target) });
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+    for (const type of ['pointerover', 'pointerenter', 'pointerleave', 'pointerout', 'mouseover'] as const) {
+      document.addEventListener(type, (e) => {
+        const el = e.target instanceof Element ? e.target : null;
+        if (el?.closest('[data-wait-words], [data-wait-step]')) log.push({ t: at(), e: type, on: desc(el) });
+      }, true);
+    }
+  });
   // A line above the list (the notification line waits for the agents' read) can land after the rows draw and push
   // them down, out from under a pointer already resting there. Only then is the mark hovered again: one that stayed
   // under the pointer must open the card.
   for (let attempt = 1; ; attempt++) {
     await target.hover();
+    await target.evaluate((el) => {
+      (window as unknown as { __rbNode?: Element }).__rbNode = el;
+      (window as unknown as { __rbLog: unknown[] }).__rbLog.push({ t: Math.round(performance.now()), hovered: el.className });
+    });
     const rested = await target.boundingBox();
     if (await card(page).waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) return;
     const now = await target.boundingBox();
     const stayed = rested !== null && now !== null && Math.abs(rested.x - now.x) < 1 && Math.abs(rested.y - now.y) < 1;
     if (stayed || attempt === 3) break;
     await page.mouse.move(5, 5);
+  }
+  if (!(await card(page).isVisible())) {
+    const box = await target.boundingBox();
+    const state = await page.evaluate((b) => {
+      const w = window as unknown as { __rbLog: unknown[]; __rbNode?: Element };
+      const x = b ? b.x + b.width / 2 : 0;
+      const y = b ? b.y + b.height / 2 : 0;
+      const under = document.elementFromPoint(x, y);
+      const node = w.__rbNode;
+      return {
+        now: Math.round(performance.now()),
+        under: under ? `${under.tagName.toLowerCase()}.${String(under.className).slice(0, 40)}` : null,
+        underIsHovered: !!node && !!under && (under === node || node.contains(under)),
+        hoveredConnected: node?.isConnected ?? null,
+        hoveredMatches: node ? document.querySelector(`[data-thread-id] [data-wait-words="${node.getAttribute('data-wait-words')}"]`) === node : null,
+        tooltips: [...document.querySelectorAll('[data-pn-tooltip]')].map((t) => `${t.hasAttribute('data-closed') ? 'closed' : 'open'}:${(t.textContent ?? '').slice(0, 30)}`),
+        popupOpenAttr: node?.getAttribute('data-popup-open') ?? null,
+        active: document.activeElement ? `${document.activeElement.tagName.toLowerCase()}.${String(document.activeElement.className).slice(0, 30)}` : null,
+        log: w.__rbLog.slice(-60),
+      };
+    }, box);
+    console.log(`RBDIAG ${JSON.stringify(state)}`);
   }
   await expect(card(page)).toBeVisible();
 }
