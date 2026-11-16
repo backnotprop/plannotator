@@ -299,6 +299,27 @@ describe("delete", () => {
 });
 
 describe("the clock", () => {
+  test("rescheduling a one-time routine while it is preparing preserves the new run", async () => {
+    const w = world();
+    const { record } = await w.make({ folder: { scratch: true }, schedule: { at: "2026-11-16T09:00", tz: NY } });
+    const replacement = { at: "2026-11-17T09:00", tz: NY };
+    w.during.prepare = async () => {
+      w.during.prepare = null;
+      await w.scheduled.update(record.id, { schedule: replacement }, { kind: "person" });
+    };
+
+    w.at("2026-11-16T14:00:10.000Z");
+    await w.scheduled.check();
+    const rescheduled = w.store.scheduledThread(record.id)!;
+    expect(rescheduled).toMatchObject({ enabled: true, schedule: replacement, thread_id: null });
+    expect(rescheduled.done_at).toBeUndefined();
+
+    w.at("2026-11-17T14:00:10.000Z");
+    await w.scheduled.check();
+    const finished = w.store.scheduledThread(record.id)!;
+    expect(w.dividers(finished.thread_id).map((line) => line.scheduled_run?.due_at)).toEqual(["2026-11-17T14:00:00.000Z"]);
+  });
+
   test("a restart reads every routine back from disk and never runs one twice; a skip line wakes no run", async () => {
     const w = world();
     const { record } = await w.make();
