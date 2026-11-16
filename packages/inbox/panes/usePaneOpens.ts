@@ -3,7 +3,7 @@ import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { PaneId, PaneSet } from './model';
 import type { QueryClient } from '@tanstack/react-query';
 import { createPaneReads, type PaneOpenView, type PaneReads, type PaneReadsDeps } from './paneReads';
-import { createShownReads, type ShownReads, type ShownReadsDeps } from './shownReads';
+import { createShownReads, watchStaleShown, type ShownReads, type ShownReadsDeps } from './shownReads';
 import { latestAgentSeq } from '../seenOnSight';
 import { useStaleOpenRead } from '../threadFlights';
 
@@ -99,10 +99,21 @@ export function usePaneOpening(reads: PaneReads, panes: PaneSet, opened: (thread
   }, [reads]);
 }
 
-/** The reads that follow every thread on screen (shownReads.ts), and the re-read of one left stale (threadFlights.ts). */
-export function useShownReads(reads: PaneReads, deps: Omit<ShownReadsDeps, 'reads'>, client: QueryClient): ShownReads {
-  const [shown] = useState(() => createShownReads({ ...deps, reads }));
-  useStaleOpenRead(client, reads.shown, (id) => void reads.refreshThread(id));
+/**
+ * The reads that follow every thread on screen (shownReads.ts), and the re-read of one left stale: each thread on
+ * screen with the switch (`watchStaleShown`), the address's thread without it, as main reads it (threadFlights.ts).
+ */
+export function useShownReads(reads: PaneReads, deps: Omit<ShownReadsDeps, 'reads' | 'split'> & { split: boolean }, client: QueryClient): ShownReads {
+  const depsRef = useRef(deps);
+  depsRef.current = deps;
+  const [shown] = useState(() => createShownReads({ reads, latest: () => depsRef.current.latest(), filesSignals: deps.filesSignals, split: () => depsRef.current.split, open: () => depsRef.current.open() }));
+  const [single] = useState(() => ({
+    get current() {
+      return { thread: depsRef.current.split ? null : depsRef.current.open() };
+    },
+  }));
+  useStaleOpenRead(client, single, (id) => void reads.refreshThread(id));
+  useEffect(() => watchStaleShown(client, () => (depsRef.current.split ? reads.shown() : []), (id) => void reads.refreshThread(id)), [client, reads]);
   useEffect(() => shown.stop, [shown]);
   return shown;
 }

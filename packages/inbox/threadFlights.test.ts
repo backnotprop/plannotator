@@ -80,7 +80,7 @@ test('the open thread left stale by any path is read after a short wait, and onl
   putThread(client, 'open', model('open', 1));
   putThread(client, 'other', model('other', 1));
   const reads: string[] = [];
-  const stop = watchStaleOpen(client, () => ['open'], (id) => reads.push(id), 20);
+  const stop = watchStaleOpen(client, () => 'open', (id) => reads.push(id), 20);
   staleThread(client, 'other');
   staleThread(client, 'open');
   await new Promise((r) => setTimeout(r, 60));

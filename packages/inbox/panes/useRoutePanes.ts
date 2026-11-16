@@ -112,7 +112,10 @@ export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn:
   const closeThreads = useCallback((threads: readonly string[]) => commit(L.closeWhere(now(), (t) => threads.includes(t)), true), [commit]);
   const focus = useCallback((id: PaneId) => commit(L.focus(now(), id), true), [commit]);
   const resized = useCallback((sizes: Readonly<Record<string, readonly ChildSize[]>>) => commit(L.resize(now(), sizes), true), [commit]);
-  const panes = !allowed ? singlePane(thread) : onInbox || thread !== null ? L.asPaneSet(layout) : singlePane(null);
+  // Without the switch, main's one pane: the same set while the address names the same thread.
+  const single = useRef<PaneSet | null>(null);
+  if (!single.current || addressThread(single.current) !== thread) single.current = singlePane(thread);
+  const panes = !allowed ? single.current : onInbox || thread !== null ? L.asPaneSet(layout) : singlePane(null);
   const columns = onInbox ? L.columns(layout.root) : 1;
   return { panes, layout, columns, openBeside, openAt, replaceIn, movePane, closePane, closeThreads, focus, resized, allowed, restored: restored.current };
 }
@@ -120,13 +123,13 @@ export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn:
 /**
  * The active pane's thread as the cache holds it (`useHeldThread`). Moving into a pane whose thread was already on
  * screen (a click in another pane, or the one beside it closing) keeps it drawn; a thread that was not on screen
- * waits for its fresh read, as opening one always did.
+ * waits for its fresh read, as opening one always did. Without the switch (`split` false), main's: every opening waits.
  */
-export function useActiveHeld(panes: PaneSet): HeldThread | null {
-  const before = useRef(panes);
+export function useActiveHeld(panes: PaneSet, split: boolean): HeldThread | null {
+  const before = useRef<PaneSet | null>(null);
   useEffect(() => {
     before.current = panes;
   });
   const thread = addressThread(panes);
-  return useHeldThread(thread, thread !== null && paneOf(before.current, thread) !== null);
+  return useHeldThread(thread, split && thread !== null && before.current !== null && paneOf(before.current, thread) !== null);
 }

@@ -571,23 +571,25 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
       act(() => staleThread(queries, id));
     }
     const got: (string | null)[] = [];
-    function Probe({ panes }: { panes: PaneSet }) {
-      got.push(useActiveHeld(panes)?.thread.thread_id ?? null);
+    function Probe({ panes, split }: { panes: PaneSet; split: boolean }) {
+      got.push(useActiveHeld(panes, split)?.thread.thread_id ?? null);
       return null;
     }
     el = document.createElement('div');
     document.body.appendChild(el);
     root = createRoot(el);
-    const render = (panes: PaneSet) =>
+    const render = (panes: PaneSet, split = true) =>
       act(() =>
         root!.render(
           <QueryClientProvider client={queries}>
-            <Probe panes={panes} />
+            <Probe panes={panes} split={split} />
           </QueryClientProvider>,
         ),
       );
     const pair = (active: string): PaneSet => ({ panes: [{ id: 'main', thread: A }, { id: 'beside-1', thread: B }], active });
+    // The window opening on a thread: it was on screen nowhere, so its stale copy waits.
     render(pair('main'));
+    expect(got.at(-1)).toBeNull();
     render(pair('beside-1'));
     expect(got.at(-1)).toBe(B);
     // The pane beside closes: A was on screen.
@@ -595,6 +597,10 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(got.at(-1)).toBe(A);
     // One pane opening another thread: its stale copy waits for the read, as before.
     render({ panes: [{ id: 'main', thread: C }], active: 'main' });
+    expect(got.at(-1)).toBeNull();
+    // Without the switch, main's: every opening waits, even of a thread the last draw had.
+    render(pair('main'), false);
+    render(pair('beside-1'), false);
     expect(got.at(-1)).toBeNull();
   });
 });

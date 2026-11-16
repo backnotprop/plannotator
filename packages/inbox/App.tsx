@@ -469,7 +469,7 @@ function Inbox() {
    * place since. Its own list row (an archived thread has none in the list) and a launched thread's run line (null
    * while the agent rests) come with it.
    */
-  const openHeld = useActiveHeld(panes);
+  const openHeld = useActiveHeld(panes, windowPanes.allowed);
   const thread = openHeld?.thread ?? null;
   const threadRow = openHeld?.row ?? null;
   /**
@@ -948,7 +948,7 @@ function Inbox() {
   /** The list header's Tidy hears a list read that brought nothing new (useTidy's `listRead`). */
   const listTidyRead = useRef<(() => void) | null>(null);
   /** A thread on screen was not here, and the list names the machine that holds it: its pane opens it there. */
-  const retryMissingThread = () => paneReads.shown().forEach(paneReads.retryMissing);
+  const retryMissingThread = () => shownReads.shown().forEach(paneReads.retryMissing);
   /**
    * Read the list; `adopt` puts it on screen (an action, Show, or nothing on
    * screen yet), sliding the rows to their places when `slide` says so.
@@ -1118,7 +1118,7 @@ function Inbox() {
 
 
   const refreshThread = paneReads.refreshThread;
-  const shownReads = useShownReads(paneReads, { latest: () => latestRef.current, filesSignals }, queryClient);
+  const shownReads = useShownReads(paneReads, { latest: () => latestRef.current, filesSignals, split: windowPanes.allowed, open: () => routeRef.current.thread ?? null }, queryClient);
 
   /** A settings read arrived: the moment the Inbox named for the line, kept on this page's clock (`useLineLatch`). */
   const noteLineAgain = useCallback((reveal: SettingsModel['reveal']) => {
@@ -2516,7 +2516,7 @@ function Inbox() {
     if (!pickSaves.current.owed) {
       // The records of these saves are still to come: read now what they will owe, so they owe nothing then.
       if (quiet) ownSaves.readsStarted();
-      else if (!paneClosed) pickSaves.current.readOwn(threadId);
+      else if (!paneClosed) pickSaves.current.readOwn(shownReads.ownOpen(threadId));
       return;
     }
     pickSaves.current.owed = false;
@@ -2535,7 +2535,7 @@ function Inbox() {
    * else keeps waiting for Show.
    */
   const afterWrite = async (written: readonly string[] = []) => {
-    await shownReads.all();
+    if (shownReads.shown().length > 0) await shownReads.all();
     const next = await refreshList(false);
     if (!next || written.length === 0) return;
     const groups = listGroups(next);
@@ -5707,7 +5707,7 @@ function Inbox() {
     );
   }
   // Shift+R: the refresh of the page on screen (keyboard/appKeys.ts `refreshKind` decides which).
-  const refreshOpen = route.page === 'inbox' ? paneThread(panes, panes.active) : null;
+  const refreshOpen = route.page === 'inbox' ? (windowPanes.allowed ? paneThread(panes, panes.active) : route.thread) : null;
   refreshRef.current = refreshAction(
     refreshKind({
       page: route.page,
@@ -5736,7 +5736,7 @@ function Inbox() {
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
-    <BesideContext.Provider value={besideOf(windowPanes, route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, holdSidebarIfTight)}>
+    <BesideContext.Provider value={!windowPanes.allowed ? null : besideOf(windowPanes,route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, holdSidebarIfTight)}>
     <div
       ref={rootRef}
       className="pn-inbox"

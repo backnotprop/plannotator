@@ -127,6 +127,15 @@ describe.skipIf(!hasDom)('Open beside', () => {
     expect(document.querySelector('[data-row-menu]')).not.toBeNull();
     expect(besideItem()).toBeNull();
     expect(w.panes!.panes.panes).toHaveLength(1);
+    // Main's one pane: the same set through a redraw on the same thread (what reads it draws nothing new), a new one
+    // for another thread.
+    const before = w.panes!.panes;
+    act(() => w.toggleSidebar(false));
+    expect(w.sidebarOpen).toBe(false);
+    expect(w.panes!.panes).toBe(before);
+    act(() => w.go('thr_b'));
+    expect(w.panes!.panes).not.toBe(before);
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_b'], active: 0 });
   });
 
   test('the open thread\'s own row offers none', async () => {

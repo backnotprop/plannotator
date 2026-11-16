@@ -52,32 +52,27 @@ export function joinThreadRead(
 
 export const STALE_OPEN_MS = 1500;
 
-/** Each thread on screen (`shown`) left stale by any path is read after `ms`, unless a read made it current meanwhile. */
-export function watchStaleOpen(client: QueryClient, shown: () => readonly string[], read: (threadId: string) => void, ms = STALE_OPEN_MS): () => void {
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const arm = (threadId: string) => {
-    if (timers.has(threadId) || !heldThread(client, threadId) || !isThreadStale(client, threadId)) return;
-    timers.set(
-      threadId,
-      setTimeout(() => {
-        timers.delete(threadId);
-        if (shown().includes(threadId) && heldThread(client, threadId) && isThreadStale(client, threadId)) read(threadId);
-      }, ms),
-    );
+export function watchStaleOpen(client: QueryClient, open: () => string | null, read: (threadId: string) => void, ms = STALE_OPEN_MS): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = () => {
+    const threadId = open();
+    if (!threadId || timer || !heldThread(client, threadId) || !isThreadStale(client, threadId)) return;
+    timer = setTimeout(() => {
+      timer = null;
+      if (open() === threadId && heldThread(client, threadId) && isThreadStale(client, threadId)) read(threadId);
+    }, ms);
   };
   const stop = client.getQueryCache().subscribe((event) => {
-    const threadId = event.query.queryKey[2];
-    if (event.query.queryKey[1] === 'thread' && typeof threadId === 'string' && shown().includes(threadId)) arm(threadId);
+    if (event.query.queryKey[1] === 'thread' && event.query.queryKey[2] === open()) arm();
   });
   return () => {
     stop();
-    for (const timer of timers.values()) clearTimeout(timer);
-    timers.clear();
+    if (timer) clearTimeout(timer);
   };
 }
 
-export function useStaleOpenRead(client: QueryClient, shown: () => readonly string[], read: (threadId: string) => void): void {
-  const latest = useRef({ shown, read });
-  latest.current = { shown, read };
-  useEffect(() => watchStaleOpen(client, () => latest.current.shown(), (id) => latest.current.read(id)), [client]);
+export function useStaleOpenRead(client: QueryClient, route: { readonly current: { thread: string | null } }, read: (threadId: string) => void): void {
+  const latest = useRef(read);
+  latest.current = read;
+  useEffect(() => watchStaleOpen(client, () => route.current.thread, (id) => latest.current(id)), [client, route]);
 }
