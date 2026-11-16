@@ -21,10 +21,15 @@ import {
 import { QUESTION_AUTHORING_GUIDE } from '../../../../packages/core/question-block';
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE } from '../../../../packages/core/inbox-actions';
 import {
+  INBOX_ANSWERS_WAKE_LINE,
+  INBOX_ASK_RECOGNISE_RULE,
   INBOX_FILLED_ARGUMENTS,
   INBOX_FOLLOW_THROUGH_RULE,
   INBOX_PICTURES_RULE,
+  INBOX_REREAD_RULE,
+  INBOX_SHOWING_RULE,
   INBOX_SUBAGENT_RULE,
+  INBOX_THREAD_NEW_ISSUE_RULE,
   INBOX_THREAD_RULE,
   INBOX_TOOL_NAME,
 } from '../../../../packages/shared/inbox/connection';
@@ -200,13 +205,16 @@ export function buildLlmsInbox(): string {
     '### Send one message',
     '',
     '- Call `send_message` with a markdown `body`. Put the decision, the summary or the blocker in that one message. Do not split it into several sends.',
-    '- `thread`: a short name that keeps one work stream in one thread, across sessions. `reply_to`: a message id, to answer inside that thread. Take ids from the Inbox (the reply\'s first line, a `read_thread` result), never from memory.',
+    '- `thread`: a short name that keeps one work stream in one thread, across sessions. `reply_to`: a message id, to answer inside that thread. Take ids from the Inbox (the reply\'s first line, a `read_thread` result), never from memory. ' + INBOX_THREAD_NEW_ISSUE_RULE,
     '- `attachments`: files to show beside the message, absolute or relative to the project: a plan, an HTML prototype, a video, code. The person annotates them and the annotations come back in the reply. Folders and `.env` files are refused.',
+    `- ${INBOX_SHOWING_RULE}`,
     `- Pictures: ${INBOX_PICTURES_RULE}`,
+    `- ${INBOX_REREAD_RULE}`,
     '- `supersedes`: earlier questions of the thread that no longer apply. `done`: your own action items you saw done.',
     '- Thread steps exist only when the person turned them on in the Inbox\'s Settings → Capabilities. Then your tool lists a `steps` action, and `plannotator inbox --help` explains it.',
     '',
     QUESTION_AUTHORING_GUIDE.trimEnd().replace(/^## /m, '### '),
+    `- ${INBOX_ASK_RECOGNISE_RULE}`,
     '',
     'Only in the Inbox, a question block can also carry these lines, each on its own line after the question:',
     '',
@@ -228,6 +236,7 @@ export function buildLlmsInbox(): string {
     '- If it does, end your turn, or go on with other work. Do not wait in a loop and do not poll. The reply arrives as a new message that starts with `Plannotator Inbox: <title> (<reply id>)`. Answer with `send_message` and `reply_to` set to that id.',
     '- If it does not, go on with your work and call `read_thread` with the `thread_id` later. `read_thread` with no id lists your threads; a thread the person wrote in for you reads `unread`.',
     '- The reply holds the person\'s words, then "Answers to your questions", then their comments on your text and their annotations on attached files.',
+    `- ${INBOX_ANSWERS_WAKE_LINE}`,
     '- Questions they did not answer stay open, and the reply says how many. Do not ask them again.',
     '- Codex, Qwen Code and T3 Code are woken once per reply, and a lost wake is not sent again. If a reply has not arrived when you next work, list your threads with `read_thread`.',
     '',
@@ -356,3 +365,71 @@ export function buildLlmsAgent(agent: Agent): string {
 
 /** Every agent the site lists, with its page. An unlisted agent gets none. */
 export const LLMS_AGENT_PAGES = LISTED_AGENTS.map((agent) => ({ slug: agent.slug, agent }));
+
+// ── /inbox/prompt.md ──
+
+/** The line in inbox-prompt.md that the per-agent list replaces. */
+export const INBOX_PROMPT_AGENTS_SLOT = '{{AGENT_STEPS}}';
+
+/** The prompt is served and copied as plain ASCII, so the agent entries' typography folds to it. */
+const ascii = (text: string) =>
+  text
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/→/g, '>')
+    .replace(/…/g, '...')
+    .replace(/[–—]/g, '-');
+
+/** The words of a step before `plannotator inbox`: its code, which is the install line. */
+function beforeStep(step: Step): string {
+  if (!step.code) return sentence(step.do);
+  return `${step.file ? `In ${code(step.file)}: ` : ''}${step.code.split('\n').map(code).join(' then ')}.`;
+}
+
+/** The words of a step after `plannotator inbox`, less a sentence about what that command did, and its code unless they quote it. */
+function afterStep(step: Step): string {
+  const words = step.do
+    .split(/(?<=\.) (?=[A-Z`])/)
+    .filter((s) => !s.startsWith('`plannotator inbox`'))
+    .join(' ');
+  const shown = (step.code?.split('\n') ?? []).filter((line) => !words.includes(code(line)));
+  return shown.length ? `${sentence(words)} ${shown.map(code).join(' then ')}.` : sentence(words);
+}
+
+/** The by-hand MCP step: `plannotator inbox` has no way to connect the agent. */
+const isByHandMcp = (step: Step) => step.prompt === 'after' && step.code === 'plannotator inbox mcp';
+
+const agentLink = (agent: Agent) => `[${agent.name}](${url(llmsAgentPath(agent.slug))})`;
+
+/** What each agent does around `plannotator inbox` in the install prompt, from the steps marked `prompt`. */
+export function buildInboxPromptAgents(): string {
+  const marked = (agent: Agent) => agent.setup.filter((step) => step.prompt);
+  const lines: string[] = [];
+  const nothing: Agent[] = [];
+  const byHand: Agent[] = [];
+  for (const agent of LISTED_AGENTS.filter((a) => a.tier !== 'cloud')) {
+    const steps = marked(agent);
+    if (steps.length === 0) nothing.push(agent);
+    else if (steps.every(isByHandMcp)) byHand.push(agent);
+    else {
+      const before = steps.filter((s) => s.prompt === 'before').map(beforeStep);
+      const after = steps.filter((s) => s.prompt === 'after').map(afterStep);
+      const parts = [...(before.length ? [`Before step 2: ${before.join(' ')}`] : []), ...(after.length ? [`After step 2: ${after.join(' ')}`] : [])];
+      lines.push(`- ${agentLink(agent)}. ${parts.join(' ')}`);
+    }
+  }
+  if (byHand.length > 0) {
+    lines.push(`- ${list(byHand.map(agentLink))}: step 2 does not connect them. In step 3 add a stdio MCP server \`plannotator-inbox\` that runs \`plannotator inbox mcp\`.`);
+  }
+  if (nothing.length > 0) lines.push(`- ${list(nothing.map(agentLink))}: nothing more. Step 2 connects them.`);
+  const cloud = LISTED_AGENTS.filter((a) => a.tier === 'cloud');
+  if (cloud.length > 0) {
+    lines.push(`- ${list(cloud.map(agentLink))}: not this setup. Follow the pairing message the person copies from the Inbox's Settings > Cloud agents.`);
+  }
+  return ascii(lines.join('\n'));
+}
+
+/** The install prompt: inbox-prompt.md (passed in, a ?raw import) with the per-agent list in its slot. */
+export function buildInboxPrompt(source: string): string {
+  return source.replace(INBOX_PROMPT_AGENTS_SLOT, buildInboxPromptAgents());
+}

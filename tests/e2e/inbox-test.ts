@@ -1,0 +1,117 @@
+import { test as base, chromium, webkit, type Browser, type BrowserContext, type BrowserType, type Page, type TestInfo } from '@playwright/test';
+import type { HeldProbe, HeldProbeRead } from '../../packages/inbox/data/heldProbe';
+import { listDrift, threadDrift } from '../helpers/inbox-held-drift';
+
+export * from '@playwright/test';
+
+export const HELD_DRIFT_OFF = 'held-drift-off';
+const SETTLE_MS = 3000;
+const READING_MS = 20_000;
+const RETRY_MS = 100;
+
+const contexts = new Map<BrowserContext, { file: string | null; checked: boolean }>();
+const tracked = new WeakSet<Browser>();
+
+function specFile(): string | null {
+  try {
+    return base.info().file;
+  } catch {
+    return null;
+  }
+}
+
+async function prepare(context: BrowserContext): Promise<BrowserContext> {
+  contexts.set(context, { file: specFile(), checked: true });
+  context.on('close', () => contexts.delete(context));
+  await context.addInitScript(() => {
+    (window as { __plannotatorInboxHeld?: object }).__plannotatorInboxHeld = {};
+  });
+  return context;
+}
+
+function track(browser: Browser): Browser {
+  if (tracked.has(browser)) return browser;
+  tracked.add(browser);
+  const newContext = browser.newContext.bind(browser);
+  browser.newContext = async (options) => prepare(await newContext(options));
+  return browser;
+}
+
+for (const type of [chromium, webkit] as BrowserType[]) {
+  const launch = type.launch.bind(type);
+  type.launch = async (options) => track(await launch(options));
+  const persistent = type.launchPersistentContext.bind(type);
+  type.launchPersistentContext = async (dir, options) => prepare(await persistent(dir, options));
+}
+
+const read = (page: Page): Promise<HeldProbeRead | null> =>
+  page.evaluate(() => (window as { __plannotatorInboxHeld?: HeldProbe }).__plannotatorInboxHeld?.read?.() ?? null).catch(() => null);
+
+function driftOf(read: HeldProbeRead): string | null {
+  const out: string[] = [];
+  for (const { threadId, held, fresh, note } of read.threads) {
+    const drift = threadDrift(held, fresh);
+    if (drift) out.push(`thread ${threadId} (${note ?? ''}):\n${drift}`);
+  }
+  const list = read.list && listDrift(read.list.held, read.list.fresh);
+  if (list) out.push(`list:\n${list}`);
+  return out.length > 0 ? out.join('\n') : null;
+}
+
+async function pageDrift(page: Page): Promise<string | null> {
+  const started = Date.now();
+  const deadline = started + SETTLE_MS;
+  for (;;) {
+    const now = await read(page);
+    if (!now) return null;
+    if (now.error) {
+      if (Date.now() > deadline) return `the held-copy probe could not read the Inbox: ${now.error}`;
+      await page.waitForTimeout(RETRY_MS).catch(() => {});
+      if (page.isClosed()) return null;
+      continue;
+    }
+    const drift = driftOf(now);
+    if ((!drift && now.busy === 0) || (Date.now() > deadline && !(now.reading > 0 && Date.now() < started + READING_MS))) return drift;
+    await page.waitForTimeout(RETRY_MS).catch(() => {});
+    if (page.isClosed()) return null;
+  }
+}
+
+export async function heldDriftOfPages(file?: string): Promise<string | null> {
+  const out: string[] = [];
+  for (const [context, opened] of contexts) {
+    if (!opened.checked || (file !== undefined && opened.file !== null && opened.file !== file)) continue;
+    for (const page of context.pages()) {
+      if (page.isClosed()) continue;
+      const drift = await pageDrift(page);
+      if (drift) out.push(`${page.url()}\n${drift}`);
+    }
+  }
+  return out.length > 0 ? out.join('\n\n') : null;
+}
+
+async function closeEarlierFiles(file: string): Promise<void> {
+  for (const [context, opened] of [...contexts]) {
+    if (opened.file === null || opened.file === file) continue;
+    contexts.delete(context);
+    await context.close().catch(() => {});
+  }
+}
+
+const off = (info: TestInfo) => info.annotations.some((annotation) => annotation.type === HELD_DRIFT_OFF);
+
+export const test = base.extend<{ heldDrift: void }, { browser: Browser }>({
+  browser: [async ({ browser }, use) => use(track(browser)), { scope: 'worker' }],
+  heldDrift: [
+    async ({}, use, info) => {
+      await closeEarlierFiles(info.file);
+      const before = new Set(contexts.keys());
+      await use();
+      if (off(info)) for (const [context, opened] of contexts) if (!before.has(context)) opened.checked = false;
+      if (off(info) || info.status !== info.expectedStatus) return;
+      const drift = await heldDriftOfPages(info.file);
+      if (drift) throw new Error(`The window's held copy differs from a fresh read of the Inbox (tests/e2e/inbox-test.ts):\n${drift}`);
+    },
+    { auto: true },
+  ],
+});

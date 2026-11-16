@@ -1,0 +1,54 @@
+## Routines
+
+On screen and to agents this feature is "Routines"; in code (files, types, routes, the record kind, config and wire keys) it is "scheduled".
+
+A routine is a saved prompt with a name, a schedule, a folder, an agent and an on/off switch. Each run starts the agent the way New message does and works in one Inbox thread: every run replies there, and the person replies there to that run. Code: `packages/core/inbox-scheduled.ts` (the pure schedule rules, croner 11.0.0), `packages/server/inbox-scheduled.ts` (records, clock, runs), `inbox-scheduled-routes.ts` (the switch and the window's routes), `inbox-scheduled-login.ts` (start at login), `inbox-mcp-scheduled.ts` (the agents' tool). Types: `packages/core/inbox-scheduled-types.ts`.
+
+A routine is managed on the computer that made it, and its runs' thread works from linked machines like any thread.
+
+### The switch
+
+Settings → Capabilities, config.json `inboxScheduledThreads` (`true`, else off). Not offered on Windows. Off: no timer, no run, no write, no `routine` tool in tools/list, every `/api/inbox/scheduled…` route answers `404 routines_off`, and a tool call from a session that listed it before answers `routines_off` with nothing written. Records on disk are kept. Turning it on starts every routine that is on from the next due time, with no catch-up; so does turning "Start agents" back on. "Start agents from New message" (`inboxLaunch.enabled`) must be on too: a run is a launch.
+
+On also adds a start-at-login item, removed when it goes off and by `plannotator uninstall` (the file only, on macOS; disabled, not stopped, on Linux: removing it never ends the Inbox it started): on macOS `~/Library/LaunchAgents/ai.plannotator.inbox.plist` (launchd reads it at the next login; it runs `plannotator inbox --no-open` for this data dir, no window); on Linux a systemd user unit `~/.config/systemd/user/plannotator-inbox.service`, enabled, only when `systemctl --user` answers (else none, and the switch reads `login: "unavailable"`).
+
+### The record and the runs
+
+Records live in `<dataDir>/inbox/scheduled.jsonl` (kind `scheduled`, one file for every project, last line per id wins, a delete is a tombstone). A run is a person-authored divider message in the thread (`scheduled_run: { scheduled_id, name, run, due_at, by, late?, missed_before?, failed? }`) whose body is the prompt (plus the late line, "This run was due Mon 9:00 AM and started Mon 11:14 AM."), carrying that run's own `launch` record and `to` its session. The first run (or skip line) starts the thread, named after the routine; later dividers take the thread over (`took_over`), so the person's plain reply goes to the newest run. A skip line is its own message, `scheduled_run` with `skipped` and no `run`: an Inbox note ("Skipped Mon 9:00 AM · this computer was asleep"). The store delivers a skip line, and a divider whose run didn't start, to no session; a divider only to its own run's session (`pendingFor`), so neither wakes or restarts an earlier run. Archiving the thread (its row, a bulk Archive, a swipe, or a Combine that took it) leaves the schedule as it is: the next run writes in the same thread, and its reply brings the thread back as any agent's reply does; a Combine's new thread gets no runs.
+
+The folder is a project (`{ project_id }`), a folder by its real path (`{ path }`: a worktree or a subfolder runs there, not at its project's root, and home, `/`, hidden and system folders are refused as New message refuses a typed folder), or a scratch folder made at the first run.
+
+One session per launched root is unchanged for every other thread: the store indexes each routine's newest later run beside the launched roots (`scheduledRunLaunches`; earlier runs have ended), and the launcher's thread reads (run line, row, respawn, attach) follow it. Starting a run lets go of the previous run's session when it is idle. One start at a time per routine: a second (Run now twice, or Run now as the clock fires) answers `409 routine_running`, and its number and thread are read after the launch is ready. A reply to an earlier run (its divider or its session's message) is refused, `409 routine_run_ended`: "Run 3 has ended, so your reply was not sent. Reply to the latest run (Run 4) instead."
+
+A run that didn't start is a divider with `failed` (the launch's reason, without New message's "Nothing was sent."), shown as "The run didn't start." and the reason; a first run that fails, on the clock as on Run now, writes it in its folder's project (a folder by its path that is there), else in the project of the thread an agent made it from, else in a project for the scratch folders' own folder (as a new scratch folder, or a project that is gone, does). A folder that isn't there never becomes a project. So it always has a thread. A run's outcome is read, never stored: `didnt_start` (no launch, or `failed`), `running`, `replied` (its session wrote after the divider), `didnt_finish`.
+
+### The clock
+
+One check when the switch is on or the Inbox starts, then every 30 seconds. A check that finds more than 2 minutes since the last one reads as the computer having slept (`asleep`); the first check after a start reads as the Inbox not running (`not_running`). Per routine that is on, approved and has a schedule: nothing due, wait; a run still going, skip (`still_running`); due more than 2 minutes ago and the next due time under 15 minutes away, one skip line for all of them (`missed`, or the sleep or start that caused it); the same with `if_missed: "skip"` (`asleep`, `not_running`, or `late` when the Inbox was up and awake); else one run for the newest due time (`late`, `missed_before`). The newest missed time is read back from now, and the ones before it are counted up to 1,000 ("Skipped 1,000 or more times"), so a long sleep costs at most that many steps. The clock counts from the record's `handled_through` (set at turn-on and at a schedule change) or the newest due time it wrote a line for, whichever is later, so nothing is written to the record at a due time. The run key `sch:<id>:<due_at>` is the divider's idempotency key, so a restart in the middle of a check answers the same run and never starts a second. A one-time schedule is Done after its run or skip.
+
+The only limit is the 15-minute rule: a schedule whose runs come closer than 15 minutes apart is refused (`422 schedule_too_frequent`, "Scheduled times are at least 15 minutes apart. This one runs every 5 minutes.", with `every_minutes`; a cron whose runs are not evenly spaced, `*/14`, "This one can run 4 minutes apart."). It spaces the scheduled times only: Run now is never held back by it. Also refused as `schedule_invalid`, in its own words and never the cron library's: a cron it cannot read or a zone it does not know ("That isn't a schedule Plannotator can read." and a hint), a cron that never comes round ("That schedule never runs: no day matches it."), a one-time date the calendar does not have, and a one-time time already passed when it is set ("That time has already passed."; one saved before its time keeps it). Daylight saving: a time that does not exist runs at the next one; a time that happens twice runs once.
+
+### Agents
+
+The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it like `card`): `op` create, list, get, update, on, off, run, delete. Paired cloud agents (the agent door) do not get it.
+
+| Surface | Form |
+| --- | --- |
+| MCP tool | `routine`, title "Make or change a routine" |
+| `plannotator_inbox` action | `routine` |
+| Shell | `plannotator routine <op> ['<json>'] [--session <id>]`, the same as `plannotator inbox call routine '{"op":"<op>",…}'` |
+| Link | `#routine=<id>` opens that routine's editor; `#routines` the list (`#routine=new` a new one) |
+
+- A routine an agent creates arrives off. The person turns it on the first time, in the Inbox (`approved_at` on the record); before that the agent's `on` and `run` answer `routine_not_approved` and change nothing. After that the agent may update, turn it on or off, run it and delete it.
+- Each change posts one line, as the agent, in the thread the call names (`thread_id`), else in the routine's own thread, with `scheduled_change: { scheduled_id, name, op, fields?, turned_off? }` and a link `[Name](#routine=<id>)` that opens the editor. An edit says old and new: the schedule and folder in words, the prompt as a `diff` block.
+- An agent's change of the folder or the agent turns it off and clears the approval; the line says so. Prompt and schedule edits apply at once.
+- Runs start in the person's own permission mode, exactly as New message does.
+- `update` changes only the fields passed. A schedule without `tz` takes this computer's zone. `thread_id` is only where the change lines go: runs reply in the routine's own thread, made at its first run. With no `thread_id` the line goes in the routine's own thread (made for it when the routine has none yet); there it is a note, not anyone's words: it wakes no run and takes no reply (`threadOwner`, `wordsMessage`, the run outcome), and the list row says the change (`last_change`, "Changed by Codex") while it is the thread's latest.
+
+### Routes (Bun only)
+
+`GET /api/inbox/scheduled` → `{ scheduled: InboxScheduledRow[], launch_on }` (a row carries `thread_name`, "Replies in"). `GET /api/inbox/scheduled/:id` → `{ scheduled, runs }` (the newest 20). Writes are the window's only (same origin and `serverSession`; else `403 window_only`, "A routine is changed in the Inbox window; an agent uses the routine tool."): `POST /api/inbox/scheduled` (create, `201`; `enabled: true` turns it on and approves it), `POST /:id` (update), `/:id/on`, `/:id/off`, `/:id/run` (`202 { scheduled, message_id, failed? }`; `409 routine_running`), `/:id/stop`, `/:id/delete` → `{ deleted: true }` (a run under way is stopped first, and one still starting does not start; its thread and past runs stay), `/:id/restore` (the window's Undo: back as it was, counting from now). `POST /api/inbox/scheduled/preview { schedule }` → `InboxScheduledPreview` (words, zone, next run, or the refusal). The settings read carries `scheduled_threads: { on, login? }` (absent on Windows); `POST /api/inbox/settings { scheduled_threads: { on } }` writes it and sends `event: capabilities` (which carries `scheduled_threads` only while on, and when it turns off). A change to a record sends `event: record` with `{ seq, kind: "scheduled", id }` only.
+
+### Linked machines
+
+The record stays on the computer that made it: no door route and no list field carry it. Its runs' thread is an ordinary thread, so a linked machine shows it, replies in it and stops its run like any launched thread; the reply goes through the forward to this computer, where the same rules apply (the newest run takes it, an earlier one says it ended). Every divider keeps `name` on `scheduled_run`, so a linked machine's list shows the sender.

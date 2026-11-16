@@ -11,6 +11,11 @@ export const INBOX_CROSS_SITE_BODY = { error: "Cross-origin requests are not acc
 export const INBOX_WINDOW_ONLY_BODY = { error: "A folder is trusted in the Inbox window.", code: "window_only" } as const;
 /** Remote launch: an agent on another machine is started, stopped or trusted only by a press in the Inbox window. */
 export const INBOX_MACHINE_WINDOW_ONLY_BODY = { error: "An agent on another machine is started, stopped or trusted from the Inbox window only.", code: "window_only" } as const;
+/**
+ * The PR board across machines: a PR on another machine is closed, reopened, merged or given a review thread only for a
+ * request that looks like the Inbox window's. Said to a bare call; a local program that imitates the window is not stopped by it.
+ */
+export const INBOX_MACHINE_PULL_WINDOW_ONLY_BODY = { error: "A pull request on another machine is closed, reopened, merged or given a review thread from the Inbox window only.", code: "window_only" } as const;
 
 export function isCrossSiteRequest(req: Request): boolean {
   const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();

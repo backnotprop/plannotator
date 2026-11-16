@@ -12,7 +12,7 @@
  * Screenshots (light and dark) go to PLANNOTATOR_MD_LINKS_SHOTS when it is set.
  * Build the binary first (see inbox.spec.ts).
  */
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

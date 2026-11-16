@@ -169,6 +169,30 @@ describe("initiatives: the store", () => {
     // Renaming one to its own name in other case is fine.
     expect(store.renameInitiative(shape.id, "SHAPE").name).toBe("SHAPE");
   });
+
+  // A linked machine's window puts this store's card in a tag by its name: the one of that name, made once.
+  test("a card put in a tag by name takes the live one of that name, cased otherwise too, and makes it (the person's) when none is", () => {
+    const { store, project, advance } = world();
+    const shape = store.createInitiative({ name: "Shape", by: PERSON });
+    // Tags made in one millisecond are ordered by their random ids.
+    advance(1000);
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Hover cards" });
+    expect(store.setCardInitiativeNamed(card.id, " SHAPE ", PERSON).initiative).toBe(shape.id);
+    const made = store.setCardInitiativeNamed(card.id, "Billing", PERSON).initiative!;
+    const billing = store.initiative(made)!;
+    expect(billing.name).toBe("Billing");
+    expect(billing.created_by).toEqual(PERSON);
+    expect(store.setCardInitiativeNamed(card.id, "billing", PERSON).initiative).toBe(made);
+    expect(store.initiatives().map((tag) => tag.name)).toEqual(["Shape", "Billing"]);
+    // A deleted tag of the name is not taken: a new one is made.
+    store.deleteInitiative(made);
+    expect(store.setCardInitiativeNamed(card.id, "Billing", PERSON).initiative).not.toBe(made);
+    // Refused before anything is made: an agent, a card that is not there.
+    const before = store.initiatives().length;
+    expect(refusal(() => store.setCardInitiativeNamed(card.id, "Memory", AGENT))).toBe("initiative_person_only");
+    expect(refusal(() => store.setCardInitiativeNamed("crd_01K0000000000000000000000X", "Memory", PERSON))).toBe("card_not_found");
+    expect(store.initiatives()).toHaveLength(before);
+  });
 });
 
 // Approval "board-initiatives", "Agents and initiatives" (q-b3b9c89c): an agent puts its card in an initiative by

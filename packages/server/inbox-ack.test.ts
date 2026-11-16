@@ -236,9 +236,9 @@ describe("what the agent sees", () => {
     expect(commands).toHaveLength(1);
     const command = commands[0]!;
     expect(command).toMatchObject({ type: "reply", thread_id: threadId, reply_to: messageId, ack_of: messageId });
-    expect(command.body).toBe(`The person reacted 👍 Looks good to your message (${messageId}).`);
+    expect(command.body).toBe(`The person reacted 👍 Looks good to your message (${messageId}). Take it as a go.`);
     expect(inboxWakeText(command)).toBe(
-      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person reacted 👍 Looks good to your message (${messageId}).\n\n[thread ${threadId}]`,
+      `Plannotator Inbox: ${command.subject} (${command.id})\nThe person reacted 👍 Looks good to your message (${messageId}). Take it as a go.\n\n[thread ${threadId}]`,
     );
     // Another session is never handed it.
     expect(await poll(server, "ses_other")).toEqual([]);

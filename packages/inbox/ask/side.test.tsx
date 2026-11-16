@@ -296,8 +296,21 @@ test.skipIf(!hasDom)("a Codex thread: Side is Codex's mark, named for Codex", as
   expect(askBox()!.value).toBe(`> ${WORDS}\n\n`);
 });
 
+test.skipIf(!hasDom)("a T3 Code thread: Side is T3 Code's mark, named for T3 Code", async () => {
+  serve(true, { host: 't3', name: 'T3 Code' });
+  await mount(<MessageWithAsk />);
+  await until(async () => {
+    await select(host!, WORDS);
+    return side() !== null;
+  }, 'Side in the selection bar');
+  expect(barOrder()).toEqual(['Delete', 'Comment', 'Looks good', '|', 'Side chat with T3 Code', '|', 'Cancel']);
+  expect(side()!.textContent).toBe('');
+  expect(side()!.querySelector('.ib-mk')!.isEqualNode(markOf('t3'))).toBe(true);
+  expect(side()!.querySelector('[data-mark="t3"]')).not.toBeNull();
+});
+
 for (const agent of [
-  { host: 't3', name: 'T3 Code' },
+  { host: 'kiro', name: 'Kiro' },
   { host: 'some-new-agent', name: 'some-new-agent' },
   { host: null, name: 'An agent' },
 ]) {

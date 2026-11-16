@@ -19,7 +19,7 @@
  * PLANNOTATOR_REFRESH_SHOTS, else .local/proof/inbox-refresh/.
  */
 
-import { devices, expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

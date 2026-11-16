@@ -29,7 +29,7 @@
  * PNGs land in PLANNOTATOR_ROW_PIN_SHOTS, or PLANNOTATOR_E2E_PROOF_DIR/row-pin, or .local/proof/row-pin/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

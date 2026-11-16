@@ -14,7 +14,7 @@
  * PNGs, light, dark and phone, land in .local/proof/inbox-accounts-step1/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -23,6 +23,7 @@ import { fakeCswapCalls, removeFakeCswap, writeFakeCswap } from '../helpers/fake
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { clearSidebarPeek } from './sidebar-peek';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -298,6 +299,7 @@ test('desktop: every state, light and dark, with the columns, a confirm and the 
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(`${world.url}#settings/accounts`);
+  await clearSidebarPeek(page);
   await expect(section(page)).toHaveAttribute('data-settings-accounts', 'accounts');
   await walk(page, 'desktop', errors);
   // The narrowest window that keeps the side nav: the tightest a row gets.

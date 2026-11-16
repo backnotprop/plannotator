@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
+import type { InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import type { RecipientConnection } from './deliveryLine';
 
 const hasDom = typeof document !== 'undefined';
@@ -11,7 +12,7 @@ const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger
 const ASKED = 'msg_01M4XXVG0ZCPSD10B1KPG7DPMB';
 const REPLY = 'msg_01M4XXVG0ZCPSD10B1KPG7DPMC';
 
-function thread(options: { wakes?: boolean; reply?: Partial<InboxMessageWire> } = {}): InboxThread {
+function thread(options: { wakes?: boolean; asked?: Partial<InboxMessageWire>; reply?: Partial<InboxMessageWire> } = {}): InboxThread {
   const asked: InboxMessageWire = {
     id: ASKED,
     project_id: PROJECT.id,
@@ -25,6 +26,7 @@ function thread(options: { wakes?: boolean; reply?: Partial<InboxMessageWire> } 
     resolved_at: null,
     idempotency_key: null,
     ...(options.wakes === false ? {} : { wakes: true }),
+    ...options.asked,
   };
   const reply: InboxMessageWire = {
     id: REPLY,
@@ -48,6 +50,7 @@ let savedFetch: typeof fetch;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
 let connection: RecipientConnection | null | undefined;
 let takeBackAnswer: () => Response = () => Response.json({});
+let replyHeld: Promise<void> | null = null;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -59,6 +62,14 @@ beforeEach(() => {
     if (init?.method === 'POST') {
       posted.push({ path, body: JSON.parse(String(init.body)) });
       if (path.endsWith('/take-back')) return takeBackAnswer();
+      if (path.endsWith('/draft')) {
+        const body = String(JSON.parse(String(init.body)).body ?? '');
+        return Response.json({ draft: { ...DRAFT, body, updated_at: new Date().toISOString() } });
+      }
+      if (path.endsWith('/reply') && replyHeld) {
+        await replyHeld;
+        return Response.json({ error: 'Not taken for the test.', code: 'refused' }, { status: 409 });
+      }
       return Response.json({ message: {} });
     }
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
@@ -153,4 +164,69 @@ test.skipIf(!hasDom)('not offered once the agent has it: delivered, or handed to
   connection = working();
   el = await render(thread({ reply: { delivery: { state: 'delivered', host: 'claude-code', session: 'ses_a', at: '2026-10-16T17:07:00.000Z' } } }), { at: '2026-10-16T17:05:00.000Z', checked_at: '2026-10-16T17:07:00.000Z' });
   expect(el.querySelector('[data-take-back]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('no Take back while a Send of this thread is on its way: what it drew is not a message yet', async () => {
+  connection = working();
+  const el = await render(thread());
+  expect(el.querySelector('[data-take-back]')).not.toBeNull();
+  let release = () => {};
+  replyHeld = new Promise<void>((done) => (release = done));
+  const reply = [...el.querySelectorAll('.ib-pfoot button')].find((b) => /^(Reply|Edit draft)$/.test(b.textContent?.trim() ?? '')) as HTMLButtonElement;
+  await act(async () => reply.click());
+  await settle();
+  const box = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
+  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+  act(() => {
+    setter.call(box, 'One more thing.');
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  await act(async () => (el.querySelector('[data-reply-send]') as HTMLButtonElement).click());
+  for (let i = 0; i < 40 && !posted.some((p) => p.path.endsWith('/reply')); i++) await settle();
+  expect(posted.some((p) => p.path.endsWith('/reply'))).toBe(true);
+  expect(el.querySelector('[data-take-back]')).toBeNull();
+  release();
+  replyHeld = null;
+  for (let i = 0; i < 40 && el.querySelector('[data-take-back]') === null; i++) await settle();
+  expect(el.querySelector('[data-take-back]')).not.toBeNull();
+});
+
+const ASK = ':::question\nShip it today?\n\n- [ ] Yes\n- [ ] No\n:::';
+const answeredBy = (reply: string): Partial<InboxMessageWire> => ({
+  body: ASK,
+  questions: parseInboxQuestionBlocks(ASK).map(
+    (q) =>
+      ({
+        key: q.key, position: q.position, kind: q.kind, prompt: q.prompt, context: q.parsed.context, choices: q.parsed.choices, recommendation: q.parsed.recommendation,
+        suggested_text: q.parsed.suggested_text, stopped: q.stopped, holds_up: q.holds_up, asked_by_agent_id: 'ses_a', orphaned: false, state: 'sent',
+        answer: { v: 1, key: q.key, kind: 'single', prompt: q.prompt, selected: ['Yes'] }, revision: 1, sent_revision: 1, picked_by: null, picked_at: null,
+        sent_reply_id: reply, message_id: ASKED, superseded_by: null,
+      }) as InboxQuestion,
+  ),
+});
+
+test.skipIf(!hasDom)('not offered on a reply that sent answers: those stay with the questions, so the server never takes it back', async () => {
+  connection = working();
+  const el = await render(thread({ asked: answeredBy(REPLY) }));
+  expect(el.querySelectorAll('[data-take-back]').length).toBe(0);
+});
+
+test.skipIf(!hasDom)('a refused Take back keeps the words typed in the reply box', async () => {
+  connection = working();
+  takeBackAnswer = () => Response.json({ error: 'Only a message of words and files can be taken back.', code: 'cannot_take_back' }, { status: 422 });
+  const el = await render(thread());
+  const reply = [...el.querySelectorAll('.ib-pfoot button')].find((b) => /^(Reply|Edit draft)$/.test(b.textContent?.trim() ?? '')) as HTMLButtonElement;
+  await act(async () => reply.click());
+  await settle();
+  const box = el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(box, 'One more thing.');
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  await press(el);
+  expect(posted.map((p) => p.path)).toContain(`/api/inbox/messages/${REPLY}/take-back`);
+  expect(el.querySelector('[data-take-back-line]')?.textContent).toBe('Only a message of words and files can be taken back.');
+  expect((el.querySelector('textarea:not([data-question-other])') as HTMLTextAreaElement).value).toBe('One more thing.');
 });

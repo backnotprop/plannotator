@@ -114,15 +114,43 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
     return { reach, aim };
   }, [arcs, touch]);
   const [active, setActive] = useState(0);
-  // The first moments of an opening, while the choices travel out.
+  // An opening, until the choices rest in their places: they take no pointer (CSS), and a press that began meanwhile
+  // chooses nothing when it lands on one. Settled is the fan's box still for a frame with Base UI's starting style gone,
+  // then every choice's travel finished: a slow device's frames, not a clock, decide it.
   const [opening, setOpening] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    setOpening(true);
-    const done = setTimeout(() => setOpening(false), 240);
-    return () => clearTimeout(done);
-  }, [open]);
+  const settled = useRef(false);
+  const pressSettled = useRef(false);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => {
+    if (!open || !arcs) return;
+    settled.current = false;
+    setOpening(true);
+    let gone = false;
+    let frame = 0;
+    let box = '';
+    const settle = () => {
+      if (gone) return;
+      settled.current = true;
+      setOpening(false);
+    };
+    const look = () => {
+      const popup = items.current.find(Boolean)?.closest<HTMLElement>('.am-fan');
+      const rect = popup?.getBoundingClientRect();
+      const now = rect ? `${rect.left},${rect.top},${rect.width},${rect.height}` : '';
+      if (!popup || popup.hasAttribute('data-starting-style') || now !== box) {
+        box = now;
+        frame = requestAnimationFrame(look);
+        return;
+      }
+      const travel = items.current.slice(0, order.length).flatMap((el) => el?.getAnimations?.() ?? []);
+      void Promise.all(travel.map((animation) => animation.finished)).then(settle, settle);
+    };
+    frame = requestAnimationFrame(look);
+    return () => {
+      gone = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [open, arcs, order]);
   useEffect(() => {
     if (open) setActive(Math.max(0, order.indexOf(chosen)));
     // Only as it opens: a choice made while it is open moves nothing.
@@ -240,8 +268,13 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
             aria-label={`Icon for ${name}`}
             initialFocus={openedBy === 'keyboard' ? () => items.current[Math.max(0, order.indexOf(chosen))] ?? true : false}
             finalFocus={openedBy === 'keyboard' ? focusBackTo(anchor, '.am-fan') : false}
+            onPointerDownCapture={() => {
+              pressSettled.current = settled.current;
+            }}
             onClick={(event) => {
-              if (!place || (event.target instanceof Element && event.target.closest('[data-face-choice]'))) return;
+              // A choice took the click, unless a pointer pressed before the choices rested (detail 0 is a key's click).
+              const onChoice = event.target instanceof Element && event.target.closest('[data-face-choice]');
+              if (!place || (onChoice && (event.detail === 0 || pressSettled.current))) return;
               const box = place.rect;
               if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) onMark();
             }}
@@ -281,7 +314,12 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                       onPointerDown={(event: ReactPointerEvent) => {
                         if (event.pointerType !== 'touch') event.preventDefault();
                       }}
-                      onClick={() => (f === OWN_CHOICE ? onOwn?.() : f === SETS_CHOICE ? onSets() : onChoose(f))}
+                      onClick={(event) => {
+                        if (event.detail !== 0 && !pressSettled.current) return;
+                        if (f === OWN_CHOICE) onOwn?.();
+                        else if (f === SETS_CHOICE) onSets();
+                        else onChoose(f);
+                      }}
                     >
                       <span className="am-fan-f" data-kind={f === 'agent' ? 'agent' : f.startsWith('glass') || f === 'yellow' ? 'glass' : f} aria-hidden="true">
                         {f === 'agent' ? (

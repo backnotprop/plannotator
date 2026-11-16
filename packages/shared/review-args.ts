@@ -1,7 +1,8 @@
 import type { VcsSelection } from "./vcs-core";
 import type { DiffType } from "./review-core";
-import { statSync } from "node:fs";
-import { resolveUserPath, stripWrappingQuotes } from "./resolve-file";
+import { readdirSync, statSync, type Dirent } from "node:fs";
+import { join } from "node:path";
+import { isAbsoluteUserPath, resolveUserPath, stripWrappingQuotes } from "./resolve-file";
 
 /**
  * The flat git diff ids `review --diff-type` accepts — exactly GIT_DIFF_TYPES
@@ -229,11 +230,13 @@ function looksLikePath(word: string): boolean {
 /**
  * Turn the parser's positional words into a review directory, before any VCS
  * discovery. Slash-command hosts forward raw user words verbatim, so prose
- * stays tolerated (the annotate tolerant-args precedent, annotate-target.ts):
+ * among several words stays tolerated (#1483):
  *
- * - A sole word is the target: an existing directory opens there, and a file,
- *   or a path-shaped word that does not exist, throws (a typo'd target must
- *   never review the caller's repo). A sole bare word naming nothing is prose.
+ * - A sole word is the target: an existing directory opens there, and a file
+ *   or a word that names nothing throws (a typo'd target must never review
+ *   the caller's repo). Two sole words stay prose: one holding whitespace
+ *   that is not path-shaped (a quoted sentence), and a bare word beside
+ *   `--patch-file`, which takes no directory.
  * - Among several words only path-shaped ones are candidates (in prose, a bare
  *   word that happens to match a directory never hijacks). A candidate that is
  *   an existing directory is the target; one that is missing or a file is
@@ -268,11 +271,13 @@ export function resolveReviewTarget(
       continue;
     }
     if (isDirectory === undefined) {
-      if (pathLike) throw new Error(`Review directory does not exist or is not accessible: ${resolved}`);
+      if (pathLike || (!/\s/.test(word) && parsed.patchFile === undefined)) {
+        throw new Error(missingReviewFolderMessage(word, resolved, cwd));
+      }
       ignored.push(word);
       continue;
     }
-    if (!isDirectory) throw new Error(`Review target is not a directory: ${resolved}`);
+    if (!isDirectory) throw new Error(reviewFileTargetMessage(word, resolved));
     directories.push(resolved);
   }
   if (directories.length + (parsed.prUrl ? 1 : 0) > 1) {
@@ -282,6 +287,131 @@ export function resolveReviewTarget(
     throw new Error("--patch-file cannot be combined with a review directory");
   }
   return { ...(directories[0] === undefined ? {} : { directory: directories[0] }), ignored };
+}
+
+const REVIEW_CURRENT_PROJECT_LINE = "To review the current project instead, run: plannotator review";
+
+/**
+ * The refusal for a target that names nothing. People and agents both read
+ * it, so it ends in commands that work as written: a close folder name when
+ * one exists, `--diff-type` for a diff mode's name, a PR URL for a number.
+ */
+function missingReviewFolderMessage(word: string, resolved: string, cwd: string): string {
+  const lines = [
+    isAbsoluteUserPath(word)
+      ? `No folder at ${resolved}; nothing was opened.`
+      : `No folder "${word}" in ${cwd}; nothing was opened.`,
+  ];
+  const suggestions = suggestReviewFolders(word, cwd);
+  if ((REVIEW_OPEN_DIFF_TYPES as readonly string[]).includes(word)) {
+    lines.push(`To open the current project's ${word} diff, run: plannotator review --diff-type ${word}`);
+  } else if (/^#?\d+$/.test(word)) {
+    const number = word.replace("#", "");
+    lines.push(`To review pull request ${number}, pass its URL: plannotator review https://github.com/<owner>/<repo>/pull/${number}`);
+  } else if (suggestions.length === 1) {
+    lines.push(`Did you mean ${suggestions[0]}? Run: plannotator review ${shellWord(suggestions[0]!)}`);
+  } else if (suggestions.length > 1) {
+    lines.push(`Did you mean one of these folders? ${suggestions.join(", ")}`);
+  } else {
+    lines.push("To review another folder, run: plannotator review <path to an existing folder>");
+  }
+  lines.push(REVIEW_CURRENT_PROJECT_LINE);
+  return lines.join("\n");
+}
+
+function reviewFileTargetMessage(word: string, resolved: string): string {
+  return [
+    `${resolved} is a file, not a folder; nothing was opened.`,
+    `To comment on the file, run: plannotator annotate ${shellWord(word)}`,
+    REVIEW_CURRENT_PROJECT_LINE,
+  ].join("\n");
+}
+
+/**
+ * Existing folders close to a path that names nothing, written the way the
+ * word was typed. Each missing segment is matched against its parent's
+ * folders; a missing segment before the last must have exactly one match.
+ */
+function suggestReviewFolders(word: string, cwd: string): string[] {
+  const sep = /[\\/]/.exec(word)?.[0] ?? "/";
+  const parts = word.split(/[\\/]+/);
+  while (parts.length > 1 && parts[parts.length - 1] === "") parts.pop();
+  // An empty first part is the root of an absolute path.
+  const typed = (segments: string[]) => (segments.length === 0 ? "." : segments.join(sep) || sep);
+  const fixed: string[] = [];
+  let corrected = false;
+  for (let i = 0; i < parts.length; i++) {
+    const segment = parts[i]!;
+    if (segment === "" || isDirectoryPath(resolveUserPath(typed([...fixed, segment]), cwd))) {
+      fixed.push(segment);
+      continue;
+    }
+    const names = closeFolderNames(segment, resolveUserPath(typed(fixed), cwd));
+    if (i === parts.length - 1) return names.map((name) => typed([...fixed, name]));
+    if (names.length !== 1) return [];
+    fixed.push(names[0]!);
+    corrected = true;
+  }
+  return corrected ? [typed(fixed)] : [];
+}
+
+function isDirectoryPath(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Up to three folders in `parent` that `name` begins (3+ characters) or is
+ * within a small edit distance of, ignoring case; the closest only.
+ */
+function closeFolderNames(name: string, parent: string): string[] {
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(parent, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const typed = name.toLowerCase();
+  const limit = typed.length <= 2 ? 0 : typed.length <= 4 ? 1 : 2;
+  const scored: { name: string; distance: number }[] = [];
+  for (const entry of entries.slice(0, 5000)) {
+    if (entry.name.startsWith(".") && !name.startsWith(".")) continue;
+    const candidate = entry.name.toLowerCase();
+    const distance = typed.length >= 3 && candidate.startsWith(typed) ? 0 : editDistance(typed, candidate, limit);
+    if (distance > limit) continue;
+    if (entry.isDirectory() || (entry.isSymbolicLink() && isDirectoryPath(join(parent, entry.name)))) {
+      scored.push({ name: entry.name, distance });
+    }
+  }
+  scored.sort((a, b) => a.distance - b.distance || a.name.length - b.name.length || a.name.localeCompare(b.name));
+  const best = scored[0]?.distance;
+  return scored.filter((entry) => entry.distance === best).slice(0, 3).map((entry) => entry.name);
+}
+
+/** Optimal string alignment distance (swapping two neighbours costs 1), capped at `limit + 1`. */
+function editDistance(a: string, b: string, limit: number): number {
+  if (Math.abs(a.length - b.length) > limit) return limit + 1;
+  let previous: number[] = [];
+  let row = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= b.length; j++) {
+      let value = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) value = Math.min(value, previous[j - 2]! + 1);
+      next.push(value);
+    }
+    previous = row;
+    row = next;
+  }
+  return Math.min(row[b.length]!, limit + 1);
+}
+
+/** A word to paste after a command, quoted when a shell would split it. */
+function shellWord(word: string): string {
+  return /^[\w@%+=:,./\\~-]+$/.test(word) || word.includes('"') ? word : `"${word}"`;
 }
 
 /** One-line notice for words `resolveReviewTarget` ignored, or undefined. */
@@ -302,7 +432,13 @@ function isReviewUrl(value: string): boolean {
   return value.startsWith("http://") || value.startsWith("https://");
 }
 
-function tokenizeReviewArgs(input: string): string[] {
+/**
+ * The words in a review command's argument text: whitespace separates and
+ * quotes group, while a backslash is an ordinary character, so a typed Windows
+ * path (`C:\dev\feature`) stays whole. Exported for a host that passes the
+ * words themselves on to the CLI (apps/dsh-plugin).
+ */
+export function tokenizeReviewArgs(input: string): string[] {
   const raw = input.trim();
   if (!raw) return [];
 

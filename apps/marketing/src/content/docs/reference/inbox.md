@@ -128,7 +128,7 @@ Settings lists each agent found on this computer with up to three switches: **Re
 - **Mark read.** To get a thread out of the top without answering it, press **Mark read** in the thread's header (or `E`, or the button that shows when you hover a row). The thread moves to Quiet, marked "Read", and its unanswered questions close. A few seconds later the agent that asked gets one note from you: "Set aside for now; don't wait on these:" and the questions. The thread comes back to the top when the agent writes again. **Undo** in the toast, or `Z`, reopens the questions that Mark read closed, as they were; the pressed **Read** button does the same later. Questions an earlier Mark read closed stay closed. If an agent was stopped on the thread, the toast says so and offers **Reply**. A toast goes by itself after a few seconds; to close it sooner, press its **×** or swipe it sideways. Closing it never undoes anything, and once it is closed its Undo (and `Z`) is gone.
 - **Archive.** **Archive thread** in the **⋯** menu of the thread's header ends the thread: its questions close, and the agent's next message starts a new thread. **Unarchive** in the thread's foot reopens it. (Agents call this `resolve_message`.)
 - **A whole project at once.** Hover a project in the sidebar and click **⋯** (or right-click the project) for **Mark all as read** and **Archive all**. Mark all as read does Mark read on every thread in the project that waits on you; each agent gets its own note, as above. Archive all archives every thread of the project still in your list. Neither asks first: **Undo** in the toast, or `Z`, puts back the whole batch, and the toast warns you when an agent was stopped or work was held up. On a phone, **⋯** is always on each project in the navigation sheet. A project with nothing left in your list leaves the sidebar on its own, and comes back when an agent writes there again; while you are viewing it, it stays until you go elsewhere. Its archived threads are in **Settings → Archived**, and search still finds it.
-- **👍 Looks good.** Next to Reply, **👍 Looks good** says "cool, looks good" in one click. The thread moves to Quiet, marked "👍 Looks good", and comes back when the agent writes again. A few seconds later the 👍 is sent to the agent that wrote the message: a Claude Code, Pi or OpenCode 2 session gets one short message ("The person reacted 👍 Looks good to your message."), and any other agent sees it when it reads the thread. Rest on the button (hold it on a phone) to react with another emoji instead; the agent gets that emoji, with its name if you gave it one. The line under the message says where it is: queued for the agent, then "Delivered to <agent>" with the time. **Undo** in the toast, or `Z`, takes it back or changes it before it is sent (the agent never hears of it). Once sent it stays: the button leaves the message, the emoji stays shown under it, and the agent's next message offers it again. **Move back** (or `E`) on the thread takes it back too, until it is delivered. The button is hidden while a question in the thread is waiting on you (answer it instead, or Mark read) and after you replied (your reply is the answer). To say more than "looks good", Reply.
+- **👍 Looks good.** Next to Reply, **👍 Looks good** says "cool, looks good" in one click. The thread moves to Quiet, marked "👍 Looks good", and comes back when the agent writes again. A few seconds later the 👍 is sent to the agent that wrote the message: a Claude Code, Pi or OpenCode 2 session gets one short message ("The person reacted 👍 Looks good to your message. Take it as a go."), and any other agent sees it when it reads the thread. Rest on the button (hold it on a phone) to react with another emoji instead; the agent gets that emoji, with its name if you gave it one. The line under the message says where it is: queued for the agent, then "Delivered to <agent>" with the time. **Undo** in the toast, or `Z`, takes it back or changes it before it is sent (the agent never hears of it). Once sent it stays: the button leaves the message, the emoji stays shown under it, and the agent's next message offers it again. **Move back** (or `E`) on the thread takes it back too, until it is delivered. The button is hidden while a question in the thread is waiting on you (answer it instead, or Mark read) and after you replied (your reply is the answer). To say more than "looks good", Reply.
 - **Write to an agent first.** The pencil beside **Search** (on a phone, in the list header), or **New message…** in the **⌘K** search box, opens a message to a running agent session in any project: an idea or a request of your own. **To** is filled with the session you wrote to last while it is running, else one in the project you are looking at; click it to pick another (each session shows its project, when it started, what it last wrote and whether it is working). Type in the search box an agent or a project ("pi billing") for **Message Pi in billing**. **⌘Enter** sends. The message starts a new thread, named by a short first sentence of what you wrote ("I want to explore what adding a board would look like"), not your whole first paragraph. Its name, the chip it shows in the list, sits right under **To**: it fills itself with a short name from what you write ("Kanban board", "Paste bug") until you type in it; then it is yours and stays as you typed it. Empty it to have it named from your message again. A name you typed that another open thread of the project already has is refused when you send, so the two never mix. A name you left as suggested is a placeholder: the agent renames the thread on its first reply, once. The agent is told it is your own idea, not an answer, and to say how it will handle it; its answer comes back in that thread. Attach any file with the paperclip, by dropping it or by pasting it (a screenshot pastes as `pasted-image-<date>-<time>.png`; not `.env` files; up to 100 MB each): the agent gets a real copy to open. A reply takes pasted images and files too: paste them while the reply box has focus. When no agent is running, nothing can be sent: save it as a draft. Closing a message with words in it (**Esc**, **Cancel** or a click outside) keeps it as a draft, with no question; **Reopen** in the note that follows brings it back. To throw one away, open it and **Delete draft**, or empty it and press **Esc**. Drafts wait under **Drafts** in the sidebar (shown only while there are some), each saying whether the session it was for is running, has ended, or was never chosen; a draft never sends itself, and one for a session that ended keeps it until you pick another. If the session stops before it takes your message, the thread says **Not delivered** and offers **Send to another session** (a session that is resumed still gets it).
 - **Skills in your replies.** Type `/` or `$` at the start of a word in the reply box, in a message you start, or in a comment on an attached file, and pick one of the skills installed on this computer (`~/.claude/skills`, `$CODEX_HOME/skills`, `~/.agents/skills`), as in a Plannotator comment. Use the arrow keys and **Enter**, or click a row; **Esc** closes the list. The agent is asked to use the skills you name. A skill an agent cannot start by itself (`disable-model-invocation: true` in its SKILL.md) is underlined, and the box says "Includes skill instructions": when you send, its SKILL.md is added at the end of your message, with its folder, so the agent can follow it. In the thread that text is folded behind one line, **Skills: …**; click **Show** to see exactly what the agent got. Agents cannot add skill instructions to their own messages.
 - **Tag other agents.** Type `@` at the start of a word in the reply box and pick a running agent session: the list shows every session in every project, grouped by agent, the one the reply goes to anyway first (**Owns this thread**), and last the agents that only read the Inbox through MCP (Cursor and others, marked **Not woken**; a Codex thread that used the Inbox in the last hour is a running session, and is woken). Type to narrow it, use the arrow keys and **Enter**, or click; **Esc** closes it. The tag reads `@Pi` in your text. Under the box, **Goes to** names everyone the reply goes to, and a note says what each tag means: a session that does not own the thread gets your reply and a pointer to the thread; an agent that reads through MCP cannot be woken and sees your reply the next time it reads the thread. A second session of the same agent reads "Claude Code (another session)", or "Claude Code (plannotator)" when it works in another project. A session on an older Plannotator says **Update Plannotator to tag this session** and cannot be picked. The thread's own agent always gets the reply too, told who else you tagged; each tagged agent is told whose thread it is, to read it first and answer only its part, in the same thread (from any project). Under your sent reply there is one line per agent, each with its own state and **Send now**, and the row in the list reads like "1 of 3 delivered · Pi queued". You can tag an agent in a comment on a Markdown, text or HTML file too: the whole reply goes to it with your next Send, and the comment is marked as the one that tagged it. Your next reply without a tag goes to the agent that wrote last. Agents do not tag each other.
@@ -208,7 +208,7 @@ In `claude -p` and other SDK runs the mod adds the tool too (Plannotator 0.28.65
 
 ### Pi
 
-Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 13 KB to every request, roughly 3,517 tokens depending on the model (about 15 KB, roughly 4,014 tokens, with the Board on). To turn it on yourself:
+Install the [Pi extension](/docs/getting-started/installation/#pi), then run `plannotator inbox`: it turns the inbox tool on for Pi when it finds the extension. The tool is off by default on Pi, because Pi sends every tool's full definition with each request: the inbox tool adds about 14 KB to every request, roughly 3,729 tokens depending on the model (about 15 KB, roughly 4,226 tokens, with the Board on). To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -218,7 +218,7 @@ Start a new Pi session (or `/reload`). A reply arrives as a follow-up message on
 
 ### OpenCode
 
-Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 13 KB per request, roughly 3,517 tokens). To turn it on yourself:
+Add the [OpenCode plugin](/docs/getting-started/installation/#opencode), then run `plannotator inbox`: it turns the inbox tool on for OpenCode when it finds the plugin in your global opencode config. The tool is off by default on OpenCode, for the same reason as Pi (about 14 KB per request, roughly 3,729 tokens). To turn it on yourself:
 
 ```bash
 export PLANNOTATOR_INBOX_TOOL=1
@@ -397,6 +397,77 @@ Browsers allow notifications per address. Each device asks once.
 
 The Inbox's MCP address (`/mcp`) now answers only when the request names `127.0.0.1` or `localhost` with the Inbox's own port. An `ssh -L` forward to a different local port is refused. Forward the same port number, or run `plannotator inbox mcp` on the Inbox's computer.
 
+## Through your own Cloudflare account
+
+If you do not use Tailscale but already have a domain on Cloudflare, you can reach the Inbox, and review, annotate and last sessions, at an address on your domain, behind Cloudflare's login. It is off until you set it up.
+
+You need:
+
+- a domain whose DNS is on Cloudflare;
+- Zero Trust turned on for the account (the Free plan is enough; Cloudflare asks you to accept its terms and to add a card);
+- `cloudflared` installed (on a Mac: `brew install cloudflared`);
+- an API token you create in Cloudflare with these permissions: Account, Cloudflare Tunnel, Edit; Account, Access: Apps and Policies, Edit; Account, Access: Organizations, Identity Providers, and Groups, Edit; Zone, DNS, Edit (your domain). A short expiry is fine: it is used only to set up and to tear down, and it is never saved.
+
+Then run:
+
+```bash
+plannotator inbox cloudflare-access setup --email you@example.com
+```
+
+It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and, last, two DNS records: one name for the Inbox and a sibling name (the same name with `-s` added) for sessions. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code. Use `--zone` when the token sees several domains, and `--hostname` to choose the name (one level under your domain, for example `plannotator.example.com`).
+
+- **Only you can open it.** Cloudflare asks for your e-mail and a one-time code, and the Inbox checks Cloudflare's signed token on every request itself: the e-mail must be the one you typed. A mistake in the Access policy alone is not enough to let anyone in.
+- **It is on the internet.** Unlike the tailnet, the address is public, behind that sign-in. Treat a signed-in phone like your computer: what you send becomes a turn in an agent session here. The sign-in lasts 24 hours.
+- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens under `/s/…` at the sibling name, with the same sign-in (you sign in once). The Inbox and sessions are kept on separate names, so a page in a review cannot act as the Inbox. Open sessions share the sibling name with each other. If the Inbox is not running, it starts in the background.
+- **When this computer sleeps** or the Inbox is stopped, the address shows Cloudflare's own error page. `cloudflared` runs as part of the Inbox and stops with it.
+
+You can do all of this from **Settings → Remote devices → Cloudflare** too: type your e-mail, paste the token, pick the domain, and watch each step tick. The same place shows both addresses with a QR code, whether the tunnel is connected, **Turn off** (keeps the setup) and **Remove**. It cannot be changed from a device signed in through Cloudflare. `plannotator inbox cloudflare-access status` shows the same state in a terminal. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
+
+### Use a tunnel and Access application you already have
+
+If you already run a Cloudflare Tunnel to the Inbox with an Access application in front of it, you can use them as they are, without setup:
+
+1. Stop the `cloudflared` you run yourself.
+2. Save the tunnel's run token in `~/.plannotator/cloudflare-access/tunnel-token`, readable only by you (`chmod 600`). The Inbox then runs `cloudflared` for you.
+3. Add this to `~/.plannotator/config.json`, with your own values:
+
+   ```json
+   "inboxCloudflareAccess": {
+     "on": true,
+     "host": "inbox.example.com",
+     "team": "yourteam.cloudflareaccess.com",
+     "aud": "the Access application's AUD tag",
+     "allow": ["you@example.com"],
+     "port": 41234
+   }
+   ```
+
+   `port` is the local port your tunnel's ingress points at (`http://127.0.0.1:<port>`), and the ingress must set the Host header to `host`.
+4. Restart the Inbox (`plannotator inbox restart`).
+
+This opens the Inbox only. Sessions need the second address that setup creates; until then `--cloudflare-access` says so.
+
+## Inside another app on this computer
+
+By default, no page may show the Inbox in a frame. To show it inside an app of your own on this computer, such as an agent's desktop app, list that app's origin in `~/.plannotator/config.json` and restart the Inbox:
+
+```json
+{ "inboxFrameAncestors": ["app://myapp"] }
+```
+
+Each entry is one exact origin, which is what the app's page reports as `location.origin`:
+
+- an app scheme with a name, such as `app://myapp` or `tauri://localhost`;
+- `http://` or `https://` on `localhost`, a `.localhost` name or `127.0.0.1`, such as `http://localhost:5173`. Without a port, an entry means the usual port only (80 for `http`, 443 for `https`), never any port: Tauri on Windows is `http://tauri.localhost`. `http://localhost` does not let a page on `http://localhost:3000` show the Inbox.
+
+Use an app scheme when you can. A port trusts any program that later runs on that port.
+
+The Inbox ignores any other entry and says so when it starts: `*` or any other wildcard, `file://`, a scheme without a name, a path or a trailing slash, an IPv6 address such as `[::1]`, and every website. An app loaded from `file://` cannot be listed. Register a scheme for it instead, or show the Inbox in a view of its own (in Electron, a `WebContentsView`), which needs no setting.
+
+The setting changes only the Inbox on this computer. The tailnet address can never be framed. The app's page can show the Inbox, but it cannot read it or use its API. Pages that agents attach, `html` blocks and the tour show inside the app too. A running app that an agent opened for you (a live site) does not show inside the app yet.
+
+Inside a frame, the browser or the app decides some things. Allow notifications in the app if you want them. For voice dictation, give the frame `allow="microphone"`, and for Copy, `allow="clipboard-write"`. Links that open a new tab go through the app: in Electron, send them to the browser with `setWindowOpenHandler`. The sidebar's open or closed state may reset when the app reloads.
+
 ## Data on disk
 
 Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/`):
@@ -419,7 +490,7 @@ Everything lives under `~/.plannotator/inbox/` (or `$PLANNOTATOR_DATA_DIR/inbox/
 | `claims/`, `leases/` and `connection-tools.json` | Bookkeeping for the Pi and OpenCode connections |
 | `acp/sessions.json` | Left by Plannotator 0.28.34 to 0.28.36, which could run Grok Build sessions itself. No longer read; you can delete it |
 
-The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete from Inbox** on a thread or a project in **Settings → Storage**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `prompts.inbox`, `inboxNotifications`, `inboxSound`, `inboxBoard`, `inboxTailscale`, `inboxTailscaleAllow`, `inboxRun`).
+The Inbox stores the files agents attached as they were when sent, the messages and your replies. It sets no size limits. To free space, use **Delete from Inbox** on a thread or a project in **Settings → Storage**, which also remove sent files that nothing else uses. Your choices for the inbox tool, notifications and the tailnet are kept in `~/.plannotator/config.json` (`inboxTool`, `inboxReminder`, `prompts.inbox`, `inboxNotifications`, `inboxSound`, `inboxBoard`, `inboxTailscale`, `inboxTailscaleAllow`, `inboxFrameAncestors`, `inboxRun`).
 
 ## Uninstall
 

@@ -331,3 +331,8 @@ export function saveReviewFolds(folds: ReviewFolds): void {
     // Storage refused (private mode, quota): the choice lasts this window only.
   }
 }
+
+/** The sidebar's Reviews count: the rows on the person in the last read. */
+export function reviewsOnYou(answer: InboxReviewsAnswer): number {
+  return answer.rows.filter((row) => row.move === 'on_you').length;
+}
