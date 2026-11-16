@@ -244,7 +244,7 @@ export function panelHostOwnsPlanMode(value: unknown): boolean {
  * What the mod sets in the environment of a process whose host draws its own
  * plan card (`panelHostOwnsPlanMode`: any process with Orca's entrypoint, a
  * session sorted `headless` by an inherited tag included; Orca's children
- * inherit the value anyway). When the mod passes ExitPlanMode on, Claude Code
+ * inherit the value anyway; and a T3 Code thread, `t3ThreadOf`). When the mod passes ExitPlanMode on, Claude Code
  * runs the plugin's classic PermissionRequest command hook (`plannotator`,
  * hooks.json), as it does when a guard plugin (`cc-plugin-sec-default`) sends
  * `classic.*` past the mod; that process inherits the session's environment,
