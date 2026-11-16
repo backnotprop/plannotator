@@ -993,7 +993,8 @@ export function register(on: On) {
       // off in the session's environment: every hook process inherits it, and the
       // `plannotator` hook exits with no decision, leaving the host's card to decide.
       if (allowed.hostPlanMode) {
-        await Promise.resolve($.env.set(HOST_PLAN_CARD_ENV.name, HOST_PLAN_CARD_ENV.value)).catch(() => undefined)
+        // The name as a literal: Claude Code refuses to load a module whose `$.env.set` takes anything else (env-get-literal.test.ts).
+        await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW', HOST_PLAN_CARD_ENV.value)).catch(() => undefined)
         if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`plan review: the host draws its own plan card (${allowed.kind}); ${HOST_PLAN_CARD_ENV.name}=${HOST_PLAN_CARD_ENV.value} set for the session's hooks`)
       }
     } finally {
