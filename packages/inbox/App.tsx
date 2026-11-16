@@ -2794,8 +2794,8 @@ function Inbox() {
         return;
       }
     }
-    // Questions this Mark read would close unanswered (and tell the agent about): the warning asks first.
-    if (read && !(await warnSetAside(setAsideOf(before, thread?.thread_id === threadId ? thread : null), false))) return undraw();
+    // Questions this Mark read would close unanswered (and tell the agent about): the warning asks first; Cancel: false.
+    if (read && !(await warnSetAside(setAsideOf(before, thread?.thread_id === threadId ? thread : null), false))) return (undraw(), false);
     if (read) draw();
     // The list holds still, a thread open or not (approval "inbox-list-view", R7): the row stays where it is, not
     // bold, and moves to Quiet when the list next settles.
@@ -3234,7 +3234,7 @@ function Inbox() {
    * read, Move back and Archive are the row's hover action and the header's, with their toasts. Mark read, Mark unread
    * and Archive hand back their write (a row's swipe brings an archived row back once it lands).
    */
-  const rowAction = (row: InboxListRow, action: RowMenuAction): Promise<void> | void => {
+  const rowAction = (row: InboxListRow, action: RowMenuAction): Promise<boolean | void> | void => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
     if (action === 'priority-add' || action === 'priority-remove') return void setPriority(row, action === 'priority-add');
     if (action === 'read' || action === 'unread') return markRead(row.thread_id, action === 'read');

@@ -75,6 +75,10 @@ let toasts: Omit<InboxToastModel, 'id'>[] = [];
 let combineStarts = 0;
 /** The threads each Combine dialog asked about (its plan read, `/combine?threads=`), in the order sent. */
 let combinePlans: string[][] = [];
+/** What one row's menu action resolves to (App.tsx `rowAction`: a Mark read whose warning was cancelled gives false). */
+let rowActionAnswer: unknown;
+/** The person's answer to Mark read's set-aside warning in the picks' writes (true: go on). */
+let warnGoesOn = true;
 
 beforeEach(() => {
   realFetch = globalThis.fetch;
@@ -94,6 +98,8 @@ beforeEach(() => {
   toasts = [];
   combineStarts = 0;
   combinePlans = [];
+  rowActionAnswer = undefined;
+  warnGoesOn = true;
 });
 
 afterEach(() => {
@@ -120,7 +126,7 @@ function bulk(): BulkWrites {
     showToast: (toast) => void toasts.push(toast),
     dismissToast: () => {},
     say: () => {},
-    warnSetAside: async () => true,
+    warnSetAside: async () => warnGoesOn,
     restoreSnooze: async () => {},
     restorePriority: async () => {},
     closeThread: () => {},
@@ -146,7 +152,10 @@ function Window({ writes }: { writes: BulkWrites }) {
             sectionOf={drawn}
             canMarkRead={true}
             held={false}
-            onAction={(row, action) => void actions.push([row.thread_id, action])}
+            onAction={(row, action) => {
+              actions.push([row.thread_id, action]);
+              return rowActionAnswer;
+            }}
             onTarget={() => {}}
             picks={pick.menu}
           >
@@ -388,6 +397,51 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     }
   });
 
+  test("a drop on Quiet whose Mark read warning is cancelled keeps the picks; once it goes on, picking ends", async () => {
+    draw();
+    cmdClick(RATE.thread_id);
+    cmdClick(SEARCH.thread_id);
+    // One unpicked row with an open question: its menu's Mark read asks, and the person cancels.
+    let answer!: (went: boolean) => void;
+    rowActionAnswer = new Promise<boolean>((resolve) => (answer = resolve));
+    pickUp(FLAKY.thread_id);
+    move(400, 2100);
+    release(400, 2100);
+    expect(actions).toEqual([[FLAKY.thread_id, 'read']]);
+    // While the warning is up, and after its Cancel, the picks stay.
+    expect(document.querySelector('[data-pick-bar]')).not.toBeNull();
+    await act(async () => answer(false));
+    expect(document.querySelector('[data-pick-bar]')).not.toBeNull();
+    // Again, and this time it goes on: picking ends, as any drop's does.
+    rowActionAnswer = new Promise<boolean | void>((resolve) => (answer = resolve));
+    pickUp(FLAKY.thread_id);
+    move(400, 2100);
+    release(400, 2100);
+    expect(document.querySelector('[data-pick-bar]')).not.toBeNull();
+    await act(async () => answer(true));
+    expect(document.querySelector('[data-pick-bar]')).toBeNull();
+  });
+
+  test('several picked rows dropped on Quiet, the warning cancelled: nothing is written and the picks stay; gone on, they end', async () => {
+    draw();
+    cmdClick(FLAKY.thread_id);
+    cmdClick(RATE.thread_id);
+    warnGoesOn = false;
+    pickUp(FLAKY.thread_id);
+    move(400, 2100);
+    release(400, 2100);
+    await wait(20);
+    expect(writes).toEqual([]);
+    expect(document.querySelector('[data-pick-bar]')).not.toBeNull();
+    warnGoesOn = true;
+    pickUp(FLAKY.thread_id);
+    move(400, 2100);
+    release(400, 2100);
+    await wait(20);
+    expect(writes.length).toBe(2);
+    expect(document.querySelector('[data-pick-bar]')).toBeNull();
+  });
+
   test('Escape while over Archive: nothing is archived, the places go, and it says so', async () => {
     draw();
     pickUp(RATE.thread_id);
@@ -594,6 +648,72 @@ describe.skipIf(!hasDom)("a row's drag role and help: only where a drag can happ
       expect(document.getElementById('ib-thread-drag-help')).toBeNull();
     } finally {
       window.matchMedia = real;
+    }
+  });
+});
+
+describe.skipIf(!hasDom)("a row's drag help follows the pointers the device has", () => {
+  /** A device's media: the queries that match now, and the `change` listeners a query has (a pointer added or gone). */
+  function device(matching: string[]) {
+    const now = new Set(matching);
+    const heard = new Set<() => void>();
+    const real = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      get matches() {
+        return now.has(query);
+      },
+      media: query,
+      addEventListener: (_: string, fn: () => void) => heard.add(fn),
+      removeEventListener: (_: string, fn: () => void) => heard.delete(fn),
+    })) as unknown as typeof window.matchMedia;
+    return {
+      set: (next: string[]) => act(() => {
+        now.clear();
+        next.forEach((query) => now.add(query));
+        heard.forEach((fn) => fn());
+      }),
+      restore: () => void (window.matchMedia = real),
+    };
+  }
+  function Row() {
+    return <button type="button" className="ib-nrow" data-thread-id={RATE.thread_id} {...useRowDragA11y()} />;
+  }
+  const menu = () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    act(() => {
+      root = createRoot(host!);
+      root.render(
+        <ThreadRowMenu className="ib-lbody" rowOf={() => RATE} canMarkRead={true} held={false} onAction={() => {}} onTarget={() => {}}>
+          <Row />
+        </ThreadRowMenu>,
+      );
+    });
+  };
+  const IPAD = ['(any-pointer: coarse)', '(pointer: coarse)', '(any-hover: none)', '(hover: none)'];
+  const says = () => rowEl(RATE.thread_id).getAttribute('aria-roledescription') === 'draggable thread' && document.getElementById('ib-thread-drag-help') !== null;
+
+  test('an iPad with its Pencil (a fine pointer that is not the main one, and a pen never drags there): no drag is announced', () => {
+    const media = device([...IPAD, '(any-pointer: fine)']);
+    try {
+      menu();
+      expect(says()).toBe(false);
+    } finally {
+      media.restore();
+    }
+  });
+
+  test('a trackpad connected mid-session announces the drag at once, and taken away it goes, with no other render', () => {
+    const media = device(IPAD);
+    try {
+      menu();
+      expect(says()).toBe(false);
+      media.set([...IPAD, '(any-pointer: fine)', '(any-hover: hover)']);
+      expect(says()).toBe(true);
+      media.set(IPAD);
+      expect(says()).toBe(false);
+    } finally {
+      media.restore();
     }
   });
 });

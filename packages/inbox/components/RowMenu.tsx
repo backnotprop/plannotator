@@ -16,7 +16,7 @@ import { bulkTargets } from '../rowPicks';
 import { formatCount } from '@plannotator/core/inbox-format';
 import { MentionMenuItem } from './MentionMenuItem';
 import { useThreadRowDrag } from './useThreadRowDrag';
-import { ListDrops, RowDragHelp, THREAD_DRAG_HELP_ID, touchOnly } from './listDrops';
+import { ListDrops, RowDragHelp, THREAD_DRAG_HELP_ID, useRowsDraggable } from './listDrops';
 export { useRowDragA11y } from './listDrops';
 
 export interface ThreadRowMenuProps {
@@ -44,7 +44,8 @@ export interface ThreadRowMenuProps {
   pinnedOf?: (row: InboxListRow) => boolean | null;
   /** Whether Add to Priority or Remove from Priority is offered on a row whose machine is another one. Absent: every row. */
   prioritizesOf?: (row: InboxListRow) => boolean;
-  onAction: (row: InboxListRow, action: RowMenuAction) => void;
+  /** A Mark read resolves false when its set-aside warning was cancelled (App.tsx `rowAction`; a drop on Quiet reads it). */
+  onAction: (row: InboxListRow, action: RowMenuAction) => unknown;
   /** The row whose menu is open (its muted background), or null when it closes. */
   onTarget: (threadId: string | null) => void;
   /** No menu (the host gave no actions): the browser's own. */
@@ -131,7 +132,8 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
   // A row pressed with a mouse and moved is dragged (threadDrag.ts): into the reply box, a mention; to the list's top or
   // bottom edge or held on another row, the places ListDrops draws while it is carried.
-  const dragOff = props.disabled === true || props.phone === true || touchOnly();
+  const draggable = useRowsDraggable();
+  const dragOff = props.disabled === true || props.phone === true || !draggable;
   const pressRow = useThreadRowDrag({ body, rowOf: props.rowOf, picks: props.picks, off: dragOff });
   const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target)), props.prioritizesOf?.(target) ?? true) : [];
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
