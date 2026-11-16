@@ -43,6 +43,7 @@ import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { cardProblem, refUnsupportedLine } from '@plannotator/core/problem-words';
 import { loadRefCard, refCardTarget } from '../utils/refCard';
 import { ProblemNotice } from './ProblemNotice';
+import { providedRefCardLabel, providedRefCardView } from '../utils/refCardProviders';
 import { RenderedMarkdown } from './RenderedMarkdown';
 import { tooltipContainerOf } from './HostTitle';
 
@@ -368,6 +369,9 @@ export interface RefCardViewProps {
 }
 
 export function RefCardView({ target, href, result, pinned, onClose, sheet, tight }: RefCardViewProps) {
+  // A provider's own card (utils/refCardProviders.ts).
+  const Provided = providedRefCardView(target);
+  if (Provided) return <Provided target={target} href={href} result={result} pinned={pinned} onClose={onClose} sheet={sheet} tight={tight} />;
   const repoName = `${target.owner}/${target.repo}`;
   const forge = forgeName(target.platform);
   const btn = sheet ? 'min-h-11 px-3' : 'h-7 px-2.5';
@@ -851,9 +855,10 @@ export function useRefHoverCards(
   if (!card || typeof document === 'undefined') return null;
   const container = tooltipContainerOf(card.anchor) ?? document.body;
   const sheet = card.via === 'tap';
+  const provided = providedRefCardLabel(card.target);
   const label = card.result?.ok
-    ? `${refKindName(card.result.data)} ${forgeRefLabel(card.result.data)}: ${card.result.data.title}`
-    : `${refKindName(card.target)} ${forgeRefLabel(card.target)}`;
+    ? `${provided ?? `${refKindName(card.result.data)} ${forgeRefLabel(card.result.data)}`}: ${card.result.data.title}`
+    : (provided ?? `${refKindName(card.target)} ${forgeRefLabel(card.target)}`);
   const surface = 'border border-border bg-popover text-popover-foreground shadow-2xl';
   const body = (
     <div
@@ -924,3 +929,6 @@ export function RefHoverCards({
 }): React.ReactElement {
   return <>{useRefHoverCards(rootRef, { delayMs, onlyWithData })}</>;
 }
+
+// The card's parts, for a provider's own card (utils/refCardProviders.ts).
+export { Avatar as RefCardAvatar, SafeMarkdown as RefCardMarkdown, StateIcon as RefCardStateIcon, timeAgo as refCardTimeAgo };
