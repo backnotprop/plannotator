@@ -11,9 +11,11 @@
  * The cookie `plannotator-inbox-sidebar-layout` keeps the last layout this browser showed, so a reload paints it
  * before the settings read answers; it is never the truth.
  *
- * An item whose capability is off (Plans, until the settings say it is on) is left out of what is saved and of the
- * cookie (`setSidebarUnsaved`), so nothing of an off Plans is ever written; a layout read without it puts it back in
- * its default place (`inboxSidebarRead`), so the page's own layout, and the presets it matches, are unchanged.
+ * An item whose capability is off (Plans, until the settings say it is on) is left out of the cookie
+ * (`setSidebarUnsaved`); the server leaves it out of what it stores (packages/server/inbox-sidebar-save.ts), so
+ * nothing of an off Plans is ever written. The save sends the layout whole: a window that never hears Plans is on (a
+ * phone, a linked window) keeps the Plans row's place and hidden state. A layout read without it puts it back in its
+ * default place (`inboxSidebarRead`), so the page's own layout, and the presets it matches, are unchanged.
  *
  * Also here: whether the Customize panel is open, and what opened it (focus goes back there when it closes).
  */
@@ -35,7 +37,7 @@ export function parseSidebarLayoutCookie(raw: string | null): InboxSidebarLayout
   return inboxSidebarRead({ top: list(top), bottom: list(bottom), hidden: list(hidden) });
 }
 
-/** Off capabilities' items: never saved, never in the cookie. Plans until this page hears it is on (plans/store.ts). */
+/** Off capabilities' items: never in the cookie. Plans until this page hears it is on (plans/store.ts). */
 const OFF_BY_DEFAULT: readonly InboxSidebarItem[] = ['plans'];
 let unsaved: ReadonlySet<InboxSidebarItem> = new Set(OFF_BY_DEFAULT);
 export function setSidebarUnsaved(ids: readonly InboxSidebarItem[]): void {
@@ -93,7 +95,9 @@ async function sendQueued(): Promise<void> {
     queued = null;
     const before = serverRev;
     try {
-      const answer = await inboxApi.saveSidebar(forSaving(layout));
+      // Sent whole: the server leaves out the item of a capability that is off (inbox-sidebar-save.ts). A window that
+      // never hears Plans is on (a phone, a linked window) still sends the Plans row's place and hidden state it read.
+      const answer = await inboxApi.saveSidebar(layout);
       // The count went back (config.json reset, restored or hand-edited): this answer is the server's layout.
       if (typeof answer.sidebar_rev === 'number' && answer.sidebar_rev <= before) serverRev = -1;
       const saved = inboxSidebarRead(answer.sidebar);

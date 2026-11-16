@@ -26,13 +26,37 @@ export const isInertPlanLink = (href: string): boolean => {
 export const resolvePlanLink: LocalLinkResolver = (href) => ({ kind: 'unavailable', title: href });
 
 /**
- * A Mermaid source that could load something or take the tab away while drawn or clicked: any URL (`https:`, `//`),
- * a node picture (`img:`, which Mermaid loads with `new Image()` before any sanitizer), an html label tag (`<img>`,
- * `<image>`, written raw or as an entity), CSS that fetches (`url(`, `@import`, in `themeCSS` or a `style`), a link
- * (`href`, `src`, a `click` line). Icon packs load nothing: Plannotator registers none.
+ * Whether a Mermaid source could reach another host (or take the tab away) when drawn or clicked. Decided by
+ * principle, not by Mermaid feature: a fetch to another host needs an absolute address once everything is decoded,
+ * that is a scheme (`https:`, with or without `//`: `https:host/x` resolves to `host`) or `//`, and every way to spell
+ * one indirectly needs a backslash (YAML, JSON and CSS escapes; a URL reads `\` as `/`) or a character reference
+ * (`&#58;`, `#58;`, `&colon;`: Mermaid turns `#…;` into `&…;` in the SVG it writes). A URL parser also drops tabs and
+ * line breaks inside an address (`ht⇥tps:`), so those are removed before looking. Percent-encoding and fullwidth
+ * characters cannot make a scheme or `//`.
+ *
+ * A character reference is any `&…;` or `#…;`, except one that cannot decode to ASCII: a number at or above 128, or a
+ * name made only of hex digits (a colour, `color:#fff;`). On top, belt and braces: a node picture or link key (`img`,
+ * `src`, `href`, quoted or not), an html tag that loads, CSS that fetches (`url(`, `@import`), and any `click` line.
  */
-const MERMAID_MAY_LOAD = /\/\/|url\s*\(|@import|<\s*(?:img|image|svg|iframe|object|embed|link|video|audio|source)\b|(?:&|#)(?:lt|#?0*60|#?x0*3c);|\b(?:img|src|href)\s*[:=]|\bhref\b|^\s*click\b/im;
-export const mermaidMayLoad = (source: string): boolean => MERMAID_MAY_LOAD.test(source);
+const REMOTE_ADDRESS = /(?:https?|ftp|wss?):|\/\/|\\/i;
+const CHARACTER_REFERENCE = /(?:&#?|#)\+?(\w+);/g;
+const MAY_LOAD_FEATURE = /url\s*\(|@import|<\s*(?:img|image|svg|iframe|object|embed|link|video|audio|source)\b|\b(?:img|src|href)\b|^\s*click\b/im;
+
+function decodesToAscii(name: string): boolean {
+  if (/^\d+$/.test(name)) return Number(name) < 128;
+  if (/^x[0-9a-f]+$/i.test(name)) return parseInt(name.slice(1), 16) < 128;
+  return !/^[0-9a-f]+$/i.test(name);
+}
+
+/** The principle alone: an absolute address, or a way to spell one indirectly. */
+export function mermaidMayReachAnotherHost(source: string): boolean {
+  const flat = source.replace(/[\t\n\r]/g, '');
+  if (REMOTE_ADDRESS.test(flat)) return true;
+  for (const match of flat.matchAll(CHARACTER_REFERENCE)) if (decodesToAscii(match[1]!)) return true;
+  return false;
+}
+
+export const mermaidMayLoad = (source: string): boolean => mermaidMayReachAnotherHost(source) || MAY_LOAD_FEATURE.test(source);
 
 /** A plan's blocks with every Mermaid fence that `mermaidMayLoad` drawn as its plain source instead of a diagram. */
 export function planBlocks(blocks: Block[]): Block[] {

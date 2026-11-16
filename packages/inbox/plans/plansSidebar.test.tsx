@@ -23,7 +23,7 @@ const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof imp
 const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
 const { dispatchInboxFrame } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 const { namesCapability, withCapabilities } = (hasDom ? await import('../capabilities') : {}) as typeof import('../capabilities');
-const { writeSidebarLayout, resetSidebarLayoutForTests, SIDEBAR_LAYOUT_COOKIE } = (hasDom ? await import('../sidebarLayout') : {}) as typeof import('../sidebarLayout');
+const { writeSidebarLayout, readSidebarLayout, adoptSavedSidebar, resetSidebarLayoutForTests, SIDEBAR_LAYOUT_COOKIE } = (hasDom ? await import('../sidebarLayout') : {}) as typeof import('../sidebarLayout');
 const { setPlansOn } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { setStorageBackend, resetStorageBackend } = (hasDom ? await import('@plannotator/ui/utils/storage') : {}) as typeof import('@plannotator/ui/utils/storage');
 const { INBOX_SIDEBAR_DEFAULT } = (hasDom ? await import('@plannotator/core/inbox-sidebar') : {}) as typeof import('@plannotator/core/inbox-sidebar');
@@ -177,7 +177,7 @@ test.skipIf(!hasDom)('`plannotator plans` with a window open: the show frame nam
   expect(heard).toEqual([['', 'w1', 'plans'], ['thr_1', 'w1', undefined]]);
 });
 
-test.skipIf(!hasDom)('off, Plans is never written: a customised sidebar is saved and kept in the cookie without it; on, with it', async () => {
+test.skipIf(!hasDom)('off, Plans is never kept in the cookie; the save sends the layout whole (the server leaves an off Plans out); on, with it', async () => {
   const saved: { top: string[]; bottom: string[]; hidden: string[] }[] = [];
   const cookie = new Map<string, string>();
   setStorageBackend({ getItem: (k) => cookie.get(k) ?? null, setItem: (k, v) => void cookie.set(k, v), removeItem: (k) => void cookie.delete(k) });
@@ -189,14 +189,13 @@ test.skipIf(!hasDom)('off, Plans is never written: a customised sidebar is saved
   try {
     resetSidebarLayoutForTests();
     resetPlansForTests(null, false);
-    // A person who never turned Plans on hides Feedback: the layout this page holds still has Plans in its place
-    // (core's default), but what is saved and kept in the cookie names nothing of it.
+    // A person who never turned Plans on hides Feedback: this browser's cookie names nothing of Plans. What the
+    // server stores is its own rule (packages/server/inbox-sidebar-save.test.ts).
     await writeSidebarLayout({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['feedback'] });
-    expect(saved.at(-1)!.top).not.toContain('plans');
-    expect([...saved.at(-1)!.top, ...saved.at(-1)!.bottom, ...saved.at(-1)!.hidden]).not.toContain('plans');
+    expect(saved.at(-1)!.hidden).toEqual(['feedback']);
     expect(cookie.get(SIDEBAR_LAYOUT_COOKIE)).not.toContain('plans');
 
-    // Plans on: its row is part of the layout saved.
+    // Plans on: its row is part of the layout saved and of the cookie.
     setPlansOn(true);
     await writeSidebarLayout({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['copy-prompt'] });
     expect(saved.at(-1)!.top.indexOf('plans')).toBe(saved.at(-1)!.top.indexOf('inbox') + 1);
@@ -205,5 +204,27 @@ test.skipIf(!hasDom)('off, Plans is never written: a customised sidebar is saved
     setPlansOn(false);
     resetSidebarLayoutForTests();
     resetStorageBackend();
+  }
+});
+
+test.skipIf(!hasDom)('Plans on, its row hidden on the desktop: a window that never heard Plans is on (a phone) saves another change, and the row stays hidden', async () => {
+  const saved: { top: string[]; bottom: string[]; hidden: string[] }[] = [];
+  globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+    const sidebar = (JSON.parse(init?.body ?? '{}') as { sidebar: { top: string[]; bottom: string[]; hidden: string[] } }).sidebar;
+    saved.push(sidebar);
+    return Response.json({ sidebar, sidebar_rev: 1 + saved.length });
+  }) as unknown as typeof fetch;
+  try {
+    resetSidebarLayoutForTests();
+    // The phone's page: Plans not heard (its settings never name it); the server's layout read, Plans hidden and moved last.
+    resetPlansForTests(null, false);
+    const server = { ...INBOX_SIDEBAR_DEFAULT, top: [...INBOX_SIDEBAR_DEFAULT.top.filter((id) => id !== 'plans'), 'plans'], hidden: ['plans'] };
+    adoptSavedSidebar(server, 1);
+    const now = readSidebarLayout();
+    await writeSidebarLayout({ ...now, hidden: [...now.hidden, 'feedback'] });
+    expect(saved.at(-1)!.hidden).toEqual(['plans', 'feedback']);
+    expect(saved.at(-1)!.top.at(-1)).toBe('plans');
+  } finally {
+    resetSidebarLayoutForTests();
   }
 });
