@@ -27,6 +27,17 @@ const reachesAnotherHost = [
   'flowchart TD\n  A["https&colon;tracker.example"]',
   'flowchart TD\n  A["#sol;#sol;tracker.example"]',
   'flowchart TD\n  A["&amp;#58;"]',
+  // Re-check 3: a numeric reference without `;` (an HTML parser decodes it) on an attribute that loads.
+  'flowchart TD\n  A["<table background=\'https&#58tracker.example/p.png\'><tr><td>x</td></tr></table>"]',
+  'flowchart TD\n  A["<td background=\'https&#x3atracker.example/p.png\'>x</td>"]',
+  'flowchart TD\n  A["https&colontracker.example/p.png"]',
+  'flowchart TD\n  A["<td background=\'p.png\'>x</td>"]',
+  'flowchart TD\n  A["</b>"]',
+  'flowchart TD\n  A["<!-- x -->"]',
+  'flowchart TD\n  A["<?xml x?>"]',
+  'flowchart TD\n  A["<br onload=x>"]',
+  // Mermaid's `#amp;` could rebuild an `&` reference.
+  'flowchart TD\n  A["https#amp;#35;58;tracker.example"]',
 ];
 
 test('a Mermaid source that could load something, or navigate on a click, is caught; a plain diagram is not', () => {
@@ -58,8 +69,18 @@ test('a Mermaid source that could load something, or navigate on a click, is cau
     'flowchart LR\n  %% the release path\n  A["Step 1: build"] --> B["Step 2: ship"]\n  style A fill:#f9f,stroke:#333,stroke-width:4px\n  classDef done fill:#9f6,color:#fff;\n  class B done',
     'flowchart TD\n  A["Caf#233;"] --> B["#9829; it"]',
     'stateDiagram-v2\n  [*] --> Draft\n  Draft --> Review: submit\n  Review --> [*]',
+    // A repo layout, Mermaid's quote escape, a line break, the `&` join with spaces, a class annotation, arrows.
+    'flowchart LR\n  src --> build --> dist',
+    'flowchart TD\n  A[src/app.ts] --> B[dist/app.js]',
+    'flowchart TD\n  A["He said #quot;hi#quot;"]',
+    'flowchart TD\n  A["one<br/>two"] --> B["three<br>four<BR />five"]',
+    'flowchart TD\n  A & B --> C',
+    'classDiagram\n  class Shape {\n    <<interface>>\n    +area() double\n  }\n  Shape <|-- Circle',
+    'flowchart LR\n  A <--> B\n  B <-.-> C',
   ];
   for (const source of plain) expect([source, mermaidMayLoad(source)]).toEqual([source, false]);
+  // Accepted: Mermaid's join written without spaces shows as source (`&` and a letter is a named reference).
+  expect(mermaidMayLoad('flowchart TD\n  A&B --> C')).toBe(true);
 });
 
 test('only a Mermaid fence that could load something is shown as its source; other blocks are untouched', () => {
