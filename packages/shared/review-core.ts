@@ -1900,10 +1900,8 @@ export async function runGitDiff(
           ["rev-parse", "--verify", "HEAD~1"],
           { cwd },
         );
-        const args =
-          hasParent.exitCode === 0
-            ? ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "HEAD~1..HEAD"]
-            : ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "--root", "HEAD"];
+        const baseRef = hasParent.exitCode === 0 ? "HEAD~1" : await getEmptyTreeSha(runtime, cwd);
+        const args = ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", `${baseRef}..HEAD`];
         patch = await runBoundedTrackedDiff(runtime, args, cwd, fileIdentities);
         label = "Last commit";
         break;
