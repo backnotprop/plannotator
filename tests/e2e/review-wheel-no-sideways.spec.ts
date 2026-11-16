@@ -1,18 +1,3 @@
-/**
- * A vertical wheel step never scrolls code sideways. In split view, All
- * changes draws a file only when scrolling brings it near; a file with a long
- * line whose change sits far to the right must arrive with both sides at the
- * left edge, whichever side the pointer is over. The steps are a page tall so
- * the file's rows are drawn in the same render that first draws the file,
- * which is when the first-change reveal used to run. A file the reader goes to
- * on purpose (a tree click, next file) still opens with its change in view. Proved in a real Chromium
- * against the compiled binary, on a scratch git repository under a temp
- * PLANNOTATOR_DATA_DIR and HOME.
- *
- * Build the binary first (see inbox.spec.ts), then
- * `bunx playwright test -c tests/e2e/playwright.config.ts review-wheel-no-sideways.spec.ts`.
- */
-
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
