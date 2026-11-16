@@ -4,7 +4,7 @@ import { postDecisions, threadHasQuestionCards } from '../decisionExport';
 import { ThreadPullsButton } from '../threadPulls/ThreadPulls';
 import { machineOf } from '../inboxUrl';
 import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeOfOpener, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
+import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
 import type { InboxNoteBlock } from '@plannotator/core/inbox-context-notes';
 import { noteReviews } from '../contextNotes/model';
@@ -1730,7 +1730,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const untouched = was.file !== 'none' && place.current.saved !== null && place.current.placedTop !== null && body !== null && Math.abs(body.scrollTop - place.current.placedTop) <= 1;
     if (!sameThread) place.current.saved = null;
     else if (placeShown(was) && body && !untouched) {
-      place.current.saved = capturePlace(body, opener ? placeOfOpener(opener.el, body) : null);
+      place.current.saved = capturePlace(body, opener?.el ?? null);
       place.current.placedTop = null;
     }
     // A file opening from the messages on screen: remember what opened it by keyboard, for focus on the way back.

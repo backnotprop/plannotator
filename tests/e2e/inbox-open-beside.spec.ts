@@ -224,7 +224,8 @@ test('a row dragged onto a pane opens there; a pane dragged by its header moves;
   // The pane's ⋯ menu: Move pane up puts it back over A; the layout comes back after a reload; Close pane closes it.
   await pane(page, b).locator('[data-thread-more]').click();
   await page.locator('[data-pane-move="top"]').click();
-  await expect.poll(async () => (await pane(page, b).boundingBox())!.y).toBeLessThan((await pane(page, a).boundingBox())!.y);
+  // Both read on every try: A's place read once, before the move lands, is the top B moves to.
+  await expect.poll(async () => (await pane(page, b).boundingBox())!.y < (await pane(page, a).boundingBox())!.y).toBe(true);
   await page.reload();
   await expect(pane(page, a)).toBeVisible({ timeout: 30_000 });
   await expect(pane(page, b)).toBeVisible();
