@@ -15,7 +15,7 @@ export interface SidebarHold {
 
 /**
  * The docked sidebar folded on screen for room (`held`), without writing the person's choice: when the list comes back
- * beside a thread (‹ Inbox from a file, leaving full screen) or "Open beside" opens a second thread, in a window with
+ * beside a thread (‹ Inbox from a file, leaving full screen) or "Open to the side" opens a second thread, in a window with
  * room for the list and the threads but not for the sidebar too. It comes back by itself once there is room again (the
  * window widened, the second pane closed), when no thread is open, or when the person opens it. A sidebar the person
  * folded is theirs: it is never held, so nothing here opens it.

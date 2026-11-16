@@ -9,7 +9,7 @@ import type { ThreadSlotHost } from '../thread/slotHost';
 import FreeLayout from './FreeLayout';
 import * as L from './layoutModel';
 import { drawnTree, fits, hiddenForRoom, neighbor } from './layoutRoom';
-import { measureRoom, usePaneDrop } from './paneDrop';
+import { measureRoom, paneRects, usePaneDrop } from './paneDrop';
 import { liveHost, quietDigest, quietHost, sameDigest, withPaneClose, type ThreadPanesHost } from './paneHosts';
 import { createPaneKeeper, PaneDock, PaneKeeperContext } from './paneKeeper';
 import { PaneMenuContext, type PaneMenu } from './PaneMenu';
@@ -70,7 +70,7 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
   useEffect(() => host.paneReads.park(windowPanes.allowed ? hidden : new Set()), [host.paneReads, hidden, windowPanes.allowed]);
   const multi = engine && ids.length - hidden.size > 1;
   const title = useCallback((id: L.PaneId) => titleOf(host, windowPanes.layout.threads[id]), [host, windowPanes]);
-  usePaneDrop({ enabled: engine && !host.fileOpen, multi, windowPanes, hidden, title, holdSidebar: (columns) => host.holdSidebarIfTight(columns) });
+  usePaneDrop({ enabled: engine && !host.fileOpen, multi, windowPanes, title, holdSidebar: (columns) => host.holdSidebarIfTight(columns) });
   const [keeper] = useState(createPaneKeeper);
   keeper.live.current = { active: layout.active, onFocus: windowPanes.focus, engine, title };
   const idsKey = ids.join('\u0000');
@@ -201,14 +201,6 @@ const PaneBody = memo(
   },
   (a, b) => !a.active && !b.active && a.paneId === b.paneId && a.threadId === b.threadId && a.shown === b.shown && !!a.digest && !!b.digest && sameDigest(a.digest, b.digest),
 );
-
-/** The panes' boxes on screen, for the ⋯ menu's moves. */
-function paneRects() {
-  return [...document.querySelectorAll<HTMLElement>('.ib-layout > [data-layout-pane]:not([data-pane-hidden="true"])')].map((el) => {
-    const r = el.getBoundingClientRect();
-    return { id: el.dataset.layoutPane!, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
-  });
-}
 
 const EDGES: readonly Edge[] = ['left', 'right', 'top', 'bottom'];
 

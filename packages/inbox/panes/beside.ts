@@ -1,17 +1,20 @@
 import { createContext, useContext } from 'react';
+import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { SettingsModel } from '../api';
+import type { InboxToastModel } from '../components/Toast';
 import * as L from './layoutModel';
-import { fits } from './layoutRoom';
-import { measureRoom } from './paneDrop';
+import { placeToSide, steppedAside, type SidePlace } from './layoutRoom';
+import { measureRoom, paneRects } from './paneDrop';
 import type { WindowPanes } from './useRoutePanes';
 
 /**
- * "Open beside" (config.json `inboxSplitView`, off unless turned on; no Settings row): a thread opens in a new pane
- * right of the active one. The rows' menu reads it from here, so no list or menu takes a prop for it. Dragging the
- * row onto a pane does the same with a place of the person's choosing (paneDrop.ts).
+ * "Open to the side" (config.json `inboxSplitView`, off unless turned on; no Settings row): a thread opens in a new
+ * pane, placed by the room (layoutRoom.ts `placeToSide`: right of the active pane, else below it, else the largest
+ * pane split). The rows' menu reads it from here, so no list or menu takes a prop for it. Dragging the row onto a
+ * pane does the same with a place of the person's choosing (paneDrop.ts).
  */
 export interface Beside {
-  /** "Open beside" is offered for `threadId`: another thread is open, `threadId` is in no pane, and the panes still fit. */
+  /** "Open to the side" is offered for `threadId`: a thread is open, and `threadId` is in no pane. */
   offers: (threadId: string) => boolean;
   open: (threadId: string) => void;
 }
@@ -24,29 +27,53 @@ export const useBeside = (): Beside | null => useContext(BesideContext);
 export const splitViewOn = (settings: SettingsModel | null): boolean => (settings as { split_view?: { on?: unknown } } | null)?.split_view?.on === true;
 
 /**
- * Whether one more pane right of the active one fits the room beside the list, a docked sidebar counted as room (it
- * folds on screen when the item is chosen: sidebarHold.ts). Each pane keeps 440 px (layoutRoom.ts).
+ * Where "Open to the side" opens `threadId` in the room beside the list now, a docked sidebar counted as room (it
+ * folds on screen when the item is chosen: sidebarHold.ts). Null without a window to measure: right of the active pane.
  */
-export function besideFits(layout: L.FreeLayout, open: string, threadId: string): boolean {
-  if (typeof document === 'undefined') return false;
-  const from = layout.active ? layout : L.follow(L.EMPTY_LAYOUT, open);
-  const next = L.openAt(from, threadId, from.active!, 'right');
+export function sidePlace(layout: L.FreeLayout, threadId: string): SidePlace | null {
+  if (typeof document === 'undefined' || !layout.active) return null;
   const measured = measureRoom(true);
-  return !!next.root && !!measured && fits(next.root, measured.room, measured.gap);
+  if (!measured) return null;
+  const place = placeToSide(layout, threadId, measured.room, measured.gap, paneRects());
+  if (place.stepsAside.length === 0) return place;
+  // Nothing fits even with the sidebar folded, so it does not fold: what steps aside is what the room now leaves.
+  const now = measureRoom();
+  return now ? { ...place, stepsAside: steppedAside(layout, place.next, now.room, now.gap) } : place;
+}
+
+/** What the window tells the person when a pane steps aside for one opened to the side. */
+export interface BesideNotice {
+  toast: (toast: Omit<InboxToastModel, 'id'>) => void;
+  rowOf: (threadId: string) => InboxListRow | null;
+}
+
+/** The toast for panes that stepped aside: their subjects, and Undo, which closes the new pane so they come back. */
+export function steppedAsideToast(threads: readonly string[], rowOf: BesideNotice['rowOf'], undo: () => void): Omit<InboxToastModel, 'id'> {
+  const names = threads.map((thread) => rowOf(thread)?.subject || 'A thread');
+  const lead = names.length === 1 ? 'No room for another pane' : 'No room for more panes';
+  const detail = names.length === 1 ? `“${names[0]}” stepped aside` : `${names.length} panes stepped aside`;
+  return { icon: 'check', lead, detail, speech: `${lead}: ${detail}.`, onUndo: undo };
 }
 
 /**
- * What the rows' menu offers: "Open beside" on another thread than `open` (null: nothing open a pane can split from).
- * `makeRoom` runs as it opens, with the columns the panes will need: the window folds a docked sidebar that leaves too
- * little room (panes/sidebarHold.ts).
+ * What the rows' menu offers: "Open to the side" on another thread than `open` (null: nothing open a pane can split
+ * from). `makeRoom` runs as it opens, with the columns the panes will need: the window folds a docked sidebar that
+ * leaves too little room (panes/sidebarHold.ts). `notice` says which panes stepped aside when nothing fit.
  */
-export function besideOf(panes: WindowPanes, open: string | null, makeRoom?: (columns: number) => void): Beside {
+export function besideOf(panes: WindowPanes, open: string | null, makeRoom?: (columns: number) => void, notice?: BesideNotice): Beside {
   return {
-    offers: (threadId) => panes.allowed && open !== null && open !== threadId && L.paneOfThread(panes.layout, threadId) === null && besideFits(panes.layout, open, threadId),
+    offers: (threadId) => panes.allowed && open !== null && open !== threadId && L.paneOfThread(panes.layout, threadId) === null,
     open: (threadId) => {
-      const at = panes.layout;
-      if (open !== null && at.active) makeRoom?.(L.columns(L.openAt(at, threadId, at.active, 'right').root));
-      panes.openBeside(threadId);
+      const place = open !== null ? sidePlace(panes.layout, threadId) : null;
+      if (!place) {
+        if (open !== null && panes.layout.active) makeRoom?.(L.columns(L.openAt(panes.layout, threadId, panes.layout.active, 'right').root));
+        panes.openBeside(threadId);
+        return;
+      }
+      if (place.stepsAside.length === 0) makeRoom?.(L.columns(place.next.root));
+      panes.openAt(threadId, place.target, place.edge);
+      const added = place.next.active!;
+      if (place.stepsAside.length && notice) notice.toast(steppedAsideToast(place.stepsAside.map((id) => panes.layout.threads[id]!), notice.rowOf, () => panes.closePane(added)));
     },
   };
 }

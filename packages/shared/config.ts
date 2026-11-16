@@ -641,7 +641,7 @@ export interface PlannotatorConfig {
    */
   inboxSystem?: boolean;
   /**
-   * A preview of the Inbox's second thread pane ("Open beside" in a row's menu): off unless `true`. Config only, no
+   * A preview of the Inbox's second thread pane ("Open to the side" in a row's menu): off unless `true`. Config only, no
    * Settings row; the settings read carries `split_view` only while on. Read on every request.
    */
   inboxSplitView?: boolean;

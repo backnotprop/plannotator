@@ -5,20 +5,23 @@
  * row dropped on it is a mention, never this. A pane carried by its header (paneDrag.ts, this layout's own) goes to
  * the nearest half of another pane; it has no centre.
  *
- * Edges are the outer 28% of a pane's width and 30% of its height, as the engine's own drop places. A side is offered
- * only where the layout still fits after the drop (layoutRoom.ts), counting a docked sidebar that would fold for room;
- * a row's thread there opens in the pane's place instead. A row over a pane's foot (`.ib-pfoot`) with no reply box
- * open does nothing.
+ * Edges are the outer 28% of a pane's width and 30% of its height, as the engine's own drop places. A side is taken
+ * only where no pane steps aside for it (layoutRoom.ts `steppedAside`), counting a docked sidebar that would fold for
+ * room. Where it does not fit, the drop zone says so and takes the other axis's nearer side of that pane if that fits
+ * ("Too narrow: opens below"); where neither fits it says "No room to split here" and the drop changes nothing. The
+ * ghost's word says where it lands before the release. A row over a pane's foot (`.ib-pfoot`) with no reply box open
+ * does nothing.
  */
 import { useEffect, useRef } from 'react';
 import { registerThreadDropTarget, sayThreadDrag, THREAD_DROP_LAYER } from '../threadDrag';
 import { announce, registerDropTarget, type DragPayload, type DropHit } from './paneDrag';
 import { mainWidthOf } from '../stack';
 import * as L from './layoutModel';
-import { fits, type Room } from './layoutRoom';
+import { steppedAside, type PaneRect, type Room } from './layoutRoom';
 import type { WindowPanes } from './useRoutePanes';
 
-export type Place = L.DropPlace;
+/** Where a drop lands; `none`: an edge with no room on either axis, which the drop zone says and the drop leaves alone. */
+export type Place = L.DropPlace | 'none';
 
 /** What is carried over the panes: a pane by its header, or one list row's thread. */
 type Carried = DragPayload | { kind: 'thread'; threadId: string; label: string };
@@ -34,6 +37,8 @@ interface PaneDropHit {
 const EDGE_X = 0.28;
 const EDGE_Y = 0.3;
 const SIDE_WORDS: Record<L.Edge, string> = { left: 'left of', right: 'right of', top: 'above', bottom: 'below' };
+/** Where a split lands, in the drop zone's words. */
+const PLACE_WORDS: Record<L.Edge, string> = { left: 'on the left', right: 'on the right', top: 'above', bottom: 'below' };
 
 /** The room beside the list the panes share (`.ib-main` less its padding, the list and the gap after it); `reclaim` adds a docked sidebar's width. */
 export function measureRoom(reclaim = false): { room: Room; gap: number } | null {
@@ -51,6 +56,14 @@ export function measureRoom(reclaim = false): { room: Room; gap: number } | null
     if (listStyle.visibility !== 'hidden' && listStyle.position !== 'absolute') width -= list.getBoundingClientRect().width + gap;
   }
   return { room: { width, height }, gap: Math.max(1, gap) };
+}
+
+/** The panes' boxes on screen: the ⋯ menu's moves, and the largest pane "Open to the side" may split (beside.ts). */
+export function paneRects(): PaneRect[] {
+  return paneBoxes().map(({ id, el }) => {
+    const r = el.getBoundingClientRect();
+    return { id, left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  });
 }
 
 /** The panes on screen and their boxes: the engine's hosts (one pane is in the layout too). */
@@ -91,7 +104,6 @@ export interface PaneDropOptions {
   /** Several panes show (the engine draws them). */
   multi: boolean;
   windowPanes: WindowPanes;
-  hidden: ReadonlySet<L.PaneId>;
   title: (id: L.PaneId) => string;
   /** Fold a docked sidebar when the list and this many columns fit only without it (sidebarHold.ts). */
   holdSidebar: (columns: number) => void;
@@ -105,7 +117,7 @@ export function usePaneDrop(options: PaneDropOptions): void {
     if (!options.enabled) return;
     let preview: HTMLElement | null = null;
     const hit = (x: number, y: number, carried: Carried): DropHit | null => {
-      const { windowPanes, hidden } = live.current;
+      const { windowPanes } = live.current;
       const layout = windowPanes.layout;
       const box = paneBoxes().find(({ el }) => {
         const r = el.getBoundingClientRect();
@@ -119,21 +131,36 @@ export function usePaneDrop(options: PaneDropOptions): void {
       const r = box.el.getBoundingClientRect();
       const { edge, depth } = nearestEdge(x, y, r);
       const measured = measureRoom(true);
-      const sideFits = (next: L.FreeLayout) => !!next.root && !!measured && fits(next.root, measured.room, measured.gap, hidden);
+      const split = (side: L.Edge) => (carried.kind === 'pane' ? L.move(layout, carried.paneId, target, side) : L.openAt(layout, carried.threadId, target, side));
+      // Taken only where no pane steps aside for it (a narrow window's rule, layoutRoom.ts).
+      const roomy = (next: L.FreeLayout) => next !== layout && !!next.root && !!measured && steppedAside(layout, next, measured.room, measured.gap).length === 0;
       let place: Place = carried.kind === 'pane' || depth <= 1 ? edge : 'center';
-      let next =
-        carried.kind === 'pane'
-          ? L.move(layout, carried.paneId, target, edge)
-          : place === 'center'
-            ? L.replace(layout, target, carried.threadId)
-            : L.openAt(layout, carried.threadId, target, edge);
-      if (place !== 'center' && !sideFits(next)) {
-        if (carried.kind === 'pane') return null;
-        place = 'center';
-        next = L.replace(layout, target, carried.threadId);
+      let next = place === 'center' && carried.kind === 'thread' ? L.replace(layout, target, carried.threadId) : split(edge);
+      let narrow: 'Too narrow' | 'Too short' | null = null;
+      if (place !== 'center' && !roomy(next)) {
+        // The other axis's nearer side of the same pane, if that fits; else nothing, said.
+        const across = edge === 'left' || edge === 'right';
+        const other: L.Edge = across ? (y < r.top + r.height / 2 ? 'top' : 'bottom') : x < r.left + r.width / 2 ? 'left' : 'right';
+        const alt = split(other);
+        if (roomy(alt)) {
+          narrow = across ? 'Too narrow' : 'Too short';
+          place = other;
+          next = alt;
+        } else {
+          place = 'none';
+          next = layout;
+        }
       }
-      if (next === layout) return null;
-      const action = carried.kind === 'pane' ? 'Move here' : place === 'center' ? 'Open here' : 'Open beside';
+      if (place !== 'none' && next === layout) return null;
+      const verb = carried.kind === 'pane' ? 'moves' : 'opens';
+      const action =
+        place === 'none'
+          ? carried.kind === 'pane' ? 'No room to move here' : 'No room to split here'
+          : place === 'center'
+            ? 'Open here'
+            : narrow
+              ? `${narrow}: ${verb} ${PLACE_WORDS[place]}`
+              : carried.kind === 'pane' ? 'Move here' : `Open ${PLACE_WORDS[place]}`;
       const data: PaneDropHit = { target, place, next, rect: sideRect(r, place) };
       return { action, data };
     };
@@ -143,7 +170,13 @@ export function usePaneDrop(options: PaneDropOptions): void {
         preview = null;
         return;
       }
-      const { rect } = found.data as PaneDropHit;
+      const { rect, place } = found.data as PaneDropHit;
+      // No room: the words say so, and no zone is drawn where nothing would land.
+      if (place === 'none') {
+        preview?.remove();
+        preview = null;
+        return;
+      }
       if (!preview) {
         preview = document.createElement('div');
         preview.className = 'ib-droppreview';
@@ -156,6 +189,10 @@ export function usePaneDrop(options: PaneDropOptions): void {
       const { windowPanes, title, holdSidebar } = live.current;
       const { target: on, place, next } = found.data as PaneDropHit;
       const name = title(on);
+      if (place === 'none') {
+        say(`No room beside ${name}. Nothing changed.`);
+        return;
+      }
       holdSidebar(L.columns(next.root));
       if (carried.kind === 'pane') {
         windowPanes.movePane(carried.paneId, on, place as L.Edge);

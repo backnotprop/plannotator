@@ -9,7 +9,7 @@
  * worked out for every draw.
  */
 import { setPaneHidden, type Edge, type LayoutNode } from '@plannotator/vendor-pierre-layouts';
-import { PANE_MIN_HEIGHT, PANE_MIN_WIDTH, panesOf, type FreeLayout, type PaneId } from './layoutModel';
+import { openAt, PANE_MIN_HEIGHT, PANE_MIN_WIDTH, panesOf, type FreeLayout, type PaneId } from './layoutModel';
 
 export interface Room {
   width: number;
@@ -56,6 +56,51 @@ export function hiddenForRoom(layout: FreeLayout, room: Room, gap: number): Set<
     if (id !== layout.active) hidden.add(id);
   }
   return hidden;
+}
+
+/** The panes that step aside for room once `after` replaces `before`, that did not already: none, and `after` draws whole. */
+export function steppedAside(before: FreeLayout, after: FreeLayout, room: Room, gap: number): PaneId[] {
+  const already = hiddenForRoom(before, room, gap);
+  return [...hiddenForRoom(after, room, gap)].filter((id) => !already.has(id));
+}
+
+/** Where "Open to the side" puts a thread: beside `target` at `edge`, and the panes that step aside for it (usually none). */
+export interface SidePlace {
+  target: PaneId;
+  edge: Edge;
+  next: FreeLayout;
+  stepsAside: PaneId[];
+}
+
+/**
+ * Where "Open to the side" opens `thread`, the same way every time for the same layout and room: right of the active
+ * pane if a column fits there; else below it if a row does; else the largest pane on screen (`rects`) split along its
+ * longer side, if both halves keep 440 x 260 px. "Fits" is that no pane steps aside for it. When nothing fits, right of
+ * the active pane anyway: the least recent panes step aside as they do for a narrow window, and `stepsAside` names them.
+ */
+export function placeToSide(layout: FreeLayout, thread: string, room: Room, gap: number, rects: readonly PaneRect[]): SidePlace {
+  const active = layout.active!;
+  const at = (target: PaneId, edge: Edge): SidePlace => {
+    const next = openAt(layout, thread, target, edge);
+    return { target, edge, next, stepsAside: steppedAside(layout, next, room, gap) };
+  };
+  for (const edge of ['right', 'bottom'] as const) {
+    const place = at(active, edge);
+    if (place.stepsAside.length === 0) return place;
+  }
+  const order = panesOf(layout.root).map((pane) => pane.id);
+  const area = (rect: PaneRect) => (rect.right - rect.left) * (rect.bottom - rect.top);
+  // Largest first; as large, the earlier in the tree (left to right, top to bottom).
+  const largest = rects.filter((rect) => order.includes(rect.id)).sort((a, b) => area(b) - area(a) || order.indexOf(a.id) - order.indexOf(b.id))[0];
+  if (largest) {
+    const width = largest.right - largest.left;
+    const height = largest.bottom - largest.top;
+    const across = width >= height;
+    const halves = across ? (width - gap) / 2 >= PANE_MIN_WIDTH : (height - gap) / 2 >= PANE_MIN_HEIGHT;
+    const place = halves ? at(largest.id, across ? 'right' : 'bottom') : null;
+    if (place && place.stepsAside.length === 0) return place;
+  }
+  return at(active, 'right');
 }
 
 /** The tree the engine draws: the layout's, with the panes that stepped aside hidden in place. */

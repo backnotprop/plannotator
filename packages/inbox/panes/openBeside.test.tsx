@@ -1,13 +1,14 @@
 /**
- * "Open beside" (panes/beside.ts, useRoutePanes.ts) as the window mounts it: the rows' real menu (RowMenu.tsx) under
- * the panes' context, and an address the test keeps as the window's route.
+ * "Open to the side" (panes/beside.ts, useRoutePanes.ts) as the window mounts it: the rows' real menu (RowMenu.tsx)
+ * under the panes' context, and an address the test keeps as the window's route.
  *
- * What regresses: the item showing with the switch off, or on the thread already open, or in a window without room for
- * the list and two threads even with the sidebar folded, or missing where there is that room but a docked sidebar
- * takes it (1440 px); choosing it not opening the second pane beside the first, or not putting the person in it, or not
- * folding a docked sidebar that leaves too little room (panes/sidebarHold.ts); closing the second pane not bringing
- * that sidebar back, or opening a sidebar the person folded; closing either pane not coming back to today's one pane;
- * Escape (the address closed) closing both panes.
+ * What regresses: the item showing with the switch off or on the thread already open, or missing with any number of
+ * panes open (the owner: two felt like a cap); choosing it not opening the second pane beside the first, or not putting
+ * the person in it, or not folding a docked sidebar that leaves too little room (panes/sidebarHold.ts); a third thread
+ * where no third column fits not going below the active pane; a window with no room for another pane opening it
+ * without saying which pane stepped aside, or its Undo not bringing that pane back; closing the second pane not
+ * bringing that sidebar back, or opening a sidebar the person folded; closing either pane not coming back to today's
+ * one pane; Escape (the address closed) closing both panes.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -15,9 +16,11 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxToastModel } from '../components/Toast';
 import type { Route } from '../app/route';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH } from '../stack';
 import { BesideContext, besideOf } from './beside';
+import * as L from './layoutModel';
 import type { PaneSet } from './model';
 import { useSidebarHold } from './sidebarHold';
 import { useRoutePanes, type WindowPanes } from './useRoutePanes';
@@ -48,15 +51,18 @@ function setWidth(width: number) {
 const rowOf = (id: string) =>
   ({ thread_id: id, subject: `Thread ${id}`, section: 'new', unread: true, unseen: 1, answered_not_sent: false, resolved_at: null, read_at: null, questions: { open: 0, picked: 0, stopped: false, holds_up: [] } }) as unknown as InboxListRow;
 
+/** The list's rows. */
+const ROWS = ['thr_a', 'thr_b', 'thr_c', 'thr_d'];
+
 /** The docked sidebar's width (shell/sidebar.tsx's default). */
 const SIDEBAR = 232;
 
 /**
- * The window: the address (`thread`), its panes, the list's menu over rows a and b, and a docked sidebar `SIDEBAR` px
+ * The window: the address (`thread`), its panes, the list's menu over rows a to d, and a docked sidebar `SIDEBAR` px
  * wide that the person keeps open (`sidebarOpen`) or folded. The window is as wide as `window.innerWidth`.
  */
 function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = true) {
-  const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {} };
+  const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {}, toasts: [] as Omit<InboxToastModel, 'id'>[] };
   function Window() {
     const [thread, setThread] = useState<string | null>(start);
     out.thread = thread;
@@ -88,9 +94,9 @@ function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = t
         <div className="ib-main" ref={(el) => measured(el, () => window.innerWidth)}>
           <div className="ib-listcol" ref={(el) => measured(el, () => LIST_MIN_WIDTH)} />
         </div>
-        <BesideContext.Provider value={besideOf(panes, thread, hold.holdIfTight)}>
-          <ThreadRowMenu className="ib-lbody" rowOf={(id) => (['thr_a', 'thr_b'].includes(id) ? rowOf(id) : null)} canMarkRead={true} held={thread !== null} onAction={() => {}} onTarget={() => {}}>
-            {['thr_a', 'thr_b'].map((id) => (
+        <BesideContext.Provider value={besideOf(panes, thread, hold.holdIfTight, { toast: (toast) => void out.toasts.push(toast), rowOf: (id) => (ROWS.includes(id) ? rowOf(id) : null) })}>
+          <ThreadRowMenu className="ib-lbody" rowOf={(id) => (ROWS.includes(id) ? rowOf(id) : null)} canMarkRead={true} held={thread !== null} onAction={() => {}} onTarget={() => {}}>
+            {ROWS.map((id) => (
               <div key={id} className="ib-rw" data-row={id}>
                 <button type="button" className="ib-row" data-thread-id={id}>
                   Thread {id}
@@ -120,8 +126,8 @@ async function openMenu(id: string) {
 const besideItem = () => document.querySelector<HTMLElement>('[data-row-menu] [data-row-action="open-beside"]');
 const shape = (set: PaneSet) => ({ threads: set.panes.map((pane) => pane.thread), active: set.panes.findIndex((pane) => pane.id === set.active) });
 
-describe.skipIf(!hasDom)('Open beside', () => {
-  test('with the switch off the menu has no Open beside, and one pane stays', async () => {
+describe.skipIf(!hasDom)('Open to the side', () => {
+  test('with the switch off the menu has no Open to the side, and one pane stays', async () => {
     const w = draw(false);
     await openMenu('thr_b');
     expect(document.querySelector('[data-row-menu]')).not.toBeNull();
@@ -149,7 +155,7 @@ describe.skipIf(!hasDom)('Open beside', () => {
     setWidth(1440);
     const w = draw(true);
     await openMenu('thr_b');
-    expect(besideItem()?.textContent).toBe('Open beside');
+    expect(besideItem()?.textContent).toBe('Open to the side');
     await act(async () => besideItem()!.click());
     expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
     expect(w.thread).toBe('thr_b');
@@ -178,20 +184,24 @@ describe.skipIf(!hasDom)('Open beside', () => {
     expect(w.thread).toBe('thr_b');
   });
 
-  test('offered while the list and two 440 px threads fit with the sidebar folded; narrower, none', async () => {
-    const room = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH;
-    setWidth(room - 1);
-    draw(true);
-    await openMenu('thr_b');
-    expect(besideItem()).toBeNull();
-    act(() => root!.unmount());
-    host!.remove();
-    // 1440 px with the sidebar docked: the two fit once it folds, so the item is there.
+  test('with two panes open it is still offered: where no third column fits, the third opens below the active pane, and a fourth below that', async () => {
+    // 1440 px: the list and two 440 px columns fit (the sidebar folds), three do not; the window is 900 px tall.
     setWidth(1440);
-    expect(1440 - SIDEBAR).toBeLessThan(room);
-    draw(true);
-    await openMenu('thr_b');
-    expect(besideItem()?.textContent).toBe('Open beside');
+    expect(1440 - LIST_MIN_WIDTH).toBeLessThan(3 * THREAD_BESIDE_FILE_WIDTH);
+    const w = draw(true);
+    for (const id of ['thr_b', 'thr_c', 'thr_d']) {
+      await openMenu(id);
+      expect(besideItem()?.textContent).toBe('Open to the side');
+      await act(async () => besideItem()!.click());
+      expect(w.thread).toBe(id);
+    }
+    const { root: tree, threads } = w.panes!.layout;
+    // a | (b / c / d): two columns, the right one three rows, the person in d; nothing stepped aside, nothing said.
+    expect(L.panesOf(tree).map((pane) => threads[pane.id])).toEqual(['thr_a', 'thr_b', 'thr_c', 'thr_d']);
+    expect(tree?.type === 'split' && tree.direction).toBe('horizontal');
+    const right = tree?.type === 'split' ? tree.children[1] : null;
+    expect(right?.type === 'split' && [right.direction, right.children.length]).toEqual(['vertical', 3]);
+    expect(w.toasts).toEqual([]);
   });
 
   test('at 1440 with the sidebar docked, choosing it folds the sidebar on screen; closing the second pane brings it back', async () => {
@@ -216,7 +226,7 @@ describe.skipIf(!hasDom)('Open beside', () => {
     expect(w.sidebarHeld).toBe(false);
   });
 
-  test('a sidebar the person folded stays theirs: Open beside folds nothing, and closing the second pane opens nothing', async () => {
+  test('a sidebar the person folded stays theirs: Open to the side folds nothing, and closing the second pane opens nothing', async () => {
     setWidth(1440);
     const w = draw(true, 'thr_a', false);
     await openMenu('thr_b');
@@ -266,13 +276,19 @@ describe.skipIf(!hasDom)('Open beside', () => {
     expect(plain.thread).toBeNull();
   });
 
-  test('a window too narrow for two panes offers none; narrowing keeps both panes in the layout and the active one in the address', async () => {
+  test('a window too narrow for two panes still offers it: the new pane shows, a toast names the pane that stepped aside, and Undo brings it back; narrowing keeps both panes in the layout', async () => {
     // The list's narrowest column and two 440 px panes with the 1 px gap between them (layoutRoom.ts).
     const two = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + 1;
     const w = draw(true);
     setWidth(two - 1);
     await openMenu('thr_b');
-    expect(besideItem()).toBeNull();
+    expect(besideItem()?.textContent).toBe('Open to the side');
+    await act(async () => besideItem()!.click());
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
+    expect(w.toasts.map((toast) => [toast.lead, toast.detail])).toEqual([['No room for another pane', '“Thread thr_a” stepped aside']]);
+    act(() => w.toasts[0]!.onUndo!());
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a'], active: 0 });
+    expect(w.thread).toBe('thr_a');
     setWidth(two);
     act(() => w.panes!.openBeside('thr_b'));
     expect(w.panes!.panes.panes).toHaveLength(2);

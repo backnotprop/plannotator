@@ -1,14 +1,15 @@
 /**
- * "Open beside" (config.json `inboxSplitView`, a preview with no Settings row), in a real browser against the compiled
+ * "Open to the side" (config.json `inboxSplitView`, a preview with no Settings row), in a real browser against the compiled
  * binary, with an agent writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
  * - On, at 1600 by 900 (the list and two 440 px threads fit beside the docked sidebar): a row's menu offers "Open
- *   beside" while another thread is open; choosing it draws the two threads side by side after the list, which
+ *   to the side" while another thread is open; choosing it draws the two threads side by side after the list, which
  *   stays, each its own pane with its own header, reply box and ✕, the person in the new one. A message arriving in
  *   the other pane stays unread there until the person clicks into that pane. The list's edge hides the list (the
  *   pair takes the window) and the first pane's ‹ Inbox brings it back. Closing the second pane is today's one pane.
  * - On, at 1440 with the sidebar docked: offered; choosing it folds the sidebar on screen (the person's choice not
- *   written) and closing the second pane brings it back. At 1240 the list and two threads cannot fit: no item.
+ *   written) and closing the second pane brings it back. At 1240 the list and two threads cannot fit: still offered,
+ *   the new pane shows, a toast names the pane that stepped aside, and its Undo brings that pane back.
  * - On, at 1920: a row dragged onto a pane's edge opens beside it; a pane dragged by its header goes to another's
  *   half; the ⋯ menu's Move pane up and Close pane do the same without a drag; the layout comes back after a reload.
  * - Off (another Inbox, no key): the item does not exist.
@@ -89,7 +90,7 @@ test('two threads side by side after the list: each its own pane, unread stays i
   const [a, b] = on.threads.slice(-2).reverse() as [string, string];
   await openThread(page, on, a);
   await row(page, b).click({ button: 'right' });
-  await expect(besideItem(page)).toHaveText('Open beside');
+  await expect(besideItem(page)).toHaveText('Open to the side');
   await besideItem(page).click();
 
   await expect(pane(page, a)).toBeVisible();
@@ -164,7 +165,7 @@ test('at 1440 with the sidebar docked: offered; choosing it folds the sidebar, a
   await openThread(page, on, a);
   await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
   await row(page, b).click({ button: 'right' });
-  await expect(besideItem(page)).toHaveText('Open beside');
+  await expect(besideItem(page)).toHaveText('Open to the side');
   await besideItem(page).click();
   await expect(pane(page, b)).toBeVisible();
   await expect(pane(page, a)).toBeVisible();
@@ -186,13 +187,26 @@ test('at 1440 with the sidebar docked: offered; choosing it folds the sidebar, a
   await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
 });
 
-test('a window where the list and two threads cannot fit even with the sidebar folded: no Open beside', async ({ page }) => {
+test('a window where the list and two threads cannot fit even with the sidebar folded: still offered; the new pane shows, a toast names the pane that stepped aside, and Undo brings it back', async ({ page }) => {
   await page.setViewportSize({ width: 1240, height: 900 });
   const [a, b] = await freshPair('narrow');
   await openThread(page, on, a);
   await row(page, b).click({ button: 'right' });
-  await expect(page.locator('[data-row-menu]')).toBeVisible();
-  await expect(besideItem(page)).toHaveCount(0);
+  await expect(besideItem(page)).toHaveText('Open to the side');
+  await besideItem(page).click();
+  // B alone beside the list: A stepped aside for room (its pane kept off the page), and the toast says so.
+  await expect(pane(page, b)).toBeVisible();
+  await expect(pane(page, a)).toBeHidden();
+  await expect(page.locator('.ib-layout > [data-layout-pane][data-pane-hidden="true"]', { has: pane(page, a) })).toHaveCount(1);
+  await expect(page).toHaveURL(new RegExp(`#thread=${b}`));
+  const toast = page.locator('[data-inbox-toast]');
+  await expect(toast).toContainText('No room for another pane');
+  await expect(toast).toContainText('“Refund retries capped (narrow)” stepped aside');
+  // Undo closes the new pane: A is back, alone, and the address names it.
+  await toast.locator('[data-toast-undo]').click();
+  await expect(pane(page, a)).toBeVisible();
+  await expect(pane(page, b)).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`#thread=${a}`));
 });
 
 /** A real pointer drag from `from` to `to`, in steps, as a person's mouse moves. */
@@ -235,7 +249,7 @@ test('a row dragged onto a pane opens there; a pane dragged by its header moves;
   await expect(page.locator('.ib-layout > .pierre-layout-separator')).toHaveCount(0);
 });
 
-test('with the switch off there is no Open beside', async ({ page }) => {
+test('with the switch off there is no Open to the side', async ({ page }) => {
   await page.setViewportSize({ width: 1600, height: 900 });
   const [a, b] = off.threads as [string, string];
   await openThread(page, off, a);

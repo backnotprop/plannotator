@@ -2459,7 +2459,7 @@ function Inbox() {
   // (synthetic ⌘V) text otherwise. Remove once Chrome 157 is stable (pasteInsert.ts).
   useEffect(() => installPlainTextPaste(), []);
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
-  // The docked sidebar folded on screen for room, the person's choice unchanged (‹ Inbox from a file, leaving full screen, Open beside): panes/sidebarHold.ts.
+  // The docked sidebar folded on screen for room, the person's choice unchanged (‹ Inbox from a file, leaving full screen, Open to the side): panes/sidebarHold.ts.
   const { held: sidebarHeld, setHeld: setSidebarHeld, holdIfTight: holdSidebarIfTight } = useSidebarHold(rootRef, routeRef, route, windowPanes.columns, sidebarOpen);
   // The thread in full screen (a click on the list column's edge, or Enter on it): the sidebar and the list hide, without
   // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
@@ -5736,7 +5736,7 @@ function Inbox() {
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
-    <BesideContext.Provider value={!windowPanes.allowed ? null : besideOf(windowPanes,route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, holdSidebarIfTight)}>
+    <BesideContext.Provider value={!windowPanes.allowed ? null : besideOf(windowPanes,route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, holdSidebarIfTight, { toast: showToast, rowOf: (id) => latestRows.get(id) ?? null })}>
     <div
       ref={rootRef}
       className="pn-inbox"

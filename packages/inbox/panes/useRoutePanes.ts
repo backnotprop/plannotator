@@ -16,7 +16,7 @@ export interface WindowPanes {
   layout: L.FreeLayout;
   /** The thread columns side by side the layout needs beside the list (sidebarHold.ts). */
   columns: number;
-  /** `threadId` opens in a new pane right of the active one, and the person is in it ("Open beside"). */
+  /** `threadId` opens in a new pane right of the active one, and the person is in it ("Open to the side"). */
   openBeside: (threadId: string) => void;
   /** `threadId` opens in a new pane at `edge` of `target` (a row dropped on a pane's edge). */
   openAt: (threadId: string, target: PaneId, edge: L.Edge) => void;

@@ -5,12 +5,14 @@
  * What regresses: a pane dropped at an edge landing elsewhere or taking another's thread; a thread showing in two
  * panes; closing a pane leaving a hole, the wrong pane active, or the last pane not giving back today's empty window;
  * a moved pane's thread or size lost; a narrow window hiding the active pane or the wrong one first, or not showing one
- * pane alone below two columns; a kept layout read back wrong, or a broken one read at all.
+ * pane alone below two columns; "Open to the side" placing differently for the same layout and room, splitting where a
+ * pane steps aside while another place fits, or refusing where nothing fits; a kept layout read back wrong, or a broken
+ * one read at all.
  */
 import { describe, expect, test } from 'bun:test';
 import type { LayoutNode } from '@plannotator/vendor-pierre-layouts';
 import * as L from './layoutModel';
-import { hiddenForRoom, minimumSize, neighbor } from './layoutRoom';
+import { hiddenForRoom, minimumSize, neighbor, placeToSide, type PaneRect, type SidePlace } from './layoutRoom';
 import { decodeLayout, encodeLayout } from './savedLayout';
 
 /** The tree as nested words: `a|b` side by side, `a/b` one over the other. */
@@ -114,6 +116,27 @@ describe('room', () => {
     expect(neighbor(rects, 'a', 'left')).toBeNull();
     // Two as near: the one that overlaps it more.
     expect(neighbor(rects, 'b', 'left')).toBe('c');
+  });
+
+  test('"Open to the side": right of the active pane, else below it, else the largest pane along its longer side, else right with the least recent stepping aside', () => {
+    const gap = 8;
+    const box = (id: string, left: number, top: number, right: number, bottom: number): PaneRect => ({ id, left, top, right, bottom });
+    // b below c on the right of a, the person in c: (a|(b/c)).
+    const three = L.openAt(two, 'c', 'p1', 'bottom');
+    const cases: { name: string; layout: L.FreeLayout; room: { width: number; height: number }; rects: PaneRect[]; target: string; edge: SidePlace['edge']; shape: string; aside: string[] }[] = [
+      { name: 'a third column fits', layout: two, room: { width: 1400, height: 900 }, rects: [box('main', 0, 0, 696, 900), box('p1', 704, 0, 1400, 900)], target: 'p1', edge: 'right', shape: '(a|b|d)', aside: [] },
+      { name: 'no third column: below the active pane', layout: two, room: { width: 1000, height: 900 }, rects: [box('main', 0, 0, 496, 900), box('p1', 504, 0, 1000, 900)], target: 'p1', edge: 'bottom', shape: '(a|(b/d))', aside: [] },
+      { name: 'the active pane too short for another row: the largest pane, taller than wide, split below', layout: three, room: { width: 1000, height: 700 }, rects: [box('main', 0, 0, 496, 700), box('p1', 504, 0, 1000, 346), box('p2', 504, 354, 1000, 700)], target: 'main', edge: 'bottom', shape: '((a/d)|(b/c))', aside: [] },
+      { name: 'nothing fits: right of the active pane, the least recent steps aside', layout: two, room: { width: 1000, height: 500 }, rects: [box('main', 0, 0, 496, 500), box('p1', 504, 0, 1000, 500)], target: 'p1', edge: 'right', shape: '(a|b|d)', aside: ['a'] },
+      { name: 'below two columns of room: the new pane alone, the other stepped aside', layout: one, room: { width: 800, height: 900 }, rects: [box('main', 0, 0, 800, 900)], target: 'main', edge: 'right', shape: '(a|d)', aside: ['a'] },
+    ];
+    for (const c of cases) {
+      const place = placeToSide(c.layout, 'd', c.room, gap, c.rects);
+      expect({ target: place.target, edge: place.edge, shape: shape(place.next), aside: place.stepsAside.map((id) => c.layout.threads[id]) }, c.name).toEqual({ target: c.target, edge: c.edge, shape: c.shape, aside: c.aside });
+      expect(L.activeThread(place.next), c.name).toBe('d');
+      // The same layout and room place the same way every time.
+      expect(placeToSide(c.layout, 'd', c.room, gap, c.rects), c.name).toEqual(place);
+    }
   });
 });
 

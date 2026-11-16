@@ -8,7 +8,8 @@
  * other pane (its cached copy is one an opening would not draw: stale, or a launched thread's). For the free layout
  * (config.json `inboxSplitView`): the window without the switch changing at all; a pane dragged onto another's half
  * not going there; a list row dropped on an edge or a centre not opening there, or a drop over a reply box going to the
- * pane, not to the box's mention; one row press starting two drags (the window has one thread drag, ../threadDrag.ts);
+ * pane, not to the box's mention; an edge with no room taking the drop silently (into the pane's place) instead of
+ * saying so and opening on the other axis where that fits, or doing anything where nothing fits; one row press starting two drags (the window has one thread drag, ../threadDrag.ts);
  * a pane mounting again when another opens or the active one changes; an archived thread's pane staying; text typed
  * in one pane's reply box showing in another's; a narrow window losing the panes it cannot show. And any change
  * of layout (a narrow window, a file beside the active pane, one pane on a phone, a stacked window, a card's or
@@ -120,7 +121,7 @@ beforeEach(() => {
   }) as typeof fetch;
   stub(HTMLElement.prototype, 'getBoundingClientRect', {
     value(this: HTMLElement) {
-      if (this.classList.contains('ib-main') || this.classList.contains('pn-inbox')) return { ...rect(0, 900), right: mainWidth, width: mainWidth };
+      if (this.classList.contains('ib-main') || this.classList.contains('pn-inbox')) return { ...rect(0, mainHeight), right: mainWidth, width: mainWidth };
       const host = this.dataset.layoutPane ? hostBoxes[this.dataset.layoutPane] : undefined;
       if (host) return { ...rect(0, 900), left: host.left, right: host.left + host.width, width: host.width, x: host.left };
       if (this.classList.contains('ib-pbody')) return rect(0, 800);
@@ -244,6 +245,7 @@ const pair = (active: 'main' | 'p1') => L.focus(L.openAt(L.follow(L.EMPTY_LAYOUT
 const panesHost = (host: ThreadSlotHost) => ({ ...host, rowOf: () => null });
 /** The room `.ib-main` gives the panes (no list in it here), and each pane host's box: main the left half, p1 the right. */
 let mainWidth = 1600;
+let mainHeight = 900;
 const hostBoxes: Record<string, { left: number; width: number }> = { main: { left: 0, width: 800 }, p1: { left: 800, width: 800 } };
 
 function drawPanes(windowPanes: WindowPanes, host: ThreadSlotHost, held: HeldThread = heldOf(A, false), withList = false) {
@@ -464,7 +466,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     drag(40, 450);
     expect(document.querySelectorAll('[data-thread-ghost]')).toHaveLength(1);
     expect(document.querySelector('.ib-dragghost')).toBeNull();
-    expect(document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent).toBe('Open beside');
+    expect(document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent).toBe('Open on the left');
     expect(document.querySelector('.ib-droppreview')).not.toBeNull();
     release(40, 450);
     expect(document.querySelector('.ib-droppreview')).toBeNull();
@@ -483,6 +485,46 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     release(400, 850);
     expect(field.value).toContain('Subject C');
     expect(calls).toEqual(['open:msg_C1:main:left', 'replace:main:msg_C1']);
+  });
+
+  test('an edge with no room says so before the release: the other axis where it fits, else nothing at all', async () => {
+    putThread(queries, B, heldOf(B, false));
+    const calls: string[] = [];
+    // Room for the two columns there are, not a third (881 px of 1000); 900 px tall, so a row fits below.
+    mainWidth = 1000;
+    try {
+      drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
+      await wait(0);
+      calls.length = 0;
+      setThreadDragHitTestForTests(() => paneOf(A));
+      const word = () => document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent;
+      // A's left edge, low on the pane: no third column, so it says so and opens below A instead, the zone its lower half.
+      pressRow();
+      drag(40, 600);
+      expect(word()).toBe('Too narrow: opens below');
+      const zone = document.querySelector<HTMLElement>('.ib-droppreview')!;
+      expect([zone.style.top, zone.style.height]).toEqual(['450px', '450px']);
+      release(40, 600);
+      expect(calls).toEqual(['open:msg_C1:main:bottom']);
+      // Too short for two rows as well (500 px): it says so, draws no zone, and the drop changes nothing.
+      mainHeight = 500;
+      calls.length = 0;
+      pressRow();
+      drag(40, 600);
+      expect(word()).toBe('No room to split here');
+      expect(document.querySelector('.ib-droppreview')).toBeNull();
+      release(40, 600);
+      expect(calls).toEqual([]);
+      // Its centre still takes the pane's place.
+      pressRow();
+      drag(400, 450);
+      expect(word()).toBe('Open here');
+      release(400, 450);
+      expect(calls).toEqual(['replace:main:msg_C1']);
+    } finally {
+      mainWidth = 1600;
+      mainHeight = 900;
+    }
   });
 
   test("with one thread open, a row dropped on its pane's edge opens beside it", async () => {

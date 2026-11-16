@@ -1,7 +1,7 @@
 /**
  * The second thread pane's preview switch (config.json `inboxSplitView`, no Settings row): the settings read carries
  * `split_view` only while it is `true`, read on every request. What regresses: a window with the switch off (or the
- * key absent, or not exactly `true`) getting the key and so offering "Open beside"; the owner's test Inbox, switched
+ * key absent, or not exactly `true`) getting the key and so offering "Open to the side"; the owner's test Inbox, switched
  * on in config.json, not getting it without a restart.
  */
 import { afterEach, expect, test } from "bun:test";

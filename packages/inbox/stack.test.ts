@@ -37,7 +37,7 @@ test('the edges: stacking starts exactly where a pane would get less than its mi
   expect(stackFor(LIST_MIN_WIDTH + THREAD_BESIDE_FILE_WIDTH - 1, 2000).thread).toBe(true);
   expect(stackFor(2000, THREAD_BESIDE_FILE_WIDTH + FILE_MIN_WIDTH).file).toBe(false);
   expect(stackFor(2000, THREAD_BESIDE_FILE_WIDTH + FILE_MIN_WIDTH - 1).file).toBe(true);
-  // Two threads beside the list ("Open beside") need room for both before the list stays beside them.
+  // Two threads beside the list ("Open to the side") need room for both before the list stays beside them.
   expect(stackFor(LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH, 2000, 2).thread).toBe(false);
   expect(stackFor(LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH - 1, 2000, 2).thread).toBe(true);
   // Not measured yet (0): nothing stacks.
