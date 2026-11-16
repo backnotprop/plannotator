@@ -23,7 +23,7 @@ const D = INBOX_SIDEBAR_DEFAULT;
 const layout = (top: InboxSidebarItem[], bottom: InboxSidebarItem[], hidden: InboxSidebarItem[] = []): InboxSidebarLayout => ({ top, bottom, hidden });
 
 test('the default is today\'s sidebar: Search to Drafts at the top, Copy prompt to Settings at the bottom, nothing hidden', () => {
-  expect(D).toEqual(layout(['search', 'new-message', 'inbox', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], ['copy-prompt', 'feedback', 'usage', 'settings']));
+  expect(D).toEqual(layout(['search', 'new-message', 'inbox', 'plans', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], ['copy-prompt', 'feedback', 'usage', 'settings']));
   // Every stack item is in it once; the logo and the Settings row's buttons are not stack items.
   const stackItems = INBOX_SIDEBAR_ITEMS.filter((spec) => spec.place === 'stack').map((spec) => spec.id);
   expect([...D.top, ...D.bottom].sort()).toEqual([...stackItems].sort());
@@ -38,13 +38,13 @@ describe('reading a saved layout', () => {
     ['the default as saved', { top: [...D.top], bottom: [...D.bottom], hidden: [] }, D],
     [
       'a newer build\'s item and a typo are dropped; the rest keeps its order',
-      { top: ['inbox', 'later-item', 'search', 'new-message', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts'], bottom: ['settings', 'copy-prompt', 'feedback', 'usage', 'bogus'], hidden: ['later-item', 'feedback'] },
-      layout(['inbox', 'search', 'new-message', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts'], ['settings', 'copy-prompt', 'feedback', 'usage'], ['feedback']),
+      { top: ['inbox', 'plans', 'later-item', 'search', 'new-message', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts'], bottom: ['settings', 'copy-prompt', 'feedback', 'usage', 'bogus'], hidden: ['later-item', 'feedback'] },
+      layout(['inbox', 'plans', 'search', 'new-message', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts'], ['settings', 'copy-prompt', 'feedback', 'usage'], ['feedback']),
     ],
     [
       'an item named twice counts once, where it first appears',
-      { top: ['search', 'new-message', 'inbox', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts', 'feedback'], bottom: ['copy-prompt', 'feedback', 'usage', 'settings'], hidden: [] },
-      layout(['search', 'new-message', 'inbox', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts', 'feedback'], ['copy-prompt', 'usage', 'settings']),
+      { top: ['search', 'new-message', 'inbox', 'plans', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts', 'feedback'], bottom: ['copy-prompt', 'feedback', 'usage', 'settings'], hidden: [] },
+      layout(['search', 'new-message', 'inbox', 'plans', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts', 'feedback'], ['copy-prompt', 'usage', 'settings']),
     ],
     [
       'Inbox and Settings never read as hidden',
@@ -64,12 +64,12 @@ describe('reading a saved layout', () => {
     [
       'an item the layout does not name (one an older build never saved) takes its default place, after its default neighbour',
       { top: ['reviews', 'inbox', 'search', 'new-message', 'board', 'drafts'], bottom: ['settings', 'copy-prompt', 'usage'], hidden: [] },
-      layout(['reviews', 'inbox', 'search', 'new-message', 'board', 'scheduled', 'shape', 'artifacts', 'drafts'], ['settings', 'copy-prompt', 'feedback', 'usage']),
+      layout(['reviews', 'inbox', 'plans', 'search', 'new-message', 'board', 'scheduled', 'shape', 'artifacts', 'drafts'], ['settings', 'copy-prompt', 'feedback', 'usage']),
     ],
     [
       'a missing item whose default neighbours all moved to the other stack goes before the next one that stayed, else last',
       { top: ['inbox', 'drafts'], bottom: ['search', 'new-message', 'board', 'reviews', 'copy-prompt', 'feedback', 'usage', 'settings'], hidden: [] },
-      layout(['inbox', 'scheduled', 'shape', 'artifacts', 'drafts'], ['search', 'new-message', 'board', 'reviews', 'copy-prompt', 'feedback', 'usage', 'settings']),
+      layout(['inbox', 'plans', 'scheduled', 'shape', 'artifacts', 'drafts'], ['search', 'new-message', 'board', 'reviews', 'copy-prompt', 'feedback', 'usage', 'settings']),
     ],
     [
       'non-strings in a list are skipped',
@@ -162,23 +162,23 @@ describe('showing and hiding', () => {
 });
 
 describe('moving', () => {
-  const noBoard = (item: InboxSidebarItem) => item !== 'board' && item !== 'scheduled' && item !== 'shape';
+  const noBoard = (item: InboxSidebarItem) => item !== 'plans' && item !== 'board' && item !== 'scheduled' && item !== 'shape';
   const cases: [string, () => InboxSidebarLayout, InboxSidebarItem[], InboxSidebarItem[]][] = [
-    ['Move up', () => inboxSidebarStep(D, 'reviews', -1), ['search', 'new-message', 'inbox', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts'], [...D.bottom]],
-    ['Move down', () => inboxSidebarStep(D, 'search', 1), ['new-message', 'search', 'inbox', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], [...D.bottom]],
+    ['Move up', () => inboxSidebarStep(D, 'reviews', -1), ['search', 'new-message', 'inbox', 'plans', 'board', 'scheduled', 'shape', 'reviews', 'artifacts', 'drafts'], [...D.bottom]],
+    ['Move down', () => inboxSidebarStep(D, 'search', 1), ['new-message', 'search', 'inbox', 'plans', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], [...D.bottom]],
     ['Move up at the top of a stack does nothing', () => inboxSidebarStep(D, 'search', -1), [...D.top], [...D.bottom]],
     ['Move down at the end of a stack does nothing (Move to bottom crosses)', () => inboxSidebarStep(D, 'settings', 1), [...D.top], [...D.bottom]],
     [
       'Move up skips an item this Inbox does not draw (Board off), which keeps its place',
       () => inboxSidebarStep(D, 'artifacts', -1, noBoard),
-      ['search', 'new-message', 'artifacts', 'inbox', 'board', 'scheduled', 'shape', 'reviews', 'drafts'],
+      ['search', 'new-message', 'artifacts', 'inbox', 'plans', 'board', 'scheduled', 'shape', 'reviews', 'drafts'],
       [...D.bottom],
     ],
-    ['Move to bottom: the start of the bottom stack', () => inboxSidebarToStack(D, 'board', 'bottom'), ['search', 'new-message', 'inbox', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], ['board', ...D.bottom]],
+    ['Move to bottom: the start of the bottom stack', () => inboxSidebarToStack(D, 'board', 'bottom'), ['search', 'new-message', 'inbox', 'plans', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], ['board', ...D.bottom]],
     ['Move to top: the end of the top stack', () => inboxSidebarToStack(D, 'settings', 'top'), [...D.top, 'settings'], ['copy-prompt', 'feedback', 'usage']],
     ['Move to top of an item already there does nothing', () => inboxSidebarToStack(D, 'inbox', 'top'), [...D.top], [...D.bottom]],
-    ['a drag into the other stack at a place', () => inboxSidebarMove(D, 'search', 'bottom', 2), ['new-message', 'inbox', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], ['copy-prompt', 'feedback', 'search', 'usage', 'settings']],
-    ['a drag past the end lands last', () => inboxSidebarMove(D, 'inbox', 'bottom', 99), ['search', 'new-message', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], [...D.bottom, 'inbox']],
+    ['a drag into the other stack at a place', () => inboxSidebarMove(D, 'search', 'bottom', 2), ['new-message', 'inbox', 'plans', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], ['copy-prompt', 'feedback', 'search', 'usage', 'settings']],
+    ['a drag past the end lands last', () => inboxSidebarMove(D, 'inbox', 'bottom', 99), ['search', 'new-message', 'plans', 'board', 'scheduled', 'shape', 'artifacts', 'reviews', 'drafts'], [...D.bottom, 'inbox']],
     ['the logo never moves', () => inboxSidebarMove(D, 'logo', 'bottom', 0), [...D.top], [...D.bottom]],
     ['the Settings row\'s buttons never move', () => inboxSidebarToStack(D, 'theme', 'top'), [...D.top], [...D.bottom]],
   ];
@@ -193,7 +193,7 @@ describe('moving', () => {
     const noReviews = (item: InboxSidebarItem) => item !== 'reviews' && item !== 'artifacts';
     // Artifacts and Reviews are off: Drafts moves up past Shape (the row drawn above it), and they stay where they were.
     const next = inboxSidebarStep(D, 'drafts', -1, noReviews);
-    expect(next.top).toEqual(['search', 'new-message', 'inbox', 'board', 'scheduled', 'drafts', 'shape', 'artifacts', 'reviews']);
+    expect(next.top).toEqual(['search', 'new-message', 'inbox', 'plans', 'board', 'scheduled', 'drafts', 'shape', 'artifacts', 'reviews']);
     expect(inboxSidebarRead(next)).toEqual(next);
   });
   test('Move up / Move down say when they have nowhere to go', () => {
