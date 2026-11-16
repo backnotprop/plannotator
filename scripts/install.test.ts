@@ -15,6 +15,8 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  readlinkSync,
+  statSync,
   rmSync,
   symlinkSync,
   utimesSync,
@@ -3013,6 +3015,24 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       expect(out.trimEnd().endsWith("Refusing to install.")).toBe(true);
       expect(code).toBe(1);
       expect(existsSync(join(sandbox.home, ".local", "bin", "plannotator"))).toBe(false);
+    });
+
+    test("enables Codex hooks through a relative config symlink, preserving its target mode", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", codexHome: true });
+      const config = join(sandbox.home, ".codex", "config.toml");
+      const target = join(sandbox.home, "managed-codex.toml");
+      try {
+        writeFileSync(target, "[features]\nhooks = false\n", { mode: 0o640 });
+        rmSync(config);
+        symlinkSync("../managed-codex.toml", config);
+        const result = runInstallSh(sandbox, ["--version", "v99.9.9", "--non-interactive", "--no-extras", "--skip-skills"]);
+        expect(result.code, result.out).toBe(0);
+        expect(Bun.TOML.parse(readFileSync(target, "utf8"))).toEqual({ features: { hooks: true } });
+        expect(readlinkSync(config)).toBe("../managed-codex.toml");
+        expect(statSync(target).mode & 0o777).toBe(0o640);
+      } finally {
+        rmSync(join(sandbox.home, ".."), { recursive: true, force: true });
+      }
     });
 
     test("M2: a foreign \"codex\": true outside skipInstall (plus explicit false inside) does NOT skip", () => {

@@ -1659,8 +1659,18 @@ CODEX_CONFIG_EOF
             return 1
         fi
 
-        tmp_config="$(mktemp)"
-        if awk '
+        # Keep symlink-managed dotfiles connected to their original config.
+        local config_file="$CODEX_CONFIG" link_target tmp_config
+        while [ -L "$config_file" ]; do
+            link_target="$(readlink "$config_file")" || return 1
+            case "$link_target" in
+                /*) config_file="$link_target" ;;
+                *) config_file="$(dirname "$config_file")/$link_target" ;;
+            esac
+        done
+
+        tmp_config="$(mktemp "${config_file}.XXXXXX")" || return 1
+        if cp -p "$config_file" "$tmp_config" && awk '
             function is_table(line) {
                 return line ~ /^[[:space:]]*\[[^]]+\][[:space:]]*$/
             }
@@ -1696,8 +1706,7 @@ CODEX_CONFIG_EOF
                     print "hooks = true"
                 }
             }
-        ' "$CODEX_CONFIG" > "$tmp_config"; then
-            mv "$tmp_config" "$CODEX_CONFIG"
+        ' "$config_file" > "$tmp_config" && mv "$tmp_config" "$config_file"; then
             echo "Enabled Codex hooks in ${CODEX_CONFIG}"
             return 0
         fi
