@@ -290,16 +290,23 @@ async function filesOn(
 	if (!auth.ok) return auth;
 	const api = githubApi(port, host);
 	const path = `/repos/${pull.repo}/pulls/${pull.number}`;
-	const summary = await read(path, pull.repo, pull.number, auth.authorization, api);
-	if (!summary.ok) return summary;
-	const listed = await readFilePages(path, auth.authorization, api);
-	if (!listed.ok) return listed;
-	const files: string[] = [];
-	for (const item of listed.items) {
-		const name = str(item.filename);
-		if (name !== undefined) files.push(name);
+	for (let attempt = 0; attempt < 2; attempt += 1) {
+		const before = await read(path, pull.repo, pull.number, auth.authorization, api);
+		if (!before.ok) return before;
+		const listed = await readFilePages(path, auth.authorization, api);
+		if (!listed.ok) return listed;
+		const after = await read(path, pull.repo, pull.number, auth.authorization, api);
+		if (!after.ok) return after;
+		if (after.headSha !== before.headSha || after.baseSha !== before.baseSha) continue;
+
+		const files: string[] = [];
+		for (const item of listed.items) {
+			const name = str(item.filename);
+			if (name !== undefined) files.push(name);
+		}
+		return { ok: true, files, headSha: after.headSha };
 	}
-	return { ok: true, files, headSha: summary.headSha };
+	return { ok: false, reason: "not_resolvable" };
 }
 
 /** The pull reads for `served` hosts. A pull's `host` (default github.com)

@@ -541,6 +541,37 @@ describe("GitHub picker and pull reads", () => {
 		expect(listed.ok && listed.headSha).toBe(HEAD_A);
 	});
 
+	it("retries a file list if its head or base moved during pagination", async () => {
+		for (const [nextHead, nextBase] of [[HEAD_B, BASE_SHA], [HEAD_A, "d".repeat(40)]] as const) {
+			const gh = fakeProvider();
+			const path = `${API}/repos/acme/web/pulls/48`;
+			gh.on(`GET ${path}`, pull(48, HEAD_A), pull(48, nextHead, nextBase));
+			gh.on(
+				`GET ${path}/files?per_page=100&page=1`,
+				() => json(200, [authFile]),
+				() => json(200, [{ ...authFile, filename: "src/session.ts" }]),
+			);
+			const port = makePort(gh.fetch, { "github github.com": installation });
+			expect(await listPullFiles({ repo: "acme/web", number: 48 }, port)).toEqual({
+				ok: true,
+				files: ["src/session.ts"],
+				headSha: nextHead,
+			});
+		}
+	});
+
+	it("refuses to report a file list if the PR moves on both reads", async () => {
+		const gh = fakeProvider();
+		const path = `${API}/repos/acme/web/pulls/49`;
+		gh.on(`GET ${path}`, pull(49, HEAD_A), pull(49, HEAD_B), pull(49, HEAD_B), pull(49, HEAD_A));
+		gh.on(`GET ${path}/files?per_page=100&page=1`, () => json(200, [authFile]));
+		const port = makePort(gh.fetch, { "github github.com": installation });
+		expect(await listPullFiles({ repo: "acme/web", number: 49 }, port)).toEqual({
+			ok: false,
+			reason: "not_resolvable",
+		});
+	});
+
 	it("G8: renames, additions, deletions and a pure rename carry git's headers", async () => {
 		const gh = fakeProvider();
 		const path = `${API}/repos/acme/web/pulls/46`;
