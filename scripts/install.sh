@@ -870,6 +870,10 @@ release_download_url_allowed() {
 
 release_download_base="https://github.com/${REPO}/releases/download"
 release_download_override="${PLANNOTATOR_RELEASE_DOWNLOAD_URL:-}"
+# Read the value as update-prepare does (trim, then drop trailing slashes), so
+# the binary and the checksum Plannotator pinned come from the same place.
+release_download_override="${release_download_override#"${release_download_override%%[![:space:]]*}"}"
+release_download_override="${release_download_override%"${release_download_override##*[![:space:]]}"}"
 while [ "${release_download_override%/}" != "$release_download_override" ]; do
     release_download_override="${release_download_override%/}"
 done

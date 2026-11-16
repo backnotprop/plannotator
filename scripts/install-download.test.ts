@@ -457,17 +457,21 @@ describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh
 });
 
 describe.skipIf(process.platform === "win32" || !REAL_CURL || !BASH)("install.sh downloads from PLANNOTATOR_RELEASE_DOWNLOAD_URL (real curl, local server)", () => {
-  test("a loopback mirror serves the binary and its .sha256; github.com is never asked", async () => {
-    const server = await startReleaseServer([]);
-    const r = await runInstallSh(server, { PLANNOTATOR_RELEASE_DOWNLOAD_URL: `${server.origin}/mirror/releases/download/` });
-    expect(r.code).toBe(0);
-    expect(r.installed.equals(BINARY)).toBe(true);
-    const releasePaths = server.requests.map((q) => q.path).filter((path) => path.includes("/releases/download/"));
-    expect(releasePaths.some((path) => path.endsWith(".sha256"))).toBe(true);
-    expect(server.attempts()).toHaveLength(1);
-    expect(releasePaths.every((path) => path.startsWith("/mirror/releases/download/v99.9.9/plannotator-"))).toBe(true);
-    expect(r.curlCalls.some((call) => call.includes("github.com"))).toBe(false);
-  }, 30_000);
+  // Padded with spaces too: update-prepare trims the value before it fetches the
+  // pinned .sha256, so install.sh must read the same mirror out of it.
+  for (const pad of ["", "  "]) {
+    test(`a loopback mirror serves the binary and its .sha256; github.com is never asked${pad ? " (value padded with spaces)" : ""}`, async () => {
+      const server = await startReleaseServer([]);
+      const r = await runInstallSh(server, { PLANNOTATOR_RELEASE_DOWNLOAD_URL: `${pad}${server.origin}/mirror/releases/download/${pad}` });
+      expect(r.code).toBe(0);
+      expect(r.installed.equals(BINARY)).toBe(true);
+      const releasePaths = server.requests.map((q) => q.path).filter((path) => path.includes("/releases/download/"));
+      expect(releasePaths.some((path) => path.endsWith(".sha256"))).toBe(true);
+      expect(server.attempts()).toHaveLength(1);
+      expect(releasePaths.every((path) => path.startsWith("/mirror/releases/download/v99.9.9/plannotator-"))).toBe(true);
+      expect(r.curlCalls.some((call) => call.includes("github.com"))).toBe(false);
+    }, 30_000);
+  }
 
   test("a value Plannotator itself refuses (plain http off loopback, a user name) leaves the download on GitHub", async () => {
     for (const refused of ["http://mirror.example/dl", "https://user@mirror.example/dl", "ftp://127.0.0.1/dl"]) {
