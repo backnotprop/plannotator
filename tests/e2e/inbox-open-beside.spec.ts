@@ -7,7 +7,8 @@
  *   stays, each its own pane with its own header, reply box and ✕, the person in the new one. A message arriving in
  *   the other pane stays unread there until the person clicks into that pane. The list's edge hides the list (the
  *   pair takes the window) and the first pane's ‹ Inbox brings it back. Closing the second pane is today's one pane.
- * - On, at 1440 with the sidebar docked: no room for the list and two threads, so no item.
+ * - On, at 1440 with the sidebar docked: offered; choosing it folds the sidebar on screen (the person's choice not
+ *   written) and closing the second pane brings it back. At 1240 the list and two threads cannot fit: no item.
  * - Off (another Inbox, no key): the item does not exist.
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -141,15 +142,43 @@ test('two threads side by side after the list: each its own pane, unread stays i
   await expect(page).toHaveURL(new RegExp(`#thread=${a}`));
 });
 
-test('at 1440 with the sidebar docked the list and two threads do not fit: no Open beside', async ({ page }) => {
-  await page.setViewportSize({ width: 1440, height: 900 });
-  // Two fresh threads: the first test read the others, and read rows can fold away under Quiet.
+/** Two fresh threads: the first test read the others, and read rows can fold away under Quiet. */
+async function freshPair(tag: string): Promise<[string, string]> {
   const fresh: string[] = [];
-  for (const [n, subject] of ['Refund retries capped', 'Payout report ready'].entries()) {
-    const sent = await on.agent.send({ project_path: on.path, subject, body: `${subject}. Nothing to answer.`, agent_session: `ses_beside_narrow_${n}` } as Parameters<SimAgent['send']>[0]);
+  for (const [n, subject] of [`Refund retries capped (${tag})`, `Payout report ready (${tag})`].entries()) {
+    const sent = await on.agent.send({ project_path: on.path, subject, body: `${subject}. Nothing to answer.`, agent_session: `ses_beside_${tag}_${n}` } as Parameters<SimAgent['send']>[0]);
     fresh.push(String(sent.thread_id));
   }
-  const [a, b] = fresh as [string, string];
+  return fresh as [string, string];
+}
+
+const sidebar = (page: Page) => page.locator('.pn-inbox .ib-sb');
+
+test('at 1440 with the sidebar docked: offered; choosing it folds the sidebar, and closing the second pane brings it back', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const [a, b] = await freshPair('docked');
+  await openThread(page, on, a);
+  await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+  await row(page, b).click({ button: 'right' });
+  await expect(besideItem(page)).toHaveText('Open beside');
+  await besideItem(page).click();
+  await expect(pane(page, b)).toBeVisible();
+  await expect(pane(page, a)).toBeVisible();
+  // The sidebar folded for room: the list stays left of the two, nothing covers it.
+  await expect(sidebar(page)).toHaveAttribute('data-state', 'collapsed');
+  await expect(page.locator('.ib-listcol')).toBeVisible();
+  const list = (await page.locator('.ib-listcol').boundingBox())!;
+  expect(list.x + list.width).toBeLessThanOrEqual((await pane(page, a).boundingBox())!.x + 1);
+  // The person's choice was not written: a reload would draw it docked.
+  expect(await page.evaluate(() => document.cookie)).not.toContain('plannotator-inbox-sidebar-open=false');
+  await pane(page, b).getByRole('button', { name: 'Close the thread' }).click();
+  await expect(pane(page, b)).toHaveCount(0);
+  await expect(sidebar(page)).toHaveAttribute('data-state', 'expanded');
+});
+
+test('a window where the list and two threads cannot fit even with the sidebar folded: no Open beside', async ({ page }) => {
+  await page.setViewportSize({ width: 1240, height: 900 });
+  const [a, b] = await freshPair('narrow');
   await openThread(page, on, a);
   await row(page, b).click({ button: 'right' });
   await expect(page.locator('[data-row-menu]')).toBeVisible();

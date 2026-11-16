@@ -2,20 +2,24 @@
  * "Open beside" (panes/beside.ts, useRoutePanes.ts) as the window mounts it: the rows' real menu (RowMenu.tsx) under
  * the panes' context, and an address the test keeps as the window's route.
  *
- * What regresses: the item showing with the switch off, or on the thread already open, or without room for the list and
- * two threads beside the docked sidebar, or in a window too narrow for
- * two panes; choosing it not opening the second pane beside the first, or not putting the person in it; closing
- * either pane not coming back to today's one pane; Escape (the address closed) closing both panes.
+ * What regresses: the item showing with the switch off, or on the thread already open, or in a window without room for
+ * the list and two threads even with the sidebar folded, or missing where there is that room but a docked sidebar
+ * takes it (1440 px); choosing it not opening the second pane beside the first, or not putting the person in it, or not
+ * folding a docked sidebar that leaves too little room (panes/sidebarHold.ts); closing the second pane not bringing
+ * that sidebar back, or opening a sidebar the person folded; closing either pane not coming back to today's one pane;
+ * Escape (the address closed) closing both panes.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { act, useState } from 'react';
+import { act, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { Route } from '../app/route';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH } from '../stack';
 import { BesideContext, besideOf, besideRoom } from './beside';
 import type { PaneSet } from './model';
+import { useSidebarHold } from './sidebarHold';
 import { useRoutePanes, type WindowPanes } from './useRoutePanes';
 
 const hasDom = typeof document !== 'undefined';
@@ -42,18 +46,44 @@ function setWidth(width: number) {
 const rowOf = (id: string) =>
   ({ thread_id: id, subject: `Thread ${id}`, section: 'new', unread: true, unseen: 1, answered_not_sent: false, resolved_at: null, read_at: null, questions: { open: 0, picked: 0, stopped: false, holds_up: [] } }) as unknown as InboxListRow;
 
-/** The window: the address (`thread`), its panes, and the list's menu over rows a and b. */
-function draw(switchOn: boolean, start: string | null = 'thr_a') {
-  const out: { panes: WindowPanes | null; thread: string | null; go: (thread: string | null) => void } = { panes: null, thread: start, go: () => {} };
+/** The docked sidebar's width (shell/sidebar.tsx's default). */
+const SIDEBAR = 232;
+
+/**
+ * The window: the address (`thread`), its panes, the list's menu over rows a and b, and a docked sidebar `SIDEBAR` px
+ * wide that the person keeps open (`sidebarOpen`) or folded. The window is as wide as `window.innerWidth`.
+ */
+function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = true) {
+  const out = { panes: null as WindowPanes | null, thread: start, go: (_thread: string | null) => {}, sidebarHeld: false, sidebarOpen, toggleSidebar: (_open: boolean) => {} };
   function Window() {
     const [thread, setThread] = useState<string | null>(start);
     out.thread = thread;
     out.go = setThread;
     const panes = useRoutePanes(thread, true, switchOn, (next) => setThread(next));
     out.panes = panes;
+    const route = { page: 'inbox', thread } as Route;
+    const routeRef = useRef(route);
+    routeRef.current = route;
+    const rootRef = useRef<HTMLDivElement | null>(null);
+    const [open, setOpen] = useState(sidebarOpen);
+    const hold = useSidebarHold(rootRef, routeRef, route, panes.panes.panes.length, open);
+    out.sidebarHeld = hold.held;
+    out.sidebarOpen = open;
+    // The sidebar's own toggle, as App.tsx wires it: the person's choice, which ends a fold for room.
+    out.toggleSidebar = (next) => {
+      hold.setHeld(false);
+      setOpen(next);
+    };
+    const measured = (el: HTMLDivElement | null, width: () => number) => {
+      if (el) el.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: width(), height: 900 });
+    };
     return (
-      <div className="pn-inbox">
-        <BesideContext.Provider value={besideOf(panes, thread)}>
+      <div className="pn-inbox" ref={(el) => {
+        rootRef.current = el;
+        measured(el, () => window.innerWidth);
+      }}>
+        <div className="ib-sb-inner" ref={(el) => measured(el, () => SIDEBAR)} />
+        <BesideContext.Provider value={besideOf(panes, thread, () => hold.holdIfTight(2))}>
           <ThreadRowMenu className="ib-lbody" rowOf={(id) => (['thr_a', 'thr_b'].includes(id) ? rowOf(id) : null)} canMarkRead={true} held={thread !== null} onAction={() => {}} onTarget={() => {}}>
             {['thr_a', 'thr_b'].map((id) => (
               <div key={id} className="ib-rw" data-row={id}>
@@ -134,7 +164,7 @@ describe.skipIf(!hasDom)('Open beside', () => {
     expect(w.thread).toBe('thr_b');
   });
 
-  test('offered only while the list and two 440 px threads fit beside the docked sidebar as it is', async () => {
+  test('offered while the list and two 440 px threads fit with the sidebar folded; narrower, none', async () => {
     const room = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH;
     setWidth(room - 1);
     draw(true);
@@ -142,23 +172,60 @@ describe.skipIf(!hasDom)('Open beside', () => {
     expect(besideItem()).toBeNull();
     act(() => root!.unmount());
     host!.remove();
-    setWidth(room + 300);
+    // 1440 px with the sidebar docked: the two fit once it folds, so the item is there.
+    setWidth(1440);
+    expect(1440 - SIDEBAR).toBeLessThan(room);
     draw(true);
-    // A docked sidebar 301 px wide: the list and two threads no longer fit beside it.
-    const sidebar = document.createElement('div');
-    sidebar.className = 'ib-sb';
-    sidebar.dataset.state = 'expanded';
-    const inner = document.createElement('div');
-    inner.className = 'ib-sb-inner';
-    inner.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, y: 0, width: 301, height: 800 });
-    sidebar.appendChild(inner);
-    host!.querySelector('.pn-inbox')!.prepend(sidebar);
-    await openMenu('thr_b');
-    expect(besideItem()).toBeNull();
-    act(() => void document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-    sidebar.dataset.state = 'collapsed';
     await openMenu('thr_b');
     expect(besideItem()?.textContent).toBe('Open beside');
+  });
+
+  test('at 1440 with the sidebar docked, choosing it folds the sidebar on screen; closing the second pane brings it back', async () => {
+    setWidth(1440);
+    const w = draw(true);
+    expect(w.sidebarHeld).toBe(false);
+    await openMenu('thr_b');
+    await act(async () => besideItem()!.click());
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
+    expect(w.sidebarHeld).toBe(true);
+    act(() => w.panes!.closePane(w.panes!.panes.panes[1]!.id));
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a'], active: 0 });
+    expect(w.sidebarHeld).toBe(false);
+  });
+
+  test('with room for the sidebar too, nothing folds', async () => {
+    setWidth(LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + SIDEBAR);
+    const w = draw(true);
+    await openMenu('thr_b');
+    await act(async () => besideItem()!.click());
+    expect(w.panes!.panes.panes).toHaveLength(2);
+    expect(w.sidebarHeld).toBe(false);
+  });
+
+  test('a sidebar the person folded stays theirs: Open beside folds nothing, and closing the second pane opens nothing', async () => {
+    setWidth(1440);
+    const w = draw(true, 'thr_a', false);
+    await openMenu('thr_b');
+    await act(async () => besideItem()!.click());
+    expect(w.panes!.panes.panes).toHaveLength(2);
+    expect(w.sidebarHeld).toBe(false);
+    act(() => w.panes!.closePane(w.panes!.panes.panes[1]!.id));
+    expect(w.panes!.panes.panes).toHaveLength(1);
+    expect(w.sidebarHeld).toBe(false);
+  });
+
+  test('folded for room, then opened and folded again by the person: closing the second pane keeps it folded', async () => {
+    setWidth(1440);
+    const w = draw(true);
+    await openMenu('thr_b');
+    await act(async () => besideItem()!.click());
+    expect(w.sidebarHeld).toBe(true);
+    act(() => w.toggleSidebar(true));
+    act(() => w.toggleSidebar(false));
+    expect(w.sidebarHeld).toBe(false);
+    act(() => w.panes!.closePane(w.panes!.panes.panes[1]!.id));
+    expect(w.sidebarOpen).toBe(false);
+    expect(w.sidebarHeld).toBe(false);
   });
 
   test('a window too narrow for two panes offers none, and narrowing to it leaves the active pane alone', async () => {

@@ -1,12 +1,14 @@
 import { createContext, useContext, useEffect, useState } from 'react';
 import type { SettingsModel } from '../api';
-import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters } from '../stack';
+import { THREAD_BESIDE_FILE_WIDTH, paneGutters } from '../stack';
+import { listAndThreads } from './sidebarHold';
 import type { WindowPanes } from './useRoutePanes';
 
 /**
  * "Open beside" (config.json `inboxSplitView`, off unless turned on; no Settings row): a thread opens in a second pane
  * next to the one open, the two sharing the room beside the list (the list's edge hides it, as for one thread, and
- * they take the window). The rows' menu reads it from here, so no list or menu takes a prop for it.
+ * they take the window; a docked sidebar without room folds while the two are open). The rows' menu reads it from
+ * here, so no list or menu takes a prop for it.
  */
 export interface Beside {
   /** "Open beside" is offered for `threadId`: another thread is open, there is room, and only one pane shows. */
@@ -26,14 +28,14 @@ export const useBeside = (): Beside | null => useContext(BesideContext);
 export const besideRoom = (gutters: number): number => 2 * THREAD_BESIDE_FILE_WIDTH + gutters;
 
 /**
- * Whether the list and two threads fit beside the docked sidebar as it is now: the list's narrowest column, two 440 px
- * threads and the gutters, 1292 px with the Soft look's (the window less the sidebar). Only then is "Open beside"
- * offered; a pair that loses that room later (the sidebar opened, the window narrowed) covers the list, as one thread does.
+ * Whether the list and two threads fit in the window with the sidebar folded: the list's narrowest column, two 440 px
+ * threads and the gutters, 1292 px with the Soft look's. Only then is "Open beside" offered. A docked sidebar that
+ * leaves too little room folds on screen when the item is chosen (panes/sidebarHold.ts) and comes back when the second
+ * pane closes; a pair that loses its room later (the person opens the sidebar, the window narrows) covers the list, as
+ * one thread does.
  */
 export function besideFits(): boolean {
-  if (typeof window === 'undefined') return false;
-  const sidebar = document.querySelector('.pn-inbox .ib-sb[data-state="expanded"] .ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-  return window.innerWidth - sidebar >= LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + paneGutters(null, 2);
+  return typeof window !== 'undefined' && window.innerWidth >= listAndThreads(2);
 }
 
 /** Whether the window is wide enough for two panes now, following its width. */
@@ -52,10 +54,16 @@ export function useBesideRoom(): boolean {
 /** The switch as the settings read sends it (server: inbox.ts, present only while on). */
 export const splitViewOn = (settings: SettingsModel | null): boolean => (settings as { split_view?: { on?: unknown } } | null)?.split_view?.on === true;
 
-/** What the rows' menu offers: "Open beside" on another thread than `open` (null: nothing open a pane can split from). */
-export function besideOf(panes: WindowPanes, open: string | null): Beside {
+/**
+ * What the rows' menu offers: "Open beside" on another thread than `open` (null: nothing open a pane can split from).
+ * `makeRoom` runs as it opens: the window folds a docked sidebar that leaves too little room (panes/sidebarHold.ts).
+ */
+export function besideOf(panes: WindowPanes, open: string | null, makeRoom?: () => void): Beside {
   return {
     offers: (threadId) => panes.allowed && panes.panes.panes.length === 1 && open !== null && open !== threadId && besideFits(),
-    open: panes.openBeside,
+    open: (threadId) => {
+      makeRoom?.();
+      panes.openBeside(threadId);
+    },
   };
 }

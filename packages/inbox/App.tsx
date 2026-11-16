@@ -127,6 +127,7 @@ import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SE
 import { paneThread } from './panes/model';
 import { PaneRow, paneRoute } from './panes/PaneRow';
 import { BesideContext, besideOf, splitViewOn } from './panes/beside';
+import { useSidebarHold } from './panes/sidebarHold';
 import { createPanesOnScreen } from './panes/onScreen';
 import { usePaneOpening, usePaneReads, useShownReads } from './panes/usePaneOpens';
 import { useActiveHeld, useRoutePanes } from './panes/useRoutePanes';
@@ -200,7 +201,7 @@ import { latestAgentSeq } from './seenOnSight';
 import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
 import { installPasteFollowsField } from './pasteTarget';
 import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
-import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
+import { useStack } from './stack';
 import { usePrPaneFocus } from './pulls/prPaneFocus';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
@@ -2458,11 +2459,8 @@ function Inbox() {
   // (synthetic ⌘V) text otherwise. Remove once Chrome 157 is stable (pasteInsert.ts).
   useEffect(() => installPlainTextPaste(), []);
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
-  // `‹ Inbox` from a file beside the thread in a window with room for the list and the thread but not for
-  // the sidebar too (about 920 to 1050 px): the sidebar stays closed on screen so the list shows beside the
-  // thread, as the open file kept it, without writing the person's choice. It comes back once there is room,
-  // when the thread closes, or when the person opens it.
-  const [sidebarHeld, setSidebarHeld] = useState(false);
+  // The docked sidebar folded on screen for room, the person's choice unchanged (‹ Inbox from a file, leaving full screen, Open beside): panes/sidebarHold.ts.
+  const { held: sidebarHeld, setHeld: setSidebarHeld, holdIfTight: holdSidebarIfTight } = useSidebarHold(rootRef, routeRef, route, panes.panes.length, sidebarOpen);
   // The thread in full screen (a click on the list column's edge, or Enter on it): the sidebar and the list hide, without
   // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
   // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
@@ -2478,23 +2476,6 @@ function Inbox() {
   // no thread open. Off by default, and never on a phone or in a window that stacks.
   const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
   const panelView = threadPanelShows(threadPanelOn, { phone, stacked: stack.thread });
-  useEffect(() => {
-    if (!sidebarHeld) return;
-    const check = () => {
-      const now = routeRef.current;
-      if (now.page !== 'inbox' || !now.thread) {
-        setSidebarHeld(false);
-        return;
-      }
-      const root = rootRef.current;
-      if (!root) return;
-      const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-      if (root.getBoundingClientRect().width - sidebar >= LIST_MIN_WIDTH + panes.panes.length * THREAD_BESIDE_FILE_WIDTH + paneGutters(root, panes.panes.length)) setSidebarHeld(false);
-    };
-    check();
-    window.addEventListener('resize', check);
-    return () => window.removeEventListener('resize', check);
-  }, [sidebarHeld, route, panes.panes.length]);
   useLayoutEffect(() => {
     covering.thread = stack.thread;
   }, [stack.thread]);
@@ -4783,17 +4764,6 @@ function Inbox() {
   const sidebarTipBusy = sidebarTip.stage === 'claimed' || sidebarTip.stage === 'open';
   useEffect(() => setLineTipBusy(sidebarTipBusy), [sidebarTipBusy]);
   threadFullRef.current = full;
-  // The list coming back beside the thread (‹ Inbox beside a file, leaving full screen) in a window with room for the
-  // list and the thread but not for the sidebar too: the sidebar stays closed on screen (`sidebarHeld`), so the thread
-  // does not stack over the list it was asked to show.
-  const holdSidebarIfTight = () => {
-    const root = rootRef.current;
-    if (!root || !sidebarOpen) return;
-    const width = root.getBoundingClientRect().width;
-    const sidebar = root.querySelector('.ib-sb-inner')?.getBoundingClientRect().width ?? 0;
-    const room = LIST_MIN_WIDTH + panes.panes.length * THREAD_BESIDE_FILE_WIDTH + paneGutters(null, panes.panes.length);
-    if (width >= room && width - sidebar < room) setSidebarHeld(true);
-  };
   // Every way out of full screen (‹ Inbox, Escape, ⌘B): the sidebar and the list come back as the window has room.
   const leaveFull = () => {
     holdSidebarIfTight();
@@ -5768,7 +5738,7 @@ function Inbox() {
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
-    <BesideContext.Provider value={besideOf(windowPanes, route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null)}>
+    <BesideContext.Provider value={besideOf(windowPanes, route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, () => holdSidebarIfTight(2))}>
     <div
       ref={rootRef}
       className="pn-inbox"
