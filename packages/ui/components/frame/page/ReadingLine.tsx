@@ -121,7 +121,7 @@ export function ReadingLine({
       data-reading-line={older === null ? "newest" : "older"}
       data-older-version-bar={older === null ? undefined : ""}
       className={cn(
-        "flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 text-frame-sm text-muted-foreground md:py-1.5",
+        "flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 px-4 py-2 text-frame-sm text-frame-muted-fg md:py-1.5",
         older !== null && "border-b border-border bg-muted/40",
       )}
     >

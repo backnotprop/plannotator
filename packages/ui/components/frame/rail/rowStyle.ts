@@ -8,7 +8,7 @@ export const SIDEBAR_COLLECTION_NAME_TEXT = "font-normal";
 
 export const ROW =
   "group/row flex h-frame-row w-full items-center gap-1.5 rounded-frame-selection pr-2 text-left text-frame-sm " +
-  "text-muted-foreground transition-colors hover:text-foreground " +
+  "text-frame-muted-fg transition-colors hover:text-foreground " +
   `${HOVER_QUIET} ${FOCUS_RING} ` +
   "[content-visibility:auto] [contain-intrinsic-size:auto_28px] " +
   "[[data-mobile=true]_&]:h-11";

@@ -80,7 +80,7 @@ export function CollapsibleEdge({
           side="bottom"
           sideOffset={14}
           data-frame-motion="fade"
-          className="text-muted-foreground"
+          className="text-frame-muted-fg"
         >
           Click to collapse, drag to resize
         </TooltipContent>

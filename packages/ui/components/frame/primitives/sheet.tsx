@@ -118,7 +118,7 @@ function SheetDescription({ className, ...props }: SheetPrimitive.Description.Pr
   return (
     <SheetPrimitive.Description
       data-slot="sheet-description"
-      className={cn("text-muted-foreground text-frame-sm", className)}
+      className={cn("text-frame-muted-fg text-frame-sm", className)}
       {...props}
     />
   );

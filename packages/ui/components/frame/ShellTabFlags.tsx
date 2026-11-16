@@ -22,7 +22,7 @@ function Flag({
       aria-label={ariaLabel}
       aria-expanded={false}
       className={cn(
-        "flex h-9 w-7 items-center justify-center rounded-r-frame-control border border-l-0 border-border/50 bg-card/80 text-muted-foreground backdrop-blur-sm transition-colors hover:bg-card hover:text-foreground frame-reduce-transparency:bg-card frame-reduce-transparency:backdrop-blur-none",
+        "flex h-9 w-7 items-center justify-center rounded-r-frame-control border border-l-0 border-border/50 bg-card/80 text-frame-muted-fg backdrop-blur-sm transition-colors hover:bg-card hover:text-foreground frame-reduce-transparency:bg-card frame-reduce-transparency:backdrop-blur-none",
         FOCUS_RING,
       )}
     >

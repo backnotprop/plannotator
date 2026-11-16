@@ -32,7 +32,7 @@ export function PagesRailHead({
         } as Record<string, unknown>)
       )}
       {label !== null && meta !== null && (
-        <div data-pages-rail-meta="" className="truncate pb-1 pl-7 pr-2 text-frame-xs text-muted-foreground">
+        <div data-pages-rail-meta="" className="truncate pb-1 pl-7 pr-2 text-frame-xs text-frame-muted-fg">
           {meta}
         </div>
       )}

@@ -4,7 +4,7 @@ import { FOCUS_RING, HOVER_QUIET } from "../lib/recipes";
 import { cn } from "../lib/utils";
 
 export const RAIL_ROW = cn(
-  "flex h-frame-row w-full items-center gap-1.5 rounded-frame-selection px-2 text-frame-sm font-normal text-muted-foreground transition-colors hover:text-foreground",
+  "flex h-frame-row w-full items-center gap-1.5 rounded-frame-selection px-2 text-frame-sm font-normal text-frame-muted-fg transition-colors hover:text-foreground",
   HOVER_QUIET,
   FOCUS_RING,
 );

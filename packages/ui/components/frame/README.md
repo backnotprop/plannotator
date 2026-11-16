@@ -35,7 +35,7 @@ In the host's Tailwind v4 entry, after Tailwind and the theme:
 @import "@plannotator/ui/frame.css";
 ```
 
-`frame.css` declares the frame's theme names (`text-frame-sm`, `h-frame-row`, `rounded-frame-pane`, `bg-frame-selected` and the rest), the `frame-dark` and `frame-reduce-transparency` variants, the card layout, and the sheet and tooltip motion. It also points Tailwind at the frame's own files, so no `@source` line is needed for them. It does not change the package themes: it defines only `--frame-*` names and rules on the frame's own attributes.
+`frame.css` declares the frame's theme names (`text-frame-sm`, `h-frame-row`, `rounded-frame-pane`, `bg-frame-selected` and the rest), the `frame-dark` and `frame-reduce-transparency` variants, the card layout, and the sheet and tooltip motion. It also points Tailwind at the frame's own files, so no `@source` line is needed for them. It does not change the package themes or a host document inside the frame: it defines only `--frame-*` names (and the `frame-*` theme names above) and rules on the frame's own attributes, and redefines no host token. The frame's own quiet text uses `--frame-muted-fg` (`text-frame-muted-fg`), which follows `--muted-foreground` and is a little brighter inside a dark pane; the host's `--muted-foreground` stays as it is.
 
 ### Host tokens it reads
 
@@ -45,7 +45,7 @@ Every `--frame-*` value can be set by the host.
 
 ### Fixed or theme colours
 
-By default the selected row, the hover fill and the subtle border (`--frame-selected`, `--frame-surface-hover`, `--frame-border-subtle`) are fixed colours: a violet selection and a cool grey hover and border, whatever the theme. The selected row's text (`--frame-selected-fg`) is the theme's `--primary`.
+By default the selected row, the hover fill and the subtle border (`--frame-selected`, `--frame-surface-hover`, `--frame-border-subtle`) are fixed colours: a violet selection and a cool grey hover and border, whatever the theme. The selected row's text (`--frame-selected-fg`) is fixed too: the frame's own violet, `oklch(0.72 0.15 280)` dark and `oklch(0.50 0.25 280)` light, not the host's `--primary`, so its contrast does not depend on the host theme. On the selected fill over Plannotator's card (`oklch(0.22 0.02 260)` dark, white light) it measures 5.45:1 dark and 5.97:1 light (WCAG 2, composited in sRGB).
 
 `<FrameGround colors="theme">` sets `data-frame-colors="theme"`, and under it the three are mixed from the theme instead:
 
