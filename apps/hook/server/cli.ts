@@ -252,10 +252,10 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  *
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
- * runs; `shape`; and `system`, System's drawing commands, until the Inbox's
- * System surfaces ship.
+ * runs; `shape`; `system`, System's drawing commands, until the Inbox's
+ * System surfaces ship; and `plans`, Plans' switch and list, until its screens ship.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system", "plans"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -287,6 +287,9 @@ export const CARD_COMMAND_USAGE = [
   "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
 ].join("\n");
+
+/** `plannotator plans …` (plans-command.ts): Plans' switch and list. Unreleased (HIDDEN_SUBCOMMANDS): the usage line only. */
+export const PLANS_COMMAND_USAGE = ["Usage:", "  plannotator plans [off | list]"].join("\n");
 
 /**
  * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
@@ -903,6 +906,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
   shape: SHAPE_COMMAND_USAGE,
+  plans: PLANS_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
   system: SYSTEM_COMMAND_USAGE,
   "t3-hook": [

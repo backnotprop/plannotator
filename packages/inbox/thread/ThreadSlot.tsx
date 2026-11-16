@@ -6,9 +6,11 @@ import { NotificationAsk } from '../components/NotificationAsk';
 import { ThreadPane } from '../components/Thread';
 import { ThreadWait } from '../components/ThreadWait';
 import { fullExitFile, fullFromSide } from '../fullScreenOrigin';
+import { useHeldThread } from '../data/queries/thread';
+import type { HeldThread } from '../data/apply/record';
 import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
-import { machineTakes, rowSnoozes, snoozeBlockedBy, threadOutbox } from '../machines';
+import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import { PaneScopeContext } from '../panes/scope';
 import { priorityAction } from '../priority';
@@ -26,6 +28,8 @@ export interface ThreadSlotProps {
   threadId: string | null;
   /** Only the active pane takes the thread keys and counts messages as seen. */
   active: boolean;
+  /** The thread as the window holds it for this pane; absent, the slot reads it from the cache itself. */
+  held?: HeldThread | null;
   host: ThreadSlotHost;
 }
 
@@ -33,8 +37,17 @@ export interface ThreadSlotProps {
  * One thread pane: the "opening…" place until the thread's read lands, then the thread. Its keys, its seen-on-sight
  * and its place on screen are its own, keyed by `paneId`; what it reads from the window it reads by thread id.
  */
-export function ThreadSlot({ paneId, threadId, active, host }: ThreadSlotProps) {
-  const { route, routeRef, thread, phone, stack, full, fromCard, fileOpen, settings, machines, go, leave, close, listTitle } = host;
+export function ThreadSlot({ paneId, threadId, active, held: given, host }: ThreadSlotProps) {
+  const { route, routeRef, phone, stack, full, fromCard, fileOpen, settings, machines, go, leave, close, listTitle } = host;
+  const own = useHeldThread(given === undefined ? threadId : null);
+  const held = given === undefined ? own : given;
+  const thread = held?.thread ?? null;
+  const open = host.paneReads.view(paneId);
+  const load = open.load?.threadId === threadId ? open.load : null;
+  // A linked machine that is away: its line, and the answers held for it, in the thread's place.
+  const owner = threadId ? machines.linked.find((m) => m.id === machineOf(threadId)) : undefined;
+  const away = owner ? threadAwayLine(owner) : null;
+  const awayWait = !!load && !(thread && thread.thread_id === threadId) && (((!!away || !!load.waiting) && load.state === 'failed') || load.state === 'refused');
   const ready = !!threadId && !!thread && thread.thread_id === threadId && !host.rowsPending;
   const scope = useMemo(() => ({ paneId, active }), [paneId, active]);
   const activeRef = useRef(active);
@@ -55,18 +68,18 @@ export function ThreadSlot({ paneId, threadId, active, host }: ThreadSlotProps) 
     <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
           and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
-      {threadId && !ready && ((!phone && !stack.thread) || host.awayWait) && (
+      {threadId && !ready && ((!phone && !stack.thread) || awayWait) && (
         <ThreadWait
           key={threadId}
-          load={host.threadLoad?.threadId === threadId ? host.threadLoad : null}
-          away={host.threadAway}
-          held={{ entries: threadOutbox(host.outbox, { thread_id: threadId, messages: [] }), machine: host.openOwner ?? null, onDismiss: host.dismissOutbox }}
+          load={load}
+          away={away}
+          held={{ entries: threadOutbox(host.outbox, { thread_id: threadId, messages: [] }), machine: owner ?? null, onDismiss: host.dismissOutbox }}
           onFocusLeaving={() => {
             focusSubject.current = true;
           }}
           onRetry={() => {
             focusSubject.current = false;
-            host.onRetry();
+            host.paneReads.retry(paneId);
           }}
           onClose={onClose}
         />
@@ -131,10 +144,10 @@ export function ThreadSlot({ paneId, threadId, active, host }: ThreadSlotProps) 
           sent={host.openThreadRow?.sent ?? null}
           row={host.openThreadRow}
           snoozeBack={host.snoozeBack?.until ?? null}
-          run={host.threadRun?.threadId === thread.thread_id ? host.threadRun.run : undefined}
-          attachCommand={host.threadRun?.threadId === thread.thread_id ? host.threadRun.attach : null}
+          run={held && held.run !== undefined ? held.run : undefined}
+          attachCommand={held && held.run !== undefined ? (held.attach_command ?? null) : null}
           onRunChanged={() => void host.refreshThread(thread.thread_id)}
-          openedWith={host.openedWith?.threadId === thread.thread_id ? host.openedWith.ids : null}
+          openedWith={open.openedWith?.threadId === thread.thread_id ? open.openedWith.ids : null}
           drawn={drawnSection(host.shown, thread.thread_id)}
           onMarkRead={(read) => void host.markRead(thread.thread_id, read)}
           onMarkUnread={() => void host.markUnread(thread.thread_id)}
@@ -218,8 +231,8 @@ export function ThreadSlot({ paneId, threadId, active, host }: ThreadSlotProps) 
               : null
           }
           onLanded={host.landed}
-          lookSeq={host.look?.threadId === thread.thread_id ? host.look.seq : undefined}
-          seenThrough={host.look?.threadId === thread.thread_id ? host.look.through : null}
+          lookSeq={open.look?.threadId === thread.thread_id ? open.look.seq : undefined}
+          seenThrough={open.look?.threadId === thread.thread_id ? open.look.through : null}
           // Only the active pane counts what it shows as seen (panes/model.ts).
           onSeen={(through) => activeRef.current && host.seenOnSight(thread.thread_id, through)}
           covered={host.covered}

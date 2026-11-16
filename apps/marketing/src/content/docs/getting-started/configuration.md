@@ -165,6 +165,12 @@ To turn off the Claude Code mod (non-blocking plan review, code review and annot
 { "claudeCodeMod": false }
 ```
 
+To open every annotate session in the same view, set `annotateView` to `"focus"`, `"wide"` or `"edit"` (the document toolbar's Focus, Wide and Edit). Clicking the toolbar still changes the view for that session, and that click is not saved back to the file. When a document cannot use the view (an HTML page has no view switch, and a diagram cannot be edited), the session opens as it does without the key.
+
+```json
+{ "annotateView": "focus" }
+```
+
 You can customize the messages Plannotator sends to the agent when you approve, deny, or annotate plans and documents. See the [custom feedback guide](/docs/guides/custom-feedback/) for the full config shape, template variables, and runtime-specific overrides.
 
 ## Remote mode
