@@ -43,11 +43,16 @@ export function SidebarActionRow({
   );
 }
 
-export function SemanticDiffRow({ active, onClick }: { active: boolean; onClick: () => void }) {
+export function SemanticDiffRow({ active, onClick, count }: { active: boolean; onClick: () => void; count?: number }) {
   return (
-    <SidebarActionRow active={active} onClick={onClick}>
+    <SidebarActionRow active={active} onClick={onClick} title="Moved, renamed and edited code, file by file">
       <Diff className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" data-semantic-diff-icon="" />
       <span>Semantic diff</span>
+      {count !== undefined && (
+        <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground" data-semantic-diff-count="">
+          {count}<span className="sr-only"> semantic changes</span>
+        </span>
+      )}
     </SidebarActionRow>
   );
 }

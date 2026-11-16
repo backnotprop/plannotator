@@ -54,21 +54,17 @@ async function mount(singlePane = false, extra: { reviewKey?: string } = {}) {
   return host;
 }
 
-const tabRow = (el: HTMLElement, pane = 0) => el.querySelector(`[data-pane="${pane}"] [data-pane-tabs]`);
 const tabButton = (el: HTMLElement, id: string) => el.querySelector<HTMLButtonElement>(`[data-pane-tab="${id}"]`)!;
 
 describe.skipIf(!hasDom)('the review panes', () => {
-  test('one tab draws no tab row; a second tab brings it; a click switches; a middle click closes', async () => {
+  test('a click switches tabs and a middle click closes one', async () => {
     const el = await mount();
-    expect(tabRow(el)).toBeNull();
     await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'a.ts' } }); });
-    expect(tabRow(el)).not.toBeNull();
     expect(tabButton(el, 'review-file:a.ts').getAttribute('aria-selected')).toBe('true');
     await act(async () => tabButton(el, 'review-all-files').click());
     expect(api!.activePanel?.id).toBe('review-all-files');
     await act(async () => { tabButton(el, 'review-file:a.ts').dispatchEvent(new MouseEvent('auxclick', { bubbles: true, button: 1 })); });
     expect(api!.getPanel('review-file:a.ts')).toBeUndefined();
-    expect(tabRow(el)).toBeNull();
   });
 
   test('All changes is the fixed home tab: no close button and a middle click leaves it; other tabs close', async () => {
@@ -122,11 +118,12 @@ describe.skipIf(!hasDom)('the review panes', () => {
     expect(input().value).toBe('kept');
   });
 
-  test('only All changes: no tab row; once another tab opens, one tab row above every tab, so switching moves nothing', async () => {
+  test('one tab row from the start, the same element whichever tab shows, so opening or switching moves nothing', async () => {
     const el = await mount();
-    expect(el.querySelector('[data-pane-tab-row]')).toBeNull();
-    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'src/a.ts' } }); });
     const row = el.querySelector('[data-pane="0"] [data-pane-tab-row]');
+    expect(row?.querySelector('[data-pane-tab="review-all-files"]')).not.toBeNull();
+    await act(async () => { api!.addPanel({ id: 'review-file:a.ts', component: 'review-file', title: 'a.ts', params: { filePath: 'src/a.ts' } }); });
+    expect(el.querySelector('[data-pane="0"] [data-pane-tab-row]')).toBe(row);
     expect(row?.querySelector('[data-pane-tab="review-file:a.ts"]')).not.toBeNull();
     expect(el.querySelector('[data-pane-tab-directory]')?.textContent).toBe('src/');
     await act(async () => tabButton(el, 'review-all-files').click());

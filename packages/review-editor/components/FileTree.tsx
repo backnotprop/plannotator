@@ -123,6 +123,7 @@ interface FileTreeProps {
   onSelectSemanticDiff?: () => void;
   isSemanticDiffActive?: boolean;
   semanticDiffAvailable?: boolean;
+  semanticDiffCount?: number;
   onSelectCallFlow?: () => void;
   isCallFlowActive?: boolean;
   callFlowEnabled?: boolean;
@@ -211,6 +212,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onSelectSemanticDiff,
   isSemanticDiffActive = false,
   semanticDiffAvailable = false,
+  semanticDiffCount,
   onSelectCallFlow,
   isCallFlowActive = false,
   callFlowEnabled = false,
@@ -537,7 +539,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             </SidebarActionRow>
           )}
           {semanticDiffAvailable && onSelectSemanticDiff && (
-            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} />
+            <SemanticDiffRow active={isSemanticDiffActive} onClick={onSelectSemanticDiff} count={semanticDiffCount} />
           )}
           {callFlowEnabled && onSelectCallFlow && (
             <CallFlowRow

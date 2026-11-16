@@ -479,6 +479,12 @@ function progressTitle(progress: ScopeProgress): string {
   return parts.join(' · ');
 }
 
+export function allPillDotNote(repo: ReadyRepo | null | undefined): string {
+  if (repo?.live) return '. The green dot: the list updates live as files change on disk';
+  if (repo?.truncated) return '. The amber ring: only part of the repository is listed';
+  return '';
+}
+
 export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: number; progress?: ScopeProgress }> = ({ model, width, progress }) => {
   const scope = shownScope(model);
   if (!scope || !model.scope) {
@@ -528,7 +534,7 @@ export const ScopeSwitch: React.FC<{ model: ReviewPanelHeaderModel; width: numbe
           aria-pressed={scope === 'all'}
           onClick={() => selectScope(model, 'all')}
           data-tree-scope="all"
-          title={`Every file of the repository at the revision the diff reads${all !== undefined ? ` (${formatCount(all)} files)` : ''}`}
+          title={`Every file of the repository at the revision the diff reads${all !== undefined ? ` (${formatCount(all)} files)` : ''}${allPillDotNote(scope === 'all' ? model.repo : null)}`}
           className={`relative flex-shrink-0 pl-1.5 pr-2.5 ${pill(scope === 'all')}`}
         >
           <span data-tree-scope-label="">{shortAll ? <>All<span className="sr-only"> files</span></> : 'All files'}</span>

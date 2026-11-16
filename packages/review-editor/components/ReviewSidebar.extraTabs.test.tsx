@@ -9,10 +9,10 @@ let host: HTMLElement | null = null;
 
 const CHANGES: ReviewSidebarExtraTab = {
   id: 'changes',
-  label: 'Sem',
-  title: 'Semantic changes',
+  label: 'Live',
+  title: 'Live review threads',
   count: 4,
-  render: () => <div data-test-changes-body="">semantic changes</div>,
+  render: () => <div data-test-changes-body="">live threads</div>,
 };
 
 async function render(activeTab: string, onSelectTab = (_tab: string) => {}): Promise<HTMLElement> {
@@ -53,9 +53,9 @@ describe.skipIf(!hasDom)('a feature adds its own tab to the right panel', () => 
     const tabs = [...el.querySelectorAll<HTMLButtonElement>('[role="tab"]')].map((tab) => tab.dataset.reviewSidebarTab);
     expect(tabs).toEqual(['annotations', 'changes']);
     const changes = el.querySelector<HTMLButtonElement>('[data-review-sidebar-tab="changes"]')!;
-    expect(changes.textContent).toBe('Sem4');
-    expect(changes.getAttribute('aria-label')).toBe('Semantic changes, 4');
-    expect(changes.title).toBe('Semantic changes');
+    expect(changes.textContent).toBe('Live4');
+    expect(changes.getAttribute('aria-label')).toBe('Live review threads, 4');
+    expect(changes.title).toBe('Live review threads');
     expect(el.querySelector('[data-test-changes-body]')).toBeNull();
     await act(async () => changes.click());
     expect(onSelectTab).toHaveBeenCalledWith('changes');
@@ -63,7 +63,7 @@ describe.skipIf(!hasDom)('a feature adds its own tab to the right panel', () => 
 
   test('when its tab is the active one, its body is the panel', async () => {
     const el = await render('changes');
-    expect(el.querySelector('[data-test-changes-body]')?.textContent).toBe('semantic changes');
+    expect(el.querySelector('[data-test-changes-body]')?.textContent).toBe('live threads');
     expect(el.querySelector('[data-review-sidebar-tab="changes"]')?.getAttribute('aria-selected')).toBe('true');
   });
 });

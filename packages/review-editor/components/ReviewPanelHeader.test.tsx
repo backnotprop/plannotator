@@ -391,6 +391,7 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
     // The button is named by its words and count alone; the dot is decoration.
     expect(all.textContent).toBe('All files8');
     expect(all.querySelector('[data-repo-listing-dot="live"]')?.getAttribute('aria-hidden')).toBe('true');
+    expect(all.title).toBe('Every file of the repository at the revision the diff reads (8 files). The green dot: the list updates live as files change on disk');
     const status = el.querySelector('[role="status"][data-repo-listing-status="live"]')!;
     expect(status.getAttribute('aria-live')).toBe('polite');
     expect(status.textContent).toBe('All files is live: 1 added, 1 edited on disk since the diff.');

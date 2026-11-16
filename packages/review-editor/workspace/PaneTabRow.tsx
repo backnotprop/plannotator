@@ -2,7 +2,6 @@ import React, { useSyncExternalStore } from 'react';
 import type { WorkspaceStore } from './workspaceStore';
 import { PaneTabs } from './PaneTabs';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
-import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 
 export const PaneTabRow: React.FC<{ store: WorkspaceStore; paneIndex: number }> = ({ store, paneIndex }) => {
   const layout = useSyncExternalStore(store.subscribe, store.getLayout, store.getLayout);
@@ -12,7 +11,7 @@ export const PaneTabRow: React.FC<{ store: WorkspaceStore; paneIndex: number }> 
   return (
     <div
       className="flex-none pl-3 pr-2 flex items-stretch border-b border-border"
-      style={{ height: state?.isCompactTouchLayout ? `${COMPACT_FILE_HEADER_HEIGHT}px` : 'var(--panel-header-h)' }}
+      style={{ height: 'var(--panel-header-h)' }}
       data-pane-tab-row=""
     >
       <PaneTabs

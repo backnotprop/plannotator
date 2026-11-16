@@ -1,3 +1,4 @@
+import { SemanticFileBadge } from './SemanticFileBadge';
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import { EllipsisName } from './EllipsisName';
 import React, { useRef } from 'react';
@@ -346,6 +347,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           </button>
         )}
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
+        <SemanticFileBadge filePath={filePath} />
         {semanticNote && <span className={`contents ${TIGHT_LABEL}`}>{semanticNote}</span>}
         {/* Edit entry lives at the far right of the row, next to the file
             actions dropdown, so the experimental affordance stays out of the
