@@ -8,6 +8,7 @@
 @import "tailwindcss";
 
 @source "./components/**/*.tsx";
+@source not "./components/frame/**";
 @source "./hooks/**/*.ts";
 @source "./utils/**/*.ts";
 

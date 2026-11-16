@@ -21,6 +21,7 @@ import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useMessageArm } from '../messageArming';
 import type { InboxToastModel } from './Toast';
 import { TAKE_BACK_LABEL } from '../takeBack';
+import { PaneMenuItems } from '../panes/PaneMenu';
 
 /**
  * Copy a message, copy a thread (design record "inbox-copy-message", option
@@ -615,6 +616,7 @@ export function ThreadMore(
                     <Menu.Separator className="ib-pm-sep" />
                   </>
                 )}
+                <PaneMenuItems />
                 {lead}
                 {leads && <Menu.Separator className="ib-pm-sep" />}
                 <Menu.Item className="ib-pmi" label="Copy thread" onClick={() => copies.thread()} data-copy-item="thread">
