@@ -379,9 +379,11 @@ test("3b. an HTML page on MacBook opens from Studio with its folder: in the view
   expect((await styleInViewer).status()).toBe(200);
 
   // "Open in" → Browser: the page in a tab of its own on Studio, through the forward, its stylesheet applied.
-  const primary = page.locator(`[data-open-in="${file.id}"] a[data-open-in-primary="browser"]`);
-  await expect(primary).toHaveAttribute('href', `/api/inbox/m/${macbook.id}/attachments/${file.id}/page`);
-  const [tab] = await Promise.all([context.waitForEvent('page'), primary.click()]);
+  // The page's viewer has no header: Open in is in its toolbar's ⋯, as for a page on this machine.
+  await page.locator(`[data-attachment-pane="${file.id}"] [data-full-view-more]`).click();
+  const browser = page.locator(`[data-full-view-menu="${file.id}"] [data-open-in-item="browser"]`);
+  await expect(browser).toHaveAttribute('href', `/api/inbox/m/${macbook.id}/attachments/${file.id}/page`);
+  const [tab] = await Promise.all([context.waitForEvent('page'), browser.click()]);
   try {
     await tab.waitForLoadState();
     expect(new URL(tab.url()).pathname).toMatch(new RegExp(`^/api/inbox/m/${macbook.id}/html-assets/[A-Za-z0-9_-]+/pricing\\.html$`));
