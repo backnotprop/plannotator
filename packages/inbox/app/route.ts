@@ -17,9 +17,12 @@ export interface Route {
   /**
    * Plans (`#plans`, only while config.json `inboxPlans` is on; approval "inbox-plans"): the plan open (`#plans=pln_…`),
    * the version read (`&v=3`; absent: the newest), the two versions compared (`&from=3&to=5`), and `#plans&new` for
-   * the get-started screen once there are plans.
+   * the get-started screen once there are plans. The file on screen: another of its documents (`&doc=doc_…`) or an
+   * artifact (`&file=<path>`); absent: the plan's main page.
    */
   plan?: string | null;
+  planDoc?: string | null;
+  planFile?: string | null;
   planVersion?: number | null;
   planDiff?: { from: number; to: number } | null;
   planNew?: boolean;
@@ -238,6 +241,8 @@ function plansRouteOf(params: URLSearchParams): Route {
     thread: null,
     plan,
     planVersion: plan ? versionOf(params.get('v')) : null,
+    planDoc: plan && !params.get('file') ? params.get('doc') || null : null,
+    planFile: plan ? params.get('file') || null : null,
     planDiff: plan && from !== null && to !== null && from !== to ? { from, to } : null,
     planNew: !plan && params.has('new'),
   };

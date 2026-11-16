@@ -8,6 +8,9 @@
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
  * - a decision on an older version reads as current in the list or the page line (it must say "changed since");
+ * - the files panel loses the main page's place or mark, mixes artifacts in with pages, shows Artifacts with none,
+ *   opens a row without the rail and the address following, draws an HTML artifact that can run or load, or forgets
+ *   that it was folded;
  * - the compact list leaves out a plan or orders it differently, loses a column, is not a link, is not remembered,
  *   or search and the empty search stop working in it;
  * - picking a version in the rail does not show that version;
@@ -31,6 +34,7 @@ const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof imp
 const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
 const { resetPlansForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { PLANS_VIEW_KEY } = (hasDom ? await import('./PlansHome') : {}) as typeof import('./PlansHome');
+const storageModule = hasDom ? await import('@plannotator/ui/utils/storage') : null;
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
@@ -78,6 +82,7 @@ afterEach(() => {
   document.body.innerHTML = '';
   globalThis.fetch = realFetch;
   localStorage.removeItem(PLANS_VIEW_KEY);
+  storageModule?.resetStorageBackend();
   resetPlansForTests();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -237,6 +242,77 @@ test.skipIf(!hasDom)('the compact list: the switch shows the same plans one line
   await act(async () => (host.querySelector(`[data-plan-row="${newer}"] a`) as HTMLAnchorElement).click());
   await settle();
   expect(host.querySelector(`[data-plan-page="${newer}"]`)).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('the files panel: main page first, other pages and artifacts by name; a row opens its file, the rail and the address follow', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n'], { seen: 1 });
+  const rollout = store.addDocument(id, { title: 'Rollout', created_at: at(3) });
+  store.addVersion(id, rollout.id, { bytes: bytes('# Rollout\n\nFirst.\n'), committed_at: at(3), source: 'agent-tool' });
+  store.addVersion(id, rollout.id, { bytes: bytes('# Rollout\n\nRollout second version.\n'), committed_at: at(4), source: 'agent-tool' });
+  const flow = store.addDocument(id, { title: 'Flow', kind: 'mermaid', created_at: at(3) });
+  store.addVersion(id, flow.id, { bytes: bytes('flowchart LR\n  A --> B\n'), committed_at: at(3), source: 'agent-tool' });
+  store.addArtifact(id, { asset_path: 'mockup.html', bytes: bytes('<h1>Mockup</h1><img src="https://example.com/x.png">'), content_type: 'text/html', created_at: at(5) });
+  store.addArtifact(id, { asset_path: 'pics/screen.png', bytes: new Uint8Array([137, 80, 78, 71]), content_type: 'image/png', title: 'Screen', created_at: at(5) });
+  const bare = plan('Ledger import', null, ['# Ledger import\n']);
+  // Plannotator's storage in memory for this test (happy-dom keeps no cookie here); put back in afterEach.
+  const kept = new Map<string, string>();
+  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  const panel = host.querySelector('[data-plan-files]')!;
+  expect(panel).not.toBeNull();
+  const names = (sel: string) => [...panel.querySelectorAll(`${sel} .ib-plan-file-n`)].map(text);
+  expect(names('[data-plan-files-pages]')).toEqual(['Rotate refresh tokens', 'Flow', 'Rollout']);
+  expect(text(panel.querySelector('[data-plan-files-pages] li:first-child [data-plan-file-main]'))).toBe('Main');
+  expect(panel.querySelectorAll('[data-plan-file-main]').length).toBe(1);
+  expect(names('[data-plan-files-artifacts]')).toEqual(['mockup.html', 'Screen']);
+  expect(text(panel)).toContain('Artifacts 2');
+  expect(panel.querySelector(`[data-plan-file="d:${store.get(id)!.primary_doc_id}"]`)?.getAttribute('aria-current')).toBe('page');
+
+  // A page: the middle shows it, the rail its versions, the address carries it.
+  await act(async () => (panel.querySelector(`[data-plan-file="d:${rollout.id}"]`) as HTMLAnchorElement).click());
+  await settle();
+  expect(window.location.hash).toBe(`#plans=${id}&doc=${rollout.id}`);
+  expect(text(host.querySelector('[data-plan-document]'))).toContain('Rollout second version.');
+  expect(text(host.querySelector('.ib-plan-railh'))).toBe('Versions 2');
+  expect(host.querySelector(`[data-plan-file="d:${rollout.id}"]`)?.getAttribute('aria-current')).toBe('page');
+  expect(text(host.querySelector('[data-plan-reading]'))).toBe('Reading v2 · newest');
+
+  // An artifact: an HTML page in a frame that runs and loads nothing; the rail says it has no versions.
+  await act(async () => (host.querySelector('[data-plan-file="a:mockup.html"]') as HTMLAnchorElement).click());
+  await settle();
+  expect(window.location.hash).toBe(`#plans=${id}&file=mockup.html`);
+  const frame = host.querySelector('iframe[data-plan-html-frame]')!;
+  expect(frame.getAttribute('sandbox')).toBe('');
+  expect(frame.getAttribute('srcdoc')!.startsWith(`<meta http-equiv="Content-Security-Policy" content="default-src 'none';`)).toBe(true);
+  expect(host.querySelector('[data-plan-no-versions]')).not.toBeNull();
+
+  // Filter files.
+  await act(async () => (host.querySelector('[data-plan-files-filter]') as HTMLButtonElement).click());
+  const field = host.querySelector('[data-plan-files-query]') as HTMLInputElement;
+  const type = async (value: string) =>
+    act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  await type('roll');
+  expect([...host.querySelectorAll('[data-plan-files] .ib-plan-file-n')].map(text)).toEqual(['Rollout']);
+  await type('zzz');
+  expect(text(host.querySelector('[data-plan-files-none]'))).toBe('No files match “zzz”.');
+
+  // Hide files is kept: the panel stays folded on the next plan opened, and Show files docks it again.
+  await act(async () => (host.querySelector('[data-plan-files-hide]') as HTMLButtonElement).click());
+  expect(host.querySelector('[data-plan-files]')).toBeNull();
+  window.location.hash = `#plans=${bare}`;
+  await settle();
+  expect(host.querySelector('[data-plan-files]')).toBeNull();
+  await act(async () => (host.querySelector('[data-plan-show-files]') as HTMLButtonElement).click());
+  // A plan with no artifacts: one page, no Artifacts heading.
+  expect([...host.querySelectorAll('[data-plan-files] .ib-plan-file-n')].map(text)).toEqual(['Ledger import']);
+  expect(host.querySelector('[data-plan-files-artifacts]')).toBeNull();
+  expect(text(host.querySelector('[data-plan-files]'))).not.toContain('Artifacts');
 });
 
 test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on the get-started screen; Try again reads again with ?retry=1', async () => {

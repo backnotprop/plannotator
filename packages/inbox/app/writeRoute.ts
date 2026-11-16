@@ -122,7 +122,8 @@ export function writeRoute(route: Route, options: { replace?: boolean; fullMark?
 
 function plansHash(route: Route): string {
   if (!route.plan) return route.planNew ? 'plans&new' : 'plans';
-  const base = `plans=${encodeURIComponent(route.plan)}`;
+  const base = `plans=${encodeURIComponent(route.plan)}${route.planFile ? `&file=${encodeURIComponent(route.planFile)}` : route.planDoc ? `&doc=${encodeURIComponent(route.planDoc)}` : ''}`;
+  if (route.planFile) return base;
   if (route.planDiff) return `${base}&from=${route.planDiff.from}&to=${route.planDiff.to}`;
   return route.planVersion ? `${base}&v=${route.planVersion}` : base;
 }

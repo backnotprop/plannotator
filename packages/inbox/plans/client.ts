@@ -4,7 +4,7 @@
  * route, so a phone's door or a linked machine gets the unknown-route 404. The one write, a look, carries the page's
  * `serverSession`.
  */
-import type { PlanDecision, PlanDocument, PlanEvent, PlanLook, PlanRecord, PlanSummary, PlanVersion } from '@plannotator/core/plans';
+import type { PlanArtifact, PlanDecision, PlanDocument, PlanEvent, PlanLook, PlanRecord, PlanSummary, PlanVersion } from '@plannotator/core/plans';
 import { pageServerSession } from '../api';
 import { readJson } from '../apiError';
 
@@ -26,6 +26,8 @@ export interface PlansList {
 export interface PlanRead {
   plan: PlanRecord;
   documents: PlanDocument[];
+  /** The plan's other files; absent from an Inbox before artifacts were read. */
+  artifacts?: PlanArtifact[];
   decisions: PlanDecision[];
   events: PlanEvent[];
   /** What the person had seen before this visit; null before the first look. */
@@ -47,6 +49,7 @@ export interface PlanDiffTexts {
 }
 
 const BASE = '/api/plans';
+const docQuery = (doc: string | null, lead: '?' | '&') => (doc ? `${lead}doc=${encodeURIComponent(doc)}` : '');
 const one = (id: string, rest = '') => `${BASE}/${encodeURIComponent(id)}${rest}`;
 
 async function get<T>(path: string): Promise<T> {
@@ -63,17 +66,24 @@ export const plansApi = {
   /** `retry`: the list's Try again, so the Inbox reads the plan history now, whatever its wait after a failure. */
   list: (retry = false) => get<PlansList>(retry ? `${BASE}?retry=1` : BASE),
   read: (id: string) => get<PlanRead>(one(id)),
-  versions: (id: string) => get<{ document_id: string; versions: PlanVersion[] }>(one(id, '/versions')),
+  /** A document's versions (`doc` null: the primary one). */
+  versions: (id: string, doc: string | null = null) => get<{ document_id: string; versions: PlanVersion[] }>(one(id, `/versions${docQuery(doc, '?')}`)),
   /** One version's text, as saved. */
-  version: (id: string, n: number) => text(one(id, `/versions/${n}`)),
-  diff: (id: string, from: number, to: number) => get<PlanDiffTexts>(one(id, `/diff?from=${from}&to=${to}`)),
-  /** The person read version `seen` of the plan's primary document. */
-  look: async (id: string, seen: number) => {
+  version: (id: string, n: number, doc: string | null = null) => text(one(id, `/versions/${n}${docQuery(doc, '?')}`)),
+  diff: (id: string, from: number, to: number, doc: string | null = null) => get<PlanDiffTexts>(one(id, `/diff?from=${from}&to=${to}${docQuery(doc, '&')}`)),
+  /** Where an artifact's bytes are (a raster picture as itself; other text as plain text). */
+  fileUrl: (id: string, assetPath: string) => one(id, `/files/${assetPath.split('/').map(encodeURIComponent).join('/')}`),
+  /** An artifact's bytes as text (an HTML page, an SVG). */
+  fileText: (id: string, assetPath: string) => text(one(id, `/files/${assetPath.split('/').map(encodeURIComponent).join('/')}`)),
+  /** The person read version `seen` of a document (`doc` null: the primary one). */
+  look: async (id: string, seen: number, doc: string | null = null) => {
     const session = pageServerSession();
+    const body: Record<string, unknown> = doc ? { doc, seen } : { seen };
+    if (session) body.serverSession = session;
     const response = await fetch(one(id, '/look'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify(session ? { seen, serverSession: session } : { seen }),
+      body: JSON.stringify(body),
     });
     return readJson<{ look: PlanLook }>(response);
   },

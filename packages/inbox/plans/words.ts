@@ -115,6 +115,55 @@ export function compactGroups(plans: readonly PlanSummary[]): PlanGroup[] {
   return groups;
 }
 
+/**
+ * A plan's left panel (the names agreed with Workspaces' space panel): "Pages" (the plan's documents, its main page
+ * first and marked "Main"), then "Artifacts" (its other files) only when it has some.
+ */
+export const PLAN_FILES_WORDS = {
+  panel: 'Files',
+  pages: 'Pages',
+  artifacts: 'Artifacts',
+  main: 'Main',
+  filter: 'Filter files',
+  show: 'Show files',
+  hide: 'Hide files',
+  back: 'Back to Plans',
+  noPages: 'No pages',
+  width: 'Files width',
+  noVersions: 'Artifacts have no versions: this file is kept as it is.',
+} as const;
+
+export const noFileMatches = (query: string) => `No files match “${query}”.`;
+
+export type PlanArtifactKind = 'image' | 'svg' | 'html' | 'pdf' | 'video' | 'other';
+
+/** What an artifact is, by its media type (an SVG is drawn as a picture, from its text). */
+export function artifactKind(contentType: string): PlanArtifactKind {
+  const type = contentType.split(';')[0]!.trim().toLowerCase();
+  if (type === 'image/svg+xml') return 'svg';
+  if (type.startsWith('image/')) return 'image';
+  if (type === 'text/html' || type === 'application/xhtml+xml') return 'html';
+  if (type === 'application/pdf') return 'pdf';
+  if (type.startsWith('video/')) return 'video';
+  return 'other';
+}
+
+const ARTIFACT_KIND_WORDS: Record<PlanArtifactKind, string> = { image: 'Picture', svg: 'Picture (SVG)', html: 'HTML page', pdf: 'PDF', video: 'Video', other: 'File' };
+export const artifactKindLabel = (contentType: string) => ARTIFACT_KIND_WORDS[artifactKind(contentType)];
+
+/** A file's size for a person: "820 bytes", "14 KB", "2.4 MB". */
+export function sizeWords(bytes: number): string {
+  if (bytes < 1000) return `${bytes} ${bytes === 1 ? 'byte' : 'bytes'}`;
+  if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
+  return `${(bytes / 1_000_000).toFixed(1)} MB`;
+}
+
+/** An artifact's name on screen: its title, else the last part of its path. */
+export const artifactName = (artifact: { title: string | null; asset_path: string }) => artifact.title?.trim() || artifact.asset_path.split('/').pop()!;
+
+/** Names in the order a person expects: case ignored, numbers as numbers ("v2" before "v10"). */
+export const byName = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' });
+
 /** The plans a search and a project pick leave (the search matches a plan's name, case-insensitively). */
 export function filterPlans(plans: readonly PlanSummary[], query: string, project: string | null): PlanSummary[] {
   const q = query.trim().toLowerCase();

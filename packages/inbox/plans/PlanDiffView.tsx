@@ -6,15 +6,24 @@
  * Under the same rules as the document (planContent.tsx): no remote picture is fetched, no link but a web one acts.
  */
 import { useMemo, useState } from 'react';
+import type { PlanDocumentKind } from '@plannotator/core/plans';
 import { computePlanDiff } from '@plannotator/ui/utils/planDiffEngine';
 import { PlanCleanDiffView } from '@plannotator/ui/components/plan-diff/PlanCleanDiffView';
 import { usePlanDiff } from './store';
 import { PlanContentRules } from './planContent';
 
-export function PlanDiffView({ id, from, to }: { id: string; from: number; to: number }) {
+/** A file that is not Markdown (an HTML page, a diagram's source) is compared as its source, in a code block. */
+function asCompared(text: string, kind: PlanDocumentKind): string {
+  if (kind === 'markdown') return text;
+  const longest = Math.max(2, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longest + 1);
+  return `${fence}text\n${text}\n${fence}\n`;
+}
+
+export function PlanDiffView({ id, from, to, doc = null, kind = 'markdown' }: { id: string; from: number; to: number; doc?: string | null; kind?: PlanDocumentKind }) {
   const [retry, setRetry] = useState(0);
-  const { diff, error } = usePlanDiff(id, from, to, retry);
-  const computed = useMemo(() => (diff?.from && diff.to ? computePlanDiff(diff.from.text, diff.to.text) : null), [diff]);
+  const { diff, error } = usePlanDiff(id, from, to, retry, doc);
+  const computed = useMemo(() => (diff?.from && diff.to ? computePlanDiff(asCompared(diff.from.text, kind), asCompared(diff.to.text, kind)) : null), [diff, kind]);
   if (error) {
     return (
       <div className="ib-plan-docstate" role="alert">

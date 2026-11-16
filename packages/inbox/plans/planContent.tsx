@@ -146,3 +146,21 @@ export function PlanContentRules({ children }: { children: ReactNode }) {
     </ImageResolverContext.Provider>
   );
 }
+
+/**
+ * An HTML page of a plan (an `html` document or artifact) runs nothing and loads nothing: it is drawn in a frame with
+ * every sandbox flag (no script, an opaque origin, no automatic refresh, no navigating the window) under its own
+ * policy, written before anything of its own, that allows only its inline styles and pictures written into it (`data:`).
+ */
+export const PLAN_HTML_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
+
+export function planHtmlSrcdoc(html: string): string {
+  const meta = `<meta http-equiv="Content-Security-Policy" content="${PLAN_HTML_CSP}">`;
+  // Always first, never after a `<head>` found by a pattern (one written inside a comment would swallow it): the
+  // parser opens the head for it, and the page's own `<html>` and `<head>` after it only join that one.
+  return `${meta}${html}`;
+}
+
+export function PlanHtmlFrame({ html, title }: { html: string; title: string }) {
+  return <iframe className="ib-plan-htmlframe" title={title} srcDoc={planHtmlSrcdoc(html)} sandbox="" referrerPolicy="no-referrer" data-plan-html-frame="" />;
+}

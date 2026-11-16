@@ -9,7 +9,9 @@
  *     docs.jsonl               documents and versions (`{ kind: "document" | "version", record }`)
  *     docs/<doc_id>/<n>.md     each version as a plain file, readable without Plannotator
  *     events.jsonl             decisions and activity
- *     files/, comments.jsonl   (later: a plan's files, comments and replies)
+ *     artifacts.jsonl          its artifacts (`{ kind: "artifact", record }`, the last line per path wins)
+ *     files/<asset_path>       each artifact's bytes
+ *     comments.jsonl           (later: comments and replies)
  *
  * The Inbox store's rules (packages/shared/inbox/store-log/jsonl-log.ts): one writer (the Inbox server; the CLI only
  * reads), every change appends ONE line in a single append-mode write, a line that does not parse is skipped on read
@@ -22,9 +24,12 @@
  * Nothing here runs unless a caller asks: creating the store reads and writes nothing.
  */
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, renameSync, appendFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
   gitBlobSha,
+  isPlanArtifact,
+  isPlanAssetPath,
   isPlanDocument,
   isPlanEvent,
   isPlanId,
@@ -34,6 +39,7 @@ import {
   NO_ACTOR,
   planId,
   type PlanActor,
+  type PlanArtifact,
   type PlanDocument,
   type PlanDocumentKind,
   type PlanEvent,
@@ -54,6 +60,8 @@ export const PLAN_LEGACY_MAP_FILE = "legacy-map.json";
 const PLAN_FILE = "plan.jsonl";
 const DOCS_FILE = "docs.jsonl";
 const EVENTS_FILE = "events.jsonl";
+const ARTIFACTS_FILE = "artifacts.jsonl";
+const FILES_DIR = "files";
 
 const EXT: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot" };
 
@@ -123,6 +131,23 @@ export interface PlanRead {
   documents: PlanDocument[];
   versions: PlanVersion[];
   events: PlanEvent[];
+  artifacts: PlanArtifact[];
+}
+
+export interface NewDocumentInput {
+  id?: string;
+  title: string;
+  kind?: PlanDocumentKind;
+  doc_path?: string | null;
+  created_at: string;
+}
+
+export interface NewArtifactInput {
+  asset_path: string;
+  bytes: Uint8Array;
+  content_type: string;
+  title?: string | null;
+  created_at: string;
 }
 
 export interface PlanStore {
@@ -142,6 +167,13 @@ export interface PlanStore {
   recordLook(id: string, input?: { doc?: string | null; seen?: number | null; at?: string }): PlanLook;
   createPlan(input: NewPlanInput): { plan: PlanRecord; document: PlanDocument };
   addVersion(id: string, docId: string, input: NewVersionInput): PlanVersion;
+  /** Another document of the plan (no version yet). Nothing calls it but tests and a sandbox seed: no route, no tool. */
+  addDocument(id: string, input: NewDocumentInput): PlanDocument;
+  artifacts(id: string): PlanArtifact[];
+  /** An artifact's file on disk: only a recorded path, only under the plan's `files/`; else null. */
+  artifactPath(id: string, assetPath: string): string | null;
+  /** Keep a file as an artifact (bytes, then its line). Nothing calls it but tests and a sandbox seed: no route, no tool. */
+  addArtifact(id: string, input: NewArtifactInput): PlanArtifact;
   addEvent(id: string, event: Omit<PlanEvent, "id" | "plan_id"> & { id?: string }): PlanEvent;
   /** The plan record changed (its name): one more snapshot line. */
   updatePlan(id: string, change: Partial<Pick<PlanRecord, "name" | "note" | "status" | "thread_id" | "legacy">>, at?: string): PlanRecord;
@@ -217,6 +249,8 @@ function readJson(path: string): unknown {
   }
 }
 
+const isArtifactsLine = (value: unknown): value is { kind: "artifact"; record: unknown } => !!value && typeof value === "object" && (value as { kind?: unknown }).kind === "artifact";
+
 const isDocsLine = (value: unknown): value is { kind: "document" | "version"; record: unknown } =>
   !!value && typeof value === "object" && ((value as { kind?: unknown }).kind === "document" || (value as { kind?: unknown }).kind === "version");
 
@@ -256,6 +290,14 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
     return { documents: docs, versions: sorted };
   };
 
+  /** The plan's artifacts, the last line per path, by path. */
+  const artifactsOf = (id: string): PlanArtifact[] => {
+    if (!isPlanId("pln", id)) return [];
+    const byPath = new Map<string, PlanArtifact>();
+    for (const line of readLines(join(folder(id), ARTIFACTS_FILE), isArtifactsLine)) if (isPlanArtifact(line.record)) byPath.set(line.record.asset_path, line.record);
+    return [...byPath.values()].sort((a, b) => a.asset_path.localeCompare(b.asset_path));
+  };
+
   const eventsOf = (id: string): PlanEvent[] =>
     readLines(join(folder(id), EVENTS_FILE), isPlanEvent)
       .filter((event) => event.plan_id === id)
@@ -288,7 +330,7 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       primary_doc_id: plan.primary_doc_id,
       head_version_number: primary?.head_version ?? 0,
       decision: latest ? { decision: latest.decision, version_number: latest.version_number, at: latest.at } : null,
-      counts: { documents: documents.length, versions: versions.length, comments: 0, artifacts: 0, events: events.length },
+      counts: { documents: documents.length, versions: versions.length, comments: 0, artifacts: artifactsOf(id).length, events: events.length },
     };
   };
 
@@ -321,7 +363,7 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
     read(id) {
       const plan = planOf(id);
       if (!plan) return null;
-      return { plan, ...docsOf(id), events: eventsOf(id) };
+      return { plan, ...docsOf(id), events: eventsOf(id), artifacts: artifactsOf(id) };
     },
 
     versions(id, docId) {
@@ -439,6 +481,52 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       if (updated !== plan.updated_at) appendLine(join(folder(id), PLAN_FILE), { ...plan, updated_at: updated });
       appendIndex(id);
       return version;
+    },
+
+    addDocument(id, input) {
+      if (!planOf(id)) throw new Error(`No plan ${id}.`);
+      const document: PlanDocument = {
+        id: input.id ?? planId("doc", Date.parse(input.created_at) || undefined),
+        plan_id: id,
+        doc_path: input.doc_path ?? null,
+        kind: input.kind ?? "markdown",
+        title: input.title,
+        head_version: 0,
+        created_at: input.created_at,
+        archived_at: null,
+      };
+      if (!isPlanDocument(document)) throw new Error("Not a plan document.");
+      appendLine(join(folder(id), DOCS_FILE), { kind: "document", record: document });
+      appendIndex(id);
+      return document;
+    },
+
+    artifacts: artifactsOf,
+
+    artifactPath(id, assetPath) {
+      if (!isPlanAssetPath(assetPath) || !artifactsOf(id).some((a) => a.asset_path === assetPath)) return null;
+      const path = join(folder(id), FILES_DIR, ...assetPath.split("/"));
+      return existsSync(path) ? path : null;
+    },
+
+    addArtifact(id, input) {
+      if (!planOf(id)) throw new Error(`No plan ${id}.`);
+      if (!isPlanAssetPath(input.asset_path)) throw new Error(`Not an artifact path: ${input.asset_path}`);
+      const segments = input.asset_path.split("/");
+      ensureDir(join(folder(id), FILES_DIR, ...segments.slice(0, -1)));
+      // The bytes first: a line never names a file that is not there.
+      writeWhole(join(folder(id), FILES_DIR, ...segments), input.bytes);
+      const artifact: PlanArtifact = {
+        asset_path: input.asset_path,
+        content_hash: createHash("sha256").update(input.bytes).digest("hex"),
+        content_type: input.content_type,
+        size: input.bytes.length,
+        title: input.title ?? null,
+        created_at: input.created_at,
+      };
+      appendLine(join(folder(id), ARTIFACTS_FILE), { kind: "artifact", record: artifact });
+      appendIndex(id);
+      return artifact;
     },
 
     addEvent(id, input) {

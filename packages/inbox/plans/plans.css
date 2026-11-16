@@ -108,9 +108,63 @@
 .ib-plans-steps { margin: 18px 0 0; padding: 14px 18px 14px 36px; border-radius: 12px; background: color-mix(in oklch, var(--card) 92%, transparent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--border); font-size: var(--ib-fs-14, 14px); line-height: 1.6; }
 .ib-plans-steps li + li { margin-top: 4px; }
 
-/* A plan: layout B */
+/* A plan: its files on the left (a pane of its own when docked), then the file and its rail in one pane */
+.ib-plan-frame { display: flex; flex: 1; min-width: 0; min-height: 0; gap: 8px; }
 .ib-plan { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; background: var(--card); }
-.ib-main > .ib-plan { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); overflow: hidden; }
+.ib-main > .ib-plan-frame > .ib-plan, .ib-plan-filespane { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); overflow: hidden; }
+.ib-plan-filespane { position: relative; flex: none; display: flex; min-height: 0; background: var(--card); overflow: visible; }
+.ib-plan-filesedge { position: absolute; top: 0; bottom: 0; right: -4px; z-index: 5; display: flex; }
+
+/* The files panel (as a Workspaces space's): 28 px rows, 8 px corners, the file on screen a soft tint with primary text */
+.ib-plan-files { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; font-size: var(--ib-fs-13, 13px); }
+.ib-plan-files-head { display: flex; align-items: center; gap: 4px; min-height: 52px; padding: 0 8px; border-bottom: 1px solid var(--border); }
+.ib-plan-files-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-plan-files-icon { flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; color: var(--muted-foreground); cursor: pointer; }
+.ib-plan-files-icon:hover, .ib-plan-files-icon[data-on] { background: var(--muted); color: var(--foreground); }
+.ib-plan-files-icon .ib-ic { width: 16px; height: 16px; }
+.ib-plan-files-body { flex: 1; min-height: 0; overflow-y: auto; padding: 8px; overscroll-behavior: contain; }
+.ib-plan-files-sec { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 4px 4px 4px 8px; }
+.ib-plan-files-sec + .ib-plan-files-list { margin-top: 2px; }
+.ib-plan-files-list + .ib-plan-files-sec { margin-top: 14px; }
+.ib-plan-files-sec h2 { margin: 0; font-size: var(--ib-fs-12, 12px); font-weight: 500; color: var(--muted-foreground); }
+.ib-plan-files-field { width: 100%; height: 30px; margin: 2px 0 6px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-plan-files-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+.ib-plan-file { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 8px; color: var(--muted-foreground); text-decoration: none; }
+.ib-plan-file .ib-ic { flex: none; width: 14px; height: 14px; }
+.ib-plan-file:hover { background: var(--muted); color: var(--foreground); }
+.ib-plan-file[data-on] { background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); }
+.ib-plans .ib-plan-file:focus-visible { outline: none; background: color-mix(in oklch, var(--primary) 18%, transparent); color: var(--foreground); }
+.ib-plan-file-n { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-plan-file-main { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-plan-files-none { margin: 8px; color: var(--muted-foreground); }
+.ib-plan-showfiles { font-weight: 500; color: var(--muted-foreground); }
+.ib-plan-showfiles:hover { color: var(--foreground); }
+
+/* The files as a sheet from the left (a phone; a desktop with no room to dock them) */
+.ib-plan-filesheet { position: fixed; inset: 0 auto 0 0; width: min(360px, 100vw - 2rem); max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; background: var(--card); color: var(--foreground); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28); display: flex; }
+.ib-plan-filesheet:not([open]) { display: none; }
+.ib-plan-filesheet::backdrop { background: rgba(0, 0, 0, 0.32); }
+.ib-plan-filesheet .ib-plan-files-head { padding-top: env(safe-area-inset-top); }
+@media (max-width: 767px), (pointer: coarse) {
+  .ib-plan-filesheet .ib-plan-file { height: 44px; font-size: var(--ib-fs-15, 15px); }
+  .ib-plan-filesheet .ib-plan-files-icon { width: 40px; height: 40px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ib-plan-filesheet[open] { animation: ib-plan-sheet-in 220ms ease-out; }
+}
+@keyframes ib-plan-sheet-in { from { transform: translateX(-100%); } to { transform: none; } }
+
+/* An artifact, or an HTML page, in the middle */
+.ib-plan-framewrap { display: flex; padding: 0 0 16px; }
+.ib-plan-htmlframe { flex: 1; width: 100%; min-height: 480px; border: 0; border-radius: 10px; background: #fff; box-shadow: 0 0 0 1px var(--border); }
+.ib-plan-picture { display: flex; align-items: flex-start; justify-content: center; }
+.ib-plan-picture img { max-width: 100%; height: auto; border-radius: 10px; box-shadow: 0 0 0 1px var(--border); background: var(--muted); }
+.ib-plan-filecard { max-width: 420px; margin: 48px auto; display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.ib-plan-filecard > .ib-ic { width: 28px; height: 28px; color: var(--muted-foreground); }
+.ib-plan-filecard-n { margin: 6px 0 0; font-size: var(--ib-fs-16, 16px); font-weight: 600; overflow-wrap: anywhere; }
+.ib-plan-filecard-k { margin: 0 0 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-plan-filecard .ib-plans-quiet { gap: 6px; text-decoration: none; }
+.ib-plan-filecard .ib-plans-quiet .ib-ic { width: 15px; height: 15px; }
 .ib-plan-top { display: flex; align-items: center; gap: 8px; min-height: 52px; padding: 0 16px 0 max(12px, var(--ib-controls-left, 0px)); border-bottom: 1px solid var(--border); }
 .ib-plan-crumb { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-14, 14px); padding-left: 10px; }
 .ib-plan-crumb-p { color: var(--muted-foreground); }
@@ -148,10 +202,10 @@
 /* The rail */
 .ib-plan-rail { flex: none; width: 372px; min-height: 0; overflow-y: auto; border-left: 1px solid var(--border); overscroll-behavior: contain; }
 .ib-plan-railin { padding: 12px; }
-.ib-plan-tabs { display: flex; gap: 2px; padding: 3px; border-radius: 10px; background: var(--muted); }
-.ib-plan-tabs [role="tab"] { flex: 1; height: 32px; border-radius: 8px; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); cursor: pointer; }
-.ib-plan-tabs [role="tab"][data-on] { background: var(--card); color: var(--foreground); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
-.ib-plan-panel { padding-top: 10px; }
+.ib-plan-railh { margin: 4px 4px 10px; font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-plan-facts { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 12px 4px 4px; font-size: var(--ib-fs-13, 13px); }
+.ib-plan-facts dt { color: var(--muted-foreground); }
+.ib-plan-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
 .ib-plan-versions { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ib-plan-version { display: flex; flex-direction: column; gap: 4px; width: 100%; padding: 10px 12px; border-radius: 10px; text-align: left; cursor: pointer; color: inherit; }
 .ib-plan-version:hover { background: color-mix(in oklch, var(--muted) 70%, transparent); }
@@ -171,9 +225,6 @@
 .ib-plan-activity li > span:not(.ib-plans-dmark) { flex: 1; min-width: 0; }
 .ib-plan-activity time { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
 .ib-plan-empty { margin: 8px 4px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
-.ib-plan-artifacts { list-style: none; margin: 0; padding: 0 4px; display: grid; gap: 8px; }
-.ib-plan-artifacts li { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-14, 14px); }
-.ib-plan-artifacts .ib-ic { width: 16px; height: 16px; color: var(--muted-foreground); }
 
 /* A phone: one column, the rail as a bar at the bottom whose parts open as sheets */
 .ib-plan-phonebar { display: flex; gap: 4px; margin: 0 12px calc(10px + env(safe-area-inset-bottom)); padding: 4px; border-radius: 16px; background: var(--card); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--border); }
@@ -206,7 +257,8 @@
   .ib-plans-c-dwords { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
   .ib-plans-table .ib-plans-c-date { text-align: right; }
   .ib-plans-c-date .ib-plans-new-n { display: block; width: fit-content; margin: 4px 0 0 auto; }
-  .ib-main > .ib-plan { border-radius: 0; box-shadow: none; }
+  .ib-main > .ib-plan-frame > .ib-plan { border-radius: 0; box-shadow: none; }
+  .ib-plan-frame[data-phone] .ib-plan-body { flex-direction: column; }
   .ib-plan-top { min-height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
   .ib-plan-main { padding: 8px 16px 0; }
   .ib-plan-crumb-p { display: none; }

@@ -16,6 +16,6 @@ export function PlansRoute({ route, on, settingsKnown, phone }: { route: Route; 
     if (settingsKnown && !on) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
   }, [settingsKnown, on]);
   if (!on) return <section className="ib-dpage" aria-busy={!settingsKnown || undefined} data-plans-waiting="" />;
-  if (route.plan) return <PlanPage key={route.plan} id={route.plan} version={route.planVersion ?? null} diff={route.planDiff ?? null} phone={phone} />;
+  if (route.plan) return <PlanPage key={route.plan} id={route.plan} version={route.planVersion ?? null} diff={route.planDiff ?? null} phone={phone} doc={route.planDoc ?? null} file={route.planFile ?? null} />;
   return <PlansHome showStart={route.planNew === true} />;
 }

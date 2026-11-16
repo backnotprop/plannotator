@@ -6,19 +6,27 @@
  */
 import { useMemo, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
-import { PlanContentRules, planBlocks, resolvePlanLink } from './planContent';
+import type { PlanDocumentKind } from '@plannotator/core/plans';
+import { PlanContentRules, PlanHtmlFrame, planBlocks, resolvePlanLink } from './planContent';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
-import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
+import { diagramDocumentBlocks, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { useVersionText } from './store';
 
 const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
 
-export function PlanDocument({ id, version }: { id: string; version: number }) {
+/**
+ * `doc` null: the plan's main page. A document's kind sets how it is drawn: Markdown by the Viewer; a Mermaid or
+ * Graphviz file as its one diagram (under the same diagram rules); an HTML page in a frame that runs nothing.
+ */
+export function PlanDocument({ id, version, doc = null, kind = 'markdown', title = '' }: { id: string; version: number; doc?: string | null; kind?: PlanDocumentKind; title?: string }) {
   const [retry, setRetry] = useState(0);
-  const { text, error } = useVersionText(id, version, retry);
+  const { text, error } = useVersionText(id, version, retry, doc);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
-  const blocks = useMemo(() => (text === null ? [] : planBlocks(parseMarkdownToBlocks(text))), [text]);
+  const blocks = useMemo(() => {
+    if (text === null || kind === 'html') return [];
+    return planBlocks(kind === 'mermaid' || kind === 'graphviz' ? diagramDocumentBlocks(text, kind) : parseMarkdownToBlocks(text));
+  }, [text, kind]);
   if (error) {
     return (
       <div className="ib-plan-docstate" role="alert">
@@ -36,12 +44,19 @@ export function PlanDocument({ id, version }: { id: string; version: number }) {
       </div>
     );
   }
+  if (kind === 'html') {
+    return (
+      <div className="ib-plan-docscroll ib-plan-framewrap" data-plan-document={version}>
+        <PlanHtmlFrame html={text} title={title || `Version ${version}`} />
+      </div>
+    );
+  }
   return (
     <div className="ib-plan-docscroll" ref={setViewport} data-plan-document={version}>
       <ScrollViewportProvider viewport={viewport}>
         <PlanContentRules>
           <Viewer
-            key={`${id}:${version}`}
+            key={`${id}:${doc ?? ''}:${version}`}
             blocks={blocks}
             markdown={text}
             annotations={NO_ANNOTATIONS}

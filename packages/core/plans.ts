@@ -120,7 +120,10 @@ export interface PlanVersion extends PlanActor {
   legacy: string | null;
 }
 
-/** A non-document file a plan keeps (bytes in its `files/`). Not written yet. */
+/**
+ * A non-document file a plan keeps: its bytes at `files/<asset_path>`, its record a line of `artifacts.jsonl` (the
+ * last line per path wins). Read and shown; nothing writes one yet but the store's own `addArtifact`.
+ */
 export interface PlanArtifact {
   asset_path: string;
   /** SHA-256 of the bytes. */
@@ -285,6 +288,32 @@ export function isPlanVersion(value: unknown): value is PlanVersion {
     PLAN_VERSION_SOURCES.includes(value.source as PlanVersionSource) &&
     isStringOrNull(value.legacy ?? null) &&
     isActor(value)
+  );
+}
+
+/**
+ * An artifact's path under its plan's `files/`: relative, `/`-separated, each segment a plain name (no `.` or `..`,
+ * no backslash, no control character, no leading dot), at most 200 characters. Anything else names no artifact.
+ */
+export function isPlanAssetPath(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 200) return false;
+  if (/[\\\u0000-\u001f\u007f]/.test(value)) return false;
+  return value.split("/").every((segment) => segment.length > 0 && !segment.startsWith("."));
+}
+
+export function isPlanArtifact(value: unknown): value is PlanArtifact {
+  if (!isObject(value)) return false;
+  return (
+    isPlanAssetPath(value.asset_path) &&
+    typeof value.content_hash === "string" &&
+    /^[0-9a-f]{64}$/.test(value.content_hash) &&
+    typeof value.content_type === "string" &&
+    value.content_type.length > 0 &&
+    typeof value.size === "number" &&
+    Number.isSafeInteger(value.size) &&
+    value.size >= 0 &&
+    isStringOrNull(value.title ?? null) &&
+    isIso(value.created_at)
   );
 }
 

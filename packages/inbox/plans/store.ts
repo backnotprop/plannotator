@@ -106,10 +106,10 @@ function putLooked(id: string, seen: number): void {
   });
 }
 
-/** The person read version `seen`. A failure only means the mark stays until the next look. */
-export function recordPlanLook(id: string, seen: number): void {
-  putLooked(id, seen);
-  plansApi.look(id, seen).catch(() => {});
+/** The person read version `seen` (of document `doc`; null: the plan's own). A failure only means the mark stays until the next look. */
+export function recordPlanLook(id: string, seen: number, doc: string | null = null): void {
+  if (!doc) putLooked(id, seen);
+  plansApi.look(id, seen, doc).catch(() => {});
 }
 
 export interface PlanState {
@@ -136,18 +136,37 @@ export function usePlan(id: string, retry: number): PlanState {
   return state;
 }
 
-/** A version's bytes never change: each is read once per window. */
+/** Another document's versions (`doc` null: none read, the plan's own come with `usePlan`). */
+export function useDocVersions(id: string, doc: string | null, retry: number): { versions: readonly PlanVersion[] | null; error: string | null } {
+  const [state, setState] = useState<{ key: string; versions: readonly PlanVersion[] | null; error: string | null }>({ key: '', versions: null, error: null });
+  const key = doc ? `${id}:${doc}` : '';
+  useEffect(() => {
+    if (!doc) return;
+    let live = true;
+    plansApi.versions(id, doc).then(
+      (list) => live && setState({ key, versions: list.versions, error: null }),
+      (error: unknown) => live && setState({ key, versions: null, error: messageOf(error) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [id, doc, key, retry]);
+  return state.key === key ? { versions: state.versions, error: state.error } : { versions: null, error: null };
+}
+
+/** A version's bytes never change, nor an artifact's (a new one is a new record): each is read once per window. */
 const texts = new Map<string, Promise<string>>();
 
-export function useVersionText(id: string, n: number | null, retry: number): { text: string | null; error: string | null } {
+/** An artifact's bytes as text (an HTML page, an SVG); `hash` tells a changed file from the one read before. */
+export function useArtifactText(id: string, assetPath: string | null, hash: string, retry: number): { text: string | null; error: string | null } {
   const [state, setState] = useState<{ key: string; text: string | null; error: string | null }>({ key: '', text: null, error: null });
-  const key = n === null ? '' : `${id}:${n}`;
+  const key = assetPath ? `file:${id}:${assetPath}:${hash}` : '';
   useEffect(() => {
-    if (n === null) return;
+    if (!assetPath) return;
     let live = true;
     let read = texts.get(key);
     if (!read) {
-      read = plansApi.version(id, n);
+      read = plansApi.fileText(id, assetPath);
       texts.set(key, read);
       read.catch(() => texts.delete(key));
     }
@@ -158,23 +177,46 @@ export function useVersionText(id: string, n: number | null, retry: number): { t
     return () => {
       live = false;
     };
-  }, [id, n, key, retry]);
+  }, [id, assetPath, key, retry]);
   return state.key === key ? { text: state.text, error: state.error } : { text: null, error: null };
 }
 
-export function usePlanDiff(id: string, from: number, to: number, retry: number): { diff: PlanDiffTexts | null; error: string | null } {
+export function useVersionText(id: string, n: number | null, retry: number, doc: string | null = null): { text: string | null; error: string | null } {
+  const [state, setState] = useState<{ key: string; text: string | null; error: string | null }>({ key: '', text: null, error: null });
+  const key = n === null ? '' : `${id}:${doc ?? ''}:${n}`;
+  useEffect(() => {
+    if (n === null) return;
+    let live = true;
+    let read = texts.get(key);
+    if (!read) {
+      read = plansApi.version(id, n, doc);
+      texts.set(key, read);
+      read.catch(() => texts.delete(key));
+    }
+    read.then(
+      (text) => live && setState({ key, text, error: null }),
+      (error: unknown) => live && setState({ key, text: null, error: messageOf(error) }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [id, n, doc, key, retry]);
+  return state.key === key ? { text: state.text, error: state.error } : { text: null, error: null };
+}
+
+export function usePlanDiff(id: string, from: number, to: number, retry: number, doc: string | null = null): { diff: PlanDiffTexts | null; error: string | null } {
   const [state, setState] = useState<{ key: string; diff: PlanDiffTexts | null; error: string | null }>({ key: '', diff: null, error: null });
-  const key = `${id}:${from}:${to}`;
+  const key = `${id}:${doc ?? ''}:${from}:${to}`;
   useEffect(() => {
     let live = true;
-    plansApi.diff(id, from, to).then(
+    plansApi.diff(id, from, to, doc).then(
       (diff) => live && setState({ key, diff, error: null }),
       (error: unknown) => live && setState({ key, diff: null, error: messageOf(error) }),
     );
     return () => {
       live = false;
     };
-  }, [id, from, to, key, retry]);
+  }, [id, from, to, doc, key, retry]);
   return state.key === key ? { diff: state.diff, error: state.error } : { diff: null, error: null };
 }
 

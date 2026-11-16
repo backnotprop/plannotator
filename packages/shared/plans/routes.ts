@@ -5,7 +5,9 @@
  * same-origin, the page's server session on the one write).
  *
  *   GET  /api/plans                          every plan, newest change first, with the person's look
- *   GET  /api/plans/:id                      one plan: its record, documents, decisions and activity, look
+ *   GET  /api/plans/:id                      one plan: its record, documents, artifacts, decisions and activity, look
+ *   GET  /api/plans/:id/files/<asset_path>   an artifact's bytes (a raster picture as itself, other text as plain
+ *                                            text, anything else as a download: `artifactServedType`)
  *   GET  /api/plans/:id/versions[?doc=]      a document's versions (the primary one without doc)
  *   GET  /api/plans/:id/versions/:n[?doc=]   one version's bytes, as saved
  *   GET  /api/plans/:id/diff[?doc=&from=&to=]  the two texts a diff needs: `to` the head unless named, `from` the
@@ -47,6 +49,22 @@ const CONTENT_TYPE: Record<string, string> = {
   dot: "text/plain; charset=utf-8",
 };
 
+/** Raster pictures, served as what they are: a picture runs nothing. */
+const SERVED_PICTURES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"]);
+
+/**
+ * The type an artifact's bytes are served as. An artifact is an agent's file on this Inbox's own origin, so nothing
+ * that could run there is served as itself: a raster picture keeps its type; text of any kind (HTML, SVG, JSON…)
+ * is plain text, which the window draws itself (an HTML page in a sandboxed frame, an SVG as a data: picture);
+ * anything else is a download.
+ */
+export function artifactServedType(contentType: string): string {
+  const type = contentType.split(";")[0]!.trim().toLowerCase();
+  if (SERVED_PICTURES.has(type)) return type;
+  if (type.startsWith("text/") || type === "image/svg+xml" || type === "application/json" || type.endsWith("+json") || type.endsWith("+xml")) return "text/plain; charset=utf-8";
+  return "application/octet-stream";
+}
+
 const bad = (message: string, status = 400): PlanRouteResult => ({ status, body: { error: message } });
 
 /** True for `/api/plans` and every path under it. */
@@ -84,7 +102,16 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
   if (!sub) {
     if (method !== "GET") return bad("method not allowed", 405);
     const decisions = read.events.filter((event) => event.kind === "decision").map((event) => event.decision);
-    return { status: 200, body: { plan: read.plan, documents: read.documents, decisions, events: read.events, look } };
+    return { status: 200, body: { plan: read.plan, documents: read.documents, artifacts: read.artifacts, decisions, events: read.events, look } };
+  }
+
+  if (sub === "files" && parts.length >= 3) {
+    if (method !== "GET") return bad("method not allowed", 405);
+    const assetPath = parts.slice(2).join("/");
+    const artifact = read.artifacts.find((a) => a.asset_path === assetPath);
+    const path = artifact ? store.artifactPath(id, assetPath) : null;
+    if (!artifact || !path) return bad(`${id} has no artifact ${assetPath}.`, 404);
+    return { status: 200, file: { path, contentType: artifactServedType(artifact.content_type) } };
   }
 
   if (sub === "versions" && parts.length === 2) {

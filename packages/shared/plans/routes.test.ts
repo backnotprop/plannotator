@@ -4,7 +4,9 @@
  * - the list, a plan, its versions or one version's bytes cannot be read, or another document's are served;
  * - the diff gets the wrong pair (it must start from the version the person last saw);
  * - a look records a version that does not exist, takes a bad body, or answers a GET;
- * - a path that is not a plan id, or a malformed one, crashes instead of answering 4xx.
+ * - a path that is not a plan id, or a malformed one, crashes instead of answering 4xx;
+ * - an artifact is served as something that could run on the Inbox's origin (HTML, SVG), or a path that is not a
+ *   recorded artifact (one reaching outside the plan's `files/`) is served at all.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -110,5 +112,38 @@ describe("Plans' routes", () => {
     expect((await call("GET", `/api/plans/${planId("pln")}`))?.status).toBe(404);
     expect((await call("GET", `/api/plans/${plan.id}/nope`))?.status).toBe(404);
     expect((await call("GET", "/api/plans/%E0%A4%A"))?.status).toBe(400);
+  });
+
+  test("a plan's other documents and artifacts: listed, read, and served as nothing that could run", async () => {
+    const { store, plan, call } = world();
+    const notes = store.addDocument(plan.id, { title: "Rollout", created_at: "2026-11-05T09:00:00.000Z" });
+    store.addVersion(plan.id, notes.id, { bytes: new TextEncoder().encode("# Rollout\n"), committed_at: "2026-11-05T09:00:00.000Z", source: "agent-tool" });
+    const at = "2026-11-06T09:00:00.000Z";
+    store.addArtifact(plan.id, { asset_path: "shots/screen.png", bytes: new Uint8Array([137, 80, 78, 71]), content_type: "image/png", created_at: at });
+    store.addArtifact(plan.id, { asset_path: "mockup.html", bytes: new TextEncoder().encode("<script>alert(1)</script>"), content_type: "text/html", created_at: at });
+    store.addArtifact(plan.id, { asset_path: "flow.svg", bytes: new TextEncoder().encode("<svg/>"), content_type: "image/svg+xml", created_at: at });
+    store.addArtifact(plan.id, { asset_path: "spec.pdf", bytes: new Uint8Array([37, 80, 68, 70]), content_type: "application/pdf", created_at: at });
+
+    const one = body(await call("GET", `/api/plans/${plan.id}`))!;
+    expect(one.documents.map((d: { title: string }) => d.title).sort()).toEqual(["Auth refactor", "Rollout"]);
+    expect(one.artifacts.map((a: { asset_path: string }) => a.asset_path)).toEqual(["flow.svg", "mockup.html", "shots/screen.png", "spec.pdf"]);
+    expect(store.list()[0]!.counts.artifacts).toBe(4);
+    expect(body(await call("GET", `/api/plans/${plan.id}/versions?doc=${notes.id}`))!.versions.length).toBe(1);
+
+    const served = async (path: string) => {
+      const answer = await call("GET", `/api/plans/${plan.id}/files/${path}`);
+      return answer && "file" in answer ? { type: answer.file.contentType, bytes: readFileSync(answer.file.path) } : answer?.status;
+    };
+    expect(await served("shots/screen.png")).toEqual({ type: "image/png", bytes: Buffer.from([137, 80, 78, 71]) });
+    expect((await served("mockup.html") as { type: string }).type).toBe("text/plain; charset=utf-8");
+    expect((await served("flow.svg") as { type: string }).type).toBe("text/plain; charset=utf-8");
+    expect((await served("spec.pdf") as { type: string }).type).toBe("application/octet-stream");
+    // Only a recorded path: nothing else under files/, nothing outside it.
+    expect(await served("nope.png")).toBe(404);
+    expect(await served("..%2F..%2Fplan.jsonl")).toBe(404);
+    expect(await served("shots%2F..%2Fmockup.html")).toBe(404);
+    expect(store.artifactPath(plan.id, "../plan.jsonl")).toBeNull();
+    expect(() => store.addArtifact(plan.id, { asset_path: "../x", bytes: new Uint8Array(), content_type: "text/plain", created_at: at })).toThrow();
+    expect((await call("POST", `/api/plans/${plan.id}/files/mockup.html`))?.status).toBe(405);
   });
 });

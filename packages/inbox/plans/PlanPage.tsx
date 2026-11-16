@@ -1,26 +1,48 @@
 /**
- * One plan (approval "inbox-plans", layout B): the plan takes the page, drawn by the document UI's own Viewer, read
- * only; a right rail holds Versions (newest first, with the activity) and Artifacts. The header says which version is
- * being read ("Reading v5 · newest"); versions change only in the rail, never from a menu in the plan. "Changed since
- * you looked" compares with the version the person had seen when the page opened, and Show changes opens the diff
- * from that version to the newest. Comments, Send and the plan's thread come later. On a phone the rail is a bar at
- * the bottom that opens each part as a sheet.
+ * One plan (approval "inbox-plans", layout B, with a space's left panel): the plan's files on the left (PlanFiles.tsx),
+ * the file on screen in the middle, and a right rail with the versions of that file and the plan's activity. A
+ * document is drawn by the document UI's own Viewer, read only; an artifact by what it is (PlanArtifactView.tsx). The
+ * header says which version is being read ("Reading v5 · newest"); versions change only in the rail. "Changed since
+ * you looked" compares with the version the person had seen of that document when the page opened, and Show changes
+ * opens the diff from it to the newest. The address carries the file (`&doc=`, `&file=`); the main page keeps the
+ * plan's own address. On a phone the rail is a bar at the bottom that opens as a sheet, and the files open from the
+ * top bar as a sheet from the left. Comments, Send and the plan's thread come later.
  */
-import { useEffect, useMemo, useState } from 'react';
-import type { PlanDecision, PlanVersion } from '@plannotator/core/plans';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import type { PlanArtifact, PlanDecision, PlanDocument as PlanDocumentRecord, PlanVersion } from '@plannotator/core/plans';
+import { storage } from '@plannotator/ui/utils/storage';
 import { SidebarTrigger } from '../shell/sidebar';
+import { CollapsibleEdge, ResizeHandle } from '../shell/CollapsibleEdge';
+import { useResizablePanel } from '../shell/useResizablePanel';
 import { Icon } from '../icons';
 import { writeRoute } from '../app/writeRoute';
 import { BottomSheet } from '../components/BottomSheet';
 import type { PlanRead } from './client';
-import { recordPlanLook, usePlan } from './store';
-import { changedSinceDecision, decisionLabel, decisionTone } from './words';
+import { recordPlanLook, useDocVersions, usePlan } from './store';
+import { artifactKindLabel, artifactName, changedSinceDecision, decisionLabel, decisionTone, PLAN_FILES_WORDS, sizeWords } from './words';
 import { DecisionMark, PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
 import { PlanDiffView } from './PlanDiffView';
-import { PlanRail, type PlanRailTab } from './PlanRail';
+import { PlanArtifactView } from './PlanArtifactView';
+import { ArtifactRail, PlanRail } from './PlanRail';
+import {
+  PLAN_DOC_MIN,
+  PLAN_FILES_DEFAULT,
+  PLAN_FILES_HIDDEN_KEY,
+  PLAN_FILES_MAX,
+  PLAN_FILES_MIN,
+  PLAN_FILES_WIDTH_KEY,
+  PlanFiles,
+  PlanFilesSheet,
+  planFileRoute,
+  type PlanFileRef,
+} from './PlanFiles';
 
 const toList = () => writeRoute({ page: 'plans', project: null, thread: null });
+
+/** The right rail's width and the gap between the panes (plans.css): the room the document has is what is left. */
+const RAIL_WIDTH = 373;
+const PANE_GAP = 8;
 
 export interface PlanPageProps {
   id: string;
@@ -28,6 +50,10 @@ export interface PlanPageProps {
   version: number | null;
   diff: { from: number; to: number } | null;
   phone: boolean;
+  /** Another document on screen (`&doc=`); null: the main page. */
+  doc?: string | null;
+  /** An artifact on screen (`&file=`). */
+  file?: string | null;
 }
 
 export function PlanPage(props: PlanPageProps) {
@@ -40,42 +66,226 @@ export function PlanPage(props: PlanPageProps) {
   return <PlanLoaded {...props} read={state.read} versions={state.versions} />;
 }
 
-/** The newest decision on each version, and the newest of all. */
-function decisionsOf(decisions: readonly PlanDecision[]): { byVersion: Map<number, PlanDecision>; newest: PlanDecision | null } {
+/** The newest decision on each version of one document, and the newest of all. */
+function decisionsOf(decisions: readonly PlanDecision[], doc: string): { byVersion: Map<number, PlanDecision>; newest: PlanDecision | null } {
   const byVersion = new Map<number, PlanDecision>();
   let newest: PlanDecision | null = null;
-  for (const d of [...decisions].sort((a, b) => a.at.localeCompare(b.at))) {
+  for (const d of [...decisions].filter((d) => d.document_id === doc).sort((a, b) => a.at.localeCompare(b.at))) {
     if (d.version_number) byVersion.set(d.version_number, d);
     newest = d;
   }
   return { byVersion, newest };
 }
 
-function PlanLoaded({ id, version, diff, phone, read, versions }: PlanPageProps & { read: PlanRead; versions: readonly PlanVersion[] }) {
+/** A kept yes/no (the panel folded), in Plannotator's own storage, as the panel's width is. */
+function useStoredFlag(key: string): [boolean, (next: boolean) => void] {
+  const [value, setValue] = useState(() => storage.getItem(key) === '1');
+  const set = useCallback(
+    (next: boolean) => {
+      setValue(next);
+      storage.setItem(key, next ? '1' : '0');
+    },
+    [key],
+  );
+  return [value, set];
+}
+
+/** An element's width as it changes (0 before layout, or where nothing measures). */
+function useWidth(el: HTMLElement | null): number {
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    if (!el) return;
+    setWidth(el.clientWidth);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => setWidth(el.clientWidth));
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [el]);
+  return width;
+}
+
+function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: PlanPageProps & { read: PlanRead; versions: readonly PlanVersion[] }) {
+  const primary = read.plan.primary_doc_id;
+  const artifacts = read.artifacts ?? [];
+  const artifact = file ? (artifacts.find((a) => a.asset_path === file) ?? null) : null;
+  const document = (doc && read.documents.find((d) => d.id === doc && !d.archived_at)) || read.documents.find((d) => d.id === primary)!;
+  const onScreen: PlanFileRef = artifact ? { kind: 'artifact', path: artifact.asset_path } : { kind: 'doc', id: document.id };
+  const project = read.plan.project_name;
+
+  // The panel: docked while there is room and the person has not folded it; otherwise Show files opens the sheet.
+  const [frame, setFrame] = useState<HTMLElement | null>(null);
+  const frameWidth = useWidth(frame);
+  const [hidden, setHidden] = useStoredFlag(PLAN_FILES_HIDDEN_KEY);
+  const resize = useResizablePanel({
+    storageKey: PLAN_FILES_WIDTH_KEY,
+    defaultWidth: PLAN_FILES_DEFAULT,
+    minWidth: PLAN_FILES_MIN,
+    maxWidth: PLAN_FILES_MAX,
+    side: 'left',
+    onSnapClose: () => setHidden(true),
+    onClick: () => setHidden(true),
+  });
+  const panelWidth = Math.min(resize.width, PLAN_FILES_MAX);
+  const squeezed = frameWidth > 0 && frameWidth - RAIL_WIDTH - PANE_GAP - panelWidth < PLAN_DOC_MIN;
+  const docked = !phone && !hidden && !squeezed;
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    if (docked) setSheet(false);
+  }, [docked]);
+  const showFiles = () => (phone || squeezed ? setSheet(true) : setHidden(false));
+  const filesProps = { plan: id, name: read.plan.name, primary, documents: read.documents, artifacts, onScreen };
+
+  const middle = artifact ? (
+    <ArtifactPane id={id} artifact={artifact} read={read} activityVersions={versions} phone={phone} project={project} />
+  ) : (
+    <DocPane key={document.id} id={id} document={document} primary={primary} read={read} mainVersions={versions} version={version} diff={diff} phone={phone} project={project} />
+  );
+  return (
+    <section className="ib-plans ib-plan-frame" ref={setFrame} aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={docked ? 'docked' : 'hidden'}>
+      {docked && (
+        <aside className="ib-plan-filespane" style={{ width: panelWidth }} id={`${id}-files`}>
+          <PlanFiles {...filesProps} onHide={() => setHidden(true)} />
+          <div className="ib-plan-filesedge">
+            <CollapsibleEdge
+              label={PLAN_FILES_WORDS.width}
+              onCollapse={() => setHidden(true)}
+              controls={`${id}-files`}
+              isDragging={resize.isDragging}
+              resize={{ value: panelWidth, min: resize.minWidth, max: PLAN_FILES_MAX, resizeTo: resize.resizeTo }}
+            >
+              <ResizeHandle {...resize.handleProps} />
+            </CollapsibleEdge>
+          </div>
+        </aside>
+      )}
+      <div className="ib-plan">
+        <header className="ib-plan-top">
+          <SidebarTrigger />
+          {!docked && (
+            <button type="button" className="ib-plans-back ib-plan-showfiles" onClick={showFiles} aria-label={PLAN_FILES_WORDS.show} data-plan-show-files="">
+              <Icon name="contents" />
+              {!phone && PLAN_FILES_WORDS.show}
+            </button>
+          )}
+          {!docked && (
+            <button type="button" className="ib-plans-back" onClick={toList} data-plans-back="">
+              <Icon name="chevL" />
+              Plans
+            </button>
+          )}
+          <span className="ib-plan-crumb" dir="auto">
+            {project && <span className="ib-plan-crumb-p">{project} /</span>} <span className={onScreen.kind === 'doc' && document.id === primary ? 'ib-plan-crumb-n' : 'ib-plan-crumb-p'}>{read.plan.name}</span>
+            {(artifact || document.id !== primary) && <span className="ib-plan-crumb-n"> / {artifact ? artifactName(artifact) : document.title}</span>}
+          </span>
+        </header>
+        {middle}
+      </div>
+      {!docked && <PlanFilesSheet {...filesProps} open={sheet} onClose={() => setSheet(false)} />}
+    </section>
+  );
+}
+
+/** The middle and the rail for a document: its versions, its decision, its diff. */
+function DocPane({
+  id,
+  document,
+  primary,
+  read,
+  mainVersions,
+  version,
+  diff,
+  phone,
+  project,
+}: {
+  id: string;
+  document: PlanDocumentRecord;
+  primary: string;
+  read: PlanRead;
+  mainVersions: readonly PlanVersion[];
+  version: number | null;
+  diff: { from: number; to: number } | null;
+  phone: boolean;
+  project: string | null;
+}) {
+  const isMain = document.id === primary;
+  const [retry, setRetry] = useState(0);
+  const other = useDocVersions(id, isMain ? null : document.id, retry);
+  const versions = isMain ? mainVersions : other.versions;
+  if (!isMain && other.error) {
+    return (
+      <div className="ib-plan-docstate" role="alert">
+        <p>
+          {document.title} could not be read. {other.error}
+        </p>
+        <button type="button" className="ib-plans-quiet" onClick={() => setRetry((n) => n + 1)}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (!versions) {
+    return (
+      <div className="ib-plan-docstate" role="status" aria-busy="true">
+        <p>Loading {document.title}…</p>
+      </div>
+    );
+  }
+  if (versions.length === 0) {
+    return (
+      <div className="ib-plan-docstate">
+        <p>{document.title} has no version yet.</p>
+      </div>
+    );
+  }
+  return <DocLoaded id={id} document={document} isMain={isMain} read={read} versions={versions} mainVersions={mainVersions} version={version} diff={diff} phone={phone} project={project} />;
+}
+
+function DocLoaded({
+  id,
+  document,
+  isMain,
+  read,
+  versions,
+  mainVersions,
+  version,
+  diff,
+  phone,
+  project,
+}: {
+  id: string;
+  document: PlanDocumentRecord;
+  isMain: boolean;
+  read: PlanRead;
+  versions: readonly PlanVersion[];
+  mainVersions: readonly PlanVersion[];
+  version: number | null;
+  diff: { from: number; to: number } | null;
+  phone: boolean;
+  project: string | null;
+}) {
   const head = versions[versions.length - 1]!.version_number;
-  // What the person had seen when the page opened: the look recorded below must not move it.
-  const [seenAtOpen] = useState<number | null>(() => read.look?.docs[read.plan.primary_doc_id] ?? null);
+  // What the person had seen of this document when the page opened: the look recorded below must not move it.
+  const [seenAtOpen] = useState<number | null>(() => read.look?.docs[document.id] ?? null);
   const known = (n: number | null | undefined) => !!n && versions.some((v) => v.version_number === n);
   const compare = diff && known(diff.from) && known(diff.to) ? { from: Math.min(diff.from, diff.to), to: Math.max(diff.from, diff.to) } : null;
   const shown = compare ? compare.to : known(version) ? version! : head;
-  const { byVersion, newest } = useMemo(() => decisionsOf(read.decisions), [read.decisions]);
-  const [tab, setTab] = useState<PlanRailTab>('versions');
+  const { byVersion, newest } = useMemo(() => decisionsOf(read.decisions, document.id), [read.decisions, document.id]);
   const [sheet, setSheet] = useState(false);
   const [sheetHost, setSheetHost] = useState<HTMLElement | null>(null);
+  const docRef = isMain ? null : document.id;
 
   // Reading a version is seeing it (the store keeps the highest seen).
-  useEffect(() => recordPlanLook(id, shown), [id, shown]);
+  useEffect(() => recordPlanLook(id, shown, docRef), [id, shown, docRef]);
 
+  const fileRoute = planFileRoute(id, read.plan.primary_doc_id, { kind: 'doc', id: document.id });
   const go = (next: { version?: number | null; diff?: { from: number; to: number } | null }) =>
-    writeRoute({ page: 'plans', project: null, thread: null, plan: id, planVersion: next.version && next.version !== head ? next.version : null, planDiff: next.diff ?? null }, { replace: true });
+    writeRoute({ ...fileRoute, planVersion: next.version && next.version !== head ? next.version : null, planDiff: next.diff ?? null }, { replace: true });
   const changedSince = seenAtOpen !== null && seenAtOpen < head;
   const since = changedSince ? head - seenAtOpen! : 0;
-  const project = read.plan.project_name;
   const rail = (
     <PlanRail
-      tab={tab}
-      onTab={setTab}
       versions={versions}
+      activityVersions={mainVersions}
       read={read}
       shown={shown}
       head={head}
@@ -93,24 +303,14 @@ function PlanLoaded({ id, version, diff, phone, read, versions }: PlanPageProps 
     />
   );
   return (
-    <section className="ib-plans ib-plan" ref={setSheetHost} aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined}>
-      <header className="ib-plan-top">
-        <SidebarTrigger />
-        <button type="button" className="ib-plans-back" onClick={toList} data-plans-back="">
-          <Icon name="chevL" />
-          Plans
-        </button>
-        <span className="ib-plan-crumb" dir="auto">
-          {project && <span className="ib-plan-crumb-p">{project} /</span>} <span className="ib-plan-crumb-n">{read.plan.name}</span>
-        </span>
-      </header>
-      <div className="ib-plan-body">
-        <div className="ib-plan-main">
-          <div className="ib-plan-line">
-            {project && <span className="ib-plan-project">{project}</span>}
-            <span className="ib-plan-reading" data-plan-reading="">
-              {compare ? `Comparing v${compare.from} with v${compare.to}` : shown === head ? `Reading v${shown} · newest` : `Reading v${shown} of ${head}`}
-            </span>
+    <div className="ib-plan-body" ref={setSheetHost}>
+      <div className="ib-plan-main">
+        <div className="ib-plan-line">
+          {project && <span className="ib-plan-project">{project}</span>}
+          <span className="ib-plan-reading" data-plan-reading="">
+            {compare ? `Comparing v${compare.from} with v${compare.to}` : shown === head ? `Reading v${shown} · newest` : `Reading v${shown} of ${head}`}
+          </span>
+          {(isMain || newest) && (
             <span className="ib-plan-decision" data-plan-decision={decisionTone(newest?.decision)}>
               <DecisionMark tone={decisionTone(newest?.decision)} />
               {decisionLabel(newest?.decision)}
@@ -122,50 +322,79 @@ function PlanLoaded({ id, version, diff, phone, read, versions }: PlanPageProps 
                 </span>
               ) : null}
             </span>
-          </div>
-          {compare ? (
-            <div className="ib-plan-banner" data-plan-banner="diff">
-              <Icon name="sideBySide" />
-              <p>
-                Showing what changed from <b>v{compare.from}</b>
-                {compare.from === seenAtOpen ? ', the one you saw,' : ''} to <b>v{compare.to}</b>.
-              </p>
-              <button type="button" className="ib-plans-quiet" onClick={() => go({ version: compare.to })} data-plan-only="">
-                Show v{compare.to} only
-              </button>
-            </div>
-          ) : changedSince ? (
-            <div className="ib-plan-banner" data-plan-banner="changed">
-              <Icon name="eye" />
-              <p>
-                <b>Changed since you looked.</b> You saw v{seenAtOpen}. {since === 1 ? `v${head} came since.` : `v${seenAtOpen! + 1} to v${head} came since.`}
-              </p>
-              <button type="button" className="ib-plans-soft" onClick={() => go({ diff: { from: seenAtOpen!, to: head } })} data-plan-show-changes="">
-                Show changes
-              </button>
-            </div>
-          ) : null}
-          <div className="ib-plan-doc">{compare ? <PlanDiffView id={id} from={compare.from} to={compare.to} /> : <PlanDocument id={id} version={shown} />}</div>
+          )}
         </div>
-        {!phone && <aside className="ib-plan-rail" aria-label="Versions and artifacts">{rail}</aside>}
+        {compare ? (
+          <div className="ib-plan-banner" data-plan-banner="diff">
+            <Icon name="sideBySide" />
+            <p>
+              Showing what changed from <b>v{compare.from}</b>
+              {compare.from === seenAtOpen ? ', the one you saw,' : ''} to <b>v{compare.to}</b>.
+            </p>
+            <button type="button" className="ib-plans-quiet" onClick={() => go({ version: compare.to })} data-plan-only="">
+              Show v{compare.to} only
+            </button>
+          </div>
+        ) : changedSince ? (
+          <div className="ib-plan-banner" data-plan-banner="changed">
+            <Icon name="eye" />
+            <p>
+              <b>Changed since you looked.</b> You saw v{seenAtOpen}. {since === 1 ? `v${head} came since.` : `v${seenAtOpen! + 1} to v${head} came since.`}
+            </p>
+            <button type="button" className="ib-plans-soft" onClick={() => go({ diff: { from: seenAtOpen!, to: head } })} data-plan-show-changes="">
+              Show changes
+            </button>
+          </div>
+        ) : null}
+        <div className="ib-plan-doc">
+          {compare ? (
+            <PlanDiffView id={id} from={compare.from} to={compare.to} doc={docRef} kind={document.kind} />
+          ) : (
+            <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} />
+          )}
+        </div>
       </div>
-      {phone && (
-        <>
-          <nav className="ib-plan-phonebar" aria-label="Plan">
-            <button type="button" onClick={() => (setTab('versions'), setSheet(true))} data-plan-phone-tab="versions">
-              <Icon name="stack" />
-              Versions {versions.length}
-            </button>
-            <button type="button" onClick={() => (setTab('artifacts'), setSheet(true))} data-plan-phone-tab="artifacts">
-              <Icon name="artifacts" />
-              Artifacts
-            </button>
-          </nav>
-          <BottomSheet open={sheet} onClose={() => setSheet(false)} title={read.plan.name} host={sheetHost} attrs={{ 'data-plan-sheet': '' }}>
-            {rail}
-          </BottomSheet>
-        </>
-      )}
-    </section>
+      <RailPlace phone={phone} rail={rail} count={versions.length} sheet={sheet} setSheet={setSheet} host={sheetHost} title={isMain ? read.plan.name : document.title} />
+    </div>
+  );
+}
+
+/** The middle and the rail for an artifact: the file as it is, and a rail that says it has no versions. */
+function ArtifactPane({ id, artifact, read, activityVersions, phone, project }: { id: string; artifact: PlanArtifact; read: PlanRead; activityVersions: readonly PlanVersion[]; phone: boolean; project: string | null }) {
+  const [sheet, setSheet] = useState(false);
+  const [sheetHost, setSheetHost] = useState<HTMLElement | null>(null);
+  return (
+    <div className="ib-plan-body" ref={setSheetHost}>
+      <div className="ib-plan-main">
+        <div className="ib-plan-line">
+          {project && <span className="ib-plan-project">{project}</span>}
+          <span className="ib-plan-reading" data-plan-reading="">
+            {artifactKindLabel(artifact.content_type)} · {sizeWords(artifact.size)}
+          </span>
+        </div>
+        <div className="ib-plan-doc">
+          <PlanArtifactView id={id} artifact={artifact} />
+        </div>
+      </div>
+      <RailPlace phone={phone} rail={<ArtifactRail artifact={artifact} read={read} activityVersions={activityVersions} />} count={0} sheet={sheet} setSheet={setSheet} host={sheetHost} title={artifactName(artifact)} />
+    </div>
+  );
+}
+
+/** The rail beside the file on a desktop; on a phone a bar at the bottom whose Versions opens it as a sheet. */
+function RailPlace({ phone, rail, count, sheet, setSheet, host, title }: { phone: boolean; rail: ReactNode; count: number; sheet: boolean; setSheet: (open: boolean) => void; host: HTMLElement | null; title: string }) {
+  if (!phone) return <aside className="ib-plan-rail" aria-label="Versions and activity">{rail}</aside>;
+  return (
+    <>
+      <nav className="ib-plan-phonebar" aria-label="Plan">
+        <button type="button" onClick={() => setSheet(true)} data-plan-phone-tab="versions">
+          <Icon name="stack" />
+          Versions {count}
+        </button>
+      </nav>
+      <BottomSheet open={sheet} onClose={() => setSheet(false)} title={title} host={host} attrs={{ 'data-plan-sheet': '' }}>
+        {rail}
+      </BottomSheet>
+    </>
   );
 }
