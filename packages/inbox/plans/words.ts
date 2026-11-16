@@ -27,6 +27,12 @@ export function changedSinceDecision(decision: { version_number: number | null }
   return decision?.version_number && decision.version_number < head ? ' · changed since' : '';
 }
 
+/** A plan's decision as a list shows it: "Approved", or "Approved on v2 · changed since" once newer versions exist. */
+export function planDecisionWords(plan: Pick<PlanSummary, 'decision' | 'head_version_number'>): string {
+  const since = changedSinceDecision(plan.decision, plan.head_version_number);
+  return `${decisionLabel(plan.decision?.decision)}${since ? ` on v${plan.decision!.version_number}${since}` : ''}`;
+}
+
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
 /** "5 versions · 2 artifacts": what a plan holds. */
@@ -83,6 +89,29 @@ export function planGroups(plans: readonly PlanSummary[]): PlanGroup[] {
   const groups: PlanGroup[] = changed.length ? [{ key: 'since', title: 'Since you looked', plans: changed }] : [];
   const projects = [...byProject.entries()].sort(([a], [b]) => (a === '' ? 1 : b === '' ? -1 : 0));
   for (const [key, list] of projects) groups.push({ key: `p:${key}`, title: key || 'No project', plans: list });
+  return groups;
+}
+
+/** The home's two views: today's rows with previews (the default) or a compact list, one line per plan. */
+export type PlansView = 'rows' | 'compact';
+export const PLANS_VIEWS: readonly { id: PlansView; label: string }[] = [
+  { id: 'rows', label: 'Rows with previews' },
+  { id: 'compact', label: 'Compact list' },
+];
+/** The compact list's column headers, in order. */
+export const PLANS_COMPACT_COLUMNS = { name: 'Name', project: 'Project', version: 'Version', decision: 'Decision', date: 'Last change' } as const;
+
+/**
+ * The compact list's groups: "Since you looked" first (as in the rows), then every other plan in one list, newest
+ * change first, titled "Other plans" only when the first group is there. Not by project: the list has a Project
+ * column, so a project heading would only say again what every row under it says.
+ */
+export function compactGroups(plans: readonly PlanSummary[]): PlanGroup[] {
+  const newest = (a: PlanSummary, b: PlanSummary) => b.updated_at.localeCompare(a.updated_at);
+  const changed = plans.filter((p) => p.changed).sort(newest);
+  const rest = plans.filter((p) => !p.changed).sort(newest);
+  const groups: PlanGroup[] = changed.length ? [{ key: 'since', title: 'Since you looked', plans: changed }] : [];
+  if (rest.length) groups.push({ key: 'rest', title: changed.length ? 'Other plans' : '', plans: rest });
   return groups;
 }
 

@@ -61,6 +61,34 @@
 .ib-plans-none { margin: 40px 0; text-align: center; color: var(--muted-foreground); }
 .ib-plans-none p { margin: 0 0 8px; }
 
+/* Home: the view switch (the Inbox's .ib-seg) and the compact list, one line per plan. Lines show hover and keyboard
+   focus by fill; the name's link is stretched over its line, so the whole line opens the plan. */
+.ib-plans-view .ib-seg-o { padding: 0 9px; }
+.ib-plans-view .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-plans-table { width: 100%; margin-top: 22px; border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: var(--ib-fs-14, 14px); }
+.ib-plans-table thead .ib-plans-c-project { width: 140px; }
+.ib-plans-table thead .ib-plans-c-version { width: 72px; }
+.ib-plans-table thead .ib-plans-c-decision { width: 296px; }
+.ib-plans-table thead .ib-plans-c-date { width: 132px; }
+.ib-plans-table th, .ib-plans-table td { padding: 0 10px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ib-plans-table thead th { height: 32px; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--muted-foreground); }
+.ib-plans-c-group th { height: 40px; padding-top: 12px; font-size: var(--ib-fs-15, 15px); font-weight: 650; color: var(--foreground); }
+.ib-plans-c-row { position: relative; }
+.ib-plans-c-row td { height: 40px; color: var(--muted-foreground); }
+.ib-plans-c-row td:first-child { border-radius: 10px 0 0 10px; }
+.ib-plans-c-row td:last-child { border-radius: 0 10px 10px 0; }
+.ib-plans-c-row:hover td { background: color-mix(in oklch, var(--muted) 70%, transparent); }
+.ib-plans-c-row:has(a:focus-visible) td { background: color-mix(in oklch, var(--primary) 14%, transparent); }
+.ib-plans-c-name a { color: var(--foreground); font-weight: 500; text-decoration: none; }
+.ib-plans-c-name a::after { content: ""; position: absolute; inset: 0; }
+.ib-plans .ib-plans-c-name a:focus-visible { outline: none; }
+.ib-plans-c-row[data-changed] .ib-plans-c-name a { font-weight: 650; }
+.ib-plans-c-sub { display: none; }
+.ib-plans-c-version, .ib-plans-c-date { font-variant-numeric: tabular-nums; }
+.ib-plans-c-dec { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; vertical-align: middle; }
+.ib-plans-c-dwords { overflow: hidden; text-overflow: ellipsis; }
+.ib-plans-c-date .ib-plans-new-n { margin-left: 8px; font-size: var(--ib-fs-12, 12px); }
+
 /* A decision's mark */
 .ib-plans-dmark { display: inline-flex; flex: none; }
 .ib-plans-dmark .ib-ic { width: 15px; height: 15px; }
@@ -162,6 +190,22 @@
   .ib-plans-rows { padding: 0 8px; }
   .ib-plans-thumb { display: none; }
   .ib-plans-row-holds .ib-plans-row-project { display: none; }
+  /* The compact list on a phone: name (project · version under it), the decision's mark, the date. Never sideways. */
+  .ib-plans-table { margin-top: 14px; padding: 0 8px; }
+  .ib-plans-table thead th { height: 0; padding-top: 0; padding-bottom: 0; font-size: 0; line-height: 0; }
+  .ib-plans-table thead .ib-plans-c-decision { width: 34px; }
+  .ib-plans-table thead .ib-plans-c-date { width: 96px; }
+  /* Project and version keep their cells (the group heading spans five columns, and a screen reader still reads
+     them), at no width: the second line under the name shows them. */
+  .ib-plans-table thead .ib-plans-c-project, .ib-plans-table thead .ib-plans-c-version { width: 0; }
+  .ib-plans-table .ib-plans-c-project, .ib-plans-table .ib-plans-c-version { padding: 0; }
+  .ib-plans-c-row td { height: 56px; }
+  .ib-plans-c-name a, .ib-plans-c-sub { display: block; overflow: hidden; text-overflow: ellipsis; }
+  .ib-plans-c-sub { margin-top: 2px; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; }
+  .ib-plans-c-decision { padding: 0 4px; }
+  .ib-plans-c-dwords { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .ib-plans-table .ib-plans-c-date { text-align: right; }
+  .ib-plans-c-date .ib-plans-new-n { display: block; width: fit-content; margin: 4px 0 0 auto; }
   .ib-main > .ib-plan { border-radius: 0; box-shadow: none; }
   .ib-plan-top { min-height: calc(52px + env(safe-area-inset-top)); padding-top: env(safe-area-inset-top); }
   .ib-plan-main { padding: 8px 16px 0; }

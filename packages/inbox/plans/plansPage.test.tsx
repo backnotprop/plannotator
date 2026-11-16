@@ -8,6 +8,8 @@
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
  * - a decision on an older version reads as current in the list or the page line (it must say "changed since");
+ * - the compact list leaves out a plan or orders it differently, loses a column, is not a link, is not remembered,
+ *   or search and the empty search stop working in it;
  * - picking a version in the rail does not show that version;
  * - the diff does not compare the two versions with the plan diff engine;
  * - with Plans off, the page draws nothing and a `#plans` link goes to the Inbox.
@@ -28,6 +30,7 @@ const hasDom = typeof document !== 'undefined';
 const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof import('./PlansPage');
 const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
 const { resetPlansForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
+const { PLANS_VIEW_KEY } = (hasDom ? await import('./PlansHome') : {}) as typeof import('./PlansHome');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
@@ -74,6 +77,7 @@ afterEach(() => {
   root = null;
   document.body.innerHTML = '';
   globalThis.fetch = realFetch;
+  localStorage.removeItem(PLANS_VIEW_KEY);
   resetPlansForTests();
   rmSync(dir, { recursive: true, force: true });
 });
@@ -169,6 +173,70 @@ test.skipIf(!hasDom)('a decision on an older version never reads as current: the
   window.location.hash = `#plans=${current}`;
   await settle();
   expect(text(host.querySelector('.ib-plan-line [data-plan-decision]'))).toBe('Approved on v2');
+});
+
+test.skipIf(!hasDom)('the compact list: the switch shows the same plans one line each, is remembered, and search works the same', async () => {
+  const changed = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n'], { seen: 1 });
+  const older = plan('Offline drafts', 'field-notes', ['# Offline drafts\n\nv1\n', '# Offline drafts\n\nv2\n', '# Offline drafts\n\nv3\n'], { seen: 3, approvedOn: 1 });
+  const newer = plan('Ledger import', 'harbor-api', ['# Ledger import\n\nv1\n', '# Ledger import\n\nv2\n', '# Ledger import\n\nv3\n', '# Ledger import\n\nv4\n']);
+  const rowIds = (host: Element) => [...host.querySelectorAll('[data-plan-row]')].map((r) => r.getAttribute('data-plan-row'));
+  window.location.hash = '#plans';
+  let host = draw();
+  await settle();
+  // Rows with previews by default.
+  expect(host.querySelector('[data-plans-compact]')).toBeNull();
+  expect(host.querySelector('[data-plans-view-pick="rows"]')?.getAttribute('aria-pressed')).toBe('true');
+  const inRows = rowIds(host);
+  expect(inRows.sort()).toEqual([changed, older, newer].sort());
+
+  await act(async () => (host.querySelector('[data-plans-view-pick="compact"]') as HTMLButtonElement).click());
+  const table = host.querySelector('table[data-plans-compact]')!;
+  expect(table).not.toBeNull();
+  expect(host.querySelector('[data-plans-view-pick="compact"]')?.getAttribute('aria-pressed')).toBe('true');
+  expect(host.querySelector('.ib-plans-thumb')).toBeNull();
+  // Since you looked first, then every other plan newest first; the same plans as the rows.
+  expect(rowIds(host)).toEqual([changed, newer, older]);
+  expect([...table.querySelectorAll('thead th')].map(text)).toEqual(['Name', 'Project', 'Version', 'Decision', 'Last change']);
+  const line = table.querySelector(`[data-plan-row="${older}"]`)!;
+  expect(text(line.querySelector('.ib-plans-c-project'))).toBe('field-notes');
+  expect(text(line.querySelector('.ib-plans-c-version'))).toBe('v3');
+  expect(text(line.querySelector('[data-plan-decision]'))).toBe('Approved on v1 · changed since');
+  expect(text(table.querySelector(`[data-plan-row="${newer}"] [data-plan-decision]`))).toBe('No decision');
+  expect(text(table.querySelector(`[data-plan-row="${changed}"] [data-plan-changed]`))).toContain('2 new');
+  // Each line is a link to its plan.
+  const link = line.querySelector('a')!;
+  expect(link.getAttribute('href')).toBe(`#plans=${older}`);
+  expect(link.getAttribute('title')).toBe('Offline drafts');
+
+  // Search and the empty search are the same in both views.
+  const search = host.querySelector('[data-plans-search]') as HTMLInputElement;
+  const type = async (value: string) =>
+    act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
+      search.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  await type('ledger');
+  expect(rowIds(host)).toEqual([newer]);
+  await type('kubernetes');
+  expect(host.querySelector('[data-plans-none]')).not.toBeNull();
+  await type('');
+
+  // Remembered: a window opened again shows the compact list.
+  unlisten();
+  act(() => root?.unmount());
+  document.body.innerHTML = '';
+  host = draw();
+  await settle();
+  expect(host.querySelector('table[data-plans-compact]')).not.toBeNull();
+  await act(async () => (host.querySelector('[data-plans-view-pick="rows"]') as HTMLButtonElement).click());
+  expect(host.querySelector('table[data-plans-compact]')).toBeNull();
+  expect(rowIds(host).sort()).toEqual(inRows.sort());
+
+  // A plain click on a line opens the plan.
+  await act(async () => (host.querySelector('[data-plans-view-pick="compact"]') as HTMLButtonElement).click());
+  await act(async () => (host.querySelector(`[data-plan-row="${newer}"] a`) as HTMLAnchorElement).click());
+  await settle();
+  expect(host.querySelector(`[data-plan-page="${newer}"]`)).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on the get-started screen; Try again reads again with ?retry=1', async () => {

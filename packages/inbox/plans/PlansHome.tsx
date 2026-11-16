@@ -2,20 +2,66 @@
  * Plans' home (approval "inbox-plans", the mix): before any plan is here, the get-started screen; once there are
  * plans, the list (the H1 list): "Plans", search, a project menu and New plan, then "Since you looked" (the plans
  * that changed since you opened them) and the rest by project. Each row: its name, its news, its decision and what
- * it holds, its last change and how many versions are new.
+ * it holds, its last change and how many versions are new. A switch beside the search shows the same plans as a
+ * compact list instead (PlansCompact.tsx), remembered on this computer; search, the project menu and the empty
+ * search are the same in both.
  */
+import type React from 'react';
 import { useId, useMemo, useState } from 'react';
 import type { PlanSummary } from '@plannotator/core/plans';
 import { formatCount, fullTime, shortTime } from '@plannotator/core/inbox-format';
 import { SidebarTrigger } from '../shell/sidebar';
 import { Icon } from '../icons';
+import { Tip } from '../components/Tip';
 import { writeRoute } from '../app/writeRoute';
 import { PlansGetStarted } from './PlansGetStarted';
+import { PlansCompact } from './PlansCompact';
 import { readPlans, usePlansPage } from './store';
-import { changedSinceDecision, decisionLabel, decisionTone, filterPlans, holdsLine, newSince, newsLine, planGroups, planProjects } from './words';
+import { decisionTone, filterPlans, holdsLine, newSince, newsLine, planDecisionWords, planGroups, planProjects, PLANS_VIEWS, type PlansView } from './words';
 import { DecisionMark, ImportErrorNote, PlansMessage } from './parts';
 
 const openPlan = (id: string) => writeRoute({ page: 'plans', project: null, thread: null, plan: id });
+
+/** The home's view, kept on this computer the way the Artifacts wall keeps its size: the rows unless the person chose the compact list. */
+export const PLANS_VIEW_KEY = 'plannotator-inbox-plans-view';
+function readView(): PlansView {
+  try {
+    return localStorage.getItem(PLANS_VIEW_KEY) === 'compact' ? 'compact' : 'rows';
+  } catch {
+    return 'rows';
+  }
+}
+
+/** The two views' marks: a page preview beside lines, and lines only. */
+const VIEW_MARKS: Record<PlansView, React.ReactElement> = {
+  rows: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+      <rect x="1.5" y="2" width="5" height="4.5" rx="1" />
+      <rect x="1.5" y="9.5" width="5" height="4.5" rx="1" />
+      <path d="M9 3.5h5.5M9 5.5h3.5M9 11h5.5M9 13h3.5" strokeLinecap="round" />
+    </svg>
+  ),
+  compact: (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" aria-hidden="true">
+      <path d="M2 3h12M2 6.33h12M2 9.67h12M2 13h12" strokeLinecap="round" />
+    </svg>
+  ),
+};
+
+/** Rows with previews | Compact list: the Inbox's segmented control, two marks with their names as tooltips. */
+function ViewSwitch({ view, onView }: { view: PlansView; onView: (view: PlansView) => void }) {
+  return (
+    <div className="ib-seg ib-plans-view" role="group" aria-label="View" data-plans-view={view}>
+      {PLANS_VIEWS.map((v) => (
+        <Tip key={v.id} content={v.label} side="bottom">
+          <button type="button" className="ib-seg-o" aria-label={v.label} aria-pressed={view === v.id} data-on={view === v.id ? '' : undefined} onClick={() => onView(v.id)} data-plans-view-pick={v.id}>
+            {VIEW_MARKS[v.id]}
+          </button>
+        </Tip>
+      ))}
+    </div>
+  );
+}
 
 export function PlansHome({ showStart }: { showStart: boolean }) {
   const snap = usePlansPage();
@@ -42,6 +88,15 @@ function PlansList({ plans, importing, error, importError }: { plans: readonly P
   const projects = useMemo(() => planProjects(plans), [plans]);
   const shown = useMemo(() => filterPlans(plans, query, project), [plans, query, project]);
   const groups = useMemo(() => planGroups(shown), [shown]);
+  const [view, setView] = useState<PlansView>(readView);
+  const pickView = (next: PlansView) => {
+    setView(next);
+    try {
+      localStorage.setItem(PLANS_VIEW_KEY, next);
+    } catch {
+      // Private mode: the view holds for this page.
+    }
+  };
   const searchId = useId();
   return (
     <section className="ib-dpage ib-plans ib-plans-home" aria-labelledby={`${searchId}-h`} data-plans-home="">
@@ -73,6 +128,7 @@ function PlansList({ plans, importing, error, importError }: { plans: readonly P
               <Icon name="chevD" />
             </label>
           )}
+          <ViewSwitch view={view} onView={pickView} />
           <button type="button" className="ib-plans-primary ib-plans-new" onClick={() => writeRoute({ page: 'plans', project: null, thread: null, planNew: true })} data-plans-new="">
             <Icon name="plus" />
             New plan
@@ -106,6 +162,8 @@ function PlansList({ plans, importing, error, importError }: { plans: readonly P
               Show every plan
             </button>
           </div>
+        ) : view === 'compact' ? (
+          <PlansCompact plans={shown} labelledBy={`${searchId}-h`} />
         ) : (
           groups.map((group) => (
             <section key={group.key} className="ib-plans-group" aria-labelledby={`${searchId}-${group.key}`} data-plans-group={group.key}>
@@ -128,8 +186,6 @@ function PlansList({ plans, importing, error, importError }: { plans: readonly P
 function PlanRow({ plan }: { plan: PlanSummary }) {
   const fresh = newSince(plan);
   const tone = decisionTone(plan.decision?.decision);
-  // A decision on an older version says so: "Approved on v2 · changed since".
-  const since = changedSinceDecision(plan.decision, plan.head_version_number);
   return (
     <li>
       <button type="button" className="ib-plans-row" onClick={() => openPlan(plan.id)} data-plan-row={plan.id} data-changed={plan.changed ? '' : undefined}>
@@ -141,10 +197,8 @@ function PlanRow({ plan }: { plan: PlanSummary }) {
           <span className="ib-plans-row-news">{newsLine(plan)}</span>
           <span className="ib-plans-row-holds">
             <DecisionMark tone={tone} />
-            <span data-plan-decision={tone}>
-              {decisionLabel(plan.decision?.decision)}
-              {since && ` on v${plan.decision!.version_number}${since}`}
-            </span>
+            {/* A decision on an older version says so: "Approved on v2 · changed since". */}
+            <span data-plan-decision={tone}>{planDecisionWords(plan)}</span>
             <span aria-hidden="true">·</span>
             <span>{holdsLine(plan)}</span>
             {plan.project_name && <span className="ib-plans-row-project"> · {plan.project_name}</span>}
