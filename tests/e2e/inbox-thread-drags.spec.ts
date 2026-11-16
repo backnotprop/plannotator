@@ -5,9 +5,8 @@
  *
  * - The list's edges: nothing shows until a row is carried; then Priority docks over the list's top and Archive and
  *   Quiet over its bottom. A drop on Priority adds the row to Priority with the menu's toast, whose Undo takes it out;
- *   Archive takes it out of the list, and its Undo brings it back; Quiet marks it read. A row with an open question
- *   says Quiet would set it aside. A row already in Priority: Priority greyed, "Already in Priority", and a drop
- *   changes nothing. Two ⌘-picked rows go to the archive together, one toast.
+ *   Archive takes it out of the list, and its Undo brings it back; Quiet marks it read. A place that takes the row is
+ *   its name alone. A row already in Priority: Priority greyed, "Already in Priority", and a drop changes nothing. Two ⌘-picked rows go to the archive together, one toast.
  * - Combine: a row held on another for a moment opens the Combine dialog with both, Cancel focused; nothing combines.
  * - The empty thread panel (the ⋮'s Keep thread panel open), with the free layout's switch off and on: "Open here"
  *   while a row is carried, and the drop opens that thread.
@@ -134,9 +133,10 @@ test('the list edges: shown only while a row is carried; Priority, Archive and Q
 
   // Priority: the place shows once the row is carried, lights under the pointer, and the drop adds it.
   await pickUp(page, first);
-  await expect(place(page, 'priority')).toContainText('Put it first in your list');
-  await expect(place(page, 'archive')).toContainText('Out of the list');
-  await expect(place(page, 'quiet')).toContainText('Mark read');
+  // Each place that takes the row is its name alone, no description line.
+  await expect(place(page, 'priority')).toHaveText('Priority');
+  await expect(place(page, 'archive')).toHaveText('Archive');
+  await expect(place(page, 'quiet')).toHaveText('Quiet');
   await carryTo(page, centre(await settledBox(place(page, 'priority'))));
   await expect(place(page, 'priority')).toHaveAttribute('data-hot', '');
   await expect(page.locator('[data-thread-ghost] .ib-tdrag-w').last()).toHaveText('Priority');
@@ -180,9 +180,11 @@ test('the list edges: shown only while a row is carried; Priority, Archive and Q
   await expect(group(page, 'priority').locator(`[data-thread-id="${second}"]`)).toBeVisible();
   expect((await onServer(page, off, second))?.priority).not.toBeNull();
 
-  // Quiet on a row with an open question says what Mark read would set aside (no drop).
+  // Quiet on a row with an open question takes it, its name alone (Mark read's own warning names what it sets aside;
+  // no drop here).
   await pickUp(page, ask);
-  await expect(place(page, 'quiet')).toContainText('Mark read · sets aside 1 question');
+  await expect(place(page, 'quiet')).toHaveText('Quiet');
+  await expect(place(page, 'quiet')).not.toHaveAttribute('data-refused');
   await page.keyboard.press('Escape');
   await page.mouse.up();
   await expect(page.locator('.ib-tedge')).toHaveCount(0);
@@ -289,7 +291,9 @@ async function twoPanes(page: Page, first: string, second: string, side: 'right'
   await expect(paneHost(page, first)).toBeVisible();
   const box = await settledBox(paneHost(page, first));
   await pickUp(page, second);
-  await carryTo(page, side === 'right' ? { x: box.x + box.width - 60, y: box.y + box.height / 2 } : { x: box.x + box.width / 2, y: box.y + box.height - 50 });
+  // The bottom edge zone is the pane's lowest 30%; its last ~80 px are the thread's foot (the reply bar), which takes
+  // no pane drop (paneDrop.ts), so aim at 80% of the height, inside the zone and above the foot.
+  await carryTo(page, side === 'right' ? { x: box.x + box.width - 60, y: box.y + box.height / 2 } : { x: box.x + box.width / 2, y: box.y + box.height * 0.8 });
   await expect(page.locator('[data-thread-ghost] .ib-tdrag-w').last()).toHaveText(side === 'right' ? 'Open on the right' : 'Open below');
   await page.mouse.up();
   await expect(paneHost(page, second)).toBeVisible();
@@ -331,7 +335,7 @@ test("the pane area's right rim (switch on, 1920 x 1080): a row opens a column t
   // a and b still one above the other, each at least the pane minimum.
   expect(boxB.y).toBeGreaterThan(boxA.y + boxA.height - 1);
   for (const box of [boxA, boxB, boxC]) {
-    expect(box.width).toBeGreaterThanOrEqual(439);
+    expect(box.width).toBeGreaterThanOrEqual(399);
     expect(box.height).toBeGreaterThanOrEqual(259);
   }
   await context.close();

@@ -5,9 +5,11 @@
  * the pointer (fixed over the list column, drawn in the window's root beside the toast so a toast never covers them),
  * and each drop runs what the row menu already runs, with its toast and Undo:
  *
- *  - Priority: Add to Priority. Its second line says why it does not take a thread (already in Priority, archived).
- *  - Quiet: Mark read ("Quiet" is not a flag; Mark read is what makes a row quiet). Its second line says when Mark read
- *    would set questions aside; the warning Mark read asks first still asks.
+ *  - Priority: Add to Priority.
+ *  - Quiet: Mark read ("Quiet" is not a flag; Mark read is what makes a row quiet). The warning Mark read asks before
+ *    it sets questions aside still asks.
+ *
+ * A place that takes the drop is its icon and name only (the owner, 2026-11-16: no description lines).
  *  - Archive: Archive. Red only while the pointer is over it.
  *  - A row held 500 ms over its middle (60%) opens today's Combine dialog with the carried threads and that one picked
  *    (useListPicks.ts `combineWith`); it never combines by itself. Passing over rows on the way to an edge never arms it,
@@ -20,9 +22,9 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
-import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { formatCount } from '@plannotator/core/inbox-format';
 import { Icon, type IconName } from '../icons';
-import { offersRowMarkRead, setAsideCount } from '../markRead';
+import { offersRowMarkRead } from '../markRead';
 import { priorityAction } from '../priority';
 import type { RowMenuAction } from '../rowMenu';
 import { refreshThreadDrag, registerThreadDropTarget, sayThreadDrag, scrollStep, threadDragging, threadDragHit, THREAD_DROP_LAYER, type DropAnswer } from '../threadDrag';
@@ -33,7 +35,7 @@ export type EdgePlace = 'priority' | 'archive' | 'quiet';
 
 export interface PlaceAnswer {
   answer: DropAnswer;
-  /** The place's second line: what a drop does, or why it does nothing. */
+  /** Why a drop does nothing (a refused place's second line, and what a drop there says); empty where it takes. */
   sub: string;
   /** The carried rows the drop takes. */
   rows: InboxListRow[];
@@ -55,16 +57,11 @@ export function edgePlaces(rows: readonly InboxListRow[], rules: DropRules): Rec
   const priority = rows.filter((row) => rules.prioritizes(row) && priorityAction(row) === 'priority-add');
   const read = rules.canMarkRead ? rows.filter((row) => rules.drawn(row) !== 'archived' && offersRowMarkRead(row, rules.drawn(row))) : [];
   const archive = rows.filter((row) => row.resolved_at === null);
-  const aside = setAsideCount(read);
-  const what =
-    aside.actions === 0
-      ? plural(aside.questions, 'question')
-      : aside.questions === 0
-        ? plural(aside.actions, 'action item')
-        : `${plural(aside.questions, 'question')} and ${plural(aside.actions, 'action item')}`;
+  // A place that takes the drop is its name alone (the owner, 2026-11-16: no description lines); Mark read's own
+  // warning still names what it sets aside when the drop runs it.
   return {
     priority: priority.length
-      ? { answer: 'take', sub: many ? 'Put them first in your list' : 'Put it first in your list', rows: priority }
+      ? { answer: 'take', sub: '', rows: priority }
       : {
           answer: rows.length ? 'refuse' : null,
           sub: !first ? '' : first.priority ? 'Already in Priority' : inboxRowArchived(first) ? (many ? 'Unarchive them first' : 'Unarchive it first') : 'Its Inbox keeps no Priority',
@@ -73,13 +70,13 @@ export function edgePlaces(rows: readonly InboxListRow[], rules: DropRules): Rec
     quiet: !rules.canMarkRead
       ? { answer: null, sub: '', rows: [] }
       : read.length
-        ? { answer: 'take', sub: aside.questions + aside.actions > 0 ? `Mark read · sets aside ${what}` : 'Mark read', rows: read }
+        ? { answer: 'take', sub: '', rows: read }
         : {
             answer: rows.length ? 'refuse' : null,
             sub: !first ? '' : rules.drawn(first) === 'archived' || inboxRowArchived(first) ? 'Archived: nothing to mark read' : first.section === 'quiet' ? 'Already in Quiet' : (first.read_at ?? null) !== null ? 'Already read' : 'Nothing waits on you here',
             rows: [],
           },
-    archive: archive.length ? { answer: 'take', sub: 'Out of the list', rows: archive } : { answer: rows.length ? 'refuse' : null, sub: 'Already archived', rows: [] },
+    archive: archive.length ? { answer: 'take', sub: '', rows: archive } : { answer: rows.length ? 'refuse' : null, sub: 'Already archived', rows: [] },
   };
 }
 
@@ -221,7 +218,7 @@ export function ListDrops(props: ListDropsProps) {
         </span>
         <span className="ib-tslot-txt">
           {meta.label}
-          <span className="ib-tslot-sub">{answer.sub}</span>
+          {answer.answer === 'refuse' && answer.sub && <span className="ib-tslot-sub">{answer.sub}</span>}
         </span>
       </div>
     );

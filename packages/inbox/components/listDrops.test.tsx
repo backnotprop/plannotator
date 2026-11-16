@@ -229,9 +229,9 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     expect(document.querySelector('.ib-tedge')).toBeNull();
     pickUp(RATE.thread_id);
     expect(threadDragging()).toBe(true);
-    expect(slot('priority')?.textContent).toBe('PriorityPut it first in your list');
-    expect(slot('archive')?.textContent).toBe('ArchiveOut of the list');
-    expect(slot('quiet')?.textContent).toBe('QuietMark read');
+    expect(slot('priority')?.textContent).toBe('Priority');
+    expect(slot('archive')?.textContent).toBe('Archive');
+    expect(slot('quiet')?.textContent).toBe('Quiet');
     // The top place is docked above the bottom one's pair: Archive left of Quiet, as the phone's swipe pairs them.
     expect([...document.querySelectorAll('.ib-tedge-bottom [data-thread-place]')].map((el) => el.getAttribute('data-thread-place'))).toEqual(['archive', 'quiet']);
     release(500, 1500);
@@ -276,11 +276,15 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     ]);
   });
 
-  test('Quiet says it is Mark read, and that it would set a question aside', async () => {
+  test('a thread with an open question: Quiet is its name alone and takes it, the drop running Mark read (whose warning names what it sets aside)', async () => {
     draw();
     pickUp(FLAKY.thread_id);
-    expect(slot('quiet')!.textContent).toBe('QuietMark read · sets aside 1 question');
-    release(500, 1500);
+    expect(slot('quiet')!.textContent).toBe('Quiet');
+    expect(slot('quiet')!.hasAttribute('data-refused')).toBe(false);
+    move(400, 2100);
+    expect(ghostWord()).toBe('Quiet');
+    release(400, 2100);
+    expect(actions).toEqual([[FLAKY.thread_id, 'read']]);
   });
 
   test('a place that cannot take the thread shows greyed and says why; a drop there changes nothing and says so', async () => {
@@ -312,7 +316,7 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     cmdClick(SEARCH.thread_id);
     pickUp(SEARCH.thread_id);
     expect(ghost()!.classList.contains('ib-tdrag-stack')).toBe(true);
-    expect(slot('priority')!.textContent).toBe('PriorityPut them first in your list');
+    expect(slot('priority')!.textContent).toBe('Priority');
     move(300, -10);
     release(300, -10);
     await wait(20);
