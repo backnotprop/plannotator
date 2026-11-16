@@ -245,6 +245,9 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
         )}
       </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
+        <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
+        <SemanticFileBadge filePath={filePath} />
+        {semanticNote && <span className={`contents ${TIGHT_LABEL}`}>{semanticNote}</span>}
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
@@ -343,9 +346,6 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
             {commentLabel && <span>{commentLabel}</span>}
           </button>
         )}
-        <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
-        <SemanticFileBadge filePath={filePath} />
-        {semanticNote && <span className={`contents ${TIGHT_LABEL}`}>{semanticNote}</span>}
         {/* Edit entry lives at the far right of the row, next to the file
             actions dropdown, so the experimental affordance stays out of the
             everyday Viewed/Add/Comment cluster. */}
