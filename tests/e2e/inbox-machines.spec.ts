@@ -397,6 +397,33 @@ test("3b. an HTML page on MacBook opens from Studio with its folder: in the view
   }
 });
 
+test("3c. a Markdown file on MacBook shows its picture in Studio's viewer, and a link to the file next to it opens there", async () => {
+  const onMac = await agentOn(macbook);
+  const project = scratchProject(macbook.code, 'plan-docs');
+  mkdirSync(join(project, 'docs'), { recursive: true });
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
+  writeFileSync(join(project, 'docs', 'shot.png'), png);
+  writeFileSync(join(project, 'docs', 'plan.md'), '# Plan\n\n![The checkout](shot.png)\n\nSee [the notes](notes.md).\n');
+  writeFileSync(join(project, 'docs', 'notes.md'), '# Notes\n\nNext to the plan.\n');
+  const sent = await onMac.send({ project_path: project, subject: 'Plan draft', body: 'The plan.', attachments: ['docs/plan.md'] });
+  const threadId = sent.thread_id as string;
+  const read = await json<{ thread: { messages: { id: string; attachments: { id: string }[] }[] } }>(studio, `/api/inbox/m/${macbook.id}/threads/${threadId}`);
+  const file = read.thread.messages.find((m) => m.id === sent.message_id)!.attachments[0]!;
+
+  // The picture next to the file, read through Studio's forward to MacBook, as for a file on Studio.
+  const pictured = page.waitForResponse((r) => r.url().includes(`/api/inbox/m/${macbook.id}/attachments/${file.id}/markdown-image`));
+  await page.goto(`${studio.url}#thread=${threadId}`);
+  await expect(page.locator('section.ib-pane .ib-subject')).toHaveText('Plan draft');
+  await page.locator(`[data-attachment-id="${file.id}"]`).first().click();
+  expect((await pictured).status()).toBe(200);
+  const pane = page.locator(`[data-attachment-pane="${file.id}"]`);
+  await expect.poll(() => pane.getByRole('img', { name: 'The checkout' }).evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1);
+
+  // A link to the Markdown file next to it opens in the same pane, read from MacBook.
+  await pane.getByText('the notes', { exact: true }).click();
+  await expect(pane.locator('.ib-linkeddoc')).toContainText('Next to the plan.');
+});
+
 test('4. MacBook asleep: greyed rows under "MacBook asleep since"; an answer waits to send, then lands once when it is back', async () => {
   await page.goto(`${studio.url}#thread=${macHeldThread}`);
   const pane = page.locator('section.ib-pane');

@@ -242,6 +242,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // sniffed type and headers. Of the phone's request headers the door forwards
   // Range, If-Range and If-None-Match (and Last-Event-ID to the event stream).
   { method: "GET", route: /^attachments\/([^/]+)\/(image|video|audio|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
+  // A Markdown file's own pictures and a document next to an attached file (approval "linked computers only",
+  // 2026-11-16): a linked machine's window shows them as for a file of its own. The window's own routes, so the same
+  // rules (by the attachment's id, inside its folder, pictures the file shows, sniffed, capped) and headers. Not a
+  // phone's: a phone reads them through the tailnet as the owner.
+  { method: "GET", route: /^attachments\/([^/]+)\/(markdown-image|linked-page)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}`, machineOnly: true },
   { method: "GET", route: /^markups\/([^/]+)$/, window: (m) => `/api/inbox/markups/${m[1]}` },
   // An image a message's body shows (`?path=<src as written>`, a question
   // block's context included): the window's own route, so the phone gets the

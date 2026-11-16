@@ -88,8 +88,8 @@ describe('free layout', () => {
 describe('room', () => {
   const four = L.openAt(L.openAt(L.openAt(one, 'b', 'main', 'right'), 'c', 'main', 'bottom'), 'd', L.paneOfThread(two, 'b')!, 'bottom');
 
-  test('a pane keeps 440 x 260 px; a row adds widths and gaps, a column heights', () => {
-    expect(minimumSize(four.root!, new Set(), 8)).toEqual({ width: 888, height: 528 });
+  test('a pane keeps 400 x 260 px; a row adds widths and gaps, a column heights', () => {
+    expect(minimumSize(four.root!, new Set(), 8)).toEqual({ width: 808, height: 528 });
   });
 
   test('when the room is too small, the least recent panes step aside first, never the active one', () => {
@@ -101,7 +101,7 @@ describe('room', () => {
     const short = hiddenForRoom(active, { width: 1200, height: 400 }, 8);
     expect([...short].map((id) => active.threads[id]).sort()).toEqual(['b', 'c']);
     // Below two columns, the active pane alone.
-    const narrow = hiddenForRoom(active, { width: 887, height: 900 }, 8);
+    const narrow = hiddenForRoom(active, { width: 807, height: 900 }, 8);
     expect([...narrow].map((id) => active.threads[id]).sort()).toEqual(['b', 'c', 'd']);
   });
 
@@ -130,7 +130,7 @@ describe('room', () => {
       { name: 'a third column fits', layout: two, room: { width: 1400, height: 900 }, rects: [box('main', 0, 0, 696, 900), box('p1', 704, 0, 1400, 900)], target: 'p1', edge: 'right', shape: '(a|b|d)', aside: [] },
       { name: 'no third column: below the active pane', layout: two, room: { width: 1000, height: 900 }, rects: [box('main', 0, 0, 496, 900), box('p1', 504, 0, 1000, 900)], target: 'p1', edge: 'bottom', shape: '(a|(b/d))', aside: [] },
       { name: 'the active pane too short for another row: the largest pane, taller than wide, split below', layout: three, room: { width: 1000, height: 700 }, rects: [box('main', 0, 0, 496, 700), box('p1', 504, 0, 1000, 346), box('p2', 504, 354, 1000, 700)], target: 'main', edge: 'bottom', shape: '((a/d)|(b/c))', aside: [] },
-      { name: 'the largest pane wider than tall but too narrow to halve across: split below instead', layout: three, room: { width: 1300, height: 700 }, rects: [box('main', 0, 0, 800, 700), box('p1', 808, 0, 1300, 346), box('p2', 808, 354, 1300, 700)], target: 'main', edge: 'bottom', shape: '((a/d)|(b/c))', aside: [] },
+      { name: 'the largest pane wider than tall but too narrow to halve across: split below instead', layout: three, room: { width: 1200, height: 700 }, rects: [box('main', 0, 0, 760, 700), box('p1', 768, 0, 1200, 346), box('p2', 768, 354, 1200, 700)], target: 'main', edge: 'bottom', shape: '((a/d)|(b/c))', aside: [] },
       { name: 'two panes as large: the earlier in the tree is split', layout: tied, room: { width: 1500, height: 600 }, rects: [box('main', 0, 0, 495, 600), box('p1', 503, 0, 998, 600), box('p2', 1006, 0, 1500, 296), box('p3', 1006, 304, 1500, 600)], target: 'main', edge: 'bottom', shape: '((a/d)|b|(c/e))', aside: [] },
       { name: 'a pane already aside does not count against a place: below the active pane fits with a still aside', layout: columns, room: { width: 1000, height: 900 }, rects: [box('p1', 0, 0, 496, 900), box('p2', 504, 0, 1000, 900)], target: 'p2', edge: 'bottom', shape: '(a|b|(c/d))', aside: [] },
       { name: 'nothing fits: right of the active pane, the least recent steps aside', layout: two, room: { width: 1000, height: 500 }, rects: [box('main', 0, 0, 496, 500), box('p1', 504, 0, 1000, 500)], target: 'p1', edge: 'right', shape: '(a|b|d)', aside: ['a'] },
@@ -151,6 +151,17 @@ describe('kept layout', () => {
     const sized = L.resize(two, { [(two.root as { id: string }).id]: [3, 1] });
     expect(decodeLayout(encodeLayout(sized))).toEqual(sized);
     expect(encodeLayout(one)).toBeNull();
+  });
+
+  test('a layout kept under the old 440 px minimum reads back with every pane at the current minimum', () => {
+    const saved = JSON.parse(encodeLayout(two)!);
+    const old = (node: { type: string; minWidth?: number; children?: unknown[] }): void => {
+      if (node.type === 'pane') node.minWidth = 440;
+      node.children?.forEach((child) => old(child as typeof node));
+    };
+    old(saved.tree.root);
+    const read = decodeLayout(JSON.stringify(saved));
+    expect(L.panesOf(read.root).map((pane) => [pane.id, pane.minWidth])).toEqual(L.panesOf(two.root).map((pane) => [pane.id, L.PANE_MIN_WIDTH]));
   });
 
   test('anything broken reads as no layout', () => {

@@ -102,7 +102,7 @@ export function ReadingLine({
   const spoken = [
     main,
     shownCount === null ? null : `${shownCount} ${shownCount === 1 ? "version" : "versions"}`,
-    main === "Versions" ? null : "Versions",
+    main === "Versions" || shownCount !== null ? null : "Versions",
   ]
     .filter((part): part is string => part !== null)
     .join(". ");
