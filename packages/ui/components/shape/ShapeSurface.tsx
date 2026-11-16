@@ -59,13 +59,20 @@ const PHONE_MAX = 640;
 
 /**
  * The phone layout (a bottom sheet, short labels) goes by the board's own
- * width, not the window's: a narrow Inbox pane on a desktop gets it too.
+ * width, not the window's: a narrow Inbox pane on a desktop gets it too. The
+ * board's size is also `--shp-w` / `--shp-h` on its root, which shape.css reads
+ * where it would read the window (the panel's width, the title's size, the
+ * example card's rooms): a board in a thread's pane lays out by the pane.
  */
 function usePhone(el: HTMLElement | null) {
   const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.innerWidth <= PHONE_MAX);
   useLayoutEffect(() => {
     if (!el) return;
-    const measure = () => setPhone(el.clientWidth <= PHONE_MAX);
+    const measure = () => {
+      el.style.setProperty('--shp-w', `${el.clientWidth}px`);
+      el.style.setProperty('--shp-h', `${el.clientHeight}px`);
+      setPhone(el.clientWidth <= PHONE_MAX);
+    };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(measure);

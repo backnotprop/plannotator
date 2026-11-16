@@ -161,6 +161,20 @@ describe.if(hasDom)('the side panel and the answers', () => {
     for (const gone of ['Ask', 'Thread', 'Chat']) expect(button(panel, gone)).toBeNull();
   });
 
+  test("the board lays out by its own size, not the window's: the panel's width reads it", async () => {
+    const { host } = rig();
+    await mount(host);
+    const root = document.querySelector<HTMLElement>('.shp-root')!;
+    // This DOM measures the board 1400 wide (beforeAll); the window is happy-dom's own.
+    expect(root.style.getPropertyValue('--shp-w')).toBe('1400px');
+    const css = await Bun.file(new URL('./shape.css', import.meta.url)).text();
+    expect(css).toContain('--pw: clamp(360px, calc(var(--shp-w, 100vw) * .31), 440px)');
+    // No other size on the board reads the window directly (a board in a thread's pane is narrower than it). The
+    // comment box's talk is the window's: the box opens over everything, where the window is its room.
+    const board = css.split('\n').filter((line) => !line.startsWith('.shp-talk')).join('\n');
+    expect(board.replace(/var\(--shp-[wh], 100d?v[wh]\)/g, '').match(/\d(d?vw|d?vh)\b/g)).toBeNull();
+  });
+
   test('an older place that names the Ask or Thread panel opens none', async () => {
     const { host } = rig();
     await mount(host, { initialPanel: 'ask' as never });
