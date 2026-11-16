@@ -23,3 +23,20 @@ export function createSignal(): Signal {
     },
   };
 }
+
+/** One signal per thread: an emit reaches only the panes showing that thread. */
+export interface KeyedSignal {
+  /** The same signal for a thread every time, so a pane's subscription holds across renders. */
+  of(key: string): Signal;
+  emit(key: string): void;
+}
+
+export function createKeyedSignal(): KeyedSignal {
+  const signals = new Map<string, Signal>();
+  const of = (key: string): Signal => {
+    let signal = signals.get(key);
+    if (!signal) signals.set(key, (signal = createSignal()));
+    return signal;
+  };
+  return { of, emit: (key) => signals.get(key)?.emit() };
+}

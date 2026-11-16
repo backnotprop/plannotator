@@ -71,6 +71,11 @@ interface FileHeaderProps {
    * read apart (the Inbox's PR page on a phone). Off: a narrow header shows the name alone, as before.
    */
   keepsFolder?: boolean;
+  /**
+   * The line "Open in" opens the file at, read at the click (openInLineForDiff):
+   * the picked lines or comment, else the file's first change.
+   */
+  openInLine?: () => number | undefined;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -161,6 +166,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
   accessory,
   openIn,
   keepsFolder = false,
+  openInLine,
 }) => {
   const [headerWidth, setHeaderWidth] = useState<number>(0);
   const state = useReviewStateOptional();
@@ -391,6 +397,7 @@ export const FileHeader: React.FC<FileHeaderProps> = ({
           filePath={filePath}
           base={state?.agentCwd ?? null}
           diffText={patch}
+          line={openInLine}
           canOpen={
             state?.canUseLiveWorkspaceActions !== false &&
             !(state?.prMetadata && !state?.agentCwd) &&

@@ -30,6 +30,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { decodePathSegment } from "@plannotator/shared/path-segment";
 import { INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isWindowRequest } from "./inbox-cross-site";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
@@ -1076,7 +1077,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const body = await context.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
-      const key = decodeURIComponent(cancel[1]!);
+      const key = decodePathSegment(cancel[1]!);
+      if (key === null) return json({ error: "Bad request.", code: "bad_request" }, 400);
       const held = outbox.get(key);
       if (held && startsAgentThere(held.route, held.body) && !isWindowRequest(req, body, context.serverSession)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
       const entry = outbox.cancel(key);
@@ -1092,7 +1094,9 @@ export function createInboxMachines(context: InboxMachinesContext) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const stale = staleTab(await context.readBody(req));
       if (stale) return stale;
-      const entry = outbox.dismiss(decodeURIComponent(dismiss[1]!));
+      const key = decodePathSegment(dismiss[1]!);
+      if (key === null) return json({ error: "Bad request.", code: "bad_request" }, 400);
+      const entry = outbox.dismiss(key);
       if (!entry) return json({ error: "No such write.", code: "not_found" }, 404);
       return json({ entry: outboxView(entry) });
     }

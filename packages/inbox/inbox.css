@@ -5823,7 +5823,10 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 ::highlight(ib-tag-ref) { color: var(--primary); background-color: color-mix(in oklch, var(--primary) 12%, transparent); }
 
 /* The @ picker: a listbox grouped by agent, the skill picker's place above the field. */
-.ib-tg-menu { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 110; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / 0.16), 0 2px 8px rgb(0 0 0 / 0.08); padding: 6px; max-height: min(430px, 62vh); overflow-y: auto; overscroll-behavior: contain; font-size: var(--ib-fs-13, 13px); text-align: left; }
+.ib-tg-menu { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 110; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 12px 32px rgb(0 0 0 / 0.16), 0 2px 8px rgb(0 0 0 / 0.08); padding: 6px; max-height: min(430px, 62vh, var(--ib-tg-room, 100vh)); overflow-y: auto; overscroll-behavior: contain; font-size: var(--ib-fs-13, 13px); text-align: left; }
+/* In the skill picker's box over the field (#3427): that box already keeps the field's 8 px (10 and 1 px wider on a
+   phone), and `--ib-tg-room` (TagPicker) caps it to the room it has, under the caps here. */
+.ib-skanchor > .ib-tg-menu { pointer-events: auto; left: 0; right: 0; margin-bottom: 6px; }
 .ib-tg-group + .ib-tg-group { margin-top: 4px; padding-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); }
 .ib-tg-gh { padding: 6px 10px 3px; font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); letter-spacing: 0.01em; }
 .ib-tg-opt { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 8px; cursor: pointer; min-width: 0; }
@@ -5949,7 +5952,7 @@ svg.ib-ic.ib-openin-check { width: 14px; height: 14px; stroke: currentColor; fil
 
 /* Phones: 44 px rows in the picker, full width above the field, and nothing runs off at 320 px. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .ib-tg-menu { left: -1px; right: -1px; margin-bottom: 10px; max-height: min(300px, calc(var(--ib-vvh, 100dvh) * 0.45)); }
+  .ib-tg-menu { left: -1px; right: -1px; margin-bottom: 10px; max-height: min(300px, calc(var(--ib-vvh, 100dvh) * 0.45), var(--ib-tg-room, 100dvh)); }
   .ib-tg-opt { min-height: 44px; }
   .ib-tg-on { font-size: var(--ib-fs-14, 14px); }
   .ib-tg-od { font-size: var(--ib-fs-12-5, 12.5px); }
