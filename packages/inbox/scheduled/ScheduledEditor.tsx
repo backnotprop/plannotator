@@ -1,7 +1,7 @@
 /**
- * One routine beside the list (CONTRACT.md section 2). It saves as you go, as the Board's card does: a name or
- * prompt when the field is left, a pick at once, a schedule once the preview takes it. A new one starts off, and is
- * made once it has a name and a prompt.
+ * One routine beside the list (CONTRACT.md section 2). It saves by itself and says so (useAutosave.ts, SaveStatus.tsx):
+ * typing after a pause, a field when it is left, a pick at once, a schedule once the preview takes it, and what waits
+ * as the page goes. A new one starts off, and is made once it has a name and a prompt; until then the tab keeps it.
  */
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
@@ -12,11 +12,14 @@ import { formatCount } from '../format';
 import { Icon } from '../icons';
 import { Switch } from '../components/SoundRow';
 import { Tip } from '../components/Tip';
-import { scheduledApi, type ScheduledFields } from './client';
+import { scheduledApi } from './client';
 import { InboxApiError } from '../apiError';
 import { putScheduled, readScheduled } from './store';
 import { FilesRow, FolderPick, RunsAs, type LaunchBlock } from './EditorParts';
+import { EditorFoot, routineOn } from './EditorFoot';
+import { SaveStatus } from './SaveStatus';
 import { localZone, ScheduleRow } from './ScheduleRow';
+import { useAutosave } from './useAutosave';
 import { OUTCOME_WORDS, runWhenWords } from './words';
 
 export interface EditorProps {
@@ -43,19 +46,7 @@ const doneWords = (record: InboxScheduledRow): string => {
   return `Done · ran ${runWhenWords(record.last_run.started_at).replace(/^Today /, '')}`;
 };
 
-const fieldsOf = (row: InboxScheduledRow): ScheduledFields => ({
-  name: row.name,
-  prompt: row.prompt,
-  schedule: row.schedule,
-  if_missed: row.if_missed,
-  folder: row.folder,
-  agent: row.agent,
-  ...(row.model ? { model: row.model } : {}),
-  ...(row.effort ? { effort: row.effort } : {}),
-  attachments: row.attachments,
-});
-
-function MoreMenu({ on, onTurn, onDelete }: { on: boolean | null; onTurn: () => void; onDelete: () => void }) {
+function MoreMenu({ on, onTurn, onRun, onDelete }: { on: boolean | null; onTurn: () => void; onRun: (() => void) | null; onDelete: () => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
   // On a phone, main's bottom sheet (inbox.css `.ib-pm-pos[data-phone]`): it fits the screen and scrolls.
   const sheet = usePhone();
@@ -73,6 +64,11 @@ function MoreMenu({ on, onTurn, onDelete }: { on: boolean | null; onTurn: () => 
             {on !== null && (
               <Menu.Item className="ib-pmi" onClick={onTurn}>
                 <span className="ib-pmi-l">{on ? 'Turn off' : 'Turn on'}</span>
+              </Menu.Item>
+            )}
+            {onRun && (
+              <Menu.Item className="ib-pmi" onClick={onRun} data-scheduled-menu-run="">
+                <span className="ib-pmi-l">Run once now</span>
               </Menu.Item>
             )}
             <Menu.Item className="ib-pmi" onClick={onDelete}>
@@ -103,36 +99,33 @@ export function ScheduledEditor(props: EditorProps) {
   }, [id, version]);
   const record = detail?.scheduled.id === id && (!row || detail.scheduled.updated_at >= row.updated_at) ? detail.scheduled : row;
   const firstAgent = props.defaults.agent ?? block?.launch?.agents[0]?.agent ?? 'claude-code';
-  const [draft, setDraft] = useState<ScheduledFields>(() =>
-    record
-      ? fieldsOf(record)
-      : { name: '', prompt: '', schedule: { cron: '0 9 * * *', tz: localZone() }, if_missed: 'run_once', folder: props.defaults.projectId ? { project_id: props.defaults.projectId } : { scratch: true }, agent: firstAgent, attachments: [] },
-  );
-  // A change made elsewhere (another window, an agent) comes in, but never over a field being typed in.
-  const seen = useRef(record);
-  useEffect(() => {
-    const before = seen.current;
-    seen.current = record;
-    if (!record || !before || before === record) {
-      if (record && !before) setDraft(fieldsOf(record));
-      return;
-    }
-    setDraft((now) => {
-      const next = { ...now };
-      const theirs = fieldsOf(record);
-      const was = fieldsOf(before);
-      for (const key of Object.keys(theirs) as (keyof ScheduledFields)[]) if (JSON.stringify(now[key]) === JSON.stringify(was[key])) Object.assign(next, { [key]: theirs[key] });
-      return next;
-    });
-  }, [record]);
+  // The preview's word on each schedule: one it refused, or has not answered, is not saved yet.
+  const verdicts = useRef(new Map<string, boolean>());
+  const firstSchedule = useRef<string | null>(null);
+  const autosave = useAutosave({
+    id,
+    record,
+    fresh: () => ({ name: '', prompt: '', schedule: { cron: '0 9 * * *', tz: localZone() }, if_missed: 'run_once', folder: props.defaults.projectId ? { project_id: props.defaults.projectId } : { scratch: true }, agent: firstAgent, attachments: [] }),
+    held: (key, fields) => {
+      if (key !== 'schedule') return false;
+      const shown = JSON.stringify(fields.schedule);
+      return verdicts.current.get(shown) === false || (!verdicts.current.has(shown) && shown !== firstSchedule.current);
+    },
+    holdTyping: routineOn(record),
+    onCreated: props.onCreated,
+  });
+  const { draft } = autosave;
+  firstSchedule.current ??= JSON.stringify(draft.schedule);
 
   const [preview, setPreview] = useState<InboxScheduledPreview | null>(null);
   const asked = useRef(0);
   const previewed = useRef<string | null>(null);
   const checkSchedule = async (schedule: InboxScheduledSchedule): Promise<boolean> => {
     const n = ++asked.current;
-    previewed.current = JSON.stringify(schedule);
+    const shown = (previewed.current = JSON.stringify(schedule));
     const answer = await scheduledApi.preview(schedule).catch(() => null);
+    // No answer: the server says on save.
+    verdicts.current.set(shown, answer?.ok !== false);
     if (n !== asked.current) return false;
     setPreview(answer);
     return answer?.ok === true;
@@ -142,66 +135,47 @@ export function ScheduledEditor(props: EditorProps) {
     if (JSON.stringify(draft.schedule) !== previewed.current) void checkSchedule(draft.schedule);
   }, [draft.schedule]);
 
-  // A new one is made once. A pick while it is being made is saved to it next, before it opens at its own address.
-  const creating = useRef(false);
-  const made = useRef<string | null>(null);
-  const later = useRef<{ change: Partial<ScheduledFields>; enabled: boolean } | null>(null);
-  const save = async (change: Partial<ScheduledFields>, enabled = false) => {
-    const next = { ...draft, ...change };
-    setDraft(next);
-    setError(null);
-    if (isNew && creating.current) {
-      later.current = { change: { ...later.current?.change, ...change }, enabled: enabled || !!later.current?.enabled };
-      return;
-    }
-    try {
-      if (!isNew) {
-        if (Object.keys(change).length > 0) putScheduled((await scheduledApi.update(id, change)).scheduled);
-        return;
-      }
-      let target = made.current;
-      let pending = { change, enabled };
-      if (!target) {
-        if (!next.name.trim() || !next.prompt.trim()) return;
-        creating.current = true;
-        try {
-          const answer = await scheduledApi.create({ ...next, ...(enabled ? { enabled } : {}) } as ScheduledFields);
-          target = made.current = answer.scheduled.id;
-          putScheduled(answer.scheduled);
-        } finally {
-          creating.current = false;
-        }
-        pending = { change: {}, enabled: false };
-      }
-      const rest = later.current;
-      later.current = null;
-      const fields = { ...pending.change, ...rest?.change };
-      if (Object.keys(fields).length > 0) putScheduled((await scheduledApi.update(target, fields)).scheduled);
-      if (pending.enabled || rest?.enabled) putScheduled((await scheduledApi.turn(target, true)).scheduled);
-      props.onCreated(target);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  };
   // A second press while the first run starts is that run: nothing to say.
-  const act = (run: () => Promise<{ scheduled: InboxScheduledRow }>) =>
-    run().then(
+  const act = (run: () => Promise<{ scheduled: InboxScheduledRow }>) => {
+    setError(null);
+    return run().then(
       (answer) => putScheduled(answer.scheduled),
       (cause: Error) => (cause instanceof InboxApiError && cause.code === 'routine_running' ? void readScheduled() : setError(cause.message)),
     );
+  };
 
-  const on = record ? record.state !== 'off' && record.state !== 'done' : false;
-  const turn = () => (record ? act(() => scheduledApi.turn(record.id, !on)) : void save({}, true));
+  // One rule for the switch, the ⋯ menu and the foot: a one-off run of an off routine leaves it off.
+  const on = routineOn(record);
+  const ready = !!draft.name.trim() && !!draft.prompt.trim();
+  // Turning on and a run read the saved routine: what waits is saved first, and one that did not save is said, not
+  // run. Turning off stops it at once; what waits is sent alongside.
+  const turn = async (next: boolean) => {
+    if (!record) return autosave.turnOn();
+    if (!next) {
+      autosave.flush();
+      return act(() => scheduledApi.turn(record.id, false));
+    }
+    if (!(await autosave.settle())) return setError("Not turned on: your last change isn't saved yet.");
+    return act(() => scheduledApi.turn(record.id, true));
+  };
+  const runOnce = async () => {
+    if (!record) return;
+    if (!(await autosave.settle())) return setError("Not run: your last change isn't saved yet.");
+    return act(() => scheduledApi.run(record.id));
+  };
   const remove = () => {
-    if (!record) return props.onClose();
+    if (!record) {
+      autosave.drop();
+      return props.onClose();
+    }
     setError(null);
     props.onDelete(record).catch((cause: Error) => setError(cause.message));
   };
   const runs = detail?.runs ?? [];
   const threadName = record?.thread_id ? (record.thread_name ?? record.name) : null;
   const agentName = block?.launch?.agents.find((a) => a.agent === draft.agent)?.name ?? INBOX_HOST_NAMES[draft.agent] ?? draft.agent;
-  const running = record?.state === 'running';
   const name = draft.name || (isNew ? 'New routine' : '');
+  const refused = autosave.status.kind === 'refused' ? autosave.status.message : null;
 
   return (
     <div className="ib-pane st-pane" data-scheduled-editor={id}>
@@ -215,7 +189,8 @@ export function ScheduledEditor(props: EditorProps) {
         <span className="ib-phsubj" data-on="" aria-hidden="true">
           {!props.narrow && <span className="ib-phsubj-t">{name}</span>}
         </span>
-        <MoreMenu on={record?.state === 'done' ? null : on} onTurn={() => void turn()} onDelete={remove} />
+        <SaveStatus status={autosave.status} />
+        <MoreMenu on={record?.state === 'done' ? null : on} onTurn={() => void turn(!on)} onRun={record && record.state !== 'running' ? () => void runOnce() : null} onDelete={remove} />
         {!props.narrow && (
           <>
             <span className="ib-vsep" aria-hidden="true" />
@@ -233,15 +208,15 @@ export function ScheduledEditor(props: EditorProps) {
           aria-label="Name"
           placeholder="Name"
           value={draft.name}
-          onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-          onBlur={() => draft.name.trim() && draft.name !== (record?.name ?? '') && void save({ name: draft.name.trim() })}
+          onChange={(event) => autosave.type({ name: event.target.value })}
+          onBlur={autosave.flush}
         />
         <div className="ib-tmeta st-meta">
           {record?.state === 'done' ? (
             <span>{doneWords(record)}</span>
           ) : (
             <>
-              <Switch on={on} label={on ? 'On' : 'Off'} disabled={isNew && (!draft.name.trim() || !draft.prompt.trim())} onClick={() => void turn()} />
+              <Switch on={on} label={on ? 'On' : 'Off'} disabled={!record && !ready} onClick={() => void turn(!on)} />
               <span>{on ? 'On' : 'Off'}</span>
             </>
           )}
@@ -259,14 +234,20 @@ export function ScheduledEditor(props: EditorProps) {
           <span className="ib-tdot" aria-hidden="true" />
           <span className="st-wrap">Runs on this computer while the Inbox is running</span>
         </div>
+        {/* What went wrong, by the save status rather than under a long prompt: a refused save, a run, a turn. */}
+        {(error ?? refused) && (
+          <p className="ib-error st-error" role="alert">
+            {error ?? refused}
+          </p>
+        )}
         <section className="ib-sgroup st-group">
           <h2>Schedule</h2>
           <ScheduleRow
             schedule={draft.schedule}
             preview={preview}
             onChange={(schedule) => {
-              setDraft((now) => ({ ...now, schedule }));
-              void checkSchedule(schedule).then((ok) => ok && void save({ schedule }));
+              autosave.type({ schedule });
+              void checkSchedule(schedule).then((ok) => ok && autosave.release());
             }}
           />
           <div className="st-miss">
@@ -274,7 +255,7 @@ export function ScheduledEditor(props: EditorProps) {
             <span className="ib-seg" role="radiogroup" aria-labelledby="st-miss-l">
               {(['run_once', 'skip'] as const).map((value) => (
                 <label key={value} className="ib-seg-o" data-on={draft.if_missed === value ? '' : undefined}>
-                  <input type="radio" name={`st-miss-${id}`} value={value} checked={draft.if_missed === value} onChange={() => void save({ if_missed: value })} />
+                  <input type="radio" name={`st-miss-${id}`} value={value} checked={draft.if_missed === value} onChange={() => autosave.pick({ if_missed: value })} />
                   {value === 'run_once' ? "Run once when I'm back" : 'Skip it'}
                 </label>
               ))}
@@ -283,9 +264,9 @@ export function ScheduledEditor(props: EditorProps) {
         </section>
         <section className="ib-sgroup st-group st-kv" aria-label="What it works with">
           <span className="st-k">Repo or folder</span>
-          <FolderPick block={block} folder={draft.folder} shown={record && JSON.stringify(record.folder) === JSON.stringify(draft.folder) ? record.folder_shown : null} agentName={agentName} phone={props.phone} onChange={(folder) => void save({ folder })} />
+          <FolderPick block={block} folder={draft.folder} shown={record && JSON.stringify(record.folder) === JSON.stringify(draft.folder) ? record.folder_shown : null} agentName={agentName} phone={props.phone} onChange={(folder) => autosave.pick({ folder })} />
           <span className="st-k">Files</span>
-          <FilesRow files={draft.attachments} onChange={(attachments) => void save({ attachments })} />
+          <FilesRow files={draft.attachments} onChange={(attachments) => autosave.pick({ attachments })} />
         </section>
         <section className="ib-sgroup st-group">
           <h2>Prompt</h2>
@@ -296,10 +277,10 @@ export function ScheduledEditor(props: EditorProps) {
               placeholder="What should this do?"
               autoFocus={isNew}
               value={draft.prompt}
-              onChange={(event) => setDraft({ ...draft, prompt: event.target.value })}
-              onBlur={() => draft.prompt.trim() && draft.prompt !== (record?.prompt ?? '') && void save({ prompt: draft.prompt })}
+              onChange={(event) => autosave.type({ prompt: event.target.value })}
+              onBlur={autosave.flush}
             />
-            <RunsAs block={block} agent={draft.agent} model={draft.model} effort={draft.effort} phone={props.phone} onChange={(next) => void save({ agent: next.agent, model: next.model, effort: next.effort })} />
+            <RunsAs block={block} agent={draft.agent} model={draft.model} effort={draft.effort} phone={props.phone} onChange={(next) => autosave.pick({ agent: next.agent, model: next.model, effort: next.effort })} />
           </div>
         </section>
         {record && record.runs > 0 && (
@@ -324,23 +305,14 @@ export function ScheduledEditor(props: EditorProps) {
             )}
           </section>
         )}
-        {error && (
-          <p className="ib-error st-error" role="alert">
-            {error}
-          </p>
-        )}
       </div>
-      <div className="ib-pfoot st-pfoot">
-        {running ? (
-          <button type="button" className="ib-btn" onClick={() => record && void act(() => scheduledApi.stop(record.id))} data-scheduled-stop="">
-            Stop
-          </button>
-        ) : (
-          <button type="button" className="ib-btn ib-pri" disabled={!record} onClick={() => record && void act(() => scheduledApi.run(record.id))} data-scheduled-run-now="">
-            Run now
-          </button>
-        )}
-      </div>
+      <EditorFoot
+        record={record}
+        ready={ready}
+        onTurnOn={() => void turn(true)}
+        onRun={() => void runOnce()}
+        onStop={() => record && void act(() => scheduledApi.stop(record.id))}
+      />
     </div>
   );
 }
