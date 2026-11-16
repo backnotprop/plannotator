@@ -11,6 +11,10 @@
  * ("Too narrow: opens below"); where neither fits it says "No room to split here" and the drop changes nothing. The
  * ghost's word says where it lands before the release. A row over a pane's foot (`.ib-pfoot`) with no reply box open
  * does nothing.
+ *
+ * The thin strip along the whole pane area's outer rim is its own place (outerEdge.ts), for a row and a pane alike: it
+ * opens (moves) the pane at the root of the layout on that side, the full height or width, and wins over a pane's own
+ * edge there. With no room it says so and changes nothing; it never takes another side.
  */
 import { useEffect, useRef } from 'react';
 import { registerThreadDropTarget, sayThreadDrag, THREAD_DROP_LAYER } from '../threadDrag';
@@ -18,6 +22,7 @@ import { announce, registerDropTarget, type DragPayload, type DropHit } from './
 import { mainWidthOf } from '../stack';
 import * as L from './layoutModel';
 import { steppedAside, type PaneRect, type Room } from './layoutRoom';
+import { outerEdgeAt, outerPlace, outerRect, outerWords, type AreaBox } from './outerEdge';
 import type { WindowPanes } from './useRoutePanes';
 
 /** Where a drop lands; `none`: an edge with no room on either axis, which the drop zone says and the drop leaves alone. */
@@ -27,7 +32,9 @@ export type Place = L.DropPlace | 'none';
 type Carried = DragPayload | { kind: 'thread'; threadId: string; label: string };
 
 interface PaneDropHit {
+  /** A pane, or `L.WHOLE`: the whole layout's `outer` edge. */
   target: L.PaneId;
+  outer?: L.Edge;
   place: Place;
   /** The layout after the drop. */
   next: L.FreeLayout;
@@ -69,6 +76,13 @@ export function paneRects(): PaneRect[] {
 /** The panes on screen and their boxes: the engine's hosts (one pane is in the layout too). */
 function paneBoxes(): { id: L.PaneId; el: HTMLElement }[] {
   return [...document.querySelectorAll<HTMLElement>('.ib-layout > [data-layout-pane]:not([data-pane-hidden="true"])')].map((el) => ({ id: el.dataset.layoutPane!, el }));
+}
+
+/** The box around every pane on screen: the area the outer edges belong to. */
+function areaOf(boxes: readonly { el: HTMLElement }[]): AreaBox | null {
+  if (!boxes.length) return null;
+  const rects = boxes.map(({ el }) => el.getBoundingClientRect());
+  return { left: Math.min(...rects.map((r) => r.left)), top: Math.min(...rects.map((r) => r.top)), right: Math.max(...rects.map((r) => r.right)), bottom: Math.max(...rects.map((r) => r.bottom)) };
 }
 
 function nearestEdge(x: number, y: number, box: DOMRect): { edge: L.Edge; depth: number } {
@@ -119,7 +133,19 @@ export function usePaneDrop(options: PaneDropOptions): void {
     const hit = (x: number, y: number, carried: Carried): DropHit | null => {
       const { windowPanes } = live.current;
       const layout = windowPanes.layout;
-      const box = paneBoxes().find(({ el }) => {
+      const boxes = paneBoxes();
+      // The whole area's rim first: there it is the whole side, never one pane's edge.
+      const area = areaOf(boxes);
+      const rim = area ? outerEdgeAt(x, y, area) : null;
+      if (area && rim) {
+        const measured = measureRoom(true);
+        if (!measured) return null;
+        const outer = outerPlace(layout, carried.kind === 'pane' ? { kind: 'pane', paneId: carried.paneId } : { kind: 'thread', threadId: carried.threadId }, rim, measured.room, measured.gap);
+        if (!outer) return null;
+        const data: PaneDropHit = { target: L.WHOLE, outer: rim, place: outer.fits ? rim : 'none', next: outer.fits ? outer.next : layout, rect: outerRect(area, rim, outer.next, measured.gap) };
+        return { action: outerWords(rim, outer.fits, carried.kind), data };
+      }
+      const box = boxes.find(({ el }) => {
         const r = el.getBoundingClientRect();
         return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
       });
@@ -187,7 +213,19 @@ export function usePaneDrop(options: PaneDropOptions): void {
     };
     const drop = (found: DropHit, carried: Carried, say: (words: string) => void) => {
       const { windowPanes, title, holdSidebar } = live.current;
-      const { target: on, place, next } = found.data as PaneDropHit;
+      const { target: on, place, next, outer } = found.data as PaneDropHit;
+      if (outer) {
+        const words = outerWords(outer, place !== 'none', carried.kind);
+        if (place === 'none') {
+          say(`${words}. Nothing changed.`);
+          return;
+        }
+        holdSidebar(L.columns(next.root));
+        if (carried.kind === 'pane') windowPanes.movePane(carried.paneId, L.WHOLE, outer);
+        else windowPanes.openAt(carried.threadId, L.WHOLE, outer);
+        say(`${carried.label} ${words.replace(/^Open /, 'opened ').replace(/^Move /, 'moved ')}.`);
+        return;
+      }
       const name = title(on);
       if (place === 'none') {
         say(`No room beside ${name}. Nothing changed.`);

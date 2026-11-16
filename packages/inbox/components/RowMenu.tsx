@@ -17,6 +17,7 @@ import { formatCount } from '@plannotator/core/inbox-format';
 import { MentionMenuItem } from './MentionMenuItem';
 import { useThreadRowDrag } from './useThreadRowDrag';
 import { ListDrops } from './listDrops';
+export { THREAD_DRAG_HELP_ID } from './listDrops';
 
 export interface ThreadRowMenuProps {
   className: string;
@@ -220,7 +221,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
         }}>
         {props.children}
       </ContextMenu.Trigger>
-      <ListDrops body={body} rowOf={props.rowOf} sectionOf={props.sectionOf} canMarkRead={props.canMarkRead} prioritizesOf={props.prioritizesOf} onAction={props.onAction} picks={props.picks} off={dragOff} />
+      <ListDrops body={body} rowOf={props.rowOf} sectionOf={props.sectionOf} canMarkRead={props.canMarkRead} prioritizesOf={props.prioritizesOf} onAction={props.onAction} picks={props.picks} follow={menu.follow} off={dragOff} />
       <ContextMenu.Portal container={portal ?? undefined}>
         {props.phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
         <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>

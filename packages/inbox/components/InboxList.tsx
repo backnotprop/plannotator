@@ -27,7 +27,7 @@ import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types'
 import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
 import { HeldNoticeLine } from './HeldNoticeLine';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
-import { ThreadRowMenu } from './RowMenu';
+import { THREAD_DRAG_HELP_ID, ThreadRowMenu } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
 import { rowTimeIso, rowWait } from '../rowDelivery';
 import { UndeliveredBadge, useMinuteClock } from './Undelivered';
@@ -736,7 +736,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
       data-section={row.section}
       data-away={away ? '' : undefined}
       data-lit={lit ? '' : undefined}
-      aria-describedby={rowHasBadge(row) ? wordsId : undefined}
+      aria-roledescription="draggable thread" aria-describedby={rowHasBadge(row) ? `${wordsId} ${THREAD_DRAG_HELP_ID}` : THREAD_DRAG_HELP_ID}
       {...tintProps(tint)}
       {...focus}
     >
@@ -933,7 +933,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       data-section={row.section}
       data-away={away ? '' : undefined}
       data-lit={lit ? '' : undefined}
-      aria-describedby={rowHasBadge(row) ? wordsId : undefined}
+      aria-roledescription="draggable thread" aria-describedby={rowHasBadge(row) ? `${wordsId} ${THREAD_DRAG_HELP_ID}` : THREAD_DRAG_HELP_ID}
       {...tintProps(tint)}
       {...focus}
     >

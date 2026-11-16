@@ -211,8 +211,10 @@ test('desktop: one question mark in its fill step, the words in full-width mode,
   }
   // One accessible name per row, its words short; the card's words as its description.
   const row = page.locator(`.ib-row[data-thread-id="${world.stopped}"]`);
-  const described = await row.getAttribute('aria-describedby');
+  // The row's description: the card's words, then the drag help every wide and three-line row has (listDrops.tsx).
+  const [described, help] = (await row.getAttribute('aria-describedby'))?.split(' ') ?? [];
   expect(described).toBeTruthy();
+  expect(help).toBe('ib-thread-drag-help');
   await expect(page.locator(`[id="${described}"]`)).toHaveText(/^Stopped: The retry worker cannot ship without this\. Also holds up: The retry worker; The admin retry view\.$/);
 
   // Left to right: the agents' marks and the project, the title cell, then the words, the badge, the count and the

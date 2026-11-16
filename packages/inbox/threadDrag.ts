@@ -29,7 +29,10 @@
  *    rows (Combine) at `list` (components/listDrops.tsx).
  *  - `sayThreadDrag(words)`: a target's result in the drag's live region. `threadDragging()`: whether one is on.
  *  - `refreshThreadDrag()`: a target's answer changed with no move (a row held long enough): the ghost's word again.
- *  - `threadDragHit(x, y)`: the element under a point, as the engine sees it (a test stands it in).
+ *  - `threadDragHit(x, y)`: the element under a point, as the engine sees it (a test stands it in). A toast is never
+ *    hit: the engine looks under it, so a place a toast lies over still takes the drop.
+ *  - A target's `refused(ids)` is what a drop on it says when it refuses ("Already in Priority. Nothing changed.");
+ *    a source's `dropped(ids)` runs after a target took the drop (the list's picks end there, as the design's do).
  */
 
 /** What a target answers for the threads being dragged: takes them, refuses them (shown, but a drop does nothing), or is no place for them (hidden). */
@@ -56,6 +59,8 @@ export interface ThreadDropTarget {
   takesAt?: (point: { x: number; y: number }) => boolean;
   /** Docked on the list's top or bottom edge while a drag is on: the list's scroll band starts at its inner edge. */
   edge?: 'top' | 'bottom';
+  /** Why it refuses these threads ("Already in Priority"): what a drop on it says. Absent: "Cancelled". */
+  refused?: (ids: readonly string[]) => string;
 }
 
 export interface ThreadDragSource {
@@ -69,6 +74,8 @@ export interface ThreadDragSource {
   spoken: (ids: readonly string[]) => string;
   /** The list that scrolls while a thread is held near its top or bottom edge. Absent: none scrolls. */
   scroller?: () => HTMLElement | null;
+  /** A target took the drop (after its `drop` ran): the list's picks end, as after any drop. */
+  dropped?: (ids: readonly string[]) => void;
 }
 
 /** How near the list's top or bottom edge (px) a held thread scrolls it, and the fastest step (px a frame). */
@@ -101,15 +108,24 @@ interface Drag {
   scroll: { step: number; frame: number | null };
   /** Where the pointer was last. */
   point: { x: number; y: number };
+  source: ThreadDragSource;
 }
 
 let drag: Drag | null = null;
 let press: { x: number; y: number; source: ThreadDragSource; root: HTMLElement; pointerId: number } | null = null;
+/**
+ * The element under a point, under any toast: a toast (an Undo for seconds after a write) can lie over a place, and a
+ * drop must never land on a toast, nor a toast hide the place under it.
+ */
+function underToasts(x: number, y: number): Element | null {
+  if (typeof document.elementsFromPoint !== 'function') return document.elementFromPoint(x, y);
+  return document.elementsFromPoint(x, y).find((el) => !el.closest('[data-inbox-toast]')) ?? null;
+}
 /** Hit testing (a test swaps it: its DOM lays nothing out). */
-let hitTest: (x: number, y: number) => Element | null = (x, y) => document.elementFromPoint(x, y);
+let hitTest: (x: number, y: number) => Element | null = underToasts;
 
 export function setThreadDragHitTestForTests(test: ((x: number, y: number) => Element | null) | null): void {
-  hitTest = test ?? ((x, y) => document.elementFromPoint(x, y));
+  hitTest = test ?? underToasts;
 }
 
 /** The element under a point, as the engine hit tests it. */
@@ -264,7 +280,7 @@ function start(event: PointerEvent): void {
   root.appendChild(ghost);
   const rows = source.rows(ids);
   for (const row of rows) row.setAttribute('data-thread-lifted', '');
-  drag = { ids, ghost, what, origin: { x: press.x, y: press.y }, over: null, rows, root, scroller: source.scroller?.() ?? null, scroll: { step: 0, frame: null }, point: { x: event.clientX, y: event.clientY } };
+  drag = { ids, ghost, what, origin: { x: press.x, y: press.y }, over: null, rows, root, scroller: source.scroller?.() ?? null, scroll: { step: 0, frame: null }, point: { x: event.clientX, y: event.clientY }, source };
   document.documentElement.setAttribute('data-thread-drag', '');
   for (const target of targets) target.show(target.accepts(ids), ids);
   say(root, `${source.spoken(ids)} Drop it on the reply box, the top or bottom of the list, or hold it on another thread. Escape cancels.`);
@@ -373,11 +389,17 @@ function finish(accepted: boolean): Drag | null {
 function end(x: number, y: number): void {
   if (!drag) return;
   const target = targetAt(x, y);
-  const take = target && target.accepts(drag.ids) === 'take' && (target.takesAt?.({ x, y }) ?? true) ? target : null;
+  const answer = target ? target.accepts(drag.ids) : null;
+  const take = target && answer === 'take' && (target.takesAt?.({ x, y }) ?? true) ? target : null;
+  // A refusing place says why (read before `show(null)` clears what it knows).
+  const reason = target && answer === 'refuse' ? target.refused?.(drag.ids) : undefined;
+  const source = drag.source;
   const d = finish(take !== null);
   if (!d) return;
-  if (take) take.drop(d.ids, { x, y });
-  else say(d.root, 'Cancelled. Nothing changed.');
+  if (take) {
+    take.drop(d.ids, { x, y });
+    source.dropped?.(d.ids);
+  } else say(d.root, `${reason ?? 'Cancelled'}. Nothing changed.`);
 }
 
 function cancel(): void {

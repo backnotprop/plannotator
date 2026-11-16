@@ -538,6 +538,51 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     }
   });
 
+  test("the whole pane area's outer edge: a row opens a full-height column there, a pane moves there; with no room it says so and nothing changes", async () => {
+    putThread(queries, B, heldOf(B, false));
+    const calls: string[] = [];
+    drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    calls.length = 0;
+    const word = () => document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent;
+    // The right rim lies in pane B's own right edge zone: there the whole side wins.
+    setThreadDragHitTestForTests(() => paneOf(B));
+    pressRow();
+    drag(1560, 450);
+    expect(word()).toBe('Open on the right');
+    drag(1590, 450);
+    expect(word()).toBe('Open on the right, full height');
+    // The zone drawn is the column it opens: the area's full height at its right end, one column's share.
+    const zone = document.querySelector<HTMLElement>('.ib-droppreview')!;
+    expect([zone.style.top, zone.style.height]).toEqual(['0px', '900px']);
+    expect(parseFloat(zone.style.left) + parseFloat(zone.style.width)).toBeCloseTo(1600, 0);
+    expect(parseFloat(zone.style.width)).toBeGreaterThan(400);
+    expect(parseFloat(zone.style.width)).toBeLessThan(600);
+    release(1590, 450);
+    expect(calls).toEqual(['open:msg_C1:*:right']);
+    // A pane by its header to the left rim (inside pane A): it moves to the whole left side.
+    calls.length = 0;
+    const head = paneOf(B).querySelector<HTMLElement>('.ib-phead')!;
+    act(() => void head.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 1200, clientY: 20, pointerId: 1, pointerType: 'mouse' })));
+    drag(10, 450);
+    expect(document.querySelector('.ib-dragghost')?.textContent).toContain('Move on the left, full height');
+    release(10, 450);
+    expect(calls.filter((call) => call.startsWith('move'))).toEqual(['move:p1:*:left']);
+    // Room for the two columns there are, not a third: it says so, draws nothing, and takes no other side.
+    mainWidth = 1000;
+    try {
+      calls.length = 0;
+      pressRow();
+      drag(1590, 450);
+      expect(word()).toBe('No room on the right');
+      expect(document.querySelector('.ib-droppreview')).toBeNull();
+      release(1590, 450);
+      expect(calls).toEqual([]);
+    } finally {
+      mainWidth = 1600;
+    }
+  });
+
   test("with one thread open, a row dropped on its pane's edge opens beside it", async () => {
     const calls: string[] = [];
     drawPanes(windowOf(L.follow(L.EMPTY_LAYOUT, A), calls), hostFor(A, noop), heldOf(A, false), true);

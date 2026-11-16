@@ -73,6 +73,8 @@ let opened: string[] = [];
 let writes: string[] = [];
 let toasts: Omit<InboxToastModel, 'id'>[] = [];
 let combineStarts = 0;
+/** The threads each Combine dialog asked about (its plan read, `/combine?threads=`), in the order sent. */
+let combinePlans: string[][] = [];
 
 beforeEach(() => {
   realFetch = globalThis.fetch;
@@ -80,7 +82,10 @@ beforeEach(() => {
   // Every write answers as the server does when it goes; the Combine dialog's plan has one agent.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.includes('/combine')) return Response.json({ agents: [{ session: 'ses_a', name: 'Claude Code', host: 'claude-code', threads: 2 }] });
+    if (url.includes('/combine')) {
+      combinePlans.push(decodeURIComponent(new URL(url, 'http://x').searchParams.get('threads') ?? '').split(','));
+      return Response.json({ agents: [{ session: 'ses_a', name: 'Claude Code', host: 'claude-code', threads: 2 }] });
+    }
     writes.push(`${init?.method ?? 'GET'} ${url.replace(/^https?:\/\/[^/]+/, '')} ${init?.body ?? ''}`);
     return Response.json({ before: { priority: null } });
   }) as unknown as typeof fetch;
@@ -88,6 +93,7 @@ beforeEach(() => {
   opened = [];
   toasts = [];
   combineStarts = 0;
+  combinePlans = [];
 });
 
 afterEach(() => {
@@ -289,7 +295,7 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     expect(ghostWord()).toBe('');
     release(300, -10);
     await wait(50);
-    expect(live()).toBe('Cancelled. Nothing changed.');
+    expect(live()).toBe('Already in Priority. Nothing changed.');
     // An archived thread (the Archived group's row): Archive and Quiet each say why.
     pickUp(OLD.thread_id);
     expect(slot('archive')!.textContent).toBe('ArchiveAlready archived');
@@ -321,15 +327,80 @@ describe.skipIf(!hasDom)('the list edges take a carried thread', () => {
     await wait(20);
     expect(writes.filter((w) => w.includes('/priority')).length).toBe(2);
     expect(writes.every((w) => w.includes('"restore"'))).toBe(true);
-    // Still picked: the same two go to the archive together.
+    // The drop ended picking (drag-system.html: picks clear after any drop).
+    expect(document.querySelector('[data-pick-bar]')).toBeNull();
+    // Picked again: exactly those two go to the archive together, and picking ends again.
     writes = [];
+    cmdClick(RATE.thread_id);
+    cmdClick(FLAKY.thread_id);
     pickUp(RATE.thread_id);
     move(100, 2100);
     release(100, 2100);
     await wait(20);
-    expect(writes.filter((w) => w.includes('/resolve')).length).toBe(2);
+    const archived = writes.filter((w) => w.includes('/resolve')).map((w) => ALL.find((row) => w.includes(row.thread_id))?.thread_id);
+    expect(archived.sort()).toEqual([FLAKY.thread_id, RATE.thread_id].sort());
     expect(toasts.map((t) => t.lead)).toEqual(['Added 2 threads to Priority', 'Archived 2 threads']);
     expect(actions).toEqual([]);
+    expect(document.querySelector('[data-pick-bar]')).toBeNull();
+  });
+
+  test('one row dropped while others are picked: its action runs, and picking ends', async () => {
+    draw();
+    cmdClick(RATE.thread_id);
+    cmdClick(SEARCH.thread_id);
+    expect(document.querySelector('[data-pick-bar]')).not.toBeNull();
+    pickUp(FLAKY.thread_id);
+    move(300, -10);
+    release(300, -10);
+    await wait(20);
+    expect(actions).toEqual([[FLAKY.thread_id, 'priority-add']]);
+    expect(document.querySelector('[data-pick-bar]')).toBeNull();
+  });
+
+  test('Escape while over Archive: nothing is archived, the places go, and it says so', async () => {
+    draw();
+    pickUp(RATE.thread_id);
+    move(100, 2100);
+    expect(slot('archive')!.hasAttribute('data-hot')).toBe(true);
+    act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+    expect(document.querySelector('.ib-tedge')).toBeNull();
+    await wait(60);
+    expect(live()).toBe('Cancelled. Nothing changed.');
+    release(100, 2100);
+    await wait(20);
+    expect(actions).toEqual([]);
+    expect(writes.filter((w) => w.startsWith('POST'))).toEqual([]);
+  });
+
+  test('an Undo toast up over the bottom edge: the place under it still takes the drop, and the toast is never pressed', async () => {
+    draw();
+    // A toast as the window draws it, lying over Quiet; the hit test is the browser's, toast first.
+    const toast = document.createElement('div');
+    toast.setAttribute('data-inbox-toast', '');
+    const undo = document.createElement('button');
+    let undone = 0;
+    undo.addEventListener('click', () => void undone++);
+    toast.appendChild(undo);
+    document.querySelector('.pn-inbox')!.appendChild(toast);
+    setThreadDragHitTestForTests(null);
+    const realStack = document.elementsFromPoint;
+    document.elementsFromPoint = ((x: number, y: number) => {
+      if (y > 2000) return [undo, toast, x < 200 ? slot('archive') : slot('quiet'), document.body].filter(Boolean) as Element[];
+      const row = ALL[Math.floor(y / 100)];
+      return row ? [rowEl(row.thread_id).querySelector('.ib-title')!, document.body] : [document.body];
+    }) as typeof document.elementsFromPoint;
+    try {
+      pickUp(SEARCH.thread_id);
+      move(400, 2100);
+      expect(slot('quiet')!.hasAttribute('data-hot')).toBe(true);
+      expect(ghostWord()).toBe('Quiet');
+      release(400, 2100);
+      expect(actions).toEqual([[SEARCH.thread_id, 'read']]);
+      expect(undone).toBe(0);
+    } finally {
+      document.elementsFromPoint = realStack;
+      toast.remove();
+    }
   });
 });
 
@@ -359,6 +430,7 @@ describe.skipIf(!hasDom)('held on another row: Combine opens its dialog', () => 
     await wait(20);
     const dialog = document.querySelector<HTMLElement>('[data-dialog="combine"]')!;
     expect(dialog.querySelector('h2')!.textContent).toBe('Combine 2 threads');
+    expect(combinePlans.at(-1)!.sort()).toEqual([RATE.thread_id, SEARCH.thread_id].sort());
     // Nothing combined by itself; Cancel has the focus.
     expect(combineStarts).toBe(0);
     expect(document.activeElement?.hasAttribute('data-combine-cancel')).toBe(true);
@@ -381,6 +453,53 @@ describe.skipIf(!hasDom)('held on another row: Combine opens its dialog', () => 
     release(300, 50);
     await wait(20);
     expect(document.querySelector('[data-dialog="combine"] h2')!.textContent).toBe('Combine 3 threads');
+    expect(combinePlans.at(-1)!.sort()).toEqual([FLAKY.thread_id, RATE.thread_id, SEARCH.thread_id].sort());
+  });
+
+  test('one unpicked row held on another while others are picked: the dialog has those two; its Cancel ends picking', async () => {
+    draw();
+    cmdClick(FLAKY.thread_id);
+    cmdClick(BILLING.thread_id);
+    pickUp(RATE.thread_id);
+    move(300, 250);
+    await wait(COMBINE_DWELL_MS + 60);
+    release(300, 250);
+    await wait(20);
+    expect(combinePlans.at(-1)!.sort()).toEqual([RATE.thread_id, SEARCH.thread_id].sort());
+    act(() => document.querySelector<HTMLElement>('[data-combine-cancel]')!.click());
+    await wait(20);
+    expect(document.querySelector('[data-pick-bar]')).toBeNull();
+  });
+
+  test('a held row that moves away or leaves the list before the hold ends arms nothing, and the drop opens nothing', async () => {
+    draw();
+    pickUp(RATE.thread_id);
+    move(300, 250);
+    expect(rowEl(SEARCH.thread_id).getAttribute('data-thread-combine')).toBe('arming');
+    // New rows push it down under the still pointer: BILLING is under it now.
+    const searchBox = rowEl(SEARCH.thread_id).getBoundingClientRect;
+    rowEl(SEARCH.thread_id).getBoundingClientRect = () => ({ ...searchBox(), top: 300, bottom: 400, y: 300 }) as DOMRect;
+    setThreadDragHitTestForTests((_x, y) => (y > 200 && y < 300 ? rowEl(BILLING.thread_id).querySelector('.ib-title') : null));
+    await wait(COMBINE_DWELL_MS + 60);
+    expect(rowEl(SEARCH.thread_id).getAttribute('data-thread-combine')).toBeNull();
+    expect(document.querySelector('.ib-tcomb')).toBeNull();
+    release(300, 250);
+    await wait(20);
+    expect(document.querySelector('[data-dialog="combine"]')).toBeNull();
+    // A held row that leaves the list (archived elsewhere) mid-hold: nothing arms either.
+    standIn();
+    pickUp(RATE.thread_id);
+    move(300, 250);
+    const held = rowEl(SEARCH.thread_id);
+    expect(held.getAttribute('data-thread-combine')).toBe('arming');
+    setThreadDragHitTestForTests(() => null);
+    held.parentElement!.style.display = 'none';
+    await wait(COMBINE_DWELL_MS + 60);
+    expect(held.getAttribute('data-thread-combine')).toBeNull();
+    release(300, 250);
+    await wait(20);
+    expect(document.querySelector('[data-dialog="combine"]')).toBeNull();
+    expect(combinePlans).toEqual([]);
   });
 
   test('an Archived group row neither carries a Combine nor takes one', async () => {

@@ -2,7 +2,8 @@
  * The list's own places for a dragged thread (approval "inbox-drag-threads", drag-system.html): Priority docked on the
  * list's top edge, Archive and Quiet on its bottom edge, and another row held for a moment (Combine). They show only
  * while a thread is carried (threadDrag.ts, the window's one thread drag), float over the list so nothing moves under
- * the pointer, and each drop runs what the row menu already runs, with its toast and Undo:
+ * the pointer (fixed over the list column, drawn in the window's root beside the toast so a toast never covers them),
+ * and each drop runs what the row menu already runs, with its toast and Undo:
  *
  *  - Priority: Add to Priority. Its second line says why it does not take a thread (already in Priority, archived).
  *  - Quiet: Mark read ("Quiet" is not a flag; Mark read is what makes a row quiet). Its second line says when Mark read
@@ -17,6 +18,7 @@
  * nothing. Never on a phone: the row's sheet and its swipe do the same there.
  */
 import { useEffect, useRef, useState, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { inboxRowArchived, type InboxListGroupId, type InboxListRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { Icon, type IconName } from '../icons';
@@ -87,6 +89,10 @@ const PLACES: { place: EdgePlace; edge: 'top' | 'bottom'; label: string; icon: I
   { place: 'quiet', edge: 'bottom', label: 'Quiet', icon: 'checkCircle', what: 'Quiet', action: 'read' },
 ];
 
+/** The rows' drag help (their `aria-describedby`, InboxList.tsx), with their `aria-roledescription` "draggable thread". */
+export const THREAD_DRAG_HELP_ID = 'ib-thread-drag-help';
+const DRAG_HELP = 'Drag to the reply box to mention it, to the top for Priority, to the bottom for Quiet or Archive, or hold over another thread to combine. Or open the menu with Shift F10.';
+
 /** How long a row is held before it takes a Combine, and the middle of it that counts (approval: 500 ms, 60%). */
 export const COMBINE_DWELL_MS = 500;
 const COMBINE_MIDDLE = 0.2;
@@ -103,14 +109,18 @@ export interface ListDropsProps {
   /** The row menu's actions (App.tsx `rowAction`): one row's drop runs exactly what its menu item runs. */
   onAction: (row: InboxListRow, action: RowMenuAction) => void;
   picks?: MenuPicks;
+  /** The row menu's focus rule after a write (useContextMenuTrigger.ts `follow`): a dropped row's focus goes where its menu item's would. */
+  follow?: (threadId: string, moves?: boolean) => void;
   /** No drag here: a phone, or a list with no actions. */
   off: boolean;
 }
 
 interface Shown {
   places: Record<EdgePlace, PlaceAnswer>;
-  /** The body's top in the list column, where the top edge docks. */
-  top: number;
+  /** Where the places dock, in the window (they are fixed): over the list column's sides, the body's top, the column's bottom. */
+  frame: { left: number; right: number; top: number; bottom: number };
+  /** The window's root they draw in: beside the toast, so they draw above it (the shell is its own stacking context). */
+  into: HTMLElement;
 }
 
 /** The row button a hit lands in (a wide row's wrapper holds it). */
@@ -148,21 +158,31 @@ export function ListDrops(props: ListDropsProps) {
         edge,
         what,
         accepts: (ids) => placesFor(ids)[place].answer,
+        refused: (ids) => placesFor(ids)[place].sub,
         // One state for the three places: Priority's `show` sets it, at the drag's start (whatever it answers) and end.
         show: (_answer, ids) => {
           if (place !== 'priority') return;
           setHot(null);
           asked = null;
           const list = live.current.body.current;
-          setShown(threadDragging() && list ? { places: placesFor(ids), top: list.offsetTop } : null);
+          const column = list?.parentElement;
+          if (!threadDragging() || !list || !column) return setShown(null);
+          const col = column.getBoundingClientRect();
+          const frame = { left: col.left + 8, right: window.innerWidth - col.right + 8, top: list.getBoundingClientRect().top + 6, bottom: window.innerHeight - col.bottom + 8 };
+          setShown({ places: placesFor(ids), frame, into: list.closest<HTMLElement>('.pn-inbox') ?? document.body });
         },
         over: (point) => setHot((was) => (point ? place : was === place ? null : was)),
         drop: (ids) => {
           const taken = placesFor(ids)[place].rows;
-          const { picks, onAction } = live.current;
-          // Several picked rows: the picks' own action (each row it takes, one toast, one Undo); one row: its menu item.
+          const { picks, onAction, follow } = live.current;
+          // Several picked rows: the picks' own action (each row it takes, one toast, one Undo), and picking ends
+          // (threadDrag.ts `dropped`), focus going where the pick bar's Done puts it. One row: its menu item, and
+          // focus follows the row as after that item (Priority moves it; Archive and Mark read may take it away).
           if (ids.length > 1 && picks) runBulk(picks.act, action === 'read' || action === 'archive' ? action : 'priority-add');
-          else if (taken[0]) onAction(taken[0], action);
+          else if (taken[0]) {
+            follow?.(taken[0].thread_id, action === 'priority-add');
+            onAction(taken[0], action);
+          }
         },
       }),
     );
@@ -170,7 +190,13 @@ export function ListDrops(props: ListDropsProps) {
     return () => offs.forEach((off) => off());
   }, [props.off]);
 
-  if (props.off || !shown) return null;
+  if (props.off) return null;
+  const help = (
+    <span id={THREAD_DRAG_HELP_ID} className="ib-sr">
+      {DRAG_HELP}
+    </span>
+  );
+  if (!shown) return help;
   const combineLabel = combineAt && (
     <div className="ib-tcomb" data-end={combineAt.end ? '' : undefined} aria-hidden="true" style={{ left: combineAt.left, top: combineAt.top, width: combineAt.width, height: combineAt.height }}>
       <Icon name="swap" size={14} />
@@ -201,17 +227,24 @@ export function ListDrops(props: ListDropsProps) {
     );
   };
   const bottom = (['archive', 'quiet'] as const).filter((place) => shown.places[place].answer);
+  const { frame } = shown;
   return (
     <>
-      {shown.places.priority.answer && (
-        <div className="ib-tedge ib-tedge-top" style={{ top: shown.top + 6 }} aria-hidden="true" data-thread-edge="top">
-          {slot('priority')}
-        </div>
-      )}
-      {bottom.length > 0 && (
-        <div className="ib-tedge ib-tedge-bottom" aria-hidden="true" data-thread-edge="bottom">
-          {bottom.map(slot)}
-        </div>
+      {help}
+      {createPortal(
+        <>
+          {shown.places.priority.answer && (
+            <div className="ib-tedge ib-tedge-top" style={{ left: frame.left, right: frame.right, top: frame.top }} aria-hidden="true" data-thread-edge="top">
+              {slot('priority')}
+            </div>
+          )}
+          {bottom.length > 0 && (
+            <div className="ib-tedge ib-tedge-bottom" style={{ left: frame.left, right: frame.right, bottom: frame.bottom }} aria-hidden="true" data-thread-edge="bottom">
+              {bottom.map(slot)}
+            </div>
+          )}
+        </>,
+        shown.into,
       )}
       {combineLabel}
     </>
