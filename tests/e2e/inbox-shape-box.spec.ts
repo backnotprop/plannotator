@@ -472,7 +472,9 @@ test('Add to reply’s Undo: once, its own press only (even of the same words), 
   const { thread } = await freshThread('undo');
   const id = store('reply-undo', thread);
   const { context, page, problems } = await openBoard(browser, id, {}, thread);
-  const reply = page.getByRole('textbox', { name: /^Reply to / });
+  // The board shows in the thread's place, its reply hidden under it (kept, as its draft is): read by its label, as a
+  // role query finds nothing hidden. The toast says it is added; the reply shows it once the board closes.
+  const reply = page.locator('section.ib-pane textarea[aria-label^="Reply to "]');
   const added = page.locator('.ib-toast', { hasText: 'Added to your reply' });
   await crosshair(page).click();
   await page.mouse.move(5, 5);
