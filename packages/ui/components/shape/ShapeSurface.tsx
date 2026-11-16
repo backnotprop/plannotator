@@ -818,6 +818,10 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
     if (!shown.size) return;
     setNewAnswers((s) => ([...s].some((q) => shown.has(q)) ? new Set([...s].filter((q) => !shown.has(q))) : s));
   });
+  // And once no new answer is left unshown (a bubble's box showed the last), the pill has said its piece too.
+  useEffect(() => {
+    if (!newAnswers.size) setAnswerReady(false);
+  }, [newAnswers]);
   const generalButton = (forView: ShapeViewId | null) => (
     <button
       type="button"

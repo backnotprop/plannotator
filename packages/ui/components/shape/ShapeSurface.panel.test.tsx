@@ -270,6 +270,31 @@ describe.if(hasDom)('the side panel and the answers', () => {
     expect(document.querySelector('[data-shape-answer-ready]')).toBeNull();
   });
 
+  test("Answer ready stays while an answer is unread, and goes once the last is opened from its part's bubble", async () => {
+    const ask = (id: string, part: string, text: string) => ({ id, kind: 'ask', v: 1, view: 'picture', part, quote: null, text, from: 'you', re: null, delivered: null, at: AT }) as unknown as ShapeNote;
+    const answer = (id: string, part: string, re: string, text: string) => ({ id, kind: 'answer', v: 1, view: 'picture', part, quote: null, text, from: 'agent', re, delivered: null, at: AT }) as unknown as ShapeNote;
+    const r = rig(undefined, { notes: [ask('shn_q1', 'whistle', 'Who boils it?'), ask('shn_q2', 'lid', 'Why red?')] });
+    await laidOut(async () => {
+      await mount(r.host);
+      r.emit({ type: 'note', note: answer('shn_a1', 'whistle', 'shn_q1', 'The agent boils it.') });
+      r.emit({ type: 'note', note: answer('shn_a2', 'lid', 'shn_q2', 'It shows heat.') });
+      const pill = () => document.querySelector('[data-shape-answer-ready]');
+      await until(() => !!pill(), 'the pill');
+      const bubbleOn = (part: string) => inDrawingAll<HTMLButtonElement>('[data-shp-talk-bubble]').find((b) => b.getAttribute('data-shp-talk-bubble')!.endsWith(part))!;
+      // One of two opened: the other is still unread, so the pill stays.
+      await click(bubbleOn('whistle'));
+      await until(() => !!talk()?.textContent?.includes('The agent boils it.'), "the whistle's box");
+      await wait();
+      expect(pill()).not.toBeNull();
+      await closeBox();
+      // The last opened: nothing is left unread, so the pill goes.
+      await click(bubbleOn('lid'));
+      await until(() => !!talk()?.textContent?.includes('It shows heat.'), "the lid's box");
+      await wait();
+      expect(pill()).toBeNull();
+    });
+  });
+
   test("a Change it says where it stands in the part's box", async () => {
     const r = rig();
     await mount(r.host);
