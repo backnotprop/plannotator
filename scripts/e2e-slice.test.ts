@@ -16,13 +16,18 @@ import { join } from 'node:path';
 import { repoRoot, specFiles, specTimes } from './ci-e2e-shard';
 import {
   DEFAULT_RULES,
+  SLICE_HARD_MAX_SHARDS,
   SLICE_MAX_SHARDS,
   SLICE_SHARD_MINUTES,
+  describeSlice,
   e2eLine,
   planOutputs,
+  referencesOf,
   selectSlice,
   shardCount,
+  shardTimeout,
   specsOfToken,
+  specsReaching,
   type SliceInput,
   type SliceRules,
 } from './e2e-slice';
@@ -92,32 +97,96 @@ describe('the slice: order', () => {
 
   test('a changed helper under tests/e2e picks the specs that import it, or the smoke sets when many do', () => {
     const sources = { [spec('b-one')]: "import { x } from './helper';", [spec('a-short')]: "import { x } from './helper.ts';" };
-    expect(names(pick({ changed: ['tests/e2e/helper.ts'], specSources: sources }).chosen)).toEqual(['a-short', 'b-one']);
+    expect(names(pick({ changed: ['tests/e2e/helper.ts'], sources }).chosen)).toEqual(['a-short', 'b-one']);
     const many = { ...sources, [spec('named')]: "import './helper';" };
-    expect(names(pick({ changed: ['tests/e2e/helper.ts'], specSources: many }).chosen)).toEqual(['smoke-x']);
-    expect(pick({ changed: ['tests/e2e/unused.ts'], specSources: sources }).unmatched).toEqual(['tests/e2e/unused.ts']);
+    expect(names(pick({ changed: ['tests/e2e/helper.ts'], sources: many }).chosen)).toEqual(['smoke-x']);
+    expect(pick({ changed: ['tests/e2e/unused.ts'], sources }).unmatched).toEqual(['tests/e2e/unused.ts']);
+  });
+
+  test('a helper reached through another helper picks the specs at the end of the chain', () => {
+    const sources = {
+      'tests/e2e/peek.ts': 'export const peek = 1;',
+      'tests/e2e/world.ts': "import { peek } from './peek';",
+      [spec('b-two')]: "import { world } from './world';",
+      [spec('a-short')]: "import { peek } from './peek';",
+      [spec('b-one')]: "import { other } from './other';",
+    };
+    expect(names(pick({ changed: ['tests/e2e/peek.ts'], sources }).chosen)).toEqual(['b-two', 'a-short']);
+  });
+
+  test('a tests/helpers file picks the specs that import it with ../helpers; one no spec uses selects nothing and raises no notice', () => {
+    const sources = {
+      'tests/helpers/fake.ts': 'export {}',
+      'tests/helpers/unit-only.ts': 'export {}',
+      [spec('b-one')]: "import { fake } from '../helpers/fake';",
+    };
+    expect(names(pick({ changed: ['tests/helpers/fake.ts'], sources }).chosen)).toEqual(['b-one']);
+    const quiet = pick({ changed: ['tests/helpers/unit-only.ts'], sources });
+    expect(quiet.chosen).toEqual([]);
+    expect(quiet.unmatched).toEqual([]);
+  });
+
+  test('a seed a spec starts by path (bun tests/e2e/<seed>.ts) picks that spec', () => {
+    const sources = {
+      'tests/e2e/seed.ts': 'console.log(1);',
+      [spec('a-long')]: "const seeded = spawnSync('bun', [join(repo, 'tests/e2e/seed.ts'), dataDir, '4']);",
+    };
+    expect(names(pick({ changed: ['tests/e2e/seed.ts'], sources }).chosen)).toEqual(['a-long']);
+    expect([...referencesOf(spec('a-long'), sources[spec('a-long')])]).toEqual(['tests/e2e/seed']);
+    expect([...referencesOf('tests/e2e/x.spec.ts', "import a from './a.ts'; import b from \"../helpers/b\";")]).toEqual(['tests/e2e/a', 'tests/helpers/b']);
   });
 });
 
 describe('the slice: budget', () => {
-  test('over budget, specs drop from the end of the order and are listed; the edited and named ones stay', () => {
+  test('over budget, the mapped and smoke specs drop from the end and are listed, after the edited and named ones', () => {
     // 4 minutes: edited 120 + named 90 + flaky 15 + b-two 20 = 245 > 240, so the cut comes at b-two.
     const slice = pick({ changed: ['packages/a/x.ts', 'packages/b/y.ts', spec('edited')], body: 'e2e: named', budgetMinutes: 4 });
     expect(names(slice.chosen)).toEqual(['edited', 'named', 'flaky']);
     expect(names(slice.dropped)).toEqual(['b-two', 'a-short', 'b-one', 'a-long']);
     for (const d of slice.dropped) expect(d.why).toContain('4-minute budget');
     expect(slice.minutes).toBe(3.8);
+    expect(slice.overBudget).toBe(false);
+  });
+
+  test('specs the PR edits or names are never dropped by the budget: over it, they all run on up to 8 shards and nothing mapped does', () => {
+    // A 1-minute budget: edited 120 s and named 90 s are both over it on their own, and the 300 s spec comes before a short one in path order.
+    const slice = pick({ changed: [spec('a-long'), spec('edited'), 'packages/b/y.ts'], body: 'e2e: named', budgetMinutes: 1 });
+    expect(names(slice.chosen)).toEqual(['a-long', 'edited', 'named']);
+    expect(slice.overBudget).toBe(true);
+    expect(names(slice.dropped)).toEqual(['flaky', 'b-two', 'b-one']);
+    expect(describeSlice(slice)).toContain('always run');
+    // 75 spec-minutes of edited specs: 8 shards, past the usual 4; 150 minutes still 8.
+    const big = Object.fromEntries(SPECS.map((s) => [s.replace('tests/e2e/', ''), 500]));
+    const all = selectSlice({ changed: SPECS, specs: SPECS, times: big, rules: RULES });
+    expect(all.chosen).toHaveLength(SPECS.length);
+    expect(all.dropped).toEqual([]);
+    expect(shardCount(all)).toBe(SLICE_HARD_MAX_SHARDS);
+    const twice = selectSlice({ changed: SPECS, specs: SPECS, times: Object.fromEntries(SPECS.map((s) => [s.replace('tests/e2e/', ''), 1000])), rules: RULES });
+    expect(shardCount(twice)).toBe(SLICE_HARD_MAX_SHARDS);
   });
 
   test('the default budget is 4 shards of 10 minutes, and the shard count follows the time', () => {
     expect(SLICE_MAX_SHARDS * SLICE_SHARD_MINUTES).toBe(40);
     expect(pick({ changed: ['packages/a/x.ts'] }).budgetMinutes).toBe(40);
     const big: Record<string, number> = Object.fromEntries(SPECS.map((s) => [s.replace('tests/e2e/', ''), 500]));
-    const slice = selectSlice({ changed: [], body: `e2e: ${SPECS.join(' ')}`, specs: SPECS, times: big, rules: RULES });
+    const rules = { ...RULES, rules: [{ name: 'all', paths: ['packages/**'], specs: ['*.spec.ts'] }] };
+    const slice = selectSlice({ changed: ['packages/x.ts'], specs: SPECS, times: big, rules });
     expect(slice.chosen).toHaveLength(4);
     expect(shardCount(slice)).toBe(4);
     expect(shardCount(pick({ changed: ['packages/a/x.ts'] }))).toBe(1);
     expect(shardCount(pick({ changed: [] }))).toBe(0);
+  });
+
+  test('the shard timeout covers setup, the longest shard twice and slack, and the outputs carry it', () => {
+    expect(shardTimeout(pick({ changed: ['packages/a/x.ts'] }))).toBe(30);
+    // Four shards of 600 s each, shard 1 with its 90 s head start: 5 + 3 + 2.5 × 11.5 = 36.75 → 37.
+    const tenMinutes = Object.fromEntries(SPECS.map((s) => [s.replace('tests/e2e/', ''), 600]));
+    const rules = { ...RULES, rules: [{ name: 'all', paths: ['packages/**'], specs: ['*.spec.ts'] }] };
+    expect(shardTimeout(selectSlice({ changed: ['packages/x.ts'], specs: SPECS, times: tenMinutes, rules }))).toBe(37);
+    const huge = selectSlice({ changed: SPECS, specs: SPECS, times: Object.fromEntries(SPECS.map((s) => [s.replace('tests/e2e/', ''), 3000])), rules: RULES });
+    expect(shardTimeout(huge)).toBe(180);
+    const withUpdates = selectSlice({ changed: ['tests/e2e/inbox-updates.spec.ts'], specs: [...SPECS, 'tests/e2e/inbox-updates.spec.ts'], times: TIMES, rules: RULES });
+    expect(planOutputs(withUpdates)).toBe('count=1\nmatrix=[1]\nrelease=true\ntimeout=30\n');
   });
 
   test('a spec with no measured time counts as the median', () => {
@@ -164,7 +233,7 @@ describe('the slice: notices and skips', () => {
     expect(slice.chosen).toEqual([]);
     expect(slice.unmatched).toEqual([]);
     expect(slice.dropped).toEqual([]);
-    expect(planOutputs(slice)).toBe('count=0\nmatrix=[]\nrelease=false\n');
+    expect(planOutputs(slice)).toBe('count=0\nmatrix=[]\nrelease=false\ntimeout=30\n');
   });
 
   test('a quarantined spec is skipped with its issue, and so is a spec another workflow runs', () => {
@@ -175,6 +244,16 @@ describe('the slice: notices and skips', () => {
       { spec: spec('flaky'), why: 'quarantined for the slice (#1234): times out' },
       { spec: spec('b-two'), why: 'smoke runs it' },
     ]);
+  });
+
+  test('the slice quarantine never drops a spec the PR edits (it may be the fix), but still drops it when only named or mapped', () => {
+    const rules = { ...RULES, quarantine: [{ spec: 'flaky.spec.ts', issue: 1234, why: 'times out' }] };
+    const edited = selectSlice({ changed: [spec('flaky')], specs: SPECS, times: TIMES, rules });
+    expect(names(edited.chosen)).toEqual(['flaky']);
+    expect(edited.dropped).toEqual([]);
+    const named = selectSlice({ changed: [], body: 'e2e: flaky', specs: SPECS, times: TIMES, rules });
+    expect(named.chosen).toEqual([]);
+    expect(named.dropped[0].why).toContain('#1234');
   });
 
   test('a WebKit-only spec is skipped with a notice on a Chromium-only run', () => {
@@ -228,11 +307,49 @@ describe('the real rules', () => {
     const slice = real(changed);
     expect(slice.chosen.map((c) => c.spec)).toContain('tests/e2e/inbox-ended-session.spec.ts');
   });
+
+  describe('helpers in this repo reach their specs', () => {
+    const files = [...new Bun.Glob('tests/{e2e,helpers}/**/*.{ts,tsx,mjs}').scanSync({ cwd: repoRoot })].filter((f) => !/\.test\.tsx?$/.test(f));
+    const sources = Object.fromEntries(files.map((f) => [f, readFileSync(join(repoRoot, f), 'utf8')]));
+    const cases: [string, string[]][] = [
+      ['tests/e2e/inbox-board-reveal-seed.ts', ['tests/e2e/inbox-board-reveal.spec.ts', 'tests/e2e/inbox-checklist-reveal.spec.ts']],
+      ['tests/e2e/inbox-snooze-intro-seed.ts', ['tests/e2e/inbox-snooze-intro.spec.ts']],
+      ['tests/e2e/stale-page-inbox.ts', ['tests/e2e/inbox-stale-page-webkit.spec.ts']],
+      ['tests/e2e/voice-inbox.ts', ['tests/e2e/inbox-voice.spec.ts']],
+    ];
+    for (const [helper, expected] of cases) {
+      test(`${helper}, started by path`, () => {
+        expect(specsReaching(helper, sources)).toEqual(expect.arrayContaining(expected));
+      });
+    }
+
+    test('tests/e2e/sidebar-peek.ts reaches the specs of the worlds that import it, not only its direct importers', () => {
+      const direct = specs.filter((s) => /['"]\.\/sidebar-peek['"]/.test(sources[s] ?? ''));
+      const reached = specsReaching('tests/e2e/sidebar-peek.ts', sources);
+      expect(reached.length).toBeGreaterThan(direct.length);
+      for (const s of direct) expect(reached).toContain(s);
+    });
+
+    test('a tests/helpers file reached by many specs gives the smoke sets, not every importer', () => {
+      expect(specsReaching('tests/helpers/tour-decided.ts', sources).length).toBeGreaterThan(DEFAULT_RULES.helperFanout);
+      const slice = real(['tests/helpers/tour-decided.ts'], { sources });
+      expect(slice.chosen.length).toBeLessThanOrEqual(Object.values(DEFAULT_RULES.smoke).flat().length);
+      expect(slice.chosen.every((c) => c.why.includes('smoke'))).toBe(true);
+    });
+  });
 });
 
 describe('the workflow', () => {
-  type Step = { run?: string; if?: string; env?: Record<string, string> };
-  type Job = { if?: string; needs?: string | string[]; 'runs-on'?: string; steps?: Step[]; strategy?: { matrix?: { shard?: string } } };
+  type Step = { run?: string; if?: string; env?: Record<string, string>; with?: Record<string, string> };
+  type Job = {
+    if?: string;
+    needs?: string | string[];
+    'runs-on'?: string;
+    'timeout-minutes'?: string | number;
+    outputs?: Record<string, string>;
+    steps?: Step[];
+    strategy?: { matrix?: { shard?: string } };
+  };
   const wf = Bun.YAML.parse(readFileSync(join(repoRoot, '.github/workflows/e2e-slice.yml'), 'utf8')) as {
     on: { pull_request?: { types?: string[]; paths?: string[] }; pull_request_target?: unknown };
     jobs: Record<string, Job>;
@@ -261,5 +378,16 @@ describe('the workflow', () => {
     const compile = steps.findIndex((s) => s.run?.includes('--outfile .local/plannotator') && !s.run.includes('0.28.10'));
     expect(compile).toBeGreaterThanOrEqual(0);
     expect(compile).toBeLessThan(run);
+  });
+
+  test('the shard timeout comes from the plan, no shard step holds a token, and artifact names carry the run attempt', () => {
+    const slice = wf.jobs.slice;
+    expect(slice['timeout-minutes']).toBe('${{ fromJSON(needs.plan.outputs.timeout) }}');
+    expect(wf.jobs.plan.outputs?.timeout).toBe('${{ steps.plan.outputs.timeout }}');
+    expect(wf.jobs.plan.outputs?.attempt).toBe('${{ github.run_attempt }}');
+    for (const step of slice.steps ?? []) expect(JSON.stringify(step.env ?? {})).not.toContain('github.token');
+    const uploads = [...(wf.jobs.plan.steps ?? []), ...(slice.steps ?? [])].filter((s) => s.with?.name);
+    expect(uploads.length).toBeGreaterThan(0);
+    for (const step of uploads) expect(step.with!.name).toMatch(/run_attempt|outputs\.attempt/);
   });
 });

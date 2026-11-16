@@ -136,7 +136,11 @@ export const SLICE_RULES: SliceRule[] = [
   { name: 'question card', paths: ['packages/ui/components/blocks/Question*', 'packages/ui/components/Question*'], specs: ['question-*.spec.ts'] },
   { name: 'chat window and Ask AI', paths: ['packages/ui/components/chat/**', 'packages/ai/**'], specs: ['chat-window.spec.ts', 'ask-ai-sanitize.spec.ts', 'annotate-ai-history.spec.ts'] },
   { name: 'phone surface', paths: ['packages/inbox/surface/**'], specs: ['surface.spec.ts'] },
-  { name: 'VS Code Guides webview', paths: ['apps/vscode-extension/src/guides/**'], specs: ['vscode-guides-*.spec.ts'] },
+  {
+    name: 'VS Code Guides webview',
+    paths: ['apps/vscode-extension/src/guides/**', 'apps/vscode-extension/scripts/esbuild.config.ts', 'apps/vscode-extension/package.json'],
+    specs: ['vscode-guides-*.spec.ts'],
+  },
   {
     name: 'packed pages and the build',
     paths: ['build/**', 'packages/shared/packed-app.ts', 'apps/hook/vite.config.ts'],
@@ -215,12 +219,39 @@ export const SLICE_RULES: SliceRule[] = [
   {
     name: 'Inbox: machines, phones and accounts',
     stopgap: true,
-    paths: ['packages/server/inbox-devices*', 'packages/server/inbox-machines*', 'packages/server/inbox-peer*', 'packages/inbox/data/machineViews*', 'packages/inbox/cloud/**'],
+    paths: [
+      'packages/server/inbox-devices*',
+      'packages/server/inbox-machines*',
+      'packages/server/inbox-peer*',
+      'packages/server/inbox-accounts*',
+      'packages/server/inbox-cloud*',
+      'packages/inbox/data/machineViews*',
+      'packages/inbox/cloud/**',
+    ],
     specs: ['inbox-machines.spec.ts', 'inbox-machine-update.spec.ts', 'inbox-phones.spec.ts', 'inbox-accounts*.spec.ts', 'inbox-snooze-machines.spec.ts', 'inbox-cloud-*.spec.ts'],
   },
   { name: 'Inbox: guided reviews', stopgap: true, paths: ['packages/inbox/guide/**', 'packages/server/inbox-guides*'], specs: ['inbox-guides.spec.ts', 'inbox-request-guide.spec.ts'] },
   { name: 'Inbox: Ask window', stopgap: true, paths: ['packages/inbox/ask/**', 'packages/server/inbox-ask*'], specs: ['inbox-ask-window.spec.ts', 'inbox-reask.spec.ts'] },
   { name: 'Inbox: search', stopgap: true, paths: ['packages/inbox/search/**'], specs: ['inbox-search*.spec.ts', 'inbox-feedback-search*.spec.ts'] },
+  {
+    // Every Inbox spec reads the store and the server; these are the short ones that walk a message's life
+    // (an agent writes through `plannotator inbox mcp`, the window shows, reads, archives, acks, replies, restarts).
+    name: 'Inbox: the store, the server and the agents\' write path',
+    stopgap: true,
+    paths: ['packages/shared/inbox/**', 'packages/server/inbox.ts', 'packages/server/inbox-mcp*'],
+    specs: [
+      'inbox-order.spec.ts',
+      'inbox-thread-foot.spec.ts',
+      'inbox-refresh.spec.ts',
+      'inbox-reply-drafts.spec.ts',
+      'inbox-writes-after-restart.spec.ts',
+      'inbox-archived.spec.ts',
+      'inbox-mark-read.spec.ts',
+      'inbox-ack.spec.ts',
+      'inbox-new-message.spec.ts',
+      'inbox-undelivered.spec.ts',
+    ],
+  },
 
   // --- Shared code: the smoke sets, for a path no rule above matched ---
   {
@@ -238,6 +269,9 @@ export const SLICE_RULES: SliceRule[] = [
       'packages/server/**',
       'packages/core/**',
       'packages/guide-viewer/**',
+      // The system pane and CLI commands (packages/inbox/api.ts, apps/hook/server/cli.ts) and the T3 Code host.
+      'packages/system/**',
+      'packages/t3-code/**',
       'apps/hook/**',
       'package.json',
       'bun.lock',

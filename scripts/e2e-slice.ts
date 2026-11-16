@@ -14,13 +14,18 @@
  *     under tests/e2e, separated by spaces or commas), or in --body-file;
  *  3. the specs the rules in tests/e2e/slice-rules.ts map the changed paths to,
  *     shortest first: the closer rules, then the smoke sets for shared code.
- *     A changed helper under tests/e2e picks the specs that import it (the
- *     smoke sets when more than SLICE_HELPER_FANOUT do).
+ *     A changed helper under tests/e2e or tests/helpers picks the specs that
+ *     reach it, by import (also through other helpers) or by a path string
+ *     (`bun tests/e2e/<seed>.ts`); the smoke sets when more than
+ *     SLICE_HELPER_FANOUT specs do.
  *
  * The budget is in spec-minutes from tests/e2e/shard-times.json (a spec with
  * no time counts as the median), SLICE_MAX_SHARDS × SLICE_SHARD_MINUTES by
- * default. Over it, specs are dropped from the end of that order and listed;
- * the slice never fails for that. A changed path no rule matches is a notice,
+ * default. The specs of 1 and 2 always run, whatever their time (the slice may
+ * then use up to SLICE_HARD_MAX_SHARDS shards); the specs of 3 get what is
+ * left, and the rest drop from the end of that order and are listed. The
+ * slice never fails for that. The slice quarantine never drops a spec the
+ * change edits. A changed path no rule matches is a notice,
  * never a failure. Paths in SLICE_NO_BROWSER (docs, markdown, the marketing
  * site, unit tests, the Pi and OpenCode hosts) select nothing.
  *
@@ -32,8 +37,8 @@
  * the notices, the quarantine and the workflow.
  */
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { basename, join } from 'node:path';
-import { E2E_CONFIG, SMOKE_SPECS, fileFilter, repoRoot, runSpecs, shardOf, specFiles, specTimes } from './ci-e2e-shard';
+import { basename, join, posix } from 'node:path';
+import { E2E_CONFIG, SHARD_1_EXTRA_S, SMOKE_SPECS, fileFilter, repoRoot, runSpecs, shardOf, shards, specFiles, specTimes } from './ci-e2e-shard';
 import { failedSpecs } from './ci-e2e-main';
 import type { Report } from './ci-e2e-reuse';
 import {
@@ -47,6 +52,8 @@ import {
 
 export const SLICE_MAX_SHARDS = 4;
 export const SLICE_SHARD_MINUTES = 10;
+/** The shard cap when the specs the PR edits or names are alone over the budget: they always run, on more shards. */
+export const SLICE_HARD_MAX_SHARDS = 8;
 export const SLICE_PLAN_DIR = '.local/e2e-slice';
 /** The update specs need the release-numbered binary, as on shard 1 of the full run. */
 export const RELEASE_BINARY_SPECS = ['tests/e2e/inbox-update-notice.spec.ts', 'tests/e2e/inbox-updates.spec.ts'];
@@ -81,8 +88,8 @@ export interface SliceInput {
   budgetMinutes?: number;
   /** Added and removed lines per changed path, for rules with `lines`. */
   diffLines?: Record<string, string[]>;
-  /** Source of each spec file, for a changed helper under tests/e2e. */
-  specSources?: Record<string, string>;
+  /** Source of each spec and helper under tests/e2e and tests/helpers, for a changed helper. */
+  sources?: Record<string, string>;
   /** Specs another workflow already runs on this PR, left out with this reason. */
   elsewhere?: { specs: string[]; why: string };
   /** Leave out WebKit-only specs (a machine with Chromium only). */
@@ -107,6 +114,8 @@ export interface Slice {
   /** Tokens on the `e2e:` line that name no spec. */
   unknown: string[];
   budgetMinutes: number;
+  /** The edited and named specs alone are over the budget: they all run, on up to SLICE_HARD_MAX_SHARDS shards. */
+  overBudget: boolean;
 }
 
 const glob = (pattern: string, target: string) => new Bun.Glob(pattern).match(target);
@@ -149,6 +158,42 @@ function ruleMatches(rule: SliceRule, file: string, diffLines: Record<string, st
   return (diffLines?.[file] ?? []).some((line) => re.test(line));
 }
 
+const stripExt = (path: string) => path.replace(/\.(?:ts|tsx|js|mjs|cjs|json)$/, '');
+
+/**
+ * The repo files (without extension) one source file refers to: relative
+ * module specifiers (`'./x'`, `'../helpers/x'`) resolved against its folder,
+ * and repo paths written as strings (`join(repo, 'tests/e2e/voice-inbox.ts')`,
+ * the seeds and stand-in Inboxes specs start with `bun <path>`).
+ */
+export function referencesOf(file: string, text: string): Set<string> {
+  const out = new Set<string>();
+  for (const m of text.matchAll(/['"`](\.{1,2}\/[^'"`\s]+)['"`]/g)) out.add(stripExt(posix.normalize(posix.join(posix.dirname(file), m[1]))));
+  for (const m of text.matchAll(/['"`](tests\/[^'"`\s]+)['"`]/g)) out.add(stripExt(posix.normalize(m[1])));
+  return out;
+}
+
+/** The specs that reach `helper` through any chain of references (helper → helper → spec). */
+export function specsReaching(helper: string, sources: Record<string, string>): string[] {
+  const refs = Object.entries(sources).map(([file, text]) => [file, referencesOf(file, text)] as const);
+  const reached = new Set<string>([stripExt(helper)]);
+  const files = new Set<string>();
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [file, set] of refs) {
+      if (files.has(file)) continue;
+      if ([...set].some((r) => reached.has(r))) {
+        files.add(file);
+        reached.add(stripExt(file));
+        grew = true;
+      }
+    }
+  }
+  return [...files].filter((f) => SPEC_RE.test(f)).sort();
+}
+
+const isHelper = (file: string) => (file.startsWith('tests/e2e/') || file.startsWith('tests/helpers/')) && /\.(?:ts|tsx|js|mjs|cjs)$/.test(file);
+
 /** Pick the slice. Pure: every input is passed in. */
 export function selectSlice(input: SliceInput): Slice {
   const rules = input.rules ?? DEFAULT_RULES;
@@ -177,12 +222,12 @@ export function selectSlice(input: SliceInput): Slice {
       continue;
     }
     if (rules.noBrowser.some((n) => n.paths.some((p) => glob(p, file)))) continue;
-    // A helper under tests/e2e: the specs that import it.
-    if (file.startsWith('tests/e2e/') && input.specSources && !rules.rules.some((r) => !r.fallback && ruleMatches(r, file, input.diffLines))) {
-      const stem = basename(file).replace(/\.[^.]+$/, '');
-      const importers = allSpecs.filter((s) => new RegExp(`['"]\\./${stem.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:\\.[a-z]+)?['"]`).test(input.specSources![s] ?? ''));
+    // A helper under tests/e2e or tests/helpers: the specs that reach it, directly or through other helpers.
+    if (isHelper(file) && !rules.rules.some((r) => !r.fallback && ruleMatches(r, file, input.diffLines))) {
+      const importers = specsReaching(file, input.sources ?? {}).filter((s) => specSet.has(s));
       if (importers.length === 0) {
-        unmatched.push(file);
+        // A shared test helper no spec uses (a unit test helper) is not a gap in the rules; a tests/e2e file is.
+        if (file.startsWith('tests/e2e/')) unmatched.push(file);
       } else if (importers.length > rules.helperFanout) {
         addSmoke(Object.keys(rules.smoke), `${file}, imported by ${importers.length} specs`);
       } else {
@@ -212,32 +257,45 @@ export function selectSlice(input: SliceInput): Slice {
   const byTime = (m: Map<string, string>): Chosen[] =>
     [...m].map(([spec, why]) => ({ spec, seconds: weight(spec), why })).sort((a, b) => a.seconds - b.seconds || a.spec.localeCompare(b.spec));
 
-  const ordered: Chosen[] = [];
+  const ordered: (Chosen & { required: boolean })[] = [];
   const seen = new Set<string>();
-  for (const c of [...edited, ...named, ...byTime(close), ...byTime(smoke)]) {
-    if (seen.has(c.spec)) continue;
-    seen.add(c.spec);
-    ordered.push(c);
+  const editedSet = new Set(edited.map((c) => c.spec));
+  for (const [list, required] of [[edited, true], [named, true], [byTime(close), false], [byTime(smoke), false]] as const) {
+    for (const c of list) {
+      if (seen.has(c.spec)) continue;
+      seen.add(c.spec);
+      ordered.push({ ...c, required });
+    }
   }
 
   const dropped: { spec: string; why: string }[] = [];
-  const kept: Chosen[] = [];
+  const kept: typeof ordered = [];
   const quarantine = new Map(rules.quarantine.map((q) => [q.spec, q]));
   const elsewhere = new Set(input.elsewhere?.specs ?? []);
   for (const c of ordered) {
-    const q = quarantine.get(basename(c.spec));
+    // The slice quarantine never drops a spec the PR edits: the PR may be the fix.
+    const q = editedSet.has(c.spec) ? undefined : quarantine.get(basename(c.spec));
     if (q) dropped.push({ spec: c.spec, why: `quarantined for the slice (#${q.issue}): ${q.why}` });
     else if (elsewhere.has(c.spec)) dropped.push({ spec: c.spec, why: input.elsewhere!.why });
     else if (input.skipWebkit && /-webkit\.spec\.ts$/.test(c.spec)) dropped.push({ spec: c.spec, why: 'needs WebKit, and this run has Chromium only' });
     else kept.push(c);
   }
 
+  // The specs the PR edits or names always run. The budget is what is left for the mapped and smoke specs,
+  // taken in order until one does not fit; the rest drop from the end and are listed.
   const chosen: Chosen[] = [];
   let used = 0;
+  for (const c of kept) {
+    if (!c.required) continue;
+    chosen.push({ spec: c.spec, seconds: c.seconds, why: c.why });
+    used += c.seconds;
+  }
+  const overBudget = used > budgetMinutes * 60;
   let over = false;
   for (const c of kept) {
+    if (c.required) continue;
     if (!over && used + c.seconds <= budgetMinutes * 60) {
-      chosen.push(c);
+      chosen.push({ spec: c.spec, seconds: c.seconds, why: c.why });
       used += c.seconds;
     } else {
       over = true;
@@ -245,13 +303,41 @@ export function selectSlice(input: SliceInput): Slice {
     }
   }
 
-  return { chosen, minutes: Math.round((used / 60) * 10) / 10, dropped, unmatched, smokeOnly, unknown, budgetMinutes };
+  return { chosen, minutes: Math.round((used / 60) * 10) / 10, dropped, unmatched, smokeOnly, unknown, budgetMinutes, overBudget };
 }
 
-/** Shards for the slice: enough that each takes about SLICE_SHARD_MINUTES, at most SLICE_MAX_SHARDS, none when empty. */
+/**
+ * Shards for the slice: enough that each takes about SLICE_SHARD_MINUTES, at
+ * most SLICE_MAX_SHARDS, or SLICE_HARD_MAX_SHARDS when the edited and named
+ * specs alone are over the budget; none when empty.
+ */
 export function shardCount(slice: Slice): number {
   if (slice.chosen.length === 0) return 0;
-  return Math.min(SLICE_MAX_SHARDS, Math.max(1, Math.ceil(slice.minutes / SLICE_SHARD_MINUTES)));
+  const cap = slice.overBudget ? SLICE_HARD_MAX_SHARDS : SLICE_MAX_SHARDS;
+  return Math.min(cap, Math.max(1, Math.ceil(slice.minutes / SLICE_SHARD_MINUTES)));
+}
+
+/** Minutes for the build and setup before a shard's specs start: install, both apps, the binary, ripgrep (measured about 3). */
+export const SHARD_SETUP_MINUTES = 5;
+
+/**
+ * The shard job's timeout. The longest shard's measured spec-minutes S (with
+ * shard 1's head start, as scripts/ci-e2e-shard.ts counts it) run, then at
+ * worst once more as the retry of every file (a missing report), with 25%
+ * slack on the measured times: 2.5 × S, plus SHARD_SETUP_MINUTES and 3 for the
+ * update specs' release pass (63 + 9 s, retried). At least 30, at most 180.
+ * A full 10-minute shard: 5 + 3 + 2.5 × 10 = 33 minutes.
+ */
+export function shardTimeout(slice: Slice): number {
+  const count = shardCount(slice);
+  if (count === 0) return 30;
+  const specs = slice.chosen.map((c) => c.spec);
+  const seconds = new Map(slice.chosen.map((c) => [c.spec, c.seconds]));
+  const loads = shards(specs, Object.fromEntries(slice.chosen.map((c) => [basename(c.spec), c.seconds])), count).map(
+    (list, i) => list.reduce((sum, f) => sum + (seconds.get(f) ?? 0), 0) + (i === 0 ? SHARD_1_EXTRA_S : 0),
+  );
+  const longest = Math.max(...loads) / 60;
+  return Math.min(180, Math.max(30, Math.ceil(SHARD_SETUP_MINUTES + 3 + 2.5 * longest)));
 }
 
 /** The slice as text: the chosen specs and the estimate first, then what was dropped and the notices. */
@@ -260,12 +346,17 @@ export function describeSlice(slice: Slice, markdown = false): string {
   const item = (text: string) => (markdown ? `- ${text}` : `  ${text}`);
   const head = (text: string) => (markdown ? `\n**${text}**\n` : `\n${text}`);
   const lines: string[] = [];
-  const shards = shardCount(slice);
+  const count = shardCount(slice);
   lines.push(
     slice.chosen.length
-      ? `e2e slice: ${slice.chosen.length} specs, about ${slice.minutes} spec-minutes on ${shards} shard${shards === 1 ? '' : 's'} (budget ${slice.budgetMinutes}).`
+      ? `e2e slice: ${slice.chosen.length} specs, about ${slice.minutes} spec-minutes on ${count} shard${count === 1 ? '' : 's'} (budget ${slice.budgetMinutes}).`
       : 'e2e slice: no browser spec to run for this change.',
   );
+  if (slice.overBudget) {
+    lines.push(
+      `The specs this change edits or names on its e2e: line are over the ${slice.budgetMinutes}-minute budget on their own. They always run, so this slice uses up to ${SLICE_HARD_MAX_SHARDS} shards and runs no mapped or smoke spec.`,
+    );
+  }
   if (slice.chosen.length) {
     lines.push(head('Chosen'));
     for (const c of slice.chosen) lines.push(item(`${name(c.spec)} (${c.seconds}s): ${c.why}`));
@@ -349,9 +440,14 @@ export function gather(opts: {
   const head = opts.specsFromTree ? null : opts.head;
   const specs = head ? lines(git(['ls-tree', '-r', '--name-only', head, '--', 'tests/e2e'])).filter((f) => SPEC_RE.test(f)) : specFiles();
   const times = head ? (JSON.parse(git(['show', `${head}:tests/e2e/shard-times.json`])) as Record<string, number>) : specTimes();
-  const specSources: Record<string, string> = {};
-  if (changed.some((f) => f.startsWith('tests/e2e/') && !SPEC_RE.test(f))) {
-    for (const s of specs) specSources[s] = head ? git(['show', `${head}:${s}`]) : readFileSync(join(repoRoot, s), 'utf8');
+  // The specs' and helpers' sources, only when a helper changed (they are read to follow its importers).
+  const sources: Record<string, string> = {};
+  if (changed.some((f) => isHelper(f) && !SPEC_RE.test(f))) {
+    const files = head
+      ? lines(git(['ls-tree', '-r', '--name-only', head, '--', 'tests/e2e', 'tests/helpers']))
+      : lines(git(['ls-files', 'tests/e2e', 'tests/helpers'])).filter((f) => existsSync(join(repoRoot, f)));
+    for (const f of files.filter((f) => isHelper(f) && !/\.test\.tsx?$/.test(f))) sources[f] = head ? git(['show', `${head}:${f}`]) : readFileSync(join(repoRoot, f), 'utf8');
+    if (!head) for (const f of changed) if (isHelper(f) && !(f in sources) && existsSync(join(repoRoot, f))) sources[f] = readFileSync(join(repoRoot, f), 'utf8');
   }
   return {
     base: mergeBase,
@@ -363,7 +459,7 @@ export function gather(opts: {
       times,
       budgetMinutes: opts.budgetMinutes,
       diffLines: diffLinesOf(mergeBase, opts.head, changed, DEFAULT_RULES),
-      specSources,
+      sources,
       skipWebkit: opts.skipWebkit,
       elsewhere: opts.elsewhere,
     },
@@ -373,11 +469,11 @@ export function gather(opts: {
 /** The reason the CI slice leaves out SMOKE_SPECS. */
 export const SMOKE_ELSEWHERE = { specs: SMOKE_SPECS, why: 'Browser smoke (browser-smoke.yml) runs it on every PR' };
 
-/** The plan job's outputs: the shard count, the matrix, and whether a shard needs the release-numbered binary. */
+/** The plan job's outputs: the shard count, the matrix, whether a shard needs the release-numbered binary, and the shard timeout. */
 export function planOutputs(slice: Slice): string {
   const count = shardCount(slice);
   const release = slice.chosen.some((c) => RELEASE_BINARY_SPECS.includes(c.spec));
-  return `count=${count}\nmatrix=${JSON.stringify(Array.from({ length: count }, (_, i) => i + 1))}\nrelease=${release}\n`;
+  return `count=${count}\nmatrix=${JSON.stringify(Array.from({ length: count }, (_, i) => i + 1))}\nrelease=${release}\ntimeout=${shardTimeout(slice)}\n`;
 }
 
 /** The plan job: select, write the plan for the shards (the shape scripts/ci-e2e-shard.ts reads), the summary and the outputs. */
