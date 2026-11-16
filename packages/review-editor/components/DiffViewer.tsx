@@ -412,7 +412,7 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   markdownPreviewSupported = true,
   markdownViewDisabledReason = null,
 }) => {
-  const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout });
+  const pierreTheme = usePierreTheme({ fontFamily, fontSize, compactTouchLayout, flushCodeTop: true });
   // Worker-pool highlighting: keep the pool's theme pair in step with the UI
   // theme. (No mount gating here — the single-file panel renders one diff;
   // a main-thread fallback frame at startup is invisible.)

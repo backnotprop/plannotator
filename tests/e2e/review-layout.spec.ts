@@ -183,6 +183,7 @@ test('tabs live in the panes: the header never changes, and one tab row from the
     expect(await paneTop(page)).toBe(top);
     expect(await tabRow.boundingBox()).toEqual(rowBox);
     await expect.poll(() => fileHeaderTop(page)).toBe(below);
+    await expect.poll(() => firstCodeTop(page)).toBe(below + 32);
 
     await page.locator('[data-pane-tab][aria-selected="true"]').focus();
     await page.keyboard.press('ArrowLeft');
