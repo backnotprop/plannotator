@@ -20,15 +20,12 @@
  * keep their meaning and the host's own `onKeyDown` gets everything else.
  * With no skills installed (or the route missing) `/` and `$` are plain text.
  *
- * Where the picker opens: never inside the field's own boxes (FloatingSkillMenu
- * portals it out, so no scrolling foot or stacking context can cut or cover
- * it). By default it hangs off the field's own box (the reply box, two lines
- * tall, so that is at the caret), inside the room the person really sees (the
- * visual viewport, under the thread's header). A tall field in a modal dialog
- * (compose) passes `caretMenu`: the picker then opens at the caret's line,
- * kept inside the box `caretMenu.bounds` names (compose: the viewport on a
- * desktop, so it floats over the footer; the sheet above its footer on a
- * phone).
+ * Where a picker (`/`, `#` or `@`) opens: never inside the field's own boxes (FloatingSkillMenu portals it out, so no
+ * scrolling foot or stacking context can cut or cover it; #3427). By default it hangs off the field's own box (the
+ * reply box, two lines tall, so that is at the caret), inside the room the person really sees (the visual viewport,
+ * under the thread's header). A tall field in a modal dialog (compose) passes `caretMenu`: the picker then opens at
+ * the caret's line, kept inside the box `caretMenu.bounds` names (compose: the viewport on a desktop, so it floats
+ * over the footer; the sheet above its footer on a phone).
  */
 import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -235,6 +232,8 @@ export function InboxComposerField({
   // `aria-expanded` follow what the person sees, so arrows never move through a list nobody can see.
   const [skillShown, setSkillShown] = useState(false);
   const skillMenuShown = skills.menu !== null && skillShown;
+  const [tagShown, setTagShown] = useState(false);
+  const tagMenuShown = tagMenu !== null && tagShown;
   const textarea = innerRef.current;
   const wrap = wrapRef.current;
   const host = textarea ? skillMenuHost(textarea) : null;
@@ -281,7 +280,11 @@ export function InboxComposerField({
           )}
         </FloatingSkillMenu>
       ) : null}
-      {tagMenu && options && <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} />}
+      {tagMenu && options && textarea && wrap && host ? (
+        <FloatingSkillMenu textarea={textarea} wrap={wrap} host={host} caret={caretMenu ?? null} onShown={setTagShown}>
+          {(boundary) => <TagPicker id={tagListboxId} menu={tagMenu} options={options} onSelect={select} field={textarea} boundary={boundary} />}
+        </FloatingSkillMenu>
+      ) : null}
       <ComposerTokenTextarea
         textareaRef={attach}
         value={value}
@@ -292,12 +295,12 @@ export function InboxComposerField({
           hash.onSelect();
         }}
         onKeyDown={(event) => {
-          if (tagMenu && (event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
+          if (tagMenu && tagShown && (event.key === 'Enter' || event.key === 'Tab') && !event.metaKey && !event.ctrlKey && !event.altKey && tagMenu.activeIndex !== null) {
             event.preventDefault();
             select(tagMenu.activeIndex);
             return;
           }
-          if (mention.onKeyDown(event)) return;
+          if (tagMenuShown && mention.onKeyDown(event)) return;
           if (hashMenuShown && hash.onKeyDown(event)) return;
           if (skillMenuShown && skills.onKeyDown(event)) return;
           onKeyDown?.(event);
@@ -317,7 +320,7 @@ export function InboxComposerField({
         tokens={hash.tokens.length > 0 ? [...skills.referenceTokens, ...hash.tokens].sort((a, b) => a.start - b.start) : skills.referenceTokens}
         mentionChips={source ? { people: mention.mentions, tokenClassName: TAG_TOKEN_CLASS } : null}
         listboxId={listboxId}
-        listboxOpen={skillMenuShown || hashMenuShown || tagMenu !== null}
+        listboxOpen={skillMenuShown || hashMenuShown || tagMenuShown}
         activeOptionId={activeOption}
         inputProps={{ 'aria-label': ariaLabel, 'aria-describedby': describedBy, rows: 2 }}
       />
@@ -342,7 +345,7 @@ export function InboxComposerField({
  * under the thread's header, so a list drawn there was cut at the foot's top
  * edge (only the last row's bottom showed) and hidden behind the header.
  */
-function skillMenuHost(field: HTMLElement): HTMLElement {
+export function skillMenuHost(field: HTMLElement): HTMLElement {
   return field.closest<HTMLElement>('dialog[open]') ?? field.closest<HTMLElement>('.pn-inbox') ?? field.ownerDocument.body;
 }
 
