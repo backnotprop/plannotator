@@ -63,6 +63,16 @@ describe("start: an agent that hangs in initialize can be stopped", () => {
     return !alive(pid);
   }
 
+  it("does not attempt to launch an already cancelled adapter", async () => {
+    const started = AcpClient.start(
+      { command: join(dir, "missing-adapter"), args: [], cwd: dir },
+      handlers,
+      info,
+      { signal: AbortSignal.abort("kill"), augmentPath: false },
+    );
+    await expect(started).rejects.toBeInstanceOf(AcpStartAbortedError);
+  });
+
   it("a time limit rejects the start and stops its process group (SIGTERM, then SIGKILL)", async () => {
     const out = join(dir, "pid-timeout");
     const started = AcpClient.start({ command: process.execPath, args: ["-e", HANG], env: { PID_OUT: out } }, handlers, info, { initializeTimeoutMs: 500, augmentPath: false });

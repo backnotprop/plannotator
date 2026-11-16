@@ -339,6 +339,9 @@ export class AcpClient {
 
   /** Start the agent process and run `initialize`. */
   static async start(launch: AgentLaunch, handlers: AcpClientHandlers, clientInfo: AcpClientInfo, options: AcpStartOptions = {}): Promise<AcpClient> {
+    const { signal, initializeTimeoutMs } = options;
+    const stopped = () => new AcpStartAbortedError(`${launch.command} was stopped while it started.`);
+    if (signal?.aborted) throw stopped();
     const plan = planSpawn(launch.command, launch.args);
     const base = options.env ?? process.env;
     const child = spawn(plan.command, plan.args, {
@@ -357,11 +360,10 @@ export class AcpClient {
     const client = new AcpClient(child, handlers, launch.startHint);
     // An agent that hangs in `initialize` (a self-update, a sign-in waiting on a prompt) can still be stopped:
     // by a time limit, or by the caller's signal.
-    const { signal, initializeTimeoutMs } = options;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let onAbort: (() => void) | null = null;
     const gaveUp = new Promise<never>((_, reject) => {
-      onAbort = () => reject(new AcpStartAbortedError(`${launch.command} was stopped while it started.`));
+      onAbort = () => reject(stopped());
       if (signal?.aborted) onAbort();
       else signal?.addEventListener("abort", onAbort, { once: true });
       if (initializeTimeoutMs !== undefined) {
