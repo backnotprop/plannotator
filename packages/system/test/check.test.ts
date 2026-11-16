@@ -105,6 +105,18 @@ describe('check', () => {
     expect((await check({ dir, root, at: sha })).missing).toEqual(['src/main.ts']);
   });
 
+  test('an unrelated Git path with non-UTF-8 bytes does not hide valid citations', async () => {
+    const { root, dir } = smallRepo();
+    const blob = git(root, 'rev-parse', 'HEAD:src/main.ts').trim();
+    // Write a Git pathname directly to the index, even on filesystems that
+    // cannot represent these bytes in a working-tree filename.
+    const record = Buffer.concat([Buffer.from(`100644 ${blob}\tdocs/`), Buffer.from([0xff, 0])]);
+    const index = Bun.spawnSync(['git', 'update-index', '-z', '--index-info'], { cwd: root, stdin: record, env: { ...process.env } });
+    expect(index.exitCode).toBe(0);
+    git(root, 'commit', '-qm', 'add an unrelated non-UTF-8 Git path');
+    expect(await check({ dir, root, at: 'HEAD' })).toEqual({ errors: [], warnings: [], missing: [] });
+  });
+
   test('outside git, the disk is read, with the same case and symlink rules', async () => {
     const root = temp();
     const dir = join(root, '.plannotator', 'system');

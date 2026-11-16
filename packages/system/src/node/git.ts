@@ -66,9 +66,14 @@ export type TreeEntry = { mode: string; type: string; size: number | null };
 export async function lsTree(root: string, commit: string, prefix?: string): Promise<Map<string, TreeEntry>> {
   const args = ['ls-tree', '-r', '-t', '-l', '-z', '--full-tree', commit];
   if (prefix) args.push('--', prefix);
-  const out = await git(root, args);
+  const out = await gitBytes(root, args);
   const tree = new Map<string, TreeEntry>();
-  for (const line of out.split('\0')) {
+  let start = 0;
+  for (let end = out.indexOf(0); end !== -1; end = out.indexOf(0, start)) {
+    const line = decodeUtf8(out.subarray(start, end));
+    start = end + 1;
+    // Git paths can contain arbitrary bytes. A drawing can cite only UTF-8
+    // paths, so an unrelated, unrepresentable path cannot invalidate its tree.
     if (!line) continue;
     // <mode> SP <type> SP <object> SP+ <size> TAB <path>
     const tab = line.indexOf('\t');
