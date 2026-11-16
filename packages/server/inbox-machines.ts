@@ -356,17 +356,20 @@ const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 const FOLDERS_ROUTES = new Set(["launch/folders", "launch/clone", "launch/clone-check"]);
 /** A file a message names, read on another machine (approval "inbox-file-refs-open-viewer"): its view, its bytes. */
 const FILE_READ_ROUTE = /^open-in\//;
+/** The reads of a far file only this Inbox's window makes: a file a message names, a Markdown file's pictures, a document next to a file. */
+const WINDOW_FILE_READ = /^(?:open-in\/|attachments\/[^/]+\/(?:markdown-image|linked-page)$)/;
 /** A forwarded file read that is not a press in this Inbox's window. */
 export const INBOX_MACHINE_FILE_WINDOW_ONLY_BODY = { error: "A file on another machine opens from the Inbox window only.", code: "window_only" } as const;
 
 /**
- * Whether a forwarded read of a file on another machine is refused. That machine hands the read to its own route as
- * its owner's, so only this Inbox's window asks: a browser's own request (`Sec-Fetch-Site: same-origin`, and an
+ * Whether a forwarded read of a file on another machine is refused (`open-in/file/*`; a Markdown file's pictures and
+ * a document next to an attached file, `attachments/<id>/markdown-image|linked-page`). That machine hands the read to
+ * its own route as its owner's, so only this Inbox's window asks (an `<img>` and a `fetch` from it alike): a browser's own request (`Sec-Fetch-Site: same-origin`, and an
  * Origin, when sent, of this host). An agent's or a script's bare call sends neither, so it cannot read the other
  * machine's files through this one (the remote launch rule; a tightening, not a secret).
  */
 export function forwardedFileReadRefusal(route: string, req: Request): { status: 403; body: Record<string, string> } | null {
-  if (!FILE_READ_ROUTE.test(route)) return null;
+  if (!WINDOW_FILE_READ.test(route)) return null;
   const site = req.headers.get("sec-fetch-site")?.trim().toLowerCase();
   const origin = req.headers.get("origin");
   let originHost: string | null = null;

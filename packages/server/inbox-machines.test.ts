@@ -399,7 +399,7 @@ describe("linked machines, on three real Inboxes", () => {
       const farShot = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`, { headers: { "Sec-Fetch-Site": "same-origin" } });
       const localShot = await fetch(`${base(B)}/api/inbox/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`);
       expect([farShot.status, localShot.status]).toEqual([200, 200]);
-      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cross-origin-resource-policy", "etag"]) {
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cross-origin-resource-policy", "etag", "cache-control"]) {
         expect([name, farShot.headers.get(name)]).toEqual([name, localShot.headers.get(name)]);
       }
       expect(Buffer.from(await farShot.arrayBuffer()).equals(png)).toBe(true);
@@ -410,12 +410,16 @@ describe("linked machines, on three real Inboxes", () => {
         expect([path, refused.status >= 400]).toEqual([path, true]);
         await refused.arrayBuffer();
       }
-      const linkedMd = await getJson(A, `/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
+      // The window's own read (same-origin); a bare call through the forward is refused, as for a file a message names.
+      const windowRead = async (path: string) => (await (await fetch(`${base(A)}${path}`, { headers: { "Sec-Fetch-Site": "same-origin" } })).json()) as Json;
+      const bare = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
+      expect([bare.status, ((await bare.json()) as Json).code]).toEqual([403, "window_only"]);
+      const linkedMd = await windowRead(`/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
       expect([linkedMd.name, linkedMd.html, linkedMd.url]).toEqual(["notes.md", null, null]);
       expect(linkedMd.text).toContain("Next to the plan.");
       // An HTML page's sibling page, in the viewer: its folder named through the forward, its new tab too.
       writeFileSync(join(site, "faq.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>FAQ</h1></body></html>');
-      const linkedHtml = await getJson(A, `/api/inbox/m/${B.id}/attachments/${htmlFile.id}/linked-page?path=faq.html`);
+      const linkedHtml = await windowRead(`/api/inbox/m/${B.id}/attachments/${htmlFile.id}/linked-page?path=faq.html`);
       expect(linkedHtml.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
       expect(linkedHtml.url).toMatch(new RegExp(`^/api/inbox/m/${B.id}/html-assets/[A-Za-z0-9_-]+/faq\\.html$`));
       const faqTab = await fetch(`${base(A)}${linkedHtml.url}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" } });

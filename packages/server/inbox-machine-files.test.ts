@@ -28,6 +28,8 @@ const HOSTILE = {
   "X-Content-Type-Options": "sniff",
   "Access-Control-Allow-Origin": "*",
   "Cross-Origin-Resource-Policy": "cross-origin",
+  "Cache-Control": "public, max-age=31536000, immutable",
+  "Content-Disposition": 'attachment; filename="setup.exe"',
 };
 
 let root: string;
@@ -80,7 +82,9 @@ function farDoor() {
       asked.push(`${route}${url.search}`);
       const path = url.searchParams.get("path");
       if (route === `attachments/${MD}/markdown-image`) {
-        if (req.headers.get("if-none-match") === '"png"') return new Response(null, { status: 304, headers: { ETag: '"png"' } });
+        if (req.headers.get("if-none-match") === '"png"') return new Response(null, { status: 304, headers: { ...HOSTILE, ETag: '"png"' } });
+        // A picture a linked Markdown file next to the attached one shows (`?document=`).
+        if (path === "deep.png" && url.searchParams.get("document") === "notes.md") return new Response(PNG, { headers: { "Content-Type": "image/png" } });
         if (path === "shot.png") return new Response(PNG, { headers: { ...HOSTILE, "Content-Type": "image/png", ETag: '"png"' } });
         if (path === "page.png") return new Response("<script>top.x()</script>", { headers: { ...HOSTILE, "Content-Type": "text/html" } });
         if (path === "huge.png") return new Response(streamed(MACHINE_IMAGE_MAX_BYTES + 10), { headers: { "Content-Type": "image/png" } });
@@ -89,10 +93,14 @@ function farDoor() {
       if (route === `attachments/${MD}/linked-page`) {
         if (path === "notes.md") return Response.json({ serverSession: "far", path: "/work/docs/notes.md", name: "notes.md", html: null, text: "# Notes", url: "https://evil.example/" });
         if (path === "odd.md") return Response.json({ serverSession: "far", path: 42, name: "odd.md", html: null });
+        // JSON words under an HTML type, and fields past what any real answer carries.
+        if (path === "typed.md") return new Response(JSON.stringify({ serverSession: "far", path: "/work/docs/typed.md", name: "typed.md", html: null, text: "<script>x()</script>", url: null }), { headers: { "Content-Type": "text/html; x=json" } });
+        if (path === "named.md") return Response.json({ serverSession: "far", path: "/work/docs/named.md", name: "n".repeat(5000), html: null, text: "x", url: null });
+        if (path === "long.md") return Response.json({ serverSession: "far", path: "/work/docs/long.md", name: "long.md", html: null, text: "x".repeat(3 * 1024 * 1024), url: null });
         return Response.json({ error: "notes2.md is not in this file's folder.", code: "linked_page_refused" }, { status: 403 });
       }
       if (route === `attachments/${PAGE}/linked-page`) {
-        const url = { "faq.html": `/api/html-assets/${FOLDER}/faq.html`, "evil.html": "https://evil.example/x", "up.html": `/api/html-assets/${FOLDER}/../threads`, "enc.html": `/api/html-assets/${FOLDER}/%2e%2e/threads`, "far.html": "/api/inbox/threads" }[path ?? ""];
+        const url = { "faq.html": `/api/html-assets/${FOLDER}/faq.html`, "evil.html": "https://evil.example/x", "up.html": `/api/html-assets/${FOLDER}/../threads`, "enc.html": `/api/html-assets/${FOLDER}/%2e%2e/threads`, "far.html": "/api/inbox/threads", "js.html": "javascript:alert(1)", "proto.html": `//evil.example/api/html-assets/${FOLDER}/x.html`, "abs.html": `https://evil.example/api/html-assets/${FOLDER}/x.html` }[path ?? ""];
         if (path === "big.html") return new Response(streamed(64 * 1024 * 1024), { headers: { "Content-Type": "application/json" } });
         return Response.json(
           { serverSession: "far", path: `/work/site/${path}`, name: path, html: `<base href="/api/html-assets/${FOLDER}/"><img src="/api/html-assets/${FOLDER}/a.png"><a href="https://example.com/api/html-assets/x">x</a>`, url, extra: "dropped" },
@@ -168,10 +176,22 @@ describe("a far Markdown file's pictures", () => {
       "same-origin",
       null,
     ]);
-    // The query rides to the far route as the window wrote it; a revalidation passes as a 304.
+    // A local picture's cache rule and no far disposition, whatever the far one said; its ETag kept.
+    expect([shot.headers.get("cache-control"), shot.headers.get("content-disposition"), shot.headers.get("etag")]).toEqual(["private, no-cache", null, '"png"']);
+    // The query rides to the far route as the window wrote it; a revalidation passes as a 304, with the same rules.
     expect(asked).toEqual([`attachments/${MD}/markdown-image?path=shot.png&version=current`]);
     const again = await get(image("shot.png"), { ...WINDOW, "If-None-Match": '"png"' });
-    expect(again.status).toBe(304);
+    expect([again.status, again.headers.get("cache-control"), again.headers.get("content-disposition"), again.headers.get("content-security-policy"), again.headers.get("etag")]).toEqual([
+      304,
+      "private, no-cache",
+      null,
+      INBOX_MESSAGE_IMAGE_CSP,
+      '"png"',
+    ]);
+    // A picture a linked Markdown file shows: `?document=` rides through to the far route.
+    const deep = await get(`${image("deep.png")}&document=notes.md`);
+    expect([deep.status, Buffer.from(await deep.arrayBuffer()).equals(PNG)]).toEqual([200, true]);
+    expect(asked.at(-1)).toBe(`attachments/${MD}/markdown-image?path=deep.png&version=current&document=notes.md`);
     // HEAD, as locally: the headers alone.
     const head = await get(image("shot.png"), WINDOW, "HEAD");
     expect([head.status, head.headers.get("content-security-policy"), await head.text()]).toEqual([200, INBOX_MESSAGE_IMAGE_CSP, ""]);
@@ -193,7 +213,7 @@ describe("a far Markdown file's pictures", () => {
     expect([declared.status, ((await declared.json()) as { code: string }).code]).toEqual([413, "image_too_large"]);
     const huge = await get(image("huge.png"));
     expect(huge.status).toBe(200);
-    expect(huge.arrayBuffer()).rejects.toThrow();
+    await expect(huge.arrayBuffer()).rejects.toThrow();
   });
 });
 
@@ -209,11 +229,29 @@ describe("a document next to a far attached file", () => {
     expect(odd.status).toBe(502);
   });
 
+  test("rebuilt under this Inbox's own JSON headers; a 200 that is not JSON, or a field past any real answer's, is refused", async () => {
+    const { get } = await linkedInbox();
+    const notes = await get(`/api/inbox/m/${FAR}/attachments/${MD}/linked-page?path=notes.md`);
+    expect([notes.headers.get("content-type"), notes.headers.get("x-content-type-options"), notes.headers.get("cache-control"), notes.headers.get("content-security-policy")]).toEqual([
+      "application/json; charset=utf-8",
+      "nosniff",
+      "no-store",
+      "sandbox",
+    ]);
+    const typed = await get(`/api/inbox/m/${FAR}/attachments/${MD}/linked-page?path=typed.md`);
+    expect([typed.status, typed.headers.get("content-type")?.startsWith("application/json"), ((await typed.json()) as { code: string }).code]).toEqual([502, true, "machine_answer_unreadable"]);
+    const named = await get(`/api/inbox/m/${FAR}/attachments/${MD}/linked-page?path=named.md`);
+    expect(named.status).toBe(502);
+    const long = await get(`/api/inbox/m/${FAR}/attachments/${MD}/linked-page?path=long.md`);
+    expect([long.status, ((await long.json()) as { code: string }).code]).toEqual([413, "machine_page_too_large"]);
+  });
+
   test("an HTML sibling: its folder and its new tab through the forward, which opens it under a local page's CSP", async () => {
     const { get } = await linkedInbox();
     const faq = await get(`/api/inbox/m/${FAR}/attachments/${PAGE}/linked-page?path=faq.html`);
     expect([faq.status, faq.headers.get("access-control-allow-origin"), faq.headers.get("x-content-type-options")]).toEqual([200, null, "nosniff"]);
-    expect(faq.headers.get("content-security-policy")).toBe("sandbox allow-scripts");
+    // This Inbox's own headers on the rebuilt answer, never the far one's (which sent an escaping sandbox).
+    expect([faq.headers.get("content-security-policy"), faq.headers.get("content-type")]).toEqual(["sandbox", "application/json; charset=utf-8"]);
     const body = (await faq.json()) as Record<string, unknown>;
     expect(body.html).toBe(`<base href="/api/inbox/m/${FAR}/html-assets/${FOLDER}/"><img src="/api/inbox/m/${FAR}/html-assets/${FOLDER}/a.png"><a href="https://example.com/api/html-assets/x">x</a>`);
     expect(body.url).toBe(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/faq.html`);
@@ -224,7 +262,7 @@ describe("a document next to a far attached file", () => {
 
   test("a far new-tab URL that is not its own folder's is dropped", async () => {
     const { get } = await linkedInbox();
-    for (const path of ["evil.html", "up.html", "enc.html", "far.html"]) {
+    for (const path of ["evil.html", "up.html", "enc.html", "far.html", "js.html", "proto.html", "abs.html"]) {
       const answer = await get(`/api/inbox/m/${FAR}/attachments/${PAGE}/linked-page?path=${path}`);
       expect([path, ((await answer.json()) as { url: unknown }).url]).toEqual([path, null]);
     }
@@ -238,6 +276,23 @@ describe("a document next to a far attached file", () => {
 });
 
 describe("what stays closed", () => {
+  test("only this Inbox's window reads them: a bare call (an agent, a script) or another origin is refused, never asked of the far machine", async () => {
+    const { get } = await linkedInbox();
+    for (const path of [image("shot.png"), `/api/inbox/m/${FAR}/attachments/${MD}/linked-page?path=notes.md`]) {
+      for (const headers of [{}, { "Sec-Fetch-Site": "none" }, { "Sec-Fetch-Site": "same-origin", Origin: "http://evil.test" }] as Record<string, string>[]) {
+        const refused = await get(path, headers);
+        expect([path, headers, refused.status, ((await refused.json()) as { code: string }).code]).toEqual([path, headers, 403, "window_only"]);
+      }
+      // The window's own: an `<img>` sends no Origin, a fetch may send its own.
+      for (const headers of [WINDOW, { ...WINDOW, Origin: "http://127.0.0.1:1" }]) {
+        const read = await get(path, headers);
+        expect([path, headers, read.status]).toEqual([path, headers, 200]);
+        await read.arrayBuffer();
+      }
+    }
+    expect(asked.length).toBe(4);
+  });
+
   test("another site, an encoded or stepped route: refused here, never asked of the far machine", async () => {
     const { get } = await linkedInbox();
     const crossSite = { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" };

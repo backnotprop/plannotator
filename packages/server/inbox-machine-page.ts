@@ -108,7 +108,7 @@ export async function readCappedBytes(answer: Response, max: number): Promise<Ui
 }
 
 /** A rebased body's headers: its length, range and ranges are B's no longer. */
-export function rebasedHeaders(headers: Headers): Headers {
+function rebasedHeaders(headers: Headers): Headers {
   const out = new Headers(headers);
   for (const name of ["content-length", "content-range", "accept-ranges"]) out.delete(name);
   return out;
