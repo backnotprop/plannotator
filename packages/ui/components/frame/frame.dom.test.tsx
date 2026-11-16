@@ -427,7 +427,7 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     const frame = mount(<ReadingLine shownNumber={6} currentNumber={6} versionsOpen={false} onToggleVersions={() => {}} />);
     const toggle = frame.querySelector('[data-reading-versions]')!;
     expect(toggle.textContent).toBe('v6 · newest');
-    expect(toggle.getAttribute('aria-label')).toBe('v6 · newest, version 6, the newest');
+    expect(toggle.getAttribute('aria-label')).toBe('v6 · newest, version 6, the newest. Versions');
     expect(toggle.getAttribute('aria-label')!.startsWith(toggle.textContent!)).toBe(true);
   });
 
@@ -444,10 +444,29 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
       />,
     );
     const toggle = frame.querySelector('[data-reading-versions]')!;
-    expect(toggle.getAttribute('aria-label')).toBe('v1 of 6, version 1 of 6, an older version');
+    expect(toggle.getAttribute('aria-label')).toBe('v1 of 6, version 1 of 6, an older version. Versions');
     expect(toggle.getAttribute('aria-label')!.startsWith(toggle.textContent!)).toBe(true);
     expect(toggle.parentElement!.textContent).toBe('v1 of 6·You are looking at an older version.');
     expect(frame.textContent).not.toContain('Reading');
+  });
+
+  test('an older version with no number says it is older once, and its toggle reads "Versions"', () => {
+    const { ReadingLine } = readingModule!;
+    const frame = mount(
+      <ReadingLine
+        shownNumber={null}
+        currentNumber={6}
+        versionsOpen={false}
+        onToggleVersions={() => {}}
+        older={{ back: <a href="#v6" />, restore: null }}
+        versionAt="start"
+      />,
+    );
+    const toggle = frame.querySelector('[data-reading-versions]')!;
+    expect(toggle.textContent).toBe('Versions');
+    expect(toggle.getAttribute('aria-label')).toBe('Versions');
+    expect(toggle.parentElement!.textContent).toBe('Versions·You are looking at an older version.');
+    expect(frame.textContent!.match(/older version/g)!.length).toBe(1);
   });
 
   test('comparing words and a count replace and join the version words on the toggle', () => {
@@ -458,7 +477,7 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     const toggle = frame.querySelector('[data-reading-versions]')!;
     expect(toggle.querySelector('[data-reading-comparing]')!.textContent).toBe('Comparing v2 with v6');
     expect(toggle.querySelector('[data-reading-versions-count]')!.textContent).toBe('6');
-    expect(toggle.getAttribute('aria-label')).toBe('Comparing v2 with v6. 6 versions');
+    expect(toggle.getAttribute('aria-label')).toBe('Comparing v2 with v6. 6 versions. Versions');
   });
 
   test('start placement: the version first, the approval after it', () => {

@@ -21,7 +21,7 @@ function readingWords(
       : { tag: `v${shownNumber}`, rest: " · newest", spoken: `Version ${shownNumber}, the newest` };
   }
   if (shownNumber === null) {
-    return { tag: null, rest: "An older version", spoken: "An older version" };
+    return { tag: null, rest: "Versions", spoken: "Versions" };
   }
   if (currentNumber === null) {
     return { tag: `v${shownNumber}`, rest: "", spoken: `Version ${shownNumber}, an older version` };
@@ -96,9 +96,11 @@ export function ReadingLine({
     shown === "" || shown === words.spoken
       ? words.spoken
       : `${shown}, ${words.spoken.charAt(0).toLowerCase()}${words.spoken.slice(1)}`;
+  const main = comparing ?? named;
   const spoken = [
-    comparing === null ? named : typeof comparing === "string" ? comparing : "Versions",
+    main,
     count === null ? null : `${count} ${count === 1 ? "version" : "versions"}`,
+    main === "Versions" ? null : "Versions",
   ]
     .filter((part): part is string => part !== null)
     .join(". ");
