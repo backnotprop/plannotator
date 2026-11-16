@@ -19,7 +19,7 @@
 
 import { randomBytes } from "node:crypto";
 import { chmodSync, closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, readlinkSync, readSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 /** Files larger than this are never edited. */
 export const AGENT_FILE_MAX_BYTES = 1024 * 1024;
@@ -37,20 +37,25 @@ export type AgentFileRead =
 
 /** Where `path` leads: its target when it is a symlink (followed as far as it exists), else itself. */
 export function resolveAgentFileTarget(path: string): string {
-  try {
-    return realpathSync(path);
-  } catch {
-    // A dangling link names a target that does not exist yet: write there.
+  let target = path;
+  const seen = new Set<string>();
+  while (!seen.has(target)) {
+    seen.add(target);
     try {
-      if (lstatSync(path).isSymbolicLink()) {
-        const link = readlinkSync(path);
-        return isAbsolute(link) ? link : resolve(dirname(path), link);
-      }
+      return realpathSync(target);
     } catch {
-      // Missing: the path itself.
+      // Follow dangling links to the missing file without replacing any link.
+      try {
+        if (!lstatSync(target).isSymbolicLink()) return target;
+        const link = readlinkSync(target);
+        target = resolve(dirname(target), link);
+      } catch {
+        return target;
+      }
     }
-    return path;
   }
+  // Let the caller's stat report a loop as an error.
+  return path;
 }
 
 /** Read an agent's file under the rules above. */
