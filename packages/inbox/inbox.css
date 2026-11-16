@@ -12370,3 +12370,52 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 @media (pointer: coarse) {
   .pn-cbox .ib-vmic { width: 44px; height: 44px; border-radius: 10px; }
 }
+
+/* Dragging threads (approval "inbox-drag-threads"; threadDrag.ts, replyMentions.tsx). Fills and tints only: never an
+   outline on a row. The ghost is a pill of the thread under the pointer; the row it came from keeps its fill, its words
+   faded. Reduced motion: no lift, no fly-back, no flash, no blinking caret. */
+:root[data-thread-drag] .pn-inbox, :root[data-thread-drag] .pn-inbox * { cursor: grabbing !important; }
+.ib-tdrag { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; display: flex; align-items: center; gap: 8px; max-width: 280px; height: 34px; padding: 0 12px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-13, 13px); font-weight: 550; white-space: nowrap; transform-origin: 16px 17px; }
+.ib-tdrag-t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-tdrag-n { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-11-5, 11.5px); display: grid; place-items: center; }
+.ib-tdrag-w { flex: none; font-weight: 500; color: var(--primary); font-size: var(--ib-fs-12, 12px); }
+.ib-tdrag-w::before { content: "·"; margin-right: 8px; color: var(--muted-foreground); }
+.ib-tdrag-w:empty { display: none; }
+.ib-tdrag[data-refused] { color: var(--muted-foreground); }
+.ib-tdrag-stack { box-shadow: var(--ib-float-shadow), 4px 4px 0 -1px var(--popover), 4px 4px 0 0 color-mix(in oklch, var(--foreground) 8%, transparent), 8px 8px 0 -1px var(--popover), 8px 8px 0 0 color-mix(in oklch, var(--foreground) 6%, transparent); }
+@media (prefers-reduced-motion: no-preference) {
+  .ib-tdrag-lift { animation: ib-tdrag-lift 160ms cubic-bezier(0.23, 1, 0.32, 1); }
+  .ib-tdrag-back { transition: transform 200ms cubic-bezier(0.23, 1, 0.32, 1), opacity 200ms ease-out; opacity: 0; }
+  @keyframes ib-tdrag-lift { from { scale: 0.96; opacity: 0.6; } }
+}
+.ib-lbody [data-thread-lifted] > * { opacity: 0.4; }
+.ib-lbody [data-thread-lifted] { background: color-mix(in oklch, var(--foreground) 7%, transparent); }
+/* The reply box while a thread is carried: a faint tint laid over the box's own colour (light or dark); over it, a
+   stronger tint and the label above it. Fills only: the box's edge never changes (no dashed edge, no ring). Your own thread: no tint, the label says so. */
+.pn-inbox .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="target"], .pn-inbox .ib-fcomp[data-thread-drop="target"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 9%, transparent), color-mix(in oklch, var(--primary) 9%, transparent)); }
+.pn-inbox .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-pfoot .ib-rbox[data-thread-drop="over"], .pn-inbox .ib-fcomp[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 18%, transparent), color-mix(in oklch, var(--primary) 18%, transparent)); }
+:root:not(.light) .pn-inbox :is(.ib-rbox, .ib-fcomp)[data-thread-drop="target"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 14%, transparent), color-mix(in oklch, var(--primary) 14%, transparent)); }
+:root:not(.light) .pn-inbox :is(.ib-rbox, .ib-fcomp)[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 26%, transparent), color-mix(in oklch, var(--primary) 26%, transparent)); }
+.ib-tdrop { position: absolute; left: 0; right: 0; bottom: 100%; margin-bottom: 8px; z-index: 6; display: none; justify-content: center; pointer-events: none; }
+.ib-tdrop > span { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); color: var(--primary); font-weight: 600; font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+[data-thread-drop="over"] > .ib-tdrop, [data-thread-drop="refuse"] > .ib-tdrop { display: flex; }
+.ib-tdrop[data-thread-drop-label="refuse"] > span { color: var(--muted-foreground); }
+.ib-tcaret { position: absolute; z-index: 2; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--primary); pointer-events: none; }
+@media (prefers-reduced-motion: no-preference) { .ib-tcaret { animation: ib-tcaret 900ms steps(2) infinite; } @keyframes ib-tcaret { 50% { opacity: 0; } } }
+/* A mention in the words: the `@` tag's paint (a tint, paint only, so the caret never drifts; no ring); an archived
+   thread in grey. */
+.pn-inbox [data-skill-ref-token^="ib-mention:"] { color: var(--primary); background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 3px; }
+.pn-inbox [data-skill-ref-token^="ib-mention-archived:"] { color: var(--muted-foreground); background: color-mix(in oklch, var(--foreground) 8%, transparent); border-radius: 3px; }
+@media (prefers-reduced-motion: no-preference) {
+  .pn-inbox [data-skill-ref-token^="ib-mention"][data-flash] { animation: ib-tflash 700ms ease-out; }
+  @keyframes ib-tflash { 0% { background: color-mix(in oklch, var(--primary) 45%, transparent); } }
+}
+/* The line under the field when the reply's agent cannot open a mentioned thread: quiet, like the skill notice. */
+.ib-cfield .ib-tmnote { margin: -2px 0 0; padding: 0 12px 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); line-height: 1.35; overflow-wrap: anywhere; }
+/* A sent mention (its link ends `&mention`; other thread links stay as they are): a link to the thread, in the
+   token's paint, the thread mark before its name. A long title wraps, each line keeping the paint. */
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"] { color: var(--primary); text-decoration-line: none; font-weight: 550; background: color-mix(in oklch, var(--primary) 13%, transparent); border-radius: 5px; padding: 0 5px 0 3px; overflow-wrap: anywhere; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"]::before { content: ""; display: inline-block; width: 13px; height: 13px; margin-right: 4px; vertical-align: -1.5px; background: currentColor; -webkit-mask: var(--ib-thread-mark) center / contain no-repeat; mask: var(--ib-thread-mark) center / contain no-repeat; }
+.pn-inbox .ib-body a[href^="#thread="][href$="&mention"]:hover { background: color-mix(in oklch, var(--primary) 20%, transparent); }
+.pn-inbox { --ib-thread-mark: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 9a2 2 0 0 1-2 2H6l-4 4V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2z'/%3E%3Cpath d='M18 9h2a2 2 0 0 1 2 2v11l-4-4h-6a2 2 0 0 1-2-2v-1'/%3E%3C/svg%3E"); }
+.ib-pmi-hint { max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }

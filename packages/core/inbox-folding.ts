@@ -12,6 +12,7 @@ import { INBOX_STILL_OPEN_LINE, sliceText } from './inbox-questions';
 import { withoutInboxSkillsBlock } from './skill-reference-block';
 import { INLINE_DESTINATION, stripInlineMarkup } from './inline-markdown';
 import { withoutInboxReplyQuoteLead } from './inbox-reply-quote';
+import { withoutInboxThreadMentions } from './inbox-thread-mention';
 
 /**
  * Where "new since you looked" starts: the seq of the person's last look at
@@ -213,7 +214,8 @@ const ANSWERS_HEADING_LINE = new RegExp(`^#{1,6}\\s+${QUESTION_ANSWERS_HEADING}\
  * lead a quoting reply opens with (`withoutInboxReplyQuoteLead`).
  */
 export function replyWords(body: string): string {
-  const lines = withoutInboxSkillsBlock(body).split(/\r?\n/);
+  // A mentioned thread (inbox-thread-mention.ts) reads as its title; the list after the words is the agent's.
+  const lines = withoutInboxThreadMentions(withoutInboxSkillsBlock(body)).split(/\r?\n/);
   const at = lines.findIndex((line) => ANSWERS_HEADING_LINE.test(line.trim()) || INBOX_STILL_OPEN_LINE.test(line.trim()));
   const kept = (at >= 0 ? lines.slice(0, at) : lines).join('\n');
   // A quoting reply's lead ("Replying to your message from …", inbox-reply-quote.ts) is the agent's, not the person's words.

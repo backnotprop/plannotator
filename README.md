@@ -65,6 +65,8 @@ Annotate plans, specs, messages, html, then send the feedback to your agent.
 
 Review local changes or remote PRs. Comment on diffs, suggest code. Your comments go back to the agent. Works with Git, GitButler, Jujutsu (`jj`), Perforce (`p4`), GitHub, and GitLab.
 
+For a big change, start a [guided review](https://plannotator.ai/code-review#guided-review): an agent sorts the diff into chapters, the most important first.
+
 </td>
 <td width="60%">
 
@@ -115,11 +117,40 @@ herdr plugin install plannotator/herdr-annotate
 
 Prefer it standalone? [Plannotator TUI](https://github.com/plannotator/plannotator-tui) powers the document review and runs without Herdr: `brew install plannotator/tap/plannotator-tui`.
 
-## Annotate HTML Artifacts
+## HTML artifacts, live sites, and guided reviews
 
-<p align="center">
-  <img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="720" />
-</p>
+<table>
+<tr>
+<td width="40%" valign="middle">
+
+### Annotate HTML artifacts and live sites
+
+Annotate rendered HTML files, or any site running on your machine. A local address opens your app live through a local proxy: you comment on the real page, and hot reload keeps working.
+
+`plannotator annotate http://localhost:5173`
+
+</td>
+<td width="60%">
+
+<img src=".github/assets/html.webp" alt="Annotating a rendered HTML artifact" width="100%" />
+
+</td>
+</tr>
+<tr>
+<td width="40%" valign="middle">
+
+### Guided reviews
+
+In code review, press **Guide** (or `Cmd/Ctrl+Shift+G`) and an agent sorts the diff into chapters: the heart of the change first, then its effects, then the glue. Each chapter puts a short overview next to the real diff. Comments you leave there go back to the agent with the rest of your review. [More on guided reviews](https://plannotator.ai/code-review#guided-review)
+
+</td>
+<td width="60%">
+
+<img src=".github/assets/guided-review.webp" alt="A guided review chapter: an overview of the change on the left, the annotatable diff on the right" width="100%" />
+
+</td>
+</tr>
+</table>
 
 ---
 

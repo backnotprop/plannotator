@@ -149,6 +149,8 @@ import {
   type InboxLiveSiteRef,
 } from "@plannotator/core/inbox-types";
 import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
+import { remapReplyMentions } from "@plannotator/core/inbox-thread-mention";
+import type { InboxReplyMention } from "@plannotator/core/inbox-types";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
@@ -6182,7 +6184,7 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote, mentions } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
@@ -6206,7 +6208,7 @@ export class InboxStore {
         this.deleteReplyDraft(threadId);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after, given, quote);
+      return this.writeReplyDraft(threadId, existing, body, after, given, quote, mentions);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -6238,13 +6240,14 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given, quote);
+    return this.writeReplyDraft(threadId, existing, body, files, given, quote, mentions);
   }
 
   /**
    * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
    * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own. `quote`: the
-   * message the reply quotes; null takes it away, undefined keeps the draft's own.
+   * message the reply quotes; null takes it away, undefined keeps the draft's own. `mentions`: the threads mentioned
+   * in the words; undefined keeps the draft's own that still stand once its words become these (remapped, never matched).
    */
   private writeReplyDraft(
     threadId: string,
@@ -6253,6 +6256,7 @@ export class InboxStore {
     files: readonly InboxDraftFile[],
     recipients: readonly string[] | null = null,
     quote: InboxReplyQuote | null | undefined = undefined,
+    mentions: readonly InboxReplyMention[] | undefined = undefined,
   ): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
@@ -6270,6 +6274,9 @@ export class InboxStore {
     // The quote (approval "inbox-reply-quote"): a save that names one sets it, `null` takes it away, absent keeps it.
     const quoted = quote === undefined ? (existing?.quote ?? null) : quote;
     if (quoted) draft.quote = { ...quoted };
+    // The mentions (approval "inbox-drag-threads"): a save that names them sets them; absent, the draft's own move with its words.
+    const mentioned = mentions ?? remapReplyMentions(existing?.mentions ?? [], existing?.body ?? "", body);
+    if (mentioned.length > 0) draft.mentions = mentioned.map((m) => ({ ...m }));
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.changes += 1;
