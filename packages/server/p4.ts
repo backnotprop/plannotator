@@ -257,16 +257,19 @@ async function getNewFileDiff(
   relativePath: string,
 ): Promise<string> {
   try {
-    const content = await Bun.file(localPath).text();
-    const lines = content.replace(/\r\n/g, "\n").split("\n");
+    const content = (await Bun.file(localPath).text()).replace(/\r\n/g, "\n");
     const header = [
       `diff --git a/${relativePath} b/${relativePath}`,
       "new file mode 100644",
-      "--- /dev/null",
-      `+++ b/${relativePath}`,
-      `@@ -0,0 +1,${lines.length} @@`,
     ];
-    return header.join("\n") + "\n" + lines.map((l) => `+${l}`).join("\n");
+    if (!content) return header.join("\n") + "\n";
+
+    const endsWithNewline = content.endsWith("\n");
+    const lines = (endsWithNewline ? content.slice(0, -1) : content).split("\n");
+    header.push("--- /dev/null", `+++ b/${relativePath}`, `@@ -0,0 +1,${lines.length} @@`);
+    const added = lines.map((line) => `+${line}`);
+    if (!endsWithNewline) added.push("\\ No newline at end of file");
+    return [...header, ...added].join("\n") + "\n";
   } catch {
     return "";
   }

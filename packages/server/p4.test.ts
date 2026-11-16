@@ -96,3 +96,31 @@ describe("P4 provider non-regression", () => {
     expect(stdout).toContain("-old\\n+new");
   });
 });
+
+test.skipIf(process.platform === "win32")("Perforce adds use the same physical line count as their source files", async () => {
+  const workspace = makeTempDir("plannotator-p4-adds-");
+  const binDir = makeTempDir("plannotator-p4-adds-bin-");
+  writeFileSync(join(workspace, "terminated.txt"), "a\n");
+  writeFileSync(join(workspace, "unterminated.txt"), "b");
+  writeFileSync(join(workspace, "empty.txt"), "");
+  writeFileSync(join(binDir, "p4"), [
+    "#!/bin/sh",
+    'case "$1" in',
+    'info) echo "Client name: tests"; printf "Client root: %s\\n" "$PWD" ;;',
+    'opened) for file in terminated.txt unterminated.txt empty.txt; do echo "//depot/$file#1 - add default change (text)"; done ;;',
+    '-ztag) for file in terminated.txt unterminated.txt empty.txt; do printf "... depotFile //depot/%s\\n... path %s/%s\\n\\n" "$file" "$PWD" "$file"; done ;;',
+    '*) exit 1 ;;',
+    'esac',
+  ].join("\n"), { mode: 0o755 });
+
+  const module = join(import.meta.dir, "p4.ts");
+  const run = Bun.spawn([process.execPath, "-e",
+    `const { runP4Diff } = await import(${JSON.stringify(module)}); process.stdout.write((await runP4Diff("p4-default", process.cwd())).patch);`
+  ], { cwd: workspace, env: { ...process.env, PATH: `${binDir}:${process.env.PATH ?? ""}` }, stdout: "pipe", stderr: "pipe" });
+  const [patch, stderr, code] = await Promise.all([new Response(run.stdout).text(), new Response(run.stderr).text(), run.exited]);
+  expect(code, stderr).toBe(0);
+  expect(patch).toContain("@@ -0,0 +1,1 @@\n+a\n");
+  expect(patch).not.toContain("+a\n+\n");
+  expect(patch).toContain("+b\n\\ No newline at end of file\n");
+  expect(patch.trimEnd().split("diff --git a/empty.txt b/empty.txt").at(-1)?.trim()).toBe("new file mode 100644");
+});
