@@ -568,7 +568,7 @@ test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, a
     const toggle = host.querySelector('[data-reading-versions]') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     // Its name is a full sentence: which version is on screen, and how many there are (the frame's words).
-    expect(toggle.getAttribute('aria-label')).toBe('v2 · newest, version 2, the newest. 2 versions. Versions');
+    expect(toggle.getAttribute('aria-label')).toBe('v2 · newest, version 2, the newest. 2 versions');
     await act(async () => toggle.click());
     await settle();
     expect(host.querySelector('[data-versions-panel] [data-plan-version="2"]')).not.toBeNull();
