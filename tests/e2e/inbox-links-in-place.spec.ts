@@ -58,6 +58,10 @@ interface World {
   html: string;
   /** An attached page whose script posts a link message on load. */
   script: string;
+  /** Hostile pages that try to get the link port: by moving to the bare asset copy, by document.open, from <head>. */
+  hop: string;
+  rewrite: string;
+  head: string;
   machine: string;
 }
 
@@ -66,6 +70,33 @@ let agent: SimAgent | undefined;
 let linkedMachine: Server | undefined;
 
 const filler = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag} paragraph ${i + 1}: long enough that the thread has to scroll.`).join('\n\n');
+
+/**
+ * A hostile page's toolkit (plain script text): `read()` gathers every link key
+ * it can find (its load address, which the navigation entry keeps; the inline
+ * guard's; any passed in its fragment; a made-up one), `steal` answers on any
+ * port posted to it, and `forge()` sends what the bridge and its guard send: a
+ * ready, a link offer per key with a link-click already queued on the port,
+ * and a link-click on the window.
+ */
+const forgeScript = (href: string) => `
+  const href = ${JSON.stringify(href)};
+  const keys = ['f'.repeat(32)];
+  const read = () => {
+    try { const k = new URL(performance.getEntriesByType('navigation')[0].name).searchParams.get('__pnk'); if (k) keys.push(k); } catch (e) {}
+    try { for (const s of document.scripts) { const m = /'([0-9a-f]{32})'/.exec(s.textContent || ''); if (m) keys.push(m[1]); } } catch (e) {}
+    keys.push(...location.hash.slice(1).split(',').filter(Boolean));
+  };
+  const steal = (e) => { if (e.ports && e.ports[0]) { e.stopImmediatePropagation(); e.ports[0].postMessage({ type: 'plannotator-bridge-link-click', href }); } };
+  const forge = () => {
+    parent.postMessage({ type: 'plannotator-bridge-ready', protocolVersion: 2 }, '*');
+    for (const key of keys) {
+      const channel = new MessageChannel();
+      channel.port1.postMessage({ type: 'plannotator-bridge-link-click', href });
+      parent.postMessage({ type: 'plannotator-bridge-link-offer', key }, '*', [channel.port2]);
+    }
+    parent.postMessage({ type: 'plannotator-bridge-link-click', href }, '*');
+  };`;
 
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
@@ -155,6 +186,47 @@ test.beforeAll(async () => {
       for (const wait of [200, 600, 1200, 2000]) setTimeout(send, wait);
     </script></body></html>`,
   );
+  // Pages that try to get the link port the viewer takes links on (linkGuard.ts), each with no click.
+  const toT2 = `${origin}/#thread=${T2}`;
+  // It moves its frame to the asset route's bare copy (no guard there), passing on every key it could read.
+  writeFileSync(
+    join(alpha, 'docs', 'hop.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>hop</title></head><body><h1>Hop page</h1><script>${forgeScript(toT2)}
+      if (window.__plannotatorLinkGuard) { read(); location.href = 'hop.html#' + keys.join(','); }
+      else { addEventListener('message', steal, true); read(); document.body.insertAdjacentHTML('beforeend', '<p>Bare copy</p>'); forge(); for (const wait of [200, 600, 1200, 2000]) setTimeout(forge, wait); }
+    </script></body></html>`,
+  );
+  // It replaces its own document (document.open drops every listener in it), then offers.
+  writeFileSync(
+    join(alpha, 'docs', 'rewrite.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>rewrite</title></head><body><h1>Rewrite page</h1><script>${forgeScript(toT2)}
+      read();
+      setTimeout(() => {
+        document.open();
+        addEventListener('message', steal, true);
+        forge();
+        document.write('<!doctype html><title>rewritten</title><h1>Rewritten page</h1>');
+        document.close();
+        for (const wait of [200, 600, 1200, 2000]) setTimeout(forge, wait);
+      }, 300);
+    </script></body></html>`,
+  );
+  // A script in <head>: it listens first, calls the guard itself, and during a person's click asks it for T2.
+  writeFileSync(
+    join(alpha, 'docs', 'head.html'),
+    `<!doctype html><html><head><meta charset="utf-8"><title>head</title><script>${forgeScript(toT2)}
+      addEventListener('message', steal, true);
+      read();
+      const misuse = () => {
+        try { window.__plannotatorLinkGuard.follow('link', { type: 'plannotator-bridge-link-click', href }); } catch (e) {}
+        try { window.__plannotatorLinkGuard.follow('form', { type: 'plannotator-bridge-link-click', href }); } catch (e) {}
+      };
+      addEventListener('click', misuse, true);
+      const all = () => { misuse(); forge(); };
+      all();
+      for (const wait of [200, 600, 1200, 2000]) setTimeout(all, wait);
+    </script></head><body><h1>Head page</h1><p><a href="${origin}/#thread=${T3}">Head page to T3</a></p></body></html>`,
+  );
   const lines = [
     `[link to T2](${origin}/#thread=${T2})`,
     `bare ${origin}/#thread=${T2} end`,
@@ -177,7 +249,7 @@ test.beforeAll(async () => {
   const message = await agent.send({
     project_path: alpha,
     reply_to: T1,
-    attachments: ['docs/notes.md', 'docs/page.html', 'docs/script.html'],
+    attachments: ['docs/notes.md', 'docs/page.html', 'docs/script.html', 'docs/hop.html', 'docs/rewrite.html', 'docs/head.html'],
     body: [
       filler(6, 'Before'),
       ...lines,
@@ -199,6 +271,9 @@ test.beforeAll(async () => {
     markdown: files.find((file) => file.name === 'notes.md')!.id,
     html: files.find((file) => file.name === 'page.html')!.id,
     script: files.find((file) => file.name === 'script.html')!.id,
+    hop: files.find((file) => file.name === 'hop.html')!.id,
+    rewrite: files.find((file) => file.name === 'rewrite.html')!.id,
+    head: files.find((file) => file.name === 'head.html')!.id,
     machine: `http://localhost:${otherPort}/#thread=${T2}`,
   };
 });
@@ -671,8 +746,8 @@ test.describe('still a new tab', () => {
 });
 
 test.describe('an attached HTML page', () => {
-  // Known gap: a page's own script can still move the window to another thread; the activation and frame-focus gates don't stop it in Chromium or WebKit.
-  test.fixme('its own script, with no click, does not move the window', async ({ browser }) => {
+  // The viewer takes a link only on the port the link guard offers once per load, never from a window message.
+  test('its own script, with no click, does not move the window', async ({ browser }) => {
     await scene(browser, 'desktop', async (s) => {
       const { page } = s;
       await openFile(page, world.script);
@@ -681,6 +756,36 @@ test.describe('an attached HTML page', () => {
       await page.waitForTimeout(3_000);
       await expect(page).toHaveURL(new RegExp(`#thread=${world.T1}&file=${world.script}`));
       await expect(page.locator('[data-attachment-pane]')).toBeVisible();
+      await noTabOpened(s);
+    });
+  });
+
+  /** The page did what it set out to (`proof` shows in its frame), then forged for two seconds: the window stays. */
+  async function staysAfter(s: Scene, file: string, proof: string): Promise<void> {
+    const { page } = s;
+    await openFile(page, file);
+    await expect(page.frameLocator('.ib-htmlframe iframe').getByText(proof, { exact: true })).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(3_000);
+    await expect(page).toHaveURL(new RegExp(`#thread=${world.T1}&file=${file}`));
+    await expect(page.locator('[data-attachment-pane]')).toBeVisible();
+    await noTabOpened(s);
+  }
+
+  test('a page that moves its frame to its bare asset copy, then offers a port with every key it read, does not move the window', async ({ browser }) => {
+    await scene(browser, 'desktop', (s) => staysAfter(s, world.hop, 'Bare copy'));
+  });
+
+  test('a page that replaces itself with document.open, then forges a ready and offers again, does not move the window', async ({ browser }) => {
+    await scene(browser, 'desktop', (s) => staysAfter(s, world.rewrite, 'Rewritten page'));
+  });
+
+  test("a script in <head> gets no port and cannot use the guard; a person's click on its link still goes where the link goes", async ({ browser }) => {
+    await scene(browser, 'desktop', async (s) => {
+      await staysAfter(s, world.head, 'Head page');
+      // During this click the head script asks the guard for T2: only the clicked link's own address goes.
+      await s.page.frameLocator('.ib-htmlframe iframe').getByRole('link', { name: 'Head page to T3', exact: true }).click();
+      await expect(s.page).toHaveURL(threadUrl(world.T3), { timeout: 5_000 });
+      await expect(subject(s.page)).toHaveText(/Beta thread/);
       await noTabOpened(s);
     });
   });

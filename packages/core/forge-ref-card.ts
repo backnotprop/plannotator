@@ -10,7 +10,7 @@
  * shape before it runs anything.
  */
 
-import { classifyForgeHost, FORGE_SPECS, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
+import { classifyForgeHost, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
 
 export type { ForgePlatform } from "./forge-refs";
 
@@ -118,10 +118,11 @@ function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | nu
 
 /**
  * One cache entry per ref. On GitHub an issue link to a PR is the same item, so the kind is not part of it there;
- * GitLab and Bitbucket number them apart (`:pull`, `:issue`).
+ * GitLab and Bitbucket number them apart (`:pull`, `:issue`). A ref card provider's ref (the Inbox's Linear issues, ui
+ * `utils/refCardProviders`) names a platform with no spec here: no kind in its key.
  */
 export function forgeRefKey(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number" | "kind">): string {
-  const kind = FORGE_SPECS[ref.platform].numbersByKind ? `:${ref.kind}` : "";
+  const kind = (FORGE_SPECS as Partial<typeof FORGE_SPECS>)[ref.platform]?.numbersByKind ? `:${ref.kind}` : "";
   return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}${kind}`.toLowerCase();
 }
 
@@ -229,8 +230,9 @@ const SHORT_GITLAB_PULL = /^([A-Za-z0-9_.-]{1,100}(?:\/[A-Za-z0-9_.-]{1,100})*)\
  * anything else are not one.
  *
  * `projectHost` is the host of the thread's project's git remote. A
- * `group/sub/project!45` is on that host when it is a GitLab (GitLab reads the
- * short form on its own instance), else on gitlab.com. A URL keeps its own host.
+ * `group/sub/project!45` is on that host unless it is GitHub's or Bitbucket's
+ * (GitLab reads the short form on its own instance; `shortGitlabHost`), else
+ * on gitlab.com. A URL keeps its own host.
  */
 export function parseForgePullRef(text: string, projectHost?: string | null): ForgeRef | null {
   const value = text.trim();
@@ -249,9 +251,20 @@ export function parseForgePullRef(text: string, projectHost?: string | null): Fo
   return null;
 }
 
+/**
+ * Only GitLab writes `!45`, so a short ref in a project whose remote is on any host but GitHub's or Bitbucket's is on
+ * that host, whatever it is called: never gitlab.com for a self-managed project, which would send its private path to
+ * a public site. gitlab.com only when the project has no usable remote host or is on GitHub or Bitbucket. A host the
+ * Inbox knows as a GitLab with a port (`gitlabHosts: ["git.acme.com:8443"]`; a remote host never has one) keeps it.
+ */
 function shortGitlabHost(projectHost: string | null | undefined): string {
   const host = normalizeForgeHost(projectHost);
-  return host && classifyForgeHost(host) === "gitlab" ? host : "gitlab.com";
+  if (!host) return "gitlab.com";
+  const platform = classifyForgeHost(host);
+  if (platform === "github" || platform === "bitbucket") return "gitlab.com";
+  if (platform === "gitlab") return host;
+  const withPort = [...gitlabHostsSnapshot()].filter((known) => known.startsWith(`${host}:`));
+  return withPort.length === 1 ? withPort[0]! : host;
 }
 
 /** A pull or merge request's web address. */

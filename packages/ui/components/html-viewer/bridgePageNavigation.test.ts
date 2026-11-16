@@ -55,7 +55,8 @@ function bridge(options: { optedIn?: boolean; armed?: boolean } = {}): Bridge {
   const posted: Array<Record<string, unknown>> = [];
   const api = new Function(
     'PREFIX',
-    'postToParent',
+    // The host's private port (bridge-script.ts, "Private link channel"): where a form's address goes.
+    'sendOnLinkPort',
     'pageNavigation',
     'annotateModeActive',
     `${extractFunction('submitterOf')}

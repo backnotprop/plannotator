@@ -3770,6 +3770,8 @@ export interface InboxVoiceKeyState {
   last4: string | null;
 }
 
+export type InboxLinearKeyState = InboxVoiceKeyState;
+
 /** Settings → Voice (`GET /api/inbox/settings` `voice`). */
 export interface InboxVoiceSettings {
   on: boolean;
