@@ -416,6 +416,32 @@ test("a schedule without tz takes this computer's zone, and an update changes on
   expect({ ...renamed, name: record.name, updated_at: record.updated_at }).toEqual(record);
 });
 
+test("simultaneous routine updates preserve fields omitted by either edit", async () => {
+  const w = world();
+  const { record } = await w.make();
+  const person = { kind: "person" } as const;
+  await Promise.all([
+    w.scheduled.update(record.id, { name: "Morning sweep" }, person),
+    w.scheduled.update(record.id, { prompt: "Check the new reviews." }, person),
+  ]);
+
+  expect(w.store.scheduledThread(record.id)).toMatchObject({
+    name: "Morning sweep",
+    prompt: "Check the new reviews.",
+  });
+});
+
+test("a routine deleted while an edit is validating stays deleted", async () => {
+  const w = world();
+  const { record } = await w.make();
+  const person = { kind: "person" } as const;
+  const edit = w.scheduled.update(record.id, { name: "Morning sweep" }, person);
+  await w.scheduled.remove(record.id, person);
+
+  await expect(edit).rejects.toMatchObject({ code: "routine_not_found" });
+  expect(w.store.scheduledThread(record.id)).toBeNull();
+});
+
 describe("one run at a time", () => {
   test("two Run now presses at once, or Run now as the clock fires, are one run in one thread", async () => {
     const w = world();
