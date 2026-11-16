@@ -76,6 +76,24 @@ describe("external reference fetch", () => {
 		expect(response.status).toBe(200);
 	});
 
+	it("cancels a discarded redirect stream before sending the next request", async () => {
+		let cancelled = false;
+		const response = await externalRefsFetch(async (input) => {
+			if (new URL(String(input)).pathname === "/final") {
+				expect(cancelled).toBe(true);
+				return new Response("final response");
+			}
+			const body = new ReadableStream({
+				cancel() {
+					cancelled = true;
+				},
+			});
+			return new Response(body, { status: 302, headers: { location: "/final" } });
+		}, `${SOURCE}/start`);
+
+		expect(await response.text()).toBe("final response");
+	});
+
 	it("honors an adapter's explicit decision to refuse even a same-origin redirect", async () => {
 		const url = `${SOURCE}/__test/same-origin`;
 		const headers = { "PRIVATE-TOKEN": "fixture-token" };

@@ -92,6 +92,9 @@ export async function externalRefsFetch(
 			) {
 				return response;
 			}
+			// The caller will never read this intermediate response. Release its
+			// stream without waiting on the provider before making the next hop.
+			void response.body?.cancel().catch(() => {});
 			currentUrl = nextUrl;
 			currentInput =
 				input instanceof Request ? new Request(nextUrl, replayInput ?? input) : nextUrl;
