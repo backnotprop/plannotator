@@ -172,6 +172,23 @@ describe('gateRepo on a real repo', () => {
     expect((await gateRepo({ root, from: base, to: 'HEAD', model })).why.map((w) => w.reason).sort()).toEqual(['added', 'deleted', 'renamed', 'watched']);
   });
 
+  test('compares revisions even when their names also name files', async () => {
+    const { dir: root, done } = tempDir();
+    cleanups.push(done);
+    git(root, 'init', '-q');
+    writeFileSync(join(root, 'baseline'), 'a file with the same name as the tag\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'base');
+    git(root, 'tag', 'baseline');
+    writeFileSync(join(root, 'added.ts'), 'new code\n');
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'add new code');
+    const model = loadFiles(edited('system.yaml', (s) => s)).model!;
+    const result = await gateRepo({ root, from: 'baseline', to: 'HEAD', model });
+    expect(result.why).toEqual([{ path: 'added.ts', reason: 'added' }]);
+    await expect(gateRepo({ root, from: 'HEAD', to: 'added.ts', model })).rejects.toThrow('git diff:');
+  });
+
   test('a ref git could read as an option is refused before git runs', async () => {
     const model = loadFiles(edited('system.yaml', (s) => s)).model!;
     await expect(gateRepo({ root: drawingDir, from: '--output=/dev/null', to: 'HEAD', model })).rejects.toThrow('is not a git ref');
