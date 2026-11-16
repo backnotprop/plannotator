@@ -472,9 +472,14 @@ export function addsExportsOnly(c: Change): boolean {
     && fresh.every((l) => /^"\.\/[^"]+": "\.\/[^"]+"$/.test(l) || /^"[^":]+\.[a-z]+"$/.test(l));
 }
 
-/** Unit files per subset lane, and DOM files per subset lane: about 4 minutes each at CI's measured rates. */
-export const UNIT_FILES_PER_LANE = 250;
-export const DOM_FILES_PER_LANE = 100;
+/**
+ * Unit files per subset lane, and DOM files per subset lane. Measured on CI: a
+ * unit file takes about 2-4 s and an editor DOM file up to 15 s, so these keep
+ * a lane near 5 minutes. A lane costs about a minute of setup, so a lane per
+ * few files would waste more than it saves.
+ */
+export const UNIT_FILES_PER_LANE = 80;
+export const DOM_FILES_PER_LANE = 20;
 /** Over this share of all test files, the full lanes run instead (they split better). */
 export const MOST = 0.6;
 

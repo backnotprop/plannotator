@@ -233,7 +233,7 @@ A PR runs only the checks its change can affect; main runs everything after the 
 
 - Print what CI will run for your branch: `bun run ci:affected --print` (against the merge base with `origin/main`, your working tree and untracked files included; `--base <ref>` for a stacked branch, `--head <ref>` for a commit, `--scanners` to list the tree-scanning tests, `--json` for everything). It needs `bun install`, and `bash apps/pi-extension/vendor.sh` for the Pi tests.
 - Run the test files it lists under "Tests the PR changed or the change reaches" with `bun run test:sandbox <file...>`, plus `bun run typecheck`. CI runs the tree-scanning tests and the guards for you.
-- After the checks finish, read which tests ran and which jobs were skipped, from the plan job's log:
+- After the checks finish (gh serves a run's log once the whole run is done), read which tests ran and which jobs were skipped, from the plan job's log:
 
   ```bash
   gh run view --log --job "$(gh pr checks <PR> --json name,link --jq '.[] | select(.name == "Plan (what this PR runs)") | .link | split("/") | last')" | sed -n '/==== ci-affected/,/==== end/p'
@@ -246,7 +246,7 @@ A PR runs only the checks its change can affect; main runs everything after the 
 **A PR runs what its change can affect** (the owner, 2026-11-16). The Test workflow's `plan` job (`scripts/ci-affected.ts plan`) reads the PR's changed files (the merge commit against its first parent) and picks:
 
 - the unit and DOM test files that reach a changed file: by import (Bun's own resolver, so workspace links, `exports` and tsconfig `paths` count), by a file path named in a string, through Pi's vendored copies (`apps/pi-extension/generated`, the `Source:` header), or, for a changed file that is not code, by its file name in a string; plus a file added to `tests/dom-test-list.txt`, plus the tree-scanning tests (a test-side file that lists folders of the checkout: about 150 files, run on every change);
-- how many lanes they need (about 250 unit files or 100 DOM files a lane; a heavy lane only for its own files; no lane when no file is affected);
+- how many lanes they need (about 80 unit files or 20 DOM files a lane, up to the full lane count; a heavy lane only for its own files; no lane when no file is affected);
 - the gated steps and jobs: the UI package smoke, the two own-process DOM steps, the OpenCode 2 installed package (its plugin, T3 Code, or `inbox-e2e.yml`'s path list), the Claude Code mod harness (`apps/hook/hooks/`, `apps/hook/tests/`).
 
 The rules are the `GATES` table in `scripts/ci-affected.ts`. The Browser smoke, Security and Windows workflows each start with a gate job that runs `scripts/ci-affected.ts gate <workflow>` (path rules only, no install): the smoke runs for `inbox-e2e.yml`'s path list; Semgrep scans only the changed files it reads (its rules are intrafile), the whole tree when `.semgrep.yml`, `.semgrepignore` or `.gitignore` changed; Trivy runs for a lockfile, a `package.json`, a Dockerfile or `.github/`; zizmor for `.github/`. Gitleaks, the plan and gate jobs, and (for every PR but a docs-only one) the Checks job always run: types, the release version, the VS Code extension's types and the tree-wide guards (`CORE_GUARDS`: the real-Inbox, browser, gh, agent-CLI and relay guards, `AGENTS.md`'s size, the DOM allowlist, the test lanes and the CI map).
