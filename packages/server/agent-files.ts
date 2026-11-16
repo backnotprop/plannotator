@@ -85,7 +85,6 @@ export function readAgentFile(path: string, maxBytes: number = AGENT_FILE_MAX_BY
   }
   // TextDecoder drops a leading BOM; the bytes say whether there was one.
   const bom = bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   return { kind: "file", path, target, text, mode: stat.mode & 0o777, crlf: dominantCrlf(text), bom, linked };
 }
 
