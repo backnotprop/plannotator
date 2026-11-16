@@ -2509,10 +2509,10 @@ function Inbox() {
   sidebarHeldNow.current = sidebarHeld;
   // Full screen changes the sidebar's and the list's room without a route change: measured again too.
   const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
-  // The thread panel view (threadPanel.ts): the list stays at its short width and the thread's pane stays drawn with
-  // no thread open. Off by default, and never on a phone or in a window that stacks.
+  // The thread panel view (threadPanel.ts; off by default) and its art's place, held here: the empty pane unmounts.
   const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
   const panelView = threadPanelShows(threadPanelOn, { phone, stacked: stack.thread });
+  const [panelPiece, setPanelPiece] = useState(0);
   useEffect(() => {
     if (!sidebarHeld) return;
     const check = () => {
@@ -5753,7 +5753,7 @@ function Inbox() {
         )}
         {panelView && !route.thread && (
           <div className="ib-pane ib-pempty" data-thread-panel-empty="">
-            <EmptyThreadPanel />
+            <EmptyThreadPanel piece={panelPiece} onPiece={setPanelPiece} />
           </div>
         )}
         <ThreadSlot

@@ -3,18 +3,22 @@
  * What this catches: the view on in a browser that never chose it; a choice forgotten on the next load, or one that
  * leaves a cookie behind when turned off; the panel drawn on a phone or in a stacked window, where it would stand
  * alone; a menu item a screen reader does not hear as a checkbox or that closes the menu; a look option's write wiping
- * the choice. The whole window (the panes, a reload, closing a thread, a phone) is proved in Chromium by
+ * the choice; the panel's art starting anywhere but the list's first piece, leaving the list's order or losing the way
+ * back to the first, or drawing the wrong piece's or mode's mask. The whole window (the panes, a reload, closing a
+ * thread, a phone, the art's keyboard path, the masks really painting) is proved in Chromium by
  * tests/e2e/inbox-thread-panel.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { TidyController } from './components/Tidy';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
+const { EmptyThreadPanel, PIECES } = (hasDom ? await import('./components/EmptyThreadPanel') : {}) as typeof import('./components/EmptyThreadPanel');
+const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { LIST_LOOK_OFF, writeListLookOptions } = await import('./listLook');
 const { THREAD_PANEL_COOKIE, readThreadPanel, threadPanelShows, writeThreadPanel } = await import('./threadPanel');
@@ -123,5 +127,56 @@ describe.skipIf(!hasDom)('the ⋮ menu item', () => {
     });
     expect(asked).toEqual([true]);
     expect(document.querySelector('[data-tidy-menu-popup]')).not.toBeNull();
+  });
+});
+
+describe.skipIf(!hasDom)('the empty panel\'s art', () => {
+  function Rotating() {
+    const [piece, setPiece] = useState(0);
+    return <EmptyThreadPanel piece={piece} onPiece={setPiece} />;
+  }
+
+  function panel(mode: 'light' | 'dark'): HTMLButtonElement {
+    host = document.createElement('div');
+    host.className = 'pn-inbox';
+    document.body.append(host);
+    root = createRoot(host);
+    act(() => {
+      root!.render(
+        <ThemeProvider defaultTheme={mode}>
+          <Rotating />
+        </ThemeProvider>,
+      );
+    });
+    return host.querySelector('button')!;
+  }
+
+  const mask = (button: HTMLElement) => button.querySelector<HTMLElement>('.ib-pempty-piece')!.style.getPropertyValue('--ib-pempty-mask');
+
+  test('opens on the first piece, a click moves to the next, and after the last it goes back to the first', () => {
+    const button = panel('light');
+    const seen: string[] = [];
+    for (let i = 0; i <= PIECES.length; i++) {
+      seen.push(button.dataset.piece!);
+      act(() => button.click());
+    }
+    expect(seen).toEqual([...PIECES.map((piece) => piece.slug), PIECES[0]!.slug]);
+  });
+
+  test('every piece has its own mask, and the dark mode draws its dark cut', () => {
+    const button = panel('dark');
+    for (const { slug } of PIECES) {
+      expect(mask(button)).toContain(`${slug}-dark.png`);
+      act(() => button.click());
+    }
+  });
+
+  test('the light mode draws the light cut', () => {
+    const button = panel('light');
+    for (const { slug } of PIECES) {
+      expect(mask(button)).toContain(`${slug}.png`);
+      expect(mask(button)).not.toContain('-dark');
+      act(() => button.click());
+    }
   });
 });
