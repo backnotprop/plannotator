@@ -1102,6 +1102,7 @@ const ReviewApp: React.FC = () => {
   // Dockview center panel API for the review workspace.
   const [dockApi, setDockApi] = useState<DockviewApi | null>(null);
   const [dockActivePanelId, setDockActivePanelId] = useState<string | null>(null);
+  const [allChangesShown, setAllChangesShown] = useState(false);
   const treeScopeRef = useRef<string>('changes');
   const [allChangesOpen, setAllChangesOpen] = useState(false);
   const filesRef = useRef(files);
@@ -1798,7 +1799,11 @@ const ReviewApp: React.FC = () => {
     needsInitialDiffPanel.current = true;
 
     // Sync activeFileIndex when user switches between dock tabs
+    const syncAllChangesShown = () => setAllChangesShown(!!event.api.getPanel(REVIEW_ALL_FILES_PANEL_ID)?.api.isVisible);
+    event.api.onDidAddPanel(syncAllChangesShown);
+    event.api.onDidRemovePanel(syncAllChangesShown);
     event.api.onDidActivePanelChange((panel) => {
+      syncAllChangesShown();
       setDockActivePanelId(panel?.id ?? null);
       if (!panel) {
         setIsAllFilesActive(false);
@@ -6040,7 +6045,7 @@ const ReviewApp: React.FC = () => {
             {guideVisible && !isCompactTouchLayout && <div ref={setGuideBarSlot} className="contents" />}
             {!guideVisible && !isCompactTouchLayout && files.length > 0 && (
               <>
-                <ReviewDockRightActions activePanel={dockActivePanelId ? { id: dockActivePanelId } : null} />
+                <ReviewDockRightActions activePanel={dockActivePanelId ? { id: dockActivePanelId } : null} allChangesShown={allChangesShown} />
                 <div className="w-px h-5 bg-border mx-1 hidden lg:block" />
               </>
             )}

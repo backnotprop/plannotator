@@ -1,6 +1,6 @@
 import React, { useLayoutEffect, useRef } from "react";
 import { Menu } from "@base-ui/react/menu";
-import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Ellipsis, Eye, EyeOff, TextSearch, X } from "lucide-react";
+import { Check, ChevronsDownUp, ChevronsUpDown, Copy, Ellipsis, Eye, EyeOff, FoldVertical, TextSearch, X } from "lucide-react";
 import { Tooltip } from "@plannotator/ui/components/Tooltip";
 
 /**
@@ -40,6 +40,8 @@ export interface PanelControlsProps {
   collapseDisabled?: boolean;
   onToggleHideViewed?: () => void;
   hideViewedFiles?: boolean;
+  onToggleFilesCollapsed?: () => void;
+  filesCollapsed?: boolean;
   viewedCount: number;
   totalCount: number;
   onCopyRawDiff?: () => void;
@@ -308,6 +310,8 @@ export function PanelControlsRow(props: PanelControlsProps) {
     showViewedControls = true,
     hideViewedFiles = false,
     onToggleHideViewed,
+    onToggleFilesCollapsed,
+    filesCollapsed = false,
     notice,
   } = props;
   const searchToggles = !!onCloseSearch;
@@ -319,6 +323,17 @@ export function PanelControlsRow(props: PanelControlsProps) {
       >
         {scope ?? <span className="px-2 text-[13px] font-medium text-muted-foreground">Files</span>}
         <div className="ml-auto flex flex-shrink-0 items-center">
+          {onToggleFilesCollapsed && (
+            <button
+              type="button"
+              onClick={onToggleFilesCollapsed}
+              aria-label={filesCollapsed ? "Expand all files" : "Collapse all files"}
+              data-tree-collapse-all-files={filesCollapsed ? "collapsed" : "open"}
+              className={TOOL}
+            >
+              {filesCollapsed ? <FoldVertical className="w-3.5 h-3.5" aria-hidden="true" /> : <ChevronsUpDown className="w-3.5 h-3.5" aria-hidden="true" />}
+            </button>
+          )}
           {showViewedControls && onToggleHideViewed && (
             <ToolButton label="Hide viewed files" onClick={onToggleHideViewed} pressed={hideViewedFiles}>
               {hideViewedFiles ? <EyeOff className="w-3.5 h-3.5" aria-hidden="true" /> : <Eye className="w-3.5 h-3.5" aria-hidden="true" />}

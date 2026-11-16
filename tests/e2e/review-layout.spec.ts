@@ -200,7 +200,7 @@ test('tabs live in the panes: the header never changes, and one tab row from the
   });
 });
 
-test('a phone keeps one pane, its tabs in the pane, and the header never changes', async ({ browser }) => {
+test('a phone keeps one pane, its tabs in the pane, folds every file from the navigator, and the header never changes', async ({ browser }) => {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   const root = mkdtempSync(join(tmpdir(), 'plannotator-review-layout-phone-'));
   const repo = buildRepo(root);
@@ -218,6 +218,14 @@ test('a phone keeps one pane, its tabs in the pane, and the header never changes
     const top = await paneTop(page);
     const header = await headerShape(page);
     await expect(page.locator('[data-review-navigation-sheet]')).toBeVisible();
+    const fold = page.locator('[data-review-navigation-sheet] [data-tree-collapse-all-files]');
+    const foldBox = (await fold.boundingBox())!;
+    expect(Math.min(foldBox.width, foldBox.height)).toBeGreaterThanOrEqual(44);
+    await fold.tap();
+    await expect(fold).toHaveAttribute('data-tree-collapse-all-files', 'collapsed');
+    await expect(fold).toHaveAccessibleName('Expand all files');
+    await fold.tap();
+    await expect(fold).toHaveAttribute('data-tree-collapse-all-files', 'open');
     await page.locator('[data-changes-tree] [data-type="item"][data-item-path$="routes.ts"]').first().tap();
     await expect(page.locator('[data-review-navigation-sheet]')).toHaveCount(0);
     await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toBeVisible();

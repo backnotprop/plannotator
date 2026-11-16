@@ -168,7 +168,6 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   const commentLabel = '';
   const headerWidthNow = () => headerRef.current?.clientWidth ?? Infinity;
   const tinyNow = () => !readOnly && headerWidthNow() < ACTIONS_FOLD_WIDTH;
-  const foldedNow = tinyNow;
   const actionFold = readOnly ? '' : ACTIONS_FOLD;
   const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
 
@@ -182,78 +181,76 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
       role={viewedKeyHint ? 'toolbar' : undefined}
       aria-label={viewedKeyHint ? filePath : undefined}
     >
-      {(
-        <div className="min-w-0 flex flex-1 items-center overflow-hidden" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
-          {collapseToggle}
-          <span
-            className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap [font-variant-ligatures:no-contextual] ${isCompactTouchLayout ? 'flex-1' : ''}`}
-            title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
-          >
-            {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
-                under tight widths — the icon + tooltip still carry it. */}
-            {status === 'renamed' && oldPath && !isCompactTouchLayout && (
-              <>
-                <span className="@max-[559px]/file-header:hidden min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
-                  {oldPath}
-                </span>
-                <svg
-                  className="@max-[559px]/file-header:hidden w-3 h-3 mx-1 flex-none text-muted-foreground/60"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  strokeWidth={2}
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" />
-                </svg>
-              </>
-            )}
-            {isCompactTouchLayout ? (
-              /* Match Diffshub's filename treatment: retain the complete path in
-               * the accessible DOM and place the ellipsis at the leading edge so
-               * the basename/extension receive the available phone width. */
-              <span
-                data-pn-compact-file-path
-                className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-foreground [direction:rtl]"
-              >
-                <bdi>{filePath}</bdi>
+      <div className="min-w-0 flex flex-1 items-center overflow-hidden" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
+        {collapseToggle}
+        <span
+          className={`min-w-0 flex items-center text-[13px] font-medium leading-normal whitespace-nowrap [font-variant-ligatures:no-contextual] ${isCompactTouchLayout ? 'flex-1' : ''}`}
+          title={status === 'renamed' && oldPath ? `${oldPath} → ${filePath}` : filePath}
+        >
+          {/* Rename: dimmed old path → new path (diffshub treatment). Dropped
+              under tight widths — the icon + tooltip still carry it. */}
+          {status === 'renamed' && oldPath && !isCompactTouchLayout && (
+            <>
+              <span className="@max-[559px]/file-header:hidden min-w-0 overflow-hidden text-ellipsis text-muted-foreground/60">
+                {oldPath}
               </span>
-            ) : (
-              <>
-                {directory && (
-                  <span data-file-header-folder={keepsFolder ? '' : undefined} className={`${keepsFolder ? '' : '@max-[559px]/file-header:hidden '}min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]`}>
-                    <bdi>{directory}</bdi>
-                  </span>
-                )}
-                <EllipsisName text={name} className="text-foreground" />
-              </>
-            )}
-          </span>
-          {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
-          {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
-            <span className="min-w-0 shrink-[1000] ml-3 flex h-4 flex-wrap items-center gap-x-1.5 overflow-hidden text-[12px] leading-4 tabular-nums" data-file-header-counts="">
-              {additions > 0 && <span className="text-success">+{formatCount(additions)}</span>}
-              {deletions > 0 && <span className="text-destructive">−{formatCount(deletions)}</span>}
-              {status && <FileStatusLetter status={status} oldPath={oldPath} />}
-              {isGenerated && (
-                <span
-                  data-pn-generated-badge
-                  className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-xs font-medium leading-none text-muted-foreground"
-                  title="Marked linguist-generated in .gitattributes"
-                >
-                  generated
+              <svg
+                className="@max-[559px]/file-header:hidden w-3 h-3 mx-1 flex-none text-muted-foreground/60"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </>
+          )}
+          {isCompactTouchLayout ? (
+            /* Match Diffshub's filename treatment: retain the complete path in
+             * the accessible DOM and place the ellipsis at the leading edge so
+             * the basename/extension receive the available phone width. */
+            <span
+              data-pn-compact-file-path
+              className="block min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-left text-foreground [direction:rtl]"
+            >
+              <bdi>{filePath}</bdi>
+            </span>
+          ) : (
+            <>
+              {directory && (
+                <span data-file-header-folder={keepsFolder ? '' : undefined} className={`${keepsFolder ? '' : '@max-[559px]/file-header:hidden '}min-w-0 shrink-[1000] overflow-hidden text-ellipsis whitespace-nowrap font-normal text-muted-foreground [direction:rtl]`}>
+                  <bdi>{directory}</bdi>
                 </span>
               )}
-            </span>
+              <EllipsisName text={name} className="text-foreground" />
+            </>
           )}
-        </div>
-      )}
+        </span>
+        {isTest && <FileKindIcon kind="test" size={13} className="ml-1.5 flex-none text-muted-foreground" title="Test file" />}
+        {(additions > 0 || deletions > 0 || (status && status !== 'modified') || isGenerated) && (
+          <span className="min-w-0 shrink-[1000] ml-3 flex h-4 flex-wrap items-center gap-x-1.5 overflow-hidden text-[12px] leading-4 tabular-nums" data-file-header-counts="">
+            {additions > 0 && <span className="text-success">+{formatCount(additions)}</span>}
+            {deletions > 0 && <span className="text-destructive">−{formatCount(deletions)}</span>}
+            {status && <FileStatusLetter status={status} oldPath={oldPath} />}
+            {isGenerated && (
+              <span
+                data-pn-generated-badge
+                className="flex-none rounded-sm border border-border/60 bg-muted/60 px-1.5 py-0.5 text-xs font-medium leading-none text-muted-foreground"
+                title="Marked linguist-generated in .gitattributes"
+              >
+                generated
+              </span>
+            )}
+          </span>
+        )}
+      </div>
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
           extraItems={() => [
-            ...(foldedNow() && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
-            ...(foldedNow() && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
+            ...(tinyNow() && showStageControl && canStage && onStage ? [{ label: isStaged ? 'Unstage this file' : 'Stage this file', onSelect: onStage }] : []),
+            ...(tinyNow() && onFileComment ? [{ label: 'Comment on this file', onSelect: () => headerRef.current && onFileComment(headerRef.current) }] : []),
             ...(tinyNow() && onEditFile && !isEditing && !editDisabledReason ? [{ label: 'Edit to suggest a change', onSelect: onEditFile }] : []),
             ...(state?.onOpenToSide ? [{ label: 'Open to the side', onSelect: () => state.onOpenToSide!(filePath), icon: <OpenToSideIcon /> }] : []),
           ]}

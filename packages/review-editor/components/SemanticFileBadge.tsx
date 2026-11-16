@@ -7,6 +7,8 @@ import { PaneSlotContext } from '../workspace/paneContext';
 import { SemanticDiffRows, lineSelectionForChange } from '../dock/panels/semanticDiffShared';
 
 const CLOSE_DELAY_MS = 140;
+const BADGE = '@max-[479px]/file-header:hidden flex-none w-16 h-6 inline-flex items-center justify-center gap-1 rounded font-mono text-[11px] leading-none text-muted-foreground';
+const COUNT = 'w-[3ch] py-px rounded-sm tabular-nums text-center';
 
 export function fileSemanticChanges(all: readonly SemanticDiffChange[] | undefined, filePath: string): SemanticDiffChange[] {
   return all ? all.filter((change) => change.filePath === filePath) : [];
@@ -18,7 +20,20 @@ export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) 
   const changes = useMemo(() => fileSemanticChanges(state?.semanticChanges, filePath), [state?.semanticChanges, filePath]);
   const [open, setOpen] = useState(false);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  if (!state || changes.length === 0) return null;
+  if (!state?.semanticDiffAvailable) return null;
+  if (changes.length === 0) {
+    const pending = state.semanticChanges === undefined;
+    return (
+      <span
+        title={pending ? 'Semantic changes are still being worked out' : 'No semantic changes in this file'}
+        data-semantic-file-badge={pending ? 'pending' : 0}
+        className={`${BADGE} opacity-50`}
+      >
+        <span className="font-semibold tracking-[0.02em]">sem</span>
+        <span className={COUNT}>{pending ? '–' : 0}</span>
+      </span>
+    );
+  }
 
   const cancelClose = () => {
     if (closeTimer.current) clearTimeout(closeTimer.current);
@@ -56,12 +71,12 @@ export const SemanticFileBadge: React.FC<{ filePath: string }> = ({ filePath }) 
             title={`${count} semantic change${count === 1 ? '' : 's'} in this file`}
             aria-label={`Semantic changes for ${filePath}: ${count}`}
             data-semantic-file-badge={count}
-            className="@max-[479px]/file-header:hidden flex-none h-6 inline-flex items-center gap-1 px-1.5 rounded font-mono text-[11px] leading-none text-muted-foreground transition-colors hover:text-foreground hover:bg-muted data-[popup-open]:text-foreground data-[popup-open]:bg-muted"
+            className={`${BADGE} transition-colors hover:text-foreground hover:bg-muted data-[popup-open]:text-foreground data-[popup-open]:bg-muted`}
           />
         }
       >
         <span className="font-semibold tracking-[0.02em]">sem</span>
-        <span className="min-w-[1.5em] px-1 py-px rounded-sm bg-primary/15 text-primary tabular-nums text-center">{count}</span>
+        <span className={`${COUNT} bg-primary/15 text-primary`}>{count}</span>
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Positioner align="end" sideOffset={6} className="z-[100]">

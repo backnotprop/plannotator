@@ -5,6 +5,7 @@ import type { IDockviewHeaderActionsProps } from 'dockview-react';
 import { configStore } from '@plannotator/ui/config';
 import { ReviewDockRightActions } from './ReviewDockRightActions';
 import { ReviewStateProvider, type ReviewState } from './ReviewStateContext';
+import { REVIEW_CODE_NAV_PANEL_ID } from './reviewPanelTypes';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -83,8 +84,8 @@ describe('ReviewDockRightActions', () => {
     expect(popup.textContent).not.toContain('Unified');
   });
 
-  test.skipIf(!hasDom)('back and forward sit in the header from load, disabled until the first jump, so the cluster never moves', async () => {
-    const render = async (canBack: boolean) => {
+  test.skipIf(!hasDom)('back and forward sit in the header from load, disabled until the first jump, and keep their place on the References tab, so the cluster never moves', async () => {
+    const render = async (canBack: boolean, panel: string | null = null) => {
       const state = {
         diffStyle: 'split',
         onDiffStyleChange: () => {},
@@ -95,7 +96,7 @@ describe('ReviewDockRightActions', () => {
       } as unknown as ReviewState;
       await act(async () => root?.render(
         <ReviewStateProvider value={state}>
-          <ReviewDockRightActions {...({ activePanel: null } as unknown as IDockviewHeaderActionsProps)} />
+          <ReviewDockRightActions activePanel={panel ? { id: panel } : null} />
         </ReviewStateProvider>,
       ));
     };
@@ -111,9 +112,14 @@ describe('ReviewDockRightActions', () => {
     expect(group.className).not.toContain('invisible');
     await render(true);
     expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(false);
+    await render(true, REVIEW_CODE_NAV_PANEL_ID);
+    const kept = host.querySelector<HTMLElement>('[data-jump-history]')!;
+    expect(kept.className).toContain('invisible');
+    expect(kept.querySelectorAll('[data-nav-history]')).toHaveLength(2);
+    expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(true);
   });
 
-  test.skipIf(!hasDom)('Collapse all files sits just left of Split/Unified while All changes is shown; elsewhere its place stays empty so the bar never moves', async () => {
+  test.skipIf(!hasDom)('Collapse all files sits just left of Split/Unified while All changes is shown in either pane; elsewhere its place stays empty so the bar never moves', async () => {
     const onToggleAllFilesCollapsed = mock(() => {});
     const render = async (panel: string, collapsed: boolean) => {
       const state = {
@@ -140,6 +146,16 @@ describe('ReviewDockRightActions', () => {
     expect(onToggleAllFilesCollapsed).toHaveBeenCalledTimes(1);
     await render('review-all-files', true);
     expect(host.querySelector('[data-header-collapse-all-files]')!.getAttribute('aria-label')).toBe('Expand all files');
+    await act(async () => root?.render(
+      <ReviewStateProvider value={{ diffStyle: 'split', onDiffStyleChange: () => {}, isCompactTouchLayout: false, allFilesAllCollapsed: false, onToggleAllFilesCollapsed } as unknown as ReviewState}>
+        <ReviewDockRightActions activePanel={{ id: 'review-diff' }} allChangesShown />
+      </ReviewStateProvider>,
+    ));
+    const otherPane = host.querySelector<HTMLButtonElement>('[data-header-collapse-all-files]')!;
+    expect(otherPane.disabled).toBe(false);
+    await act(async () => otherPane.click());
+    expect(onToggleAllFilesCollapsed).toHaveBeenCalledTimes(2);
+    expect(otherPane.hasAttribute('aria-pressed')).toBe(false);
     await render('review-diff', false);
     const hidden = host.querySelector<HTMLButtonElement>('[data-header-collapse-all-files]')!;
     expect(hidden.disabled).toBe(true);

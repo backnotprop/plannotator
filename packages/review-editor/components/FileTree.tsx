@@ -31,6 +31,7 @@ import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from '.
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
 import { COMPACT_ROWS_WIDTH, countColumnVars, compactRowsProps } from './FileRowBits';
 import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
+import { useReviewStateOptional } from '../dock/ReviewStateContext';
 
 interface FileTreeProps {
   controlsNotice?: React.ReactNode;
@@ -369,6 +370,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
   }, [repoFoldersOpen]);
   const scrollAreaRef = useRef<OverlayScrollAreaHandle>(null);
 
+  const reviewState = useReviewStateOptional();
+  const phoneFolds = !!reviewState?.isCompactTouchLayout && !!isAllFilesActive;
   const panelWidth = width ?? 256;
   const totalAdditions = files.reduce((sum, file) => sum + file.additions, 0);
   const totalDeletions = files.reduce((sum, file) => sum + file.deletions, 0);
@@ -386,6 +389,8 @@ export const FileTree: React.FC<FileTreeProps> = ({
       collapseDisabled={showAllFiles ? !repoReady : allFolderPaths.length === 0}
       onToggleHideViewed={onToggleHideViewed}
       hideViewedFiles={hideViewedFiles}
+      onToggleFilesCollapsed={phoneFolds ? reviewState!.onToggleAllFilesCollapsed : undefined}
+      filesCollapsed={reviewState?.allFilesAllCollapsed}
       viewedCount={viewedFiles.size}
       totalCount={files.length}
       onCopyRawDiff={onCopyRawDiff}

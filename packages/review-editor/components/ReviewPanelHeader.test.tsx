@@ -391,7 +391,6 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
     // The button is named by its words and count alone; the dot is decoration.
     expect(all.textContent).toBe('All files8');
     expect(all.querySelector('[data-repo-listing-dot="live"]')?.getAttribute('aria-hidden')).toBe('true');
-    expect(all.title).toBe('Every file of the repository at the revision the diff reads (8 files). The green dot: the list updates live as files change on disk');
     const status = el.querySelector('[role="status"][data-repo-listing-status="live"]')!;
     expect(status.getAttribute('aria-live')).toBe('polite');
     expect(status.textContent).toBe('All files is live: 1 added, 1 edited on disk since the diff.');
@@ -407,6 +406,26 @@ describe.skipIf(!hasDom)('ScopeSwitch (Changes | All files)', () => {
       />,
     );
     expect(el.querySelector('[data-repo-listing-status="partial"]')?.textContent).toBe('Part of the repository is listed (the platform stopped early).');
+  });
+
+  test('the All pill tooltip explains its mark, and says something different for a live and a partial listing', async () => {
+    const titleFor = async (repo: ReturnType<typeof readyRepo>) => {
+      const el = await mount(<ScopeSwitch model={model({ scope: { value: 'all', onSelect: () => {}, changed: 4, all: 8 }, repo })} width={256} />);
+      const title = el.querySelector<HTMLButtonElement>('[data-tree-scope="all"]')!.title;
+      await act(async () => root?.unmount());
+      host?.remove();
+      root = null;
+      host = null;
+      return title;
+    };
+    const quiet = await titleFor(readyRepo({ live: false }));
+    const live = await titleFor(readyRepo());
+    const partial = await titleFor(readyRepo({ live: false, truncated: true }));
+    expect(live.startsWith(quiet)).toBe(true);
+    expect(partial.startsWith(quiet)).toBe(true);
+    expect(live.length).toBeGreaterThan(quiet.length);
+    expect(partial.length).toBeGreaterThan(quiet.length);
+    expect(live).not.toBe(partial);
   });
 
   test('neither label is cut at the default 256 px panel nor at the 160 px minimum: the switch shortens its words instead', async () => {

@@ -249,7 +249,7 @@ test("a file header's sem menu lists that file's changes on hover, and a row lan
     await shot(page, 'file-menu');
     await menu.locator('.semantic-diff-row').filter({ hasText: 'saveUser' }).first().click();
     await expect(menu).toHaveCount(0);
-    await expect(header).toBeInViewport({ timeout: 10_000 });
+    await expect(page.locator('[data-line][data-selected-line]').filter({ hasText: 'saveUser' }).first()).toBeInViewport({ timeout: 10_000 });
     await context.close();
   } finally {
     await session.close();
@@ -288,6 +288,13 @@ test('on a 390 px phone nothing semantic runs past the window, and the Semantic 
     }).length);
     expect(overflow).toBe(0);
     await shot(page, 'phone');
+    const openNavigator = page.getByRole('button', { name: 'Open review navigation' });
+    if (await openNavigator.count()) await openNavigator.click();
+    await page.locator('[data-review-sidebar]').getByText('Semantic diff', { exact: true }).first().click();
+    await expect(page.locator('[data-pane-tab="review-semantic-diff"]')).toHaveAttribute('aria-selected', 'true');
+    const tab = page.locator('[data-pane] .semantic-diff-panel');
+    await expect(tab.locator('.semantic-diff-row').filter({ hasText: 'saveUser' }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(tab.getByText('rate -> taxRate')).toBeVisible();
     await context.close();
   } finally {
     await session.close();
