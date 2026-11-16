@@ -137,6 +137,7 @@ import {
   type ThemeConfig,
 } from "@plannotator/shared/config";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
+import { decodePathSegment } from "@plannotator/shared/path-segment";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
 import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
@@ -6623,7 +6624,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const initiativeAt = /^\/api\/inbox\/initiatives\/([^/]+)$/.exec(path);
       if (initiativeAt) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        const id = decodeURIComponent(initiativeAt[1]!);
+        const id = decodePathSegment(initiativeAt[1]!);
+        if (id === null) return json({ error: "Bad request.", code: "bad_request" }, 400);
         if (!isInboxId("ini", id)) throw new InboxError("validation_error", "An initiative id (ini_).", { field: "initiative" });
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);

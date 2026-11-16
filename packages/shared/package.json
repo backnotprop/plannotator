@@ -134,6 +134,7 @@
     "./live-proxy-core": "./live-proxy-core.ts",
     "./loopback-host": "./loopback-host.ts",
     "./request-origin": "./request-origin.ts",
+    "./path-segment": "./path-segment.ts",
     "./ref-cards": "./ref-cards.ts",
     "./ref-cards-node": "./ref-cards-node.ts",
     "./inbox-pull-close": "./inbox-pull-close.ts",
