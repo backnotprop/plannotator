@@ -13,6 +13,7 @@ export function RailSheet({
   triggerTitle = "Sidebar",
   title = "Pages",
   description = "The pages in this collection.",
+  docked,
 }: {
   head: ReactNode;
   children: ReactNode;
@@ -21,8 +22,14 @@ export function RailSheet({
   triggerTitle?: string;
   title?: string;
   description?: string;
+  /**
+   * `false` offers the sheet at any width, for a docked rail that does not fit the row
+   * (pass `DocumentRailShell`'s `onFitChange` result). Below 768px the sheet always shows.
+   */
+  docked?: boolean;
 }) {
-  const supportsDockedRail = useSupportsDockedRail();
+  const wide = useSupportsDockedRail();
+  const supportsDockedRail = wide && docked !== false;
   const [open, setOpen] = useState(false);
   useEffect(() => {
     if (supportsDockedRail) setOpen(false);

@@ -25,10 +25,11 @@ export function Breadcrumbs({
 }: {
   readonly collectionName: string | null;
   readonly collectionLink: ReactElement;
-  readonly path: string;
+  /** The file on screen; leave it out on the collection's own page. */
+  readonly path?: string | null;
   readonly root?: CrumbRoot | null;
 }) {
-  const filename = path.split("/").at(-1) ?? path;
+  const filename = path == null ? null : (path.split("/").at(-1) ?? path);
   const containerRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const [collapsed, setCollapsed] = useState<"none" | "parents">("none");
@@ -70,8 +71,12 @@ export function Breadcrumbs({
           </>
         )}
         <span className="font-medium">{collectionName}</span>
-        <span className="text-frame-xs">/</span>
-        <span className="font-medium">{filename}</span>
+        {filename !== null && (
+          <>
+            <span className="text-frame-xs">/</span>
+            <span className="font-medium">{filename}</span>
+          </>
+        )}
       </div>
       <div className="flex min-w-0 items-center gap-1.5">
         {root !== null && collapsed === "none" && (
@@ -93,6 +98,7 @@ export function Breadcrumbs({
           <TooltipTrigger
             render={cloneElement(collectionLink, {
               "aria-label": collectionName,
+              "aria-current": filename === null ? "page" : undefined,
               className: cn(
                 "whitespace-nowrap rounded-frame-structure font-sans text-frame-sm font-medium hover:underline",
                 collapsed === "parents"
@@ -106,26 +112,30 @@ export function Breadcrumbs({
           </TooltipTrigger>
           <TooltipContent>{collectionName}</TooltipContent>
         </Tooltip>
-        <span className="shrink-0 text-frame-xs text-muted-foreground" aria-hidden="true">
-          /
-        </span>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span
-                tabIndex={0}
-                aria-current="page"
-                className={cn(
-                  "min-w-0 flex-1 truncate rounded-frame-structure font-sans text-frame-sm font-medium text-foreground",
-                  FOCUS_RING,
-                )}
-              />
-            }
-          >
-            {filename}
-          </TooltipTrigger>
-          <TooltipContent>{path}</TooltipContent>
-        </Tooltip>
+        {filename !== null && path != null && (
+          <>
+            <span className="shrink-0 text-frame-xs text-muted-foreground" aria-hidden="true">
+              /
+            </span>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span
+                    tabIndex={0}
+                    aria-current="page"
+                    className={cn(
+                      "min-w-0 flex-1 truncate rounded-frame-structure font-sans text-frame-sm font-medium text-foreground",
+                      FOCUS_RING,
+                    )}
+                  />
+                }
+              >
+                {filename}
+              </TooltipTrigger>
+              <TooltipContent>{path}</TooltipContent>
+            </Tooltip>
+          </>
+        )}
       </div>
     </div>
   );

@@ -221,6 +221,7 @@ export function PortoLaunchPlanExample() {
               currentNumber={5}
               versionsOpen={versionsOpen}
               onToggleVersions={setVersionsOpen}
+              count={ENTRIES.length}
               approved={
                 <span className="text-frame-xs text-muted-foreground">
                   Approved by Alex Rivera

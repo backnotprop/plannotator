@@ -25,7 +25,14 @@ export interface FrameVersionEntry {
   readonly linked: boolean;
   readonly sameAsOlder: boolean;
   readonly approval: string | null;
+  /** A host's decision on this version beside `approval`, for example "Changes asked" (negative). */
+  readonly decision?: VersionDecision | null;
   readonly canCompare: boolean;
+}
+
+export interface VersionDecision {
+  readonly label: string;
+  readonly tone: "positive" | "negative" | "neutral";
 }
 
 export type VersionItem =

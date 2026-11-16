@@ -44,6 +44,10 @@ export function ReadingLine({
   onToggleVersions,
   approved = null,
   older = null,
+  comparing = null,
+  count = null,
+  versionAt = "end",
+  start = null,
 }: {
   readonly shownNumber: number | null;
   readonly currentNumber: number | null;
@@ -51,20 +55,72 @@ export function ReadingLine({
   readonly onToggleVersions: ((next: boolean) => void) | null;
   readonly approved?: ReactNode;
   readonly older?: OlderVersion | null;
+  /** While two versions are compared, the host's words for it (for example "Comparing v2 with v6") replace "Reading". */
+  readonly comparing?: string | null;
+  /** How many versions there are, shown on the versions toggle. */
+  readonly count?: number | null;
+  /**
+   * Where the version words and toggle sit: "end" (default), at the right next to the panel
+   * they open, with `approved` on the start side; or "start", with `approved` at the right.
+   */
+  readonly versionAt?: "start" | "end";
+  /** Content at the start of the line, before everything else (a project name, a decision mark). */
+  readonly start?: ReactNode;
 }) {
   const words = readingWords(shownNumber, currentNumber, older !== null);
-  if (older === null && words.tag === null && approved === null) return null;
-  const inner = (
-    <>
-      Reading{" "}
-      {words.tag !== null && (
-        <span data-page-version="" className="font-medium text-foreground">
-          {words.tag}
+  if (older === null && words.tag === null && approved === null && comparing === null && start === null) return null;
+  const end = versionAt === "end";
+  const counted =
+    count === null || onToggleVersions === null ? null : (
+      <span data-reading-versions-count="" className="ml-1.5 tabular-nums text-frame-tertiary">
+        {count}
+      </span>
+    );
+  const inner =
+    comparing !== null ? (
+      <>
+        <span data-reading-comparing="" className="text-foreground">
+          {comparing}
         </span>
-      )}
-      {words.rest}
-    </>
-  );
+        {counted}
+      </>
+    ) : (
+      <>
+        Reading{" "}
+        {words.tag !== null && (
+          <span data-page-version="" className="font-medium text-foreground">
+            {words.tag}
+          </span>
+        )}
+        {words.rest}
+        {counted}
+      </>
+    );
+  const spoken = [
+    comparing === null ? words.spoken : `Versions. ${comparing}`,
+    count === null ? null : `${count} ${count === 1 ? "version" : "versions"}`,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(". ");
+  const toggle =
+    onToggleVersions === null ? (
+      <span>{inner}</span>
+    ) : (
+      <button
+        type="button"
+        data-reading-versions=""
+        aria-expanded={versionsOpen}
+        aria-label={spoken}
+        onClick={() => onToggleVersions(!versionsOpen)}
+        className={cn(
+          "relative rounded-frame-structure hover:text-foreground",
+          "max-md:after:absolute max-md:after:-inset-y-3 max-md:after:-inset-x-1 max-md:after:content-['']",
+          FOCUS_RING,
+        )}
+      >
+        {inner}
+      </button>
+    );
   return (
     <div
       data-reading-line={older === null ? "newest" : "older"}
@@ -74,27 +130,22 @@ export function ReadingLine({
         older !== null && "border-b border-border bg-muted/40",
       )}
     >
-      <span className={cn("flex min-w-0 flex-wrap items-baseline gap-x-2", older !== null && "max-md:basis-full")}>
-        {onToggleVersions === null ? (
-          <span>{inner}</span>
-        ) : (
-          <button
-            type="button"
-            data-reading-versions=""
-            aria-expanded={versionsOpen}
-            aria-label={words.spoken}
-            onClick={() => onToggleVersions(!versionsOpen)}
-            className={cn(
-              "relative rounded-frame-structure hover:text-foreground",
-              "max-md:after:absolute max-md:after:-inset-y-3 max-md:after:-inset-x-1 max-md:after:content-['']",
-              FOCUS_RING,
-            )}
-          >
-            {inner}
-          </button>
-        )}
-        {older !== null && <span role="status">You are looking at an older version.</span>}
-      </span>
+      {start !== null && (
+        <span data-reading-start="" className="flex min-w-0 items-center gap-2">
+          {start}
+        </span>
+      )}
+      {end ? (
+        <>
+          {older === null && approved !== null && <span className="flex min-w-0">{approved}</span>}
+          {older !== null && <span role="status">You are looking at an older version.</span>}
+        </>
+      ) : (
+        <span className={cn("flex min-w-0 flex-wrap items-baseline gap-x-2", older !== null && "max-md:basis-full")}>
+          {toggle}
+          {older !== null && <span role="status">You are looking at an older version.</span>}
+        </span>
+      )}
       {older !== null && (
         <>
           {older.actions !== undefined && older.actions !== null && (
@@ -118,7 +169,15 @@ export function ReadingLine({
           </span>
         </>
       )}
-      {older === null && approved !== null && <span className="flex min-w-0 md:ml-auto">{approved}</span>}
+      {!end && older === null && approved !== null && <span className="flex min-w-0 md:ml-auto">{approved}</span>}
+      {end && (
+        <span
+          data-reading-version-end=""
+          className={cn("flex min-w-0 items-baseline gap-x-2", older === null ? "ml-auto" : "max-md:ml-auto")}
+        >
+          {toggle}
+        </span>
+      )}
     </div>
   );
 }

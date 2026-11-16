@@ -795,3 +795,4 @@ packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
 packages/inbox/agents/projectFaceMarks.test.tsx
 packages/ui/components/frame/frame.dom.test.tsx
+packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx

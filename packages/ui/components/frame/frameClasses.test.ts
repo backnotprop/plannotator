@@ -11,6 +11,7 @@ import { dirname, join, resolve } from 'node:path';
 import { compile } from 'tailwindcss';
 import ts from 'typescript';
 import { cn } from './lib/utils';
+import { fileIcon } from './rail/fileIcons';
 
 const folder = import.meta.dir;
 const frameCss = readFileSync(join(folder, 'frame.css'), 'utf8');
@@ -145,7 +146,8 @@ describe('the frame cn', () => {
 });
 
 describe('theme colours opt-in', () => {
-  const OPT_IN_TOKENS = ['--frame-border-subtle', '--frame-selected', '--frame-surface-hover'];
+  const MIXED_TOKENS = ['--frame-border-subtle', '--frame-selected', '--frame-surface-hover'];
+  const OPT_IN_TOKENS = [...MIXED_TOKENS, '--frame-selected-fg'].sort();
 
   /** The custom properties a rule with exactly this selector list sets in frame.css. */
   function declared(selector: string): Record<string, string> {
@@ -155,16 +157,35 @@ describe('theme colours opt-in', () => {
     return Object.fromEntries([...body.matchAll(/(--[\w-]+):\s*([^;]+);/g)].map(([, name, value]) => [name, value.trim()]));
   }
 
-  test('dark and light each derive the same three tokens from the theme, and the fixed defaults stay on :root', () => {
+  test('dark and light each derive the same tokens from the theme, selected text on the foreground, and the fixed defaults stay on :root', () => {
     const dark = declared('[data-frame-colors="theme"]');
     const light = declared('.light[data-frame-colors="theme"],\n.light [data-frame-colors="theme"]');
     for (const tokens of [dark, light]) {
       expect(Object.keys(tokens).sort()).toEqual(OPT_IN_TOKENS);
-      for (const value of Object.values(tokens)) {
-        expect(value).toMatch(/^color-mix\(in oklch, var\(--(primary|foreground)\) [\d.]+%, transparent\)$/);
+      for (const name of MIXED_TOKENS) {
+        expect(tokens[name]).toMatch(/^color-mix\(in oklch, var\(--(primary|foreground)\) [\d.]+%, transparent\)$/);
       }
+      // Only the fill carries the accent: a theme's primary as text can fall under 4.5:1.
+      expect(tokens['--frame-selected-fg']).toBe('var(--foreground)');
     }
     const root = declared(':root');
-    for (const name of OPT_IN_TOKENS) expect(root[name]).toMatch(/^oklch\(/);
+    for (const name of MIXED_TOKENS) expect(root[name]).toMatch(/^oklch\(/);
+    expect(root['--frame-selected-fg']).toBe('var(--primary)');
+  });
+});
+
+describe('layout and icons for host requests', () => {
+  test('the rail tab column is not drawn as a card', () => {
+    expect(frameCss).toMatch(/\[data-frame-row\] > :not\([^)]*\[data-rail-flags\][^)]*\)/);
+  });
+
+  test('html, mermaid and graphviz files get their own neutral marks, by kind or by extension', () => {
+    const plain = fileIcon({ path: 'notes.txt' });
+    const marks = ['html', 'mermaid', 'graphviz'].map((kind) => fileIcon({ kind }));
+    for (const mark of marks) expect(mark).not.toBe(plain);
+    expect(new Set(marks).size).toBe(3);
+    expect(fileIcon({ path: 'site/index.html' })).toBe(marks[0]);
+    expect(fileIcon({ path: 'flow.mmd' })).toBe(marks[1]);
+    expect(fileIcon({ path: 'graph.dot' })).toBe(marks[2]);
   });
 });

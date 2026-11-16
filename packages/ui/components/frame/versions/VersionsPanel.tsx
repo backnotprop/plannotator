@@ -1,4 +1,4 @@
-import { ChevronDown, CircleCheck, X } from "lucide-react";
+import { ChevronDown, Circle, CircleAlert, CircleCheck, X } from "lucide-react";
 import { cloneElement, useId, useMemo, useState, type ReactElement, type ReactNode } from "react";
 
 import { Button } from "../primitives/button";
@@ -18,6 +18,7 @@ import {
   versionTag,
   versionTitle,
   type VersionAuthor,
+  type VersionDecision,
   type FrameVersionEntry,
 } from "./versionsModel";
 
@@ -56,6 +57,7 @@ export function VersionActions({
   soft = false,
   onCompare,
   onCopyLink,
+  actions,
 }: {
   readonly version: string;
   readonly number: number | null;
@@ -64,6 +66,8 @@ export function VersionActions({
   readonly soft?: boolean;
   readonly onCompare: () => void;
   readonly onCopyLink: () => void;
+  /** The host's own actions, beside "Compare". */
+  readonly actions?: ReactNode;
 }) {
   const named = number === null ? "this version" : `version ${number}`;
   const newest = currentNumber === null ? "the newest version" : `version ${currentNumber}`;
@@ -97,6 +101,7 @@ export function VersionActions({
             {compareWords}
           </button>
         ))}
+      {actions}
       <button
         type="button"
         data-version-copy-link=""
@@ -121,6 +126,29 @@ export interface VersionRowPlace {
   readonly exactMatch?: boolean;
   readonly onRowOpen?: (entry: FrameVersionEntry, phone: boolean) => void;
   readonly explainAgent?: (agentKind: string) => string | null;
+  /** A line under a version's row (a host note or link); not inside the row's link. */
+  readonly note?: (entry: FrameVersionEntry) => ReactNode;
+  /** `false` hides the author line everywhere, for a host with no authors. Default `true`. */
+  readonly authors?: boolean;
+}
+
+const DECISION_ICON = {
+  positive: { Icon: CircleCheck, className: "text-success" },
+  negative: { Icon: CircleAlert, className: "text-destructive" },
+  neutral: { Icon: Circle, className: "text-muted-foreground" },
+} as const;
+
+function Decision({ decision }: { readonly decision: VersionDecision }) {
+  const { Icon, className } = DECISION_ICON[decision.tone];
+  return (
+    <span
+      data-version-decision={decision.tone}
+      className="flex min-w-0 items-center gap-1.5 text-frame-xs text-foreground"
+    >
+      <Icon className={cn("size-3.5 shrink-0", className)} aria-hidden="true" />
+      <span className="truncate">{decision.label}</span>
+    </span>
+  );
 }
 
 function rowName(entry: FrameVersionEntry, who: string): string {
@@ -132,6 +160,7 @@ function rowName(entry: FrameVersionEntry, who: string): string {
     whenWords(entry.createdAt),
     entry.sameAsOlder ? "no change to the text" : null,
     entry.approval === null ? null : `approved by ${entry.approval}`,
+    entry.decision == null ? null : entry.decision.label,
   ]
     .filter((part): part is string => part !== null)
     .join(", ");
@@ -167,12 +196,14 @@ function RowLines({
   entry,
   nested,
   explainAgent,
+  authors,
 }: {
   readonly entry: FrameVersionEntry;
   readonly nested: boolean;
   readonly explainAgent?: (agentKind: string) => string | null;
+  readonly authors: boolean;
 }) {
-  const who = nested ? "" : authorWords(entry.author);
+  const who = nested || !authors ? "" : authorWords(entry.author);
   const detail = [who === "" ? null : who, entry.sameAsOlder ? "No change to the text" : null]
     .filter((part): part is string => part !== null)
     .join(" · ");
@@ -190,7 +221,7 @@ function RowLines({
           </span>
         )}
       </span>
-      {(detail !== "" || !nested) && (
+      {(detail !== "" || (!nested && authors)) && (
         <Who author={entry.author} detail={detail} explainAgent={explainAgent} />
       )}
       {entry.approval !== null && (
@@ -202,6 +233,7 @@ function RowLines({
           <span className="truncate">Approved by {entry.approval}</span>
         </span>
       )}
+      {entry.decision != null && <Decision decision={entry.decision} />}
     </>
   );
 }
@@ -216,7 +248,9 @@ function VersionRow({
   readonly nested: boolean;
 }) {
   const isMobile = useIsMobile();
-  const name = rowName(entry, nested ? "" : authorWords(entry.author));
+  const authors = place.authors !== false;
+  const name = rowName(entry, nested || !authors ? "" : authorWords(entry.author));
+  const note = place.note?.(entry);
   const link = entry.linked
     ? place.rowLink(entry, { phone: isMobile, exact: place.exactMatch ?? true })
     : null;
@@ -241,12 +275,17 @@ function VersionRow({
           "aria-label": name,
           className: cn(ROW, entry.viewing ? SELECTED : HOVER_QUIET, FOCUS_RING),
           children: (
-            <RowLines entry={entry} nested={nested} explainAgent={place.explainAgent} />
+            <RowLines entry={entry} nested={nested} explainAgent={place.explainAgent} authors={authors} />
           ),
         } as Record<string, unknown>)
       ) : (
         <div role="group" aria-label={name} className={cn(ROW, entry.viewing && SELECTED)}>
-          <RowLines entry={entry} nested={nested} explainAgent={place.explainAgent} />
+          <RowLines entry={entry} nested={nested} explainAgent={place.explainAgent} authors={authors} />
+        </div>
+      )}
+      {note !== undefined && note !== null && (
+        <div data-version-note="" className="px-3 pb-2 pt-1 text-frame-xs text-muted-foreground">
+          {note}
         </div>
       )}
     </li>
@@ -270,11 +309,11 @@ function FoldRow({
   const newest = entries[0]!;
   const onScreen = entries.find((entry) => entry.viewing);
   const hidden = holdsViewing && !open && onScreen !== undefined;
-  const who = authorWords(newest.author);
-  const summary = `${who} · ${entries.length} saves`;
+  const who = place.authors === false ? "" : authorWords(newest.author);
+  const summary = who === "" ? `${entries.length} saves` : `${who} · ${entries.length} saves`;
   const name = [
     foldTitle(entries),
-    `${who}, ${entries.length} saves`,
+    who === "" ? `${entries.length} saves` : `${who}, ${entries.length} saves`,
     whenWords(newest.createdAt),
     hidden && onScreen !== undefined ? `${versionTitle(onScreen)} on screen` : null,
   ]
@@ -339,6 +378,7 @@ export function VersionsPanel({
   onLoadMore,
   onScreenActions,
   onClose,
+  footer,
 }: {
   status: "pending" | "error" | "success";
   entries: readonly FrameVersionEntry[];
@@ -349,6 +389,8 @@ export function VersionsPanel({
   onLoadMore?: () => void;
   onScreenActions?: (onScreen: FrameVersionEntry, compared: FrameVersionEntry | null) => ReactNode;
   onClose?: () => void;
+  /** Under the list, after "Show older versions". */
+  footer?: ReactNode;
 }) {
   const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set());
   const items = useMemo(() => versionItems(entries, opened), [entries, opened]);
@@ -450,6 +492,11 @@ export function VersionsPanel({
           >
             {loadingMore ? "Loading older versions" : "Show older versions"}
           </button>
+        )}
+        {footer !== undefined && footer !== null && (
+          <div data-versions-footer="" className="mt-3 px-3">
+            {footer}
+          </div>
         )}
       </div>
     </aside>

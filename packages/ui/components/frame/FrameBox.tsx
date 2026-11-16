@@ -5,21 +5,30 @@ import { cn } from "./lib/utils";
 export function FrameGround({
   tone,
   colors = "fixed",
+  as = "main",
   children,
 }: {
   tone?: "plain" | "tinted";
   /** "theme": selected, hover and subtle border follow the theme's primary and foreground (frame.css). */
   colors?: "fixed" | "theme";
+  /** "main" (default) fills the viewport and holds the page's <main>; "div" fills its container, for a host that has its own. */
+  as?: "main" | "div";
   children: ReactNode;
 }) {
+  const Pane = as;
   return (
-    <div data-frame-ground="" data-frame-tone={tone} data-frame-colors={colors} className="flex h-svh w-full overflow-hidden">
-      <main
+    <div
+      data-frame-ground=""
+      data-frame-tone={tone}
+      data-frame-colors={colors}
+      className={cn("flex w-full overflow-hidden", as === "main" ? "h-svh" : "h-full")}
+    >
+      <Pane
         data-frame-pane=""
         className="relative flex-1 overflow-hidden bg-card md:my-2 md:mr-2 md:ml-2 md:rounded-frame-pane md:shadow-frame-pane"
       >
         {children}
-      </main>
+      </Pane>
     </div>
   );
 }

@@ -24,6 +24,9 @@ export function DocumentRailShell({
   onDrop,
   storage = DEFAULT_RAIL_STORAGE,
   storageKeys,
+  open,
+  onOpenChange,
+  onFitChange,
 }: {
   head: ReactNode;
   children: ReactNode;
@@ -36,9 +39,15 @@ export function DocumentRailShell({
   /** Where the open flag is kept. Default: the package's storage helper. */
   storage?: RailStorage;
   storageKeys?: Partial<RailStorageKeys>;
+  /** Controlled open state; leave unset for the remembered, uncontrolled rail. */
+  open?: boolean;
+  /** Every open or close request (the tab, the edge, a snap shut), controlled or not. */
+  onOpenChange?: (open: boolean) => void;
+  /** Whether the docked rail fits the row; while it does not, show `RailSheet` with `docked={false}`. */
+  onFitChange?: (fits: boolean) => void;
 }) {
   const keys = railStorageKeys(storageKeys);
-  const rail = useDocumentRailState(defaults, storage, keys.open);
+  const rail = useDocumentRailState(defaults, storage, keys.open, { open, onOpenChange });
   const railSnapCloseRef = useRef<() => void>(() => {});
   useEffect(() => {
     railSnapCloseRef.current = () => rail.setRailOpen(false);
@@ -54,6 +63,9 @@ export function DocumentRailShell({
     apply: (nextWidth) => railWidthApplyRef.current(nextWidth),
   });
   const fits = enabled && (fitsForWidth === undefined || fitsForWidth(tocResize.width));
+  useLayoutEffect(() => {
+    onFitChange?.(fits);
+  }, [onFitChange, fits]);
   const railMotion = useRailMotion(rail.railOpen && fits, tocResize.width);
   useEffect(() => {
     railWidthApplyRef.current = (nextWidth) => railMotion.width.set(nextWidth);
@@ -85,6 +97,13 @@ export function DocumentRailShell({
             side="left"
             onCollapse={() => rail.setRailOpen(false)}
             label="Collapse rail"
+            keyboard={{
+              value: tocResize.width,
+              min: RAIL_WIDTH.minWidth,
+              max: RAIL_WIDTH.maxWidth,
+              resizeTo: tocResize.resizeTo,
+              side: "left",
+            }}
           />
         </div>
       )}

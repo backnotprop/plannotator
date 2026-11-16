@@ -1,4 +1,4 @@
-import { Film } from "lucide-react";
+import { FileCode, Film, Network, Workflow } from "lucide-react";
 import type { ComponentType } from "react";
 
 export type FileGlyph = ComponentType<{ className?: string }>;
@@ -108,14 +108,20 @@ const FileIcon = glyph("file", [
 export { FolderIcon, FolderOpenIcon };
 
 const VideoIcon: FileGlyph = Film;
+const HtmlIcon: FileGlyph = FileCode;
+const MermaidIcon: FileGlyph = Workflow;
+const GraphvizIcon: FileGlyph = Network;
 
-export type FileIconKind = "markdown" | "image" | "pdf" | "video" | (string & {});
+export type FileIconKind = "markdown" | "image" | "pdf" | "video" | "html" | "mermaid" | "graphviz" | (string & {});
 
 const KIND_GLYPH: Partial<Record<FileIconKind, FileGlyph>> = {
   markdown: MarkdownIcon,
   image: ImageIcon,
   pdf: FileTextIcon,
   video: VideoIcon,
+  html: HtmlIcon,
+  mermaid: MermaidIcon,
+  graphviz: GraphvizIcon,
 };
 
 const EXTENSION_GLYPH: Readonly<Record<string, FileGlyph>> = {
@@ -147,6 +153,12 @@ const EXTENSION_GLYPH: Readonly<Record<string, FileGlyph>> = {
   tgz: FileZipIcon,
   rar: FileZipIcon,
   "7z": FileZipIcon,
+  html: HtmlIcon,
+  htm: HtmlIcon,
+  mmd: MermaidIcon,
+  mermaid: MermaidIcon,
+  dot: GraphvizIcon,
+  gv: GraphvizIcon,
 };
 
 function extensionOf(path: string | undefined): string | null {
