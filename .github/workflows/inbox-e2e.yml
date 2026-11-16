@@ -246,6 +246,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
         run: bun run scripts/ci-e2e-reuse.ts plan
 

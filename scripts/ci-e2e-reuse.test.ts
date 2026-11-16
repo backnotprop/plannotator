@@ -364,7 +364,7 @@ describe('deciding the plan', () => {
   const files = specFiles();
   const times = specTimes();
   const current: Current = { blobs: Object.fromEntries(files.map((f) => [f, 'B'])), quarantine: Object.fromEntries(files.map((f) => [f, 'q'])), now: NOW };
-  const pr = { GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: 'o/r', HEAD_REPO: 'o/r', GITHUB_HEAD_REF: 'feat/x', GITHUB_RUN_ID: '100', PR_LABELS: '["ci:e2e"]' };
+  const pr = { GITHUB_EVENT_NAME: 'pull_request', GITHUB_REPOSITORY: 'o/r', HEAD_REPO: 'o/r', GITHUB_HEAD_REF: 'feat/x', GITHUB_RUN_ID: '100', PR_NUMBER: '17', PR_LABELS: '["ci:e2e"]' };
   const deps = (github: GitHub, key = () => 'K'): PlanDeps => ({ files, times, current, key, github: () => github, scratch: scratch('plan') });
   const [a, b] = files;
 
@@ -374,7 +374,7 @@ describe('deciding the plan', () => {
         id: 99,
         artifacts: {
           // Run 99 had left out a; a really ran in run 90, 20 hours ago.
-          'e2e-reuse-1': { key: 'K', passed: { [a!]: { blob: 'B', quarantine: 'q', run: '90', ranAt: hoursAgo(20) } } },
+          'e2e-reuse-1': { key: '17:K', passed: { [a!]: { blob: 'B', quarantine: 'q', run: '90', ranAt: hoursAgo(20) } } },
           'e2e-passed-1-1': { passed: { [b!]: { blob: 'B', quarantine: 'q', run: '99', ranAt: hoursAgo(1) } } },
         },
       },
@@ -382,13 +382,22 @@ describe('deciding the plan', () => {
     const { plan, reuse } = decidePlan(pr, deps(fakeGitHub(runs)));
     expect(plan.reused.sort()).toEqual([a!, b!].sort());
     expect(reuse).toEqual({
-      key: 'K',
+      key: '17:K',
       passed: { [a!]: { blob: 'B', quarantine: 'q', run: '90', ranAt: hoursAgo(20) }, [b!]: { blob: 'B', quarantine: 'q', run: '99', ranAt: hoursAgo(1) } },
     });
     // Five hours later run 90's pass of a is over a day old: a runs again, b is still left out.
     const later = decidePlan(pr, { ...deps(fakeGitHub([{ id: 101, artifacts: { 'e2e-reuse-1': reuse } }])), current: { ...current, now: NOW + 5 * 3600_000 } });
     expect(later.plan.specs).toContain(a!);
     expect(later.plan.reused).toEqual([b!]);
+  });
+
+  test('a new PR using the same branch and change cannot inherit the closed PR\'s pass', () => {
+    const earlier = decidePlan({ ...pr, PR_NUMBER: '17' }, deps(fakeGitHub([])));
+    const runs: FakeRun[] = [
+      { id: 99, artifacts: { 'e2e-reuse-1': earlier.reuse, 'e2e-passed-1-1': { passed: { [a!]: rec('B') } } } },
+    ];
+    expect(decidePlan({ ...pr, PR_NUMBER: '18' }, deps(fakeGitHub(runs))).plan.specs).toBeNull();
+    expect(decidePlan({ ...pr, PR_NUMBER: '17' }, deps(fakeGitHub(runs))).plan.reused).toEqual([a!]);
   });
 
   test('a failure in the lookup gives a full run and still keeps the key', () => {
@@ -400,7 +409,7 @@ describe('deciding the plan', () => {
     };
     const { plan, reuse } = decidePlan(pr, deps(broken));
     expect(plan).toMatchObject({ count: E2E_SHARDS, specs: null, why: 'the reuse lookup failed' });
-    expect(reuse).toEqual({ key: 'K', passed: {} });
+    expect(reuse).toEqual({ key: '17:K', passed: {} });
     const noKey = decidePlan(pr, deps(fakeGitHub([]), () => {
       throw new Error('git merge-base: no merge base');
     }));
@@ -408,8 +417,16 @@ describe('deciding the plan', () => {
     expect(noKey.reuse.key).toBe('');
   });
 
+  test('a PR event without a valid number runs every spec', () => {
+    const calls: string[] = [];
+    const result = decidePlan({ ...pr, PR_NUMBER: undefined }, deps(fakeGitHub([], 'o/r', calls)));
+    expect(result.plan).toMatchObject({ count: E2E_SHARDS, specs: null });
+    expect(result.reuse.key).toBe('');
+    expect(calls).toEqual([]);
+  });
+
   test('a scheduled run, a fork and the label never look at earlier runs', () => {
-    const reusable: FakeRun[] = [{ id: 99, artifacts: { 'e2e-reuse-1': { key: 'K', passed: Object.fromEntries(files.map((f) => [f, rec('B')])) } } }];
+    const reusable: FakeRun[] = [{ id: 99, artifacts: { 'e2e-reuse-1': { key: '17:K', passed: Object.fromEntries(files.map((f) => [f, rec('B')])) } } }];
     for (const env of [
       { GITHUB_EVENT_NAME: 'schedule' },
       { ...pr, HEAD_REPO: 'someone/r' },
@@ -445,6 +462,7 @@ describe('a full run, always', () => {
     }
     expect(wf.concurrency.group).toContain(`github.event.label.name != '${FULL_LABEL}'`);
     const planStep = wf.jobs.plan!.steps!.find((s) => s.run?.trim() === 'bun run scripts/ci-e2e-reuse.ts plan')!;
+    expect(planStep.env?.PR_NUMBER).toBe('${{ github.event.pull_request.number }}');
     expect(planStep.env?.PR_LABELS).toBe('${{ toJSON(github.event.pull_request.labels.*.name) }}');
   });
 });

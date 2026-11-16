@@ -330,8 +330,11 @@ export function decidePlan(env: Record<string, string | undefined>, deps: PlanDe
   } else {
     try {
       const reason = fullRunReason(env);
-      // The key is kept even for a full run, so the next run of the PR can reuse this one.
-      key = deps.key();
+      // A branch can be used for another PR after closure, with the same diff.
+      const prNumber = env.PR_NUMBER;
+      if (!prNumber || !/^[1-9][0-9]*$/.test(prNumber)) throw new Error('no valid PR_NUMBER');
+      // The key is kept even for a full run, so the next run of this PR can reuse it.
+      key = `${prNumber}:${deps.key()}`;
       if (!reason) {
         const repo = env.GITHUB_REPOSITORY;
         const headRef = env.GITHUB_HEAD_REF;
