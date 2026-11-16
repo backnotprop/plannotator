@@ -16,12 +16,12 @@
  * lowercased label, so it is the same on every machine; projects on screen that would draw the same letters in the
  * same hue are sorted by that key and each next one steps three hues round the wheel until it is free.
  */
-import { useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import type { AgentFace } from './faceChoices';
 import { HUES, LetterMark, hueOf, projectLetters, type Letters } from '../letterMarks';
 import { inboxAgentsFlat, inboxAgentsNow, onInboxAgentsSet } from '../agentsList';
-import { sessionProjectOf, useSessionProjects } from '../projectPictures';
+import { onSessionProjects, sessionProjectOf } from '../projectPictures';
 
 /** The picker's words for the face (its accessible name and tooltip). */
 export const PROJECT_FACE_LABEL = 'From the project name';
@@ -72,6 +72,7 @@ function watch(): void {
     byAgent = null;
     changed();
   });
+  onSessionProjects(changed);
 }
 
 /** Every id of a listed agent (its id, its session, the sessions it continues) → its project. */
@@ -133,13 +134,24 @@ function hueFor(label: string): number {
 function subscribe(listener: () => void): () => void {
   watch();
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => void listeners.delete(listener);
 }
 
-/** The tile an agent would draw: its label and letters, or null (no project known, or a name with nothing to draw). */
+/**
+ * The tile an agent would draw: its label and letters, or null (no project known, or a name with nothing to draw).
+ *
+ * Plain state, never `useSyncExternalStore` (as agentsList.ts `useInboxAgents`): a list read sets the agents and the
+ * sessions' projects mid-read, and a store would draw at once, before the read moves a snoozed row to its band; the
+ * row menu would then see its write land with the row still on screen and drop focus to the page (rowMenu.test.tsx).
+ */
 export function useAgentProjectTile(agent: string | null | undefined): { label: string; letters: Letters; hue: number } | null {
-  useSyncExternalStore(subscribe, () => version, () => version);
-  useSessionProjects();
+  const [, setSeen] = useState(version);
+  useEffect(() => {
+    const read = () => setSeen(version);
+    // A change between the first draw and this subscription.
+    read();
+    return subscribe(read);
+  }, []);
   const label = agentProjectLabel(agent);
   if (!label) return null;
   const letters = projectLetters(label);

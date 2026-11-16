@@ -35,26 +35,19 @@ interface SessionsRow {
  */
 const sessionProjects = new Map<string, { id: string; name: string }>();
 // Its own listeners: a new session redraws the agents' tiles, never every letter mark.
-let sessionsVersion = 0;
 const sessionListeners = new Set<() => void>();
 
 export function sessionProjectOf(session: string): { id: string; name: string } | null {
   return sessionProjects.get(session) ?? null;
 }
 
-export function useSessionProjects(): number {
-  return useSyncExternalStore(
-    (listener) => {
-      sessionListeners.add(listener);
-      return () => sessionListeners.delete(listener);
-    },
-    () => sessionsVersion,
-    () => sessionsVersion,
-  );
+/** Hear each read that taught a session's project (agents/projectFace.tsx). Returns the way to stop. */
+export function onSessionProjects(listener: () => void): () => void {
+  sessionListeners.add(listener);
+  return () => void sessionListeners.delete(listener);
 }
 
 function notifySessions(): void {
-  sessionsVersion++;
   for (const listener of [...sessionListeners]) listener();
 }
 
