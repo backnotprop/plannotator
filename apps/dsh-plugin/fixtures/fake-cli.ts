@@ -8,7 +8,8 @@
  *   late-fail: never opens the page; after FAKE_CLI_DELAY_MS prints
  *     "Port in use" and exits 1;
  *   crash: opens the page, then after FAKE_CLI_DELAY_MS exits 1 with no
- *     decision and nothing on stdout;
+ *     decision. Set FAKE_CLI_STDOUT to simulate a diagnostic on stdout;
+ *   legacy: opens the page and exits 0 with the old CLI feedback on stdout;
  *   (unset): opens the page and waits until the test writes
  *     `<log dir>/decide-<review id>.json`, then writes that record to
  *     PLANNOTATOR_HOST_RESULT_FILE and exits 0.
@@ -61,9 +62,12 @@ if (mode === "hang") {
     process.stderr.write("Port in use\n");
     process.exit(1);
   }, delay);
-} else if (mode === "crash") {
+} else if (mode === "crash" || mode === "legacy") {
   ready();
-  setTimeout(() => process.exit(1), delay);
+  setTimeout(() => {
+    if (process.env.FAKE_CLI_STDOUT) process.stdout.write(`${process.env.FAKE_CLI_STDOUT}\n`);
+    process.exit(mode === "crash" ? 1 : 0);
+  }, delay);
 } else {
   ready();
   const decideFile = join(logDir, `decide-${reviewId}.json`);

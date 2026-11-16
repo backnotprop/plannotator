@@ -81,7 +81,7 @@ function loadPlugin(options: {
   config?: PlannotatorConfig;
   env?: NodeJS.ProcessEnv;
   profile?: string;
-  mode?: "fail" | "hang" | "late-fail" | "crash";
+  mode?: "fail" | "hang" | "late-fail" | "crash" | "legacy";
   /** The CLI ignores SIGTERM: only SIGKILL stops it. */
   ignoreTerm?: boolean;
   readyWaitMs?: { review: number; other: number };
@@ -345,6 +345,24 @@ describe("no decision coming", () => {
     expect(main.followups[0]).toStartWith(`Plannotator: notes.md (${sessionOf(opened)}) — Ended with no decision.`);
     expect(main.followups[0]).toContain("do not wait for it");
   }, 15_000);
+  test("stdout from a crashed CLI does not become reviewer feedback", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "crash", env: { FAKE_CLI_STDOUT: "Could not finish the review" } });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main });
+    await until(() => main.followups.length > 0);
+    expect(main.followups[0]).toContain("Ended with no decision.");
+    expect(main.followups[0]).toContain("exited with code 1");
+  }, 15_000);
+
+  test("stdout from a successful older CLI still becomes reviewer feedback", async () => {
+    const dsh = loadPlugin({ config: { agentTool: true }, mode: "legacy", env: { FAKE_CLI_STDOUT: "Keep the first paragraph." } });
+    const main = dsh.add(new FakeAgent("session-main", dsh.project));
+    await dsh.tool("plannotator")!.execute({ action: "annotate", target: "notes.md" }, { agent: main });
+    await until(() => main.followups.length > 0);
+    expect(main.followups[0]).toContain("Feedback.");
+    expect(main.followups[0]).toContain("Keep the first paragraph.");
+  }, 15_000);
+
 });
 
 describe("a CLI gone right after its page came up", () => {

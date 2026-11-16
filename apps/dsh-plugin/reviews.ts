@@ -480,8 +480,8 @@ export class DshReviews {
     } else if (!review.url) {
       // It answered "starting": the agent waits, so say it did not open.
       message = { send: true, text: dshLateFailureText(review.subject, id, this.failureOf(review)) };
-    } else if (review.stdout.trim()) {
-      // A CLI older than this plugin writes no result file here: its stdout is the feedback.
+    } else if (code === 0 && review.stdout.trim()) {
+      // A successful older CLI writes its feedback to stdout instead of a result file.
       message = { send: true, text: `${plannotatorDecisionHeading(review.subject, id, "Feedback", review.target)}\n\n${review.stdout.trim()}` };
     } else {
       // The page opened and the CLI went without a decision (it crashed, or was killed): the agent was told to wait.
