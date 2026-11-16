@@ -1582,6 +1582,13 @@ export const INBOX_CONTINUES_POLL_FIELD = 'continues'
 export const INBOX_TITLE_POLL_FIELD = 'title'
 
 /**
+ * On a poll, when the session first started (epoch ms), as its connection kept it across its own restarts (a plugin
+ * reload starts the connection again, so `started_at` moves later). The Agents list orders by the earliest it heard
+ * (packages/server/inbox-first-seen.ts). An older Inbox ignores it; an older connection never sends it.
+ */
+export const INBOX_FIRST_STARTED_POLL_FIELD = 'first_started_at'
+
+/**
  * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
  * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
  * An older Inbox ignores it.

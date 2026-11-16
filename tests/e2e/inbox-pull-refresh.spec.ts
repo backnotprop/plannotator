@@ -175,8 +175,10 @@ for (const phone of [
         // The list's read can be held for a moment, so the spin while it is in flight is seen.
         let holdRead = false;
         let reads = 0;
+        let lastReadAt = 0;
         await page.route('**/api/inbox/threads?archived=exclude*', async (route) => {
           reads += 1;
+          lastReadAt = Date.now();
           if (holdRead) {
             holdRead = false;
             await new Promise((r) => setTimeout(r, 1200));
@@ -197,7 +199,9 @@ for (const phone of [
         const y = box.y + 90;
         const touch = await finger(page, phone.browserName);
 
-        // A short pull springs back and reads nothing.
+        // A short pull springs back and reads nothing. The stream's connect and the agent's write each owe the list a
+        // read 60 to 120 ms after their frame (App.tsx, listAfterEvents), in either order: those land first.
+        await expect.poll(() => Date.now() - lastReadAt).toBeGreaterThan(1000);
         let before = reads;
         await touch.down(x, y);
         await touch.move(x, y + 70);

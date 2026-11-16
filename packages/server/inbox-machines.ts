@@ -375,6 +375,8 @@ export function forwardedFileReadRefusal(route: string, req: Request): { status:
 }
 /** A launched agent's buttons on another machine (remote launch): Stop, Try again, Trust folder, Delete. */
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
+/** New message, and a reply sent to a new session in place of one that ended: both carry `to.launch`. */
+const LAUNCHES_WITH_TO = /^messages(\/[^/]+\/reply)?$/;
 
 /**
  * Remote launch: a write that starts, stops or trusts an agent on another machine, which is code run there. Only a
@@ -383,7 +385,7 @@ const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 export function startsAgentThere(route: string, body: Record<string, unknown>): boolean {
   if (LAUNCH_ROUTE.test(route)) return true;
   const to = body.to;
-  return route === "messages" && !!to && typeof to === "object" && "launch" in to;
+  return LAUNCHES_WITH_TO.test(route) && !!to && typeof to === "object" && "launch" in to;
 }
 /** A thread id the window names in `X-Plannotator-Thread`: kept on the outbox entry only, never sent on. */
 const THREAD_HINT = /^[A-Za-z0-9_-]{8,80}$/;

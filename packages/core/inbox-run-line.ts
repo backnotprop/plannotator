@@ -88,8 +88,9 @@ export interface InboxRunEvidence {
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
 
 /**
- * The session a launched root started: its record's, else its `to` while that is still the placeholder or, on an older
- * launch that started, the session. Null when the root was moved before any session started, and on a thread no launch made.
+ * The session a launched message (a root, or a reply sent to a new session) started: its record's, else its `to` while
+ * that is still the placeholder or, on an older launch that started, the session. Null when it was moved before any
+ * session started, and on a message no launch made.
  */
 export function inboxLaunchedSession(root: { to?: { session: string } | null; launch?: Pick<InboxLaunchRecord, "session" | "session_ref"> | null }): string | null {
   if (!root.launch) return null;
@@ -99,19 +100,18 @@ export function inboxLaunchedSession(root: { to?: { session: string } | null; la
 }
 
 /**
- * A bridge command's `launched` (approval "inbox-launched-agent-note"): set only on a launched thread's root, while
- * it is addressed to the session its launch started (never once the person moved it to another session, never on
- * a deleted launch), so only that session's first wake carries the launched lines. `project`: started in a
- * project folder, not a scratch folder, one the Send made, or a clone. Null for every other message.
+ * A bridge command's `launched` (approval "inbox-launched-agent-note"): set only on the message a launch was made for
+ * (a launched thread's root, or a reply sent to a new session), while it is addressed to the session its launch
+ * started (never once the person moved it to another session, never on a deleted launch), so only that session's
+ * first wake carries the launched lines. `project`: started in a project folder, not a scratch folder, one the Send
+ * made, or a clone. Null for every other message.
  */
 export function inboxLaunchedWakeOf(message: {
-  id: string;
-  thread_id: string;
   to?: { session: string } | null;
   launch?: Pick<InboxLaunchRecord, "agent" | "session" | "session_ref" | "scratch" | "made_folder" | "clone" | "deleted_at"> | null;
 }): { agent: InboxLaunchRecord["agent"]; project: boolean } | null {
   const launch = message.launch;
-  if (!launch || launch.deleted_at || message.id !== message.thread_id || !message.to) return null;
+  if (!launch || launch.deleted_at || !message.to) return null;
   if (inboxLaunchedSession(message) !== message.to.session) return null;
   return { agent: launch.agent, project: !launch.scratch && !launch.made_folder && !launch.clone };
 }

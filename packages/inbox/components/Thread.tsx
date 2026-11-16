@@ -128,7 +128,10 @@ import { ReplyRow } from './ReplyRow';
 import { sendFailure } from '../sendFailure';
 import { ReplyRecipient } from './ReplyRecipient';
 import { PhoneReplyRecipient } from './PhoneReplyRecipient';
-import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
+import { aimable, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, sessionFolder, toggleRecipient, type RecipientRow } from '../replyRecipients';
+import { replyRecipientList } from '../thread/recipientList';
+import { isStartRow, replyStartOf } from '../thread/replyStart';
+import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
 import { spaced } from '../voiceField';
 import type { VoiceLate } from '../voiceSession';
@@ -231,8 +234,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const cloudName = [...thread.messages].reverse().find((m) => m.cloud_wake)?.cloud_wake?.name ?? null;
   const addresseeName = (host: string) => (isInboxCloudHost(host) && cloudName ? cloudName : hostName(host));
   const asker = startedTo ? addresseeName(startedTo.host) : agentName(root.author);
-  // Launch: the person started this agent from New message (packages/server/inbox-launch.ts).
-  const launched = root.launch ?? null;
+  // Launch: the person started this agent from New message, or a reply started a new session (packages/server/inbox-launch.ts).
+  const launchedAt = [...thread.messages].reverse().find((m) => !!m.launch) ?? root;
+  const launched = launchedAt.launch ?? null;
   // Launch is on for this thread (a launched thread whose read carries a run line).
   const launchOn = !!launched && runLine !== undefined;
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1034,7 +1038,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
   const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
   // Only the launched session (the root's `to`, the one the server's sweep starts again): another agent in the thread that ended is gone.
-  const resumingSession = launchResumes ? inboxLaunchedSession(root) : null;
+  const resumingSession = launchResumes ? inboxLaunchedSession(launchedAt) : null;
   // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
   // on an ended session's question, while the words go to a live one, opens the choice for that answer.
   const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking).filter((s) => s.session !== resumingSession);
@@ -1045,6 +1049,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
   const asking = endedOther ?? wordsAsking;
   const askerEnded = wordsEnded || endedOther !== null;
+  const replyStart = replyStartOf(useReplyLaunchBlock(!resolved && askerEnded, machine), thread, asking, !!machine && machine.state !== 'online');
   /** Each session whose replies the choice sends on: every one of this Send's sessions that ended. */
   const endedSends = new Set([...(wordsEnded && wordsAsking ? [wordsAsking.session] : []), ...otherSessions.filter((s) => !resolved && endedOthers.has(s.session)).map((s) => s.session)]);
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
@@ -1113,9 +1118,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [tagOpts],
   );
   const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
+  /** Another session can take an ended session's reply: a live one, or a new one (the start row). */
+  const anotherTakes = anyOtherLive || replyStart !== null;
   // Who gets the reply (approval "inbox-reply-recipient", option E): a pill under the box, right, in a thread with
-  // more than one agent, or one whose only agent ended while another is live (it does the old route choice's job).
-  const pillActive = !resolved && (multiAgent || (askerEnded && anyOtherLive));
+  // more than one agent, or one whose only agent ended while another can take it (it does the old route choice's job).
+  const pillActive = !resolved && (multiAgent || (askerEnded && anotherTakes));
   /** Whom the words go to unless the person aims them: the session of the message they answer (wordsMessage). */
   const rcptDefault = (() => {
     const words = wordsMessage(thread);
@@ -1129,27 +1136,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const rcptAsked = useRef(false);
   /** Sessions a Send was refused for as not live any more (the race): ended in the list from then on. */
   const [rcptGone, setRcptGone] = useState<ReadonlyMap<string, string | null>>(() => new Map());
-  const rcptAgents = useMemo((): RecipientRow[] => {
-    if (!pillActive) return [];
-    const people: RecipientPerson[] = [...participants];
-    const add = (host: string | null, session: string) => {
-      if (!people.some((p) => p.session === session)) people.push({ host, session });
-    };
-    const handed = activeHandoff(thread) ?? tookOverReply(thread);
-    if (handed?.to) add(handed.to.host, handed.to.session);
-    // The agent asked has ended: the live sessions take its place in the list (its project's, and writers from other folders).
-    if (askerEnded) for (const s of live?.sessions ?? []) add(s.host, s.session);
-    // One that ended as a Send went to it stays in the list, ended.
-    for (const [session, host] of rcptGone) add(host, session);
-    const ended = new Set([...(askerEnded && asking ? [asking.session] : []), ...rcptGone.keys()]);
-    return recipientRows(
-      people,
-      // A live session of the project's list that the `@` list has not read: the thread's folder (the list is its project's).
-      (session) =>
-        sessionFolder(session, thread, taggable) ?? (rcptGone.has(session) || live?.sessions.some((s) => s.session === session) ? thread.project.name : null),
-      (session) => recipientState(session, taggable, ended),
-    ).map((row) => ({ ...row, alone: canTakeAlone(row.state, row.session === rcptDefault || latestBy(thread, row.session) !== undefined) }));
-  }, [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault]);
+  const rcptAgents = useMemo(
+    (): RecipientRow[] => (pillActive ? replyRecipientList({ participants, thread, askerEnded, asking, live, taggable, gone: rcptGone, rcptDefault, start: replyStart }) : []),
+    [pillActive, participants, thread, askerEnded, asking, live, taggable, rcptGone, rcptDefault, replyStart],
+  );
   /** Whether a session can be the first recipient (a typed tag's, not in the list, is live). */
   const rcptAlone = (id: string) => rcptAgents.find((r) => r.session === id)?.alone !== false;
   /** The choice came back with a draft (not the person's own tap): one led by an agent that can't take it alone is not kept. */
@@ -1165,7 +1155,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     const row = rcptAgents.find((r) => r.session === id);
     if (row) return [row];
     const option = tagOpts.find((o) => o.id === id);
-    return option ? [{ session: id, host: option.host, label: option.label, short: option.label, state: 'live' as const }] : [];
+    return option ? [{ session: id, host: option.host, label: option.name ?? option.label, short: option.name ?? option.label, state: 'live' as const }] : [];
   });
   const rcptNames = namesList(rcptChosen.map((r) => r.label));
   /** Whom the box's words go to, named: the pill's names where it shows, else as before (the field's name, full screen's card). */
@@ -1678,7 +1668,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   screenRef.current = onScreenChange;
   const paneCovered = covered || fileCovers || artifactsOn;
   showingRef.current = !paneCovered;
-  // The status and Cancel go under the cover with the box (the pane stays mounted): no mic goes on unseen, and what was said still lands.
+  // The status and Cancel go under the cover with the box (the pane stays mounted): a recording goes, nothing posted; a take being transcribed lands.
   useEffect(() => {
     if (paneCovered) coverVoice(voice.session);
   }, [paneCovered, voice.session]);
@@ -3155,9 +3145,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         ? (route.rows.find((row) => row.live.session === route.selected && !row.ended)?.live ?? null)
         : null;
     const first = pillActive && !handingTo ? (rcptPicked?.[0] ?? rcptDefault) : null;
-    const aimed = first !== null && first !== rcptDefault ? first : null;
+    const aimed = first !== null && first !== rcptDefault && !isStartRow(first) ? first : null;
     const firstLive = first ? (live?.sessions.find((s) => s.session === first) ?? null) : null;
-    const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : undefined;
+    const aimedTo = firstLive ? { host: firstLive.host, session: firstLive.session } : isStartRow(first) ? replyStart?.to : undefined;
     const pillExtra = pillActive && !handingTo && rcptPicked ? rcptPicked.slice(1) : [];
     const to = chosen ? { host: chosen.host, session: chosen.session } : aimedTo;
     // live or not as this window last read it. One not live any more is the server's refusal (409), never another agent.
@@ -3322,7 +3312,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const wordsPart = { target: { message: t.message, questions: [], skip: [], actions: [] }, key: `w:${wordsTo.session}`, own: tail.own, wordsTo };
         // Where the tail's own answers go: their asker, or (it ended) the live agent the pill names.
         const owner = t.message.author.kind === 'agent' ? (t.message.author.session ?? null) : null;
-        const answersTo = to && owner && sendEnded.has(owner) ? to.session : owner;
+        const answersTo = to && 'session' in to && owner && sendEnded.has(owner) ? to.session : owner;
         if ((t.questions.length > 0 || t.skip.length > 0 || t.actions.length > 0) && answersTo !== wordsTo.session) {
           tail.own = [];
           parts.push(wordsPart);
@@ -3405,7 +3395,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The words aimed with the pill at a session that never wrote here go to it alone.
           ...(part.wordsTo
             ? { to: part.wordsTo }
-            : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session)
+            : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session) && ('session' in to || target.message.author.session === asking?.session)
               ? { to }
               : {}),
         } });
@@ -3420,7 +3410,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       let sentRead: ThreadModel | null = null;
       for (const [index, request] of requests.entries()) {
         if (request.input.words) wordsKey = request.input.idempotency_key;
-        postingTo = request.input.to;
+        postingTo = request.input.to && 'session' in request.input.to ? request.input.to : undefined;
         const last = index === requests.length - 1;
         const answer = await sendReply.mutateAsync({ messageId: request.messageId, input: last && !machine ? { ...request.input, with_thread: true } : request.input });
         const written = answer.reply as InboxMessageWire | null;
@@ -3640,7 +3630,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const replySession = lastTo?.session ?? askedSession;
   // The run line speaks for the session the launch started. Words "your reply starts it again" and "your reply is
   // waiting" are not about a reply waiting on another session, or a root that moved: that reply's own line says.
-  const runSpeaks = !runLine || (runLine.state !== 'stopped' && runLine.state !== 'missing') || (replySession ?? root.to?.session ?? null) === inboxLaunchedSession(root);
+  const runSpeaks = !runLine || (runLine.state !== 'stopped' && runLine.state !== 'missing') || (replySession ?? root.to?.session ?? null) === inboxLaunchedSession(launchedAt);
   const shownRun = runSpeaks ? runLine : null;
   const replyWaiting = !!replySession && !last.delivery && !(lastTo === null && sent?.checked_at);
   // A 👍 the Inbox sent through to a waking session and that session has not taken yet (the person's reply
@@ -3964,7 +3954,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const endedActions = showAskerNote ? (
     <EndedActions
       sendElsewhere={
-        anyOtherLive
+        anotherTakes
           ? () => {
               openBox();
               setRcptOpen(true);
@@ -4285,7 +4275,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name}
     />
   ) : (
-    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} />
+    <ReplyRecipient rows={rcptAgents} chosen={rcptChosen} open={rcptOpen} onOpen={setRcptOpen} onOnly={onlyRecipient} onToggle={toggleReplyRecipient} onTagAnother={tagAnother} labels={sessionLabels} folderOf={(session) => sessionFolder(session, thread, taggable) ?? thread.project.name} />
   );
   const routeChoice = asking ? (
     <RouteChoice
@@ -5597,7 +5587,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
-          {showAskerNote && !(pillActive && box.open) && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />}
+          {showAskerNote && !(pillActive && box.open) && asking && <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anotherTakes} />}
         </div>
         {cameBack && (
           <div className="ib-acts ib-archnote" data-came-back="">
