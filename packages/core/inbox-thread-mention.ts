@@ -33,7 +33,10 @@ export const INBOX_THREAD_MENTION_WORDS = {
   /** Its title, as a quoted string (`inboxThreadMentionTitleData`). */
   title: (quoted: string) => `   title: ${quoted}`,
   /** What the list says about it (absent parts are left out). */
-  details: (ref: { project?: string | null; archived?: boolean }) => [ref.project ? `project ${ref.project}` : null, ref.archived ? 'archived' : null].filter(Boolean).join(', '),
+  details: (ref: { project?: string | null; archived?: boolean }) => {
+    const project = mentionProjectData(ref.project);
+    return [project ? `project ${project}` : null, ref.archived ? 'archived' : null].filter(Boolean).join(', ');
+  },
   /** The line the details go on. */
   detailsLine: (details: string) => `   ${details}.`,
   /** How to read it. */
@@ -49,20 +52,30 @@ export const INBOX_REPLY_MENTIONS_MAX = 40;
 /** The longest label (a title and its project). */
 const LABEL_MAX = 200;
 
-/** A title on one line, as a mention carries it: no control characters, runs of spaces as one, at most the max. */
-export function inboxThreadMentionTitle(title: string): string {
-  const flat = title
+/** Text on one line (a title or a project): no control, separator or format characters, runs of spaces as one, at most the max. */
+function oneLine(text: string): string {
+  const flat = text
     .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
     .replace(/\p{Cf}+/gu, '')
     .replace(/\s+/g, ' ')
     .trim();
   const chars = [...flat];
-  const cut = chars.length > INBOX_THREAD_MENTION_TITLE_MAX ? `${chars.slice(0, INBOX_THREAD_MENTION_TITLE_MAX).join('').trimEnd()}…` : flat;
-  return cut || 'Untitled thread';
+  return chars.length > INBOX_THREAD_MENTION_TITLE_MAX ? `${chars.slice(0, INBOX_THREAD_MENTION_TITLE_MAX).join('').trimEnd()}…` : flat;
+}
+
+/** A title on one line, as a mention carries it: no control characters, runs of spaces as one, at most the max. */
+export function inboxThreadMentionTitle(title: string): string {
+  return oneLine(title) || 'Untitled thread';
 }
 
 /** A title as the list carries it: one capped line, backticks made plain quotes (no code span can open). */
 const listedTitle = (title: string) => inboxThreadMentionTitle(title).replace(/`/g, "'");
+
+/** A project as the list carries it, like a title (an agent picks its folder's name): a JSON string, or null when empty. */
+function mentionProjectData(project: string | null | undefined): string | null {
+  const flat = project ? oneLine(project).replace(/`/g, "'") : '';
+  return flat ? JSON.stringify(flat) : null;
+}
 
 /** A title as the agent reads it: the listed title as a JSON string (its quotes and backslashes escaped). */
 export function inboxThreadMentionTitleData(title: string): string {
@@ -83,12 +96,13 @@ function mentionOf(value: unknown): InboxReplyMention | null {
   if (v.label === '' || v.label.length > LABEL_MAX || v.title === '' || [...v.title].length > INBOX_THREAD_MENTION_TITLE_MAX + 1) return null;
   if (v.project !== undefined && (typeof v.project !== 'string' || v.project.length > LABEL_MAX)) return null;
   if (v.machine !== undefined && !isInboxId('ibx', v.machine)) return null;
+  const project = typeof v.project === 'string' ? oneLine(v.project) : '';
   return {
     thread_id: v.thread_id,
     title: v.title,
     label: v.label,
     at: v.at,
-    ...(typeof v.project === 'string' && v.project !== '' ? { project: v.project } : {}),
+    ...(project ? { project } : {}),
     ...(v.archived === true ? { archived: true } : {}),
     ...(typeof v.machine === 'string' ? { machine: v.machine } : {}),
   };
