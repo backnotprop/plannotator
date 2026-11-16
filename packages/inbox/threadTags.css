@@ -16,6 +16,8 @@
 .ib-pm .ib-tagm-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-pmi .ib-tagm-n { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-zsub .ib-tagm-n { margin-left: 0; padding: 0 6px 0 0; }
+/* The Color item's dot: the tag's colour where the menu's icons sit, a hairline so a pale one shows on the menu. */
+.ib-pmi .ib-tagm-dot { flex: none; width: 13px; height: 13px; margin: 0 1px; border-radius: 50%; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--foreground) 18%, transparent); }
 .ib-pmi .ib-tagm-slot { flex: none; width: 15px; margin-left: auto; }
 .ib-pmi .ib-tagm-n + .ib-tagm-tick, .ib-pmi .ib-tagm-n + .ib-tagm-slot { margin-left: 8px; }
 .ib-pmi.ib-tagm-quiet { color: var(--muted-foreground); }
@@ -46,40 +48,27 @@
 }
 
 /* ---------- tag colours (tagColours.ts; approval step 3, look C): the whole row tinted, the tag's name on it. ---------- */
-/* The row follows the pick (approval "inbox-tag-colors-picker"; tagColours.ts `tintAttrs`, tagColourMap.ts): each
-   tinted element carries its row in both themes, the lightness against the card (`--ib-tint-ld`, `-dd`), the chroma
-   (`--ib-tint-lc`, `-dc`) and the hue (`--ib-tint-hue`). The fill is the card's lightness moved by that much, so other
-   themes keep the step; hover, the open menu, the selection and both are a lightness step (`--ib-tint-step`): darker
-   in light, lighter in dark, each held so the row's text keeps 4.5:1 on the default theme (tagColourMap.test.ts reads
-   these steps). Not a mix: a mix ties lightness to chroma, and a vivid pick would wash out. */
-.pn-inbox, .ib-lightscope { --ib-tint-step1: 0.01; --ib-tint-step2: 0.02; --ib-tint-step3: 0.028; }
-:root.light .pn-inbox, .ib-lightscope.light { --ib-tint-step1: -0.015; --ib-tint-step2: -0.03; --ib-tint-step3: -0.042; }
-.pn-inbox [data-tint] {
-  --ib-tint-step: 0;
-  --ib-tint-dl: var(--ib-tint-dd);
-  --ib-tint-c: var(--ib-tint-dc);
-  --ib-tint-card: 0.22;
-  --ib-tint-fill: oklch(calc(var(--ib-tint-card) + var(--ib-tint-dl) + var(--ib-tint-step)) var(--ib-tint-c) var(--ib-tint-hue));
-}
-:root.light .pn-inbox [data-tint], .ib-lightscope.light [data-tint] { --ib-tint-dl: var(--ib-tint-ld); --ib-tint-c: var(--ib-tint-lc); --ib-tint-card: 1; }
-@supports (color: oklch(from red calc(l + 0.1) c h)) {
-  .pn-inbox [data-tint] { --ib-tint-fill: oklch(from var(--card) calc(l + var(--ib-tint-dl) + var(--ib-tint-step)) var(--ib-tint-c) var(--ib-tint-hue)); }
-}
+/* The row follows the pick (approval "inbox-tag-colors-picker"): `data-tint` carries the stored colour, and
+   tagTintSheet.ts writes that colour's four fills for the theme on screen: `--ib-tint-0` at rest, `-1` under the
+   pointer or with its menu open, `-2` selected, `-3` both. Each is held so the row's text is never harder to read than
+   on the theme's plain row in that state, and keeps 4.5:1 wherever the plain row does (tagTintTheme.test.ts walks
+   every theme). */
+.pn-inbox [data-tint] { --ib-tint-fill: var(--ib-tint-0); }
 
 /* Wide and three-line rows: the row's own pill, so hover, the open menu and the selection are steps of the same
    colour. !important because the pill's hover and selected fills are !important (inbox.css), and a tinted row's
    steps must replace them; the focus ring stays on top. */
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint] { --ib-row-fill: var(--ib-tint-fill); }
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint]:hover,
-.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint] { --ib-tint-step: var(--ib-tint-step1); --ib-row-fill: var(--ib-tint-fill); }
-.pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-tint-step: var(--ib-tint-step2); --ib-row-fill: var(--ib-tint-fill); }
+.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint] { --ib-tint-fill: var(--ib-tint-1); --ib-row-fill: var(--ib-tint-fill); }
+.pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-tint-fill: var(--ib-tint-2); --ib-row-fill: var(--ib-tint-fill); }
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint].ib-sel:hover,
-.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-tint-step: var(--ib-tint-step3); --ib-row-fill: var(--ib-tint-fill); }
+.pn-inbox .ib-rw[data-menu] :is(.ib-row, .ib-nrow)[data-tint].ib-sel { --ib-tint-fill: var(--ib-tint-3); --ib-row-fill: var(--ib-tint-fill); }
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint]::before { background: var(--ib-row-fill) !important; }
 /* A phone's row: the whole row, edge to edge, as its press and its open menu are. */
 .pn-inbox .ib-mrow[data-tint] { background: var(--ib-tint-fill) !important; }
 .pn-inbox .ib-mrow[data-tint]:active,
-.pn-inbox .ib-mrow[data-tint][data-menu] { --ib-tint-step: var(--ib-tint-step1); }
+.pn-inbox .ib-mrow[data-tint][data-menu] { --ib-tint-fill: var(--ib-tint-1); }
 /* A tinted row brought in by Show does not light up: the glow is a fill, and the tint is the row's fill. The row
    still slides into place, as every new row does. */
 .pn-inbox .ib-rw :is(.ib-row, .ib-nrow)[data-tint][data-lit]::before,
@@ -87,7 +76,7 @@
 
 /* A thread in search's results, as its row in the list: the tint over the panel, the chosen result a stronger step. */
 .pn-inbox .ib-sp-row[data-tint] { background: var(--ib-tint-fill); }
-.pn-inbox .ib-sp-row[data-tint][aria-selected="true"] { --ib-tint-step: var(--ib-tint-step3); background: var(--ib-tint-fill); }
+.pn-inbox .ib-sp-row[data-tint][aria-selected="true"] { --ib-tint-fill: var(--ib-tint-3); background: var(--ib-tint-fill); }
 .ib-sp-row > .ib-rtag { margin-left: auto; align-self: flex-start; margin-top: 1px; }
 .ib-sp-row > .ib-rtag + .ib-sp-time { margin-left: 0; }
 .ib-sp-row > .ib-rtag + .ib-sp-time::before { content: "·"; margin: 0 6px; color: var(--muted-foreground); }
@@ -108,8 +97,8 @@
    stands in for the usual selected fill. */
 .pn-inbox .ib-tags .ib-proj[data-tint] { background: var(--ib-tint-fill); }
 .pn-inbox .ib-tags .ib-proj[data-tint]:not(.ib-on):hover,
-.pn-inbox .ib-tags .ib-proj[data-tint][data-menu]:not(.ib-on) { --ib-tint-step: var(--ib-tint-step1); background: var(--ib-tint-fill); }
-.pn-inbox .ib-tags .ib-proj.ib-on[data-tint] { --ib-tint-step: var(--ib-tint-step2); background: var(--ib-tint-fill); color: var(--foreground); box-shadow: none; }
+.pn-inbox .ib-tags .ib-proj[data-tint][data-menu]:not(.ib-on) { --ib-tint-fill: var(--ib-tint-1); background: var(--ib-tint-fill); }
+.pn-inbox .ib-tags .ib-proj.ib-on[data-tint] { --ib-tint-fill: var(--ib-tint-2); background: var(--ib-tint-fill); color: var(--foreground); box-shadow: none; }
 
 /* ---------- the colour menu (components/TagColourMenu.tsx, ColorSquare.tsx): the twelve swatches, the own colours,
    the square, the hue strip, Hex. Each swatch is the picked colour itself; the one on has the accent's ring. ---------- */

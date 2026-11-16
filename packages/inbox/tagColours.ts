@@ -4,12 +4,14 @@
  * colour per row, from its coloured tag first by name, the rest named in its tooltip. In
  * a tag's own list that tag steps aside (every row has it). "Show tag colors" off: no row and no sidebar tag is tinted.
  *
- * The row follows the pick (approval "inbox-tag-colors-picker"): tagColourMap.ts turns the colour into a row per
- * theme, its hue and part of its strength kept, its lightness held so the row's text keeps AA in every state. A stored
- * name (an earlier Inbox's preset) shows as the calm colour of its hue; accent as Indigo.
+ * The row follows the pick (approval "inbox-tag-colors-picker"): tagTintTheme.ts turns the colour into the row's four
+ * fills on the theme on screen, its hue and part of its strength kept, its lightness held so the row's text is never
+ * harder to read than on that theme's plain row (and keeps 4.5:1 where the plain row does). A stored name (an earlier
+ * Inbox's preset) shows as the calm colour of its hue; accent as Indigo.
  */
-import { INBOX_TAG_PRESET_HEX, inboxTagOwnColour, inboxTagShownHex, inboxTagSwatchName, INBOX_TAG_SWATCHES, isInboxTagPreset, type InboxTagPreset } from '@plannotator/core/inbox-types';
-import { hexToOklch, tintLook } from './tagColourMap';
+import { inboxTagOwnColour, inboxTagShownHex, inboxTagSwatchName, INBOX_TAG_SWATCHES, isInboxTagPreset, type InboxTagPreset } from '@plannotator/core/inbox-types';
+import { hexToOklch } from './tagColourMap';
+import { drawTint } from './tagTintSheet';
 
 /** The list ⋮'s switch for every row colour (the owner asked for "show tag color"; the window writes "colors"). */
 export const SHOW_TAG_COLOURS_LABEL = 'Show tag colors';
@@ -51,31 +53,13 @@ export function swatchInk(hex: string): string {
   return hexToOklch(hex).l < 0.7 ? '#ffffff' : '#11161f';
 }
 
-/** Each colour's attributes once worked out: every row of a tag draws the same. */
-const drawn = new Map<string, { 'data-tint': string; style: Record<string, string> }>();
-
 /**
- * How a colour is drawn: `data-tint` (a stored name, or `custom` for a code) and the row in both themes as custom
- * properties threadTags.css reads: `--ib-tint-ld` / `--ib-tint-dd` the lightness against the card, `--ib-tint-lc` /
- * `--ib-tint-dc` the chroma, `--ib-tint-hue`.
+ * How a colour is drawn: `data-tint` carries the stored value (a code, or an earlier Inbox's name), and tagTintSheet.ts
+ * holds that value's four fills for the theme on screen (`--ib-tint-0` to `-3`, threadTags.css reads them).
  */
-export function tintAttrs(colour: string): { 'data-tint': string; style: Record<string, string> } {
-  const kept = drawn.get(colour);
-  if (kept) return kept;
-  const look = tintLook(isInboxTagPreset(colour) ? INBOX_TAG_PRESET_HEX[colour] : colour);
-  const attrs = {
-    'data-tint': isInboxTagPreset(colour) ? colour : 'custom',
-    style: {
-      '--ib-tint-ld': String(look.light.delta),
-      '--ib-tint-lc': String(look.light.c),
-      '--ib-tint-dd': String(look.dark.delta),
-      '--ib-tint-dc': String(look.dark.c),
-      '--ib-tint-hue': String(look.h),
-    },
-  };
-  if (drawn.size > 500) drawn.clear();
-  drawn.set(colour, attrs);
-  return attrs;
+export function tintAttrs(colour: string): { 'data-tint': string } {
+  drawTint(colour, inboxTagShownHex(colour));
+  return { 'data-tint': colour };
 }
 
 /** A row's colour: the tag it comes from, the other coloured tags the row is in, and the colour. */

@@ -91,6 +91,22 @@ test("the person's pick, own colour or None, wins and is kept; marks stay throug
   expect(() => store.setTagColour("ini_01NOPE", "green", null)).toThrow();
 });
 
+test("Highlight rows off keeps the colour: written off (null, what an older Inbox reads as None) with the colour kept, back on with it; an earlier None has none", () => {
+  const { store, reopen, onDisk } = world();
+  const release = store.createInitiative({ name: "Release", by: PERSON });
+  store.setTagColour(release.id, "#ff6a00", "2026-11-13T10:00:00.000Z");
+  store.setTagColour(release.id, null, "2026-11-13T10:01:00.000Z", "#ff6a00");
+  // On disk and on the wire: `colour: null` (an older reader's None), the colour beside it.
+  expect(onDisk().looks![release.id]).toEqual({ colour: null, by: "person", at: "2026-11-13T10:01:00.000Z", kept_colour: "#ff6a00" });
+  expect(reopen().tagLook(release.id)).toEqual({ colour: null, by: "person", at: "2026-11-13T10:01:00.000Z", kept_colour: "#ff6a00" });
+  store.setTagColour(release.id, "#ff6a00", "2026-11-13T10:02:00.000Z");
+  expect(onDisk().looks![release.id]).toEqual({ colour: "#ff6a00", by: "person", at: "2026-11-13T10:02:00.000Z" });
+  // An older Inbox's None sends no kept colour: off with none.
+  store.setTagColour(release.id, null, "2026-11-13T10:03:00.000Z");
+  expect(reopen().tagLook(release.id)).toEqual({ colour: null, by: "person", at: "2026-11-13T10:03:00.000Z" });
+  expect(() => store.setTagColour(release.id, null, "2026-11-13T10:04:00.000Z", "purple")).toThrow();
+});
+
 test("own colours: the last three, newest first, each once, on any tag", () => {
   const { store, reopen } = world();
   const a = store.createInitiative({ name: "Release", by: PERSON });

@@ -72,11 +72,17 @@ export function inboxTagOwnColour(colour: unknown): colour is string {
 /** The person's own colours kept for the menu's second line, newest first. */
 export const INBOX_TAG_RECENT_MAX = 3;
 
-/** A tag's colour and who set it: `auto` when it was given at creation, `person` once the person picked one or None. */
+/**
+ * A tag's colour and who set it: `auto` when it was given at creation, `person` once the person picked one or turned
+ * Highlight rows off. `colour` is what its rows show; `null` is off (an earlier Inbox's None). Off with a colour kept
+ * (the owner: Highlight rows "instantly" on and off, the colour chosen apart): `kept_colour`, so turning it on brings
+ * that colour back. An older Inbox ignores the field and reads off as None.
+ */
 export interface InboxTagLook {
   colour: string | null;
   by: "auto" | "person";
   at: string;
+  kept_colour?: string;
 }
 
 /** The switch and the person's own colours, as the list model carries them (`tag_colours`). */
@@ -107,7 +113,17 @@ export function inboxTagHex(value: string): string | null {
 export function isInboxTagLook(value: unknown): value is InboxTagLook {
   if (!value || typeof value !== "object") return false;
   const look = value as Record<string, unknown>;
-  return (look.colour === null || isInboxTagColour(look.colour)) && (look.by === "auto" || look.by === "person") && typeof look.at === "string";
+  return (look.colour === null || isInboxTagColour(look.colour)) && (look.by === "auto" || look.by === "person") && typeof look.at === "string" && (look.kept_colour === undefined || isInboxTagColour(look.kept_colour));
+}
+
+/** A look as stored and sent: `kept_colour` only while off. */
+export function inboxTagLook(colour: string | null, by: InboxTagLook["by"], at: string, kept?: string | null): InboxTagLook {
+  return colour === null && kept && isInboxTagColour(kept) ? { colour, by, at, kept_colour: kept } : { colour, by, at };
+}
+
+/** The colour a tag's rows show when highlighted: the one on, else the one kept while off (null: never had one). */
+export function inboxTagLookColour(look: InboxTagLook | undefined): string | null {
+  return look ? (look.colour ?? look.kept_colour ?? null) : null;
 }
 
 /**
@@ -158,6 +174,8 @@ export function inboxTagColoursOf(all: readonly InboxTagColours[]): InboxTagColo
     .flatMap((one) => one.recent)
     .sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0))
     .filter((entry, i, list) => list.findIndex((e) => e.colour === entry.colour) === i)
+    // A quick swatch an older Inbox kept is not an own colour: dropped before the cut, so it never takes a place.
+    .filter((entry) => inboxTagOwnColour(entry.colour))
     .slice(0, INBOX_TAG_RECENT_MAX);
   return { show: show.show, show_at: show.show_at, recent };
 }

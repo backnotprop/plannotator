@@ -3,7 +3,7 @@
  * brightness square at the current hue, left to right muted to vivid, top to bottom light to dark. One focus stop, a
  * slider named "Color" whose value says both ("Saturation 72%, brightness 58%"). Its own arrow keys move it by 1%
  * (Left and Right saturation, Up and Down brightness; PageUp and PageDown brightness by 10%, Home and End saturation
- * to its ends); Up at the top edge and Down at the bottom edge step out of it, as the strip and the field do. A drag
+ * to its ends) and stop at its edges: they never leave it (Tab and Shift+Tab do), so passing it changes nothing. A drag
  * (mouse, pen or finger: `touch-action: none`) moves it live; letting go ends it. Every other key stays its own, so
  * the menu's typeahead and arrows do not take them; Escape goes on to the menu.
  */
@@ -20,15 +20,12 @@ export interface SquareProps {
   onMove: (s: number, v: number, by: 'key' | 'pointer') => void;
   /** A drag let go. */
   onLetGo: (s: number, v: number) => void;
-  /** Up at the top edge, Down at the bottom edge. */
-  onStepUp: () => void;
-  onStepDown: () => void;
   onBlur?: () => void;
 }
 
 const clamp = (n: number) => Math.max(0, Math.min(100, Math.round(n)));
 
-export function ColorSquare({ hue, s, v, onMove, onLetGo, onStepUp, onStepDown, onBlur }: SquareProps) {
+export function ColorSquare({ hue, s, v, onMove, onLetGo, onBlur }: SquareProps) {
   const dragging = useRef(false);
   const at = (event: PointerEvent<HTMLDivElement>) => {
     const box = event.currentTarget.getBoundingClientRect();
@@ -50,16 +47,8 @@ export function ColorSquare({ hue, s, v, onMove, onLetGo, onStepUp, onStepDown, 
       case 'ArrowRight':
         return step(1, 0);
       case 'ArrowUp':
-        if (v >= 100) {
-          event.preventDefault();
-          return onStepUp();
-        }
         return step(0, 1);
       case 'ArrowDown':
-        if (v <= 0) {
-          event.preventDefault();
-          return onStepDown();
-        }
         return step(0, -1);
       case 'PageUp':
         return step(0, 10);

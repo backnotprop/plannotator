@@ -28,3 +28,15 @@
 
 ## Out of scope
 - Any change to tag filters, tag names, or the "Show tag colors" switch.
+
+## 2026-11-16: Highlight rows and Color as two rows (owner feedback on the built menu)
+The owner, on the tag menu in the sandbox build (the row "Highlight rows   Custom  >"): "You need to fix that arrow by custom and honestly I'd rather the color picker to be its own row. It's confusing how it's ingrained in like the highlight. Like just let the highlight be a thing where it's like light mode, dark mode turn on and just instantly flashes and then let me select the color differently."
+
+The menu shape since then:
+- **Highlight rows**: a checkbox item, the same shape as "Show tag colors" in the list's ⋮. It applies at once and the menu stays open. On: the tag's rows are tinted in its color. Off: they look plain, and the sidebar tag is plain. No submenu, no new shortcut.
+- **Color**: its own row, with a dot of the tag's color and its name, and the chevron. It opens the picker in place (12 swatches, recents, square, strip, Hex). The picker's title is "Color". It has no "None": Highlight rows turns the tint off.
+- Turning Highlight rows off keeps the tag's color: the Color row still shows it, and turning it on brings the same color back.
+- Picking a color while Highlight rows is off turns it on. The person is choosing a color to see it.
+- A tag that is None today (an earlier Inbox) reads as Highlight rows off with no kept color. The Color row shows the color a new tag would get, and picking sets it.
+- The chevron after the value sits on the text's center line, in every menu row of that shape.
+- Storage stays compatible: off is still `colour: null`, which an older Inbox reads as None. The kept color goes in an extra optional field, `kept_colour`, which v0.28.66's check ignores.

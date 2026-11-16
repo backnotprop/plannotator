@@ -2,7 +2,9 @@
  * Tag colors, the picker (approval "inbox-tag-colors-picker") in a real browser against the compiled binary:
  *
  *  - two tags made from the row menu get colors by themselves, vivid then calm (Green, then Indigo);
- *  - the tag menu's Highlight rows shows the twelve quick swatches, the square, the hue strip and Hex;
+ *  - the tag menu has Highlight rows (a checkbox: off leaves the rows plain and keeps the color, on brings it back) and
+ *    Color, which shows the twelve quick swatches, the square, the hue strip and Hex;
+ *  - the arrows pass the square by (last swatch, strip, Hex and back) and Tab reaches it, writing nothing;
  *  - a drag to the square's top right corner picks a vivid color: kept on letting go, the Hex field shows it;
  *  - the vivid tag's row is drawn clearly stronger than the calm tag's row (computed fill, not a class), in light
  *    and in dark, and the row's quiet text keeps 4.5:1 on it.
@@ -122,8 +124,25 @@ test('a vivid pick on the square gives a row clearly stronger than a calm tag’
   // The first new tag is vivid Green, the second calm Indigo.
   await tagFromRowMenu(page, threads.vivid, 'Onboarding');
   await tagFromRowMenu(page, threads.calm, 'Security');
-  await expect(rowButton(page, threads.vivid)).toHaveAttribute('data-tint', 'custom');
-  await expect(rowButton(page, threads.calm)).toHaveAttribute('data-tint', 'custom');
+  await expect(rowButton(page, threads.vivid)).toHaveAttribute('data-tint', '#14cc61');
+  await expect(rowButton(page, threads.calm)).toHaveAttribute('data-tint', '#b1b7fd');
+  const writes: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/inbox/tag-colours')) writes.push(request.postData() ?? '');
+  });
+
+  // Security's Highlight rows off: its row is plain at once, the Color item still names Indigo; on again brings it back.
+  await tagRows(page).filter({ hasText: 'Security' }).click({ button: 'right' });
+  const highlight = page.locator('[data-tag-menu] [data-tag-action="highlight"]');
+  await expect(highlight).toHaveAttribute('aria-checked', 'true');
+  await highlight.click();
+  await expect(rowButton(page, threads.calm)).not.toHaveAttribute('data-tint', /./);
+  await expect(highlight).toHaveAttribute('aria-checked', 'false');
+  await expect(page.locator('[data-tag-menu] [data-tag-action="colour"]')).toContainText('Indigo');
+  await highlight.click();
+  await expect(rowButton(page, threads.calm)).toHaveAttribute('data-tint', '#b1b7fd');
+  await page.keyboard.press('Escape');
+  await expect.poll(() => writes.length).toBe(2);
 
   // Onboarding's colors: twelve swatches, then the square, the strip and Hex.
   await tagRows(page).filter({ hasText: 'Onboarding' }).click({ button: 'right' });
@@ -134,6 +153,25 @@ test('a vivid pick on the square gives a row clearly stronger than a calm tag’
   const square = list.getByRole('slider', { name: 'Color' });
   await expect(square).toBeVisible();
   await expect(list.getByRole('slider', { name: 'Hue' })).toBeVisible();
+  await expect(list.locator('[data-colour="none"]')).toHaveCount(0);
+
+  // By keyboard, nothing written by moving: the arrows go last swatch, strip, Hex and back up, past the square; Tab
+  // from a swatch reaches the square and Tab goes on to the strip.
+  const before = writes.length;
+  await list.locator('.ib-tagc-swb').last().focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(list.getByRole('slider', { name: 'Hue' })).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await expect(list.locator('[data-tag-colour-hex]')).toBeFocused();
+  await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('ArrowUp');
+  await expect(list.locator('.ib-tagc-swb').last()).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(square).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(list.getByRole('slider', { name: 'Hue' })).toBeFocused();
+  await page.waitForTimeout(1000);
+  expect(writes.length).toBe(before);
 
   // Drag to the top right corner: full saturation and brightness at the current hue.
   const box = (await square.boundingBox())!;
@@ -143,6 +181,8 @@ test('a vivid pick on the square gives a row clearly stronger than a calm tag’
   await page.mouse.move(box.x + box.width - 1, box.y + 1, { steps: 4 });
   await page.mouse.up();
   await expect(square).toHaveAttribute('aria-valuetext', /^Saturation (9\d|100)%, brightness (9\d|100)%$/);
+  // One drag, one write: on letting go.
+  await expect.poll(() => writes.length).toBe(before + 1);
   const hex = list.locator('[data-tag-colour-hex]');
   await expect(hex).toHaveValue(/^#[0-9a-f]{6}$/);
   await expect(list.locator('[data-tag-colour-caption]')).toContainText('rows tagged Onboarding');

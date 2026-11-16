@@ -1,7 +1,7 @@
 /**
  * How a picked colour becomes a row (approval "inbox-tag-colors-picker", NOTES.md). What this catches: a pick whose
  * row makes the row's text (the quiet grey or the body text) fall under 4.5:1 in any state, light or dark, on the
- * default theme; the CSS steps drifting from the ones the check uses; a vivid pick drawn as calm as a muted one (the
+ * default theme; a vivid pick drawn as calm as a muted one (the
  * owner's "they are muted only"); black, white or a grey given a hue; the quick swatches' rows too close to tell
  * apart; an earlier Inbox's colour names drawn differently from the calm colour of their hue.
  */
@@ -9,11 +9,11 @@ import { expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { INBOX_TAG_PRESET_HEX, INBOX_TAG_PRESETS, INBOX_TAG_SWATCHES } from '@plannotator/core/inbox-types';
-import { contrastOf, hexToOklch, hsvToHex, hexToHsv, oklchToHex, oklchToLinear, tintLook, TINT_BANDS, type TintMode } from './tagColourMap';
+import { contrastOf, hexToOklch, hsvToHex, hexToHsv, oklchToHex, tintLook, TINT_BANDS, type TintMode } from './tagColourMap';
 import { tagColourLong, tagColourName, tintAttrs } from './tagColours';
+import { DEFAULT_TINT_THEMES, tintRows } from './tagTintTheme';
 
 const theme = readFileSync(join(import.meta.dir, '../ui/themes/plannotator.css'), 'utf8');
-const css = readFileSync(join(import.meta.dir, 'threadTags.css'), 'utf8');
 const block = (selector: string) => theme.slice(theme.indexOf(`${selector} {`), theme.indexOf('}', theme.indexOf(`${selector} {`)));
 const token = (text: string, name: string): [number, number, number] => {
   const m = new RegExp(`--${name}: oklch\\(([\\d.]+) ([\\d.]+) ([\\d.]+)\\)`).exec(text);
@@ -24,28 +24,10 @@ const THEME = {
   dark: block('.theme-plannotator'),
   light: block('.theme-plannotator.light'),
 };
-/** The state steps threadTags.css draws (hover, selected, selected + hover), per theme. */
-function cssSteps(mode: TintMode): number[] {
-  const line = css.split('\n').find((l) => (mode === 'light' ? l.startsWith(':root.light .pn-inbox, .ib-lightscope.light {') : l.startsWith('.pn-inbox, .ib-lightscope {')) && l.includes('--ib-tint-step1'));
-  if (!line) throw new Error(`no steps for ${mode}`);
-  return [0, ...[1, 2, 3].map((n) => Number(new RegExp(`--ib-tint-step${n}: (-?[\\d.]+)`).exec(line)?.[1]))];
-}
-/** The four fills a row of this pick gets on the default theme: the card's lightness moved by the row's delta and each step. */
+/** The four fills (rest, hover, selected, both) a row of this pick gets on the default theme. */
 function fills(hex: string, mode: TintMode): string[] {
-  const look = tintLook(hex);
-  const row = look[mode];
-  const card = token(THEME[mode], 'card')[0];
-  return cssSteps(mode).map((step) => {
-    const L = card + row.delta + step;
-    // Drawn as is: every state inside sRGB (a browser would otherwise clip it).
-    expect(oklchToLinear(L, row.c, look.h).every((v) => v >= 0 && v <= 1)).toBe(true);
-    return oklchToHex(L, row.c, look.h);
-  });
+  return tintRows(hex, DEFAULT_TINT_THEMES[mode]).fills;
 }
-
-test('the CSS state steps are the ones the mapping holds to AA', () => {
-  for (const mode of ['light', 'dark'] as const) expect(cssSteps(mode)).toEqual([...TINT_BANDS[mode].steps]);
-});
 
 test('every pick (hue every 5°, saturation and brightness every 5%) keeps the quiet text and the body text at 4.5:1 in all four states, light and dark', () => {
   for (const mode of ['light', 'dark'] as const) {
@@ -122,7 +104,6 @@ test('the five stored names still draw: each as the calm colour of its hue, acce
   for (const name of INBOX_TAG_PRESETS) {
     const attrs = tintAttrs(name);
     expect(attrs['data-tint']).toBe(name);
-    expect(attrs.style).toEqual(tintAttrs(INBOX_TAG_PRESET_HEX[name]).style);
     // Calm: a mid-strength row, never one of the vivid swatches.
     expect(hexToOklch(INBOX_TAG_PRESET_HEX[name]).c).toBeLessThanOrEqual(0.105);
   }

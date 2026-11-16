@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import { inboxMachineTags, type InboxInitiative } from "./inbox-initiatives";
-import { INBOX_TAG_AUTO_COLOURS, INBOX_TAG_PRESET_HEX, INBOX_TAG_SWATCHES, inboxNextTagColour, inboxTagColoursOf, inboxTagColoursRead, inboxTagHex, inboxTagLookOf, inboxTagOwnColour, isInboxTagColour, isInboxTagLook, type InboxTagLook } from "./inbox-tag-colours";
+import { INBOX_TAG_AUTO_COLOURS, INBOX_TAG_PRESET_HEX, INBOX_TAG_SWATCHES, inboxNextTagColour, inboxTagColoursOf, inboxTagColoursRead, inboxTagHex, inboxTagLook, inboxTagLookColour, inboxTagLookOf, inboxTagOwnColour, isInboxTagColour, isInboxTagLook, type InboxTagLook } from "./inbox-tag-colours";
 
 const auto = (colour: string, at = "2026-11-12T09:00:00.000Z"): InboxTagLook => ({ colour, by: "auto", at });
 const person = (colour: string | null, at: string): InboxTagLook => ({ colour, by: "person", at });
@@ -119,6 +119,42 @@ describe("one colour per tag across machines", () => {
     expect(merged.show).toBe(false);
     expect(merged.recent.map((r) => r.colour)).toEqual(["#0b1e4a", "#ff6a00"]);
     expect(inboxTagColoursOf([{ show: true, show_at: null, recent: [] }]).show).toBe(true);
+  });
+
+  test("own colours across machines: quick swatches an older Inbox kept are dropped before the cut to three, so they take no place", () => {
+    const at = (n: number) => `2026-11-0${n}T00:00:00.000Z`;
+    const merged = inboxTagColoursOf([
+      { show: true, show_at: null, recent: [{ colour: INBOX_TAG_SWATCHES[0]!.hex, at: at(9) }, { colour: INBOX_TAG_SWATCHES[3]!.hex, at: at(8) }, { colour: "#ff6a00", at: at(5) }] },
+      { show: true, show_at: null, recent: [{ colour: INBOX_TAG_SWATCHES[5]!.hex, at: at(7) }, { colour: "#0b1e4a", at: at(4) }, { colour: "#123456", at: at(3) }] },
+    ]);
+    expect(merged.recent.map((r) => r.colour)).toEqual(["#ff6a00", "#0b1e4a", "#123456"]);
+  });
+
+  test("Highlight rows off keeps the colour: a look off with `kept_colour` reads back its colour; an earlier Inbox's None has none; an older Inbox's check takes the new look", () => {
+    const off = inboxTagLook(null, "person", "2026-11-16T10:00:00.000Z", "#0b9488");
+    expect(off).toEqual({ colour: null, by: "person", at: "2026-11-16T10:00:00.000Z", kept_colour: "#0b9488" });
+    expect(inboxTagLookColour(off)).toBe("#0b9488");
+    // On: the colour; no kept field rides along.
+    expect(inboxTagLook("#0b9488", "person", "2026-11-16T10:00:00.000Z", "#ff0000")).toEqual({ colour: "#0b9488", by: "person", at: "2026-11-16T10:00:00.000Z" });
+    expect(inboxTagLookColour(person(null, "2026-11-16T10:00:00.000Z"))).toBeNull();
+    expect(isInboxTagLook(off)).toBe(true);
+    expect(isInboxTagLook({ ...off, kept_colour: "purple" })).toBe(false);
+    // v0.28.66's check, as released: it reads the off look (and sees None), and the on one.
+    const olderCheck = (value: unknown) => {
+      const look = value as Record<string, unknown>;
+      return (look.colour === null || isInboxTagColour(look.colour)) && (look.by === "auto" || look.by === "person") && typeof look.at === "string";
+    };
+    expect(olderCheck(off)).toBe(true);
+  });
+
+  test("one look per merged tag stays one whole look: an off look from one machine carries its kept colour, the same on every machine", () => {
+    const off = inboxTagLook(null, "person", "2026-11-16T10:00:00.000Z", "#0b9488");
+    const held = [
+      { machine: "ibx_b", created_at: "2026-11-01T00:00:00.000Z", look: person("#ff6a00", "2026-11-15T00:00:00.000Z") },
+      { machine: "ibx_a", created_at: "2026-11-02T00:00:00.000Z", look: off },
+    ];
+    expect(inboxTagLookOf(held)).toEqual(off);
+    expect(inboxTagLookOf([...held].reverse())).toEqual(off);
   });
 
   test("a far machine's malformed tag_colours reads as nothing set", () => {
