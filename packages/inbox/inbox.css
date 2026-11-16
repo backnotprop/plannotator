@@ -10331,10 +10331,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-shape-layer .shp-root:not(.phone) .shp-head-start { margin-left: -18px; }
 .ib-shape-layer .shp-root:not(.phone) .shp-head:has(.shp-head-start) .shp-claim { margin-left: 24px; }
 .ib-shape-layer .shp-root.phone .shp-head:has(.shp-head-start) .shp-claim { margin-left: 42px; }
-.ib-shape-thread { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
-.ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
-.ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }
-.ib-shape-who span { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-shape-page .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
 .ib-shape-find { display: flex; align-items: center; gap: 8px; height: 36px; width: 300px; max-width: 40vw; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted-foreground); background: transparent; }
 .ib-shape-find input { all: unset; flex: 1; min-width: 0; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }

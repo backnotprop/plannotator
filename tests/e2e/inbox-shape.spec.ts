@@ -11,8 +11,8 @@
  *    lists every board and Find narrows it;
  *  - the thread header's Pebble (a dot while it changed), left of Artifacts,
  *    opens the board in the thread's own pane under the thread's header (not
- *    over the window), the board's Thread tab shows the thread's messages, and
- *    its × ("Close Shape"), Esc or Back closes it, the × giving the focus back
+ *    over the window), its side panel is References only (no Thread or Ask tab,
+ *    no Chat), and its × ("Close Shape"), Esc or Back closes it, the × giving the focus back
  *    to the Pebble;
  *  - a drawing's `#…` link never changes the window's hash, and an https link
  *    opens a new tab (never this one);
@@ -146,12 +146,15 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board in 
   expect(page.url()).toBe(before);
   expect(await page.evaluate(() => (window as unknown as { __opened: unknown[][] }).__opened)).toEqual([['https://example.com/notes', '_blank', 'noopener,noreferrer']]);
 
-  // The Thread tab: the thread's own message.
-  await layer.getByRole('button', { name: 'Chat' }).click();
-  await layer.getByRole('tab', { name: 'Thread' }).click();
-  await expect(layer.locator('[data-shape-message]')).toContainText('It shows once, ever, after 2 days of use.');
+  // The side panel is References only (the owner, 2026-11-16): no Thread or Ask tab, no Chat button.
+  await expect(layer.getByRole('toolbar').getByRole('button', { name: 'Chat' })).toHaveCount(0);
+  await layer.getByRole('toolbar').getByRole('button', { name: /References/ }).click();
+  const panel = layer.locator('.shp-sidep.open');
+  await expect(panel.locator('.shp-sidep-title')).toHaveText('References');
+  await expect(panel.getByRole('tab')).toHaveCount(0);
+  await expect(panel.locator('[data-shape-message], textarea')).toHaveCount(0);
   await page.waitForTimeout(400);
-  await shot(page, 'board-thread-tab', 'light');
+  await shot(page, 'board-references-panel', 'light');
   await layer.getByRole('button', { name: 'Close panel' }).click();
 
   // A change waits for the agent until its `shape read --notes` takes it: the board clears it with no reload.

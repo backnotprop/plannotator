@@ -157,6 +157,9 @@ interface CommentPopoverProps {
   /** Opt-in: why the last submit failed (Shape: a Change it that did not reach the server), shown under the
    *  header with `role="alert"` while the person's words stay in the box. Absent → nothing, as always. */
   errorText?: string;
+  /** Opt-in: drawn under the header, above the words (Shape: what was asked or changed on this part, and the
+   *  answers). Absent → nothing, as always. */
+  before?: React.ReactNode;
   /** Opt-in: `side` opens the popover beside the anchor (right, else left),
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
@@ -372,6 +375,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   yieldState,
   headerText,
   errorText,
+  before,
   placement = 'below',
   zIndex,
   autoFocus = true,
@@ -1021,6 +1025,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {isGlobal ? 'Global comment' : on ?? 'Comment'}
           </div>
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
           <div className="pn-cbox-field">
@@ -1186,6 +1191,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           </div>
 
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
 
@@ -1358,6 +1364,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       </div>
 
       {errorRow}
+      {before}
           {draftConflictRow}
       {chipsRow}
 

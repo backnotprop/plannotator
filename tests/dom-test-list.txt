@@ -689,6 +689,7 @@ packages/inbox/lazyRecovery.test.tsx
 packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
 packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
+packages/ui/components/shape/ShapeSurface.panel.test.tsx
 packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/ui/components/CommentPopover.extraAction.test.tsx

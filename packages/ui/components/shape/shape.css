@@ -123,11 +123,8 @@
 .shp-tbtn:hover { color: var(--foreground); }
 .shp-tbtn:disabled { opacity: .5; cursor: default; }
 .shp-tbtn.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
-.shp-tbtn.chat.ready { color: var(--primary); background: color-mix(in oklab, var(--primary) 11%, transparent); }
 .shp-tdot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--popover); }
 .shp-tcount { font: 600 10.5px/1 var(--font-mono); color: var(--muted-foreground); padding: 2px 5px; border-radius: 6px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
-.shp-ready-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); animation: shp-ready 1.6s ease-out 2; }
-@keyframes shp-ready { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 50%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
 .shp-tstrip { padding-left: 6px; border-left: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
 .shp-tstrip > div { flex-wrap: nowrap !important; }
 .shp-tstrip button { flex-shrink: 0; }
@@ -179,12 +176,9 @@
   transform: translateX(calc(100% + 24px)); opacity: 0; visibility: hidden; transition: transform .32s cubic-bezier(.2,.8,.2,1), opacity .2s ease, visibility 0s .32s; }
 .shp-sidep.open { transform: none; opacity: 1; visibility: visible; transition: transform .32s cubic-bezier(.2,.8,.2,1), opacity .16s ease, visibility 0s; }
 .shp-sidep-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 10px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
-.shp-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px; background: color-mix(in oklab, var(--muted) 55%, transparent); flex: 1; }
-.shp-tabs button { flex: 1; appearance: none; border: 0; background: transparent; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: 500 12.5px/1 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
-.shp-tabs button.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+.shp-sidep-title { flex: 1; display: inline-flex; align-items: center; gap: 6px; margin: 0; padding-left: 4px; font: 600 13px/1 var(--font-sans); color: var(--foreground); }
 .shp-sidep-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .shp-sidep-body > * { flex: 1; min-height: 0; }
-.shp-thread-in { display: flex; flex-direction: column; overflow: auto; }
 .shp-sidep.sheet { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 84%; border-radius: 18px 18px 0 0; transform: translateY(100%); }
 .shp-sidep.sheet.open { transform: none; }
 .shp-grab { width: 38px; height: 4px; border-radius: 4px; background: color-mix(in oklab, var(--foreground) 22%, transparent); margin: 8px auto 0; flex: none; }
@@ -216,7 +210,6 @@
 
 /* A message a reference points at, in the host's Thread. */
 [data-shape-message] { border-radius: 10px; transition: background-color .6s; }
-[data-shape-message].shp-flash { background: color-mix(in oklab, var(--primary) 14%, transparent); transition: background-color .15s; }
 
 /* ── phone: 390 px, the panel is a bottom sheet ── */
 .shp-root.phone .shp-head { padding: 14px 16px 0 10px; }
@@ -237,7 +230,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .shp-rb.flash { animation: none; background: var(--primary); color: var(--primary-foreground); }
-  .shp-ready-dot, .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
+  .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
   .shp-sidep, .shp-sidep.open { transition: opacity .16s; }
   .shp-dock, .shp-pill, .shp-pin-hover { transition: none; }
 }
@@ -641,3 +634,15 @@ button.shp-stk-pr { cursor: pointer; transition: background-color .15s ease, col
 .shp-stk-file-path { margin: 12px 16px; font: var(--ib-fs-13, 13px)/1.4 var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 @media (pointer: coarse) { .shp-stk-chip { height: 36px; } .shp-stk-frow { min-height: 44px; } }
 @media (prefers-reduced-motion: reduce) { .shp-stk-card, .shp-stk-card.sheet { animation: shp-ex-fade .15s linear both; } .shp-stk-chip, .shp-stk-chip:active { transform: none; transition: background-color .15s, color .15s; } }
+
+/* A part's questions and changes, with the answers, in its comment box (talk.tsx): above the words, scrolling on its own. */
+.shp-talk { max-height: min(42vh, 320px); overflow: auto; padding: 8px 12px 4px; display: flex; flex-direction: column; gap: 10px; font: 400 13px/1.45 var(--font-sans); color: var(--foreground); }
+.shp-talk-who { margin: 0; font-size: 11.5px; color: var(--muted-foreground); }
+.shp-talk-entry { display: flex; flex-direction: column; gap: 3px; }
+.shp-talk-where { margin: 0; font-size: 11.5px; color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shp-talk-q { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.shp-talk-a { overflow-wrap: anywhere; }
+.shp-talk-a .ai-markdown > :first-child { margin-top: 0; }
+.shp-talk-a .ai-markdown > :last-child { margin-bottom: 0; }
+.shp-talk-status, .shp-talk-wait { margin: 0; font-size: 12px; color: var(--muted-foreground); display: inline-flex; align-items: center; gap: 6px; }
+.shp-talk-error { margin: 0; font-size: 12px; color: var(--destructive); }

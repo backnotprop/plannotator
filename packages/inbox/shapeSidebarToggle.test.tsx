@@ -120,7 +120,7 @@ async function mount(options: { thread?: InboxThread; phone?: boolean; inThread?
 const sidebarState = (el: ParentNode) => el.querySelector('[data-slot="sidebar"][data-state]')?.getAttribute('data-state') ?? null;
 const boardToggle = (el: ParentNode) => el.querySelector<HTMLButtonElement>('.shp-head [data-sidebar="trigger"]');
 
-/** A thread the board hangs off (only the board's Thread tab reads its messages). */
+/** A thread the board hangs off. */
 const THREAD = { thread_id: 'thr_1', messages: [], project: { root: '/work/relay', repo: null } } as unknown as InboxThread;
 
 for (const [where, thread] of [['the Shape page', undefined], ['a board in a thread that covers the list', THREAD]] as const) {

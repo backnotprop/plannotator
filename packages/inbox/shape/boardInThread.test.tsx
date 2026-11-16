@@ -13,12 +13,14 @@
  *  - the focus: the Pebble's press takes it to the board's title, and a close from the board (its ×) gives it back to
  *    the Pebble, as leaving the Artifacts view gives it to its button;
  *  - the board losing a control in a 400 px pane (the narrowest pane a thread gets): its views, Comment, References,
- *    Chat, Global comment and its ×;
+ *    Global comment and its ×;
  *  - the thread's keys acting under the board (R opening the hidden reply box, O a file beside the board);
  *  - the thread's scroll lost when the board closes (WebKit forgets a hidden scroller's, so the pane puts it back);
  *  - with Shape off, an old address naming a board keeping the Artifacts view shut, with no board in its place;
  *  - a one-message thread with no name losing its subject from the bar while the board hides its heading;
- *  - on a phone, the header's way back leaving the thread instead of the board (it reads ‹ Thread, as Artifacts' does).
+ *  - on a phone, the header's way back leaving the thread instead of the board (it reads ‹ Thread, as Artifacts' does);
+ *  - the board's side panel growing back its Thread or Ask tab (it is References only, the owner 2026-11-16), or a
+ *    reference to a message of the thread opening nothing now that the Thread tab is gone (it lands the thread there).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -132,7 +134,7 @@ function board(): ShapeLoaded {
   dirs.push(dir);
   const store = createShapeStore({ dataDir: join(dir, 'data') });
   const made = store.update({
-    board: { title: 'Two ways a refund arrives', claim: 'Webhook or polling.', views: { picture: { html: '<p data-mark="hook">Webhook</p>' }, how: { html: '<p data-mark="poll">Poll</p>' } }, refs: [{ n: 1, kind: 'link', title: 'Stripe docs', target: 'https://example.com/stripe' }] },
+    board: { title: 'Two ways a refund arrives', claim: 'Webhook or polling.', views: { picture: { html: '<p data-mark="hook">Webhook</p>' }, how: { html: '<p data-mark="poll">Poll</p>' } }, refs: [{ n: 1, kind: 'link', title: 'Stripe docs', target: 'https://example.com/stripe' }, { n: 2, kind: 'message', title: 'The question', target: T }] },
     project: { root: dir, name: 'billing-svc' },
     session: { id: 'ses_a', host: 'claude-code' },
   });
@@ -349,11 +351,11 @@ test.skipIf(!hasDom)('a 400 px pane: the board takes its narrow layout and keeps
   const views = [...dock.querySelectorAll<HTMLButtonElement>('[aria-label="Views"] button')].map((b) => b.title);
   expect(views).toEqual(['Shape', 'How it works']);
   for (const name of ['Comment', 'Global comment']) expect(dock.querySelector(`button[aria-label="${name}"]`), name).not.toBeNull();
-  for (const title of ['References', 'Chat']) expect(dock.querySelector(`button[title="${title}"]`), title).not.toBeNull();
+  expect(dock.querySelector('button[title="References"]')).not.toBeNull();
   expect(board.querySelector('button[aria-label="Close Shape"]')).not.toBeNull();
   for (const b of dock.querySelectorAll<HTMLButtonElement>('button')) expect(b.disabled, b.title).toBe(false);
-  // Chat opens the panel (a sheet here) with the board's tabs.
-  await act(async () => dock.querySelector<HTMLButtonElement>('button[title="Chat"]')!.click());
+  // References opens the panel (a sheet here).
+  await act(async () => dock.querySelector<HTMLButtonElement>('button[title="References"]')!.click());
   expect(board.querySelector('.shp-sidep.sheet.open')).not.toBeNull();
 });
 
@@ -451,4 +453,33 @@ test.skipIf(!hasDom)('the board in its thread counts as open over the page for t
   expect(document.querySelector('[data-shape-open]')).toBe(layer());
   draw({ page: 'inbox', project: null, thread: T, shape: null });
   expect(document.querySelector('[data-shape-open]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('the board’s side panel is References only: no Thread tab, no Ask tab, no Chat button', async () => {
+  const { id, draw } = mount({});
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await boardDrawn();
+  const dock = layer()!.querySelector<HTMLElement>('[role="toolbar"][aria-label="Shape toolbar"]')!;
+  expect(dock.querySelector('button[title="Chat"]')).toBeNull();
+  await act(async () => dock.querySelector<HTMLButtonElement>('button[title="References"]')!.click());
+  const panel = layer()!.querySelector<HTMLElement>('.shp-sidep.open')!;
+  expect(panel.querySelectorAll('[role="tab"]')).toHaveLength(0);
+  expect(panel.querySelector('[data-shape-message], textarea')).toBeNull();
+  expect(panel.querySelector('.shp-sidep-title')!.textContent).toBe('References');
+});
+
+test.skipIf(!hasDom)('a reference to a message of the thread lands the thread on it, the board closed', async () => {
+  keepAddress();
+  const { id, draw } = mount({});
+  window.history.replaceState(null, '', `#thread=${T}&shape=${id}`);
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await boardDrawn();
+  const dock = layer()!.querySelector<HTMLElement>('[role="toolbar"][aria-label="Shape toolbar"]')!;
+  await act(async () => dock.querySelector<HTMLButtonElement>('button[title="References"]')!.click());
+  const row = [...layer()!.querySelectorAll<HTMLElement>('.shp-sidep li, .shp-sidep .shp-ref')].find((r) => r.textContent?.includes('The question'));
+  const open = (row ?? layer()!.querySelector('.shp-sidep')!).querySelector<HTMLButtonElement>('.shp-ref-open');
+  expect(open).not.toBeNull();
+  await act(async () => open!.click());
+  expect(window.location.hash).toContain(`msg=${T}`);
+  expect(window.location.hash).not.toContain('shape=');
 });

@@ -301,9 +301,11 @@ test('How it works: a lazy drag over a diagram', async ({ browser }) => {
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(shots, '06-diagram-comment.png') });
   await composer(page).getByRole('button', { name: 'Ask' }).click();
-  await expect(composer(page)).toHaveCount(0);
-  // An Ask opens the chat beside the board.
-  await expect(page.locator('.shp-sidep.open')).toBeVisible();
+  // An Ask keeps its box open on the box it asked about, the words cleared: the question (and its answer, as it
+  // comes) above them. The side panel is References only and stays shut.
+  await expect(composer(page).locator('[data-shape-talk]')).toContainText('Show me how this works');
+  await expect(composer(page).locator('textarea')).toHaveValue('');
+  await expect(page.locator('.shp-sidep.open')).toHaveCount(0);
   // `shape read --notes` hands the notes over and marks them delivered, so the read that finds them is the one kept.
   let notes: { view: string; part: string; code?: string[]; picture?: string }[] = [];
   await expect.poll(() => (notes = waiting(id) as typeof notes).length).toBeGreaterThan(0);
