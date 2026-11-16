@@ -4,6 +4,7 @@
  * - a Change it or an Ask from the page is lost, or a bad one is stored;
  * - "seen" or finishing does not stick;
  * - a file outside the shape's files/ (or not an image) is served;
+ * - a malformed percent-encoding in a path crashes the route instead of answering 400;
  * - the event feed misses an agent's new version or the agent picking up a
  *   waiting change, so the board's "1 change waits" never clears.
  */
@@ -117,6 +118,17 @@ describe("shape routes", () => {
     if (!r.ok) throw new Error(JSON.stringify(r));
     const name = /files\/([^"]+)/.exec(w.store.read(w.id)!.views.picture!.html)![1]!;
     expect(await w.call("GET", `/api/shapes/${w.id}/files/${name}`)).toMatchObject({ status: 200, file: { contentType: "image/svg+xml" } });
+  });
+
+  test("a malformed percent-encoding is a 400, not a crash", async () => {
+    const w = world();
+    for (const path of ["/api/shapes/%", `/api/shapes/${w.id}/files/%E0%A4%A`]) {
+      const bad = await w.call("GET", path);
+      expect(bad.status).toBe(400);
+      expect(bad.body.error).toBe("malformed URL encoding");
+    }
+    expect((await w.call("GET", `/api/shapes/${w.id}`)).status).toBe(200);
+    expect(w.changed).toEqual([]);
   });
 });
 
