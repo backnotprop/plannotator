@@ -145,6 +145,10 @@ describe("markdownImageRefs", () => {
     expect([...markdownImageRefs("A `stray backtick.\n\n![b](b.png) and ` another")]).toEqual(["b.png"]);
   });
 
+  test("an unmatched opening parenthesis does not name a shown image", () => {
+    expect(markdownImageRefs("![draft](img/plot(v2.png)").size).toBe(0);
+  });
+
   test("sources are compared with leading and trailing whitespace dropped, as a browser does", () => {
     expect([...markdownImageRefs('<img src=" img/a.png\t">')]).toEqual(["img/a.png"]);
   });
@@ -198,6 +202,18 @@ describe("handleReviewMarkdownImageRequest", () => {
     "new:notes.livemd": doc("![n](n.png)\n"),
     "new:n.png": png(8, 8),
   };
+
+  test("serves inline Markdown images with balanced parentheses in their filenames", async () => {
+    const result = await answer(
+      { doc: "docs/guide.md", side: "new", src: "img/plot(v2).png" },
+      {
+        "new:docs/guide.md": doc('![Plot](img/plot(v2).png "Result")'),
+        "new:docs/img/plot(v2).png": png(4, 3),
+      },
+    );
+    expect(result.response.status).toBe(200);
+    expect(result.reads).toEqual(["new:docs/guide.md", "new:docs/img/plot(v2).png"]);
+  });
 
   test("serves the image at the requested side, relative to the document's folder at THAT side", async () => {
     const newSide = await answer({ doc: "docs/guide.md", side: "new", src: "img/a.png" }, STORE);

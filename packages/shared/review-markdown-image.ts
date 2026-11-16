@@ -61,8 +61,8 @@ export function isReviewMarkdownPath(path: string, extraExtensions: readonly str
 
 // --- References -------------------------------------------------------------
 
-/** `![alt](src)`, `![alt](<src>)`, `![alt](src "title")`. */
-const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\(\s*(<[^>\n]*>|[^)\s]+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
+/** Inline images, including a title or one level of balanced parentheses in the target. */
+const MARKDOWN_IMAGE_RE = /!\[[^\]]*\]\(\s*(<[^>\n]*>|(?:[^()<>\s]|\([^()\s]*\))+)(?:\s+(?:"[^"]*"|'[^']*'|\([^)]*\)))?\s*\)/g;
 /** `![alt][ref]`, `![alt][]` and `![ref]`: the labels a reference image uses. */
 const MARKDOWN_REF_IMAGE_RE = /!\[([^\]]*)\](?:\[([^\]]*)\])?/g;
 /** `[ref]: src "title"` link reference definitions. */
