@@ -83,6 +83,8 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
+// First import: loopback requests ignore a proxy from here on (loopback-no-proxy.ts).
+import "./loopback-no-proxy";
 import { childEnv, GIT_REPO_ENV, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
@@ -155,6 +157,7 @@ import {
 } from "./host-result";
 import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
+import { exitWhenParentGone } from "./orphan-plan-review";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { LIVE_APP_REMOTE_MESSAGE, LIVE_APP_REQUIRES_URL_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
@@ -3330,6 +3333,10 @@ if (args[0] === "sessions") {
     console.error(`Failed to parse hook event from stdin: ${e?.message || e}`);
     process.exit(1);
   }
+
+  // The agent that ran this hook reads the decision from stdout: if it dies,
+  // stop instead of holding the port open forever (orphan-plan-review.ts).
+  exitWhenParentGone(takeHostResultPath() !== undefined);
 
   if (event.hook_event_name === "Stop") {
     const transcriptPath = typeof event.transcript_path === "string" && event.transcript_path
