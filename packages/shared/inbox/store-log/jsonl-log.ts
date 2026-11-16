@@ -21,6 +21,7 @@ import {
   PROJECT_FILE,
   PULLS_FILE,
   QUESTIONS_FILE,
+  SCHEDULED_FILE,
   SEQ_FLOOR_FILE,
   STEPS_FILE,
 } from "../schema";
@@ -35,10 +36,11 @@ const FILE_OF: Record<InboxLine["kind"], string> = {
   steps: STEPS_FILE,
   thread_pull: PULLS_FILE,
   initiative: INITIATIVES_FILE,
+  scheduled: SCHEDULED_FILE,
 };
 
 /** Files an older Inbox never reads: after a line there, `seq.json` keeps that Inbox from handing out its seq again. */
-const FLOORED: ReadonlySet<InboxLine["kind"]> = new Set(["card", "steps", "thread_pull", "initiative"]);
+const FLOORED: ReadonlySet<InboxLine["kind"]> = new Set(["card", "steps", "thread_pull", "initiative", "scheduled"]);
 
 /** Every project file the store reads, in the order it always read them. */
 const PROJECT_FILES = [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE, PULLS_FILE];
@@ -59,6 +61,7 @@ class JsonlInboxLog implements InboxLog {
     const lines: InboxLine[] = [];
     // The Board's initiatives: one file for every project, on the same seq.
     this.readLines(join(this.dir, INITIATIVES_FILE), lines);
+    this.readLines(join(this.dir, SCHEDULED_FILE), lines);
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
     if (!existsSync(projectsDir)) return { lines, seqFloor };
     for (const key of readdirSync(projectsDir)) {
@@ -73,7 +76,7 @@ class JsonlInboxLog implements InboxLog {
   }
 
   append(line: InboxLine, project: InboxProject | null): void {
-    const file = line.kind === "initiative" || !project ? join(this.dir, FILE_OF[line.kind]) : join(this.folder(project), FILE_OF[line.kind]);
+    const file = line.kind === "initiative" || line.kind === "scheduled" || !project ? join(this.dir, FILE_OF[line.kind]) : join(this.folder(project), FILE_OF[line.kind]);
     const prefix = this.tornFiles.has(file) ? "\n" : "";
     try {
       appendFileSync(file, `${prefix}${JSON.stringify(line)}\n`, { mode: 0o600 });

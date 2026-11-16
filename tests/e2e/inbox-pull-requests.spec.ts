@@ -63,7 +63,7 @@
  * PLANNOTATOR_E2E_VIDEO=1.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -1792,6 +1792,39 @@ test('a description with a list never scrolls sideways', async ({ browser }) => 
     } finally {
       await context.close();
     }
+  }
+});
+
+// With Wrap long lines on, a diff's lines wrap at the window and it never pans sideways. A thread on a line is drawn in the
+// rows of the diff, and a folded one is one line of its first words (nowrap), which counted in full toward the width of the
+// diff's code column: the column grew to that line, every row wrapped there instead of at the phone, and the diff panned
+// sideways. (An open thread wraps its words and is not the case.)
+test('a folded thread on a line leaves a wrapped diff as wide as a phone', async ({ browser }) => {
+  const number = TEAMMATE.split('#')[1]!;
+  const words = 'This retries forever when the charge keeps failing, so the worker holds the queue and nothing behind it ever runs; the cap belongs here and not in the caller, which is why these first words stay on one line.';
+  // A resolved thread starts folded.
+  const thread = {
+    id: 'folded', isResolved: true, isOutdated: false, line: 1, startLine: null, path: 'src/app.ts', diffSide: 'RIGHT',
+    comments: { nodes: [{ id: 'folded-c', body: words, author: { __typename: 'User', login: 'kim', avatarUrl: world.avatars.url('kim') }, createdAt: '2026-11-01T09:30:00Z', url: '' }] },
+  };
+  // What the world's forge answered for this PR before is put back after: the tests that follow read it too.
+  const answer = join(world.forge, `ctxg-${number}.json`);
+  const before = existsSync(answer) ? readFileSync(answer, 'utf8') : null;
+  writeFileSync(answer, JSON.stringify({ data: { repository: { pullRequest: { comments: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [thread] } } } } }));
+  const { context, page } = await stubbedReview(browser, 390, COLLIDING_PATHS_DIFF);
+  try {
+    await context.addCookies([{ name: 'plannotator-diff-overflow', value: 'wrap', url: world.url }]);
+    await page.reload();
+    const shell = page.locator('[data-pull-review] [data-guide-file-shell="src/app.ts"]');
+    await shell.scrollIntoViewIfNeeded();
+    await expect(shell.locator('[data-pull-thread="folded"]')).toBeVisible();
+    const { client, scroll } = await shell.locator('[data-code]').first().evaluate((el) => ({ client: el.clientWidth, scroll: el.scrollWidth }));
+    expect(client).toBeLessThanOrEqual(390);
+    expect(scroll).toBeLessThanOrEqual(client);
+  } finally {
+    if (before === null) rmSync(answer, { force: true });
+    else writeFileSync(answer, before);
+    await context.close();
   }
 });
 

@@ -9,6 +9,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AGENTS, COLUMNS, LISTED_AGENTS, TIERS, cellOf } from './src/lib/inbox-agents';
+import { buildInboxPrompt } from './src/lib/llms';
 
 const marketingRoot = fileURLToPath(new URL('.', import.meta.url));
 const switchFile = join(marketingRoot, 'src/lib/inbox-launch.ts');
@@ -99,15 +100,16 @@ describe('Plannotator Inbox launch switch', () => {
   });
 
   // "Copy install prompt" copies the text inlined in the page; /inbox/prompt.md
-  // serves the file. Both come from src/lib/inbox-prompt.md and must not drift.
-  // ASCII only because S3 serves .md as text/markdown without a charset.
+  // serves the file. Both are buildInboxPrompt() of src/lib/inbox-prompt.md and
+  // must not drift. ASCII only: it is text a person pastes into any agent.
   test('on: the install prompt is served and inlined from one source', async () => {
     const source = await readFile(join(marketingRoot, 'src/lib/inbox-prompt.md'), 'utf8');
-    expect(source).toMatch(/^[\x09\x0a\x20-\x7e]*$/);
-    expect(await read(dist.on, 'inbox/prompt.md')).toBe(source);
+    const served = await read(dist.on, 'inbox/prompt.md');
+    expect(served).toMatch(/^[\x09\x0a\x20-\x7e]*$/);
+    expect(served).toBe(buildInboxPrompt(source));
     const inbox = await read(dist.on, 'inbox/index.html');
     const inlined = inbox.match(/<script type="application\/json" id="ib-install-prompt">([\s\S]*?)<\/script>/)?.[1];
-    expect(inlined && JSON.parse(inlined)).toBe(source);
+    expect(inlined && JSON.parse(inlined)).toBe(served);
   });
 
   test('on: the cloud agent setup pages are served as plain ASCII markdown at /inbox/cloud-agent.md and /inbox/muse.md', async () => {

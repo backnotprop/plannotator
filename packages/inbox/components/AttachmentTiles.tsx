@@ -99,6 +99,7 @@ export function ImageGallery({
   onOpen,
   openIn,
   onOpenAs,
+  pinOf,
 }: {
   images: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
@@ -106,16 +107,20 @@ export function ImageGallery({
   /** Where the window is, for the menu's Open in list (as the tiles'). */
   openIn?: OpenInSurface;
   onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
+  pinOf?: TilePinOf;
 }) {
   if (images.length === 0) return null;
   return (
     <div className="ib-gallery" data-image-gallery="">
       {images.map((image) => (
-        <GalleryImage key={image.id} image={image} count={annotationCounts.get(image.path) ?? 0} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} />
+        <GalleryImage key={image.id} image={image} count={annotationCounts.get(image.path) ?? 0} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} pin={pinOf?.(image)} />
       ))}
     </div>
   );
 }
+
+/** A file's pin (its thread and artifact key) for its menu's Pin / Unpin; absent (the tour): none. */
+export type TilePinOf = (attachment: InboxAttachmentState) => { threadId: string; key: string };
 
 /** Tall images are cropped to this width-to-height ratio in the row. */
 const TALL_RATIO = 0.62;
@@ -126,12 +131,14 @@ function GalleryImage({
   onOpen,
   openIn,
   onOpenAs,
+  pin,
 }: {
   image: InboxAttachmentState;
   count: number;
   onOpen: (attachment: InboxAttachmentState) => void;
   openIn?: OpenInSurface;
   onOpenAs?: (attachment: InboxAttachmentState, view: 'full' | 'side') => void;
+  pin?: { threadId: string; key: string };
 }) {
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   const [failed, setFailed] = useState(false);
@@ -193,6 +200,7 @@ function GalleryImage({
       attachment={image}
       surface={openIn}
       onOpenAs={onOpenAs ? (view) => onOpenAs(image, view) : undefined}
+      pin={pin}
       render={(_more, status) => (
         <div className={`ib-gal-w${count > 0 ? ' ib-gal-w-count' : ''}`} style={frame}>
           {item}
@@ -225,6 +233,7 @@ export function AttachmentTiles({
   onOpenAs,
   newestId = null,
   newestKeycap = true,
+  pinOf,
 }: {
   attachments: readonly InboxAttachmentState[];
   annotationCounts: ReadonlyMap<string, number>;
@@ -241,6 +250,7 @@ export function AttachmentTiles({
   newestId?: string | null;
   /** Whether that tile draws the O keycap. Off while a file is open: from the file O does nothing, and the tile still names the key. */
   newestKeycap?: boolean;
+  pinOf?: TilePinOf;
 }) {
   const newestKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'openNewest' });
   const source = useInboxFileSource();
@@ -256,7 +266,7 @@ export function AttachmentTiles({
           {plural(attachments.length, 'attachment')}
         </div>
       )}
-      <ImageGallery images={images} annotationCounts={annotationCounts} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} />
+      <ImageGallery images={images} annotationCounts={annotationCounts} onOpen={onOpen} openIn={openIn} onOpenAs={onOpenAs} pinOf={pinOf} />
       <div className="ib-atts ib-tiles">
         {attachments.map((attachment) => {
           const count = annotationCounts.get(attachment.path) ?? 0;
@@ -327,6 +337,7 @@ export function AttachmentTiles({
               attachment={attachment}
               surface={openIn}
               onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined}
+              pin={pinOf?.(attachment)}
               render={(more, status) =>
                 more || reuse ? (
                   <div className={`ib-att-w${reuse ? ' ib-att-w-reuse' : ''}${more ? ' ib-att-w-more' : ''}`} data-open-in-tile={more ? attachment.id : undefined}>

@@ -9,7 +9,7 @@
  * into a field: Enter saves, Escape or leaving the field cancels) and Delete tag (no question: the toast has Undo).
  * Closed, the section keeps only the tag the list shows.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxInitiative } from '@plannotator/core/inbox-types';
@@ -17,6 +17,10 @@ import { formatCount } from '../format';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
+import { TagColourItem, TagColourList } from './TagColourMenu';
+import { focusAfterSwap } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
+import { tintAttrs } from '../tagColours';
+import type { TagColourControls } from '../useThreadTagsHost';
 
 export interface TagsSectionProps {
   /** The live tags, oldest first. */
@@ -40,6 +44,8 @@ export interface TagsSectionProps {
   /** Resolves true once the new name is in. */
   onRename: (tagId: string, name: string) => Promise<boolean>;
   onDelete: (tag: InboxInitiative) => void;
+  /** Tag colours (tagColours.ts): each tag's row wears its colour, the key to the list's; null from an older Inbox. */
+  colours?: TagColourControls | null;
 }
 
 export function TagsSection(props: TagsSectionProps) {
@@ -76,6 +82,21 @@ export function TagsSection(props: TagsSectionProps) {
     longPress: true,
   });
   const target = menu.targetId ? (tags.find((tag) => tag.id === menu.targetId) ?? null) : null;
+  // Highlight rows swaps the menu for the colours in place; each opening starts on the menu.
+  const [colourView, setColourView] = useState(false);
+  useEffect(() => setColourView(false), [menu.targetId]);
+  // Back from the colours: focus returns to Highlight rows.
+  const leftColours = useRef(false);
+  useLayoutEffect(() => {
+    if (colourView) {
+      leftColours.current = true;
+      return;
+    }
+    if (!leftColours.current) return;
+    leftColours.current = false;
+    return focusAfterSwap(() => portal?.querySelector<HTMLElement>('[data-tag-menu] [data-tag-action="colour"]'));
+  }, [colourView, portal]);
+  const colours = props.colours ?? null;
   const startCreate = () => {
     if (closed) props.onToggle();
     setCreating(true);
@@ -134,6 +155,8 @@ export function TagsSection(props: TagsSectionProps) {
               );
             }
             const n = props.waiting.get(tag.id) ?? 0;
+            const colour = colours?.show ? colours.colourOf(tag.id) : null;
+            const tint = colour ? tintAttrs(colour) : null;
             return (
               <button
                 key={tag.id}
@@ -143,6 +166,8 @@ export function TagsSection(props: TagsSectionProps) {
                 onClick={props.pick(() => props.onOpen(tag.id))}
                 data-tag-row={tag.id}
                 data-menu={aimed === tag.id ? '' : undefined}
+                data-tint={tint?.['data-tint']}
+                style={tint?.style as CSSProperties | undefined}
               >
                 <span className="ib-name" dir="auto">
                   {tag.name}
@@ -162,10 +187,13 @@ export function TagsSection(props: TagsSectionProps) {
           <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>
             <ContextMenu.Popup className="ib-pm" aria-label={target?.name ?? 'Tag'} data-tag-menu={target?.id} {...menu.popup}>
               {target && (
+                <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                  {target.name}
+                </div>
+              )}
+              {target && colourView && colours && <TagColourList tag={target} colours={colours} onBack={() => setColourView(false)} />}
+              {target && !(colourView && colours) && (
                 <>
-                  <div className="ib-pm-title" dir="auto" aria-hidden="true">
-                    {target.name}
-                  </div>
                   <Menu.Item className="ib-pmi" label="Show threads" onClick={props.pick(() => props.onOpen(target.id))} data-tag-action="open">
                     <Icon name="inbox" size={15} />
                     Show threads
@@ -183,6 +211,7 @@ export function TagsSection(props: TagsSectionProps) {
                     <Icon name="pen" size={15} />
                     Rename
                   </Menu.Item>
+                  {colours && <TagColourItem colour={colours.colourOf(target.id)} onOpen={() => setColourView(true)} />}
                   <Menu.Separator className="ib-pm-sep" />
                   <Menu.Item
                     className="ib-pmi"

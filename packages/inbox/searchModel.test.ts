@@ -63,7 +63,7 @@ test('a picked type: the live region counts that type alone, from the totals, si
 
 test('a no-match scope names a picked type once, with the project it was searched in', () => {
   const name = (id: string) => (id === 'prj_a' ? 'relay' : id);
-  const filters = { project: 'prj_a', status: 'archived' as const, from: null };
+  const filters = { project: 'prj_a', status: 'archived' as const, from: null, tags: [] };
   // The type and the project read as one scope, not as two items of a list.
   expect(scopeWords(filters, name, 'projects')).toEqual(['projects in relay', 'Archived']);
   expect(scopeWords({ ...filters, project: null }, name, 'files')).toEqual(['files', 'Archived']);

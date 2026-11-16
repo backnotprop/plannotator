@@ -39,7 +39,7 @@ import {
   type SkillCatalogEntry,
   type SkillExportContent,
 } from '@plannotator/ui/utils/skillReferences';
-import { inboxReviewSkill } from '@plannotator/core/inbox-review';
+import { INBOX_BUILTIN_SKILL_ROOT, inboxReviewSkill } from '@plannotator/core/inbox-review';
 import { shapeSkill } from '@plannotator/core/shape-skill';
 import { inboxApi } from './api';
 import { annotationOf } from './attachments';
@@ -127,6 +127,19 @@ export function builtinSkillContent(ref: SkillCatalogEntry, shape: boolean = rev
   if (ref.root !== 'plannotator') return undefined;
   const skill = inboxReviewSkill(ref.name, { shape, diagrams }) ?? shapeSkill(ref.name);
   return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
+}
+
+/**
+ * The block a verdict asking for changes carries (`pull-handoff-pushes`: the next round sends only what changed):
+ * `/review-recheck`'s, the same block as when the person names it in a reply. Only for the session that wrote the
+ * review (`toReviewer`): another one never saw it, so it gets no block and its next round covers the whole change.
+ * '' for an approval.
+ */
+export function verdictRecheckBlock(verdict: 'approved' | 'changes_requested', toReviewer: boolean): string {
+  if (verdict !== 'changes_requested' || !toReviewer) return '';
+  const ref: SkillCatalogEntry = { name: 'review-recheck', root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true };
+  const content = builtinSkillContent(ref);
+  return content ? composeInboxSkillsBlock([ref], new Map([[ref.name, content]]), INBOX_REPLY_SKILL_AUDIENCE) : '';
 }
 
 /**

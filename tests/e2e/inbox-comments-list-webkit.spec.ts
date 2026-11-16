@@ -8,7 +8,7 @@
  * inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { expect, test, devices, type Browser, type Page } from '@playwright/test';
+import { expect, test, devices, type Browser, type Page } from './inbox-test';
 import { cardChip, fileHighlight, fileUrl, highlight, onScreen, openThread, pane, rowOf, seededThread, startWorld, stopWorld, theList, threadUrl, type ListWorld } from './inbox-comments-list-world';
 
 const { defaultBrowserType: _webkit, ...iphone } = devices['iPhone 15'];

@@ -433,6 +433,11 @@ export interface PlannotatorConfig {
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
   /**
+   * The list's "Show archived" switch (⋮ menu, POST /api/inbox/settings `{ show_archived }`), kept the same on every
+   * linked machine: `rev` counts saves across them, `by` is the machine that saved it. Unset: off.
+   */
+  inboxShowArchived?: { on: boolean; rev: number; by: string | null };
+  /**
    * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
    * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
    */
@@ -519,6 +524,8 @@ export interface PlannotatorConfig {
    * 2026-11-04).
    */
   inboxBoard?: boolean;
+  /** Routines (packages/server/inbox-scheduled.ts): off unless the person turned them on. Not offered on Windows. */
+  inboxScheduledThreads?: boolean;
   /**
    * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
    * person turns on, off by default. On: the thread's steps button, the
@@ -733,6 +740,28 @@ export interface PlannotatorConfig {
    * a tagged machine, which has no owner. Config only. Default: none.
    */
   inboxTailscaleAllow?: string[];
+  inboxCloudflareAccess?: {
+    on?: boolean;
+    host?: string;
+    team?: string;
+    aud?: string;
+    allow?: string[];
+    port?: number;
+    account?: string;
+    zone?: string;
+    tunnel?: string;
+    app?: string;
+    dnsRecord?: string;
+  };
+  /**
+   * Exact origins of an app on this computer that may show the Plannotator
+   * Inbox window in a frame (#3299), e.g. "app://myapp" or
+   * "http://localhost:5173": loopback http(s) (no port means the default port only), or an app scheme.
+   * Anything else is dropped (packages/server/inbox-framing.ts). Applies to
+   * the window's own port only, never the tailnet. Config only, read once
+   * when the Inbox starts. Default: none (nothing may frame it).
+   */
+  inboxFrameAncestors?: string[];
   gitlabHosts?: string[];
   /**
    * Launch agents from the Inbox (New message's "New session" rows;

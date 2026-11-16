@@ -5,6 +5,7 @@ import { shortcutPrefs } from '../shortcuts/prefs';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { useTouchPhone } from '../phone';
 import { Tip } from './Tip';
+import { useTouchPress } from './touchPress';
 
 /** `thumb`: 👍 Looks good (the emoji itself, as plan review's button draws it). */
 export type InboxToastIcon = 'check' | 'warn' | 'archive' | 'mute' | 'thumb' | 'unpin' | 'clock' | 'unread';
@@ -121,6 +122,7 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
   const touchPhone = useTouchPhone();
   const reply = !(phone && touchPhone) && toast.onReply;
   const undoKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'undo' });
+  const undoPress = useTouchPress(toast.onUndo);
   const lead = phone ? (toast.phoneLead ?? toast.lead) : toast.lead;
   const detail = phone ? (toast.phoneDetail ?? toast.detail) : toast.detail;
   const error = toast.wrap && !detail ? splitErrorAction(lead) : null;
@@ -164,7 +166,7 @@ function ToastBody({ toast, phone, onDismiss }: { toast: InboxToastModel; phone:
             </button>
           )}
           {toast.onUndo && (
-            <button type="button" className="ib-tundo" onClick={toast.onUndo} data-toast-undo="" aria-keyshortcuts={toast.noKey || (phone && touchPhone) ? undefined : undoKeys}>
+            <button type="button" className="ib-tundo" {...undoPress} data-toast-undo="" aria-keyshortcuts={toast.noKey || (phone && touchPhone) ? undefined : undoKeys}>
               Undo
               {/* A narrow desktop window (the phone layout, a mouse and keys) keeps Z, as it keeps Reply. */}
               {!toast.noKey && !(phone && touchPhone) && <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" touchOnly />}

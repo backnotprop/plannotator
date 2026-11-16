@@ -21,7 +21,7 @@
  * PLANNOTATOR_UNDELIVERED_SHOTS, else .local/proof/undelivered/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -164,7 +164,8 @@ async function replyInWindow(page: Page, words: string): Promise<void> {
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await pane.getByRole('textbox', { name: 'Reply to Claude Code' }).fill(words);
   await page.keyboard.press('ControlOrMeta+Enter');
-  await expect(pane.locator('article.ib-message[data-author="person"]').last()).toContainText(words);
+  // The reply landed (not the words drawn while the Send is on its way, `data-sending`): the server has it.
+  await expect(pane.locator('article.ib-message[data-author="person"]:not([data-sending])').last()).toContainText(words);
 }
 
 async function shot(page: Page, name: string, clip?: () => Promise<{ x: number; y: number; width: number; height: number }>): Promise<void> {

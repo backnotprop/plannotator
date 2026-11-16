@@ -312,14 +312,15 @@ export function FullScreenComposer({
   const commentsRef = useRef<HTMLButtonElement | null>(null);
   /** The card's height when the list opened: the list sits just above the card. */
   const [cardHeight, setCardHeight] = useState(0);
-  const voice = useVoiceSession(!value.covered && mode === 'reply' && !state.minimized, reply.onLateVoice);
-  // The sheet hides the status and Stop, so no microphone stays open behind it. What was said still lands in the reply.
-  const covered = value.covered === true;
+  const voice = useVoiceSession(!value.covered && !value.tucked && mode === 'reply' && !state.minimized, reply.onLateVoice);
+  // The sheet, or the tools gathered into the corner, hide the status and Stop, so no microphone stays open behind
+  // them. What was said still lands in the reply.
+  const hidden = value.covered === true || value.tucked === true;
   useEffect(() => {
-    if (!covered) return;
+    if (!hidden) return;
     voice.session.stop();
     if (voice.session.view().phase !== 'sending') voice.session.covered();
-  }, [covered, voice.session]);
+  }, [hidden, voice.session]);
   const tabsRef = useRef<HTMLDivElement | null>(null);
   /** Where focus goes once the next state is drawn: the card's field (restored, a tab picked) or the pill (minimized). */
   const focusNext = useRef<'field' | 'pill' | null>(null);
@@ -617,6 +618,8 @@ export function FullScreenComposer({
             type="button"
             className="ib-fvb ib-fcomp-min"
             onClick={() => {
+              // Before the card goes: a take still recording is transcribed into the reply, never dropped with its field.
+              voice.session.stop();
               onMinimized?.();
               // The same gather as the toolbar's »: everything goes into the corner control, and comes back with it.
               if (value.onGather) return value.onGather();

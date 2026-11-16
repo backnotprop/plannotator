@@ -283,6 +283,26 @@ test.skipIf(!hasDom)("a tap opens the finger's picker and changes no face; a lon
   expect(faces.agentFaceOf('ses_1')).toBe('agent');
 });
 
+// A slow phone's second tap landed on Ice glass while it still travelled out over the mark (a 240 ms clock had said
+// the choices were in place): a press that began before they rest chooses nothing.
+test.skipIf(!hasDom)('a tap that began before the choices rest chooses nothing; once they rest, a tap on one chooses it', async () => {
+  const icon = mount();
+  pointer(icon, 'pointerdown', { kind: 'touch', x: 29, y: 384 });
+  pointer(icon, 'pointerup', { kind: 'touch', x: 29, y: 384 });
+  press(icon);
+  await until(() => group() !== null, 'a tap to open it');
+  expect(document.querySelector('.am-fan')!.hasAttribute('data-opening')).toBe(true);
+  pointer(choice('glass-ice')!, 'pointerdown', { kind: 'touch' });
+  press(choice('glass-ice')!);
+  await wait(40);
+  expect(faces.agentFaceOf('ses_1')).toBe('agent');
+  expect(icon.getAttribute('aria-expanded')).toBe('true');
+  await until(() => !document.querySelector('.am-fan')!.hasAttribute('data-opening'), 'the choices to rest');
+  pointer(choice('glass-ice')!, 'pointerdown', { kind: 'touch' });
+  press(choice('glass-ice')!);
+  await until(() => faces.agentFaceOf('ses_1') === 'glass-ice', 'the tap to choose Ice glass');
+});
+
 test.skipIf(!hasDom)('reduced motion: the choices appear in place, with no travel', async () => {
   reduce = true;
   const icon = mount();
