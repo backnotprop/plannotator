@@ -184,7 +184,11 @@
 .shp-sidep.sheet.open { transform: none; }
 .shp-grab { width: 38px; height: 4px; border-radius: 4px; background: color-mix(in oklab, var(--foreground) 22%, transparent); margin: 8px auto 0; flex: none; }
 .shp-scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .28); z-index: 29; animation: shp-fade-only .2s ease both; }
-.shp-root.panel-open:not(.phone) .shp-dock, .shp-root.panel-open:not(.phone) .shp-pill { left: calc((100% - var(--pw) - 12px) / 2); }
+.shp-root.panel-open:not(.panel-sheet) .shp-dock, .shp-root.panel-open:not(.panel-sheet) .shp-pill { left: calc((100% - var(--pw) - 12px) / 2); }
+/* As a sheet (a phone, a narrow pane: ShapeSurface `usePanelSheet`) the dock stays over it, whole and in reach; the
+   sheet's list ends above the dock. */
+.shp-root.panel-open.panel-sheet .shp-dock { z-index: 32; }
+.shp-sidep.sheet .shp-sidep-body { padding-bottom: 72px; }
 .shp-dock, .shp-pill { transition: left .32s cubic-bezier(.2,.8,.2,1); }
 
 /* ── reference bubbles and the References list ── */
@@ -293,7 +297,7 @@
 /* "Show more": the board's corner, only when there is more to draw. */
 .shp-more { position: absolute; right: 28px; bottom: 22px; z-index: 5; appearance: none; border: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: color-mix(in oklab, var(--popover) 94%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 85%, transparent); font: 500 12.5px/1 var(--font-sans); cursor: pointer; }
 .shp-more:hover { background: var(--muted); }
-.shp-root.panel-open:not(.phone) .shp-more { right: calc(var(--pw) + 28px); }
+.shp-root.panel-open:not(.panel-sheet) .shp-more { right: calc(var(--pw) + 28px); }
 .shp-root.phone .shp-more { right: 12px; bottom: 66px; }
 
 /* ── Follow an example (approval "trace-it-board", r5; the path on its rail from r7) ── The card sits where the
@@ -310,7 +314,7 @@
   animation: shp-ex-card-in .24s var(--ex-ease) both; }
 .shp-ex-card.expanded { width: min(1180px, calc(100% - 32px)); }
 @keyframes shp-ex-card-in { from { opacity: 0; transform: translateY(8px); } }
-.shp-root.panel-open:not(.phone) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); max-width: calc(100% - var(--pw) - 44px); }
+.shp-root.panel-open:not(.panel-sheet) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); max-width: calc(100% - var(--pw) - 44px); }
 .shp-ex-card.leaving { pointer-events: none; }
 /* The board's status stays in view while an example is followed: it rides above the card, on the card's curve. */
 /* It keeps sliding with the dock when a panel opens. */
@@ -647,3 +651,8 @@ button.shp-stk-pr { cursor: pointer; transition: background-color .15s ease, col
 .shp-talk-a .ai-markdown > :last-child { margin-bottom: 0; }
 .shp-talk-status, .shp-talk-wait { margin: 0; font-size: 12px; color: var(--muted-foreground); display: inline-flex; align-items: center; gap: 6px; }
 .shp-talk-error { margin: 0; font-size: 12px; color: var(--destructive); }
+/* A finished board's box to read what was asked (talk.tsx `ShapeTalkBox`): the comment box's look, with no words to type. */
+.shp-talkbox { position: fixed; z-index: 100; display: flex; flex-direction: column; background: var(--popover); color: var(--popover-foreground, var(--foreground)); border-radius: 12px; box-shadow: 0 22px 60px -20px rgb(0 0 0 / .38), 0 0 0 1px var(--border); overflow: hidden; outline: none; }
+.shp-talkbox-head { display: flex; align-items: center; gap: 6px; padding: 6px 6px 6px 12px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); font: 400 12px/1.3 var(--font-sans); color: var(--muted-foreground); }
+.shp-talkbox-head > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shp-talkbox .shp-talk { max-height: none; flex: 1; min-height: 0; padding-bottom: 12px; }

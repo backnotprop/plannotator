@@ -265,7 +265,8 @@ for (const scheme of ['light', 'dark'] as const) {
 
 test('a click still marks one part; a tiny drag is a click; Esc cancels a drag and closes nothing else', async ({ browser }) => {
   const id = store('click');
-  const { context, page, problems } = await openBoard(browser, id);
+  // Wide enough that References opens beside the board (a narrow board opens it as a sheet over the drawing).
+  const { context, page, problems } = await openBoard(browser, id, { viewport: { width: 1800, height: 900 } });
   await crosshair(page).click();
   const s = await at(page, 'save', 0.5, 0.5);
   await drag(page, s, { x: s.x + 3, y: s.y + 2 }, 3);

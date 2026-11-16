@@ -15,6 +15,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { shapeParts, type ShapeBoard, type ShapeNote, type ShapeNoteInput, type ShapeRef } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
 import type { ShapeEvent, ShapeHost, ShapeLoaded } from './types';
+import { boxKey, talkOn } from './talk';
 
 const hasDom = typeof document !== 'undefined';
 const { ShapeSurface } = (hasDom ? await import('./ShapeSurface') : {}) as typeof import('./ShapeSurface');
@@ -34,13 +35,13 @@ interface Rig {
   emit: (event: ShapeEvent) => void;
 }
 
-function rig(session: ShapeLoaded['session'] = { state: 'live', agent: 'Claude Code' }): Rig {
+function rig(session: ShapeLoaded['session'] = { state: 'live', agent: 'Claude Code' }, finished: { notes: ShapeNote[] } | null = null): Rig {
   const board: ShapeBoard = { title: 'Kettle', claim: 'Built.', views: { picture: PICTURE, how: HOW }, refs: REFS };
   const data: ShapeLoaded = {
-    shape: { v: 1, id: ID, title: 'Kettle', project: { name: 'app', root: '/work/app' }, session: null, thread: null, state: 'active', created: AT, updated: AT, latest: 1, drawing: null },
+    shape: { v: 1, id: ID, title: 'Kettle', project: { name: 'app', root: '/work/app' }, session: null, thread: null, state: finished ? 'finished' : 'active', created: AT, updated: AT, latest: 1, drawing: null },
     version: { ...board, n: 1, at: AT, base: null, through: null, by: null, parts: shapeParts(board) },
     seen: 1,
-    notes: [],
+    notes: finished?.notes ?? [],
     session,
   };
   const asked: ShapeNoteInput[] = [];
@@ -168,7 +169,6 @@ describe.if(hasDom)('the side panel and the answers', () => {
     // This DOM measures the board 1400 wide (beforeAll); the window is happy-dom's own.
     expect(root.style.getPropertyValue('--shp-w')).toBe('1400px');
     const css = await Bun.file(new URL('./shape.css', import.meta.url)).text();
-    expect(css).toContain('--pw: clamp(360px, calc(var(--shp-w, 100vw) * .31), 440px)');
     // No other size on the board reads the window directly (a board in a thread's pane is narrower than it). The
     // comment box's talk is the window's: the box opens over everything, where the window is its room.
     const board = css.split('\n').filter((line) => !line.startsWith('.shp-talk')).join('\n');
@@ -247,5 +247,108 @@ describe.if(hasDom)('the side panel and the answers', () => {
     await pick('lid');
     expect(talk()!.textContent).toContain('Change: Make it red');
     expect(talk()!.textContent).toContain('Sent to Claude Code');
+  });
+  test('a finished board: Global comment and a part that was asked about open to read, with no words to type', async () => {
+    const asked = { id: 'shn_q', kind: 'ask', v: 1, view: 'picture', part: 'whistle', quote: 'One whistle', text: 'Why one whistle?', from: 'you', re: null, delivered: null, at: AT } as unknown as ShapeNote;
+    const answer = { id: 'shn_a', kind: 'answer', v: 1, view: 'picture', part: 'whistle', quote: null, text: 'Because the lid holds the steam.', from: 'agent', re: 'shn_q', delivered: null, at: AT } as unknown as ShapeNote;
+    const change = { id: 'shn_c', kind: 'change', v: 1, view: null, part: null, quote: null, text: 'Make it red', from: 'you', re: null, delivered: AT, at: AT } as unknown as ShapeNote;
+    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: [asked, answer, change] });
+    await mount(host);
+    const readBox = () => document.querySelector<HTMLElement>('[data-shape-talkbox]');
+    const noWords = (box: HTMLElement) => {
+      expect(box.querySelector('textarea')).toBeNull();
+      for (const gone of ['Ask', 'Change it', 'Show me']) expect(button(box, gone)).toBeNull();
+    };
+    // Global comment: every question and change, with its answer.
+    const general = document.querySelector<HTMLButtonElement>('.shp-general')!;
+    expect(general.disabled).toBe(false);
+    await click(general);
+    await until(() => !!readBox(), 'the whole board to read');
+    expect(readBox()!.textContent).toContain('Why one whistle?');
+    expect(readBox()!.textContent).toContain('Because the lid holds the steam.');
+    expect(readBox()!.textContent).toContain('Change: Make it red');
+    noWords(readBox()!);
+    // Esc closes it, and only it.
+    await act(async () => { document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })); });
+    await until(() => !readBox(), 'the box closed');
+    expect(document.querySelector('.shp-root')).not.toBeNull();
+    // The part asked about opens its own, to read; a part nothing was asked about opens nothing.
+    await click(inDrawing('[data-mark="whistle"]')!);
+    await until(() => !!readBox(), "the part's box");
+    expect(readBox()!.textContent).toContain('Because the lid holds the steam.');
+    expect(readBox()!.textContent).not.toContain('Make it red');
+    noWords(readBox()!);
+    await click(readBox()!.querySelector('button[aria-label="Close"]')!);
+    await click(inDrawing('[data-mark="lid"]')!);
+    await wait();
+    expect(readBox()).toBeNull();
+    expect(popover()).toBeNull();
+  });
+
+  test('a finished board with nothing asked: Global comment stays off', async () => {
+    const { host } = rig({ state: 'gone', agent: 'Claude Code' }, { notes: [] });
+    await mount(host);
+    expect(document.querySelector<HTMLButtonElement>('.shp-general')!.disabled).toBe(true);
+  });
+
+  test('References opens beside the board while the dock fits left of it, else as a sheet under a dock kept on top', async () => {
+    const widths = (board: number, dock: number) => {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => board });
+      Object.defineProperty(HTMLElement.prototype, 'scrollWidth', { configurable: true, get() { return (this as HTMLElement).classList.contains('shp-dock') ? dock : 0; } });
+    };
+    try {
+      // 1400 wide, a 400 px dock: room beside the 434 px panel.
+      widths(1400, 400);
+      const { host } = rig();
+      await mount(host);
+      await click(document.querySelector('.shp-dock button[title="References"]')!);
+      expect(document.querySelector('.shp-sidep.open')!.classList.contains('sheet')).toBe(false);
+      expect(document.querySelector('.shp-root')!.classList.contains('panel-sheet')).toBe(false);
+      act(() => root?.unmount());
+      document.body.innerHTML = '';
+      // 760 wide (no phone): 760 - 360 - 12 leaves 388, less than the dock and its edges: a sheet.
+      widths(760, 400);
+      await mount(rig().host);
+      await click(document.querySelector('.shp-dock button[title="References"]')!);
+      const panel = document.querySelector<HTMLElement>('.shp-sidep.open')!;
+      expect(panel.classList.contains('sheet')).toBe(true);
+      expect(document.querySelector('.shp-root')!.classList.contains('panel-sheet')).toBe(true);
+      expect(document.querySelector('.shp-root')!.classList.contains('phone')).toBe(false);
+      // The dock stays in reach over the sheet: its References button closes it.
+      await click(document.querySelector('.shp-dock button[title="References"]')!);
+      expect(document.querySelector('.shp-sidep.open')).toBeNull();
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, get: () => 1400 });
+      delete (HTMLElement.prototype as unknown as Record<string, unknown>).scrollWidth;
+    }
+  });
+
+  test("a part's box stays inside the board's own box, not only the window", async () => {
+    const r = rig();
+    await mount(r.host);
+    // The board in a pane from x 400 to 1000; the part at its left edge.
+    const board = document.querySelector<HTMLElement>('.shp-root')!;
+    board.getBoundingClientRect = () => ({ left: 400, top: 0, right: 1000, bottom: 760, width: 600, height: 760, x: 400, y: 0, toJSON: () => ({}) }) as DOMRect;
+    const part = inDrawing<HTMLElement>('[data-mark="whistle"]')!;
+    part.getBoundingClientRect = () => ({ left: 410, top: 100, right: 430, bottom: 120, width: 20, height: 20, x: 410, y: 100, toJSON: () => ({}) }) as DOMRect;
+    await pick('whistle');
+    await wait();
+    const left = parseFloat(popover()!.style.left);
+    // Centred on the part it would start at 228, over the list beside the pane; it starts at the board's edge.
+    expect(left).toBeGreaterThanOrEqual(408);
+    expect(left + parseFloat(popover()!.style.width)).toBeLessThanOrEqual(992);
+  });
+
+  test('an Ask from a box over no part answers in that box', () => {
+    const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.1 };
+    const mine = boxKey('picture', box);
+    const entries = [
+      { id: 'a', label: 'Shape', words: 'Here?', change: false, answer: 'Yes.', streaming: false, view: 'picture', part: null, box: mine },
+      { id: 'b', label: 'Shape', words: 'There?', change: false, answer: '', streaming: false, view: 'picture', part: null, box: boxKey('picture', { ...box, x: 0.5 }) },
+      { id: 'c', label: 'The whole board', words: 'All?', change: false, answer: '', streaming: false, view: null, part: null, box: null },
+    ];
+    expect(talkOn(entries, { view: 'picture', part: null, box: mine }).map((e) => e.id)).toEqual(['a']);
+    expect(talkOn(entries, null).map((e) => e.id)).toEqual(['a', 'b', 'c']);
+    expect(talkOn(entries, { view: 'picture', part: null, box: null })).toEqual([]);
   });
 });

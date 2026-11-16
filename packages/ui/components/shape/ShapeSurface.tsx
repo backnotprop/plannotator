@@ -47,7 +47,7 @@ import { useShapeFollow } from './ShapeFollow';
 import { useShapeStack } from './ShapeStack';
 import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
-import { ShapeTalk, talkOn, type ShapeTalkEntry } from './talk';
+import { boxKey, ShapeTalk, ShapeTalkBox, talkOn, type ShapeTalkEntry } from './talk';
 import { boxNoteInput, captureBox, pictureRect, placeBox, readBox, useBoxDrag, type KeptBox, type ShapeBoxSelection } from './boxSelect';
 import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeShowMeInput, ShapeSurfaceProps, ShapeSurfaceReview } from './types';
 
@@ -80,6 +80,34 @@ function usePhone(el: HTMLElement | null) {
     return () => ro.disconnect();
   }, [el]);
   return phone;
+}
+
+/** The References panel's width, as shape.css's `--pw` gives it for a board `w` wide. */
+const panelWidth = (w: number) => Math.min(440, Math.max(360, w * 0.31));
+
+/**
+ * The References panel beside the board while the dock still fits whole to its left; else (a phone, a narrow pane)
+ * a sheet from the board's foot, the dock kept over it, so the drawing keeps its size and every control stays.
+ */
+function usePanelSheet(el: HTMLElement | null, phone: boolean) {
+  const [sheet, setSheet] = useState(phone);
+  useLayoutEffect(() => {
+    if (!el) return;
+    const measure = () => {
+      const dock = el.querySelector<HTMLElement>('.shp-dock');
+      const w = el.clientWidth;
+      // The dock's own width, and 12 px of the board's edge on each side of it, left of the panel and its gap.
+      setSheet(phone || (!!dock && dock.scrollWidth + 24 > w - panelWidth(w) - 12));
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    const dock = el.querySelector('.shp-dock');
+    if (dock) ro.observe(dock);
+    return () => ro.disconnect();
+  }, [el, phone]);
+  return sheet;
 }
 
 const ViewIcon = ({ id }: { id: ShapeViewId }) => {
@@ -214,6 +242,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
     setRootEl(el);
   }, []);
   const phone = usePhone(rootEl);
+  const sheet = usePanelSheet(rootEl, phone);
   const reduce = useReducedMotion();
 
   const [loaded, setLoaded] = useState<ShapeLoaded | null>(null);
@@ -261,7 +290,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   const [panel, setPanel] = useState<ShapePanelTab | null>(initialPanel === 'refs' ? 'refs' : null);
   /** An answer came while no comment box showed it: the pill says so, and Show opens the whole board's box. */
   const [answerReady, setAnswerReady] = useState(false);
-  const [streams, setStreams] = useState<Record<string, { prompt: string; label: string; view: string | null; part: string | null; text: string; at: number; failed?: boolean }>>({});
+  const [streams, setStreams] = useState<Record<string, { prompt: string; label: string; view: string | null; part: string | null; box: string | null; text: string; at: number; failed?: boolean }>>({});
   /** The questions the open comment box shows (its `ShapeTalk`): their answers need no pill. */
   const talkShown = useRef<ReadonlySet<string>>(new Set());
   const panelRef = useRef(panel);
@@ -564,7 +593,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
     const v = versionRef.current;
     if (!v || finished) return;
     const temp = `pending-${Date.now()}`;
-    setStreams((s) => ({ ...s, [temp]: { prompt: input.text, label, view: input.view ?? null, part: input.part ?? null, text: '', at: Date.now() } }));
+    setStreams((s) => ({ ...s, [temp]: { prompt: input.text, label, view: input.view ?? null, part: input.part ?? null, box: boxKey(input.view ?? null, input.box), text: '', at: Date.now() } }));
     let failed = false;
     let asked = temp;
     let answered = false;
@@ -714,10 +743,13 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
       : undefined;
 
   // ── pointing at the board ──
+  // The parts something was asked or changed on (`${view}\0${mark}`): on a finished board only these open, to read.
+  const talkedParts = useRef<Set<string>>(new Set());
   const pickMark = useCallback((el: HTMLElement, v: ShapeViewId, text?: string) => {
+    if (finished && !talkedParts.current.has(`${v}\u0000${el.getAttribute('data-mark')}`)) return;
     setTarget({ el, view: v, id: el.getAttribute('data-mark'), text: (text ?? partWords(el)).replace(/\s+/g, ' ').trim() });
     clearHover();
-  }, [clearHover]);
+  }, [clearHover, finished]);
   // Only when the part under the pointer changes: not a new render per pointer move.
   const hoverMark = useCallback((el: HTMLElement | null) => {
     // With the box (a Mac screenshot's cross) nothing lights under the pointer: a click still marks the part.
@@ -765,7 +797,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
     <button
       type="button"
       className="shp-general"
-      disabled={finished}
+      disabled={finished && talk.length === 0}
       onClick={(e) => {
         setTarget(null);
         setGeneral({ el: e.currentTarget, view: forView });
@@ -864,20 +896,25 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
         const where = q.view ? tabLabel(q.view) : 'The whole board';
         const label = q.part || (boxSelect && q.box) ? (q.quote ? `${where} · “${q.quote.slice(0, 46)}”` : where) : q.view ? `${where} · general` : where;
         const status = a ? undefined : shapeNoteWaits(q) && session.state === 'gone' ? 'Waits for the agent' : q.delivered ? `${agent} has it` : `Sent to ${agent}`;
-        return { id: q.id, label, words: q.text, change: q.kind === 'change', answer: a?.text ?? '', streaming: false, ...(status ? { status } : {}), view: q.view ?? null, part: q.part ?? null };
+        return { id: q.id, label, words: q.text, change: q.kind === 'change', answer: a?.text ?? '', streaming: false, ...(status ? { status } : {}), view: q.view ?? null, part: q.part ?? null, box: boxKey(q.view ?? null, q.box) };
       });
     for (const [tid, st] of Object.entries(streams)) {
-      out.push({ id: tid, label: st.label, words: st.prompt, change: false, answer: st.text, streaming: !st.failed, ...(st.failed ? { error: SHAPE_ASK_NOT_SENT } : {}), view: st.view, part: st.part });
+      out.push({ id: tid, label: st.label, words: st.prompt, change: false, answer: st.text, streaming: !st.failed, ...(st.failed ? { error: SHAPE_ASK_NOT_SENT } : {}), view: st.view, part: st.part, box: st.box });
     }
     return out;
   }, [notes, streams, session.state, agent, boxSelect]);
   /** Who answers an Ask, over the questions (a host with nothing true to say there has none). */
   const who = host.sessionless ? null : session.state === 'gone' ? shapeEndedLabel(host) : `Ask this session · ${agent}`;
-  const talkFor = (on: { view: string | null; part: string | null } | null) => {
+  const talkFor = (on: { view: string | null; part: string | null; box?: string | null } | null) => {
     const entries = talkOn(talk, on);
     talkShown.current = new Set(entries.map((e) => e.id));
-    return <ShapeTalk entries={entries} who={who} whoAlways={session.state === 'gone' && !finished} onCode={showCode} />;
+    return <ShapeTalk entries={entries} who={finished ? null : who} whoAlways={session.state === 'gone' && !finished} onCode={showCode} />;
   };
+  /** A part's or a box's own (`talkOn`'s place). */
+  const placeOf = (t: Target) => ({ view: t.view, part: t.id, box: t.box ? boxKey(t.box.view, t.box.box) : null });
+  // A finished board takes no new words, but what was asked and changed stays readable: Global comment opens it all,
+  // and a part with questions opens its own, read-only (`ShapeTalkBox`).
+  talkedParts.current = new Set(talk.filter((e) => e.part !== null).map((e) => `${e.view}\u0000${e.part}`));
 
   const waiting = notes.filter(shapeNoteWaits).length;
   const bringUpToDate = async () => {
@@ -928,7 +965,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           phase={phase}
           skip={skip}
           reduce={reduce}
-          pinpoint={annotating && inputMethod === 'pinpoint' && phase !== 'leaving' && !target}
+          pinpoint={((annotating && inputMethod === 'pinpoint') || (finished && talkedParts.current.size > 0)) && phase !== 'leaving' && !target}
           boxable={boxing && phase !== 'leaving'}
           boxes={phase === 'leaving' || !boxSelect ? undefined : boxesOn(v, v === 'picture' && showMore)}
           select={annotating && inputMethod === 'drag'}
@@ -1006,7 +1043,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
     <RefsCtx.Provider value={refsState}>
     {/* While annotating, a click on the board's words picks them: a code span is only words. */}
     <CodeSpanContext.Provider value={annotating ? null : codeSpan}>
-      <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}${follow.sheet ? ' follow-sheet' : ''}`}>
+      <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}${sheet ? ' panel-sheet' : ''}${follow.sheet ? ' follow-sheet' : ''}`}>
         <RefHoverCards rootRef={rootRef} />
 
         <section className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>
@@ -1064,7 +1101,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
 
           {updated ? (
             <div ref={pillRef} className="shp-pill" role="status"><Pebble alive reshaping={busy} size={16} />{updated}</div>
-          ) : answerReady && !finished ? (
+          ) : answerReady ? (
             <div ref={pillRef} className="shp-pill" role="status" data-shape-answer-ready="">
               <Pebble alive={false} size={16} />
               Answer ready
@@ -1175,7 +1212,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
                 {refs.length > 0 && <span className="shp-tcount">{refs.length}</span>}
               </button>
               {phone && (
-                <button type="button" className="shp-tbtn" onClick={(e) => { setTarget(null); setGeneral({ el: e.currentTarget, view: null }); }} title="Add global comment" aria-label="Global comment" disabled={finished}>
+                <button type="button" className="shp-tbtn" onClick={(e) => { setTarget(null); setGeneral({ el: e.currentTarget, view: null }); }} title="Add global comment" aria-label="Global comment" disabled={finished && talk.length === 0}>
                   <GlobeIcon />
                 </button>
               )}
@@ -1186,10 +1223,21 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
 
           {hoverRect && <div className="shp-pin-hover" style={{ left: hoverRect.left - 4, top: hoverRect.top - 3, width: hoverRect.width + 8, height: hoverRect.height + 6 }} />}
 
+          {target && finished && (
+            <ShapeTalkBox anchor={target.el} within={rootEl} label={quoteLabel(target)} onClose={() => setTarget(null)}>
+              {talkFor(placeOf(target))}
+            </ShapeTalkBox>
+          )}
+          {general && finished && (
+            <ShapeTalkBox anchor={general.el} within={rootEl} label="The whole board" onClose={() => setGeneral(null)}>
+              {talkFor(null)}
+            </ShapeTalkBox>
+          )}
           {target && !finished && (
             <CommentPopover
               key={`part-${talkKey}`}
               anchorEl={target.el}
+              within={rootEl}
               // With the box: the header is the label as written (CommentPopover quotes a contextText itself).
               contextText={boxSelect ? target.text : quoteLabel(target)}
               headerText={boxSelect ? quoteLabel(target) : undefined}
@@ -1216,7 +1264,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               allowCard={false}
               initialText={target.retry?.text}
               errorText={target.retry?.error}
-              before={talkFor({ view: target.view, part: target.id })}
+              before={talkFor(placeOf(target))}
               onSubmit={(text) => {
                 const sent = target;
                 if (sent.box) sentBox(sent.el);
@@ -1250,6 +1298,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
             <CommentPopover
               key={`general-${talkKey}`}
               anchorEl={general.el}
+              within={rootEl}
               contextText=""
               isGlobal
               headerText={general.view ? `${tabLabel(general.view)} · the whole guide` : 'The whole board'}
@@ -1286,14 +1335,14 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           )}
         </section>
 
-        {phone && panel && <div className="shp-scrim" onClick={closePanel} aria-hidden="true" />}
+        {sheet && panel && <div className="shp-scrim" onClick={closePanel} aria-hidden="true" />}
         <aside
-          className={`shp-sidep${phone ? ' sheet' : ''}${panel ? ' open' : ''}`}
+          className={`shp-sidep${sheet ? ' sheet' : ''}${panel ? ' open' : ''}`}
           aria-label="References"
           aria-hidden={!panel}
           inert={!panel}
         >
-          {phone && <div className="shp-grab" aria-hidden="true" />}
+          {sheet && <div className="shp-grab" aria-hidden="true" />}
           <div className="shp-sidep-head">
             <h2 className="shp-sidep-title"><RefsIcon />References</h2>
             <button type="button" className="shp-icon-btn" onClick={closePanel} aria-label="Close panel" title="Close (Esc)">×</button>

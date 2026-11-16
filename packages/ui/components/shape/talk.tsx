@@ -4,7 +4,12 @@
  * panel"), so a part's Ask answers here: on the part it was asked about, streaming as it comes; the board's Global
  * comment box lists every question and change on the board. Read-only: the box under it asks again.
  */
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import type { ShapeNoteBox } from '@plannotator/core/shape';
+import { useVisibleViewportBounds } from '../../hooks/useViewportEnvironment';
 import { renderChatMarkdown } from '../../utils/aiChatFormat';
+import { boundsWithin, computeCommentPopoverPosition, sheetWithin } from '../CommentPopover';
 import { Pebble } from './Pebble';
 
 export interface ShapeTalkEntry {
@@ -23,11 +28,19 @@ export interface ShapeTalkEntry {
   /** The part it is on (its view and mark id; null: the whole board or a whole view). */
   view: string | null;
   part: string | null;
+  /** A dragged box's place (`boxKey`), so a box over no part shows its own; null: none. */
+  box: string | null;
 }
 
-/** The entries on one part (a part's box), or every one (the whole board's). */
-export function talkOn(entries: readonly ShapeTalkEntry[], on: { view: string | null; part: string | null } | null): ShapeTalkEntry[] {
-  return on ? entries.filter((e) => e.part !== null && e.view === on.view && e.part === on.part) : entries.slice();
+/** Where a dragged box sits on its view: the same box asked from again has the same key. */
+export function boxKey(view: string | null, box: ShapeNoteBox | null | undefined): string | null {
+  return box ? `${view}|${box.x},${box.y},${box.w},${box.h}${box.more ? '|more' : ''}` : null;
+}
+
+/** The entries on one part or box (its box), or every one (the whole board's). */
+export function talkOn(entries: readonly ShapeTalkEntry[], on: { view: string | null; part: string | null; box?: string | null } | null): ShapeTalkEntry[] {
+  if (!on) return entries.slice();
+  return entries.filter((e) => (e.part !== null && e.view === on.view && e.part === on.part) || (!!on.box && e.box === on.box));
 }
 
 /** `who`: who answers an Ask; `whoAlways`: said before any question too (the session ended: what happens to one). */
@@ -64,5 +77,65 @@ export function ShapeTalk({ entries, who, whoAlways = false, onCode }: { entries
         </article>
       ))}
     </div>
+  );
+}
+
+/**
+ * A finished board's box, to read what was asked and changed (the board takes no new words): the talk with its
+ * place, and a close. It stays inside the board (`within`), by the part or button it was opened from, as the comment
+ * box does; Esc, the × or a press outside closes it.
+ */
+export function ShapeTalkBox({ anchor, within, label, onClose, children }: { anchor: HTMLElement; within: HTMLElement | null; label: string; onClose: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const window_ = useVisibleViewportBounds(16);
+  const [at, setAt] = useState<ReturnType<typeof sheetWithin> | null>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
+  useLayoutEffect(() => {
+    const place = () => {
+      const bounds = boundsWithin(window_, within);
+      const next = computeCommentPopoverPosition(anchor.getBoundingClientRect(), bounds);
+      setAt(next.requiresExpanded ? sheetWithin(bounds) : next);
+    };
+    place();
+    window.addEventListener('scroll', place, true);
+    return () => window.removeEventListener('scroll', place, true);
+  }, [anchor, within, window_]);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+    const key = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      e.preventDefault();
+      e.stopPropagation();
+      close.current();
+    };
+    const away = (e: PointerEvent) => {
+      if (!e.composedPath().some((t) => t === ref.current || t === anchor)) close.current();
+    };
+    document.addEventListener('keydown', key, true);
+    document.addEventListener('pointerdown', away, true);
+    return () => {
+      document.removeEventListener('keydown', key, true);
+      document.removeEventListener('pointerdown', away, true);
+    };
+  }, [anchor]);
+  return createPortal(
+    <div
+      ref={ref}
+      className="shp-talkbox"
+      role="dialog"
+      aria-label={label}
+      tabIndex={-1}
+      data-comment-popover=""
+      data-shape-talkbox=""
+      style={at ? { top: at.top, left: at.left, width: at.width, maxHeight: at.maxHeight, ...(at.flipAbove ? { transform: 'translateY(-100%)' } : {}) } : { visibility: 'hidden' }}
+    >
+      <div className="shp-talkbox-head">
+        <span>{label}</span>
+        <button type="button" className="shp-icon-btn" onClick={onClose} aria-label="Close">×</button>
+      </div>
+      {children}
+    </div>,
+    document.body,
   );
 }
