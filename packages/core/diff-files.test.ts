@@ -56,6 +56,19 @@ describe("parseDiffToFiles", () => {
     expect(files[0].deletions).toBe(1);
   });
 
+  it("counts hunk contents that start with plus or minus runs", () => {
+    const [file] = parseDiffToFiles([
+      "diff --git a/notes.txt b/notes.txt",
+      "--- a/notes.txt",
+      "+++ b/notes.txt",
+      "@@ -1 +1 @@",
+      "---- old",
+      "++++ new",
+      "",
+    ].join("\n"));
+    expect([file.additions, file.deletions]).toEqual([1, 1]);
+  });
+
   it("handles renamed quoted paths", () => {
     const files = parseDiffToFiles([
       'diff --git "a/api/old name.ts" "b/api/new name.ts"',

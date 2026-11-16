@@ -94,9 +94,12 @@ export function parseDiffToFiles(rawPatch: string): DiffFile[] {
     let additions = 0;
     let deletions = 0;
 
+    let inHunk = false;
     for (const line of lines) {
-      if (line.startsWith("+") && !line.startsWith("+++")) additions += 1;
-      if (line.startsWith("-") && !line.startsWith("---")) deletions += 1;
+      if (line.startsWith("@@ ")) inHunk = true;
+      if (!inHunk) continue;
+      if (line.startsWith("+")) additions += 1;
+      if (line.startsWith("-")) deletions += 1;
     }
 
     files.push({
