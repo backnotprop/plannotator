@@ -245,7 +245,8 @@ import {
 } from "./cli";
 import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
-import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
+import { ensureInboxRunning, inboxRemoteOpenHint, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
+import { runPlansCommand } from "./plans-command";
 import { runCardCommand } from "./card-command";
 import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
 // @ts-expect-error a text import of the optional helper file
@@ -431,6 +432,22 @@ if (isReviewDrawCommand(rawArgs, () => {
         dataDir: getPlannotatorDataDir(),
         cwd: shapeCommandFolder(process.env),
         env: process.env,
+      }),
+    );
+  }
+}
+// `plannotator plans …`: Plans' switch and list (plans-command.ts; unreleased, HIDDEN_SUBCOMMANDS). Bare `plans`
+// turns Plans on and opens the Inbox on its Plans page; `plans off` turns it off; anything else runs only while it
+// is on (off, one line naming `plannotator plans`, exit 1, nothing started). Before the strict-annotate parse.
+{
+  const args = rawArgs;
+  if (args[0] === "plans") {
+    process.exit(
+      await runPlansCommand(args.slice(1), {
+        dataDir: getPlannotatorDataDir(),
+        ensureInbox: () => ensureInboxRunning(getPlannotatorDataDir()),
+        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        remoteHint: inboxRemoteOpenHint,
       }),
     );
   }
