@@ -2262,19 +2262,14 @@ const ReviewApp: React.FC = () => {
     [prMetadata, activeWorktreePath],
   );
   const guideHasContent = activeGuideJobId !== null || agentJobs.jobs.some((j) => j.provider === 'guide' && jobMatchesCurrentContext(j));
-  const launchPadReachable = aiUIEnabled && agentJobs.capabilities?.available === true;
   const newestDiffGuideRef = useRef<string | null>(null);
-  const toggleGuideOrLaunchPad = useCallback(() => {
+  const toggleGuide = useCallback(() => {
     if (!guideOpen && !guideHasContent && newestDiffGuideRef.current) {
       handleOpenGuide(newestDiffGuideRef.current);
       return;
     }
-    if (!guideOpen && !guideHasContent && launchPadReachable) {
-      reviewSidebar.open('agents');
-      return;
-    }
     setGuideOpen((prev) => !prev);
-  }, [guideOpen, guideHasContent, launchPadReachable, reviewSidebar.open, handleOpenGuide]);
+  }, [guideOpen, guideHasContent, handleOpenGuide]);
 
   // A `saved:{id}` guide has no AgentJobInfo, so GuideScreen's context match
   // passes trivially (unknown ids are tolerated by design, for the demo path).
@@ -2656,7 +2651,7 @@ const ReviewApp: React.FC = () => {
             setIsCompactNavigatorOpen(false);
             reviewSidebar.close();
           }
-          toggleGuideOrLaunchPad();
+          toggleGuide();
         }
       }
       // Cmd/Ctrl+. to toggle sidebar
@@ -2670,7 +2665,7 @@ const ReviewApp: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator, guideHasContent, toggleGuideOrLaunchPad]);
+  }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator, guideHasContent, toggleGuide]);
 
 
   // Load diff content - try API first, fall back to demo
@@ -5782,7 +5777,7 @@ const ReviewApp: React.FC = () => {
                       markGuideHintSeen();
                       setGuideHintActive(false);
                     }
-                    toggleGuideOrLaunchPad();
+                    toggleGuide();
                   }}
                   className={`relative flex h-7 shrink-0 items-center gap-1 px-2 rounded-md text-xs font-medium transition-colors ${
                     guideOpen ? 'bg-primary/15 text-primary' : 'bg-muted text-foreground hover:bg-muted/80'
@@ -6073,10 +6068,6 @@ const ReviewApp: React.FC = () => {
                   setGuideHintActive(false);
                 }
                 setIsCompactNavigatorOpen(false);
-                if (!guideHasContent && !newestDiffGuideRef.current && launchPadReachable) {
-                  reviewSidebar.open('agents');
-                  return;
-                }
                 reviewSidebar.close();
                 if (!guideHasContent && newestDiffGuideRef.current) {
                   handleOpenGuide(newestDiffGuideRef.current);

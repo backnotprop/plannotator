@@ -258,7 +258,7 @@ async function openLiveGuide(): Promise<void> {
   await waitFor(() => tickButtons().length === 2, "the guide's sections");
 }
 
-/** The Guide button opens the Agents tab while no guide is open; open the saved guide from its list. */
+/** The Guide button opens the launch panel while no guide is open; open the saved guide from its list. */
 async function openSavedGuide(): Promise<void> {
   const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
     .find((b) => b.title === "Open guided review");
@@ -364,7 +364,16 @@ describe.if(hasDom)("Guided Review: ticking a section marks its files viewed", (
 });
 
 describe.if(hasDom)("the Guide button with a guide written for this diff", () => {
-  test("opens that guide in one click instead of the launch pad", async () => {
+  test("with no guide for this diff, opens the launch panel over the centre, not the Agents tab", async () => {
+    await mount(false);
+    const guideButton = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).find((b) => b.title === "Open guided review");
+    if (!guideButton) throw new Error("Guide button did not render");
+    await act(async () => guideButton.click());
+    await waitFor(() => !!Array.from(document.querySelectorAll("h1")).find((h) => h.textContent === "Start a guided review?"), "the launch panel");
+    expect(document.querySelector("[data-launch-pad]")).toBeNull();
+  });
+
+  test("opens that guide in one click instead of the launch panel", async () => {
     guidesWhere = "diff";
     try {
       await mount(false);

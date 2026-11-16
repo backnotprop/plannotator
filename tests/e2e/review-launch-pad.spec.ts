@@ -1,6 +1,6 @@
 /**
  * The review window's launch pad, in a real Chromium against the compiled
- * binary: with no guide yet, the header's Guide button opens the Agents tab,
+ * binary: with no guide yet, the header's Guide button opens the launch panel,
  * one click on Start runs a Guided Review with the saved defaults (no dialog),
  * the finished guide opens by itself, and the tab then lists it under
  * "This diff".
@@ -114,7 +114,7 @@ function buildRepo(root: string): string {
   return repo;
 }
 
-test('with no guide yet, Guide opens the launch pad and one click on Start runs a Guided Review', async ({ browser }) => {
+test('with no guide yet, Guide opens the launch panel, and one click on Start in the Agents tab runs a Guided Review', async ({ browser }) => {
   test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
   test.setTimeout(90_000);
   const root = mkdtempSync(join(tmpdir(), 'plannotator-launch-pad-'));
@@ -149,7 +149,13 @@ test('with no guide yet, Guide opens the launch pad and one click on Start runs 
     await expect(page.locator('[data-review-sticky-tools]')).toBeVisible();
 
     await page.getByRole('button', { name: 'Guide', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Start a guided review?' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Generate guide' })).toBeVisible();
+    await page.getByRole('button', { name: 'Go back' }).click();
+
     const pad = page.locator('[data-launch-pad]');
+    if (!(await pad.isVisible())) await page.locator('[data-review-panel-toggle]').click();
+    await page.locator('[data-review-sidebar-tab="agents"]').click();
     await expect(pad).toBeVisible();
     await expect(page.locator('[data-launch-scope]')).toHaveText(/3 files · \+\d+ −\d+$/);
     await expect(page.locator('[data-guides-empty]')).toBeVisible();
