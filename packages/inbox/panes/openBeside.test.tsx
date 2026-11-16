@@ -18,7 +18,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { InboxToastModel } from '../components/Toast';
 import type { Route } from '../app/route';
-import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH } from '../stack';
+import { LIST_MIN_WIDTH } from '../stack';
 import { BesideContext, besideOf } from './beside';
 import * as L from './layoutModel';
 import type { PaneSet } from './model';
@@ -56,6 +56,9 @@ const ROWS = ['thr_a', 'thr_b', 'thr_c', 'thr_d'];
 
 /** The docked sidebar's width (shell/sidebar.tsx's default). */
 const SIDEBAR = 232;
+
+/** A window where the list and two panes fit only with the docked sidebar folded (1440 in the real window; this one has no gutters). */
+const TIGHT = LIST_MIN_WIDTH + 2 * L.PANE_MIN_WIDTH + SIDEBAR - 40;
 
 /**
  * The window: the address (`thread`), its panes, the list's menu over rows a to d, and a docked sidebar `SIDEBAR` px
@@ -185,9 +188,9 @@ describe.skipIf(!hasDom)('Open to the side', () => {
   });
 
   test('with two panes open it is still offered: where no third column fits, the third opens below the active pane, and a fourth below that', async () => {
-    // 1440 px: the list and two 440 px columns fit (the sidebar folds), three do not; the window is 900 px tall.
+    // 1440 px: the list and two 400 px columns fit (the sidebar folds), three do not; the window is 900 px tall.
     setWidth(1440);
-    expect(1440 - LIST_MIN_WIDTH).toBeLessThan(3 * THREAD_BESIDE_FILE_WIDTH);
+    expect(1440 - LIST_MIN_WIDTH).toBeLessThan(3 * L.PANE_MIN_WIDTH);
     const w = draw(true);
     for (const id of ['thr_b', 'thr_c', 'thr_d']) {
       await openMenu(id);
@@ -204,8 +207,8 @@ describe.skipIf(!hasDom)('Open to the side', () => {
     expect(w.toasts).toEqual([]);
   });
 
-  test('at 1440 with the sidebar docked, choosing it folds the sidebar on screen; closing the second pane brings it back', async () => {
-    setWidth(1440);
+  test('in a window with room for two panes only without the docked sidebar, choosing it folds the sidebar on screen; closing the second pane brings it back', async () => {
+    setWidth(TIGHT);
     const w = draw(true);
     expect(w.sidebarHeld).toBe(false);
     await openMenu('thr_b');
@@ -218,7 +221,7 @@ describe.skipIf(!hasDom)('Open to the side', () => {
   });
 
   test('with room for the sidebar too, nothing folds', async () => {
-    setWidth(LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + SIDEBAR);
+    setWidth(LIST_MIN_WIDTH + 2 * L.PANE_MIN_WIDTH + SIDEBAR);
     const w = draw(true);
     await openMenu('thr_b');
     await act(async () => besideItem()!.click());
@@ -239,7 +242,7 @@ describe.skipIf(!hasDom)('Open to the side', () => {
   });
 
   test('folded for room, then opened and folded again by the person: closing the second pane keeps it folded', async () => {
-    setWidth(1440);
+    setWidth(TIGHT);
     const w = draw(true);
     await openMenu('thr_b');
     await act(async () => besideItem()!.click());
@@ -277,8 +280,8 @@ describe.skipIf(!hasDom)('Open to the side', () => {
   });
 
   test('a window too narrow for two panes still offers it: the new pane shows, a toast names the pane that stepped aside, and Undo brings it back; narrowing keeps both panes in the layout', async () => {
-    // The list's narrowest column and two 440 px panes with the 1 px gap between them (layoutRoom.ts).
-    const two = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + 1;
+    // The list's narrowest column and two 400 px panes with the 1 px gap between them (layoutRoom.ts).
+    const two = LIST_MIN_WIDTH + 2 * L.PANE_MIN_WIDTH + 1;
     const w = draw(true);
     setWidth(two - 1);
     await openMenu('thr_b');
@@ -300,7 +303,7 @@ describe.skipIf(!hasDom)('Open to the side', () => {
   });
 
   test('Undo only takes back the placement its toast named: once the layout is another, the toast leaves and its Undo does nothing', async () => {
-    const two = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + 1;
+    const two = LIST_MIN_WIDTH + 2 * L.PANE_MIN_WIDTH + 1;
     const toSide = async (w: ReturnType<typeof draw>, id: string) => {
       await openMenu(id);
       await act(async () => besideItem()!.click());

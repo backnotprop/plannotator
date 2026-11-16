@@ -2481,7 +2481,7 @@ function Inbox() {
     covering.thread = stack.thread;
   }, [stack.thread]);
 
-  const openRow = (row: InboxListRow) => go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, tag: route.tag, thread: row.thread_id });
+  const openRow = (row: Pick<InboxListRow, 'thread_id'>) => go({ page: 'inbox', project: route.project, machine: route.machine, agent: route.agent, tag: route.tag, thread: row.thread_id });
 
   const patchQuestions = (messageId: string, questions: InboxQuestion[], stateKept = false) => {
     ownSaves.saved(questions);
@@ -5687,7 +5687,7 @@ function Inbox() {
         )}
         {panelView && !route.thread && (
           <div className="ib-pane ib-pempty" data-thread-panel-empty="">
-            <EmptyThreadPanel />
+            <EmptyThreadPanel onOpen={(thread_id) => openRow({ thread_id })} />
           </div>
         )}
         <ThreadPanes windowPanes={windowPanes} held={openHeld} host={{

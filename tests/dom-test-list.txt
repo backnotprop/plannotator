@@ -796,6 +796,7 @@ packages/ui/components/OpenInAppButton.line.test.tsx
 packages/ui/utils/openInLine.test.ts
 packages/editor/App.annotateView.test.tsx
 packages/inbox/replyMentionsField.test.tsx
+packages/inbox/components/listDrops.test.tsx
 packages/inbox/agents/projectFaceMarks.test.tsx
 packages/ui/components/frame/frame.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
