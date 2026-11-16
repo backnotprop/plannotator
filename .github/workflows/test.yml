@@ -22,6 +22,16 @@ permissions:
 # waiting one. A merge train lands several PRs in a minute, and testing each of
 # their merge commits on main would fill every runner. deploy.yml diffs from the
 # last main commit whose Test passed, so a skipped commit deploys with the next.
+#
+# Docs-only PRs: the checks, unit, dom, opencode-v2 and claude-code-mod jobs
+# start with a gate step (scripts/ci-docs-only.sh). On a PR whose every changed
+# path is on its allowlist (the root README and other root docs, LICENSE-*,
+# .github/assets, adr/, docs/ outside docs/agent-guides), every later step
+# skips, so the job passes in seconds under its usual name: the merge script
+# wants each fast check by name with SUCCESS, which a job-level `if` would not
+# give (a skipped matrix job reports one check with an unexpanded name). Any
+# other change, a push, a manual run, or the gate step failing (its output is
+# then not `true`) runs every step. scripts/ci-docs-only.test.ts guards it.
 concurrency:
   group: test-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && format('push-{0}', github.ref) || format('run-{0}', github.run_id) }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -49,6 +59,14 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # The merge commit and both parents, for the docs-only gate below.
+          fetch-depth: 2
+
+      # Docs-only gate: see the top of this file.
+      - name: Is this a docs-only change?
+        id: docs
+        continue-on-error: true
+        run: bash scripts/ci-docs-only.sh
 
       # GitHub's image has Node (tests and npm run it) and unzip (setup-bun
       # unpacks Bun with it); a self-hosted stock Ubuntu has neither. There,
@@ -58,34 +76,40 @@ jobs:
       # and git 2.47 or later (background git relies on credential.interactive,
       # which older git ignores; packages/server/git-background.test.ts).
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.docs.outputs.skip != 'true'
         with:
           bun-version: 1.4.4
 
       - name: Install dependencies
+        if: steps.docs.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       - name: Check release version consistency
+        if: steps.docs.outputs.skip != 'true'
         run: bun run check:release-version
 
       - name: Generate Pi extension shared copies
+        if: steps.docs.outputs.skip != 'true'
         run: bash apps/pi-extension/vendor.sh
 
       - name: Type check
+        if: steps.docs.outputs.skip != 'true'
         run: bun run typecheck
 
       - name: Smoke-test published UI package
+        if: steps.docs.outputs.skip != 'true'
         # This packs the real tarball and installs it with a pinned pnpm CLI in
         # a temp consumer outside the monorepo. It prevents workspace protocols
         # from leaking into the manifest published to external consumers.
@@ -96,6 +120,7 @@ jobs:
       # generated asset matches the current bridge source runs here; in the
       # unit lanes it skips (no asset on a fresh checkout).
       - name: Check the generated bridge asset against its source
+        if: steps.docs.outputs.skip != 'true'
         run: bun test packages/ui/components/html-viewer/bridgeAsset.test.ts
 
       # The extension has its own tsconfig (Node libs, no DOM) and is not part
@@ -103,6 +128,7 @@ jobs:
       # panel cookie seed shipped that way; this is the step that would have
       # caught it.
       - name: Type check VS Code extension
+        if: steps.docs.outputs.skip != 'true'
         run: bun run --cwd apps/vscode-extension lint
 
       # The file-browser watcher test is timing-sensitive (a 120ms SSE debounce
@@ -111,6 +137,7 @@ jobs:
       # the rest of the ui suite (heavy load intermittently starves the debounce
       # timer and the reconnect refetch is missed). See useFileBrowser.test.tsx.
       - name: Run file-browser DOM test (isolated)
+        if: steps.docs.outputs.skip != 'true'
         run: DOM_TESTS=1 bun test packages/ui/hooks/useFileBrowser.test.tsx
 
       # These render against the REAL @pierre/diffs, because the defects they
@@ -126,6 +153,7 @@ jobs:
       # removes the coupling outright, same reasoning as the isolated step
       # above. scripts/ci-test-lanes.test.ts keeps them out of the DOM list.
       - name: Run diff-renderer DOM tests (isolated, real @pierre/diffs)
+        if: steps.docs.outputs.skip != 'true'
         run: >-
           DOM_TESTS=1 bun test
           packages/review-editor/components/DiffViewer.fullContentSwap.test.tsx
@@ -145,6 +173,7 @@ jobs:
       # The lane guard holds the matrices below to scripts/ci-test-lane.ts, so
       # no shard can be dropped without failing here.
       - name: Guard the DOM test allowlist and the test lanes
+        if: steps.docs.outputs.skip != 'true'
         run: bun test scripts/dom-test-allowlist.test.ts scripts/ci-test-lanes.test.ts
 
   # The plain `bun test` sweep, split across jobs (scripts/ci-test-lane.ts).
@@ -170,25 +199,35 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # The merge commit and both parents, for the docs-only gate below.
+          fetch-depth: 2
+
+      # Docs-only gate: see the top of this file.
+      - name: Is this a docs-only change?
+        id: docs
+        continue-on-error: true
+        run: bash scripts/ci-docs-only.sh
 
       # Node and Bun on a self-hosted machine: see the checks job.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.docs.outputs.skip != 'true'
         with:
           bun-version: 1.4.4
 
       - name: Install dependencies
+        if: steps.docs.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       # On CI the installer tests require PowerShell (scripts/install.test.ts
@@ -197,14 +236,14 @@ jobs:
       # its SHA-256 and kept between runs. Bun's shards decide which unit lane
       # holds that file, so every unit-k lane gets it.
       - name: Restore the PowerShell download (self-hosted)
-        if: runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/ci-tools/pwsh
           key: pwsh-7.6.9-1da6d6d6035d
 
       - name: Install PowerShell 7.6.9 (self-hosted)
-        if: runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted' && startsWith(matrix.lane, 'unit-')
         env:
           PWSH_SHA256: 1da6d6d6035d651f20e70ddee7c4c15ac6ab8b9fb40ee92240d91263f28a884b
           GH_TOKEN: ${{ github.token }}
@@ -221,13 +260,15 @@ jobs:
           "$dir/pwsh" -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
 
       - name: Generate Pi extension shared copies
+        if: steps.docs.outputs.skip != 'true'
         run: bash apps/pi-extension/vendor.sh
 
       - name: Fetch the released plugins' tags
-        if: matrix.lane == 'heavy-mod'
+        if: steps.docs.outputs.skip != 'true' && matrix.lane == 'heavy-mod'
         run: git fetch --no-tags --depth 1 origin tag v0.28.8 tag v0.28.30
 
       - name: Run tests
+        if: steps.docs.outputs.skip != 'true'
         env:
           LANE: ${{ matrix.lane }}
         run: bun run scripts/ci-test-lane.ts "$LANE"
@@ -251,31 +292,43 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # The merge commit and both parents, for the docs-only gate below.
+          fetch-depth: 2
+
+      # Docs-only gate: see the top of this file.
+      - name: Is this a docs-only change?
+        id: docs
+        continue-on-error: true
+        run: bash scripts/ci-docs-only.sh
 
       # Node and Bun on a self-hosted machine: see the checks job.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.docs.outputs.skip != 'true'
         with:
           bun-version: 1.4.4
 
       - name: Install dependencies
+        if: steps.docs.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       - name: Generate Pi extension shared copies
+        if: steps.docs.outputs.skip != 'true'
         run: bash apps/pi-extension/vendor.sh
 
       - name: Run DOM tests
+        if: steps.docs.outputs.skip != 'true'
         env:
           LANE: ${{ matrix.lane }}
         run: bun run scripts/ci-test-lane.ts "$LANE"
@@ -290,28 +343,39 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # The merge commit and both parents, for the docs-only gate below.
+          fetch-depth: 2
+
+      # Docs-only gate: see the top of this file.
+      - name: Is this a docs-only change?
+        id: docs
+        continue-on-error: true
+        run: bash scripts/ci-docs-only.sh
 
       # Node and Bun on a self-hosted machine: see the checks job.
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         with:
           node-version: 22
           package-manager-cache: false
 
       - name: Install Bun 1.4.4 (self-hosted)
-        if: runner.environment == 'self-hosted'
+        if: steps.docs.outputs.skip != 'true' && runner.environment == 'self-hosted'
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash scripts/ci-install-bun.sh 1.4.4
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        if: steps.docs.outputs.skip != 'true'
         with:
           bun-version: 1.4.4
 
       - name: Install dependencies
+        if: steps.docs.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       - name: Install OpenCode 2
+        if: steps.docs.outputs.skip != 'true'
         # zizmor: ignore[adhoc-packages] This integration test requires the exact
         # globally installed CLI. Owner: maintainers; reassess a locked fixture
         # by 2027-08-11.
@@ -321,6 +385,7 @@ jobs:
         run: npm install --global @opencode/cli@2.0.19
 
       - name: Build OpenCode plugin assets
+        if: steps.docs.outputs.skip != 'true'
         run: bun run build:review && bun run build:hook && bun run build:opencode
 
       # This is the only job with the single-file bundles on disk, so it is the
@@ -328,13 +393,16 @@ jobs:
       # run (they skip on an unbuilt checkout). Chief among them: no inlined
       # WebAssembly survived the bundle.
       - name: Assert built bundles ship no inlined WASM
+        if: steps.docs.outputs.skip != 'true'
         run: bun test tests/entry-assets.test.ts
 
       - name: Pack OpenCode plugin
+        if: steps.docs.outputs.skip != 'true'
         working-directory: apps/opencode-plugin
         run: npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP"
 
       - name: Run installed-package smoke
+        if: steps.docs.outputs.skip != 'true'
         # Glob the tarball so this job survives version bumps; npm pack wrote
         # exactly one plannotator-opencode-*.tgz into RUNNER_TEMP above.
         # The pinned host has the native command API, so a markdown stub
@@ -351,16 +419,19 @@ jobs:
       # a scripted model endpoint, against the binary compiled with the
       # release flags (apps/opencode-plugin/inbox-v2.test.ts).
       - name: Compile the binary for the Inbox proofs
+        if: steps.docs.outputs.skip != 'true'
         run: >-
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
           --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
 
       - name: Run the T3 connected-session proofs on the compiled binary
+        if: steps.docs.outputs.skip != 'true'
         env:
           T3_TEST_EXECUTABLE: ${{ github.workspace }}/.local/plannotator
         run: bun test packages/t3-code
 
       - name: Run the Inbox connection proofs on the installed package
+        if: steps.docs.outputs.skip != 'true'
         env:
           PLANNOTATOR_INBOX_TEST_BINARY: ${{ github.workspace }}/.local/plannotator
           INBOX_PROOF_DIR: ${{ github.workspace }}/.local/proof/inbox-opencode
@@ -371,7 +442,7 @@ jobs:
           bun test apps/opencode-plugin/inbox-v2.test.ts apps/opencode-plugin/inbox.test.ts
 
       - name: Keep the Inbox transcripts
-        if: always()
+        if: always() && steps.docs.outputs.skip != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: inbox-opencode-proof
@@ -390,14 +461,24 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
+          # The merge commit and both parents, for the docs-only gate below.
+          fetch-depth: 2
+
+      # Docs-only gate: see the top of this file.
+      - name: Is this a docs-only change?
+        id: docs
+        continue-on-error: true
+        run: bash scripts/ci-docs-only.sh
 
       - name: Install Claude Code
+        if: steps.docs.outputs.skip != 'true'
         # zizmor: ignore[adhoc-packages] The harness is part of the Claude Code
         # CLI itself (2.1.287 or later). Owner: maintainers; reassess a locked
         # fixture by 2027-08-11.
         run: npm install --global @anthropic-ai/claude-code@2.1.325
 
       - name: Run the harness tests
+        if: steps.docs.outputs.skip != 'true'
         env:
           DISABLE_AUTOUPDATER: "1"
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"

@@ -190,8 +190,21 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # The merge commit and both parents, for the docs-only gate below.
+          fetch-depth: 2
+
+      # Docs-only gate (scripts/ci-docs-only.sh), as in test.yml. Semgrep's
+      # rules read only JS/TS and shell, PowerShell, batch and Dockerfiles, none
+      # of which is on the gate's allowlist, so a docs-only PR has nothing for
+      # it to scan: the steps below skip and the job passes under its usual
+      # name. Anything else, this step failing included, scans as before.
+      - name: Is this a docs-only change?
+        id: docs
+        continue-on-error: true
+        run: bash scripts/ci-docs-only.sh
 
       - name: Install pinned Semgrep CE image
+        if: steps.docs.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -227,6 +240,7 @@ jobs:
           fi
 
       - name: Verify Semgrep rules and detector health
+        if: steps.docs.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -320,6 +334,7 @@ jobs:
           fi
 
       - name: Scan source with Semgrep CE
+        if: steps.docs.outputs.skip != 'true'
         id: scan
         shell: bash
         run: |
@@ -405,7 +420,7 @@ jobs:
           echo 'report-ready=true' >> "$GITHUB_OUTPUT"
 
       - name: Retain Semgrep reports
-        if: always()
+        if: always() && steps.docs.outputs.skip != 'true'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: semgrep-reports
@@ -419,6 +434,7 @@ jobs:
       - name: Upload Semgrep SARIF
         if: >-
           always() &&
+          steps.docs.outputs.skip != 'true' &&
           steps.scan.outputs.report-ready == 'true' &&
           (github.event_name != 'pull_request' ||
           (github.event.pull_request.head.repo.full_name == github.repository &&
