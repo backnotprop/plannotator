@@ -179,8 +179,15 @@ Small shares live in the link itself. Large ones are encrypted before upload and
 
 <p align="center">
   <a href="https://plannotator.ai/workspaces">
-    <img src=".github/assets/workspaces-cta.svg" alt="For teams: Workspaces. Join the waitlist." height="44" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/workspaces-dark.png" />
+      <img src=".github/assets/workspaces-light.png" alt="Plannotator Workspaces: several cursors working in one shared space" width="720" />
+    </picture>
   </a>
+</p>
+
+<p align="center">
+  For teams: <a href="https://plannotator.ai/workspaces"><strong>join the Workspaces waitlist</strong></a>
 </p>
 
 ---
@@ -244,6 +251,9 @@ Use `--purge` for a full removal of known local Plannotator data as well:
 plannotator uninstall --purge
 ```
 
+<details>
+<summary>What uninstall removes, what it keeps, and when it stops</summary>
+
 Purge requires typing `purge` at the prompt and explains that the data is
 local-only: it is not stored on a Plannotator server and cannot be recovered.
 For automation, pass `--yes` (or `-y`); non-interactive removal refuses to run
@@ -283,6 +293,8 @@ commands, immediately before the synchronous data-removal block; a replaced
 data directory is refused without touching either the old or replacement data.
 If your dedicated data directory is symlinked, point `PLANNOTATOR_DATA_DIR` at
 its resolved target and retry.
+
+</details>
 
 If you installed only the standalone Pi extension and do not have the
 `plannotator` CLI, use `pi remove npm:@plannotator/pi-extension`.
