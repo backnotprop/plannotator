@@ -9,6 +9,7 @@
 @source "../../packages/ui/hooks/**/*.ts";
 /* The shared chat window has no host in this app, so its classes stay out of this stylesheet. */
 @source not "../../packages/ui/components/chat/**";
+@source not "../../packages/ui/components/frame/**";
 @source "../../packages/inbox/surface/**/*.tsx";
 @source "../../packages/inbox/guide/**/*.tsx";
 @source "../../packages/guide-viewer/**/*.tsx";
