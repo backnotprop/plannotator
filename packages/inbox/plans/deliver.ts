@@ -5,15 +5,19 @@
  * - the plan has its Inbox thread (`thread_id`): the words go into it as the person's reply, at once;
  * - else an agent is live in the plan's project (the Inbox's live sessions, the ones New message lists; the session
  *   that wrote the plan first when it is one of them): New message opens to it filled in (compose/openComposer.ts),
- *   or on its own To list when several are live; the person reads it and presses Send there, and the thread it
- *   starts becomes the plan's;
+ *   or on its own To list when several are live or the project is known by its folder's name only (an imported
+ *   plan: two folders may share the name, and the list shows which is which); the person reads it and presses Send
+ *   there, and the thread it starts becomes the plan's;
  * - else nothing goes, and the page says so in the Inbox's words for a project with no live agent.
  * A Send that went marks the comments it carried sent, records the thread and the version a Direct Edits section
  * carried (`POST /api/plans/:id/sent`). That record is retried quietly: the reply went, so the person is never told
- * it did not. A reply keeps one key per plan and words, so pressing Send again cannot post it twice. A Send held for
- * another machine is recorded when its outbox entry is delivered.
+ * it did not; one that never lands waits in this browser's storage and is tried again when a plan page opens. A
+ * reply's key is the plan, the thread, the comments it carries, the version it tells of and its words: the same Send
+ * tried again is the same reply, and a new Send is never taken for an old one. A Send held for another machine is
+ * recorded when its outbox entry is delivered.
  */
 import { sha1Hex, type PlanRecord, type PlanVersion } from '@plannotator/core/plans';
+import { storage } from '@plannotator/ui/utils/storage';
 import type { InboxComposeSession } from '@plannotator/core/inbox-types';
 import { inboxApi, type ComposeSessionsModel } from '../api';
 import { openComposer } from '../compose/openComposer';
@@ -45,30 +49,41 @@ export const noAgentWords = (project: string | null) => (project ? `No agent is 
 export type PlanAgent =
   | { kind: 'thread'; thread: string; label: string }
   | { kind: 'session'; session: string; host: string; label: string }
-  /** Several agents are live in the project: New message opens on its To list. */
+  /** Several agents are live in the project, or one known by its folder's name only: New message opens on its To list. */
   | { kind: 'pick'; label: string }
   | { kind: 'none' };
 
 const lastPart = (root: string) => root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? root;
 
-/** The live sessions working in the plan's project: its Inbox project, its folder, or the name plan history files it under. */
-export function planLiveSessions(plan: Pick<PlanRecord, 'project_id' | 'project_root' | 'project_name'>, model: ComposeSessionsModel | null): InboxComposeSession[] {
+/**
+ * The live sessions working in the plan's project: its Inbox project, its folder, or the name plan history files it
+ * under. `sure`: matched by the project's id or folder; a match by the folder's name only (an imported plan knows no
+ * more) may be another folder of the same name.
+ */
+export function planLiveSessions(plan: Pick<PlanRecord, 'project_id' | 'project_root' | 'project_name'>, model: ComposeSessionsModel | null): (InboxComposeSession & { sure: boolean })[] {
   if (!model) return [];
-  const ours = (project: { id: string | null; name: string; root: string }, root?: string) =>
-    (!!plan.project_id && project.id === plan.project_id) ||
-    (!!plan.project_root && (project.root === plan.project_root || root === plan.project_root)) ||
-    (!!plan.project_name && (project.name === plan.project_name || lastPart(project.root) === plan.project_name || (!!root && lastPart(root) === plan.project_name)));
-  return model.projects.flatMap((group) => group.sessions.filter((s) => ours(group.project, s.root)));
+  const sure = (project: { id: string | null; root: string }, root?: string) =>
+    (!!plan.project_id && project.id === plan.project_id) || (!!plan.project_root && (project.root === plan.project_root || root === plan.project_root));
+  const named = (project: { name: string; root: string }, root?: string) =>
+    !!plan.project_name && (project.name === plan.project_name || lastPart(project.root) === plan.project_name || (!!root && lastPart(root) === plan.project_name));
+  return model.projects.flatMap((group) =>
+    group.sessions.flatMap((s): (InboxComposeSession & { sure: boolean })[] => (sure(group.project, s.root) ? [{ ...s, sure: true }] : named(group.project, s.root) ? [{ ...s, sure: false }] : [])),
+  );
 }
 
-/** Whom the plan's words go to now: its thread, else the live agent in its project (the plan's own session first). */
+/**
+ * Whom the plan's words go to now: its thread, else the live agent in its project: the plan's own session first,
+ * else the one agent matched by the project's id or folder (one of the same name elsewhere does not count). Several,
+ * or matched by the folder's name only: New message's To list, where the person sees which folder each agent is in.
+ */
 export function planAgentOf(plan: PlanRecord, versions: readonly PlanVersion[], model: ComposeSessionsModel | null): PlanAgent {
   const own = planSession(versions);
   if (plan.thread_id) return { kind: 'thread', thread: plan.thread_id, label: planAgentLabel(own) };
   const live = planLiveSessions(plan, model);
-  const chosen = live.find((s) => s.session === own?.session) ?? (live.length === 1 ? live[0]! : null);
+  const sure = live.filter((s) => s.sure);
+  const chosen = live.find((s) => s.session === own?.session) ?? (sure.length === 1 ? sure[0]! : null);
   if (chosen) return { kind: 'session', session: chosen.session, host: chosen.host, label: chosen.label || hostLabel(chosen.host) };
-  return live.length > 1 ? { kind: 'pick', label: 'the agent' } : { kind: 'none' };
+  return live.length > 0 ? { kind: 'pick', label: 'the agent' } : { kind: 'none' };
 }
 
 /** Whom the plan's words go to at the moment they are sent: the live sessions read again (a failed read: none known). */
@@ -83,18 +98,64 @@ export type PlanDelivery = 'replied' | 'composing' | 'held' | 'no-agent';
 
 type SentBody = Parameters<typeof plansApi.sent>[1];
 
-/** Record a Send that went, quietly: tried again a few times, and never said to have failed (the words went). */
+/** The records of Sends that went but could not be recorded yet, in this browser, tried again when a plan page opens. */
+export const PLAN_SENT_QUEUE_KEY = 'plannotator-inbox-plan-sent-queue';
+type QueuedSent = { id: string; body: SentBody };
+const readQueue = (): QueuedSent[] => {
+  try {
+    const value = JSON.parse(storage.getItem(PLAN_SENT_QUEUE_KEY) ?? '[]') as unknown;
+    return Array.isArray(value) ? (value as QueuedSent[]) : [];
+  } catch {
+    return [];
+  }
+};
+const writeQueue = (queue: readonly QueuedSent[]) => (queue.length ? storage.setItem(PLAN_SENT_QUEUE_KEY, JSON.stringify(queue.slice(-50))) : storage.removeItem(PLAN_SENT_QUEUE_KEY));
+
+/** How long the quiet record waits between tries (the last try's failure queues it). */
+let sentRetryWaits: readonly number[] = [0, 1_000, 4_000, 15_000];
+export function setPlanSentRetryWaitsForTests(waits: readonly number[] | null): void {
+  sentRetryWaits = waits ?? [0, 1_000, 4_000, 15_000];
+}
+
+/**
+ * Record a Send that went, quietly: tried again a few times, and never said to have failed (the words went). Every
+ * try failed: it waits in the queue (`PLAN_SENT_QUEUE_KEY`) for the next plan page, so the next diff does not hold
+ * again what the agent already has. A record is safe twice (a sent comment stays sent, the first thread stays, the
+ * told version only rises).
+ */
 async function recordSent(id: string, body: SentBody, onSent: () => void): Promise<void> {
-  for (const wait of [0, 1_000, 4_000, 15_000]) {
+  for (const wait of sentRetryWaits) {
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
     try {
       await plansApi.sent(id, body);
       onSent();
       return;
     } catch {
-      // Tried again below; the comments stay waiting only if every try failed.
+      // Tried again below, then queued.
     }
   }
+  writeQueue([...readQueue(), { id, body }]);
+}
+
+/** Try the queued records again (a plan page opened): how many landed; the ones that fail again stay queued. */
+export async function flushQueuedPlanSent(): Promise<number> {
+  const queue = readQueue();
+  if (!queue.length) return 0;
+  writeQueue([]);
+  const left: QueuedSent[] = [];
+  let landed = 0;
+  for (const entry of queue) {
+    try {
+      await plansApi.sent(entry.id, entry.body);
+      landed++;
+    } catch (error) {
+      // A plan or comment that is gone (4xx) is dropped; anything else waits for the next page.
+      const status = (error as { status?: unknown }).status;
+      if (!(typeof status === 'number' && status >= 400 && status < 500)) left.push(entry);
+    }
+  }
+  if (left.length) writeQueue([...left, ...readQueue()]);
+  return landed;
 }
 
 /** How often a held Send's outbox entry is looked at, and for how long. */
@@ -140,8 +201,8 @@ export async function deliverToPlanAgent(input: {
   const { plan, agent, words, comments, onSent } = input;
   const told = input.told ?? null;
   if (agent.kind === 'thread') {
-    // One key per plan and words: the same Send pressed again is the same reply, never a second one.
-    const key = `plan_${sha1Hex(new TextEncoder().encode(`${plan.id}\n${agent.thread}\n${words}`)).slice(0, 32)}`;
+    // The same Send tried again is the same reply; a new Send (other comments, another version) is never an old one.
+    const key = `plan_${sha1Hex(new TextEncoder().encode(`${plan.id}\n${agent.thread}\n${comments.join(',')}\n${told?.version ?? ''}\n${words}`)).slice(0, 32)}`;
     const result = await inboxApi.reply(agent.thread, { idempotency_key: key, words, questions: [] });
     const replyId = (result.reply as { id?: unknown } | null)?.id;
     const body: SentBody = { thread_id: agent.thread, message_id: typeof replyId === 'string' ? replyId : agent.thread, to: null, comments: [...comments], told };

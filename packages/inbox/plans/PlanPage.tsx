@@ -37,7 +37,7 @@ import type { PlanRead } from './client';
 import { recordPlanLook, useDocVersions, usePlan } from './store';
 import { approvalTone, approvalWords, PLAN_FILES_WORDS } from './words';
 import { usePlanEditing } from './PlanEditing';
-import { planAgentOf } from './deliver';
+import { flushQueuedPlanSent, planAgentOf } from './deliver';
 import { useComposeSessions } from '../compose/useComposeSessions';
 import { PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
@@ -76,6 +76,10 @@ export function PlanPage(props: PlanPageProps) {
   const [fresh, setFresh] = useState(0);
   const onChanged = useCallback(() => setFresh((n) => n + 1), []);
   const state = usePlan(props.id, retry, fresh);
+  // A Send that went but was not recorded then (deliver.ts) is recorded now, and the plan read again.
+  useEffect(() => {
+    void flushQueuedPlanSent().then((landed) => landed > 0 && onChanged());
+  }, [props.id, onChanged]);
   if (state.missing) return <PlansMessage title="This plan is not here" body="It may have been removed, or Plans was turned off." onBack={toList} />;
   if (state.error) return <PlansMessage title="This plan could not be read" body={state.error} onRetry={() => setRetry((n) => n + 1)} onBack={toList} />;
   if (!state.read || !state.versions) return <PlansMessage busy title="Plan" body="Loading the plan…" onBack={toList} />;

@@ -6,9 +6,9 @@
 import type { MutableRefObject } from 'react';
 import { MarkdownEditor, type MarkdownEditorHandle } from '@plannotator/ui/components/MarkdownEditor';
 
-export default function PlanEditor({ text, documentId, handle, onChange }: { text: string; documentId: string; handle: MutableRefObject<MarkdownEditorHandle | null>; onChange: (markdown: string) => void }) {
+export default function PlanEditor({ text, documentId, handle, onChange, onBlur }: { text: string; documentId: string; handle: MutableRefObject<MarkdownEditorHandle | null>; onChange: (markdown: string) => void; onBlur?: () => void }) {
   return (
-    <div className="ib-plan-editor" data-plan-editor="">
+    <div className="ib-plan-editor" data-plan-editor="" onBlur={onBlur}>
       <MarkdownEditor markdown={text} documentId={documentId} editorHandleRef={handle} onMarkdownChange={onChange} maxWidth={null} />
     </div>
   );

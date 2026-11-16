@@ -8,7 +8,8 @@
  *   aside): no version. A newer version came while the person was editing: nothing is written, the newest shows, and
  *   their text is kept here to copy or edit again.
  * - An open edit and a kept text live in the tab's sessionStorage per plan and page (`planEditKey`), so another page,
- *   a read that failed or a reload brings them back.
+ *   a read that failed or a reload brings them back. Typing is written a moment after it pauses (`EDIT_KEEP_MS`), and
+ *   at once when the editor loses focus, the page is hidden or left, and before Done.
  * - An older version cannot be edited: it is read, compared, or Restored (the reading line's restore slot), which
  *   makes a new newest version holding its text, sent to the agent the same way.
  * - Approve names the version on screen and is refused once a newer one came (the newest then shows). An approval
@@ -48,6 +49,8 @@ function readKeptEdit(key: string): KeptEdit | null {
     return null;
   }
 }
+/** How long typing pauses before the open edit's text is written to sessionStorage. */
+const EDIT_KEEP_MS = 400;
 function keepEdit(key: string, value: KeptEdit | null): void {
   try {
     if (value) window.sessionStorage.setItem(key, JSON.stringify(value));
@@ -101,11 +104,44 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
   const [kept, setKept] = useState<{ text: string; base: number } | null>(null);
   const typed = useRef('');
   const handle = useRef<MarkdownEditorHandle | null>(null);
+  /** The typed text not written yet (written `EDIT_KEEP_MS` after typing pauses, or by `flushTyped`). */
+  const pending = useRef<{ key: string; value: KeptEdit; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const dropTyped = () => {
+    if (pending.current) clearTimeout(pending.current.timer);
+    pending.current = null;
+  };
+  const flushTyped = () => {
+    const due = pending.current;
+    dropTyped();
+    if (due) keepEdit(due.key, due.value);
+  };
+  const keepTyped = (value: KeptEdit) => {
+    dropTyped();
+    pending.current = { key: editKey, value, timer: setTimeout(flushTyped, EDIT_KEEP_MS) };
+  };
+  // The page hidden, left, closed or turned to another page of the plan: the typed text is written now.
+  useEffect(() => {
+    const onHide = () => flushTyped();
+    const onVisibility = () => {
+      if (window.document.visibilityState === 'hidden') flushTyped();
+    };
+    window.addEventListener('pagehide', onHide);
+    window.document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', onHide);
+      window.document.removeEventListener('visibilitychange', onVisibility);
+      flushTyped();
+    };
+    // The handlers read refs only; a new page writes the last one's text first.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editKey]);
   const setEditing = (next: { base: number; original: string; text: string } | null) => {
+    dropTyped();
     setEditingNow(next);
     keepEdit(editKey, next ? { base: next.base, text: next.text } : null);
   };
   const keep = (next: { text: string; base: number } | null) => {
+    dropTyped();
     setKept(next);
     keepEdit(editKey, next ? { ...next, kept: true } : null);
   };
@@ -180,6 +216,8 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
 
   const done = async () => {
     if (!editing || busy) return;
+    // A Done that fails still finds the text kept.
+    flushTyped();
     const text = handle.current?.getMarkdown() ?? typed.current;
     const unchanged: Notice = { kind: 'unchanged', alert: false, words: 'Nothing changed, so no new version was made.' };
     // Line endings are not a change (the editor gives `\r\n` back as `\n`).
@@ -363,8 +401,9 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
         handle={handle}
         onChange={(markdown) => {
           typed.current = markdown;
-          keepEdit(editKey, { base: editing.base, text: markdown });
+          keepTyped({ base: editing.base, text: markdown });
         }}
+        onBlur={flushTyped}
       />
     </Suspense>
   ) : null;

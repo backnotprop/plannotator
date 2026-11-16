@@ -132,9 +132,9 @@ afterEach(() => {
 const at = (day: number, hour = 9) => new Date(Date.UTC(2026, 10, day, hour)).toISOString();
 const bytes = (text: string) => new TextEncoder().encode(text);
 
-/** A plan with versions; `seen`: the person looked at that version. */
-function plan(name: string, project: string | null, texts: string[], options: { seen?: number; approvedOn?: number; deniedOn?: number } = {}) {
-  const { plan: record, document } = store.createPlan({ name, project_name: project, created_at: at(1), document: { title: name } });
+/** A plan with versions; `seen`: the person looked at that version; `root`: its project's folder. */
+function plan(name: string, project: string | null, texts: string[], options: { seen?: number; approvedOn?: number; deniedOn?: number; root?: string } = {}) {
+  const { plan: record, document } = store.createPlan({ name, project_name: project, project_root: options.root ?? null, created_at: at(1), document: { title: name } });
   texts.forEach((text, i) => store.addVersion(record.id, document.id, { bytes: bytes(text), committed_at: at(2 + i), source: 'plan-review', author_via: 'plan-review' }));
   for (const [kind, n] of [['approved', options.approvedOn], ['denied', options.deniedOn]] as const) {
     if (!n) continue;
@@ -867,13 +867,16 @@ test.skipIf(!hasDom)('Done makes a new version of the person’s words and sends
   expect(host.querySelector('[data-plan-banner="changed"]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('Done with an agent live in the plan’s project opens New message to it with what changed; once sent, the next Done replies in the plan’s thread; several live: New message asks which', async () => {
-  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+test.skipIf(!hasDom)('Done with an agent live in the plan’s project opens New message to it with what changed; once sent, the next Done replies in the plan’s thread; several live, or one known by its folder’s name only: New message asks which', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n'], { root: '/Users/me/harbor-api' });
   const several = plan('Rate limits', 'ledger', ['# Rate limits\n\nA bucket.\n']);
+  // Imported from plan history: only the folder's name is known, and the one agent live is in another folder of that name.
+  const named = plan('Cache keys', 'trailhead-api', ['# Cache keys\n\nPer tenant.\n']);
   keptStorage();
   const replies = interceptInbox([
     { project: { id: null, name: 'harbor-api', root: '/Users/me/harbor-api' }, sessions: [{ session: 'sess-7', host: 'codex' }] },
     { project: { id: null, name: 'ledger', root: '/Users/me/ledger' }, sessions: [{ session: 'sess-1', host: 'codex' }, { session: 'sess-2', host: 'claude-code' }] },
+    { project: { id: null, name: 'trailhead-api', root: '/Users/me/oss/trailhead-api' }, sessions: [{ session: 'sess-3', host: 'codex' }] },
   ]);
   const opened: { to: unknown; body: string; onSent: (sent: object) => void }[] = [];
   const listen = (event: Event) => opened.push((event as CustomEvent).detail);
@@ -906,6 +909,17 @@ test.skipIf(!hasDom)('Done with an agent live in the plan’s project opens New 
     await settle();
     await editAndDone(host, '# Rate limits\n\nTwo buckets.\n');
     expect(opened.map((o) => o.to)).toEqual([{ session: 'sess-7' }, 'pick']);
+    expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v2. What changed is in New message: choose the agent there.');
+
+    // One agent live, but matched by the folder's name only: never chosen for the person; the To list shows its folder.
+    act(() => root!.unmount());
+    unlisten();
+    document.body.innerHTML = '';
+    window.location.hash = `#plans=${named}`;
+    host = draw();
+    await settle();
+    await editAndDone(host, '# Cache keys\n\nPer tenant and route.\n');
+    expect(opened.map((o) => o.to)).toEqual([{ session: 'sess-7' }, 'pick', 'pick']);
     expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v2. What changed is in New message: choose the agent there.');
   } finally {
     window.removeEventListener('plannotator-inbox:open-composer', listen);
@@ -964,9 +978,58 @@ test.skipIf(!hasDom)('an open edit and a kept text outlive another page and a re
   expect(host.querySelector('[data-plan-banner="stale"]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a reply that went is never said to have failed when recording it does: the record is tried again; a held Send is recorded once its outbox entry was delivered, never when refused', async () => {
+test.skipIf(!hasDom)('typing is kept a moment after it pauses, and at once when the editor loses focus or the page is hidden', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+  keptStorage();
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  const key = `plannotator-inbox-plan-edit-${id}-${store.get(id)!.primary_doc_id}`;
+  const keptText = () => (JSON.parse(window.sessionStorage.getItem(key) ?? 'null') as { text: string } | null)?.text;
+  const type = (words: string) => act(async () => editorView().dispatch({ changes: { from: 0, to: editorView().state.doc.length, insert: words } }));
+  await type('# One\n');
+  // Not on every keystroke.
+  expect(keptText()).toBe('# Rotate refresh tokens\n\nRetire keys after 14 days.\n');
+  await act(async () => document.querySelector('[data-plan-editor] .cm-content')!.dispatchEvent(new FocusEvent('focusout', { bubbles: true })));
+  expect(keptText()).toBe('# One\n');
+  await type('# Two\n');
+  await act(async () => window.dispatchEvent(new Event('pagehide')));
+  expect(keptText()).toBe('# Two\n');
+  await type('# Three\n');
+  await act(async () => await new Promise((r) => setTimeout(r, 450)));
+  expect(keptText()).toBe('# Three\n');
+});
+
+test.skipIf(!hasDom)('the agent a plan’s words go to: its own session, else the one matched by the project’s id or folder; matched by the folder’s name only, New message asks', () => {
+  const session = (id: string) => ({ session: id, host: 'codex', started_at: at(1), last_seen_at: at(1), busy: false, idle_since: null, last_thread: null });
+  const model = (projects: { id: string | null; name: string; root: string; sessions: string[] }[]) => ({ serverSession: 's', home: '/Users/me', projects: projects.map(({ sessions, ...project }) => ({ project, sessions: sessions.map(session) })) }) as unknown as Parameters<typeof import('./deliver').planAgentOf>[2];
+  const id = plan('Cache keys', 'trailhead-api', ['# Cache keys\n']);
+  const record = (change: object) => ({ ...store.get(id)!, ...change });
+  const versions = store.versions(id);
+  const kind = (change: object, projects: Parameters<typeof model>[0]) => {
+    const agent = deliver!.planAgentOf(record(change), versions, model(projects));
+    return agent.kind === 'session' ? agent.session : agent.kind;
+  };
+  const work = { id: 'prj_work', name: 'trailhead-api · work', root: '/Users/me/work/trailhead-api', sessions: ['sess-w'] };
+  const oss = { id: null, name: 'trailhead-api', root: '/Users/me/oss/trailhead-api', sessions: ['sess-o'] };
+  expect(kind({ project_id: 'prj_work' }, [work, oss])).toBe('sess-w');
+  expect(kind({ project_root: '/Users/me/oss/trailhead-api' }, [work, oss])).toBe('sess-o');
+  // The name only: one folder of that name live, or two: never chosen for the person.
+  expect(kind({}, [oss])).toBe('pick');
+  expect(kind({}, [work, oss])).toBe('pick');
+  expect(kind({}, [])).toBe('none');
+  // The plan's own session is that agent, whatever its folder is called.
+  const own = plan('Own', 'trailhead-api', []);
+  store.addVersion(own, store.get(own)!.primary_doc_id, { bytes: bytes('# Own\n'), committed_at: at(2), source: 'plan-review', agent_session: 'sess-o', agent_host: 'codex' });
+  expect(deliver!.planAgentOf(store.get(own)!, store.versions(own), model([work, oss]))).toMatchObject({ kind: 'session', session: 'sess-o' });
+});
+
+test.skipIf(!hasDom)('a reply that went is never said to have failed when recording it does: the record is tried again, then kept for the next plan page; one key per Send; a held Send is recorded once its outbox entry was delivered, never when refused', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
   store.updatePlan(id, { thread_id: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ' });
+  const kept = keptStorage();
   const replies = interceptInbox();
   // The first record of the Send fails (the Inbox was busy); the reply had gone.
   const inner = globalThis.fetch;
@@ -981,9 +1044,44 @@ test.skipIf(!hasDom)('a reply that went is never said to have failed when record
   for (let i = 0; i < 30 && told === 0; i++) await new Promise((r) => setTimeout(r, 100));
   expect(told).toBe(1);
   expect(store.get(id)!.agent_told).toEqual({ [store.get(id)!.primary_doc_id]: 1 });
-  // The same words again are the same reply (one key per plan and words): the Inbox answers it once.
-  await deliver!.deliverToPlanAgent({ plan: store.get(id)!, agent: { kind: 'thread', thread: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ', label: 'the agent' }, words: '# Direct Edits\n\nx', comments: [], onSent: () => {} });
+  // The same Send tried again is the same reply: the Inbox answers it once.
+  const thread = { kind: 'thread', thread: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ', label: 'the agent' } as const;
+  const doc = store.get(id)!.primary_doc_id;
+  await deliver!.deliverToPlanAgent({ plan: store.get(id)!, agent: thread, words: '# Direct Edits\n\nx', comments: [], told: { doc, version: 1 }, onSent: () => {} });
   expect(new Set(replies.map((r) => r.body.idempotency_key)).size).toBe(1);
+  // The same words carrying other comments, or telling of no version, are a new Send: never taken for the old one.
+  await deliver!.deliverToPlanAgent({ plan: store.get(id)!, agent: thread, words: '# Direct Edits\n\nx', comments: ['ann_1'], told: { doc, version: 1 }, onSent: () => {} });
+  await deliver!.deliverToPlanAgent({ plan: store.get(id)!, agent: thread, words: '# Direct Edits\n\nx', comments: [], told: null, onSent: () => {} });
+  expect(new Set(replies.map((r) => r.body.idempotency_key)).size).toBe(3);
+
+  // Every try failed (the Inbox down for the whole wait): the record waits in storage, and the next plan page records it.
+  deliver!.setPlanSentRetryWaitsForTests([0, 5]);
+  let down = true;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/sent') && down) return Response.json({ error: 'busy' }, { status: 503 });
+    return inner(input, init);
+  }) as typeof fetch;
+  try {
+    const other = plan('Rate limits', 'harbor-api', ['# Rate limits\n\nA bucket.\n', '# Rate limits\n\nTwo.\n']);
+    store.updatePlan(other, { thread_id: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCZ' });
+    const otherDoc = store.get(other)!.primary_doc_id;
+    await deliver!.deliverToPlanAgent({ plan: store.get(other)!, agent: { ...thread, thread: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCZ' }, words: '# Direct Edits\n\ny', comments: [], told: { doc: otherDoc, version: 2 }, onSent: () => {} });
+    for (let i = 0; i < 20 && !kept.get(deliver!.PLAN_SENT_QUEUE_KEY); i++) await new Promise((r) => setTimeout(r, 10));
+    expect(JSON.parse(kept.get(deliver!.PLAN_SENT_QUEUE_KEY)!).map((q: { id: string }) => q.id)).toEqual([other]);
+    expect(store.get(other)!.agent_told).toBeUndefined();
+    // Still down when a page opens: it stays queued.
+    expect(await deliver!.flushQueuedPlanSent()).toBe(0);
+    expect(kept.has(deliver!.PLAN_SENT_QUEUE_KEY)).toBe(true);
+    // Back: the plan page that opens records it, and the queue is empty.
+    down = false;
+    window.location.hash = `#plans=${other}`;
+    draw();
+    for (let i = 0; i < 20 && !store.get(other)!.agent_told; i++) await settle();
+    expect(kept.has(deliver!.PLAN_SENT_QUEUE_KEY)).toBe(false);
+    expect(store.get(other)!.agent_told).toEqual({ [otherDoc]: 2 });
+  } finally {
+    deliver!.setPlanSentRetryWaitsForTests(null);
+  }
 
   // Held for another machine: recorded once the entry left the waiting list with no notice.
   const waiting = new Set(['k-delivered', 'k-refused']);
