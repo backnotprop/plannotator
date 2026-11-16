@@ -10,7 +10,7 @@
  * import cycle through update-prepare.ts.
  */
 
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
 /**
  * Why a download failed at TLS. `untrusted`: neither Bun's roots nor this
@@ -70,10 +70,21 @@ export function withoutLogOnlyLines(text: string): string {
  */
 export function lastRunLog(logPath: string): string {
   let text: string;
+  let file: number | undefined;
   try {
-    text = readFileSync(logPath, "utf-8").slice(-65_536);
+    file = openSync(logPath, "r");
+    const size = fstatSync(file).size;
+    const length = Math.min(size, 65_536);
+    const tail = Buffer.alloc(length);
+    const read = readSync(file, tail, 0, length, size - length);
+    // Starting mid-character is harmless: discard only leading UTF-8 continuation bytes.
+    let start = 0;
+    while (start < read && (tail[start]! & 0xc0) === 0x80) start += 1;
+    text = tail.toString("utf-8", start, read);
   } catch {
     return "";
+  } finally {
+    if (file !== undefined) closeSync(file);
   }
   const END = "] update: install.sh exited";
   const last = text.lastIndexOf(END);
