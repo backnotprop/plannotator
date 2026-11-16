@@ -18,8 +18,12 @@ const hasDom = typeof document !== 'undefined';
 const rect = (top: number, bottom: number) => ({ top, bottom, left: 0, right: 400, width: 400, height: bottom - top, x: 0, y: top }) as DOMRect;
 
 let root: HTMLElement | null = null;
+/** The hold a test started, stopped even when the test fails before stopping it. */
+let stopHold: (() => void) | null = null;
 const realObserver = globalThis.ResizeObserver;
 afterEach(() => {
+  stopHold?.();
+  stopHold = null;
   root?.remove();
   root = null;
   globalThis.ResizeObserver = realObserver;
@@ -74,7 +78,7 @@ test.skipIf(!hasDom)('held beside a file: the view stays while the place is in v
   const resize = observeByHand();
   let box: [number, number] = [57, 105];
   const t = thread(() => box);
-  const stop = holdPlace(t.body, t.place, undefined, 60_000, t.body, true);
+  const stop = (stopHold = holdPlace(t.body, t.place, undefined, 60_000, t.body, true));
   expect(t.body.style.overflowAnchor).toBe('none');
   // The column narrows: the rows above grow, the place moves down but stays in view.
   box = [90, 154];
