@@ -2474,6 +2474,8 @@ export const INBOX_ROWS_OPTIONS = [
   // PRs"), off by default, so a look saved before it shows them as ever: no PR mark at any row's end. The thread's
   // own PR button stays. No rival.
   "hidePulls",
+  // Omit a project's machine suffix when its name already distinguishes it.
+  "hideMachineNames",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 

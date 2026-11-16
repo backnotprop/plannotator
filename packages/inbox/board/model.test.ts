@@ -143,6 +143,11 @@ test("the Board's project names: a linked machine's carry its name; one name on 
   ]);
   // None linked: the names as before.
   expect(boardProjectNames(projects.slice(0, 1), new Map())).toEqual(new Map([['prj_a', 'web']]));
+  expect([...boardProjectNames(projects, new Map([['ibx_mini', 'Mac-mini']]), true)]).toEqual([
+    ['prj_a', 'web'],
+    ['prj_b', 'web · Mac-mini'],
+    ['prj_c', 'api'],
+  ]);
 });
 
 test('a card message names the card; a message key replays the same words and not changed ones', () => {

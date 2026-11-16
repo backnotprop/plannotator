@@ -82,6 +82,8 @@ export interface ListLook {
    * (`RowPullsMark`). Off by default, so a look saved before it shows them. The thread's own PR button stays.
    */
   hidePulls: boolean;
+  /** Hide redundant machine suffixes on project labels; same-name projects keep theirs. */
+  hideMachineNames: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -112,6 +114,7 @@ export const LIST_LOOK_OFF: ListLook = {
   statusMark: false,
   boldNames: false,
   hidePulls: false,
+  hideMachineNames: false,
 };
 
 /** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
