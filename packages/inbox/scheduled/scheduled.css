@@ -165,8 +165,17 @@ button.st-chip { cursor: pointer; }
 .st-runrow svg.ib-ic { color: var(--muted-foreground); }
 .st-all { margin: 6px 0 0 -8px; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: pointer; }
 .st-all:hover { background: var(--muted); }
-.st-error { margin-top: 16px; }
-.st-pfoot { display: flex; align-items: center; }
+.st-error { margin: 12px 0 0; }
+/* The header's quiet save status ("Saved", "Saving…"), red with its mark when a save failed. */
+.st-saved { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
+.st-saved svg.ib-ic { width: 13px; height: 13px; color: var(--muted-foreground); }
+.st-saved[data-bad] { color: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-saved[data-bad] svg.ib-ic { color: currentColor; }
+/* The foot: where it stands, then Run once now (quiet) and Turn on (the filled next step while it is off). */
+.st-pfoot { display: flex; align-items: center; gap: 10px; }
+.st-footline { flex: 1; min-width: 0; font-size: var(--ib-fs-13, 13px); line-height: 18px; color: var(--muted-foreground); }
+.st-footline b { font-weight: 550; color: var(--foreground); }
+.st-once svg.ib-ic { width: 12px; height: 12px; }
 
 /* A thread's run line: the play mark, the run and a hairline; a click shows its prompt. The skip line is quieter: no
    mark, regular weight, a fainter colour, no trailing hairline, because nothing ran. */
@@ -198,6 +207,13 @@ button.st-foot-mark:hover { background: var(--muted); }
 .ib-badge.st-pill { gap: 6px; }
 .ib-badge.st-warn svg.ib-ic { width: 14px; height: 14px; }
 
+/* Beside the editor the list gives the Runs column's room to the name (the editor lists the runs, as on a phone), so a
+   name like "Inbox Usage Data and Feedback" keeps one line. Run stays right of the name, every row in one column. */
+@media (min-width: 761px) {
+  .st-list-split .st-short { grid-template-columns: [name] fit-content(calc(100% - 236px)) [btn] 24px [space] minmax(0, 1fr) [last] 112px [more] 40px [end]; }
+  .st-list-split .st-scols > .st-count { display: none; }
+}
+
 @media (max-width: 760px) {
   .st-list.st-list-split { width: 100%; }
   /* A phone gives the name the room: Runs is in the editor, and a long name takes two lines. */
@@ -205,5 +221,7 @@ button.st-foot-mark:hover { background: var(--muted); }
   .st-scols > .st-count { display: none; }
   .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .st-next { margin-left: 0; width: 100%; }
+  .st-pfoot { flex-wrap: wrap; }
+  .st-footline { flex-basis: 100%; }
   .st-pfoot .ib-btn { flex: 1; }
 }
