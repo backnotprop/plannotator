@@ -121,12 +121,12 @@ export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean
       title: isViewed ? 'Viewed, click to unmark' : 'Mark as viewed',
     });
   }
+  let stage: FileTreeRowPart | null = null;
   if (withStage) {
-    if (p.stagingFile === file.path) lead.push({ id: 'staging', text: '…', disabled: true, title: 'Staging' });
-    else if (isStaged && stageable) lead.push({ id: 'unstage', icon: STAGED_ICON, label: `Unstage ${file.path}`, title: 'Staged, click to unstage' });
-    else if (isStaged) lead.push({ id: 'staged', icon: STAGED_ICON, disabled: true, title: 'Staged (git add)' });
-    else if (stageable) lead.push({ id: 'stage', icon: STAGE_ICON, label: `Stage ${file.path}`, title: 'Stage file (git add)' });
-    else lead.push(null);
+    if (p.stagingFile === file.path) stage = { id: 'staging', text: '…', disabled: true, title: 'Staging' };
+    else if (isStaged && stageable) stage = { id: 'unstage', icon: STAGED_ICON, label: `Unstage ${file.path}`, title: 'Staged, click to unstage' };
+    else if (isStaged) stage = { id: 'staged', icon: STAGED_ICON, disabled: true, title: 'Staged (git add)' };
+    else if (stageable) stage = { id: 'stage', icon: STAGE_ICON, label: `Stage ${file.path}`, title: 'Stage file (git add)' };
   }
   const notes = p.annotationCounts.get(file.path) ?? 0;
   const previewed = p.markdownPreviewedPaths?.has(file.path);
@@ -143,9 +143,16 @@ export function fileRowParts(file: DiffFile, p: FileRowState, withStage: boolean
           : previewed
             ? { icon: EYE_ICON, title: 'Shown rendered' }
             : null,
+      stage,
       ...countParts(file.additions, file.deletions, false),
     ],
   };
+}
+
+export const TREE_ROW_HEIGHT = 28;
+
+export function leadColumnsFor(showViewedControls: boolean): string {
+  return showViewedControls ? 'var(--tree-lead-w)' : 'none';
 }
 
 export const TreeRowMenu: React.FC<{

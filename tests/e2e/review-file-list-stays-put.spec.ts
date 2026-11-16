@@ -9,6 +9,10 @@
  *    first header's place.
  *  - Hide viewed on: the file you leave (auto-marked viewed) keeps its row
  *    while the pointer is in the panel, and goes once the pointer leaves.
+ *  - A file header's Open in shows on hover left of its actions; nothing in
+ *    the header moves and no empty room is left at its right edge.
+ *  - Collapse all files in the tree header folds every file and expands them
+ *    again, and the file you were reading stays in view both ways.
  *
  * Nothing is mocked: `plannotator review` runs in a scratch git repository
  * under a temp PLANNOTATOR_DATA_DIR and HOME, with a PATH of its own (no agent
@@ -286,5 +290,60 @@ test('Hide viewed: the file you leave keeps its row while the pointer is in the 
     // Leaving the list hides it.
     await page.mouse.move(800, 600);
     await expect(first).toHaveCount(0);
+  });
+});
+
+test('All changes: Collapse all files in the tree header folds every file and keeps the file you read in view', async ({ browser }) => {
+  await withReview(browser, async (page) => {
+    await openAllChanges(page);
+    await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 200).length).toBeGreaterThan(0);
+    const listTop = (await mainHeaders(page))[0]!.top;
+    const x = (await mainHeaders(page))[0]!.nameX;
+    await page.mouse.move(x, listTop + 300);
+    await page.mouse.wheel(0, 1_200);
+    await expect.poll(() => headerUnder(page, x, listTop + 40)).not.toBe(MODIFIED[0]);
+    await page.waitForTimeout(300);
+    const reading = (await headerUnder(page, x, listTop + 40))!;
+    expect(reading).toBeTruthy();
+    const top = async () => (await mainHeaders(page)).find((h) => h.path === reading)?.top ?? Number.NaN;
+
+    const tools = page.locator('[data-review-sticky-tools]');
+    await tools.getByRole('button', { name: 'Collapse all files' }).click();
+    await expect(tools.getByRole('button', { name: 'Expand all files' })).toBeVisible();
+    await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);
+    await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 40).length).toBe(0);
+    const folded = await top();
+    expect(folded).toBeGreaterThanOrEqual(listTop - 1);
+    expect(folded).toBeLessThan(page.viewportSize()!.height - 40);
+
+    await tools.getByRole('button', { name: 'Expand all files' }).click();
+    await expect(tools.getByRole('button', { name: 'Collapse all files' })).toBeVisible();
+    await expect.poll(async () => (await mainHeaders(page)).find((h) => h.path === reading)?.height ?? 0).toBeGreaterThan(200);
+    await expect.poll(async () => Math.abs((await top()) - listTop)).toBeLessThan(3);
+  });
+});
+
+test('File header: hover shows Open in on the left of its actions, and nothing in the header moves', async ({ browser }) => {
+  await withReview(browser, async (page) => {
+    await openAllChanges(page);
+    const header = page.locator('[data-file-header]').first();
+    await expect(header).toBeVisible();
+    const viewed = header.locator('[data-file-header-viewed]');
+    const comment = header.getByRole('button', { name: 'Comment on this file' });
+    const openIn = header.locator('[data-open-in-quiet]');
+    await page.mouse.move(5, 5);
+    await expect.poll(() => openIn.evaluate((el) => getComputedStyle(el).opacity)).toBe('0');
+    const boxes = async () => ({ header: (await header.boundingBox())!, viewed: (await viewed.boundingBox())!, comment: (await comment.boundingBox())!, openIn: (await openIn.boundingBox())! });
+    const rest = await boxes();
+    expect(rest.header.x + rest.header.width - (rest.comment.x + rest.comment.width)).toBeLessThan(16);
+    expect(rest.openIn.x + rest.openIn.width).toBeLessThanOrEqual(rest.viewed.x);
+
+    await header.hover({ position: { x: 40, y: rest.header.height / 2 } });
+    await expect.poll(() => openIn.evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
+    const hovered = await boxes();
+    for (const key of ['viewed', 'comment', 'openIn'] as const) {
+      expect(hovered[key].x, `${key} moved`).toBe(rest[key].x);
+      expect(hovered[key].y, `${key} moved`).toBe(rest[key].y);
+    }
   });
 });

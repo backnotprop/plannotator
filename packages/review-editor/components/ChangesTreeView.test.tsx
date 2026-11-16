@@ -110,18 +110,18 @@ afterEach(async () => {
 });
 
 describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
-  test('group by kind: Code, Tests, Docs, Generated in that order, Generated folded, folder sums beside folders', async () => {
+  test('group by kind: Code, Docs, Tests, Generated in that order, Generated folded, folder sums beside folders', async () => {
     const el = await mount(<Tree groupByKind />);
     expect(rows(el)).toEqual([
       'Code/',
       'Code/retry.ts',
+      'Docs/',
+      'Docs/README.md',
       'Tests/',
       'Tests/src\u2215sync\u2215__tests__/',
       'Tests/src\u2215sync\u2215__tests__/retry.test.ts',
       'Tests/tests\u2215e2e/',
       'Tests/tests\u2215e2e/sync.spec.ts',
-      'Docs/',
-      'Docs/README.md',
       'Generated/',
     ]);
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('false');
@@ -132,7 +132,7 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
 
   test('j/k follow the grouped order and open the folded group they land in', async () => {
     const onSelectFile = mock((_index: number) => {});
-    const el = await mount(<Tree groupByKind activeFileIndex={3} onSelectFile={onSelectFile} />);
+    const el = await mount(<Tree groupByKind activeFileIndex={4} onSelectFile={onSelectFile} />);
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'j' })));
     expect(onSelectFile).toHaveBeenLastCalledWith(0);
     await rerender(<Tree groupByKind activeFileIndex={0} onSelectFile={onSelectFile} />);
@@ -168,6 +168,20 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     );
     expect(part(el, 'edited.ts', 'viewed').getAttribute('aria-pressed')).toBe('true');
     expect(row(el, 'edited.ts').dataset.itemMuted).toBe('true');
+  });
+
+  test('a file row reads viewed mark, name, then git add, its numbers and its status letter at the right edge', async () => {
+    const el = await mount(<Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} onStageFile={() => {}} />);
+    const sectionsOf = (path: string) =>
+      [...row(el, path).querySelectorAll<HTMLElement>('[data-item-section]')]
+        .map((section) => section.dataset.itemSection)
+        .filter((name) => name === 'lead' || name === 'content' || name === 'trail' || name === 'git');
+    expect(sectionsOf('edited.ts')).toEqual(['lead', 'content', 'trail', 'git']);
+    expect(row(el, 'edited.ts').querySelector('[data-item-section="git"]')?.textContent).toBe('M');
+    expect(row(el, 'new.ts').querySelector('[data-item-section="git"]')?.textContent).toBe('U');
+    expect(trail(el, 'edited.ts')).toEqual(['', '+3', '-2']);
+    expect(part(el, 'edited.ts', 'stage').closest('[data-item-section]')?.getAttribute('data-item-section')).toBe('trail');
+    expect(part(el, 'edited.ts', 'viewed').closest('[data-item-section]')?.getAttribute('data-item-section')).toBe('lead');
   });
 
   test('group by git status: staging a file from its row moves it to Staged', async () => {
