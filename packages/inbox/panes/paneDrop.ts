@@ -47,11 +47,9 @@ export function measureRoom(reclaim = false): { room: Room; gap: number } | null
   return { room: { width, height }, gap: Math.max(1, gap) };
 }
 
-/** The panes on screen and their boxes: the engine's hosts beside each other, or the one thread's card. */
-function paneBoxes(multi: boolean, active: L.PaneId | null): { id: L.PaneId; el: HTMLElement }[] {
-  if (multi) return [...document.querySelectorAll<HTMLElement>('.ib-layout > [data-layout-pane]:not([data-pane-hidden="true"])')].map((el) => ({ id: el.dataset.layoutPane!, el }));
-  const one = document.querySelector<HTMLElement>('.pn-inbox .ib-main > section.ib-pane[data-thread-id]');
-  return one && active ? [{ id: active, el: one }] : [];
+/** The panes on screen and their boxes: the engine's hosts (one pane is in the layout too). */
+function paneBoxes(): { id: L.PaneId; el: HTMLElement }[] {
+  return [...document.querySelectorAll<HTMLElement>('.ib-layout > [data-layout-pane]:not([data-pane-hidden="true"])')].map((el) => ({ id: el.dataset.layoutPane!, el }));
 }
 
 function nearestEdge(x: number, y: number, box: DOMRect): { edge: L.Edge; depth: number } {
@@ -94,9 +92,9 @@ export function usePaneDrop(options: PaneDropOptions): void {
     if (!options.enabled) return;
     let preview: HTMLElement | null = null;
     const hit = (x: number, y: number, payload: DragPayload): DropHit | null => {
-      const { windowPanes, multi, hidden } = live.current;
+      const { windowPanes, hidden } = live.current;
       const layout = windowPanes.layout;
-      const box = paneBoxes(multi, layout.active).find(({ el }) => {
+      const box = paneBoxes().find(({ el }) => {
         const r = el.getBoundingClientRect();
         return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
       });

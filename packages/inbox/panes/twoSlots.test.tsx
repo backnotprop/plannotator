@@ -449,6 +449,22 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(calls).toHaveLength(2);
   });
 
+  test("with one thread open, a row dropped on its pane's edge opens beside it", async () => {
+    const calls: string[] = [];
+    drawPanes(windowOf(L.follow(L.EMPTY_LAYOUT, A), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    const row = el!.querySelector<HTMLElement>('.ib-lbody [data-thread-id="msg_C1"]')!;
+    act(() => void row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 900, pointerId: 1, pointerType: 'mouse' })));
+    // At the window's corner the pill flips to the pointer's left and above it, so it stays whole on screen.
+    drag(window.innerWidth - 2, window.innerHeight - 2);
+    const at = /translate\((-?\d+)px, (-?\d+)px\)/.exec(document.querySelector<HTMLElement>('.ib-dragghost')!.style.transform)!;
+    expect(Number(at[1])).toBeLessThan(window.innerWidth - 2);
+    expect(Number(at[2])).toBeLessThan(window.innerHeight - 2);
+    drag(760, 450);
+    release(760, 450);
+    expect(calls).toEqual(['open:msg_C1:main:right']);
+  });
+
   test('a press on a row that does not move is a click; Escape mid-drag puts it back', async () => {
     const calls: string[] = [];
     let clicks = 0;

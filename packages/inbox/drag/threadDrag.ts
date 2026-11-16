@@ -105,9 +105,13 @@ function makeGhost(label: string): { el: HTMLElement; at: (x: number, y: number,
   return {
     el,
     at(x, y, words) {
-      el.style.transform = `translate(${Math.round(x + 14)}px, ${Math.round(y + 12)}px)`;
       action.textContent = words ?? '';
       el.toggleAttribute('data-none', words === null);
+      // Beside the pointer, flipped to its left or above it near the window's edge so it stays whole.
+      const { width, height } = el.getBoundingClientRect();
+      const left = x + 14 + width > window.innerWidth - 8 ? x - 14 - width : x + 14;
+      const top = y + 12 + height > window.innerHeight - 8 ? y - 12 - height : y + 12;
+      el.style.transform = `translate(${Math.round(Math.max(8, left))}px, ${Math.round(Math.max(8, top))}px)`;
     },
   };
 }
