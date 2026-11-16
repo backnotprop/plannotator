@@ -2,13 +2,13 @@
  * "Open to the side" (config.json `inboxSplitView`, a preview with no Settings row), in a real browser against the compiled
  * binary, with an agent writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
- * - On, at 1600 by 900 (the list and two 440 px threads fit beside the docked sidebar): a row's menu offers "Open
+ * - On, at 1600 by 900 (the list and two 400 px threads fit beside the docked sidebar): a row's menu offers "Open
  *   to the side" while another thread is open; choosing it draws the two threads side by side after the list, which
  *   stays, each its own pane with its own header, reply box and ✕, the person in the new one. A message arriving in
  *   the other pane stays unread there until the person clicks into that pane. The list's edge hides the list (the
  *   pair takes the window) and the first pane's ‹ Inbox brings it back. Closing the second pane is today's one pane.
  * - On, at 1440 with the sidebar docked: offered; choosing it folds the sidebar on screen (the person's choice not
- *   written) and closing the second pane brings it back. At 1240 the list and two threads cannot fit: still offered,
+ *   written) and closing the second pane brings it back. At 1180 the list and two threads cannot fit: still offered,
  *   the new pane shows, a toast names the pane that stepped aside, and its Undo brings that pane back.
  * - On, at 1920: a row dragged onto a pane's edge opens beside it; a pane dragged by its header goes to another's
  *   half; the ⋯ menu's Move pane up and Close pane do the same without a drag; the layout comes back after a reload.
@@ -188,7 +188,7 @@ test('at 1440 with the sidebar docked: offered; choosing it folds the sidebar, a
 });
 
 test('a window where the list and two threads cannot fit even with the sidebar folded: still offered; the new pane shows, a toast names the pane that stepped aside, and Undo brings it back', async ({ page }) => {
-  await page.setViewportSize({ width: 1240, height: 900 });
+  await page.setViewportSize({ width: 1180, height: 900 });
   const [a, b] = await freshPair('narrow');
   await openThread(page, on, a);
   await row(page, b).click({ button: 'right' });

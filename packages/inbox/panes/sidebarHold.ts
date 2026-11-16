@@ -1,9 +1,15 @@
 import { useEffect, useState, type Dispatch, type RefObject, type SetStateAction } from 'react';
 import type { Route } from '../app/route';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters } from '../stack';
+import { PANE_MIN_WIDTH } from './layoutModel';
 
-/** The room the list and `threads` thread columns take: the list's narrowest column, 440 px a thread, and the gutters. */
-export const listAndThreads = (threads: number, el?: Element | null): number => LIST_MIN_WIDTH + threads * THREAD_BESIDE_FILE_WIDTH + paneGutters(el, threads);
+/**
+ * The room the list and `threads` thread columns take: the list's narrowest column, the threads and the gutters. One
+ * thread keeps the 440 px a thread keeps beside the list (stack.ts, which stacks below it); several are free layout
+ * panes, each at the pane minimum (layoutModel.ts `PANE_MIN_WIDTH`), as the room rules count them.
+ */
+export const listAndThreads = (threads: number, el?: Element | null): number =>
+  LIST_MIN_WIDTH + (threads > 1 ? threads * PANE_MIN_WIDTH : THREAD_BESIDE_FILE_WIDTH) + paneGutters(el, threads);
 
 export interface SidebarHold {
   /** The docked sidebar is folded on screen for room, the person's stored choice unchanged. */

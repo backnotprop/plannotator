@@ -1,6 +1,6 @@
 /**
  * The whole pane area's outer edges (outerEdge.ts, layoutModel.ts `WHOLE`): where a drop there puts the new pane in
- * the tree, and whether it fits the room with every pane at 440 x 260 px and none stepping aside.
+ * the tree, and whether it fits the room with every pane at 400 x 260 px (layoutModel.ts `PANE_MIN_WIDTH`, `PANE_MIN_HEIGHT`) and none stepping aside.
  *
  * What regresses: a rim drop splitting one pane instead of spanning the area; the new column taking half the room
  * instead of one column's share; "fits" said where a pane would step aside (or fall below its minimum), or refused
@@ -46,18 +46,21 @@ const thread = (threadId: string) => ({ kind: 'thread' as const, threadId });
 
 describe('a drop at the whole layout edge: where it goes and whether it fits', () => {
   const cases: [name: string, layout: () => L.FreeLayout, edge: L.Edge, room: { width: number; height: number }, fits: boolean][] = [
+    // 3 x 400 + 2 x 8 = 1216 px for a third column: 1036 px (1440) is 180 short.
     ["owner's 2x2 over 1 at 1440: right", ownerLayout, 'right', ROOM[1440], false],
     ["owner's 2x2 over 1 at 1440: left", ownerLayout, 'left', ROOM[1440], false],
     ["owner's 2x2 over 1 at 1440: below", ownerLayout, 'bottom', ROOM[1440], false],
-    // 3 x 440 + 2 x 8 = 1336 px for a third column; 1324 px is 12 short.
-    ["owner's 2x2 over 1 at 1728: right", ownerLayout, 'right', ROOM[1728], false],
+    // 1324 px (1728) holds the 1216 px of a third column.
+    ["owner's 2x2 over 1 at 1728: right", ownerLayout, 'right', ROOM[1728], true],
+    ["owner's 2x2 over 1 at 1728: left", ownerLayout, 'left', ROOM[1728], true],
     // 4 x 260 + 3 x 8 = 1064 px for a fourth row: 1101 px holds it.
     ["owner's 2x2 over 1 at 1728: below", ownerLayout, 'bottom', ROOM[1728], true],
     ["owner's 2x2 over 1 at 1920: right", ownerLayout, 'right', ROOM[1920], true],
     ['a single pane at 1440: right', single, 'right', ROOM[1440], true],
     ['a single pane at 1440: left', single, 'left', ROOM[1440], true],
     ['three columns, one stepped aside, at 1036 px: right', threeColumns, 'right', { width: 1036, height: 884 }, false],
-    // 4 x 440 + 3 x 8 = 1784 px for a fourth column: 1516 px (1920) does not hold it, 1800 px does.
+    // 4 x 400 + 3 x 8 = 1624 px for a fourth column: 1324 px (1728) and 1516 px (1920) do not hold it, 1800 px does.
+    ['three columns at 1728: right', threeColumns, 'right', ROOM[1728], false],
     ['three columns at 1920: right', threeColumns, 'right', ROOM[1920], false],
     ['three columns with 1800 px: right', threeColumns, 'right', { width: 1800, height: 1064 }, true],
   ];
@@ -138,8 +141,8 @@ describe('the rim strip and its zone', () => {
     expect(outerEdgeAt(1000, 12, area)).toBe('top');
     expect(outerEdgeAt(1698, 20, area)).toBe('right');
     expect(outerEdgeAt(1710, 500, area)).toBeNull();
-    // A pane's own edge zone is 28% of its width: well past the strip for any pane of 440 px or more.
-    expect(OUTER_ZONE).toBeLessThan(440 * 0.28);
+    // A pane's own edge zone is 28% of its width: well past the strip for any pane at its 400 px minimum or wider.
+    expect(OUTER_ZONE).toBeLessThan(L.PANE_MIN_WIDTH * 0.28);
   });
 
   test("the preview is the column's own strip: full height at the right end, its share of the width", () => {

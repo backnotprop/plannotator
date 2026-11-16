@@ -1,10 +1,10 @@
 /**
  * How the free layout (layoutModel.ts) fits the room beside the list, and how it gives way when there is too little.
  *
- * Every pane keeps 440 x 260 px at least (a thread's column beside a file, its header and a few lines). The panes
+ * Every pane keeps 400 x 260 px at least (layoutModel.ts `PANE_MIN_WIDTH`: its header, reply bar and a few lines). The panes
  * draw as the layout places them when the room holds all of them at that size. When it does not, the pane the person
  * was in longest ago steps aside, then the next, until the rest fit; the active pane never does. Below two columns of
- * room (2 x 440 px and the gap) only the active pane shows. A pane that steps aside keeps its place, its thread and
+ * room (2 x 400 px and the gap) only the active pane shows. A pane that steps aside keeps its place, its thread and
  * its size in the layout and comes back in place once the room is there again. Nothing is stored for room: it is
  * worked out for every draw.
  */
@@ -75,7 +75,7 @@ export interface SidePlace {
 /**
  * Where "Open to the side" opens `thread`, the same way every time for the same layout and room: right of the active
  * pane if a column fits there; else below it if a row does; else the largest pane on screen (`rects`) split along its
- * longer side, else its shorter one, where both halves keep 440 x 260 px. "Fits" is that no pane steps aside for it. When nothing fits, right of
+ * longer side, else its shorter one, where both halves keep 400 x 260 px. "Fits" is that no pane steps aside for it. When nothing fits, right of
  * the active pane anyway: the least recent panes step aside as they do for a narrow window, and `stepsAside` names them.
  */
 export function placeToSide(layout: FreeLayout, thread: string, room: Room, gap: number, rects: readonly PaneRect[]): SidePlace {

@@ -14,7 +14,6 @@
  * and the pane view draws by kind; the tree, the verbs and the room rules here do not change.
  */
 import { naryTree, type ChildSize, type Edge, type LayoutNode, type PaneNode } from '@plannotator/vendor-pierre-layouts';
-import { THREAD_BESIDE_FILE_WIDTH } from '../stack';
 import { MAIN_PANE, singlePane, type PaneSet } from './model';
 
 export type PaneId = string;
@@ -22,8 +21,15 @@ export type { Edge };
 /** Where a thread dropped on a pane goes: beside it at an edge, or in its place (`center`). */
 export type DropPlace = Edge | 'center';
 
-/** A thread column stays readable: the thread's column beside a file (stack.ts). */
-export const PANE_MIN_WIDTH = THREAD_BESIDE_FILE_WIDTH;
+/**
+ * The narrowest a pane of the free layout gets: its header, the reply bar (Reply, Looks good, the open-question chip),
+ * question cards and a message stay whole at 400 px (the owner, 2026-11-16: "lower the minimum width to about 400 px,
+ * so three columns fit at 1728"). It is the floor: every room rule reads it (layoutRoom.ts: stepping aside, Open to the
+ * side; paneDrop.ts and outerEdge.ts: a drop's fit; sidebarHold.ts: the sidebar folded for room; savedLayout.ts: a kept
+ * layout's panes), and the engine keeps a divider from taking a pane below it. Where a pane would go narrower, nothing
+ * opens there ("No room on the right"). A single thread beside the list keeps stack.ts's 440 px.
+ */
+export const PANE_MIN_WIDTH = 400;
 /** The header, a few lines of the thread and its foot. */
 export const PANE_MIN_HEIGHT = 260;
 

@@ -6,14 +6,14 @@
  * where they overlap, because a person aiming at the very edge means the whole side.
  *
  * It is offered where nothing steps aside for it (layoutRoom.ts `steppedAside`, the same rule as a pane's edges, so
- * every pane keeps 440 x 260 px). Where it does not fit the place says "No room on the right" and the drop changes
+ * every pane keeps 400 x 260 px). Where it does not fit the place says "No room on the right" and the drop changes
  * nothing: it never falls back to another side, since the person asked for that one.
  */
 import type { Edge } from '@plannotator/vendor-pierre-layouts';
 import * as L from './layoutModel';
 import { steppedAside, type Room } from './layoutRoom';
 
-/** How deep the strip along each outer edge of the pane area is, in px: well inside a pane's own edge zone (28% of its width, 30% of its height). */
+/** How deep the strip along each outer edge of the pane area is, in px: well inside a pane's own edge zone (28% of its width, 30% of its height; 112 px at the 400 px floor). */
 export const OUTER_ZONE = 24;
 
 export interface AreaBox {

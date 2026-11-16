@@ -501,7 +501,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
   test('an edge with no room says so before the release: the other axis where it fits, else nothing at all', async () => {
     putThread(queries, B, heldOf(B, false));
     const calls: string[] = [];
-    // Room for the two columns there are, not a third (881 px of 1000); 900 px tall, so a row fits below.
+    // Room for the two columns there are, not a third (801 px of 1000; a third needs 1202); 900 px tall, so a row fits below.
     mainWidth = 1000;
     try {
       drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
@@ -686,7 +686,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
   test('a window too narrow for both shows the active pane alone, and both come back in place when it widens', async () => {
     putThread(queries, A, heldOf(A, false));
     putThread(queries, B, heldOf(B, false));
-    mainWidth = 860;
+    mainWidth = 780;
     drawPanes(windowOf(pair('p1')), hostFor(B, noop), heldOf(B, false));
     await wait(0);
     expect(paneOf(A)).toBeNull();
@@ -703,7 +703,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
   test('closing the pane shown alone in a narrow window (an Undo, a ✕) draws the one that stepped aside, without a throw', async () => {
     putThread(queries, A, heldOf(A, false));
     putThread(queries, B, heldOf(B, false));
-    mainWidth = 860;
+    mainWidth = 780;
     drawPanes(windowOf(pair('p1')), hostFor(B, noop), heldOf(B, false));
     await wait(0);
     expect(paneOf(A)).toBeNull();
@@ -913,7 +913,7 @@ describe.skipIf(!hasDom)("a pane keeps the person's work through every change of
           await wait(0);
           kept(before);
         }
-        if (narrow) mainWidth = 860;
+        if (narrow) mainWidth = 780;
         drawPanes(windowOf(withK(active)), change(hostIn(active)), heldIn(active));
         if (narrow) act(() => void window.dispatchEvent(new Event('resize')));
         await wait(0);
