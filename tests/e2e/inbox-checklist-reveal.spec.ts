@@ -30,6 +30,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { join, resolve } from 'node:path';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'checklist-reveal');
@@ -130,8 +131,7 @@ async function world(steps?: boolean): Promise<World> {
   return { url, dataDir, ids };
 }
 
-const configText = (w: World) => readFileSync(join(w.dataDir, 'config.json'), 'utf8');
-const config = (w: World) => JSON.parse(configText(w)) as Record<string, any>;
+const config = (w: World) => savedConfig(w.dataDir);
 
 /**
  * This spec proves the leave moment ("back on the list"), so the page is never idle (idleClock.ts: 20 s without input

@@ -14,6 +14,7 @@
  */
 import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { Route } from '../app/route';
@@ -23,6 +24,7 @@ import { createStepsBus } from '../steps/useThreadSteps';
 import { SEEN_DWELL_MS } from '../seenOnSight';
 import type { ThreadSlotHost } from '../thread/slotHost';
 import { createPanesOnScreen } from './onScreen';
+import { NO_OPEN, type PaneReads } from './paneReads';
 
 const hasDom = typeof document !== 'undefined';
 // The thread pane pulls in web-highlighter, which reads `window` at module-eval time.
@@ -131,36 +133,42 @@ afterEach(() => {
 const noop = () => {};
 const none = async () => null;
 
-/** The window's side of one slot: its thread read, its look at the open, and where its seen-on-sight goes. */
-function hostFor(thread: InboxThread, seen: (threadId: string, through: number) => void): ThreadSlotHost {
-  const route: Route = { page: 'inbox', project: null, thread: thread.thread_id };
+/** The window's side of one slot: its look at the open, and where its seen-on-sight goes. */
+function hostFor(threadId: string, seen: (threadId: string, through: number) => void): ThreadSlotHost {
+  const route: Route = { page: 'inbox', project: null, thread: threadId };
+  const paneReads = { view: () => ({ ...NO_OPEN, look: { threadId, seq: 2, through: 2 } }), retry: noop } as unknown as PaneReads;
   return {
-    route, routeRef: { current: route }, thread, rowsPending: false, awayWait: false, threadLoad: null, threadAway: null, openOwner: undefined,
-    outbox: new Map(), dismissOutbox: noop, onRetry: noop, phone: false, stack: { thread: false, file: false }, full: false, fromCard: null,
+    route, routeRef: { current: route }, rowsPending: false, paneReads,
+    outbox: new Map(), dismissOutbox: noop, phone: false, stack: { thread: false, file: false }, full: false, fromCard: null,
     fileOpen: false, staleNotice: null, notifyAgainIn: null, notifications: {} as ThreadSlotHost['notifications'], soundOn: false, settings: null,
     saveTour: noop, go: noop, leave: noop, close: noop, openCompose: noop, pullReviewOf: null, reviewView: null, pullsShown: false,
     stepsBus: createStepsBus(), boardEnabled: null, boardsOn: false, cards: null, backToCard: noop, openThreadRow: null, snoozeBack: null,
-    threadRun: null, refreshThread: none, refreshList: none, openedWith: null, shown: null, markRead: none, markUnread: none, acknowledge: none,
+    refreshThread: none, refreshList: none, shown: null, markRead: none, markUnread: none, acknowledge: none,
     markAction: none, archive: none, pinnedIds: new Set(), pinsOn: false, machines: machinesModel([]), setPin: none, setPriority: noop,
     snoozeOn: false, snooze: noop, unsnooze: noop, setMachineUpdateOpen: noop, threadAgentContext: null, replyFor: null, setReplyFor: noop,
     draftSignals: createKeyedSignal(), filesSignals: createKeyedSignal(), shapes: { byThread: new Map() } as unknown as ThreadSlotHost['shapes'],
     ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop, shapeReply: null, setShapeReply: noop,
     patchQuestions: noop, onPickSaves: noop, afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
-    searchLanding: { current: null }, decideLanding: { current: null }, landed: noop, look: { threadId: thread.thread_id, seq: 2, through: 2 },
+    searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
     seenOnSight: seen, covered: false, panesOnScreen: createPanesOnScreen(), setOpenThreadCovered: noop, listTitle: 'Inbox', fullSidebar: true,
     setThreadFull: noop, leaveFull: noop, showToast: noop, toastNow: { current: null }, dismissToast: noop, inboxLink: () => null,
     holdSidebarIfTight: noop, backFromFile: { current: null },
   };
 }
 
+const queries = new QueryClient();
+const heldOf = (id: string, arrived: boolean) => ({ serverSession: 's', cursor: 0, thread: threadOf(id, arrived) });
+
 /** Two panes, A on the left and B on the right, `active` the one the person is in. */
 function draw(active: 'a' | 'b', arrived: boolean, seen: [string, number][]) {
   const record = (threadId: string, through: number) => void seen.push([threadId, through]);
   const panes = (
-    <div className="pn-inbox">
-      <ThreadSlot paneId="a" threadId={A} active={active === 'a'} host={hostFor(threadOf(A, arrived), record)} />
-      <ThreadSlot paneId="b" threadId={B} active={active === 'b'} host={hostFor(threadOf(B, arrived), record)} />
-    </div>
+    <QueryClientProvider client={queries}>
+      <div className="pn-inbox">
+        <ThreadSlot paneId="a" threadId={A} active={active === 'a'} held={heldOf(A, arrived)} host={hostFor(A, record)} />
+        <ThreadSlot paneId="b" threadId={B} active={active === 'b'} held={heldOf(B, arrived)} host={hostFor(B, record)} />
+      </div>
+    </QueryClientProvider>
   );
   if (!root) {
     el = document.createElement('div');
