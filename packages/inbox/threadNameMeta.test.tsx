@@ -183,7 +183,8 @@ test.skipIf(!hasDom)('the bar shows the title at the top, scrolled or not; its t
  */
 let cutNow = false;
 const widths = ['scrollWidth', 'clientWidth'] as const;
-const savedWidths = widths.map((key) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, key));
+// Read at load only with a DOM: the file loads (and skips) without one too.
+const savedWidths = hasDom ? widths.map((key) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, key)) : [];
 function cutTo(cut: boolean) {
   cutNow = cut;
   for (const key of widths) {
