@@ -6,7 +6,7 @@
 import type React from 'react';
 import type { ForgeRefCardError } from '@plannotator/core/forge-ref-card';
 import { parseLinearRefUrl, type LinearCardData, type LinearCardFields } from '@plannotator/core/linear-ref-card';
-import { HTML_BLOCK_OPEN_RE, HTML_BLOCK_TAGS } from '@plannotator/core/markdown-structure';
+import { codeFenceFor, HTML_BLOCK_OPEN_RE, HTML_BLOCK_TAGS } from '@plannotator/core/markdown-structure';
 import { parseMarkdownToBlocks } from '../utils/parser';
 import { RefCardAvatar, RefCardMarkdown, RefCardStateIcon, refCardTimeAgo, type RefCardViewProps } from './RefHoverCard';
 
@@ -27,7 +27,13 @@ function openHref(result: RefCardViewProps['result'], href: string): string {
   return result?.ok && parseLinearRefUrl(result.data.url) ? result.data.url : href;
 }
 
-/** Every line that could open an HTML block (also inside a quote, whose lines are parsed again) shown as code. */
+/** A line's container markers: indentation, quote `>`, list bullets and numbers, task boxes, heading marks. */
+const LINE_PREFIX = /^(?:\s+|>|[-*+](?=\s)|\d{1,9}[.)](?=\s)|\[[ xX]\](?=\s)|#{1,6}(?=\s))*/;
+
+/**
+ * Every line that could open an HTML block or a directive (`:::question`, `:::note`…), behind any container markers
+ * (a quote's lines are parsed again as blocks), shown as code.
+ */
 function codeOpeners(markdown: string, skipFences: boolean): string {
   let fenceClose: RegExp | null = null;
   return markdown
@@ -45,31 +51,48 @@ function codeOpeners(markdown: string, skipFences: boolean): string {
           return line;
         }
       }
-      const quote = /^(?:>\s*)*/.exec(trimmed)![0];
-      const body = trimmed.slice(quote.length);
+      const prefix = LINE_PREFIX.exec(trimmed)![0];
+      const body = trimmed.slice(prefix.length);
       const tag = HTML_BLOCK_OPEN_RE.exec(body)?.[1];
-      if (!tag || !HTML_BLOCK_TAGS.has(tag.toLowerCase())) return line;
+      if (!body.startsWith(':::') && !(tag && HTML_BLOCK_TAGS.has(tag.toLowerCase()))) return line;
       const ticks = '`'.repeat(Math.max(0, ...(body.match(/`+/g) ?? []).map((run) => run.length)) + 1);
-      return `${quote}${ticks} ${body} ${ticks}`;
+      return `${prefix}${ticks} ${body} ${ticks}`;
     })
     .join('\n');
 }
 
-/** The renderer's own parse of this text would draw an HTML block somewhere (quotes are parsed again when drawn). */
-function reachesHtml(markdown: string, frontmatter = true): boolean {
+/** Blocks whose content is drawn as text (never parsed again as markdown). */
+const TEXT_BLOCKS = new Set(['code', 'math']);
+
+/**
+ * The renderer's own parse of this text would draw raw HTML or a directive (an answerable question card) somewhere.
+ * Generic over containers: any block that is not code or math has its content parsed again and checked, so a quote, a
+ * list, a callout or a block type added later cannot hide one.
+ */
+function reachesHtmlOrDirective(markdown: string, depth = 0, frontmatter = true): boolean {
+  if (depth > 8) return true;
   return parseMarkdownToBlocks(markdown, frontmatter ? undefined : { frontmatter: false }).some(
-    (block) => block.type === 'html' || (block.type === 'blockquote' && reachesHtml(block.content, false)),
+    (block) =>
+      block.type === 'html' ||
+      block.type === 'directive' ||
+      // Content equal to the text just parsed holds nothing more (a plain paragraph).
+      (!TEXT_BLOCKS.has(block.type) && typeof block.content === 'string' && block.content !== markdown && reachesHtmlOrDirective(block.content, depth + 1, false)),
   );
 }
 
 /**
- * Linear's text with raw HTML kept as text: a line that would open an HTML block is shown as code, so nothing from
- * Linear reaches the renderer's HTML path. Fenced code is left alone; the parser itself then checks the result, and
- * when anything would still be HTML (a fence the scan read differently), every such line is shown as code.
+ * Linear's text as text: a line that would open a raw HTML block or a directive is shown as code, so nothing from
+ * Linear reaches the renderer's HTML path and no `:::question` in an issue draws an answerable card. Fenced code is
+ * left alone; the parser itself then checks the result. When anything would still be HTML or a directive (a fence the
+ * scan read differently), every such line is shown as code, and failing that the whole text is one code block.
  */
 export function htmlAsText(markdown: string): string {
   const scanned = codeOpeners(markdown, true);
-  return reachesHtml(scanned) ? codeOpeners(markdown, false) : scanned;
+  if (!reachesHtmlOrDirective(scanned)) return scanned;
+  const every = codeOpeners(markdown, false);
+  if (!reachesHtmlOrDirective(every)) return every;
+  const fence = codeFenceFor(markdown);
+  return `${fence}\n${markdown}\n${fence}`;
 }
 
 /** Linear's own state marks: a dashed ring (backlog), a ring (todo), a part-filled ring (started), a filled check or cross (done, canceled). */
