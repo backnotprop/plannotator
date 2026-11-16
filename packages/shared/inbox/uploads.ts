@@ -290,7 +290,7 @@ export async function receiveInboxUpload(
     const path = inboxBlobPath(inboxDirPath, scan.sha256);
     if (existsSync(path)) unlinkSync(temp);
     else renameSync(temp, path);
-    const decided = decideInboxAttachmentKind(name as string, scan.head, scan.text, scan.size);
+    const decided = decideInboxAttachmentKind(name as string, scan.head, scan.text, scan.size, scan.video);
     const upload: InboxUpload = {
       upload_id: inboxId("upl"),
       name: name as string,
@@ -300,6 +300,7 @@ export async function receiveInboxUpload(
       created_at: options.at,
       ...(decided.media_type ? { media_type: decided.media_type } : {}),
       ...(decided.width !== undefined && decided.height !== undefined ? { width: decided.width, height: decided.height } : {}),
+      ...(decided.duration_ms !== undefined ? { duration_ms: decided.duration_ms } : {}),
       ...(options.shownSha256 ? { shown_sha256: options.shownSha256 } : {}),
     };
     recordPendingUpload(inboxDirPath, upload);

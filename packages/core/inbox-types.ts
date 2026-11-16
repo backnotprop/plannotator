@@ -3227,7 +3227,7 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
-  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  /** The film or recording's length, when its metadata can be read. */
   duration_ms?: number;
   /** The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload. */
   shown_sha256?: string;
