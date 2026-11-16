@@ -83,11 +83,14 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
           {navButton('forward')}
         </div>
       )}
-      {showCollapseAll && state && (
+      {state && (
         <button
           type="button"
           onClick={state.onToggleAllFilesCollapsed}
-          className={ICON_BUTTON}
+          className={showCollapseAll ? ICON_BUTTON : `${ICON_BUTTON} invisible`}
+          disabled={!showCollapseAll}
+          aria-hidden={!showCollapseAll || undefined}
+          tabIndex={showCollapseAll ? undefined : -1}
           title={state.allFilesAllCollapsed ? 'Expand all files' : 'Collapse all files'}
           aria-label={state.allFilesAllCollapsed ? 'Expand all files' : 'Collapse all files'}
           aria-pressed={state.allFilesAllCollapsed}

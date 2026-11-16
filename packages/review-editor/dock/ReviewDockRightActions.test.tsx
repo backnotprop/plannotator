@@ -113,7 +113,7 @@ describe('ReviewDockRightActions', () => {
     expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(false);
   });
 
-  test.skipIf(!hasDom)('Collapse all files sits just left of Split/Unified while All changes is shown, and only then', async () => {
+  test.skipIf(!hasDom)('Collapse all files sits just left of Split/Unified while All changes is shown; elsewhere its place stays empty so the bar never moves', async () => {
     const onToggleAllFilesCollapsed = mock(() => {});
     const render = async (panel: string, collapsed: boolean) => {
       const state = {
@@ -141,6 +141,8 @@ describe('ReviewDockRightActions', () => {
     await render('review-all-files', true);
     expect(host.querySelector('[data-header-collapse-all-files]')!.getAttribute('aria-label')).toBe('Expand all files');
     await render('review-diff', false);
-    expect(host.querySelector('[data-header-collapse-all-files]')).toBeNull();
+    const hidden = host.querySelector<HTMLButtonElement>('[data-header-collapse-all-files]')!;
+    expect(hidden.disabled).toBe(true);
+    expect(hidden.classList.contains('invisible')).toBe(true);
   });
 });
