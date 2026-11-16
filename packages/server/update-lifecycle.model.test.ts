@@ -50,7 +50,7 @@ import {
   runReleaseCheck,
   type FetchReleaseResult,
 } from "@plannotator/shared/update-check";
-import { acquireUpdateLock, autoUpdatePaths, startManualUpdate, thisLockMachine, type InstallerLaunch } from "./auto-update";
+import { acquireUpdateLock, autoUpdatePaths, setBootTimeForTests, startManualUpdate, thisLockMachine, type InstallerLaunch } from "./auto-update";
 import { createInboxUpdates, INBOX_UPDATING_TICK_MS, type InboxUpdates } from "./inbox-updates";
 
 const MIN = 60_000;
@@ -717,6 +717,10 @@ beforeEach(() => {
   // Never unset: a config read before newWorld() resolves to this empty sandbox, never ~/.plannotator.
   idleDataDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-update-model-idle-")));
   process.env.PLANNOTATOR_DATA_DIR = idleDataDir;
+  // The model's machine never reboots: it booted before any lock a run ages. Without this, on macOS
+  // (no boot id) a lock aged past the real machine's uptime reads as written before the boot, so
+  // its live installer reads as gone: the result would depend on how long ago the machine booted.
+  setBootTimeForTests(0);
   // "Updating…" polls every 2 s on a real timer; the test ticks by itself.
   globalThis.setTimeout = ((fn: (...a: unknown[]) => void, ms?: number, ...rest: unknown[]) =>
     ms === INBOX_UPDATING_TICK_MS ? realSetTimeout(() => {}, 2 ** 30) : realSetTimeout(fn, ms, ...rest)) as typeof setTimeout;
@@ -724,6 +728,7 @@ beforeEach(() => {
 
 afterEach(async () => {
   globalThis.setTimeout = realSetTimeout;
+  setBootTimeForTests(undefined);
   for (const r of worlds.splice(0)) await disposeWorld(r);
   rmSync(idleDataDir, { recursive: true, force: true });
   for (const k of ENV) {
