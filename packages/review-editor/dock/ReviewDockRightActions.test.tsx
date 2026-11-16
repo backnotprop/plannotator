@@ -5,6 +5,8 @@ import type { IDockviewHeaderActionsProps } from 'dockview-react';
 import { configStore } from '@plannotator/ui/config';
 import { ReviewDockRightActions } from './ReviewDockRightActions';
 import { ReviewStateProvider, type ReviewState } from './ReviewStateContext';
+import { PaneSlotContext, usePaneDiffStyle, type PaneSlot } from '../workspace/paneContext';
+import type { WorkspaceStore } from '../workspace/workspaceStore';
 
 const hasDom = typeof document !== 'undefined';
 let root: Root | null = null;
@@ -151,5 +153,52 @@ describe('ReviewDockRightActions', () => {
     const hidden = host.querySelector<HTMLButtonElement>('[data-header-collapse-all-files]')!;
     expect(hidden.disabled).toBe(true);
     expect(hidden.classList.contains('invisible')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('Split saved but every shown diff pane too narrow: the button says Split needs a wider pane, and a wide pane makes it plain again', async () => {
+    const pane = (width: number) => {
+      const element = document.createElement('section');
+      Object.defineProperty(element, 'clientWidth', { configurable: true, get: () => width });
+      return element;
+    };
+    const elements = [pane(500), pane(900)];
+    const layout = { panes: [{ tabs: [], activeId: 'left' }, { tabs: [], activeId: 'right' }], activePane: 0 };
+    const store = { subscribe: () => () => {}, getLayout: () => layout, paneElement: (index: number) => elements[index] } as unknown as WorkspaceStore;
+    const slot = (paneIndex: number, tabId: string): PaneSlot => ({ store, paneIndex, tabId, component: 'review-all-files' });
+    const drawn: string[] = [];
+    const Probe = ({ name }: { name: string }) => {
+      drawn.push(`${name}:${usePaneDiffStyle('split')}`);
+      return null;
+    };
+    const left = slot(0, 'left');
+    const right = slot(1, 'right');
+    const onDiffStyleChange = mock((_style: 'split' | 'unified') => {});
+    const state = { diffStyle: 'split', onDiffStyleChange, isCompactTouchLayout: false, allFilesAllCollapsed: false, onToggleAllFilesCollapsed: () => {} } as unknown as ReviewState;
+    const render = async (withWide: boolean) => act(async () => root?.render(
+      <ReviewStateProvider value={state}>
+        <PaneSlotContext.Provider value={left}><Probe name="left" /></PaneSlotContext.Provider>
+        {withWide && <PaneSlotContext.Provider value={right}><Probe name="right" /></PaneSlotContext.Provider>}
+        <ReviewDockRightActions activePanel={null} />
+      </ReviewStateProvider>,
+    ));
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+
+    await render(false);
+    expect(drawn.at(-1)).toBe('left:unified');
+    const toggle = host.querySelector<HTMLButtonElement>('[data-diff-layout-toggle]')!;
+    expect(toggle.getAttribute('data-diff-layout-toggle')).toBe('split');
+    expect(toggle.hasAttribute('data-split-too-narrow')).toBe(true);
+    expect(toggle.getAttribute('aria-label')).toBe('Split needs a wider pane. Showing Unified.');
+    expect(toggle.title).toBe('Split needs a wider pane. Showing Unified.');
+    expect(toggle.disabled).toBe(false);
+    await act(async () => toggle.click());
+    expect(onDiffStyleChange).toHaveBeenCalledWith('unified');
+
+    await render(true);
+    expect(drawn).toContain('right:split');
+    expect(toggle.hasAttribute('data-split-too-narrow')).toBe(false);
+    expect(toggle.getAttribute('aria-label')).toBe('Switch to Unified view');
   });
 });

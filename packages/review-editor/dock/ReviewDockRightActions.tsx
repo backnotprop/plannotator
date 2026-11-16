@@ -5,6 +5,7 @@ import { DiffDisplayOptionsPopover } from '@plannotator/ui/components/DiffDispla
 import { DiffLayoutToggle } from '@plannotator/ui/components/DiffLayoutToggle';
 import { useReviewStateOptional } from './ReviewStateContext';
 import { REVIEW_ALL_FILES_PANEL_ID } from './reviewPanelTypes';
+import { useEveryDiffPaneTooNarrowForSplit } from '../workspace/splitFallback';
 
 const ICON_BUTTON = 'h-7 w-7 flex items-center justify-center rounded-md text-muted-foreground transition-colors hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50';
 
@@ -16,6 +17,7 @@ export interface ReviewDiffControlsProps {
 export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props) => {
   const storedDiffStyle = useConfigValue('diffStyle');
   const state = useReviewStateOptional();
+  const splitTooNarrow = useEveryDiffPaneTooNarrowForSplit();
 
   if (state?.isCompactTouchLayout) return null;
 
@@ -66,7 +68,7 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
           {state.allFilesAllCollapsed ? <FoldVertical className="w-3.5 h-3.5" aria-hidden="true" /> : <ChevronsUpDown className="w-3.5 h-3.5" aria-hidden="true" />}
         </button>
       )}
-      <DiffLayoutToggle value={diffStyle} onChange={setDiffStyle} className={ICON_BUTTON} />
+      <DiffLayoutToggle value={diffStyle} onChange={setDiffStyle} splitTooNarrow={splitTooNarrow} className={ICON_BUTTON} />
       <DiffDisplayOptionsPopover
         actions={collapseAction}
         minimapOption
