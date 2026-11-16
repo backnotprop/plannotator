@@ -11,10 +11,16 @@
  * The cookie `plannotator-inbox-sidebar-layout` keeps the last layout this browser showed, so a reload paints it
  * before the settings read answers; it is never the truth.
  *
+ * An item whose capability is off (Plans, until the settings say it is on) is left out of the cookie
+ * (`setSidebarUnsaved`); the server leaves it out of what it stores (packages/server/inbox-sidebar-save.ts), so
+ * nothing of an off Plans is ever written. The save sends the layout whole: a window that never hears Plans is on (a
+ * phone, a linked window) keeps the Plans row's place and hidden state. A layout read without it puts it back in its
+ * default place (`inboxSidebarRead`), so the page's own layout, and the presets it matches, are unchanged.
+ *
  * Also here: whether the Customize panel is open, and what opened it (focus goes back there when it closes).
  */
 import { useSyncExternalStore } from 'react';
-import { INBOX_SIDEBAR_DEFAULT, inboxSidebarRead, inboxSidebarSame, type InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
+import { INBOX_SIDEBAR_DEFAULT, inboxSidebarRead, inboxSidebarSame, type InboxSidebarItem, type InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { inboxApi } from './api';
 
@@ -30,6 +36,18 @@ export function parseSidebarLayoutCookie(raw: string | null): InboxSidebarLayout
   const list = (part: string) => part.split(',').filter(Boolean);
   return inboxSidebarRead({ top: list(top), bottom: list(bottom), hidden: list(hidden) });
 }
+
+/** Off capabilities' items: never in the cookie. Plans until this page hears it is on (plans/store.ts). */
+const OFF_BY_DEFAULT: readonly InboxSidebarItem[] = ['plans'];
+let unsaved: ReadonlySet<InboxSidebarItem> = new Set(OFF_BY_DEFAULT);
+export function setSidebarUnsaved(ids: readonly InboxSidebarItem[]): void {
+  unsaved = new Set(ids);
+}
+const forSaving = (layout: InboxSidebarLayout): InboxSidebarLayout => {
+  if (unsaved.size === 0) return layout;
+  const keep = (list: readonly InboxSidebarItem[]) => list.filter((id) => !unsaved.has(id));
+  return { top: keep(layout.top), bottom: keep(layout.bottom), hidden: keep(layout.hidden) };
+};
 
 let current: InboxSidebarLayout | null = null;
 let serverRev = -1;
@@ -52,7 +70,7 @@ const shown = (): InboxSidebarLayout => (current ??= readBrowserLayout());
 function show(layout: InboxSidebarLayout): void {
   try {
     if (inboxSidebarSame(layout, INBOX_SIDEBAR_DEFAULT)) storage.removeItem(SIDEBAR_LAYOUT_COOKIE);
-    else storage.setItem(SIDEBAR_LAYOUT_COOKIE, sidebarLayoutCookie(layout));
+    else storage.setItem(SIDEBAR_LAYOUT_COOKIE, sidebarLayoutCookie(forSaving(layout)));
   } catch {
     // A page with no cookies still shows the layout; a reload only paints the default until the settings read.
   }
@@ -77,6 +95,8 @@ async function sendQueued(): Promise<void> {
     queued = null;
     const before = serverRev;
     try {
+      // Sent whole: the server leaves out the item of a capability that is off (inbox-sidebar-save.ts). A window that
+      // never hears Plans is on (a phone, a linked window) still sends the Plans row's place and hidden state it read.
       const answer = await inboxApi.saveSidebar(layout);
       // The count went back (config.json reset, restored or hand-edited): this answer is the server's layout.
       if (typeof answer.sidebar_rev === 'number' && answer.sidebar_rev <= before) serverRev = -1;
@@ -158,6 +178,7 @@ export function resetSidebarLayoutForTests(): void {
   inFlight = false;
   queued = null;
   drained = Promise.resolve();
+  unsaved = new Set(OFF_BY_DEFAULT);
   customizer = null;
   for (const listener of [...listeners]) listener();
 }

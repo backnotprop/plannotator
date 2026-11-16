@@ -2,7 +2,10 @@
  * The plan library's records, pure. What regresses if these fail:
  * - a version's id stops matching `git hash-object` (an export or a later sync would see every version as changed);
  * - an id of the wrong kind, a bad version number or a foreign line passes as a record;
- * - the one write a window makes (a look) takes a field it should refuse.
+ * - the one write a window makes (a look) takes a field it should refuse;
+ * - an imported approval whose version was never found drops out of view ("No decision") instead of staying history
+ *   on the first version;
+ * - a page's file name loses its own name or kind.
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -14,8 +17,11 @@ import {
   isPlanRecord,
   isPlanVersion,
   NO_ACTOR,
+  planApprovalState,
+  planDocumentFileName,
   planHeadingOf,
   planId,
+  type PlanEvent,
   sha1Hex,
 } from "./plans";
 
@@ -113,5 +119,21 @@ describe("planHeadingOf", () => {
     expect(planHeadingOf("intro\n# Auth refactor \n## Steps")).toBe("Auth refactor");
     expect(planHeadingOf("## Only a subheading")).toBeNull();
     expect(planHeadingOf("")).toBeNull();
+  });
+});
+
+describe("an approval whose version was never found", () => {
+  test("stays history on the first version: approved while v1 is the newest, then cleared, never lost", () => {
+    const event = { ...NO_ACTOR, id: "actev_1", plan_id: "pln_1", kind: "decision", at: "2026-11-02T09:00:00.000Z", subject: null, legacy: "feedback/p/index.jsonl#1", decision: { document_id: "doc_1", version: null, version_number: null, decision: "approved", at: "2026-11-02T09:00:00.000Z", feedback: null, feedback_record: null, snapshot: null } } as PlanEvent;
+    expect(planApprovalState([event], "doc_1", 1)).toMatchObject({ kind: "approved", version_number: 1 });
+    expect(planApprovalState([event], "doc_1", 3)).toEqual({ kind: "cleared", version_number: 3, from_version_number: 1, names: ["person"] });
+  });
+});
+
+describe("planDocumentFileName", () => {
+  test("the document's own file name, else its title with its kind's extension", () => {
+    expect(planDocumentFileName({ doc_path: "plans/rollout.md", title: "Rollout", kind: "markdown" })).toBe("rollout.md");
+    expect(planDocumentFileName({ doc_path: null, title: "Request flow", kind: "mermaid" })).toBe("Request flow.mmd");
+    expect(planDocumentFileName({ doc_path: null, title: "", kind: "html" })).toBe("Plan.html");
   });
 });
