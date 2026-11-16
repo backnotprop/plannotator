@@ -546,7 +546,7 @@ test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, a
     const toggle = host.querySelector('[data-reading-versions]') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     // Its name is a full sentence: which version is on screen, and how many there are (the frame's words).
-    expect(toggle.getAttribute('aria-label')).toBe('v2 · newest, version 2, the newest. 2 versions');
+    expect(toggle.getAttribute('aria-label')).toBe('v2 · newest, version 2, the newest. 2 versions. Versions');
     await act(async () => toggle.click());
     await settle();
     expect(host.querySelector('[data-versions-panel] [data-plan-version="2"]')).not.toBeNull();
@@ -705,6 +705,8 @@ test.skipIf(!hasDom)('Show changes compares the version you saw with the newest,
   // The reading line says which two are compared, and still how many versions there are.
   expect(text(host.querySelector('[data-plan-reading] [data-reading-comparing]'))).toBe('Comparing v1 with v2');
   expect(text(host.querySelector('[data-plan-reading] [data-reading-versions-count]'))).toBe('2');
+  // Both compared versions are marked in the versions panel.
+  expect([...host.querySelectorAll('[data-version-row][data-version-compared]')].map((row) => row.getAttribute('data-version'))).toEqual(['2', '1']);
   const diff = host.querySelector('[data-plan-diff="1-2"]')!;
   expect(diff).not.toBeNull();
   // The old words are marked removed and the new ones added; nothing offers a comment (read only).

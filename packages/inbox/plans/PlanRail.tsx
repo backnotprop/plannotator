@@ -106,6 +106,8 @@ export function PlanVersions(props: PlanVersionsProps) {
       }}
       onRetry={() => {}}
       onClose={onClose}
+      // During a diff both compared rows are marked.
+      comparing={compare ? { from: String(compare.from), to: String(compare.to) } : undefined}
       onScreenActions={(onScreen) => (
         <VersionActions
           version={onScreen.version}

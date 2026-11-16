@@ -217,7 +217,9 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
             enabled={!phone}
             fitsForWidth={railFits}
             onFitChange={setRailDocks}
-            open={railDocks ? filesOpen : true}
+            open={filesOpen}
+            // Short of room our own sheet (RailSheet docked={false}) is the way to the files: the frame shows no tab then.
+            narrowRail="host"
             onOpenChange={setFilesOpen}
             storageKeys={{ open: PLAN_FILES_OPEN_KEY, width: PLAN_FILES_WIDTH_KEY }}
           >
@@ -377,8 +379,7 @@ function DocLoaded({
               onToggleVersions={place.setOpen}
               older={older}
               comparing={compare ? `Comparing v${compare.from} with v${compare.to}` : null}
-              // On an older version "v2 of 4" already says how many: a count beside it would read "of 4 4".
-              count={older ? null : versions.length}
+              count={versions.length}
             />
           </div>
         }
