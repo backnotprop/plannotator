@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import type { Edge, PaneNode } from '@plannotator/vendor-pierre-layouts';
 import type { HeldThread } from '../data/apply/record';
 import { useHeldThread } from '../data/queries/thread';
-import { announce } from '../drag/threadDrag';
+import { announce } from './paneDrag';
 import { ThreadSlot } from '../thread/ThreadSlot';
 import type { ThreadSlotHost } from '../thread/slotHost';
 import FreeLayout from './FreeLayout';

@@ -1,21 +1,27 @@
 /**
- * The thread panes as a drop target (drag/threadDrag.ts): a list row's thread dropped on a pane's edge opens beside
- * it, on its centre takes its place; a pane dropped on another's half goes to that side of it. Edges are the outer
- * 28% of a pane's width and 30% of its height, as the engine's own drop places; a pane carried by its header has no
- * centre, only the nearest half. A side is offered only where the layout still fits after the drop (layoutRoom.ts),
- * counting a docked sidebar that would fold for room; a row's thread there opens in the pane's place instead.
+ * The thread panes as a drop target. A list row's thread is carried by the window's one thread drag (../threadDrag.ts,
+ * #3526's module): the panes register there at THREAD_DROP_LAYER.pane, and a row dropped on a pane's edge opens beside
+ * it, on its centre takes its place. A reply box inside a pane is its own target there at `reply`, a higher layer, so a
+ * row dropped on it is a mention, never this. A pane carried by its header (paneDrag.ts, this layout's own) goes to
+ * the nearest half of another pane; it has no centre.
  *
- * The reply box and the foot of a pane (`.ib-pfoot`) are not this target's: a thread carried over them is left to a
- * target of a higher layer (the reply box's mention), or to nothing.
+ * Edges are the outer 28% of a pane's width and 30% of its height, as the engine's own drop places. A side is offered
+ * only where the layout still fits after the drop (layoutRoom.ts), counting a docked sidebar that would fold for room;
+ * a row's thread there opens in the pane's place instead. A row over a pane's foot (`.ib-pfoot`) with no reply box
+ * open does nothing.
  */
 import { useEffect, useRef } from 'react';
-import { announce, LAYER, registerDropTarget, type DragPayload, type DropHit } from '../drag/threadDrag';
+import { registerThreadDropTarget, sayThreadDrag, THREAD_DROP_LAYER } from '../threadDrag';
+import { announce, registerDropTarget, type DragPayload, type DropHit } from './paneDrag';
 import { mainWidthOf } from '../stack';
 import * as L from './layoutModel';
 import { fits, type Room } from './layoutRoom';
 import type { WindowPanes } from './useRoutePanes';
 
 export type Place = L.DropPlace;
+
+/** What is carried over the panes: a pane by its header, or one list row's thread. */
+type Carried = DragPayload | { kind: 'thread'; threadId: string; label: string };
 
 interface PaneDropHit {
   target: L.PaneId;
@@ -72,6 +78,13 @@ function sideRect(box: DOMRect, place: Place) {
   return { left: box.left, top: box.top, width: box.width, height: box.height };
 }
 
+/** A list row's title, for what the live region says (the row's subject line, as the list draws it). */
+function rowTitle(threadId: string): string {
+  const row = document.querySelector(`.ib-lbody [data-thread-id="${CSS.escape(threadId)}"]`);
+  const label = row?.querySelector('.ib-subj')?.textContent?.trim() || 'Thread';
+  return label.length > 60 ? `${label.slice(0, 57)}…` : label;
+}
+
 export interface PaneDropOptions {
   /** The panes take drops: the switch is on, and the window can show several (not a phone, not stacked, no file). */
   enabled: boolean;
@@ -84,14 +97,14 @@ export interface PaneDropOptions {
   holdSidebar: (columns: number) => void;
 }
 
-/** The panes as a drop target while `enabled`. */
+/** The panes as a drop target while `enabled`: a row's thread through the window's thread drag, a pane through paneDrag.ts. */
 export function usePaneDrop(options: PaneDropOptions): void {
   const live = useRef(options);
   live.current = options;
   useEffect(() => {
     if (!options.enabled) return;
     let preview: HTMLElement | null = null;
-    const hit = (x: number, y: number, payload: DragPayload): DropHit | null => {
+    const hit = (x: number, y: number, carried: Carried): DropHit | null => {
       const { windowPanes, hidden } = live.current;
       const layout = windowPanes.layout;
       const box = paneBoxes().find(({ el }) => {
@@ -100,75 +113,109 @@ export function usePaneDrop(options: PaneDropOptions): void {
       });
       if (!box) return null;
       const target = box.id;
-      if (payload.kind === 'pane' && payload.paneId === target) return null;
+      if (carried.kind === 'pane' && carried.paneId === target) return null;
       const over = document.elementFromPoint(x, y);
-      if (payload.kind === 'thread' && over && box.el.contains(over) && over.closest('.ib-pfoot, .ib-rbox')) return null;
+      if (carried.kind === 'thread' && over && box.el.contains(over) && over.closest('.ib-pfoot, .ib-rbox')) return null;
       const r = box.el.getBoundingClientRect();
       const { edge, depth } = nearestEdge(x, y, r);
       const measured = measureRoom(true);
       const sideFits = (next: L.FreeLayout) => !!next.root && !!measured && fits(next.root, measured.room, measured.gap, hidden);
-      let place: Place = payload.kind === 'pane' || depth <= 1 ? edge : 'center';
+      let place: Place = carried.kind === 'pane' || depth <= 1 ? edge : 'center';
       let next =
-        payload.kind === 'pane'
-          ? L.move(layout, payload.paneId, target, edge)
+        carried.kind === 'pane'
+          ? L.move(layout, carried.paneId, target, edge)
           : place === 'center'
-            ? L.replace(layout, target, payload.threadId)
-            : L.openAt(layout, payload.threadId, target, edge);
+            ? L.replace(layout, target, carried.threadId)
+            : L.openAt(layout, carried.threadId, target, edge);
       if (place !== 'center' && !sideFits(next)) {
-        if (payload.kind === 'pane') return null;
+        if (carried.kind === 'pane') return null;
         place = 'center';
-        next = L.replace(layout, target, payload.threadId);
+        next = L.replace(layout, target, carried.threadId);
       }
       if (next === layout) return null;
-      const action = payload.kind === 'pane' ? 'Move here' : place === 'center' ? 'Open here' : 'Open beside';
+      const action = carried.kind === 'pane' ? 'Move here' : place === 'center' ? 'Open here' : 'Open beside';
       const data: PaneDropHit = { target, place, next, rect: sideRect(r, place) };
       return { action, data };
     };
-    const target = {
-      id: 'thread-panes',
-      layer: LAYER.pane,
-      accepts: (payload: DragPayload) => payload.kind === 'thread' || live.current.multi,
-      hit,
-      over(found: DropHit | null) {
-        if (!found) {
-          preview?.remove();
-          preview = null;
-          return;
-        }
-        const { rect } = found.data as PaneDropHit;
-        if (!preview) {
-          preview = document.createElement('div');
-          preview.className = 'ib-droppreview';
-          preview.setAttribute('aria-hidden', 'true');
-          (document.querySelector('.pn-inbox') ?? document.body).appendChild(preview);
-        }
-        Object.assign(preview.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
-      },
-      drop(found: DropHit, payload: DragPayload) {
-        const { windowPanes, title, holdSidebar } = live.current;
-        const { target: on, place, next } = found.data as PaneDropHit;
-        const name = title(on);
-        holdSidebar(L.columns(next.root));
-        if (payload.kind === 'pane') {
-          windowPanes.movePane(payload.paneId, on, place as L.Edge);
-          announce(`${payload.label} moved ${SIDE_WORDS[place as L.Edge]} ${name}.`);
-          // Focus stays in the pane that moved.
-          requestAnimationFrame(() => {
-            const host = document.querySelector<HTMLElement>(`.ib-layout > [data-layout-pane="${CSS.escape(payload.paneId)}"]`);
-            if (host && !host.contains(document.activeElement)) host.focus({ preventScroll: true });
-          });
-        } else if (place === 'center') {
-          windowPanes.replaceIn(on, payload.threadId);
-          announce(`${payload.label} opened in place of ${name}.`);
-        } else {
-          windowPanes.openAt(payload.threadId, on, place);
-          announce(`${payload.label} opened ${SIDE_WORDS[place]} ${name}.`);
-        }
-      },
+    const draw = (found: DropHit | null) => {
+      if (!found) {
+        preview?.remove();
+        preview = null;
+        return;
+      }
+      const { rect } = found.data as PaneDropHit;
+      if (!preview) {
+        preview = document.createElement('div');
+        preview.className = 'ib-droppreview';
+        preview.setAttribute('aria-hidden', 'true');
+        (document.querySelector('.pn-inbox') ?? document.body).appendChild(preview);
+      }
+      Object.assign(preview.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
     };
-    const unregister = registerDropTarget(target);
+    const drop = (found: DropHit, carried: Carried, say: (words: string) => void) => {
+      const { windowPanes, title, holdSidebar } = live.current;
+      const { target: on, place, next } = found.data as PaneDropHit;
+      const name = title(on);
+      holdSidebar(L.columns(next.root));
+      if (carried.kind === 'pane') {
+        windowPanes.movePane(carried.paneId, on, place as L.Edge);
+        say(`${carried.label} moved ${SIDE_WORDS[place as L.Edge]} ${name}.`);
+        // Focus stays in the pane that moved.
+        requestAnimationFrame(() => {
+          const host = document.querySelector<HTMLElement>(`.ib-layout > [data-layout-pane="${CSS.escape(carried.paneId)}"]`);
+          if (host && !host.contains(document.activeElement)) host.focus({ preventScroll: true });
+        });
+      } else if (place === 'center') {
+        windowPanes.replaceIn(on, carried.threadId);
+        say(`${carried.label} opened in place of ${name}.`);
+      } else {
+        windowPanes.openAt(carried.threadId, on, place);
+        say(`${carried.label} opened ${SIDE_WORDS[place]} ${name}.`);
+      }
+    };
+    // A pane by its header (paneDrag.ts), while several show.
+    const offPanes = registerDropTarget({
+      id: 'thread-panes',
+      accepts: () => live.current.multi,
+      hit,
+      over: draw,
+      drop: (found, carried) => drop(found, carried, announce),
+    });
+    // A list row's thread (../threadDrag.ts): one thread at a time; several picked rows are no place's here.
+    let carried: string | null = null;
+    let found: DropHit | null = null;
+    const offRows = registerThreadDropTarget({
+      element: () => document.querySelector<HTMLElement>('.pn-inbox .ib-layout'),
+      layer: THREAD_DROP_LAYER.pane,
+      // Read as the pointer moves, just before `over` runs: `over` writes the ghost's word too, so it never lags.
+      get what() {
+        return found?.action ?? '';
+      },
+      accepts: (ids) => (ids.length === 1 ? 'take' : null),
+      show: (answer, ids) => {
+        carried = answer === 'take' ? ids[0]! : null;
+        if (!answer) {
+          found = null;
+          draw(null);
+        }
+      },
+      over: (point) => {
+        found = point && carried ? hit(point.x, point.y, { kind: 'thread', threadId: carried, label: '' }) : null;
+        draw(found);
+        const word = document.querySelector<HTMLElement>('[data-thread-ghost] .ib-tdrag-w');
+        if (word) word.textContent = found?.action ?? '';
+      },
+      drop: (ids, point) => {
+        const threadId = ids[0]!;
+        const thread: Carried = { kind: 'thread', threadId, label: rowTitle(threadId) };
+        const at = hit(point.x, point.y, thread);
+        if (at) drop(at, thread, (words) => sayThreadDrag(words));
+        else sayThreadDrag('Nothing changed.');
+      },
+    });
     return () => {
-      unregister();
+      offPanes();
+      offRows();
       preview?.remove();
     };
   }, [options.enabled]);

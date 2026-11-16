@@ -8,8 +8,9 @@
  * other pane (its cached copy is one an opening would not draw: stale, or a launched thread's). For the free layout
  * (config.json `inboxSplitView`): the window without the switch changing at all; a pane dragged onto another's half
  * not going there; a list row dropped on an edge or a centre not opening there, or a drop over a reply box going to the
- * pane; a pane mounting again when another opens or the active one changes; an archived thread's pane staying; text
- * typed in one pane's reply box showing in another's; a narrow window losing the panes it cannot show. And any change
+ * pane, not to the box's mention; one row press starting two drags (the window has one thread drag, ../threadDrag.ts);
+ * a pane mounting again when another opens or the active one changes; an archived thread's pane staying; text typed
+ * in one pane's reply box showing in another's; a narrow window losing the panes it cannot show. And any change
  * of layout (a narrow window, a file beside the active pane, one pane on a phone, a stacked window, a card's or
  * Reviews' thread, a file full screen, one pane and back) losing a pane's reply box, a picked answer, an unfolded
  * message, its scroll place or a recording in progress; a deleted thread's pane closing under a recording.
@@ -23,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, jest, test } from 'bun:test';
 import { act, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAuthor, InboxListRow, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import type { Route } from '../app/route';
 import { machinesModel } from '../machines';
 import { createKeyedSignal } from '../signal';
@@ -35,7 +36,6 @@ import { NO_OPEN, type PaneReads } from './paneReads';
 import { useActiveHeld, type WindowPanes } from './useRoutePanes';
 import { singlePane, type PaneSet } from './model';
 import * as L from './layoutModel';
-import { LAYER, registerDropTarget } from '../drag/threadDrag';
 import { changeThread, putThread, staleThread } from '../data/queries/thread';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
 import type { HeldThread } from '../data/apply/record';
@@ -44,6 +44,8 @@ const hasDom = typeof document !== 'undefined';
 // The thread pane pulls in web-highlighter, which reads `window` at module-eval time.
 const { ThreadSlot } = (hasDom ? await import('../thread/ThreadSlot') : {}) as typeof import('../thread/ThreadSlot');
 const { ThreadPanes } = (hasDom ? await import('./ThreadPanes') : {}) as typeof import('./ThreadPanes');
+const { ThreadRowMenu } = (hasDom ? await import('../components/RowMenu') : {}) as typeof import('../components/RowMenu');
+const { setThreadDragHitTestForTests } = (hasDom ? await import('../threadDrag') : {}) as typeof import('../threadDrag');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-svc-abcdef', name: 'billing-svc', root: '/work/billing-svc', created_at: '2026-10-12T09:00:00.000Z' };
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
@@ -139,9 +141,12 @@ afterEach(() => {
   try {
     act(() => root?.unmount());
     el?.remove();
-    // A drag's swallow of the click after it (drag/threadDrag.ts) ends at the next press, or a timer this file's
+    // A drag's swallow of the click after it (paneDrag.ts) ends at the next press, or a timer this file's
     // fake clock may never run: the next test's first click is its own.
     window.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }));
+    setThreadDragHitTestForTests(null);
+    // The window's thread drag swallows the click after a drop once, until a 400 ms timer the fake clock may not run.
+    window.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   } finally {
     root = null;
     el = null;
@@ -251,11 +256,12 @@ function drawPanes(windowPanes: WindowPanes, host: ThreadSlotHost, held: HeldThr
         <div className="pn-inbox">
           <main className="ib-main">
             {withList && (
-              <div className="ib-lbody">
+              // The list as App draws it: its rows are the window's one thread drag's source (useThreadRowDrag.ts).
+              <ThreadRowMenu className="ib-lbody" rowOf={(id) => (id === 'msg_C1' ? listRow(id) : null)} canMarkRead={true} held={true} onAction={() => {}} onTarget={() => {}}>
                 <button type="button" className="ib-row" data-thread-id="msg_C1">
                   <span className="ib-subj">Subject C</span>
                 </button>
-              </div>
+              </ThreadRowMenu>
             )}
             <ThreadPanes windowPanes={windowPanes} held={held} host={panesHost(host)} />
           </main>
@@ -265,8 +271,17 @@ function drawPanes(windowPanes: WindowPanes, host: ThreadSlotHost, held: HeldThr
   );
 }
 const hostOf = (thread: string) => paneOf(thread).closest<HTMLElement>('[data-layout-pane]')!;
-const drag = (x: number, y: number) => act(() => void window.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, pointerId: 1, bubbles: true })));
-const release = (x: number, y: number) => act(() => void window.dispatchEvent(new PointerEvent('pointerup', { clientX: x, clientY: y, pointerId: 1, bubbles: true })));
+const drag = (x: number, y: number) => act(() => void window.dispatchEvent(new PointerEvent('pointermove', { clientX: x, clientY: y, pointerId: 1, buttons: 1, bubbles: true })));
+const release = (x: number, y: number) => act(() => void window.dispatchEvent(new PointerEvent('pointerup', { clientX: x, clientY: y, pointerId: 1, buttons: 0, bubbles: true })));
+/** A list row as the list's read has it (what the row drag names the thread by). */
+const listRow = (id: string) =>
+  ({ thread_id: id, subject: 'Subject C', thread_name: null, section: 'new', unread: true, unseen: 1, answered_not_sent: false, resolved_at: null, read_at: null, questions: { open: 0, picked: 0, stopped: false, holds_up: [] } }) as unknown as InboxListRow;
+/** A mouse press on the list's row C. */
+const pressRow = () => {
+  const row = el!.querySelector<HTMLElement>('.ib-lbody [data-thread-id="msg_C1"]')!;
+  act(() => void row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1, clientX: 100, clientY: 900, pointerId: 1, pointerType: 'mouse' })));
+  return row;
+};
 describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and sees', () => {
   test('R opens the reply box in the active pane only, and follows the active pane when it changes', async () => {
     const seen: [string, number][] = [];
@@ -433,43 +448,45 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
     await wait(0);
     calls.length = 0;
-    const row = el!.querySelector<HTMLElement>('.ib-lbody [data-thread-id="msg_C1"]')!;
+    // What the window's thread drag finds under the pointer: inside pane A.
+    setThreadDragHitTestForTests(() => paneOf(A));
     const carry = (x: number, y: number) => {
-      act(() => void row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 900, pointerId: 1, pointerType: 'mouse' })));
+      pressRow();
       drag(x, y);
       release(x, y);
     };
-    carry(40, 450);
+    // One row press is one drag: the window's ghost alone, saying what a drop does there.
+    pressRow();
+    drag(40, 450);
+    expect(document.querySelectorAll('[data-thread-ghost]')).toHaveLength(1);
+    expect(document.querySelector('.ib-dragghost')).toBeNull();
+    expect(document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent).toBe('Open beside');
+    expect(document.querySelector('.ib-droppreview')).not.toBeNull();
+    release(40, 450);
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
     carry(400, 450);
     expect(calls).toEqual(['open:msg_C1:main:left', 'replace:main:msg_C1']);
-    // The reply box's own target (a mention, another branch) sits above the panes: the pane's zone leaves it the drop.
-    const mentions: string[] = [];
-    const foot = paneOf(A).querySelector<HTMLElement>('.ib-pfoot')!;
-    stub(document, 'elementFromPoint', { value: () => foot });
-    const off = registerDropTarget({ id: 'reply-test', layer: LAYER.reply, accepts: (p) => p.kind === 'thread', hit: (x, y) => (document.elementFromPoint(x, y)?.closest('.ib-pfoot') ? { action: 'Mention' } : null), drop: (_hit, p) => void mentions.push(p.kind === 'thread' ? p.threadId : '') });
-    try {
-      carry(400, 850);
-    } finally {
-      off();
-    }
-    expect(mentions).toEqual(['msg_C1']);
+    // Over pane A's open reply box, the box's own target (a mention, layer `reply`) takes the drop, not the pane.
+    pressR();
+    const field = box(A)!;
+    expect(field).not.toBeNull();
+    stub(document, 'elementFromPoint', { value: () => field });
+    setThreadDragHitTestForTests(() => field);
+    pressRow();
+    drag(400, 850);
+    expect(document.querySelectorAll('[data-thread-ghost]')).toHaveLength(1);
+    expect(document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent).toBe('Mention');
+    release(400, 850);
+    expect(field.value).toContain('Subject C');
     expect(calls).toEqual(['open:msg_C1:main:left', 'replace:main:msg_C1']);
-    // Without such a target, a drop over the reply box does nothing.
-    carry(400, 850);
-    expect(calls).toHaveLength(2);
   });
 
   test("with one thread open, a row dropped on its pane's edge opens beside it", async () => {
     const calls: string[] = [];
     drawPanes(windowOf(L.follow(L.EMPTY_LAYOUT, A), calls), hostFor(A, noop), heldOf(A, false), true);
     await wait(0);
-    const row = el!.querySelector<HTMLElement>('.ib-lbody [data-thread-id="msg_C1"]')!;
-    act(() => void row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 900, pointerId: 1, pointerType: 'mouse' })));
-    // At the window's corner the pill flips to the pointer's left and above it, so it stays whole on screen.
-    drag(window.innerWidth - 2, window.innerHeight - 2);
-    const at = /translate\((-?\d+)px, (-?\d+)px\)/.exec(document.querySelector<HTMLElement>('.ib-dragghost')!.style.transform)!;
-    expect(Number(at[1])).toBeLessThan(window.innerWidth - 2);
-    expect(Number(at[2])).toBeLessThan(window.innerHeight - 2);
+    setThreadDragHitTestForTests(() => paneOf(A));
+    pressRow();
     drag(760, 450);
     release(760, 450);
     expect(calls).toEqual(['open:msg_C1:main:right']);
@@ -481,19 +498,36 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
     await wait(0);
     calls.length = 0;
-    const row = el!.querySelector<HTMLElement>('.ib-lbody [data-thread-id="msg_C1"]')!;
+    setThreadDragHitTestForTests(() => paneOf(A));
+    const row = pressRow();
     row.addEventListener('click', () => clicks++);
-    act(() => void row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 900, pointerId: 1, pointerType: 'mouse' })));
     drag(102, 901);
     release(102, 901);
     act(() => row.click());
     expect(clicks).toBe(1);
-    act(() => void row.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 100, clientY: 900, pointerId: 1, pointerType: 'mouse' })));
+    pressRow();
     drag(40, 450);
     act(() => void window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     release(40, 450);
     expect(calls).toEqual([]);
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
+  });
+
+  test('a press on a pane header while a thread is carried starts nothing of its own', async () => {
+    putThread(queries, B, heldOf(B, false));
+    const calls: string[] = [];
+    drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    calls.length = 0;
+    setThreadDragHitTestForTests(() => paneOf(A));
+    pressRow();
+    drag(40, 450);
+    const head = paneOf(B).querySelector<HTMLElement>('.ib-phead')!;
+    act(() => void head.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, buttons: 1, clientX: 1200, clientY: 20, pointerId: 2, pointerType: 'mouse' })));
+    act(() => void window.dispatchEvent(new PointerEvent('pointermove', { clientX: 1100, clientY: 400, pointerId: 2, buttons: 1, bubbles: true })));
     expect(document.querySelector('.ib-dragghost')).toBeNull();
+    release(40, 450);
+    expect(calls.filter((call) => call.startsWith('move'))).toEqual([]);
   });
 
   test('a thread archived while beside others closes its pane; one opened archived stays, unless a kept layout brings it back', async () => {

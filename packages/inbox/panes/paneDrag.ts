@@ -1,23 +1,20 @@
 /**
- * The Inbox's one drag system: what can be picked up (a list row's thread, a pane by its header) and where it can be
- * put (the thread panes; later the reply box's mention and the list's Priority and Quiet edges). Sources and targets
- * register here and nowhere else, so a new target is one `registerDropTarget` call and no source changes.
+ * Moving a pane of the free layout by its header (inboxSplitView). A list row's thread is carried by the window's one
+ * thread drag (../threadDrag.ts, `pressThreadRow`), never here: the panes register there as a row's drop target
+ * (panes/paneDrop.ts, THREAD_DROP_LAYER.pane), so a row press starts exactly one drag. This module only carries a
+ * pane, from a press on its header (panes/paneKeeper.tsx), which is never on a row: the two never start together, and
+ * a pane press while a thread is being dragged starts nothing.
  *
- * - Pointer events only (mouse and pen; touch never drags: a phone and a tablet scroll the list). A press that moves
- *   less than `DRAG_SLOP` is a click, as before; once it is a drag, the click that ends it is swallowed.
- * - While a drag is on, a pill follows the pointer with what is carried and what letting go does there ("Open beside",
- *   "Open here", "Move here"). Targets draw their own preview (`over`), only while a drag is on.
- * - Where several targets take a point, the highest `layer` wins: a reply box (LAYER.reply) inside a pane (LAYER.pane)
- *   takes the drop, so the pane's zone never swallows it. A target returns null from `hit` for a point it declines.
- * - Escape, a lost pointer or a window that loses focus cancels: nothing moves. What was picked up and where it went
- *   is said in a polite live region.
- * - A list row is a source only while some target takes threads: with the free layout off nothing registers, so a
- *   row press is exactly today's.
+ * - Pointer events only (mouse and pen; touch never drags). A press that moves less than `DRAG_SLOP` is a click, as
+ *   before; once it is a drag, the click that ends it is swallowed.
+ * - While a pane is carried, a pill follows the pointer with its title and what letting go does there ("Move here").
+ *   The target draws its own preview (`over`).
+ * - Escape, a lost pointer or a window that loses focus cancels: nothing moves. What moved where is said in a polite
+ *   live region.
  */
+import { threadDragging } from '../threadDrag';
 
-export type DragPayload =
-  | { kind: 'thread'; threadId: string; label: string }
-  | { kind: 'pane'; paneId: string; label: string };
+export type DragPayload = { kind: 'pane'; paneId: string; label: string };
 
 /** What letting go at a point does: the pill's words, and anything the target needs for the drop. */
 export interface DropHit {
@@ -27,8 +24,6 @@ export interface DropHit {
 
 export interface DropTarget {
   id: string;
-  /** The higher wins where targets overlap (LAYER). */
-  layer: number;
   accepts: (payload: DragPayload) => boolean;
   hit: (x: number, y: number, payload: DragPayload) => DropHit | null;
   /** Draw (a hit) or clear (null) the target's preview. */
@@ -36,14 +31,10 @@ export interface DropTarget {
   drop: (hit: DropHit, payload: DragPayload) => void;
 }
 
-/** The layers in use and reserved, so separate branches stack their targets the same way. */
-export const LAYER = { pane: 10, listEdge: 20, reply: 30 } as const;
-
 /** How far a press must move before it is a drag (px). */
 export const DRAG_SLOP = 5;
 
 const targets = new Map<string, DropTarget>();
-let rowSource: (() => void) | null = null;
 let live: HTMLElement | null = null;
 
 /** The window the drag's pill and live region go in, so they take its tokens (the theme, the Soft switches). */
@@ -68,22 +59,18 @@ export function announce(words: string): void {
   });
 }
 
-/** A target takes drops until the returned function is called. */
+/** A target takes dropped panes until the returned function is called. */
 export function registerDropTarget(target: DropTarget): () => void {
   targets.set(target.id, target);
-  syncRowSource();
   return () => {
     if (targets.get(target.id) === target) targets.delete(target.id);
-    syncRowSource();
   };
 }
 
-export const takesThreads = (): boolean => [...targets.values()].some((target) => target.accepts({ kind: 'thread', threadId: '', label: '' }));
-
-/** The target that takes a point, the highest layer first. */
+/** The target that takes a point. */
 export function targetAt(x: number, y: number, payload: DragPayload): { target: DropTarget; hit: DropHit } | null {
-  const order = [...targets.values()].filter((target) => target.accepts(payload)).sort((a, b) => b.layer - a.layer);
-  for (const target of order) {
+  for (const target of targets.values()) {
+    if (!target.accepts(payload)) continue;
     const hit = target.hit(x, y, payload);
     if (hit) return { target, hit };
   }
@@ -128,7 +115,7 @@ export interface DragStart {
 
 /** A press that becomes a drag once it moves `DRAG_SLOP`; until then nothing happens and the click is the press's. */
 export function pressToDrag({ event, payload, onBegin, onEnd }: DragStart): void {
-  if (event.button !== 0 || event.pointerType === 'touch') return;
+  if (event.button !== 0 || event.pointerType === 'touch' || threadDragging()) return;
   const startX = event.clientX;
   const startY = event.clientY;
   const pointer = event.pointerId;
@@ -198,28 +185,4 @@ export function pressToDrag({ event, payload, onBegin, onEnd }: DragStart): void
   window.addEventListener('pointercancel', cancel, true);
   window.addEventListener('keydown', key, true);
   window.addEventListener('blur', cancel);
-}
-
-/** A list row's thread, picked up by a press on the row (not on a control inside it). */
-function rowPress(event: PointerEvent): void {
-  const target = event.target instanceof Element ? event.target : null;
-  const row = target?.closest<HTMLElement>('.ib-lbody [data-thread-id]');
-  if (!row || target!.closest('input, textarea, [contenteditable="true"], [role="menuitem"]') || !takesThreads()) return;
-  if (row.closest('[data-picking]') || row.getAttribute('aria-pressed') !== null) return;
-  const threadId = row.dataset.threadId!;
-  const label = row.querySelector('.ib-subj')?.textContent?.trim() || 'Thread';
-  pressToDrag({ event, payload: { kind: 'thread', threadId, label: label.length > 60 ? `${label.slice(0, 57)}…` : label } });
-}
-
-/** The rows are a source while a target takes threads. */
-function syncRowSource(): void {
-  if (typeof document === 'undefined') return;
-  const on = takesThreads();
-  if (on && !rowSource) {
-    document.addEventListener('pointerdown', rowPress, true);
-    rowSource = () => document.removeEventListener('pointerdown', rowPress, true);
-  } else if (!on && rowSource) {
-    rowSource();
-    rowSource = null;
-  }
 }

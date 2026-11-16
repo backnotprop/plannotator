@@ -13,7 +13,7 @@
  * page): a press or focus in a pane makes it the active one, and a press on its header may pick it up.
  */
 import { createContext, useContext, useLayoutEffect, useRef } from 'react';
-import { pressToDrag } from '../drag/threadDrag';
+import { pressToDrag } from './paneDrag';
 import type { PaneId } from './layoutModel';
 
 /** What a press on a pane's header can start a drag from: its empty part and its title, never a control. */

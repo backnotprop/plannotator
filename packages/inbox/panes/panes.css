@@ -33,7 +33,7 @@
 .dark [data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: color-mix(in oklch, var(--background) 70%, var(--card)); }
 [data-pane-quiet] > .pierre-layout-pane-inner .ib-phead :is(.ib-subject, .ib-phsubj) { color: var(--muted-foreground); }
 
-/* A drag (drag/threadDrag.ts): the pill that follows the pointer, and where letting go puts what it carries. */
+/* A pane carried by its header (paneDrag.ts): its pill; and where letting go puts a pane or a row's thread (paneDrop.ts). */
 :root[data-ib-dragging], :root[data-ib-dragging] * { cursor: grabbing !important; user-select: none !important; }
 .ib-dragghost { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; display: flex; align-items: center; gap: 8px; max-width: 320px; padding: 5px 10px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 6px 20px rgb(0 0 0 / 0.16), 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent); font-size: 12.5px; line-height: 18px; white-space: nowrap; }
 .ib-dragghost-what { overflow: hidden; text-overflow: ellipsis; min-width: 0; }

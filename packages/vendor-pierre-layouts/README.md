@@ -154,8 +154,8 @@ Prefer no patch: wrap in `src/`, or ask upstream. When a patch is unavoidable:
 
 ## Known gaps we work around
 
-- No drop from outside the layout: a list row cannot be dropped into it by the engine. The Inbox's own drag system
-  (`packages/inbox/drag/threadDrag.ts`, `panes/paneDrop.ts`) hit-tests the pane under the pointer and changes its own
+- No drop from outside the layout: a list row cannot be dropped into it by the engine. The Inbox's one thread drag
+  (`packages/inbox/threadDrag.ts`, with `panes/paneDrop.ts` its pane target; a pane moves by `panes/paneDrag.ts`) hit-tests the pane under the pointer and changes its own
   tree, which it pushes into the store (`setRoot`). The engine's own pane drag (its header grip) is not used: the
   Inbox draws no engine header (`renderHeader` returns nothing) and moves panes by the thread's header instead.
 - No keyboard way to move a pane to another place (resizing is keyboard-reachable). The Inbox's pane ⋯ menu has Move

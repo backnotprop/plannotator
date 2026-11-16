@@ -25,7 +25,7 @@ const noHeader = () => null;
  * comes back through `onResize` and `onFocus`. The engine draws no header and no actions of its own: each pane's
  * header is the thread's. A pane's content is a node the pane keeper puts in its place (paneKeeper.tsx), which hears
  * the presses and focus in it: one makes the pane active, and a press on its header (not on a control) that moves
- * 5 px picks it up (drag/threadDrag.ts); where it lands is the drop target ThreadPanes registers.
+ * 5 px picks it up (paneDrag.ts); where it lands is the drop target ThreadPanes registers (paneDrop.ts).
  */
 export default function FreeLayout({ tree, active, gap, title, renderPane, onFocus, onResize }: FreeLayoutProps) {
   const [store] = useState(() => new LayoutStore(tree, { model: naryTree }));
