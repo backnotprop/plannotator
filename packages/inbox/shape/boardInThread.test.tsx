@@ -17,7 +17,7 @@
  *  - the thread's keys acting under the board (R opening the hidden reply box, O a file beside the board);
  *  - the thread's scroll lost when the board closes (WebKit forgets a hidden scroller's, so the pane puts it back);
  *  - with Shape off, an old address naming a board keeping the Artifacts view shut, with no board in its place;
- *  - a one-message thread with no name losing its subject from the bar while the board hides its heading;
+ *  - a one-message thread with no name losing its title from the bar while the board shows;
  *  - on a phone, the header's way back leaving the thread instead of the board (it reads ‹ Thread, as Artifacts' does);
  *  - the board's side panel growing back its Thread or Ask tab (it is References only, the owner 2026-11-16), or a
  *    reference to a message of the thread opening nothing now that the Thread tab is gone (it lands the thread there).
@@ -290,8 +290,8 @@ test.skipIf(!hasDom)('the board draws in the thread’s own pane, under its head
   expect(pebble().getAttribute('aria-pressed')).toBe('true');
   expect(rightGroup()).toEqual(['Shape', 'Artifacts', 'More', '×']);
   expect(head().querySelector('[data-artifacts-button]')!.getAttribute('aria-pressed')).toBe('false');
-  // The subject the hidden messages' heading held is in the bar.
-  expect(head().querySelector('[data-header-subject]')!.hasAttribute('data-on')).toBe(true);
+  // The thread's title stays in the bar.
+  expect(head().querySelector('[data-header-title]')!.textContent).toContain('Refund events: webhook or polling?');
   // The messages and the reply box are kept, out of sight.
   expect(pane().querySelector<HTMLElement>(':scope > .ib-pbody')!.hidden).toBe(true);
   expect(pane().querySelector<HTMLElement>(':scope > .ib-pfoot')!.hidden).toBe(true);
@@ -420,16 +420,13 @@ test.skipIf(!hasDom)('Shape off: an old address naming a board and the Artifacts
   expect(pane().querySelector('[data-shape-pebble]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a one-message thread with no name: its subject is in the bar while the board hides its heading', async () => {
+test.skipIf(!hasDom)('a one-message thread with no name: its title stays in the bar with the board open', async () => {
   const one: InboxThread = { ...THREAD, messages: [THREAD.messages[0]!] };
   const { id, draw } = mount({ thread: one });
   await ready();
-  // The heading shows in the messages: the bar has room, no subject.
-  expect(head().querySelector('[data-header-subject]')).toBeNull();
   draw({ page: 'inbox', project: null, thread: T, shape: id });
   await boardDrawn();
-  const subject = head().querySelector<HTMLElement>('[data-header-subject]');
-  expect(subject?.textContent).toContain('Refund events: webhook or polling?');
+  expect(head().querySelector('[data-header-title]')?.textContent).toContain('Refund events: webhook or polling?');
 });
 
 test.skipIf(!hasDom)('a phone: with the board open the header’s way back reads ‹ Thread and closes the board, not the thread', async () => {

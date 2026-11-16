@@ -86,11 +86,9 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
     reportScreen();
   });
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
-  // The board named in the address, in this pane while it shows that thread (the window's one board). Only one the
-  // window draws takes the messages' place (none with Shape off, or while a review draws its own).
+  // The address's board, in this pane while it shows that thread: only one the window draws (none with Shape off, or
+  // while a review draws its own). On a phone it is a screen of its own, as the Artifacts view is: back is the thread.
   const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
-  // On a phone the board is a screen of its own, as the Artifacts view is: its way back is to the thread.
-  const closeBoard = () => close({ ...routeRef.current, shape: null });
   return (
     <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
@@ -210,12 +208,8 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             const board = host.boardsOn && thread ? host.shapes.byThread.get(thread.thread_id) : undefined;
             if (!board) return null;
             const open = !!route.shape;
-            // The board takes the Artifacts view's place: one view of the thread at a time. Opened by this press, its
-            // title takes the focus, as the Artifacts view's heading does.
-            const show = () => {
-              go({ ...route, shape: board.id, artifacts: false, links: false });
-              focusBoardTitle(board.id);
-            };
+            // In the Artifacts view's place (one view at a time); opened by this press, its title takes the focus.
+            const show = () => (go({ ...route, shape: board.id, artifacts: false, links: false }), focusBoardTitle(board.id));
             return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
           })()}
           board={boardNode}
@@ -237,7 +231,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             void host.refreshList(false);
             return true;
           }}
-          onClose={phone && boardNode ? closeBoard : onClose}
+          onClose={phone && boardNode ? () => close({ ...routeRef.current, shape: null }) : onClose}
           file={route.file ?? null}
           namedFile={route.ref ?? null}
           onOpenNamedFile={(ref) => (ref ? go({ ...routeRef.current, file: null, ref }) : close({ ...routeRef.current, ref: null }))}
