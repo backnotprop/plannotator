@@ -9,6 +9,7 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as http from "http";
+import { editorAnnotationLines } from "./editor-annotation-lines";
 
 // ── State ──────────────────────────────────────────────────────────
 
@@ -89,8 +90,7 @@ export function registerEditorAnnotationCommand(
       const document = await vscode.workspace.openTextDocument(thread.uri);
       const selectedText = document.getText(range);
       const filePath = vscode.workspace.asRelativePath(thread.uri, false);
-      const lineStart = range.start.line + 1;
-      const lineEnd = range.end.line + 1;
+      const { lineStart, lineEnd } = editorAnnotationLines(range);
 
       try {
         const body = JSON.stringify({
