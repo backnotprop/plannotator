@@ -305,6 +305,9 @@ describe("plan import", () => {
     // 002 is filled in after all, and 004 arrives: 002 is never taken after 003; 004 is v3.
     put(join(chain, "002.md"), "# Order\n\n2, late\n", new Date(t + 120_000));
     version(dataDir, "api", "order-2026-11-10", 4, "# Order\n\n4\n", new Date(t + 130_000));
+    // A new file moves the folder's time; set it, as a file system with a coarse clock may not within a test's
+    // milliseconds (Linux CI), and the chain would be skipped as unchanged.
+    utimesSync(chain, new Date(t + 130_000), new Date(t + 130_000));
     report = importPlanLibrary(store, { dataDir, now: () => t + 300_000 });
     expect(report).toMatchObject({ versions_added: 1, late_files: ["history/api/order-2026-11-10/002.md"] });
     expect(legacyOrder()).toEqual([
