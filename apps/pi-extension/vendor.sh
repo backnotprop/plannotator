@@ -159,6 +159,9 @@ printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewe
 # bridge-script.ts imports the sandbox shim (a dependency-free string constant too).
 printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/sandboxShim.ts\n' \
   | cat - "../../packages/ui/components/html-viewer/sandboxShim.ts" > "generated/sandboxShim.ts"
+# ...and the link guard (dependency-free too).
+printf '// @generated — DO NOT EDIT. Source: packages/ui/components/html-viewer/linkGuard.ts\n' \
+  | cat - "../../packages/ui/components/html-viewer/linkGuard.ts" > "generated/linkGuard.ts"
 
 # Vendor the moved AI context types and the model catalog from core into generated/ai/.
 for f in ai-context model-catalog; do
