@@ -137,7 +137,9 @@ function stripJsonComments(text: string): string {
 		out += ch;
 		i += 1;
 	}
-	return out.replace(/,(\s*[}\]])/g, "$1");
+	// Skip entire JSON strings before looking for commas outside them. A model ID
+	// or display label can contain the very same characters as a trailing comma.
+	return out.replace(/"(?:[^"\\]|\\[\s\S])*"|,(\s*[}\]])/g, (match, closing: string | undefined) => closing ?? match);
 }
 
 /** The models in the user's Qwen Code settings; empty when there are none or the file cannot be read. */

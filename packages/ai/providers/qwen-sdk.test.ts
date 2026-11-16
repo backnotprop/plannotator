@@ -293,7 +293,7 @@ describe("QwenSDKProvider", () => {
   "modelProviders": {
     "openai": [
       { "id": "qwen3-coder-plus", "name": "Qwen3 Coder Plus" },
-      { "id": "gpt-local", "name": "Local model" },
+      { "id": "gpt-local,]", "name": "Local model, } with /* literal text */" },
     ],
   },
 }`,
@@ -301,7 +301,7 @@ describe("QwenSDKProvider", () => {
 		await provider.fetchModels();
 		expect(provider.models).toEqual([
 			{ id: "qwen3-coder-plus", label: "Qwen3 Coder Plus", default: true },
-			{ id: "gpt-local", label: "Local model" },
+			{ id: "gpt-local,]", label: "Local model, } with /* literal text */" },
 		]);
 		expect(fakeQwenRuns(fake.log)).toHaveLength(0);
 
