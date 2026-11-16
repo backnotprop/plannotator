@@ -57,6 +57,8 @@ export interface DocBadgesProps {
    * Open-in-app control. Omitted (or an https:// URL) -> no control rendered.
    */
   openInAppPath?: string | null;
+  /** The line the Open-in-app control opens that file at, read at the click. */
+  openInAppLine?: () => number | undefined;
 }
 
 export const DocBadges: React.FC<DocBadgesProps> = ({
@@ -73,6 +75,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   linkedDocInfo,
   sourceInfo,
   openInAppPath,
+  openInAppLine,
 }) => {
   const hideRepoOwner = useConfigValue('hideRepoOwner');
   const isRow = layout === 'row';
@@ -82,7 +85,7 @@ export const DocBadges: React.FC<DocBadgesProps> = ({
   // Never shrinks: a file name chip beside it gives up its width first.
   const openInButton = canOpenInApp ? (
     <span className="flex flex-shrink-0">
-      <OpenInAppButton filePath={openInAppPath} base={null} />
+      <OpenInAppButton filePath={openInAppPath} base={null} line={openInAppLine} />
     </span>
   ) : null;
 
