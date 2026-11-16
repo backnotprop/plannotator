@@ -17,12 +17,15 @@
  * The rules are replyRecipients.ts; ThreadPane owns the choice and Send. The
  * rows are named as a phone's sheet names them (thread/recipientNames.ts).
  */
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
+import { createPortal } from 'react-dom';
 import { graphemesOf } from '@plannotator/core/inbox-format';
 import { HostMark, Icon } from '../icons';
 import { canAddRecipient, type RecipientRow } from '../replyRecipients';
 import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
+import { skillMenuHost } from './ComposerField';
+import { skillListRoom } from '../caretMenu';
 import { recipientNames } from '../thread/recipientNames';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
@@ -68,6 +71,69 @@ const StartTile = ({ host }: { host: string | null }) => (
   </>
 );
 
+/** The list's own gap from the pill (inbox.css sets the same 6 px for `.ib-rpick`'s `bottom`). */
+const RPICK_GAP = 6;
+/** One whole row and the list's padding: the least list ever shown (a sliver of a row is never shown). */
+const RPICK_LEAST = 56;
+
+/**
+ * Where the list sits: fixed to the viewport from the pill's measured rect, never inside the reply box's own
+ * boxes. The list hangs above the pill; drawn inside the foot it is cut at the pane's top edge (`.ib-pane`
+ * clips) and in a short window not every agent shows (#3427). Above the pill by default; below it when the
+ * pill sits too close to the thread's header for one whole row above it.
+ */
+function useListSpot(pillRef: RefObject<HTMLButtonElement | null>, open: boolean, wide: boolean): CSSProperties | undefined {
+  const [style, setStyle] = useState<CSSProperties | undefined>(undefined);
+  const measure = useCallback(() => {
+    const pill = pillRef.current;
+    if (!open || !pill) {
+      setStyle((current) => (current === undefined ? current : undefined));
+      return;
+    }
+    const view = pill.ownerDocument.defaultView ?? window;
+    const rect = pill.getBoundingClientRect();
+    // inbox.css's widths: 300, or 360 with a "start a new session" row (`.ib-rpick:has([data-recipient-start])`).
+    const width = Math.min(wide ? 360 : 300, view.innerWidth - 24);
+    const left = Math.max(12, Math.min(rect.right - width, view.innerWidth - width - 12));
+    // The room under the thread's header; `--ib-tg-room` caps the list to it, under inbox.css's own cap.
+    const room = skillListRoom(pill);
+    const above = rect.top - RPICK_GAP - room.top - 8;
+    const next: CSSProperties = {
+      position: 'fixed',
+      left,
+      width,
+      right: 'auto',
+      margin: 0,
+      ...(above >= RPICK_LEAST
+        ? { bottom: view.innerHeight - rect.top + RPICK_GAP, top: 'auto', '--ib-tg-room': `${Math.round(above)}px` }
+        : { top: rect.bottom + RPICK_GAP, bottom: 'auto', '--ib-tg-room': `${Math.round(Math.max(RPICK_LEAST, room.bottom - rect.bottom - RPICK_GAP - 8))}px` }),
+    } as CSSProperties;
+    setStyle((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+  }, [open, pillRef, wide]);
+  // Every commit (the box grows as the person types); the equality guard converges.
+  useLayoutEffect(() => {
+    measure();
+  });
+  // And on anything that moves it without a commit: a scroll anywhere, a resize, the visual viewport.
+  useEffect(() => {
+    if (!open) return;
+    const view = pillRef.current?.ownerDocument.defaultView ?? window;
+    const viewport = view.visualViewport;
+    const soon = () => measure();
+    view.addEventListener('scroll', soon, true);
+    view.addEventListener('resize', soon);
+    viewport?.addEventListener('resize', soon);
+    viewport?.addEventListener('scroll', soon);
+    return () => {
+      view.removeEventListener('scroll', soon, true);
+      view.removeEventListener('resize', soon);
+      viewport?.removeEventListener('resize', soon);
+      viewport?.removeEventListener('scroll', soon);
+    };
+  }, [open, measure, pillRef]);
+  return style;
+}
+
 export function ReplyRecipient({
   rows,
   chosen,
@@ -94,6 +160,9 @@ export function ReplyRecipient({
   folderOf?: (session: string) => string;
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
+  const pillRef = useRef<HTMLButtonElement | null>(null);
+  const spot = useListSpot(pillRef, open, rows.some((row) => row.start));
+  const host = pillRef.current ? skillMenuHost(pillRef.current) : null;
   const chosenIds = chosen.map((r) => r.session);
   const one = chosen.length === 1 ? chosen[0]! : null;
   const named = recipientNames(rows, labels, folderOf);
@@ -139,6 +208,7 @@ export function ReplyRecipient({
   const words = one ? pillOf(one) : `${chosen.length} agents`;
   const button = (
     <button
+      ref={pillRef}
       type="button"
       className="ib-rto"
       data-recipient=""
@@ -155,7 +225,7 @@ export function ReplyRecipient({
   );
 
   const list = open ? (
-    <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" onMouseDown={(event) => event.preventDefault()}>
+    <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label="Who gets this reply" onMouseDown={(event) => event.preventDefault()} style={spot}>
       {rows.map((row) => {
         const on = chosenIds.includes(row.session);
         const { title, agent } = named.get(row.session)!;
@@ -224,7 +294,6 @@ export function ReplyRecipient({
   const pill = (
     <span className="ib-rto-wrap">
       {!open && (chosen.length > 1 || (one && words !== nameOf(one))) ? <Tip content={names}>{button}</Tip> : button}
-      {list}
     </span>
   );
   // A wide window: every name stacked under the pill, so the Draft words beside it never move when it changes.
@@ -236,6 +305,8 @@ export function ReplyRecipient({
         </span>
       ))}
       {pill}
+      {/* The list portals out of the reply box's own boxes (see useListSpot): nothing renders in place. */}
+      {list && host && spot ? createPortal(list, host) : null}
     </span>
   );
 }

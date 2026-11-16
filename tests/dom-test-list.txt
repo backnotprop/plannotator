@@ -110,6 +110,7 @@ packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
+packages/inbox/panes/twoSlots.test.tsx
 packages/inbox/projectList.test.tsx
 packages/inbox/rowBadges.test.tsx
 packages/inbox/readWaitingRow.test.tsx
@@ -779,3 +780,5 @@ packages/inbox/scheduled/scheduledEditor.test.tsx
 packages/inbox/scheduled/scheduledThread.test.tsx
 packages/inbox/scheduled/scheduledRows.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
+packages/ui/components/OpenInAppButton.line.test.tsx
+packages/ui/utils/openInLine.test.ts

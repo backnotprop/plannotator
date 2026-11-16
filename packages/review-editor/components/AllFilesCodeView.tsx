@@ -65,6 +65,7 @@ import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
 import { FileCommentBanner } from './FileCommentBanner';
 import { annotationMatchesPrScope, isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
+import { openInLineForDiff } from '../utils/openInLine';
 import { useEditSession } from '../edit/useEditSession';
 import type { EditSelectionAnnotationRequest, EditSelectionComment } from '../edit/useEditSession';
 import type { SuggestionHunk } from '../edit/deriveSuggestions';
@@ -3410,6 +3411,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
         patch={file.patch}
+        // Read at the click: this file's picked lines (a selection or the
+        // picked comment's, both painted as selectedLines), else its first change.
+        openInLine={() => {
+          const picked = selectedLinesRef.current;
+          return openInLineForDiff(file.patch, picked?.id === item.id ? picked.range : null);
+        }}
         status={file.status}
         oldPath={file.oldPath}
         onEditFile={editEnabled ? () => editSession.startEdit(item.id) : undefined}
