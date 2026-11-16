@@ -139,7 +139,7 @@ export type PlanCommentTarget =
   | { kind: "asset"; asset_path: string; asset_sha: string }
   | { kind: "plan" };
 
-/** A comment on a version, a file or the whole plan. Not written yet. */
+/** A comment on a version, a file or the whole plan. Written for now only on a document version (the plan page's comments, `comments.jsonl`). */
 export interface PlanComment extends PlanActor {
   id: string;
   plan_id: string;
@@ -381,6 +381,53 @@ export function checkPlanLookInput(input: unknown): { ok: true; doc: string | nu
   if (body.doc !== undefined && !isPlanId("doc", body.doc)) return { ok: false, error: "doc is a document id (doc_…)" };
   if (body.seen !== undefined && !isPlanVersionNumber(body.seen)) return { ok: false, error: "seen is a version number" };
   return { ok: true, doc: (body.doc as string | undefined) ?? null, seen: (body.seen as number | undefined) ?? null };
+}
+
+/** The most one comment's annotation may hold (its JSON, in characters): the Inbox's cap for a live comment. */
+export const PLAN_COMMENT_MAX = 128 * 1024;
+
+/** An annotation's own id as a comment keeps it (Plannotator's `Annotation.id`): the Inbox's rule for a file comment's id. */
+export const isPlanAnnotationId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_.:-]{1,128}$/.test(value);
+
+/** The id of the annotation a comment holds (its `anchor`), or null. */
+export function planCommentAnnotationId(comment: Pick<PlanComment, "anchor">): string | null {
+  const id = isObject(comment.anchor) ? comment.anchor.id : null;
+  return isPlanAnnotationId(id) ? id : null;
+}
+
+/** A comment line as the store reads it back (`comments.jsonl`); a line that is not one is skipped. */
+export function isPlanComment(value: unknown): value is PlanComment {
+  if (!isObject(value) || !isObject(value.target)) return false;
+  const target = value.target;
+  return (
+    isPlanId("anno", value.id) &&
+    isPlanId("pln", value.plan_id) &&
+    target.kind === "document" &&
+    isPlanId("doc", target.document_id) &&
+    isGitBlobSha(target.document_version) &&
+    planCommentAnnotationId({ anchor: value.anchor }) !== null &&
+    typeof value.body === "string" &&
+    (value.state === "open" || value.state === "resolved") &&
+    isIso(value.created_at) &&
+    (value.sent === null || isObject(value.sent)) &&
+    isActor(value)
+  );
+}
+
+/**
+ * The body of `POST /api/plans/:id/comments`: the person's annotation (Plannotator's `Annotation`, as the Inbox's file
+ * viewer made it) on one version of a document (`doc` absent: the primary one).
+ */
+export function checkPlanCommentInput(input: unknown): { ok: true; doc: string | null; version: number; annotation: Record<string, unknown> } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { doc?, version, annotation }" };
+  const unknown = Object.keys(input).find((key) => key !== "doc" && key !== "version" && key !== "annotation" && key !== "serverSession");
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  if (input.doc !== undefined && !isPlanId("doc", input.doc)) return { ok: false, error: "doc is a document id (doc_…)" };
+  if (!isPlanVersionNumber(input.version)) return { ok: false, error: "version is a version number" };
+  if (!isObject(input.annotation)) return { ok: false, error: "annotation: an object" };
+  if (!isPlanAnnotationId(input.annotation.id)) return { ok: false, error: "annotation.id: a short id" };
+  if (JSON.stringify(input.annotation).length > PLAN_COMMENT_MAX) return { ok: false, error: `annotation: at most ${PLAN_COMMENT_MAX / 1024} KB` };
+  return { ok: true, doc: (input.doc as string | undefined) ?? null, version: input.version, annotation: input.annotation };
 }
 
 /** The first `# heading` of a markdown document, trimmed; null when it has none. */

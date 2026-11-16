@@ -4,13 +4,13 @@
  * toggle, then Plans / the project / the plan on the main page, Plans / the plan / the file on another), and from
  * 768 px three cards: the frame's left rail with the plan's files (PlanFiles.tsx; its head's quiet line carries the
  * project and the plan's current decision), the frame's page card whose reading line says which version is on screen
- * (or which two are compared) and how many there are, holding the file (a Markdown page in the Inbox's own reader, PlanDocument.tsx; an artifact
+ * (or which two are compared) and how many there are, holding the file (a Markdown page in the Inbox's own file viewer with its toolbars and comments, PlanAnnotate.tsx; a diagram or HTML page in PlanDocument.tsx; an artifact
  * by what it is, PlanArtifactView.tsx), and the frame's versions panel (PlanRail.tsx), open until the person closes
  * it (kept), reopened from the reading line. "Changed since you looked" compares with the version the person had
  * seen of that document when the page opened, and Show changes opens the diff from it to the newest. The address
  * carries the file (`&doc=`, `&file=`); the main page keeps the plan's own address. Short of room the rail gives way
  * first (the frame's sheet, `RailSheet docked={false}`), then the versions open as the frame's sheet; on a phone the
- * frame's sheets carry both. Comments, Send and the plan's thread come later.
+ * frame's sheets carry both. The plan's own Inbox thread comes later.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent, type ReactElement } from 'react';
 import type { PlanDecision, PlanDocument as PlanDocumentRecord, PlanVersion } from '@plannotator/core/plans';
@@ -37,6 +37,7 @@ import { recordPlanLook, useDocVersions, usePlan } from './store';
 import { changedSinceDecision, decisionLabel, decisionTone, PLAN_FILES_WORDS } from './words';
 import { PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
+import { PlanAnnotate } from './PlanAnnotate';
 import { PlanDiffView } from './PlanDiffView';
 import { PlanArtifactView } from './PlanArtifactView';
 import { ArtifactLine, PlanVersions } from './PlanRail';
@@ -411,7 +412,12 @@ function DocLoaded({
             {compare ? (
               <PlanDiffView id={id} from={compare.from} to={compare.to} doc={docRef} kind={document.kind} />
             ) : (
-              <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} phone={phone} />
+              document.kind === 'markdown' ? (
+                // A Markdown page in the Inbox's own file viewer, with its toolbars and comments (PlanAnnotate.tsx); × goes back to Plans.
+                <PlanAnnotate read={read} document={document} docRef={docRef} versions={versions} shown={shown} phone={phone} onClose={toList} />
+              ) : (
+                <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} phone={phone} />
+              )
             )}
           </div>
         </div>

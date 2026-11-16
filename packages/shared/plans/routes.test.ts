@@ -4,6 +4,8 @@
  * - the list, a plan, its versions or one version's bytes cannot be read, or another document's are served;
  * - the diff gets the wrong pair (it must start from the version the person last saw);
  * - a look records a version that does not exist, takes a bad body, or answers a GET;
+ * - a comment is not kept on the version it names, an edit makes a second one, a bad or oversized one is kept, or one
+ *   taken away comes back;
  * - a path that is not a plan id, or a malformed one, crashes instead of answering 4xx;
  * - an artifact is served as something that could run on the Inbox's origin (HTML, SVG), or a path that is not a
  *   recorded artifact (one reaching outside the plan's `files/`) is served at all.
@@ -104,6 +106,31 @@ describe("Plans' routes", () => {
     expect((await call("POST", `/api/plans/${plan.id}/look`, "{ bad"))?.status).toBe(400);
     expect((await call("GET", `/api/plans/${plan.id}/look`))?.status).toBe(405);
     expect((await call("POST", "/api/plans"))?.status).toBe(405);
+  });
+
+  test("a comment is kept on its version, edited in place, read back with the plan and taken away; a bad one is refused", async () => {
+    const { store, plan, doc, call, changes } = world();
+    const v2 = store.versions(plan.id)[1]!;
+    const annotation = { id: "ann-1", blockId: "block-1", type: "COMMENT", text: "Say who owns it.", originalText: "v2" };
+    const saved = await call("POST", `/api/plans/${plan.id}/comments`, { version: 2, annotation, serverSession: "s" });
+    expect(saved?.status).toBe(200);
+    expect(body(saved)!.comment).toMatchObject({ plan_id: plan.id, target: { kind: "document", document_id: doc, document_version: v2.version }, body: "Say who owns it.", state: "open", sent: null, author_via: "person" });
+    expect(changes()).toEqual([plan.id]);
+    // The same annotation again is an edit: one comment, its words new, its id and time kept.
+    const edited = await call("POST", `/api/plans/${plan.id}/comments`, { version: 2, annotation: { ...annotation, text: "Name the owner." } });
+    expect(body(edited)!.comment).toMatchObject({ id: body(saved)!.comment.id, created_at: body(saved)!.comment.created_at, body: "Name the owner." });
+    expect(body(await call("GET", `/api/plans/${plan.id}`))!.comments.map((c: { body: string }) => c.body)).toEqual(["Name the owner."]);
+    // On another version, the same annotation id is refused; so are bad bodies and unknown versions.
+    expect((await call("POST", `/api/plans/${plan.id}/comments`, { version: 3, annotation }))?.status).toBe(409);
+    expect((await call("POST", `/api/plans/${plan.id}/comments`, { version: 9, annotation }))?.status).toBe(404);
+    expect((await call("POST", `/api/plans/${plan.id}/comments`, { version: 2, annotation: { text: "no id" } }))?.status).toBe(400);
+    expect((await call("POST", `/api/plans/${plan.id}/comments`, { version: 2, annotation: { id: "big", text: "x".repeat(140_000) } }))?.status).toBe(400);
+    expect((await call("POST", `/api/plans/${plan.id}/comments`, { version: 2, annotation, extra: 1 }))?.status).toBe(400);
+    expect((await call("GET", `/api/plans/${plan.id}/comments`))?.status).toBe(405);
+    // Taken away: gone from the plan; a second time there is nothing to take.
+    expect((await call("POST", `/api/plans/${plan.id}/comments/ann-1/remove`, {}))?.status).toBe(200);
+    expect(store.comments(plan.id)).toEqual([]);
+    expect((await call("POST", `/api/plans/${plan.id}/comments/ann-1/remove`, {}))?.status).toBe(404);
   });
 
   test("not a plan, an unknown plan, an unknown path or bad encoding answer 4xx", async () => {

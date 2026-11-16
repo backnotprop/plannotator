@@ -13,8 +13,13 @@
  *   GET  /api/plans/:id/diff[?doc=&from=&to=]  the two texts a diff needs: `to` the head unless named, `from` the
  *                                            version the person last saw (else the one before `to`)
  *   POST /api/plans/:id/look                 { doc?, seen? }: the person looked (and saw version `seen`)
+ *   POST /api/plans/:id/comments             { doc?, version, annotation }: the person's comment on a version (new, or
+ *                                            an edit of one not sent), kept as the Inbox keeps a file's comment
+ *   POST /api/plans/:id/comments/:annotation/remove   take that comment away
+ *
+ * `GET /api/plans/:id` carries the kept comments (`comments`).
  */
-import { checkPlanLookInput, isPlanId, isPlanPictureType, isPlanVersionNumber, planMediaType, type PlanVersion } from "@plannotator/core/plans";
+import { checkPlanCommentInput, checkPlanLookInput, isPlanAnnotationId, isPlanId, isPlanPictureType, isPlanVersionNumber, planMediaType, type PlanVersion } from "@plannotator/core/plans";
 import type { PlanStore } from "./store";
 
 export const PLANS_ROUTE_PREFIX = "/api/plans";
@@ -100,7 +105,7 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
   if (!sub) {
     if (method !== "GET") return bad("method not allowed", 405);
     const decisions = read.events.filter((event) => event.kind === "decision").map((event) => event.decision);
-    return { status: 200, body: { plan: read.plan, documents: read.documents, artifacts: read.artifacts, decisions, events: read.events, look } };
+    return { status: 200, body: { plan: read.plan, documents: read.documents, artifacts: read.artifacts, decisions, events: read.events, look, comments: store.comments(id) } };
   }
 
   if (sub === "files" && parts.length >= 3) {
@@ -169,6 +174,43 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
     const recorded = store.recordLook(id, { doc, seen: input.seen });
     deps.changed?.(id);
     return { status: 200, body: { look: recorded } };
+  }
+
+  if (sub === "comments" && parts.length === 2) {
+    if (method !== "POST") return bad("method not allowed", 405);
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return bad("the body must be JSON");
+    }
+    const input = checkPlanCommentInput(body);
+    if (!input.ok) return bad(input.error);
+    const doc = input.doc ?? read.plan.primary_doc_id;
+    if (!read.documents.some((d) => d.id === doc)) return bad(`${id} has no document ${doc}.`, 404);
+    const version = read.versions.find((v) => v.document_id === doc && v.version_number === input.version);
+    if (!version) return bad(`${doc} has no version ${input.version}.`, 404);
+    try {
+      const comment = store.saveComment(id, { document_id: doc, document_version: version.version, annotation: input.annotation, at: new Date().toISOString() });
+      deps.changed?.(id);
+      return { status: 200, body: { comment } };
+    } catch (error) {
+      return bad(error instanceof Error ? error.message : String(error), 409);
+    }
+  }
+
+  if (sub === "comments" && parts.length === 4 && parts[3] === "remove") {
+    if (method !== "POST") return bad("method not allowed", 405);
+    const annotationId = parts[2]!;
+    if (!isPlanAnnotationId(annotationId)) return bad("not an annotation id", 404);
+    try {
+      const comment = store.removeComment(id, annotationId, new Date().toISOString());
+      if (!comment) return bad(`${id} has no comment ${annotationId}.`, 404);
+      deps.changed?.(id);
+      return { status: 200, body: { comment } };
+    } catch (error) {
+      return bad(error instanceof Error ? error.message : String(error), 409);
+    }
   }
 
   return bad("not found", 404);

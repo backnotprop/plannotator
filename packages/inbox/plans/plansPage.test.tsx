@@ -7,6 +7,11 @@
  * - an empty library does not show the get-started screen, or its action does not say how a plan arrives;
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
+ * - a plan's Markdown page stops being the Inbox's own file viewer (AttachmentPane: its header with Download and the
+ *   view switch, the annotation toolstrip, Copy file and Global comment, the comments panel, the contents rail);
+ * - a comment made there is not kept in the plan library, not back after the page opens again, or not taken away;
+ * - Send opens New message with anything but the plan's own agent session and the comments as plan feedback, or is
+ *   not disabled, in the Inbox's words, when no session is known;
  * - a decision on an older version reads as current in the list or the rail head (it must say "changed since");
  * - the page leaves the shared frame (its ground, top bar, rail, page card and versions panel), the reading line's
  *   version words leave its end, or the plan's decision comes back into the reading line or leaves the rail head
@@ -564,15 +569,14 @@ test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, a
   }
 });
 
-test.skipIf(!hasDom)('a plan reads in the Inbox reader: the file pane frame, its 640 px column, and the contents rail in the gutter', async () => {
+test.skipIf(!hasDom)('a plan’s Markdown page is the Inbox’s own file viewer: its header, toolstrip, Copy file, Global comment, comments panel and contents rail', async () => {
   const headings = ['Rotate refresh tokens', 'Context', 'Design', 'Rollout'];
   const id = plan('Rotate refresh tokens', 'harbor-api', [`# ${headings[0]}\n\n## ${headings[1]}\n\nWhy.\n\n## ${headings[2]}\n\nHow.\n\n## ${headings[3]}\n\nWhen.\n`], { seen: 1 });
-  const kept = new Map<string, string>();
-  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  keptStorage();
   // A page wide enough for the rail (happy-dom lays nothing out): the page 900 px, its column 640 px.
   const real = HTMLElement.prototype.getBoundingClientRect;
   HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
-    if (this.hasAttribute('data-plan-document')) return new DOMRect(0, 0, 900, 800);
+    if (this.classList.contains('ib-docscroll')) return new DOMRect(0, 0, 900, 800);
     if (this.hasAttribute('data-doc-text-root')) return new DOMRect(130, 0, 640, 2000);
     return real.call(this);
   };
@@ -580,20 +584,117 @@ test.skipIf(!hasDom)('a plan reads in the Inbox reader: the file pane frame, its
     window.location.hash = `#plans=${id}`;
     const host = draw();
     await settle();
-    // The reader's own frame (components/AttachmentPane.tsx): `.ib-docscroll`, the Clean look on the card colour.
-    const page = host.querySelector<HTMLElement>('[data-plan-document]')!;
-    expect(page.matches('.ib-docscroll.bg-card[data-look="clean"]')).toBe(true);
+    // The pane a Markdown file opens in beside a thread (components/AttachmentPane.tsx), its file this version.
+    const pane = host.querySelector<HTMLElement>('[data-plan-annotate] section.ib-view[data-attachment-pane]')!;
+    expect(pane).not.toBeNull();
+    expect(text(pane.querySelector('.ib-vhead [data-header-name]'))).toBe('Rotate refresh tokens.md');
+    expect(pane.querySelector('.ib-vhead [data-attachment-download]')!.getAttribute('href')).toBe(`/api/plans/${id}/versions/1`);
+    expect(pane.querySelector('.ib-vhead [data-view-switch] [data-full-screen-toggle]')).not.toBeNull();
+    // Its annotation toolstrip, and the Viewer's own header: Copy file and Global comment.
+    expect(pane.querySelector('.ib-toolstrip')?.querySelectorAll('button').length).toBeGreaterThan(1);
+    expect([...pane.querySelectorAll('button')].some((b) => text(b) === 'Copy file')).toBe(true);
+    expect(pane.querySelector('button[title="Add global comment"]')).not.toBeNull();
+    // The reader's frame: `.ib-docscroll`, the Clean look on the card colour; the comments panel beside it.
+    const page = pane.querySelector<HTMLElement>('.ib-docscroll.bg-card[data-look="clean"]')!;
+    expect(page).not.toBeNull();
+    expect(text(page)).toContain('How.');
+    expect(pane.querySelector('.ib-apanel')).not.toBeNull();
     for (let i = 0; i < 4; i++) {
       await act(async () => {
         window.dispatchEvent(new Event('resize'));
         await new Promise((r) => setTimeout(r, 60));
       });
     }
-    // The column keeps the rail's gutter, and the rail lists the headings.
-    expect(page.hasAttribute('data-contents-gutter')).toBe(true);
+    // The contents rail lists the headings.
     expect([...host.querySelectorAll('.pn-contents-rail .pn-contents-rail-label')].map(text)).toEqual(headings);
   } finally {
     HTMLElement.prototype.getBoundingClientRect = real;
+  }
+});
+
+/** Add a global comment through the Viewer's own button and composer, as the person does. */
+async function globalComment(host: Element, words: string) {
+  act(() => host.querySelector<HTMLButtonElement>('button[title="Add global comment"]')!.click());
+  await settle();
+  const area = document.querySelector<HTMLTextAreaElement>('[data-comment-popover] textarea')!;
+  const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(area), 'value')!.set!;
+  await act(async () => {
+    setter.call(area, words);
+    area.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => {
+    area.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
+  });
+  await settle();
+}
+
+test.skipIf(!hasDom)('a comment on a plan is kept in the plan library, is back when the page opens again, and is taken away from the panel', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+  keptStorage();
+  window.location.hash = `#plans=${id}`;
+  let host = draw();
+  await settle();
+  await globalComment(host, 'Say who owns the rollout.');
+  // Kept by the real route in the library, on this version, as the viewer made it.
+  const kept = store.comments(id);
+  expect(kept.map((c) => c.body)).toEqual(['Say who owns the rollout.']);
+  expect(kept[0]!.target).toEqual({ kind: 'document', document_id: store.read(id)!.plan.primary_doc_id, document_version: store.versions(id)[0]!.version });
+  const card = () => host.querySelector(`.ib-apanel [data-annotation-id="${(kept[0]!.anchor as { id: string }).id}"]`);
+  expect(text(card())).toContain('Say who owns the rollout.');
+  // The page again, from the library alone.
+  act(() => root!.unmount());
+  unlisten();
+  document.body.innerHTML = '';
+  resetPlansForTests(null, true);
+  host = draw();
+  await settle();
+  expect(text(card())).toContain('Say who owns the rollout.');
+  // Taken away from its card: gone from the library too.
+  const remove = [...card()!.querySelectorAll<HTMLButtonElement>('button')].find((b) => /delete|remove/i.test(`${b.getAttribute('aria-label') ?? ''} ${b.title}`))!;
+  act(() => remove.click());
+  await settle();
+  expect(store.comments(id)).toEqual([]);
+  expect(card()).toBeNull();
+});
+
+test.skipIf(!hasDom)('Send opens New message to the plan’s own agent session with the comments as plan feedback; with no session it is disabled and says why', async () => {
+  const quiet = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+  const { plan: record, document: doc } = store.createPlan({ name: 'Rate limits', project_name: 'harbor-api', created_at: at(1), document: { title: 'Rate limits' } });
+  store.addVersion(record.id, doc.id, { bytes: bytes('# Rate limits\n\nA token bucket per key.\n'), committed_at: at(2), source: 'plan-review', agent_session: 'sess-42', agent_host: 'claude-code' });
+  keptStorage();
+  const opened: unknown[] = [];
+  const listen = (event: Event) => opened.push((event as CustomEvent).detail);
+  window.addEventListener('plannotator-inbox:open-composer', listen);
+  try {
+    window.location.hash = `#plans=${quiet}`;
+    let host = draw();
+    await settle();
+    const button = () => host.querySelector<HTMLButtonElement>('[data-plan-send-button]')!;
+    // No session known: disabled, in the Inbox's words for a project with no live agent.
+    await globalComment(host, 'Shorter.');
+    expect(button().disabled).toBe(true);
+    expect(text(host.querySelector(`#${button().getAttribute('aria-describedby')}`))).toBe('No agent is running in harbor-api');
+    act(() => root!.unmount());
+    unlisten();
+    document.body.innerHTML = '';
+    window.location.hash = `#plans=${record.id}`;
+    host = draw();
+    await settle();
+    // Nothing to send yet.
+    expect(button().disabled).toBe(true);
+    await globalComment(host, 'Name the limit per tenant.');
+    expect(button().disabled).toBe(false);
+    expect(text(host.querySelector(`#${button().getAttribute('aria-describedby')}`))).toBe('1 annotation rides your next Send to Claude Code.');
+    await act(async () => button().click());
+    await settle();
+    expect(opened).toHaveLength(1);
+    const prefill = opened[0] as { subject: string; body: string; to: { session: string } };
+    expect(prefill.to).toEqual({ session: 'sess-42' });
+    expect(prefill.subject).toBe('Rate limits');
+    expect(prefill.body).toContain('# Plan Feedback');
+    expect(prefill.body).toContain('Name the limit per tenant.');
+  } finally {
+    window.removeEventListener('plannotator-inbox:open-composer', listen);
   }
 });
 

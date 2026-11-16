@@ -11,7 +11,8 @@
  *     events.jsonl             decisions and activity
  *     artifacts.jsonl          its artifacts (`{ kind: "artifact", record }`, the last line per path wins)
  *     files/<asset_path>       each artifact's bytes
- *     comments.jsonl           (later: comments and replies)
+ *     comments.jsonl           the person's comments (`{ kind: "comment", record }`, the last line per annotation id
+ *                              wins; `{ kind: "removed", annotation_id, at }` takes one away)
  *
  * The Inbox store's rules (packages/shared/inbox/store-log/jsonl-log.ts): one writer (the Inbox server; the CLI only
  * reads), every change appends ONE line in a single append-mode write, a line that does not parse is skipped on read
@@ -29,6 +30,7 @@ import { join } from "node:path";
 import {
   gitBlobSha,
   isPlanArtifact,
+  isPlanComment,
   isPlanAssetPath,
   isPlanDocument,
   isPlanEvent,
@@ -37,9 +39,11 @@ import {
   isPlanRecord,
   isPlanVersion,
   NO_ACTOR,
+  planCommentAnnotationId,
   planId,
   type PlanActor,
   type PlanArtifact,
+  type PlanComment,
   type PlanDocument,
   type PlanDocumentKind,
   type PlanEvent,
@@ -61,6 +65,7 @@ const PLAN_FILE = "plan.jsonl";
 const DOCS_FILE = "docs.jsonl";
 const EVENTS_FILE = "events.jsonl";
 const ARTIFACTS_FILE = "artifacts.jsonl";
+const COMMENTS_FILE = "comments.jsonl";
 const FILES_DIR = "files";
 
 const EXT: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot" };
@@ -150,6 +155,15 @@ export interface NewArtifactInput {
   created_at: string;
 }
 
+export interface NewCommentInput {
+  document_id: string;
+  /** The version's blob SHA. */
+  document_version: string;
+  /** Plannotator's `Annotation`, as the viewer made it (its `id` is the comment's key). */
+  annotation: Record<string, unknown>;
+  at: string;
+}
+
 export interface PlanStore {
   readonly root: string;
   /** The library folder exists (something was ever written). */
@@ -175,6 +189,12 @@ export interface PlanStore {
   /** Keep a file as an artifact (bytes, then its line). Nothing calls it but tests and a sandbox seed: no route, no tool. */
   addArtifact(id: string, input: NewArtifactInput): PlanArtifact;
   addEvent(id: string, event: Omit<PlanEvent, "id" | "plan_id"> & { id?: string }): PlanEvent;
+  /** The person's comments still kept (the last line per annotation id; a removed one is gone), oldest first. */
+  comments(id: string): PlanComment[];
+  /** Keep a comment, new or an edit of one not sent yet (the same annotation id on the same version): one line. */
+  saveComment(id: string, input: NewCommentInput): PlanComment;
+  /** Take a comment away by its annotation's id: one line. The comment it was, or null when there is none. */
+  removeComment(id: string, annotationId: string, at: string): PlanComment | null;
   /** The plan record changed (its name): one more snapshot line. */
   updatePlan(id: string, change: Partial<Pick<PlanRecord, "name" | "note" | "status" | "thread_id" | "legacy">>, at?: string): PlanRecord;
   /** Append an index line for every plan whose last one is missing or behind its files (a crash between writes); how many. */
@@ -249,6 +269,8 @@ function readJson(path: string): unknown {
   }
 }
 
+type CommentsLine = { kind: "comment"; record: unknown } | { kind: "removed"; annotation_id: unknown; at: unknown };
+const isCommentsLine = (value: unknown): value is CommentsLine => !!value && typeof value === "object" && ((value as { kind?: unknown }).kind === "comment" || (value as { kind?: unknown }).kind === "removed");
 const isArtifactsLine = (value: unknown): value is { kind: "artifact"; record: unknown } => !!value && typeof value === "object" && (value as { kind?: unknown }).kind === "artifact";
 
 const isDocsLine = (value: unknown): value is { kind: "document" | "version"; record: unknown } =>
@@ -296,6 +318,20 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
     const byPath = new Map<string, PlanArtifact>();
     for (const line of readLines(join(folder(id), ARTIFACTS_FILE), isArtifactsLine)) if (isPlanArtifact(line.record)) byPath.set(line.record.asset_path, line.record);
     return [...byPath.values()].sort((a, b) => a.asset_path.localeCompare(b.asset_path));
+  };
+
+  /** The plan's kept comments, the last line per annotation id, oldest first. */
+  const commentsOf = (id: string): PlanComment[] => {
+    if (!isPlanId("pln", id)) return [];
+    const byAnnotation = new Map<string, PlanComment>();
+    for (const line of readLines(join(folder(id), COMMENTS_FILE), isCommentsLine)) {
+      if (line.kind === "removed") {
+        if (typeof line.annotation_id === "string") byAnnotation.delete(line.annotation_id);
+      } else if (isPlanComment(line.record) && line.record.plan_id === id) {
+        byAnnotation.set(planCommentAnnotationId(line.record)!, line.record);
+      }
+    }
+    return [...byAnnotation.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
   };
 
   const eventsOf = (id: string): PlanEvent[] =>
@@ -557,6 +593,49 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       appendLine(join(folder(id), EVENTS_FILE), event);
       appendIndex(id);
       return event;
+    },
+
+    comments: commentsOf,
+
+    saveComment(id, input) {
+      const plan = planOf(id);
+      if (!plan) throw new Error(`No plan ${id}.`);
+      if (!docsOf(id).versions.some((v) => v.document_id === input.document_id && v.version === input.document_version)) {
+        throw new Error(`Plan ${id} has no version ${input.document_version} of ${input.document_id}.`);
+      }
+      const annotationId = planCommentAnnotationId({ anchor: input.annotation });
+      if (!annotationId) throw new Error("A comment needs its annotation's id.");
+      const existing = commentsOf(id).find((c) => planCommentAnnotationId(c) === annotationId);
+      if (existing && existing.target.kind === "document" && (existing.target.document_id !== input.document_id || existing.target.document_version !== input.document_version)) {
+        throw new Error("That annotation id is already on another version.");
+      }
+      if (existing?.sent) throw new Error("That comment was already sent.");
+      const text = input.annotation.text;
+      const comment: PlanComment = {
+        ...NO_ACTOR,
+        author_via: "person",
+        id: existing?.id ?? planId("anno", Date.parse(input.at) || undefined),
+        plan_id: id,
+        target: { kind: "document", document_id: input.document_id, document_version: input.document_version },
+        anchor: input.annotation,
+        body: typeof text === "string" ? text : "",
+        state: "open",
+        created_at: existing?.created_at ?? input.at,
+        sent: null,
+      };
+      if (!isPlanComment(comment)) throw new Error("Not a plan comment.");
+      ensureDir(folder(id));
+      appendLine(join(folder(id), COMMENTS_FILE), { kind: "comment", record: comment });
+      return comment;
+    },
+
+    removeComment(id, annotationId, at) {
+      if (!planOf(id)) throw new Error(`No plan ${id}.`);
+      const existing = commentsOf(id).find((c) => planCommentAnnotationId(c) === annotationId);
+      if (!existing) return null;
+      if (existing.sent) throw new Error("That comment was already sent.");
+      appendLine(join(folder(id), COMMENTS_FILE), { kind: "removed", annotation_id: annotationId, at });
+      return existing;
     },
 
     updatePlan(id, change, when) {

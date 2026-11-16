@@ -403,8 +403,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // that cannot load is drawn as its alt text, as in a message body (Thread.tsx).
   const imageBaseDir = inboxMarkdownImageBase(attachment.id, effectiveVersion);
   const resolveImage = useCallback<ImageResolver>(
-    (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),
-    [imageBaseDir],
+    (src) => source.markdownImage?.(src) ?? { kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) },
+    [imageBaseDir, source],
   );
   // Data and log files are drawn as code (inboxViewKind).
   const kind = inboxViewKind(attachment.kind, attachment.name);
@@ -1393,8 +1393,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   followLinkRef.current = followLink;
   // Stable across renders: ui's HtmlBlock redraws a raw HTML block whenever its link resolver changes.
   const resolveFileLink = useCallback<LocalLinkResolver>(
-    (href) => ({ kind: 'open', open: () => followLinkRef.current(href, pageFolder) }),
-    [pageFolder],
+    (href) => source.markdownLink?.(href) ?? { kind: 'open', open: () => followLinkRef.current(href, pageFolder) },
+    [pageFolder, source],
   );
   const linkedPath = linkedTop?.path ?? null;
   const openFromLinked = useCallback((href: string) => {
@@ -1416,7 +1416,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const annotations = useMemo(() => fileRecords.map(annotationOf), [fileRecords]);
   // The document's blocks keep their identity across saves (the Viewer re-renders on a new array);
   // only code comments, which carry their own lines, derive blocks from the annotations.
-  const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
+  const documentBlocks = useMemo(() => (view && !isCode ? (source.textBlocks ?? attachmentBlocks)(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name, source]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
   // The file's question cards, answerable like the body's (issue #2828).
