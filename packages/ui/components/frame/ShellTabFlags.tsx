@@ -7,16 +7,19 @@ function Flag({
   title,
   ariaLabel,
   onClick,
+  autoFocus,
   children,
 }: {
   title: string;
   ariaLabel: string;
   onClick: () => void;
+  autoFocus: boolean;
   children: ReactNode;
 }) {
   return (
     <button
       type="button"
+      autoFocus={autoFocus}
       onClick={onClick}
       title={title}
       aria-label={ariaLabel}
@@ -39,10 +42,10 @@ function Flag({
   );
 }
 
-export function ShellTabFlags({ onOpenFiles }: { onOpenFiles: () => void }) {
+export function ShellTabFlags({ onOpenFiles, autoFocus = false }: { onOpenFiles: () => void; autoFocus?: boolean }) {
   return (
     <div data-rail-flags="" className="relative z-20 hidden w-7 shrink-0 flex-col gap-1 pt-3 md:flex">
-      <Flag title="Files" ariaLabel="Show files" onClick={onOpenFiles}>
+      <Flag title="Files" ariaLabel="Show files" onClick={onOpenFiles} autoFocus={autoFocus}>
         <path
           strokeLinecap="round"
           strokeLinejoin="round"

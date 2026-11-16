@@ -210,6 +210,53 @@ describe.skipIf(!hasDom)('DocumentRailShell', () => {
     expect(frame.querySelector('[role="separator"]')!.getAttribute('aria-valuenow')).toBe('400');
   });
 
+  async function withReducedMotion(run: () => Promise<void>) {
+    const original = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query.includes('reduce'),
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    })) as unknown as typeof window.matchMedia;
+    try {
+      await run();
+    } finally {
+      window.matchMedia = original;
+    }
+  }
+
+  test('Enter on the edge collapses the rail and focus moves to the tab, not the page', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const frame = mount(
+        <DocumentRailShell head={head} defaults={{ open: true }} storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>,
+      );
+      const edge = frame.querySelector<HTMLElement>('[role="separator"]')!;
+      act(() => edge.focus());
+      press(edge, 'Enter');
+      await act(async () => {});
+      expect(frame.querySelector('[data-document-rail]')).toBeNull();
+      expect(document.activeElement).toBe(frame.querySelector('[aria-label="Show files"]'));
+    }));
+
+  test('the Show files tab opens the rail and focus moves into it', () =>
+    withReducedMotion(async () => {
+      const { DocumentRailShell } = shellModule!;
+      const frame = mount(
+        <DocumentRailShell head={<button type="button">Filter</button>} defaults={{ open: false }} storage={memoryStorage()}>
+          rows
+        </DocumentRailShell>,
+      );
+      const tab = frame.querySelector<HTMLButtonElement>('[aria-label="Show files"]')!;
+      act(() => tab.focus());
+      act(() => tab.click());
+      await act(async () => {});
+      expect(frame.querySelector('[aria-label="Show files"]')).toBeNull();
+      expect(document.activeElement?.textContent).toBe('Filter');
+    }));
+
   test('a rail that does not fit says so, and the rail sheet is then offered at a desktop width', () => {
     const { DocumentRailShell } = shellModule!;
     const { RailSheet } = sheetModule!;
