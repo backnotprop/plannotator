@@ -848,6 +848,8 @@ test.skipIf(!hasDom)('Done makes a new version of the person’s words and sends
   expect(words.startsWith('# Direct Edits')).toBe(true);
   expect(words).toContain('-Retire keys after 7 days.\n+Retire keys after 3 days.');
   expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v3. The agent was sent what changed.');
+  // The person saw v2 when the page opened; v3 is their own, so it is not "Changed since you looked".
+  expect(host.querySelector('[data-plan-banner="changed"]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('a newer version that came while editing: nothing is saved, the newest shows, and the person’s text is kept to edit again', async () => {

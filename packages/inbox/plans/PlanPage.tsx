@@ -329,7 +329,10 @@ function DocLoaded({
 }) {
   const head = versions[versions.length - 1]!.version_number;
   // What the person had seen of this document when the page opened: the look recorded below must not move it.
-  const [seenAtOpen] = useState<number | null>(() => read.look?.docs[document.id] ?? null);
+  // The person's own version (an edit or a Restore, always made on the newest) is seen by making it.
+  const [lookedAtOpen] = useState<number | null>(() => read.look?.docs[document.id] ?? null);
+  const ownLast = versions.reduce((n, v) => (v.source === 'person' ? Math.max(n, v.version_number) : n), 0);
+  const seenAtOpen = lookedAtOpen === null ? null : Math.max(lookedAtOpen, ownLast);
   const known = (n: number | null | undefined) => !!n && versions.some((v) => v.version_number === n);
   const compare = diff && known(diff.from) && known(diff.to) ? { from: Math.min(diff.from, diff.to), to: Math.max(diff.from, diff.to) } : null;
   const shown = compare ? compare.to : known(version) ? version! : head;
