@@ -6,6 +6,7 @@ import { imageReferenceIndex, imageSourceLine, regionOf } from './ImageRegions';
 import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode, type HostDraft } from '../types';
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
+import { documentOpenInLine } from '../utils/openInLine';
 import { useFenceTheme } from '../hooks/useFenceTheme';
 import { computeListIndices, extractFrontmatter, groupBlocks, selectionSourceLines, type Frontmatter, type FrontmatterValue } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
@@ -1030,6 +1031,17 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
   };
   const containerRef = useRef<HTMLDivElement>(null);
+  // "Open in" opens the document's file at the picked comment's line, else the
+  // selected text's, read at the click (documentOpenInLine). A plan diff view's
+  // blocks are not the file's lines, so it sends none.
+  const openInLineRef = useRef({ blocks, annotations, selectedAnnotationId, isPlanDiffActive });
+  openInLineRef.current = { blocks, annotations, selectedAnnotationId, isPlanDiffActive };
+  const openInAppLine = useCallback((): number | undefined => {
+    const now = openInLineRef.current;
+    if (now.isPlanDiffActive) return undefined;
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    return documentOpenInLine(containerRef.current, now.blocks, now.annotations, now.selectedAnnotationId, selection);
+  }, []);
   // The element that actually scrolls; shared by the Vim scroll math, the
   // sticky-header observer, and the reticle geometry.
   const scrollViewport = useScrollViewport();
@@ -1987,6 +1999,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               linkedDocInfo={linkedDocInfo}
               sourceInfo={sourceInfo}
               openInAppPath={openInAppPath}
+              openInAppLine={openInAppLine}
             />
           </div>
         )}
@@ -2013,6 +2026,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               linkedDocInfo,
               sourceInfo,
               openInAppPath,
+              openInAppLine,
             }}
             actions={documentActions}
           />
