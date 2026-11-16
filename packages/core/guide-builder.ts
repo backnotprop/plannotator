@@ -162,7 +162,9 @@ export function parseGuideDraft(input: unknown): GuideDraftParseResult {
     if (c.diagram !== undefined && !isDraftDiagram(c.diagram)) return bad(`The diagram of chapter ${c.id} is malformed.`);
     for (const f of c.files) {
       if (!isRecord(f) || typeof f.file !== "string" || typeof f.summary !== "string") return bad(`A file in chapter ${c.id} is malformed.`);
-      if (f.focus !== undefined && !Array.isArray(f.focus)) return bad(`The focus of ${f.file} is malformed.`);
+      if (f.focus !== undefined && (!Array.isArray(f.focus) || !f.focus.every(isDraftFocusRange))) {
+        return bad(`The focus of ${f.file} is malformed.`);
+      }
     }
   }
   if (!Array.isArray(value.unplaced) || value.unplaced.some((u) => !isRecord(u) || typeof u.file !== "string")) {
@@ -175,6 +177,15 @@ export function parseGuideDraft(input: unknown): GuideDraftParseResult {
 
 function isRecord(value: unknown): value is Record<string, any> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isDraftFocusRange(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  const { hunk, start, end } = value;
+  if (hunk !== undefined) {
+    return Number.isInteger(hunk) && hunk >= 1 && start === undefined && end === undefined;
+  }
+  return Number.isInteger(start) && Number.isInteger(end) && start >= 1 && end >= start;
 }
 
 function isDraftDiagram(value: unknown): boolean {

@@ -612,6 +612,27 @@ describe("drafts serialize and resume", () => {
     expect(parseGuideDraft({ ...d, review: { gitRef: "x" } })).toMatchObject({ ok: false });
   });
 
+  test("rejects invalid stored focus entries before a guide can resume", async () => {
+    const draft = ok(await guidePlaceFile(await twoChapters(), {
+      file: "src/webhooks/deliver.ts",
+      chapter: "c1",
+      summary: "Use the retry budget.",
+      focus: [{ start: 2, end: 3 }, { hunk: 2 }],
+    }, hooks));
+    const serialized = serializeGuideDraft(draft);
+    const original = parseGuideDraft(serialized);
+    if (!original.ok) throw new Error(original.error);
+    expect((await guideRead(original.draft)).text).toContain("L2-L3, hunk 2");
+
+    for (const invalid of [null, 1, { hunk: 0 }, { start: 3, end: 2 }, { hunk: 1, start: 2, end: 3 }]) {
+      const stored = JSON.parse(serialized);
+      stored.chapters[0].files[0].focus.push(invalid);
+      const result = parseGuideDraft(JSON.stringify(stored));
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.error).toMatch(/focus.*deliver\.ts/);
+    }
+  });
+
   test("operations never mutate their input", async () => {
     const d = await twoChapters();
     const before = serializeGuideDraft(d);
