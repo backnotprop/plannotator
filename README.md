@@ -74,10 +74,6 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
 </tr>
 </table>
 
-<p align="center">
-  <sub><strong>AI built in:</strong> ask AI about anything you're reviewing,<br/>or launch AI reviews that post comments to the diff.</sub>
-</p>
-
 ## Plannotator Inbox
 
 <p align="center">
@@ -166,6 +162,12 @@ plannotator sessions                   # List active Plannotator sessions
 plannotator sessions --open 1          # Reopen a session in the browser
 plannotator archive                    # Browse saved plan decisions read-only
 ```
+
+---
+
+## AI built in
+
+Ask AI about anything you're reviewing, or launch AI reviews that post comments to the diff.
 
 ---
 
