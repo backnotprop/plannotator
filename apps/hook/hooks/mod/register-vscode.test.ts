@@ -49,6 +49,8 @@ const PANEL_HOSTS = [PANEL, ORCA]
 const T3 = { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001' }
 /** How the engine raises `session.start` for an Agent SDK host, the VS Code extension's included. */
 const SDK_START = { isInteractive: false, surface: null, cwd: '/w' }
+/** How the engine raises `session.start` for a person at Claude Code's own prompt. */
+const TERMINAL_START = { isInteractive: true, surface: 'terminal', cwd: '/w' }
 const REPLY = { type: 'reply', id: 'msg_reply', thread_id: 'msg_1', reply_to: 'msg_1', subject: 'Ship it?', body: 'Yes, after the freeze.', url: `http://localhost:${PORT}/#thread=msg_1` }
 
 /** The tools T3's own MCP server gives a thread's Claude, a few seconds after it starts. */
@@ -208,10 +210,10 @@ function engine(
 
 const pass = (e: unknown) => e
 
-async function started(name: string, env: Record<string, string>, options: Parameters<typeof engine>[1] = {}) {
+async function started(name: string, env: Record<string, string>, options: Parameters<typeof engine>[1] = {}, start: typeof SDK_START | typeof TERMINAL_START = SDK_START) {
   const hook = await freshHooks(name)
   const world = engine(env, options)
-  await hook('session.start')(world.$, SDK_START, async () => ({ cwd: '/w' }))
+  await hook('session.start')(world.$, start, async () => ({ cwd: '/w' }))
   await settle()
   return { hook, world }
 }
@@ -299,17 +301,51 @@ describe('ExitPlanMode in a panel host', () => {
     expect(launched(world, 'claude-mod-plan')).toBe(false)
   })
 
-  // Claude Code runs the plugin's classic command hook whatever a module answers: the session's environment, which
-  // that hook process inherits, is what turns it off (the process test below runs the real hook with it).
-  test.each<[string, Record<string, string>, string | undefined, { listed?: string[] }]>([
-    ['Orca', ORCA, '0', {}],
-    ['a T3 thread', T3, '0', { listed: T3_OWN_TOOLS }],
-    ['the VS Code panel', PANEL, undefined, {}],
-    ['claude -p', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, undefined, {}],
-    ['claude -p from Claude\'s Bash in an Orca session', { ...ORCA, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }, undefined, {}],
-  ])("%s: the session's hooks get PLANNOTATOR_PLAN_REVIEW=%p", async (name, env, value, options) => {
-    const { world } = await started(`plan-env-${name.replace(/[^a-z0-9]+/gi, '-')}`, env, options)
-    expect(world.env.get('PLANNOTATOR_PLAN_REVIEW')).toBe(value)
+  // When the mod passes ExitPlanMode on, Claude Code runs the plugin's classic command hook: the session's
+  // environment, which that hook process inherits, is what turns it off (the process test below runs the real hook).
+  const OWN_MARK = `claude-code:${SESSION}`
+  test.each<[string, Record<string, string>, string | undefined, string | undefined, { listed?: string[] }, boolean]>([
+    ['Orca', ORCA, '0', OWN_MARK, {}, false],
+    // Sorted headless (an inherited tag, a nested run), still under Orca's card.
+    ['Orca started from a Claude Code shell (another session\'s tag)', { ...ORCA, PLANNOTATOR_SESSION_TAG: 'claude-code:other' }, '0', OWN_MARK, {}, false],
+    ['claude -p from Claude\'s Bash in an Orca session', { ...ORCA, CLAUDECODE: '1', CLAUDE_CODE_CHILD_SESSION: '1' }, '0', OWN_MARK, {}, false],
+    ['a T3 thread', T3, undefined, undefined, { listed: T3_OWN_TOOLS }, false],
+    ['the VS Code panel', PANEL, undefined, undefined, {}, false],
+    ['claude -p', { CLAUDE_CODE_ENTRYPOINT: 'sdk-cli' }, undefined, undefined, {}, false],
+    ['no entrypoint', {}, undefined, undefined, {}, false],
+    ['the terminal', {}, undefined, undefined, {}, true],
+  ])("%s: the session's hooks get PLANNOTATOR_PLAN_REVIEW=%p, marked %p", async (name, env, value, mark, options, interactive) => {
+    const { world } = await started(`plan-env-${name.replace(/[^a-z0-9]+/gi, '-')}`, env, options, interactive ? TERMINAL_START : SDK_START)
+    expect([world.env.get('PLANNOTATOR_PLAN_REVIEW'), world.env.get('PLANNOTATOR_PLAN_REVIEW_SET_BY')]).toEqual([value, mark])
+  })
+
+  // An Orca session's `0` reaches whatever it starts (a review server, the Inbox, an "Open in" terminal, a tmux
+  // server); a terminal Claude Code started from one of those must still review plans.
+  test.each<[string, Record<string, string>, typeof SDK_START | typeof TERMINAL_START]>([
+    ['the terminal', {}, TERMINAL_START],
+    ['the VS Code panel', PANEL, SDK_START],
+  ])("%s inheriting another session's marked 0: plan review on, and both variables cleared", async (name, env, start) => {
+    const inherited = { ...env, PLANNOTATOR_PLAN_REVIEW: '0', PLANNOTATOR_PLAN_REVIEW_SET_BY: 'claude-code:the-orca-session' }
+    const { hook, world } = await started(`plan-inherited-${name.replace(/[^a-z0-9]+/gi, '-')}`, inherited, {}, start)
+    expect([world.env.get('PLANNOTATOR_PLAN_REVIEW'), world.env.get('PLANNOTATOR_PLAN_REVIEW_SET_BY')]).toEqual(['', ''])
+    const below = (e: unknown) => ({ passed: e })
+    expect(await hook('tool.call')(world.$, { tool: 'ExitPlanMode', tool_use_id: 'toolu_plan', plan: '# Plan\n' }, below)).not.toMatchObject({ passed: expect.anything() })
+    expect(launched(world, 'claude-mod-plan')).toBe(true)
+  })
+
+  test("the terminal with the person's own PLANNOTATOR_PLAN_REVIEW=0 (no marker): respected, nothing cleared", async () => {
+    const { hook, world } = await started('plan-own-off', { PLANNOTATOR_PLAN_REVIEW: '0' }, {}, TERMINAL_START)
+    expect([world.env.get('PLANNOTATOR_PLAN_REVIEW'), world.env.get('PLANNOTATOR_PLAN_REVIEW_SET_BY')]).toEqual(['0', undefined])
+    const below = (e: unknown) => ({ passed: e })
+    expect(await hook('tool.call')(world.$, { tool: 'ExitPlanMode', tool_use_id: 'toolu_plan', plan: '# Plan\n' }, below)).toMatchObject({ passed: { tool: 'ExitPlanMode' } })
+  })
+
+  test.each<[string, string, string | undefined]>([
+    ['an explicit PLANNOTATOR_PLAN_REVIEW=1', '1', undefined],
+    ['the person\'s own PLANNOTATOR_PLAN_REVIEW=off (no marker)', 'off', undefined],
+  ])("Orca with %s: the person's value stays, unmarked", async (_name, value, mark) => {
+    const { world } = await started(`orca-own-${value}`, { ...ORCA, PLANNOTATOR_PLAN_REVIEW: value })
+    expect([world.env.get('PLANNOTATOR_PLAN_REVIEW'), world.env.get('PLANNOTATOR_PLAN_REVIEW_SET_BY')]).toEqual([value, mark])
   })
 
   test("Orca: the non-blocking code review stays the mod's (the command and Claude's Bash `plannotator review`)", async () => {
@@ -714,8 +750,8 @@ describe("which process is a T3 thread: the one with T3's t3-code tools", () => 
 /**
  * The plugin's classic plan hook (hooks.json: PermissionRequest on ExitPlanMode runs `plannotator`), run as Claude Code
  * runs it: a process with the session's environment, which holds what the mod set. Claude Code runs it in an Orca
- * session whatever the mod answers (a real Orca run opened a Plannotator review beside Orca's card). Temp HOME and data
- * dir; no browser; no Inbox.
+ * session once the mod passes ExitPlanMode on (a real Orca run opened a Plannotator review beside Orca's card). Temp
+ * HOME and data dir; no browser; no Inbox.
  */
 describe("the plugin's classic plan hook, in the environment the mod leaves the session", () => {
   const entry = resolve(import.meta.dir, '../../server/index.ts')
@@ -729,7 +765,7 @@ describe("the plugin's classic plan hook, in the environment the mod leaves the 
     for (const root of roots) rmSync(root, { recursive: true, force: true })
   })
 
-  async function classicPlanHook(sessionEnv: Map<string, string>, timeoutMs: number) {
+  async function classicPlanHook(sessionEnv: Map<string, string>, timeoutMs: number, sessionId = SESSION) {
     const root = realpathSync(mkdtempSync(join(tmpdir(), 'plannotator-host-plan-card-')))
     roots.push(root)
     const dataDir = join(root, 'data')
@@ -750,7 +786,7 @@ describe("the plugin's classic plan hook, in the environment the mod leaves the 
       PLANNOTATOR_AI: 'disabled',
       PLANNOTATOR_SHARE: 'disabled',
     })
-    const payload = { session_id: SESSION, transcript_path: '/nowhere/transcript.jsonl', cwd: '/w', permission_mode: 'plan', hook_event_name: 'PermissionRequest', tool_name: 'ExitPlanMode', tool_input: { plan: '# Ship it\n\n1. Do the thing.\n' } }
+    const payload = { session_id: sessionId, transcript_path: '/nowhere/transcript.jsonl', cwd: '/w', permission_mode: 'plan', hook_event_name: 'PermissionRequest', tool_name: 'ExitPlanMode', tool_input: { plan: '# Ship it\n\n1. Do the thing.\n' } }
     const proc = Bun.spawn([process.execPath, 'run', entry], { cwd: root, stdin: new TextEncoder().encode(JSON.stringify(payload)), stdout: 'pipe', stderr: 'pipe', env })
     const timer = setTimeout(() => proc.kill(), timeoutMs)
     const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited])
@@ -759,16 +795,22 @@ describe("the plugin's classic plan hook, in the environment the mod leaves the 
     return { stdout, stderr, code, sessions: existsSync(sessions) ? readdirSync(sessions) : [] }
   }
 
-  test.each<[string, Record<string, string>, { listed?: string[] }]>([
-    ['Orca', ORCA, {}],
-    ['a T3 thread', T3, { listed: T3_OWN_TOOLS }],
-  ])('%s: it opens nothing and exits 0 with no decision, so the host\'s own plan card decides', async (name, sessionEnv, options) => {
-    const { world } = await started(`classic-plan-${name.replace(/[^a-z0-9]+/gi, '-')}`, sessionEnv, options)
+  test("Orca: it opens nothing and exits 0 with no decision, so Orca's own plan card decides", async () => {
+    const { world } = await started('classic-plan-orca', ORCA)
     const run = await classicPlanHook(world.env, 20_000)
     expect(run.code).toBe(0)
     expect(run.stdout).toBe('')
     expect(run.stderr).not.toContain('http://')
     expect(run.sessions).toEqual([])
+  }, 30_000)
+
+  // A Claude Code with no mod to clear it (the mod off, an older Claude Code) started from something the Orca session
+  // started: its own hook, with the Orca session's marked 0 in its environment, still opens the review.
+  test("the Orca session's marked 0 in another session's hook: the review opens", async () => {
+    const { world } = await started('classic-plan-orca-elsewhere', ORCA)
+    const run = await classicPlanHook(world.env, 6_000, 'a-terminal-session')
+    expect(run.stdout).toBe('')
+    expect(run.stderr).toContain('http://')
   }, 30_000)
 
   // The control: where the mod reviews plans itself the classic hook still opens one when it is reached (it never is:

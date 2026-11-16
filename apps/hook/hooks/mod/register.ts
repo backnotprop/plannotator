@@ -108,7 +108,9 @@ import {
   resolvePlanReviewEnabled,
   isPanelEntrypoint,
   panelHostOwnsPlanMode,
+  planSwitchAction,
   HOST_PLAN_CARD_ENV,
+  HOST_PLAN_CARD_MARKER,
 } from './enabled'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
@@ -329,10 +331,12 @@ interface Allowed {
   /** A panel host's chat (`isPanelSession`: VS Code, Orca): not interactive, a person reading it. */
   panel: boolean
   /**
-   * The host draws its own plan card (Orca: `panelHostOwnsPlanMode`; a T3 thread): ExitPlanMode is left to it, and
-   * the session's hooks get `HOST_PLAN_CARD_ENV`, so the plugin's classic hook gives no decision either.
+   * The host draws its own plan card (`panelHostOwnsPlanMode`: Orca's entrypoint, whatever the panel guard said):
+   * ExitPlanMode is left to it.
    */
   hostPlanMode: boolean
+  /** What `session.start` does with the plan review switch (`planSwitchAction`), and this session's marker value. */
+  planSwitch: 'set' | 'clear' | 'keep'
   /** The T3 Code thread this session is (`t3ThreadOf`), or null. */
   t3Thread: string | null
   kind: SessionKind
@@ -648,6 +652,8 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     const previous = mod
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', settings.t3Thread ? `t3:${settings.t3Thread}` : `claude-code:${sessionId}`)
+    // The switch's marker follows the session id (`/clear`, a resume): a binary honors a marked `0` only in its session's hook.
+    if (settings.planSwitch === 'set') await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW_SET_BY', `claude-code:${sessionId}`)).catch(() => undefined)
     const host = hostOf($, settings.debugPath)
     const title = sessionTitleOf($, host, String(sessionId))
     // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
@@ -821,10 +827,9 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
 
 /**
  * Which SDK host this non-interactive session is: a panel host's chat (VS
- * Code, Orca: `isPanelSession`, and whether that host
- * draws its own plan card: `panelHostOwnsPlanMode`) or a T3 Code thread
- * (`t3ThreadOf`; T3 draws its own plan card too), all in enabled.ts. Each variable is named as a literal
- * (env-get-literal.test.ts).
+ * Code, Orca: `isPanelSession`), whether its host draws its own plan card
+ * (`panelHostOwnsPlanMode`), or a T3 Code thread (`t3ThreadOf`), all in
+ * enabled.ts. Each variable is named as a literal (env-get-literal.test.ts).
  */
 async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boolean; t3Thread: string | null }> {
   const none = { panel: false, hostPlanMode: false, t3Thread: null }
@@ -839,11 +844,11 @@ async function sdkHostOf($: Engine): Promise<{ panel: boolean; hostPlanMode: boo
   }
   if (isPanelEntrypoint(entrypoint)) {
     const panel = isPanelSession(env, String(await $.session.id()))
-    return { ...none, panel, hostPlanMode: panel && panelHostOwnsPlanMode(entrypoint) }
+    // Whatever the guard said: a process with Orca's entrypoint that is not the
+    // panel (an inherited tag, a nested run) still sits under Orca's card.
+    return { ...none, panel, hostPlanMode: panelHostOwnsPlanMode(entrypoint) }
   }
-  // T3 owns Plan mode: its own plan card stays (SESSION_KIND_FEATURES).
-  const t3Thread = t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') })
-  return { ...none, t3Thread, hostPlanMode: t3Thread !== null }
+  return { ...none, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
 }
 
 /** Why the mod passes an ExitPlanMode on, for the debug log. */
@@ -853,6 +858,33 @@ function planPassReason(settings: Allowed | null): string {
   if (!SESSION_KIND_FEATURES[settings.kind].planReview) return `a ${settings.kind} session keeps the classic hook`
   if (!settings.planReview) return 'plan review is turned off'
   return 'a subagent keeps the classic hook'
+}
+
+/**
+ * The plan review switch in the session's environment (`planSwitchAction`).
+ * `set`: where the host draws its own plan card (Orca), `PLANNOTATOR_PLAN_REVIEW=0`
+ * beside the marker naming this session: when the mod passes ExitPlanMode on,
+ * Claude Code runs the plugin's classic PermissionRequest command hook
+ * (hooks.json), which inherits the environment and exits with no decision,
+ * leaving the host's card to decide. `clear`: another session's `0` reached
+ * this one (it inherited it through a server, an "Open in" terminal, a tmux
+ * server): both go, so this session's hooks review plans again. Names as
+ * literals: Claude Code refuses to load a module whose `$.env.set` takes
+ * anything else (env-get-literal.test.ts).
+ */
+async function applyPlanSwitch($: Engine, settings: Allowed): Promise<void> {
+  const log = (text: string) => settings.debugPath && hostOf($, settings.debugPath).debug(text)
+  if (settings.planSwitch === 'set') {
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW', HOST_PLAN_CARD_ENV.value)).catch(() => undefined)
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW_SET_BY', `claude-code:${String(await $.session.id())}`)).catch(() => undefined)
+    log(`plan review: the host draws its own plan card (${settings.kind}); ${HOST_PLAN_CARD_ENV.name}=${HOST_PLAN_CARD_ENV.value} set for the session's hooks`)
+  } else if (settings.planSwitch === 'clear') {
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW', '')).catch(() => undefined)
+    await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW_SET_BY', '')).catch(() => undefined)
+    log(`plan review: ${HOST_PLAN_CARD_ENV.name}=${HOST_PLAN_CARD_ENV.value} came from another session (${HOST_PLAN_CARD_MARKER}); cleared`)
+  } else if (settings.hostPlanMode) {
+    log(`plan review: the host draws its own plan card (${settings.kind}), but the person's own ${HOST_PLAN_CARD_ENV.name} stays`)
+  }
 }
 
 /** Whether the mod runs here (on unless the user turned it off), in which kind of session, and where its data dir is; null: stay inert. */
@@ -883,17 +915,26 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   if (!shell) return null
   useShell(shell)
   const debug = await $.env.get('PLANNOTATOR_MOD_DEBUG')
+  const planSwitchValue = await $.env.get('PLANNOTATOR_PLAN_REVIEW')
+  const planSwitch = planSwitchAction({
+    hostPlanCard: host.hostPlanMode,
+    value: planSwitchValue,
+    setBy: await $.env.get('PLANNOTATOR_PLAN_REVIEW_SET_BY'),
+    sessionId: String(await $.session.id()),
+  })
   return {
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
     agentTool: features.reviews && resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
-    planReview: features.planReview && !host.hostPlanMode && resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
+    // Another session's `0` (its marker names that session) counts as unset here.
+    planReview: features.planReview && !host.hostPlanMode && resolvePlanReviewEnabled(planSwitch === 'clear' ? undefined : planSwitchValue, configText),
     inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
     inboxReminderRules: resolveInboxReminderRules(configText),
     panel: host.panel,
     hostPlanMode: host.hostPlanMode,
+    planSwitch,
     t3Thread: host.t3Thread,
     kind,
     reviews: features.reviews,
@@ -975,6 +1016,8 @@ export function register(on: On) {
     if (allowed) return result
     try {
       const decided = await resolveAllowed($, e)
+      // First, before any request of the mod's own: the plan review switch.
+      if (decided) await applyPlanSwitch($, decided)
       // Before `allowed` is set: a turn.start that beats this hook (a
       // --reply-on-resume launch) would build the instance without the Inbox link.
       if (decided?.inboxTool) await registerInboxTool($, decided)
@@ -987,16 +1030,6 @@ export function register(on: On) {
       // when the reminder is off (a value inherited from a parent Claude Code
       // must not speak for this session).
       await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
-      // A host that draws its own plan card (Orca, a T3 thread): Claude Code runs
-      // the plugin's classic PermissionRequest command hook (hooks.json) for
-      // ExitPlanMode whatever this module answers, so the plan review switch goes
-      // off in the session's environment: every hook process inherits it, and the
-      // `plannotator` hook exits with no decision, leaving the host's card to decide.
-      if (allowed.hostPlanMode) {
-        // The name as a literal: Claude Code refuses to load a module whose `$.env.set` takes anything else (env-get-literal.test.ts).
-        await Promise.resolve($.env.set('PLANNOTATOR_PLAN_REVIEW', HOST_PLAN_CARD_ENV.value)).catch(() => undefined)
-        if (allowed.debugPath) hostOf($, allowed.debugPath).debug(`plan review: the host draws its own plan card (${allowed.kind}); ${HOST_PLAN_CARD_ENV.name}=${HOST_PLAN_CARD_ENV.value} set for the session's hooks`)
-      }
     } finally {
       // Decided (or inert): a first prompt the engine may already be raising
       // gets its context now, without waiting for the commands and tools below.

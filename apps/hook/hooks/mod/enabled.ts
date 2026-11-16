@@ -241,17 +241,53 @@ export function panelHostOwnsPlanMode(value: unknown): boolean {
 }
 
 /**
- * What the mod sets in the environment of a session whose host draws its own
- * plan card (Orca, a T3 thread). Claude Code runs the plugin's classic
- * PermissionRequest command hook (`plannotator`, hooks.json) for ExitPlanMode
- * whatever a module answers (seen in a real Orca run), and that process
- * inherits the session's environment: with plan review off it exits 0 with no
- * decision (`resolvePlanReview` in packages/shared/config.ts, honored by every
- * binary since #2299), so the host's own card decides. The mod decides, not
- * the binary: only the session itself can tell its own entrypoint from one a
- * nested `claude -p` inherited (`isPanelSession`, `t3ThreadOf`).
+ * What the mod sets in the environment of a process whose host draws its own
+ * plan card (`panelHostOwnsPlanMode`: any process with Orca's entrypoint, a
+ * session sorted `headless` by an inherited tag included; Orca's children
+ * inherit the value anyway). When the mod passes ExitPlanMode on, Claude Code
+ * runs the plugin's classic PermissionRequest command hook (`plannotator`,
+ * hooks.json), as it does when a guard plugin (`cc-plugin-sec-default`) sends
+ * `classic.*` past the mod; that process inherits the session's environment,
+ * and with plan review off it exits 0 with no decision (`resolvePlanReview`
+ * in packages/shared/config.ts; binaries 0.28.52 and later, #2299), so the
+ * host's own card decides. An older binary opens its blocking review beside
+ * the card, as before this change.
  */
 export const HOST_PLAN_CARD_ENV = { name: 'PLANNOTATOR_PLAN_REVIEW', value: '0' } as const
+
+/**
+ * Set beside that `0`: the session that set it (`claude-code:<session id>`).
+ * Everything the session starts inherits both (a review server, the Inbox, an
+ * "Open in" terminal, a tmux server), so a later session that is not a host
+ * plan card and finds a `0` whose marker names another session treats the
+ * switch as unset and clears both (`planSwitchAction`); a binary that knows
+ * the marker honors the `0` only in the hook of the session that set it, and
+ * drops both before it starts anything (`scrubModSessionEnv` in
+ * apps/hook/server/mod-session-env.ts, which keeps this name equal). A
+ * person's own `0` has no marker and is always honored.
+ */
+export const HOST_PLAN_CARD_MARKER = 'PLANNOTATOR_PLAN_REVIEW_SET_BY'
+
+/**
+ * What the mod does with the plan review switch at `session.start`:
+ * - `set`: a host plan card: `PLANNOTATOR_PLAN_REVIEW=0` and the marker
+ *   naming this session. Never over the person's own explicit on value, and
+ *   never marking their own unmarked off value;
+ * - `clear`: not a host plan card, and the `0` was set by another session
+ *   (its marker names it): the switch counts as unset here, and both go;
+ * - `keep`: anything else, the person's own value included.
+ */
+export function planSwitchAction(s: { hostPlanCard: boolean; value: unknown; setBy: unknown; sessionId: string }): 'set' | 'clear' | 'keep' {
+  const marked = setIn(s.setBy)
+  if (s.hostPlanCard) {
+    const explicit = typeof s.value === 'string' ? parseClaudeModEnv(s.value) : undefined
+    if (explicit === true) return 'keep'
+    if (explicit === false && !marked) return 'keep'
+    return 'set'
+  }
+  if (s.value === HOST_PLAN_CARD_ENV.value && marked && s.setBy !== `claude-code:${s.sessionId}`) return 'clear'
+  return 'keep'
+}
 
 /** What `isPanelSession` reads, each variable as `$.env.get` answers it. */
 export type PanelSessionEnv = {
