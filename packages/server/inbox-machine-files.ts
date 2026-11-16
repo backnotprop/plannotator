@@ -103,9 +103,13 @@ function farDocumentUrl(url: unknown, machine: string): string | null {
 /** The longest name and path a linked page's answer may carry: a file name, and a path on any disk. */
 const LINKED_NAME_MAX = 1024;
 const LINKED_PATH_MAX = 4096;
-/** Its text (a real far machine reads at most 2 MB) and its served html (that, with a `<base>` and a guard). */
+/**
+ * Its text (a real far machine reads at most 2 MB) and its served html. The html is that file after `rewriteHtml`
+ * (re-serialized, and every relative asset reference given its folder's route), which can grow well past the file:
+ * a 2 MB page with thousands of pictures opens on that machine, so it opens here too.
+ */
 const LINKED_TEXT_MAX = MAX_HTML_ASSET_DOCUMENT_BYTES;
-const LINKED_HTML_MAX = MAX_HTML_ASSET_DOCUMENT_BYTES + 64 * 1024;
+const LINKED_HTML_MAX = 4 * MAX_HTML_ASSET_DOCUMENT_BYTES;
 /** This Inbox's own headers on a rebuilt answer (the forward adds `sandbox` and nosniff). */
 const LINKED_PAGE_HEADERS = { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
 

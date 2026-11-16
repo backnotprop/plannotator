@@ -182,3 +182,23 @@ describe("agents", () => {
     expect((await w.call({ op: "on", id })).content[0]!.text).toStartWith("routine_not_approved:");
   });
 });
+
+describe("the window's editor", () => {
+  test("a create sent twice with one idempotency_key (a retry, a keepalive, a reloaded page's kept draft) makes one routine", async () => {
+    const w = await world();
+    await w.setOn(true);
+    const fields = { name: "Feedback digest", prompt: "Read the feedback threads.", schedule: w.daily, folder: { scratch: true }, agent: FAKE, idempotency_key: "k-editor-1" };
+    const [first, second] = await Promise.all([w.window("/api/inbox/scheduled", fields), w.window("/api/inbox/scheduled", fields)]);
+    const third = await w.window("/api/inbox/scheduled", fields);
+    const ids = await Promise.all([first, second, third].map(async (r) => ((await r.json()) as { scheduled: { id: string } }).scheduled.id));
+    expect([first.status, second.status, third.status]).toEqual([201, 201, 201]);
+    expect(new Set(ids).size).toBe(1);
+    expect(w.server.store.scheduledThreads()).toHaveLength(1);
+    // The key is kept on the record (so a restart still knows it) and never sent out.
+    expect(w.server.store.scheduledThreads()[0]!.create_key).toBe("k-editor-1");
+    expect(JSON.stringify(await (await fetch(`${w.base}/api/inbox/scheduled`)).json())).not.toContain("k-editor-1");
+    // Another key is another routine.
+    expect((await w.window("/api/inbox/scheduled", { ...fields, idempotency_key: "k-editor-2" })).status).toBe(201);
+    expect(w.server.store.scheduledThreads()).toHaveLength(2);
+  });
+});

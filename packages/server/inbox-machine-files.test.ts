@@ -102,6 +102,11 @@ function farDoor() {
       if (route === `attachments/${PAGE}/linked-page`) {
         const url = { "faq.html": `/api/html-assets/${FOLDER}/faq.html`, "evil.html": "https://evil.example/x", "up.html": `/api/html-assets/${FOLDER}/../threads`, "enc.html": `/api/html-assets/${FOLDER}/%2e%2e/threads`, "far.html": "/api/inbox/threads", "js.html": "javascript:alert(1)", "proto.html": `//evil.example/api/html-assets/${FOLDER}/x.html`, "abs.html": `https://evil.example/api/html-assets/${FOLDER}/x.html` }[path ?? ""];
         if (path === "big.html") return new Response(streamed(64 * 1024 * 1024), { headers: { "Content-Type": "application/json" } });
+        // A 2 MB page whose served html grew past 2 MB (thousands of pictures, each given its folder's route); and html
+        // past anything a 2 MB page grows to.
+        const pictures = (count: number) => `<base href="/api/html-assets/${FOLDER}/">${`<img src="/api/html-assets/${FOLDER}/shot.png">`.repeat(count)}`;
+        if (path === "grown.html") return Response.json({ serverSession: "far", path: "/work/site/grown.html", name: "grown.html", html: pictures(60_000), url: null });
+        if (path === "huge.html") return Response.json({ serverSession: "far", path: "/work/site/huge.html", name: "huge.html", html: pictures(200_000), url: null });
         return Response.json(
           { serverSession: "far", path: `/work/site/${path}`, name: path, html: `<base href="/api/html-assets/${FOLDER}/"><img src="/api/html-assets/${FOLDER}/a.png"><a href="https://example.com/api/html-assets/x">x</a>`, url, extra: "dropped" },
           { headers: HOSTILE },
@@ -244,6 +249,17 @@ describe("a document next to a far attached file", () => {
     expect(named.status).toBe(502);
     const long = await get(`/api/inbox/m/${FAR}/attachments/${MD}/linked-page?path=long.md`);
     expect([long.status, ((await long.json()) as { code: string }).code]).toEqual([413, "machine_page_too_large"]);
+  });
+
+  test("an HTML sibling whose served html grew past 2 MB opens, as on that machine; html past any 2 MB page's is refused", async () => {
+    const { get } = await linkedInbox();
+    const grown = await get(`/api/inbox/m/${FAR}/attachments/${PAGE}/linked-page?path=grown.html`);
+    expect(grown.status).toBe(200);
+    const body = (await grown.json()) as { html: string };
+    expect(body.html.length).toBeGreaterThan(3 * 1024 * 1024);
+    expect(body.html).toStartWith(`<base href="/api/inbox/m/${FAR}/html-assets/${FOLDER}/">`);
+    const huge = await get(`/api/inbox/m/${FAR}/attachments/${PAGE}/linked-page?path=huge.html`);
+    expect([huge.status, ((await huge.json()) as { code: string }).code]).toEqual([413, "machine_page_too_large"]);
   });
 
   test("an HTML sibling: its folder and its new tab through the forward, which opens it under a local page's CSP", async () => {
