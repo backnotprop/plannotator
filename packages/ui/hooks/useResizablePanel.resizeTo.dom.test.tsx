@@ -3,7 +3,7 @@
  * hook's min and max, applied, and saved under the drag's key in the drag's
  * format, so the next mount reads it back. Requires DOM (DOM_TESTS=1).
  */
-import { afterEach, describe, expect, jest, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { act, type PointerEvent } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
@@ -21,7 +21,6 @@ afterEach(() => {
   act(() => roots.forEach((root) => root.unmount()));
   roots = [];
   storage?.resetStorageBackend();
-  jest.useRealTimers();
 });
 
 function memoryBackend() {
@@ -46,19 +45,29 @@ function mountPanel(apply?: (width: number) => void): { current: Panel } {
   return ref;
 }
 
-/** A real drag on the handle: pointer down, move by `dx`, one animation frame, pointer up. */
-async function drag(panel: { current: Panel }, dx: number) {
-  jest.useFakeTimers();
-  act(() => panel.current.handleProps.onPointerDown({ button: 0, clientX: 100, clientY: 0, preventDefault() {} } as unknown as PointerEvent));
-  act(() => {
-    window.dispatchEvent(new MouseEvent('pointermove', { clientX: 100 + dx, clientY: 0 }));
-  });
-  await act(async () => {
-    jest.advanceTimersByTime(50);
-  });
-  act(() => {
-    window.dispatchEvent(new MouseEvent('pointerup', { clientX: 100 + dx, clientY: 0 }));
-  });
+/**
+ * A drag on the handle: pointer down, move by `dx`, then the one animation
+ * frame the move asked for, run by hand so the test does not depend on the
+ * DOM's frame timing, then pointer up. Returns the widths the frame applied.
+ */
+function drag(panel: { current: Panel }, dx: number, applied: number[]) {
+  const frames: FrameRequestCallback[] = [];
+  const realFrame = globalThis.requestAnimationFrame;
+  globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+  try {
+    act(() => panel.current.handleProps.onPointerDown({ button: 0, clientX: 100, clientY: 0, preventDefault() {} } as unknown as PointerEvent));
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointermove', { clientX: 100 + dx, clientY: 0 }));
+    });
+    expect(frames.length).toBe(1);
+    act(() => frames.shift()!(0));
+    expect(applied.at(-1)).toBe(300 + dx);
+    act(() => {
+      window.dispatchEvent(new MouseEvent('pointerup', { clientX: 100 + dx, clientY: 0 }));
+    });
+  } finally {
+    globalThis.requestAnimationFrame = realFrame;
+  }
 }
 
 describe.if(hasDom)('useResizablePanel resizeTo', () => {
@@ -75,10 +84,11 @@ describe.if(hasDom)('useResizablePanel resizeTo', () => {
     expect(applied).toEqual([200, 500, 321]);
   });
 
-  test('saves under the key and in the format a finished drag uses, and a second instance reads it back', async () => {
+  test('saves under the key and in the format a finished drag uses, and a second instance reads it back', () => {
     const memory = memoryBackend();
-    const panel = mountPanel();
-    await drag(panel, 40);
+    const applied: number[] = [];
+    const panel = mountPanel((width) => applied.push(width));
+    drag(panel, 40, applied);
     expect([...memory.entries()]).toEqual([[KEY, '340']]);
     act(() => panel.current.resizeTo(410));
     expect([...memory.entries()]).toEqual([[KEY, '410']]);
