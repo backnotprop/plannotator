@@ -1453,6 +1453,22 @@ describe("review-core", () => {
     }
   });
 
+  test("stage and unstage affect only the selected file when its name contains brackets", async () => {
+    const repo = initRepo();
+    const runtime = makeRuntime(repo);
+    const selected = "row[1].txt";
+    const neighbor = "row1.txt";
+    writeFileSync(join(repo, selected), "selected\n");
+    writeFileSync(join(repo, neighbor), "neighbor\n");
+
+    await gitAddFile(runtime, selected);
+    expect(git(repo, ["diff", "--cached", "--name-only"])).toBe(selected);
+
+    git(repo, ["add", "--", neighbor]);
+    await gitResetFile(runtime, selected);
+    expect(git(repo, ["diff", "--cached", "--name-only"])).toBe(neighbor);
+  });
+
   test("stage/unstage resolves root-relative pathspecs from a subdirectory CWD", async () => {
     const repoDir = initRepo();
     mkdirSync(join(repoDir, "pkg"), { recursive: true });
