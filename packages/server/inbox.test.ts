@@ -617,6 +617,38 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
     expect((missing.content as { text: string }[])[0]!.text).toMatch(/^thread_not_found: /);
   });
 
+  test("the person's Inbox rules and reminder reach an MCP session (#3555), read fresh on every connection", async () => {
+    const root = tempRoot();
+    const dataDir = join(root, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    try {
+      writeFileSync(
+        join(dataDir, "config.json"),
+        JSON.stringify({ prompts: { inbox: { rules: "Always ask before deleting.", reminder: "Ping me when done." } } }),
+      );
+      const server = await start(dataDir);
+      const first = await mcpClient(server);
+      const firstInstructions = first.getInstructions()!;
+      expect(firstInstructions.length).toBeLessThan(2048);
+      expect(firstInstructions).toContain("Always ask before deleting.");
+      expect(firstInstructions).toContain("Ping me when done.");
+      expect(firstInstructions).not.toContain("A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.");
+      // A change applies at the next session, with no restart.
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ prompts: { inbox: { rules: "Never delete anything." } } }));
+      const second = await mcpClient(server);
+      const secondInstructions = second.getInstructions()!;
+      expect(secondInstructions.length).toBeLessThan(2048);
+      expect(secondInstructions).toContain("Never delete anything.");
+      expect(secondInstructions).not.toContain("Always ask before deleting.");
+      expect(secondInstructions).not.toContain("Ping me when done.");
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   test("the event stream replays from a cursor, then streams live", async () => {
     const root = tempRoot();
     const server = await start(join(root, "data"));
