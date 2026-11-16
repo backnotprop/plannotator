@@ -648,6 +648,31 @@ test.skipIf(!hasDom)('a computer: the open list marks its .pn-inbox (data-ib-rpi
   expect(inbox.hasAttribute('data-ib-rpick')).toBe(false);
 });
 
+// #3427: both pickers render outside the composer's own boxes, so no scrolling foot or stacking context can cut or
+// cover them: the `@` picker out of the reply box's scroll region, the "to" list out of the foot.
+test.skipIf(!hasDom)('the tag picker and the recipient list render outside the reply box scroll region and foot', async () => {
+  const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, PI, 45)));
+  const text = await write(el, 'Queue it. ');
+  await typeBox(text, `${text.value}@`);
+  for (let i = 0; i < 40 && !document.querySelector('[data-tag-picker]'); i++) await settle(25);
+  const picker = document.querySelector('[data-tag-picker]') as HTMLElement;
+  expect(picker).not.toBeNull();
+  expect(picker.closest('.ib-rscroll')).toBeNull();
+  expect(picker.closest('.ib-pfoot')).toBeNull();
+  await key(text, 'Escape');
+  await settle();
+  expect(document.querySelector('[data-tag-picker]')).toBeNull();
+  await openList(el);
+  const list = el.querySelector('[data-recipient-list]') as HTMLElement;
+  expect(list).not.toBeNull();
+  expect(list.closest('.ib-rscroll')).toBeNull();
+  expect(list.closest('.ib-pfoot')).toBeNull();
+  expect(rows(el)).toEqual([
+    ['Claude Code', null],
+    ['Pi', null],
+  ]);
+});
+
 /** A phone's sheet (approval "inbox-phone-composer-picker"): each row's session, title, quiet line, and whether it gets the reply. */
 const sheetRows = (el: HTMLElement) =>
   [...el.querySelectorAll('[data-recipient-list] [data-recipient-row]')].map((r) => [r.getAttribute('data-recipient-row'), r.querySelector('.ib-sheet-t')?.textContent, r.querySelector('.ib-sheet-d')?.textContent ?? null, r.getAttribute('aria-selected')]);
