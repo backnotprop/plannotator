@@ -30,8 +30,8 @@ export function AddTagItem({ threadId, onOpen }: { threadId: string; onOpen: () 
   );
 }
 
-/** The swapped-in list. */
-export function AddTagList({ threadId, onBack }: { threadId: string; onBack: () => void }) {
+/** The swapped-in list; without `onBack`, the list alone (the thread header's `+`, ThreadTagLine). */
+export function AddTagList({ threadId, onBack }: { threadId: string; onBack?: () => void }) {
   const host = useThreadTags();
   const [query, setQuery] = useState('');
   const field = useRef<HTMLInputElement>(null);
@@ -74,11 +74,15 @@ export function AddTagList({ threadId, onBack }: { threadId: string; onBack: () 
   };
   return (
     <div ref={body} data-add-tag-list="">
-      <Menu.Item className="ib-pmi ib-zb" label="Add tag" closeOnClick={false} onClick={onBack} data-add-tag-back="">
-        <Icon name="chevL" size={14} />
-        Add tag
-      </Menu.Item>
-      <Menu.Separator className="ib-pm-sep" />
+      {onBack && (
+        <>
+          <Menu.Item className="ib-pmi ib-zb" label="Add tag" closeOnClick={false} onClick={onBack} data-add-tag-back="">
+            <Icon name="chevL" size={14} />
+            Add tag
+          </Menu.Item>
+          <Menu.Separator className="ib-pm-sep" />
+        </>
+      )}
       <label className="ib-tagm-find">
         <Icon name="search" size={15} />
         <input ref={field} value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={onKeyDown} onBlur={onBlur} placeholder="Find or make a tag" aria-label="Find or make a tag" autoComplete="off" spellCheck={false} data-tag-find="" />

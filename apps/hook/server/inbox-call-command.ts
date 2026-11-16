@@ -157,10 +157,29 @@ export function parseCallCommand(argv: readonly string[], actions: readonly stri
   // `steps` is left out of the list, as in the usage: it is served only while the person has thread steps on (and the
   // switch is the Inbox's, not known here), so an agent with them off reads no word of it.
   if (!actions.includes(action)) {
-    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${actions.filter((name) => name !== "steps").join(", ")}.` };
+    return { ok: false, code: "unknown_action", error: `${action} is not an Inbox action. Actions: ${actions.filter((name) => name !== "steps" && name !== "routine").join(", ")}.` };
   }
   if (more.length > 0) return { ok: false, code: "usage", error: "inbox call takes one JSON argument (quote it), or - to read it from stdin." };
   return { ok: true, action, json: json === "-" ? null : (json ?? null), stdin: json === "-", session };
+}
+
+/**
+ * `plannotator routine <op> [<json>] [--session <id>]`: `inbox call routine` with the op as its first word, so
+ * `plannotator routine list` is `plannotator inbox call routine '{"op":"list"}'`. Answers the `inbox call` words.
+ */
+export function routineCallArgs(argv: readonly string[]): string[] | { code: string; error: string } {
+  const words = argv.filter((arg, i) => arg !== "--session" && argv[i - 1] !== "--session");
+  const session = argv.includes("--session") ? ["--session", argv[argv.indexOf("--session") + 1] ?? ""] : [];
+  const [op, json, ...more] = words;
+  if (!op || op.startsWith("-") || more.length > 0) return { code: "usage", error: "Usage: plannotator routine <op> ['<json>'] (op: create, list, get, update, on, off, run or delete)." };
+  let fields: unknown = {};
+  try {
+    fields = json === undefined ? {} : JSON.parse(json);
+  } catch (error) {
+    return { code: "invalid_json", error: `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return { code: "invalid_json", error: "The arguments must be one JSON object." };
+  return [...session, "routine", JSON.stringify({ ...(fields as Record<string, unknown>), op })];
 }
 
 /** The tool's arguments from the JSON text, or why they are not. PowerShell's pipe may start with a BOM. */

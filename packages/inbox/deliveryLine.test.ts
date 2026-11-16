@@ -27,6 +27,13 @@ describe('the line under a sent reply', () => {
     expect(deliveryLine({ ...base, connection: { busy: true, idle_since: null, send_now: false } }).sendNow).toBe(false);
   });
 
+  test('waiting on T3 (a T3 that quit took its Claude, whose last poll still reads idle): queued, never Sending; delivered: unchanged', () => {
+    const idle = { busy: false, idle_since: '2026-10-16T17:00:00.000Z', send_now: false };
+    expect(deliveryLine({ ...base, name: 'T3 Code', connection: idle, waitsOnT3: true }).state).toBe('queued');
+    expect(deliveryLine({ ...base, name: 'T3 Code', connection: idle, waitsOnT3: true, handed: true }).text).toBe('Handed to T3 Code; it takes this at its next step.');
+    expect(deliveryLine({ ...base, name: 'T3 Code', connection: idle, waitsOnT3: true, deliveredAt: '2026-10-16T17:12:00.000Z' }).state).toBe('delivered');
+  });
+
   test('idle: sending; after Send now: sending now; delivered: unchanged', () => {
     expect(deliveryLine({ ...base, connection: { busy: false, idle_since: '2026-10-16T17:00:00.000Z', send_now: true } })).toEqual({ state: 'sending', text: 'Sending to Claude Code…' });
     expect(deliveryLine({ ...base, sendingNow: true, connection: { busy: true, idle_since: null, send_now: true } })).toEqual({ state: 'sending', text: 'Sending to Claude Code now…' });

@@ -1522,6 +1522,25 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(links["github.com/northwind/billing-svc#2"]!.agent!.ended).toBeUndefined();
     expect(links["github.com/northwind/billing-svc#3"]!.agent!.ended).toBeUndefined();
   });
+
+  test("the thread's latest review names the session that sent it, so a PR verdict to another agent asks it for the whole change", () => {
+    const pull = parseGithubPulls(JSON.stringify(answerOf([ghPull(1)])), "github.com")!.pulls;
+    const guide = { sha256: "a", input_sha256: "b", bytes: 1, title: "Retries", sections: 2, files: 1, additions: 1, deletions: 0, review: true };
+    const messages = new Map([
+      ["m1", { id: "m1", thread_id: "t1", project_id: "prj_1", created_at: "2026-11-03T10:00:00.000Z", author: { kind: "agent", host: "claude-code", session: "ses_review", name: null }, body: "Up: https://github.com/northwind/billing-svc/pull/1", guide }],
+      ["m2", { id: "m2", thread_id: "t1", project_id: "prj_1", created_at: "2026-11-03T11:00:00.000Z", author: { kind: "agent", host: "codex", session: "ses_next", name: null }, body: "I took this over." }],
+    ]);
+    const store = {
+      threadsOf: () => [{ thread_id: "t1", last_at: "2026-11-03T11:00:00.000Z" }],
+      threadMessageIds: () => ["m1", "m2"],
+      message: (id: string) => (messages.get(id) as never) ?? null,
+      threadSubject: () => "Subject",
+      threadProject: () => "prj_1",
+    };
+    const link = linkInboxPulls(pull, store, new Map([["github.com/northwind/billing-svc", ["prj_1"]]]))["github.com/northwind/billing-svc#1"]!;
+    expect(link.guide).toMatchObject({ message_id: "m1", review: true, session: "ses_review" });
+    expect(link.agent?.session).toBe("ses_next");
+  });
 });
 
 describe("the searches (scoped to the projects' repositories)", () => {

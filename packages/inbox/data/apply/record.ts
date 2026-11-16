@@ -126,6 +126,7 @@ export function applyRecord(model: HeldThread, event: InboxEvent): RecordOutcome
     case 'initiative':
     case 'steps':
     case 'thread_pull':
+    case 'scheduled':
       return NONE;
     case 'project':
       return REREAD;

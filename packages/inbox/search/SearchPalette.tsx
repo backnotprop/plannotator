@@ -31,6 +31,8 @@ import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
+import { useThreadTags } from '../threadTags';
+import { tagChipText, tagPicked, toggledTag } from './searchTags';
 import {
   FROM_OPTIONS,
   GROUP_LABELS,
@@ -98,9 +100,10 @@ export interface SearchPaletteProps {
   tintOf?: (threadId: string) => RowTint | null;
 }
 
-type FilterKind = keyof SearchFilters;
-/** A chip and its menu: the three filters, and the Type chip that leads them. */
-type ChipKind = FilterKind | 'type';
+type FilterKind = 'project' | 'status' | 'from';
+/** A chip and its menu: the three filters, the Type chip that leads them, and the Tag chip (several picks) after them. */
+type ChipKind = FilterKind | 'type' | 'tag';
+const NO_TAGS: readonly never[] = [];
 
 interface Answered {
   /** The query and filters this answer is for. */
@@ -484,6 +487,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const sort = useSearchSort();
   const [fades, setFades] = useState({ top: false, bottom: false });
 
+  // The tags this Inbox's own threads carry (approval "inbox-thread-tags", step 2): the Tag chip shows once there is one.
+  const tagList = useThreadTags()?.here ?? NO_TAGS;
+  const tagListRef = useRef(tagList);
+  tagListRef.current = tagList;
+  const tagWords = (picks: readonly string[], tags: typeof tagList) => (picks.length > 0 ? tagChipText(tags, picks) : null);
   const names = useMemo(() => projectNames(projects), [projects]);
   const projectName = useCallback((id: string) => names.get(id) ?? id, [names]);
   const projectNameRef = useRef(projectName);
@@ -565,7 +573,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
           const said = nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters));
           // Found inside a filter: the count says so, as the line under the list does ("2 results in 2 groups. Searched only plannotator").
-          const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType).join(', ') : '';
+          const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType, tagWords(nextFilters.tags, tagListRef.current)).join(', ') : '';
           setLive(only ? `${said}. Searched only ${only}` : said);
         })
         .catch((cause) => {
@@ -809,15 +817,26 @@ export default function SearchPalette(props: SearchPaletteProps) {
         ? [{ value: null, label: 'All projects' }, ...projects.map((p) => ({ value: p.id, label: projectName(p.id) }))]
         : kind === 'status'
           ? STATUS_OPTIONS.map((o) => ({ value: o.value, label: o.label }))
-          : FROM_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
+          : kind === 'tag'
+            ? [{ value: null, label: 'Any tag' }, ...tagList.map((tag) => ({ value: tag.id, label: tag.name }))]
+            : FROM_OPTIONS.map((o) => ({ value: o.value, label: o.label }));
 
-  const chipValue = (kind: ChipKind): string | null => (kind === 'type' ? type : filters[kind]);
+  const chipValue = (kind: ChipKind): string | null => (kind === 'type' ? type : kind === 'tag' ? (tagList.find((tag) => tagPicked(tag, filters.tags))?.id ?? null) : filters[kind]);
+  /** Whether a menu row is ticked: the Tag menu ticks every picked tag, and "Any tag" when none is. */
+  const itemChecked = (kind: ChipKind, value: string | null): boolean => {
+    if (kind !== 'tag') return chipValue(kind) === value;
+    const tag = value === null ? null : tagList.find((t) => t.id === value);
+    return tag ? tagPicked(tag, filters.tags) : chipValue('tag') === null;
+  };
   /** Set one chip (null: back to its start) and ask again. */
   const setChip = (kind: ChipKind, value: string | null) => {
     if (kind === 'type') {
       const next = value as InboxSearchGroupId | null;
       setType(next);
       run(q, filters, next);
+    } else if (kind === 'tag') {
+      const tag = value === null ? null : tagList.find((t) => t.id === value);
+      changeFilters({ ...filters, tags: tag ? toggledTag(filters.tags, tag) : [] });
     } else changeFilters({ ...filters, [kind]: value } as SearchFilters);
   };
   const openMenu = (kind: ChipKind) => {
@@ -829,6 +848,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setMenu({ kind, hl: Math.max(0, at) });
   };
   const pick = (kind: ChipKind, value: string | null) => {
+    // A tag ticks or unticks and the menu stays open, so several can be picked; "Any tag" clears them and closes.
+    if (kind === 'tag' && value !== null) {
+      setChip(kind, value);
+      return;
+    }
     setMenu(null);
     setChip(kind, value);
     requestAnimationFrame(() => filtersRef.current?.querySelector<HTMLElement>(`[data-chip="${kind}"]`)?.focus());
@@ -836,7 +860,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (!menu) return;
-    menuRef.current?.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[menu.hl]?.focus();
+    menuRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]')[menu.hl]?.focus();
   }, [menu]);
   const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (!menu) return;
@@ -866,7 +890,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
 
   const chip = (kind: ChipKind) => {
     const set = chipValue(kind) !== null;
-    const label = kind === 'type' ? (type ? GROUP_LABELS[type].heading : 'All types') : chipText(kind, filters, projectName);
+    const label = kind === 'type' ? (type ? GROUP_LABELS[type].heading : 'All types') : kind === 'tag' ? tagChipText(tagList, filters.tags) : chipText(kind, filters, projectName);
     const button = (
       <Tip content={label} when={(trigger) => isTextCut(trigger.querySelector('.ib-sp-fl'))}>
         <button
@@ -908,16 +932,16 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const cell = chipEl?.closest<HTMLElement>('.ib-sp-fcell');
     const left = cell?.offsetLeft ?? 10;
     const top = cell ? cell.offsetTop + cell.offsetHeight + 6 : undefined;
-    const label = menu.kind === 'type' ? 'Type' : menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : 'From';
+    const label = menu.kind === 'type' ? 'Type' : menu.kind === 'project' ? 'Project' : menu.kind === 'status' ? 'Status' : menu.kind === 'tag' ? 'Tag' : 'From';
     return (
       <div ref={menuRef} className="ib-sp-menu" role="menu" aria-label={label} style={phone ? undefined : { left, top }} onKeyDown={onMenuKey}>
         {items.map((item, i) => {
-          const checked = chipValue(menu.kind) === item.value;
+          const checked = itemChecked(menu.kind, item.value);
           return (
             <div
               key={item.value ?? 'any'}
               className="ib-sp-mi"
-              role="menuitemradio"
+              role={menu.kind === 'tag' && item.value !== null ? 'menuitemcheckbox' : 'menuitemradio'}
               tabIndex={-1}
               aria-checked={checked}
               data-hl={menu.hl === i ? '' : undefined}
@@ -979,7 +1003,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (options.length === 0) {
       if (answered.type && !answered.q) return <div className="ib-sp-empty ib-sp-quiet" data-search-type-empty="">Type to search {GROUP_LABELS[answered.type].noun}.</div>;
       if (!answered.q && !filtered) return <div className="ib-sp-empty ib-sp-quiet">Type to search threads, messages and files.</div>;
-      const scope = scopeWords(answered.filters, projectName, answered.type);
+      const scope = scopeWords(answered.filters, projectName, answered.type, tagWords(answered.filters.tags, tagList));
       return (
         <div className="ib-sp-empty" data-search-none="">
           <span>
@@ -1107,7 +1131,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   // Results found inside a filter (a project the person picked, say): say what was left out, under the list.
   // The filters the shown answer was asked with: a chip changed since keeps the line true until its own answer lands.
   const scopeShown = Boolean(answered && answered.q && !indexing && !error && filtersSet(answered.filters) && options.length > 0);
-  const resultScope = scopeShown ? scopeWords(answered!.filters, projectName, answered!.type) : [];
+  const resultScope = scopeShown ? scopeWords(answered!.filters, projectName, answered!.type, tagWords(answered!.filters.tags, tagList)) : [];
   // The order only means something for words: the recent view and filters alone keep their own order.
   const sortSwitch = q.trim() ? <SortSwitch sort={sort} onChange={changeSort} name={`ib-sp-sort-${uid}`} /> : null;
   return (
@@ -1182,6 +1206,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           {chip('project')}
           {chip('status')}
           {chip('from')}
+          {(tagList.length > 0 || filters.tags.length > 0) && chip('tag')}
           {anyFilter && (
             <span className="ib-sp-end">
               <button type="button" className="ib-sp-clear" data-clear-filters="" onClick={clearFilters}>

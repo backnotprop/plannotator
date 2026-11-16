@@ -89,6 +89,7 @@ import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
+import { verdictRecheckBlock } from '../skills';
 import { useGuideState } from './useGuideState';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
 import { onPullDiff, postedSignature, postedWords } from '../pulls/postRules';
@@ -882,7 +883,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
           for (const record of carried) await inboxApi.removeAnnotation(record.id);
           setRecords([]);
         }
-        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : carried, note);
+        // Only the session that wrote this review is asked for just what changed since it: no other one saw it.
+        const toReviewer = asking !== null && !to && !askerEnded;
+        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : carried, note, verdictRecheckBlock(plan.verdict, toReviewer));
         const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), ...(parts.uploads ? { uploads: parts.uploads } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
         await inboxApi.reply(message.id, { idempotency_key: keys.current.keyFor(input), ...input });
         keys.current.done();

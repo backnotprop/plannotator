@@ -11,11 +11,9 @@
  */
 
 import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
-import { inboxRefTransport } from './refTransport';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
-import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
-import { inboxUrl, machineOf, selfMachineId } from './inboxUrl';
+import { machineOf, selfMachineId } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
@@ -24,6 +22,7 @@ import { WarmCodeHighlight } from './components/WarmCodeHighlight';
 import { threadDrawReady } from './threadDrawReady';
 import { QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { probedInboxQueryClient } from './data/heldProbe';
+import { useMachineViews } from './data/machineViews';
 import { dropThread, heldThread, isThreadStale, pruneThreads, putThread, readThread, showableThread, staleThreads, useHeldThread } from './data/queries/thread';
 import { sameThreadFiles } from './data/queries/files';
 import { putList, readListTaking, useListModel } from './data/queries/list';
@@ -43,11 +42,9 @@ import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
 import { configStore } from '@plannotator/ui/config';
-import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
-import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
@@ -61,11 +58,8 @@ import {
   setPageSession,
   subscribeInboxEvents,
   inboxAskOn,
-  REF_CARD_READ_MS,
-  signalWithin,
   type InboxEvent,
   type ListModel,
-  type MachineView,
   type OutboxView,
   type SettingsModel,
   type UpdateDetails,
@@ -105,7 +99,6 @@ import {
 } from './settle';
 import { plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
-import { inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { UsagePeek } from './components/Usage';
@@ -145,6 +138,7 @@ import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange } from '@plannotator/core/inbox-types';
+import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { threadBoardCard } from './steps/model';
@@ -163,12 +157,13 @@ import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from
 import { useLineLatch, claimRevealOnce, listTallerThanScreen, listViewRevealClear, listViewRevealLeaveCounts, listViewRevealMayClaim, idleClockArmed, noteRevealThread, openThreadAsks, revealArmed, broRevealIdleCounts, broRevealLeaveCounts, grillMeTipIdleCounts, grillMeTipLeaveCounts, REVEAL_TIMES, starRevealLeaveCounts, useBoardReveal, useLineReveal, useStepsReveal, useStarReveal } from './reveal';
 import { useIdleClock } from './idleClock';
 import { launchTipDue } from './compose/launchTip';
-import type { InboxRevealId } from './api';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeListLookOptions } from './listLook';
 import { adoptSavedSidebar, hearSidebarEvent, sidebarLayoutReadMark, useSidebarCustomizerOpen } from './sidebarLayout';
+import { adoptShowArchived } from './showArchived';
+import { useArchivedGroup } from './data/actions/archivedGroup';
 import { sidebarTipDue, useSidebarTip } from './sidebarTip';
 import { SidebarTipCard } from './components/SidebarTipCard';
 import { SidebarCustomizer } from './components/SidebarCustomizer';
@@ -190,6 +185,7 @@ import { sameSettings, settingsReadAtLoad, takeSettingsAtLoad } from './settings
 import { openTakenBack } from './takenBackCompose';
 import { restartInbox } from './restartInbox';
 import { errorToast } from './toastError';
+import { useBulkWrites } from './components/useCombines';
 import { canToggleRead, confirmSetAside, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, offersRowMarkRead, seenHeldInNew, setAsideCount, setAsideOf, type SetAsideAnswer, type SetAsideCount, warnsBeforeRead } from './markRead';
 import { MarkReadWarning } from './components/MarkReadWarning';
 import { AgentDeleteDialog } from './agents/AgentDeleteDialog';
@@ -213,9 +209,9 @@ import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backBy, backTo, settleLanding } from './history';
 import { sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, type FrameMove } from './fullScreenOrigin';
-import { adoptSavedTheme, inboxServerSync, useInboxThemePick } from './theme';
+import { adoptSavedTheme, useInboxThemePick } from './theme';
 import { adoptSavedDiffOptions } from './diffOptions';
-import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
+import { adoptSavedTextSize } from './textSize';
 import { adoptSavedFavicon, chooseFavicon, useInboxFavicon, useInboxFaviconBadgeHref, useInboxFaviconHref } from './faviconChoice';
 import { adoptSavedReactions, hearReactionsEvent, onSavedReactionsFailed, reactionsReadMark } from './reactions';
 import type { SettingsSection } from './settingsRoute';
@@ -267,7 +263,7 @@ import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
-import type { CardsModel, DraftView, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
+import type { CardsModel, DraftView, InboxRevealId, InboxStorageModel, ThreadModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
@@ -303,73 +299,8 @@ import { hashOf, currentHash, writeRoute } from './app/writeRoute';
 import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
 import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
 export { THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS } from './app/constants';
-
-// The Inbox has no /api/config and no browser-agent tools: settings stay in
-// the page's own cookies, except the theme, which goes to config.json `theme`
-// through the Inbox's settings route so plan review follows it (theme.ts).
-// WebMCP is off.
-// No image uploads either: a comment's image would need an upload route the
-// Inbox does not have, so the composer says so instead of posting nowhere.
-// The text size this browser last showed, on the document before the first render (textSize.ts).
-applyRememberedTextSize();
-
-configurePlannotatorUI({
-  serverSync: inboxServerSync,
-  // ui's own hover text (annotation panel and toolbar, question cards, links to attachments) as ui's Tooltip,
-  // never a native title (the owner, 2026-10-17).
-  componentTooltips: true,
-  // A digit-only #186379 in a message is a PR or issue of the project's repo, not a colour (#1932).
-  digitHexIssueRefs: true,
-  // An owner/repo#123 links even in a project with no git origin (no repo of its own to link bare #123 into):
-  // agents are told to write that form for another repo's PR or issue. github.com until the first list read, then
-  // the host most projects use (defaultRefHost.ts, from api.ts).
-  crossRepoRefsWithoutRepo: true,
-  // ui marks <body data-pn-popout> while a popout is open and <html data-pn-selection-chooser> while the diff's
-  // selection chooser shows; the window's build keys theme.css's and comments.css's body:has() / html:has() on them
-  // (build/inbox-page-marks.ts: each such :has() cost a style pass over the whole page on every DOM change).
-  pageMarks: true,
-  // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
-  richCopy: true,
-  // The comment box is the small card by the words (approval "inbox-comment-box", round 3; apps/inbox/index.css
-  // imports its sheet). Docked, it spans the pane the words are in and never covers the pane's reply bar or box.
-  commentCard: { pane: '.ib-fullview, [data-attachment-pane], section.ib-pane', foot: '.ib-pfoot, .ib-fcomp, [data-file-foot]' },
-  // A comment closed with words keeps them highlighted, with a "Draft" badge that opens it again.
-  visibleCommentDrafts: true,
-  // On a phone the selection toolbar sits below the selection, clear of iOS's own edit menu, inside the screen,
-  // with thumb-sized buttons (utils/touchToolbarPlacement).
-  touchSelectionToolbar: true,
-  // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab, and Bitbucket Cloud
-  // pull requests with the review app's Bitbucket token (ref-cards.ts). Given up after REF_CARD_READ_MS (the card then shows what the Inbox knows), so no read holds a connection for good.
-  refCardBitbucket: true,
-  refCardTransport: inboxRefTransport((href, signal) => {
-    const within = signalWithin(REF_CARD_READ_MS, signal);
-    return fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal: within.signal, headers: { accept: 'application/json' } }).finally(within.done);
-  }),
-  // Images in a message load from the Inbox's per-message route (#1813).
-  imageSrcResolver: inboxImageSrcResolver,
-  // A long thread can hold hundreds of code fences: each is highlighted when it comes near the screen (before it
-  // shows) and the rest in idle time, not all at once when the thread opens (utils/codeHighlight).
-  deferOffscreenCodeHighlight: true,
-  // Their tokens are made in a Web Worker; the page only writes the markup (codeHighlightWorker.ts).
-  codeHighlightWorker: createInboxCodeHighlightWorker(() => import('./codeHighlight.worker?worker&inline').then((module) => new module.default())),
-  webmcp: { enabled: false, namePrefix: 'plannotator.' },
-  // The `/` and `$` skill picker (composers and comments on attached files)
-  // lists this computer's global skills (approval "inbox-skill-references").
-  skillCatalogTransport: async () => {
-    const { skills } = await inboxApi.skills();
-    return Array.isArray(skills) ? (skills as SkillCatalogEntry[]) : [];
-  },
-  // A Send composes ONE skills block for the whole message (skills.ts), so a
-  // comment's `$name` stays plain text in the attachments' feedback.
-  skillReferenceExport: false,
-  // A comment on an attached file rides the person's next reply.
-  skillInstructionsDestination: 'your reply',
-  uploadTransport: {
-    upload: async () => {
-      throw new Error('Images cannot be added to a comment in the Inbox.');
-    },
-  },
-});
+// The document UI's settings for the window, before the first render.
+import './configureUI';
 
 function Inbox() {
   const [route, setRoute] = useState<Route>(() => {
@@ -385,16 +316,8 @@ function Inbox() {
   const queryClient = useQueryClient();
   /** The list as the cache holds it (data/queries/list.ts): its last read, with what records said since. */
   const latest = useListModel(queryClient);
-  /**
-   * Linked machines (docs/agent-guides/inbox-machines.md): every machine and its state, from the merged list and
-   * the stream's `machines` frames. Nothing draws from it while no machine is linked (machines.ts).
-   */
-  const [machineViews, setMachineViewsNow] = useState<MachineView[] | null>(null);
-  // Every list read carries the machines; the same ones keep the same model, so a list read rebuilds nothing.
-  const setMachineViews = useCallback(
-    (next: MachineView[]) => setMachineViewsNow((current) => (current && JSON.stringify(current) === JSON.stringify(next) ? current : next)),
-    [],
-  );
+  // Linked machines: a read that began before the latest `machines` frame keeps the frame's state (data/machineViews.ts).
+  const [machineViews, machineViewsGate] = useMachineViews();
   const machines = useMemo(() => machinesModel(machineViews), [machineViews]);
   const machinesRef = useRef(machines);
   machinesRef.current = machines;
@@ -1121,6 +1044,7 @@ function Inbox() {
   );
   const refreshList = useCallback(async (adopt: boolean, slide = false, refresh?: { light?: boolean; keepOpen?: boolean }) => {
     try {
+      const machinesMark = machineViewsGate.mark();
       const { next, held, taken } = await readListTaking(() => latestRef.current, () => listCursor.current, { firstDone: firstList.current!.done, adopt, settings: routeRef.current.page === 'settings' });
       const failedBefore = listReadFailure.current !== null;
       listReadFailure.current = null;
@@ -1159,7 +1083,7 @@ function Inbox() {
         perfFirstList(next.sections);
       }
       // Linked machines: the merged list names every machine and its state (an older Inbox names none).
-      if (next.machines) setMachineViews(next.machines);
+      if (next.machines) machineViewsGate.read(machinesMark, next.machines);
       retryMissingThread();
       if (adopt && slide) armSlide();
       // Show's light for a refresh (clicking Inbox): the rows it brings in, against the list on screen now.
@@ -1404,6 +1328,7 @@ function Inbox() {
       adoptSavedReactions(next.reactions, next.reactions_rev, reactionsMark);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedSidebar(next.sidebar, next.sidebar_rev, sidebarMark);
+      adoptShowArchived(next.show_archived);
       adoptSavedDiffOptions(next.diff_options, next.diff_style);
       // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
       // carries it. Only with Code review on: off, every comment reads as on main.
@@ -1985,6 +1910,7 @@ function Inbox() {
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
+        onShowArchived: adoptShowArchived,
         // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
         // A linked machine's agent's face or name changed there: its list brings it.
         onAgentFaces: (data) => {
@@ -2078,7 +2004,7 @@ function Inbox() {
           machineThreadTimer = setTimeout(() => void refreshThread(open), 80);
         },
         onMachines: (next) => {
-          setMachineViews(next);
+          machineViewsGate.frame(next);
           // A machine's state or its list moved: read the merged list. Only while a machine is (or just was) linked,
           // so an Inbox that never links reads nothing more than before.
           const linked = next.some((m) => !m.self);
@@ -2530,7 +2456,6 @@ function Inbox() {
   // that dialog already said what notifications need (and the note dialog is
   // never decided on that load).
   const askLinesFree = soundSettled && agentNoteSettled && soundDialog === 'none' && !agentNoteOpen;
-
 
   // The list on screen catches up as the route changes (the layout effect above), not here.
   const go = (next: Route) => writeRoute(next);
@@ -3470,10 +3395,10 @@ function Inbox() {
     }
   };
 
-
   const { snooze, unsnooze, restoreSnooze } = snoozeWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered, snoozeMoved, snoozedThisLoad });
 
   const { setPriority, restorePriority } = priorityWrites({ rowOf, threadRow: () => threadRow, showError, showToast, dismissToast, afterWrite, say, armSlide, setShown, shownRef, routeRef, latestRef, listCovered });
+  const bulk = useBulkWrites({ rowOf, rowWrites, setShown, shownRef, latestRef, routeRef, listCovered, armSlide, afterWrite, showToast, dismissToast, say, warnSetAside, restoreSnooze, restorePriority, closeThread: () => (fromCard ? backToCard() : close({ ...routeRef.current, thread: null, file: null })), openThread: (thread) => go({ page: 'inbox', project: null, thread }) }, machines);
 
   /**
    * Pin a thread to the sidebar, or unpin it (approval "inbox-pinned-threads"),
@@ -3596,17 +3521,18 @@ function Inbox() {
     );
   };
   /**
-   * A thread row's right-click menu. Copy link and Copy thread ID say so in
-   * the window's one toast; Mark read, Move back and Archive are the row's
-   * hover action and the header's, with their toasts.
+   * A thread row's right-click menu and its swipe. Copy link and Copy thread ID say so in the window's one toast; Mark
+   * read, Move back and Archive are the row's hover action and the header's, with their toasts. Mark read, Mark unread
+   * and Archive hand back their write (a row's swipe brings an archived row back once it lands).
    */
-  const rowAction = (row: InboxListRow, action: RowMenuAction) => {
+  const rowAction = (row: InboxListRow, action: RowMenuAction): Promise<void> | void => {
     if (action === 'pin' || action === 'unpin') return void setPin(row, action === 'pin');
     if (action === 'priority-add' || action === 'priority-remove') return void setPriority(row, action === 'priority-add');
-    if (action === 'read' || action === 'unread') return void markRead(row.thread_id, action === 'read');
-    if (action === 'mark-unread') return void markUnread(row.thread_id);
+    if (action === 'read' || action === 'unread') return markRead(row.thread_id, action === 'read');
+    if (action === 'mark-unread') return markUnread(row.thread_id);
     if (action === 'unsnooze') return void unsnooze(row);
-    if (action === 'archive') return void archive(row.thread_id, row.thread_id, true);
+    if (action === 'archive') return archive(row.thread_id, row.thread_id, true);
+    if (action === 'unarchive') return archivedHost.unarchive(row);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
     void copyTextToClipboard(text).then((ok) =>
@@ -3701,28 +3627,6 @@ function Inbox() {
     return deleteAgentNow(agentDelete, archive);
   };
 
-
-  /**
-   * Settings' Unarchive: the thread goes back to the list, in whatever
-   * section its state puts it, and opens there (owner ruling 2026-10-12).
-   */
-  const unarchiveFromSettings = async (row: InboxListRow): Promise<boolean> => {
-    try {
-      await inboxApi.resolve(row.thread_id, false);
-    } catch (cause) {
-      showError(cause);
-      return false;
-    }
-    go({ page: 'inbox', project: null, thread: row.thread_id });
-    await refreshList(true);
-    showToast({
-      icon: 'check',
-      lead: 'Back in your Inbox',
-      detail: `“${row.subject ?? '(no subject)'}”`,
-      onUndo: () => void archive(row.thread_id, row.thread_id, true),
-    });
-    return true;
-  };
 
   // E marks the open thread (or the focused row) read, and again moves it
   // back; Z undoes while the toast is up. Never while typing, never with a
@@ -4092,8 +3996,9 @@ function Inbox() {
     };
   }, [whatsNewVersion, whatsNewRetry]);
 
-  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
+  const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
+  const scheduledOn = useScheduledOn(settings);
 
   const projects = latest?.projects ?? [];
   /**
@@ -4107,7 +4012,7 @@ function Inbox() {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
   const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
-    latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead,
+    latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, combining: bulk.combines.waiting,
     tags: {
       listTags,
       across,
@@ -4124,6 +4029,9 @@ function Inbox() {
   });
   const { decisionModeOn, decideInThread, sittingDecisions, closeDecide } = useDecideSitting({ settings, decisions, setDecisions, decide, setDecide, decideOpener, decisionModeOnRef, refreshDecisions, refreshList });
   const snoozeBack = useSnoozeBack({ thread, route, listedOpenRow, looking, openThreadCovered, lookRef, trackLook, refreshList, snoozed: latest?.snoozed, refreshSnoozes, seen: inboxApi.seen });
+  // The list's Archived group (approval "inbox-archived-group") and Settings → Archived's Unarchive.
+  const archivedFilter = useCallback((rows: readonly InboxListRow[]) => filterShown([{ id: 'archived', label: 'Archived', threads: [...rows] }])[0]?.threads ?? rows, [filterShown]);
+  const { host: archivedHost, unarchiveFromSettings } = useArchivedGroup({ project: route.page === 'inbox' ? route.project : null, merged: anyMachineLinked, filter: archivedFilter, showToast, showError, afterWrite, archive, go, refreshList });
 
   const context: ConnectContext | null = settings
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
@@ -4568,7 +4476,7 @@ function Inbox() {
   // Its plan goes stale with every list read: one that moved the latest list but kept the list drawn (a row held
   // behind "N new") counts, and one that brought nothing new says so itself (`listRead`, refreshList).
   const listReadToken = useMemo(() => ({ shown, latest }), [shown, latest]);
-  const listTidy = useTidy(route.page === 'inbox' ? (route.project ?? null) : null, 'list', listReadToken, route.page === 'inbox' && !firstRun);
+  const listTidy = useTidy(route.page === 'inbox' ? (route.project ?? null) : null, 'list', listReadToken, route.page === 'inbox' && !firstRun, machines);
   listTidyRead.current = listTidy.listRead ?? null;
   const boardTidy = useTidy(boardFilter, 'board', cards, route.page === 'board');
   // The first-run screen shows who is running now ("Message Claude Code") and moves on by itself
@@ -4588,6 +4496,8 @@ function Inbox() {
   const [paneView, setPaneView] = useState<SheetView>('open');
   const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
   const sheetHead = useMemo(() => (sheetPulls.model ? sheetModel(sheetPulls.model, Date.now(), {}).head : null), [sheetPulls.model]);
+  // What the board shares in Reviews' pane and on its own page; a review thread opens beside Reviews.
+  const sheetShared = { model: sheetPulls.model, error: sheetPulls.error, loading: sheetPulls.loading, phone, onMerged: sheetPulls.refresh, onToast: showToast, machineName: (id: string) => machineViews?.find((m) => m.id === id)?.name ?? null, onOpenThread: (id: string) => go({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id }) };
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
@@ -5549,16 +5459,11 @@ function Inbox() {
       prBoard={
         <SheetPage
           mode="pane"
-          model={sheetPulls.model}
-          error={sheetPulls.error}
-          loading={sheetPulls.loading}
-          phone={phone}
+          {...sheetShared}
           view={paneView}
           onView={setPaneView}
           onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
           onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
-          onMerged={sheetPulls.refresh}
-          onToast={(next, ms) => showToast(next, ms)}
           layout={paneLayout}
           onLayout={setPaneLayout}
         />
@@ -5615,6 +5520,7 @@ function Inbox() {
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleScheduled={(next) => void toggleScheduled(next)}
         onToggleBro={(next) => void toggleBro(next)}
         onToggleFloatDrafts={(next) => void toggleFloatDrafts(next)}
         onToggleMarkReadWarning={(next) => void toggleMarkReadWarning(next)}
@@ -5629,7 +5535,8 @@ function Inbox() {
         machines={machineViews ?? undefined}
         onMachineUpdate={pageOffersUpdates(settings) ? (id) => setMachineUpdateOpen({ id, snooze: false }) : undefined}
         onMachinesChanged={() => {
-          inboxApi.machines().then((next) => setMachineViews(next.machines), () => {});
+          const mark = machineViewsGate.mark();
+          inboxApi.machines().then((next) => machineViewsGate.read(mark, next.machines), () => {});
           void refreshList(false);
         }}
         onToggleTailscale={(next, replaceExposed) => void toggleTailscale(next, replaceExposed)}
@@ -5840,20 +5747,17 @@ function Inbox() {
     main = (
       <StackPage
         stack={stack && stack.layers.some(inboxPullIsOpen) ? stack : null}
-        loading={!sheetPulls.model}
+        loading={!sheetPulls.model} board={sheetPulls.model}
         repoLabel={stack ? (repoLabels(stacks).get(`${stack.host}/${stack.repo}`.toLowerCase()) ?? stack.repo) : null}
         phone={phone}
         onBack={() => close(prsHome(route))}
-        onOpenLayer={(pull) => go({ ...route, layer: pull.key, scope: 'layer', prsFrom: 'stack' })}
+        onOpenLayer={(pull, scope) => go({ ...route, layer: pull.key, scope: scope ?? 'layer', prsFrom: 'stack' })}
       />
     );
   } else if (route.page === 'prs' && pullsShown) {
     main = (
       <SheetPage
-        model={sheetPulls.model}
-        error={sheetPulls.error}
-        loading={sheetPulls.loading}
-        phone={phone}
+        {...sheetShared}
         view={route.prsView ?? 'open'}
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
         layout={route.prsLayout}
@@ -5861,8 +5765,6 @@ function Inbox() {
         onBack={() => close({ page: 'reviews', project: null, thread: null })}
         onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
-        onMerged={sheetPulls.refresh}
-        onToast={(next, ms) => showToast(next, ms)}
       />
     );
   } else if (route.page === 'prs') {
@@ -5898,6 +5800,8 @@ function Inbox() {
         onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
+  } else if (route.page === 'scheduled') {
+    main = <ScheduledRoute route={route} settings={settings} rows={windowRows} phone={phone} stacked={stack.thread} onToast={showToast} />;
   } else if (route.page === 'artifacts') {
     // The Artifacts wall (approval "inbox-artifact-stars"): a tile opens its file or guided review in its thread; Back comes here.
     main = (
@@ -5991,6 +5895,7 @@ function Inbox() {
           onHide={route.thread !== null && !stack.thread ? () => setThreadFull(true) : undefined}
           threadPanel={phone ? undefined : { on: threadPanelOn, onChange: setThreadPanelOn }}
           onCustomizeRows={() => go({ page: 'settings', project: null, thread: null, section: 'rows' })}
+          archived={archivedHost}
           selectedThreadId={route.thread}
           lit={lit}
           notice={notice}
@@ -6037,6 +5942,7 @@ function Inbox() {
           onMarkUnread={(row) => void markUnread(row.thread_id)}
           onSendNow={(row) => void sendNowFromRow(row)}
           onRowAction={rowAction}
+          bulk={bulk}
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
           snoozeBlockedOf={(row) => (pageOffersUpdates(settings) ? snoozeBlockedBy(row, machines) : null)}
@@ -6064,7 +5970,7 @@ function Inbox() {
           reconnecting={streamDead}
           empty={
             listFilterEmpty ? (
-              <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped))} />
+              <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
               <div className="ib-empty-list" data-tag-empty="">
                 <b dir="auto">Nothing tagged {filterTag.name} yet</b>
@@ -6502,6 +6408,7 @@ function Inbox() {
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.reviews ? reviewsOnYou(pulls.reviews) : 0}

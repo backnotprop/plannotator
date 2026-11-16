@@ -60,17 +60,29 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let fetched: string[] = [];
+/** The asking session's connection as the sessions route reports it (`asker.connection`); undefined: none. */
+let askerConnection: { busy: boolean | null; idle_since: string | null; send_now: boolean } | undefined;
 
 beforeEach(() => {
   if (!hasDom) return;
   resetMachineRoutes();
   fetched = [];
+  askerConnection = undefined;
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = String(input);
     fetched.push(path);
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
-    if (path.includes('/sessions')) return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: [] });
+    if (path.includes('/sessions')) {
+      const asked = new URL(path, 'http://inbox.test').searchParams.get('asker');
+      return Response.json({
+        serverSession: 's',
+        home: '/home/me',
+        project: PROJECT,
+        sessions: [],
+        ...(asked && askerConnection ? { asker: { session: asked, live: true, connection: askerConnection } } : {}),
+      });
+    }
     return Response.json({});
   }) as typeof fetch;
 });
@@ -171,4 +183,14 @@ test.skipIf(!hasDom)("a linked machine's T3 thread shows the same line, with the
   expect(waitLine(el)?.textContent).toContain(inboxT3WaitLine('sign_in_again').text);
   // Its sessions are read from that machine, never from this one.
   expect(fetched.filter((path) => path.includes('/sessions')).every((path) => path.includes(`/m/${MAC}/`))).toBe(true);
+});
+
+// A T3 that quit took its Claude with it, whose last poll still reads as live and idle for up to 30 s: the waiting
+// line shows as soon as the reply's `t3_wait` does, never "Sending to T3 Code…".
+test.skipIf(!hasDom)('waiting on a T3 that quit, while its Claude last read as idle: the waiting line, never Sending', async () => {
+  askerConnection = { busy: false, idle_since: '2026-11-14T17:04:00.000Z', send_now: false };
+  const el = await render(thread({ t3_wait: 'closed' }));
+  expect(fetched.some((path) => path.includes('/sessions') && path.includes('asker='))).toBe(true);
+  expect(waitLine(el)?.getAttribute('data-t3-wait')).toBe('closed');
+  expect(el.textContent).not.toContain('Sending to');
 });

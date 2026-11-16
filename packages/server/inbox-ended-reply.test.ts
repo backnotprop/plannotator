@@ -826,19 +826,38 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     mkdirSync(join(dataDir, "inbox", "claims", written.id), { recursive: true });
     const delivered: string[] = [];
     const idleWake = (session: string) => {
-      const wake = new InboxWake(new InboxAgentConnection({ dataDir, host: "pi", agentName: "Pi", tools: [] }), session, { isBusy: () => false, deliver: async (_text, command) => void delivered.push(`${session}:${command.id}`), notify: () => {}, projectPath: () => project }, 20);
+      const connection = new InboxAgentConnection({ dataDir, host: "pi", agentName: "Pi", tools: [] });
+      const bridge = connection.bridge.bind(connection);
+      const inFlight = new Set<Promise<unknown>>();
+      let quiet = false;
+      connection.bridge = (...args) => {
+        if (quiet) return Promise.resolve(null);
+        const call = bridge(...args);
+        const settled = call.then(
+          () => inFlight.delete(settled),
+          () => inFlight.delete(settled),
+        );
+        inFlight.add(settled);
+        return call;
+      };
+      const wake = new InboxWake(connection, session, { isBusy: () => false, deliver: async (_text, command) => void delivered.push(`${session}:${command.id}`), notify: () => {}, projectPath: () => project }, 20);
       wake.start();
-      return wake;
+      const stop = async () => {
+        quiet = true;
+        await Promise.all([...inFlight]);
+        wake.dispose();
+      };
+      return { wake, stop };
     };
     const own = idleWake("ses-asker");
     try {
       await Bun.sleep(300);
       expect(delivered).toEqual([]);
     } finally {
-      own.dispose();
+      await own.stop();
     }
     pass();
-    const next = idleWake("ses-next");
+    const { wake: next } = idleWake("ses-next");
     try {
       const listed = async () => ((await (await fetch(`${base(server)}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }).sessions.some((s) => s.session === "ses-next");
       for (let i = 0; i < 200 && !(await listed()); i++) await Bun.sleep(20);
