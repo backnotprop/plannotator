@@ -115,7 +115,8 @@ const SPEC_RE = /^tests\/e2e\/[^/]+\.spec\.ts$/;
 /** The tokens on the PR body's `e2e:` lines, HTML comments and code ticks removed. */
 export function e2eLine(body: string | undefined): string[] {
   if (!body) return [];
-  const text = body.replace(/<!--[\s\S]*?-->/g, '');
+  // A RegExp from a string: Semgrep's TypeScript parser fails on an HTML comment opener inside a regex literal.
+  const text = body.replace(new RegExp('<' + '!--[\\s\\S]*?--' + '>', 'g'), '');
   const out: string[] = [];
   for (const line of text.split(/\r?\n/)) {
     const m = /^\s*(?:[-*]\s+)?e2e\s*:(.*)$/i.exec(line);
