@@ -10,6 +10,7 @@
 @source "../../packages/ui/hooks/**/*.ts";
 /* The shared chat window has no host in this page, so its classes stay out of this stylesheet. */
 @source not "../../packages/ui/components/chat/**";
+@source not "../../packages/ui/components/frame/**";
 @source "../../packages/guide-viewer/**/*.tsx";
 @source "../../packages/review-editor/components/**/*.tsx";
 /* Shape: the board (packages/ui/components/shape), its lazy wrapper and this page (packages/inbox/shape). */

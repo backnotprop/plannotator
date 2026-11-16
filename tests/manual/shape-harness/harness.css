@@ -6,6 +6,7 @@
 @plugin "../../../packages/review-editor/node_modules/tailwindcss-animate";
 
 @source "../../../packages/ui/components/**/*.tsx";
+@source not "../../../packages/ui/components/frame/**";
 @source "../../../packages/ui/hooks/**/*.ts";
 @source "../../../packages/guide-viewer/**/*.tsx";
 @source "../../../packages/review-editor/components/TokenHoverCard.tsx";

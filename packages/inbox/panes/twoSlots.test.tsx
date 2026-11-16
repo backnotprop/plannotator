@@ -501,7 +501,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
   test('an edge with no room says so before the release: the other axis where it fits, else nothing at all', async () => {
     putThread(queries, B, heldOf(B, false));
     const calls: string[] = [];
-    // Room for the two columns there are, not a third (881 px of 1000); 900 px tall, so a row fits below.
+    // Room for the two columns there are, not a third (801 px of 1000; a third needs 1202); 900 px tall, so a row fits below.
     mainWidth = 1000;
     try {
       drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
@@ -538,6 +538,51 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     }
   });
 
+  test("the whole pane area's outer edge: a row opens a full-height column there, a pane moves there; with no room it says so and nothing changes", async () => {
+    putThread(queries, B, heldOf(B, false));
+    const calls: string[] = [];
+    drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    calls.length = 0;
+    const word = () => document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent;
+    // The right rim lies in pane B's own right edge zone: there the whole side wins.
+    setThreadDragHitTestForTests(() => paneOf(B));
+    pressRow();
+    drag(1560, 450);
+    expect(word()).toBe('Open on the right');
+    drag(1590, 450);
+    expect(word()).toBe('Open on the right, full height');
+    // The zone drawn is the column it opens: the area's full height at its right end, one column's share.
+    const zone = document.querySelector<HTMLElement>('.ib-droppreview')!;
+    expect([zone.style.top, zone.style.height]).toEqual(['0px', '900px']);
+    expect(parseFloat(zone.style.left) + parseFloat(zone.style.width)).toBeCloseTo(1600, 0);
+    expect(parseFloat(zone.style.width)).toBeGreaterThan(400);
+    expect(parseFloat(zone.style.width)).toBeLessThan(600);
+    release(1590, 450);
+    expect(calls).toEqual(['open:msg_C1:*:right']);
+    // A pane by its header to the left rim (inside pane A): it moves to the whole left side.
+    calls.length = 0;
+    const head = paneOf(B).querySelector<HTMLElement>('.ib-phead')!;
+    act(() => void head.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: 1200, clientY: 20, pointerId: 1, pointerType: 'mouse' })));
+    drag(10, 450);
+    expect(document.querySelector('.ib-dragghost')?.textContent).toContain('Move on the left, full height');
+    release(10, 450);
+    expect(calls.filter((call) => call.startsWith('move'))).toEqual(['move:p1:*:left']);
+    // Room for the two columns there are, not a third: it says so, draws nothing, and takes no other side.
+    mainWidth = 1000;
+    try {
+      calls.length = 0;
+      pressRow();
+      drag(1590, 450);
+      expect(word()).toBe('No room on the right');
+      expect(document.querySelector('.ib-droppreview')).toBeNull();
+      release(1590, 450);
+      expect(calls).toEqual([]);
+    } finally {
+      mainWidth = 1600;
+    }
+  });
+
   test("with one thread open, a row dropped on its pane's edge opens beside it", async () => {
     const calls: string[] = [];
     drawPanes(windowOf(L.follow(L.EMPTY_LAYOUT, A), calls), hostFor(A, noop), heldOf(A, false), true);
@@ -547,6 +592,64 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     drag(760, 450);
     release(760, 450);
     expect(calls).toEqual(['open:msg_C1:main:right']);
+  });
+
+  test("the pane's foot: closed (Reply, Looks good), it is the bottom edge and opens below; with the reply box open, a drop there does nothing", async () => {
+    const calls: string[] = [];
+    drawPanes(windowOf(L.follow(L.EMPTY_LAYOUT, A), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    const foot = paneOf(A).querySelector<HTMLElement>('.ib-pfoot')!;
+    expect(foot.querySelector('.ib-rbox')).toBeNull();
+    const reply = foot.querySelector<HTMLElement>('button') ?? foot;
+    stub(document, 'elementFromPoint', { value: () => reply });
+    setThreadDragHitTestForTests(() => paneOf(A));
+    const word = () => document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent;
+    pressRow();
+    drag(400, 870);
+    expect(word()).toBe('Open below');
+    expect(document.querySelector('.ib-droppreview')).not.toBeNull();
+    release(400, 870);
+    expect(calls).toEqual(['open:msg_C1:main:bottom']);
+    // The reply box open: the foot around it takes no pane drop (no word, no zone, nothing changes).
+    calls.length = 0;
+    pressR();
+    expect(foot.querySelector('.ib-rbox')).not.toBeNull();
+    stub(document, 'elementFromPoint', { value: () => foot });
+    pressRow();
+    drag(400, 870);
+    expect(word()).toBe('');
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
+    // The foot's part of the area's rim strip (the bottom 24 px) takes none either.
+    drag(400, 892);
+    expect(word()).toBe('');
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
+    release(400, 892);
+    expect(calls).toEqual([]);
+  });
+
+  test("a pane's header nudged within its own pane moves nothing, the rim strip over its header included; carried out to another pane's top rim, it moves to the whole top", async () => {
+    putThread(queries, B, heldOf(B, false));
+    const calls: string[] = [];
+    drawPanes(windowOf(pair('main'), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    calls.length = 0;
+    const head = paneOf(B).querySelector<HTMLElement>('.ib-phead')!;
+    const press = (x: number, y: number) => act(() => void head.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, clientX: x, clientY: y, pointerId: 1, pointerType: 'mouse' })));
+    // Pressed 4 px below the area's top (inside the 24 px rim strip and B's own box), moved 6 px, let go.
+    press(1200, 4);
+    drag(1203, 5);
+    drag(1206, 5);
+    expect(document.querySelector('.ib-dragghost')).not.toBeNull();
+    expect(document.querySelector('.ib-dragghost')!.textContent).not.toContain('full width');
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
+    release(1206, 5);
+    expect(calls.filter((call) => call.startsWith('move'))).toEqual([]);
+    // The same press carried over pane A's top rim: the whole top.
+    press(1200, 4);
+    drag(400, 6);
+    expect(document.querySelector('.ib-dragghost')?.textContent).toContain('Move above, full width');
+    release(400, 6);
+    expect(calls.filter((call) => call.startsWith('move'))).toEqual(['move:p1:*:top']);
   });
 
   test('a press on a row that does not move is a click; Escape mid-drag puts it back', async () => {
@@ -641,7 +744,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
   test('a window too narrow for both shows the active pane alone, and both come back in place when it widens', async () => {
     putThread(queries, A, heldOf(A, false));
     putThread(queries, B, heldOf(B, false));
-    mainWidth = 860;
+    mainWidth = 780;
     drawPanes(windowOf(pair('p1')), hostFor(B, noop), heldOf(B, false));
     await wait(0);
     expect(paneOf(A)).toBeNull();
@@ -658,7 +761,7 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
   test('closing the pane shown alone in a narrow window (an Undo, a ✕) draws the one that stepped aside, without a throw', async () => {
     putThread(queries, A, heldOf(A, false));
     putThread(queries, B, heldOf(B, false));
-    mainWidth = 860;
+    mainWidth = 780;
     drawPanes(windowOf(pair('p1')), hostFor(B, noop), heldOf(B, false));
     await wait(0);
     expect(paneOf(A)).toBeNull();
@@ -868,7 +971,7 @@ describe.skipIf(!hasDom)("a pane keeps the person's work through every change of
           await wait(0);
           kept(before);
         }
-        if (narrow) mainWidth = 860;
+        if (narrow) mainWidth = 780;
         drawPanes(windowOf(withK(active)), change(hostIn(active)), heldIn(active));
         if (narrow) act(() => void window.dispatchEvent(new Event('resize')));
         await wait(0);

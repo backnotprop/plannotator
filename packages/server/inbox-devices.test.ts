@@ -308,6 +308,10 @@ describe("the device door, on the binary", () => {
       ["GET", "open-in/file"],
       ["POST", "open-in/file"],
       ["GET", "attachments/att_x/page"],
+      // A Markdown file's pictures and a document next to a file: a linked machine's window only (the phone reads
+      // them through the tailnet as the owner).
+      ["GET", "attachments/att_x/markdown-image"],
+      ["GET", "attachments/att_x/linked-page"],
       ["POST", "restart"],
       ["POST", "mcp"],
       ["POST", "bridge/poll"],
@@ -1261,6 +1265,19 @@ describe("the device door, in process", () => {
       expect([who, relayed.status, await relayed.json()]).toEqual([who, 404, words]);
     }
     expect(handed).toBe(0);
+    // A Markdown file's pictures and a document next to a file: handed to the window for a linked machine only.
+    for (const route of ["attachments/att_x/markdown-image?path=shot.png", "attachments/att_x/linked-page?path=notes.md"]) {
+      const url = new URL(`http://127.0.0.1/api/inbox/device/${route}`);
+      const fromPhone = (await devices.door(new Request(url, { headers: { Authorization: `Bearer ${phone.token}` } }), url))!;
+      expect([route, fromPhone.status, await fromPhone.json()]).toEqual([route, 404, PHONE]);
+      const relayed = await devices.asDevice(phone.device.id, { method: "GET", path: `/api/inbox/device/${route}` });
+      expect([route, relayed.status]).toEqual([route, 404]);
+      await relayed.arrayBuffer();
+      const fromMachine = (await devices.door(new Request(url, { headers: { Authorization: `Bearer ${machine.token}` } }), url))!;
+      expect([route, fromMachine.status]).toEqual([route, 200]);
+      await fromMachine.arrayBuffer();
+    }
+    expect(handed).toBe(2);
   });
 });
 

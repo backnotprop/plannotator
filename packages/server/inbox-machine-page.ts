@@ -84,7 +84,7 @@ function folderToken(html: string): string | null {
  * At most `max` bytes of `answer`, read from a twin so that past the cap the answer itself still streams on whole.
  * Null past the cap (or a declared length past it); the answer is then untouched.
  */
-async function readCappedBytes(answer: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+export async function readCappedBytes(answer: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
   const declared = Number(answer.headers.get("content-length") ?? "");
   if (Number.isFinite(declared) && declared > max) return null;
   const twin = answer.clone();
@@ -119,7 +119,7 @@ interface FarView {
   attachment?: { kind?: unknown; name?: unknown; path?: unknown; unavailable?: unknown; current?: { size?: unknown } | null };
 }
 
-const refusal = (status: number, code: string, error: string) => Response.json({ error, code }, { status, headers: BYTE_GUARD_HEADERS });
+export const refusal = (status: number, code: string, error: string) => Response.json({ error, code }, { status, headers: BYTE_GUARD_HEADERS });
 
 /**
  * `attachments/<id>/page` for a page on `machine`, from its door's `view` answer. `pass` hands a refusal (or an

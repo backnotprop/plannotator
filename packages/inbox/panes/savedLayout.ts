@@ -5,7 +5,15 @@
  * anything else reads as no layout.
  */
 import { naryTree, parseStoredLayoutTree } from '@plannotator/vendor-pierre-layouts';
-import { EMPTY_LAYOUT, panesOf, paneCount, type FreeLayout } from './layoutModel';
+import type { LayoutNode } from '@plannotator/vendor-pierre-layouts';
+import { EMPTY_LAYOUT, PANE_MIN_HEIGHT, PANE_MIN_WIDTH, panesOf, paneCount, type FreeLayout } from './layoutModel';
+
+/** Every pane at today's minimums: a layout kept under another minimum (440 px before) draws by the current rule. */
+function withMinimums(node: LayoutNode): LayoutNode {
+  if (node.type === 'pane') return node.minWidth === PANE_MIN_WIDTH && node.minHeight === PANE_MIN_HEIGHT ? node : { ...node, minWidth: PANE_MIN_WIDTH, minHeight: PANE_MIN_HEIGHT };
+  if (node.type !== 'split') return node;
+  return { ...node, children: node.children.map(withMinimums) };
+}
 
 export const LAYOUT_KEY = 'plannotator.inbox.layout';
 
@@ -39,7 +47,7 @@ export function decodeLayout(text: string | null): FreeLayout {
   try {
     const saved = JSON.parse(text) as Partial<Saved>;
     if (saved?.v !== 1 || !saved.threads || typeof saved.threads !== 'object') return EMPTY_LAYOUT;
-    const { root } = parseStoredLayoutTree(saved.tree, naryTree);
+    const root = withMinimums(parseStoredLayoutTree(saved.tree, naryTree).root);
     const ids = panesOf(root).map((pane) => pane.id);
     const threads = saved.threads as Record<string, unknown>;
     const shown = Object.values(threads);

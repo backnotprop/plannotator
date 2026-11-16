@@ -14,7 +14,6 @@
  * and the pane view draws by kind; the tree, the verbs and the room rules here do not change.
  */
 import { naryTree, type ChildSize, type Edge, type LayoutNode, type PaneNode } from '@plannotator/vendor-pierre-layouts';
-import { THREAD_BESIDE_FILE_WIDTH } from '../stack';
 import { MAIN_PANE, singlePane, type PaneSet } from './model';
 
 export type PaneId = string;
@@ -22,8 +21,15 @@ export type { Edge };
 /** Where a thread dropped on a pane goes: beside it at an edge, or in its place (`center`). */
 export type DropPlace = Edge | 'center';
 
-/** A thread column stays readable: the thread's column beside a file (stack.ts). */
-export const PANE_MIN_WIDTH = THREAD_BESIDE_FILE_WIDTH;
+/**
+ * The narrowest a pane of the free layout gets: its header, the reply bar (Reply, Looks good, the open-question chip),
+ * question cards and a message stay whole at 400 px (the owner, 2026-11-16: "lower the minimum width to about 400 px,
+ * so three columns fit at 1728"). It is the floor: every room rule reads it (layoutRoom.ts: stepping aside, Open to the
+ * side; paneDrop.ts and outerEdge.ts: a drop's fit; sidebarHold.ts: the sidebar folded for room; savedLayout.ts: a kept
+ * layout's panes), and the engine keeps a divider from taking a pane below it. Where a pane would go narrower, nothing
+ * opens there ("No room on the right"). A single thread beside the list keeps stack.ts's 440 px.
+ */
+export const PANE_MIN_WIDTH = 400;
 /** The header, a few lines of the thread and its foot. */
 export const PANE_MIN_HEIGHT = 260;
 
@@ -89,6 +95,37 @@ const shaped = (root: LayoutNode): LayoutNode => naryTree.normalize(root, splitI
 const splitTree = (root: LayoutNode, target: PaneId, pane: PaneNode, edge: Edge): LayoutNode =>
   shaped(naryTree.split(root, target, pane, edge, splitIds(root)));
 
+/**
+ * The target that names the whole layout (`openAt`, `move`): a pane put at its edge spans its full height (left,
+ * right) or full width (top, bottom), beside every pane, where a pane's own edge splits that pane only.
+ */
+export const WHOLE: PaneId = '*';
+
+/**
+ * `pane` at `edge` of the whole tree. The engine splits a pane or a stack only (its `split` takes no split as its
+ * target), so this puts the tree and the pane in a new split and lets the engine's normalize join it into a root of
+ * that direction, as its own split would. The pane takes one column's share (one row's for top and bottom), not half.
+ */
+function besideAll(root: LayoutNode, pane: PaneNode, edge: Edge): LayoutNode {
+  const horizontal = edge === 'left' || edge === 'right';
+  const share = horizontal ? columns(root) : rows(root);
+  const first = edge === 'left' || edge === 'top';
+  return shaped({
+    type: 'split',
+    id: splitIds(root)(),
+    direction: horizontal ? 'horizontal' : 'vertical',
+    children: first ? [pane, root] : [root, pane],
+    sizes: first ? [1, share] : [share, 1],
+  });
+}
+
+/** Pane `id` is already the whole layout's first (left, top) or last (right, bottom) child toward `edge`. */
+function atWholeEdge(root: LayoutNode, id: PaneId, edge: Edge): boolean {
+  if (root.type !== 'split' || root.direction !== (edge === 'left' || edge === 'right' ? 'horizontal' : 'vertical')) return false;
+  const end = edge === 'left' || edge === 'top' ? root.children[0] : root.children[root.children.length - 1];
+  return end?.type === 'pane' && end.id === id;
+}
+
 /** A pane id no pane has. */
 function newId(layout: FreeLayout): PaneId {
   let serial = layout.serial;
@@ -124,12 +161,12 @@ export function follow(layout: FreeLayout, thread: string | null): FreeLayout {
  * that pane there instead (a row dragged onto an edge, its thread already open).
  */
 export function openAt(layout: FreeLayout, thread: string, target: PaneId, edge: Edge): FreeLayout {
-  if (!layout.root || !(target in layout.threads)) return follow(layout, thread);
+  if (!layout.root || (target !== WHOLE && !(target in layout.threads))) return follow(layout, thread);
   const shownIn = paneOfThread(layout, thread);
   if (shownIn !== null) return focus(move(layout, shownIn, target, edge), shownIn);
   const id = newId(layout);
   return {
-    root: splitTree(layout.root, target, paneNode(id), edge),
+    root: target === WHOLE ? besideAll(layout.root, paneNode(id), edge) : splitTree(layout.root, target, paneNode(id), edge),
     threads: { ...layout.threads, [id]: thread },
     active: id,
     recent: touch(layout.recent, id),
@@ -145,13 +182,14 @@ export function replace(layout: FreeLayout, target: PaneId, thread: string): Fre
   return focus({ ...layout, threads: { ...layout.threads, [target]: thread } }, target);
 }
 
-/** Pane `id` goes to `edge` of pane `target`. Its thread and the active pane stay. */
+/** Pane `id` goes to `edge` of pane `target` (of the whole layout: `WHOLE`). Its thread and the active pane stay. */
 export function move(layout: FreeLayout, id: PaneId, target: PaneId, edge: Edge): FreeLayout {
-  if (!layout.root || id === target || !(id in layout.threads) || !(target in layout.threads)) return layout;
+  if (!layout.root || id === target || !(id in layout.threads) || (target !== WHOLE && !(target in layout.threads))) return layout;
+  if (target === WHOLE && atWholeEdge(layout.root, id, edge)) return layout;
   const rest = naryTree.remove(layout.root, id);
   const moving = panesOf(layout.root).find((pane) => pane.id === id);
   if (!rest || !moving) return layout;
-  return { ...layout, root: splitTree(rest, target, moving, edge) };
+  return { ...layout, root: target === WHOLE ? besideAll(rest, moving, edge) : splitTree(rest, target, moving, edge) };
 }
 
 /**
@@ -200,4 +238,11 @@ export function columns(node: LayoutNode | null): number {
   if (!node || node.type !== 'split') return 1;
   const each = node.children.map(columns);
   return node.direction === 'horizontal' ? each.reduce((a, b) => a + b, 0) : Math.max(...each);
+}
+
+/** How many thread rows stacked the layout needs at least: a column adds its children's, a row takes its tallest. */
+export function rows(node: LayoutNode | null): number {
+  if (!node || node.type !== 'split') return 1;
+  const each = node.children.map(rows);
+  return node.direction === 'vertical' ? each.reduce((a, b) => a + b, 0) : Math.max(...each);
 }
