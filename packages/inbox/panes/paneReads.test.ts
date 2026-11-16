@@ -58,7 +58,7 @@ function harness(start: PaneSet) {
     drawn: (views) => void drawn.push(views),
   });
   const stops = new Map<string, { thread: string | null; stop: () => void }>();
-  /** The window's effect (usePaneOpens.ts): a pane whose thread changed opens it, or closes. */
+  /** A pane whose thread changed opens it, or closes (the window's own: usePaneOpens.test.tsx). */
   const show = (next: PaneSet) => {
     panes = next;
     for (const { id, thread } of next.panes) {

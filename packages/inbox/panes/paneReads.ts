@@ -214,15 +214,35 @@ export function createPaneReads(deps: PaneReadsDeps) {
     }
   };
 
-  /** The pane shows nothing. */
+  /** The pane shows nothing, and keeps no thread in memory. */
   const close = (paneId: PaneId) => {
     dropUnshown();
     const r = record(paneId);
     r.openRead = null;
     r.openedFor = null;
     r.unlisted = null;
+    r.loaded = null;
+    r.loadedAt = 0;
     setLoad(paneId, null);
     change(paneId, { look: null, openedWith: null });
+  };
+
+  /** The pane is gone (or the window): its reads are given up and nothing of it is kept. */
+  const remove = (paneId: PaneId) => {
+    const thread = records.get(paneId)?.openedFor ?? null;
+    stopLive(paneId);
+    for (const reading of [...out]) {
+      if (reading.threadId !== thread || (shownIn(thread) ?? paneId) !== paneId) continue;
+      reading.controller.abort();
+      out.delete(reading);
+    }
+    dropUnshown();
+    records.delete(paneId);
+    if (!views.has(paneId)) return;
+    const next = new Map(views);
+    next.delete(paneId);
+    views = next;
+    deps.drawn(views);
   };
 
   /**
@@ -289,6 +309,7 @@ export function createPaneReads(deps: PaneReadsDeps) {
     refreshThread,
     open,
     close,
+    remove,
     retry,
     /** The thread was missing here, and the list now names the machine that holds it: its pane reads it there. */
     retryMissing: (threadId: string) => {

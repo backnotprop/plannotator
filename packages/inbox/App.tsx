@@ -1774,7 +1774,7 @@ function Inbox() {
         onDeliveries: (change) => {
           // A launched thread's run line moves with the same signature: the open one is read again.
           const open = routeRef.current.thread;
-          if (open && paneReads.readOf(open).loaded?.messages[0]?.launch) void refreshThread(open);
+          if (open && paneReads.readOf(open).loaded?.thread_id === open && paneReads.readOf(open).loaded?.messages[0]?.launch) void refreshThread(open);
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
@@ -1912,7 +1912,7 @@ function Inbox() {
     };
   }, [refreshList, refreshSnoozes, refreshPriority, refreshSettings, refreshThread, refreshDrafts, refreshCards, refreshDecisions, observeEvent, flushNotifications, setNotifyReach, windowReport, reportWindow, queryClient, takeRecordList]);
 
-  // A pane opening a thread (panes/paneReads.ts reads it): record the look, and update its row in place.
+  // The active pane opened a thread (panes/usePaneOpens.ts, scope.ts): record the look, and update its row in place.
   // While any thread is open the list holds still (settle.ts): the look
   // unbolds the row where it is and does not re-sort the list. Where the
   // thread covers the list, the list catches up now, out of sight, before the
@@ -5760,7 +5760,7 @@ function Inbox() {
           paneId={MAIN_PANE}
           threadId={paneThread(panes, MAIN_PANE)}
           active={panes.active === MAIN_PANE}
-          held={openHeld}
+          held={panes.active === MAIN_PANE ? openHeld : undefined}
           host={{
             route, routeRef, rowsPending: reviewRowsPending, paneReads, outbox, dismissOutbox,
             phone, stack, full, fromCard, fileOpen, staleNotice, notifyAgainIn: notifyAgain ? notifyAgainThread : null, notifications,
