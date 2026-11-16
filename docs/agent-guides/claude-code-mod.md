@@ -121,7 +121,12 @@ mod decides, not the binary: only the session can tell its own entrypoint from
 one a nested `claude -p` inherited. Side effect: a `claude -p` started from
 inside the session inherits the switch too, so its ExitPlanMode gets no
 Plannotator review. The tools, the wake and the non-blocking reviews stay on.
-T3 threads get the same switch (below).
+T3 threads get the same switch (below). Seen in a real Orca 1.4.259 run:
+Orca's card shows and waits, no Plannotator plan server starts, and the debug
+log says both ExitPlanMode and its permission request were passed on. An Orca
+started from a terminal that is itself inside a Plannotator-enabled Claude
+Code session inherits that session's `PLANNOTATOR_SESSION_TAG`, so its
+sessions are treated as `headless` (a tag naming another session).
 
 **The Claude desktop app's Code tab (#3239).** The desktop app runs a Code
 tab session's CLI through the Agent SDK with `CLAUDE_CODE_ENTRYPOINT` set to
