@@ -28,6 +28,9 @@ const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof imp
 const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
 const { resetPlansForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
+const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
+const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
+const { acceptPlanDiagramSvg } = (hasDom ? await import('./planContent') : {}) as typeof import('./planContent');
 
 let root: Root | null = null;
 let unlisten = () => {};
@@ -270,6 +273,66 @@ test.skipIf(!hasDom)('an agent’s plan fetches no remote picture and no link ta
   window.location.hash = `#plans=${id}&from=1&to=2`;
   await settle();
   check(host.querySelector('[data-plan-diff="1-2"]')!);
+});
+
+test.skipIf(!hasDom)('a drawn diagram that would load from another host is never put in the page: its source shows; markers and same-document links still draw', async () => {
+  const NS = 'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"';
+  // What the engine hands back for each source: the sources pass the source rule, the drawn svgs are the test.
+  const drawn: Record<string, string> = {
+    'flowchart TD\n  Hostile --> X': `<svg ${NS} id="h" viewBox="0 0 10 10"><image href="https://tracker.example/p.png" width="5" height="5"/></svg>`,
+    'flowchart TD\n  Marker --> Y': `<svg ${NS} id="m" viewBox="0 0 10 10" data-marker-diagram=""><defs><marker id="a"><path d="M0 0L5 5"/></marker></defs><path d="M0 0L9 9" marker-end="url(#a)"/><a href="#a"><text>x</text></a></svg>`,
+  };
+  const restoreParser = diagramSvg!.installInertDiagramSvgParser();
+  mermaid!.__setMermaidRuntimeLoaderForTests(async () => ({ initialize() {}, render: async (_id: string, source: string) => ({ svg: drawn[source.trim()] ?? '' }) }) as never);
+  try {
+    const text = ['# Drawn', '', '```mermaid', 'flowchart TD', '  Hostile --> X', '```', '', '```mermaid', 'flowchart TD', '  Marker --> Y', '```', ''].join('\n');
+    const id = plan('Drawn', 'harbor-api', [text]);
+    window.location.hash = `#plans=${id}`;
+    const host = draw();
+    await settle();
+    await settle();
+    const doc = host.querySelector('[data-plan-document="1"]')!;
+    // The hostile one: no svg of it anywhere in the page, its source as code.
+    expect(document.querySelector('image')).toBeNull();
+    expect(document.querySelector('svg#h, svg[id$="h"]')).toBeNull();
+    const source = [...doc.querySelectorAll('pre')].find((pre) => pre.textContent?.includes('Hostile --> X'));
+    expect(source).toBeDefined();
+    // The marker one is mounted.
+    expect(doc.querySelector('[data-marker-diagram] path[marker-end="url(#a)"]')).not.toBeNull();
+  } finally {
+    mermaid!.__setMermaidRuntimeLoaderForTests(undefined);
+    restoreParser();
+  }
+});
+
+test.skipIf(!hasDom)('the drawn-diagram check: what loads from another host or document is refused, the same document and data: pass', () => {
+  const NS = 'xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"';
+  const parse = (body: string) => diagramSvg!.parseInertSvg(`<svg ${NS} id="r">${body}</svg>`)!;
+  const refused = [
+    '<image href="https://tracker.example/p.png"/>',
+    '<image xlink:href="//tracker.example/p.png"/>',
+    '<image href="shots/p.png"/>',
+    '<use href="other.svg#x"/>',
+    '<rect style="fill: url(https://tracker.example/f.svg#g)"/>',
+    '<rect fill="url(https://tracker.example/f.svg#g)"/>',
+    '<rect style="background: u\\72l(x)"/>',
+    '<style>#r .n { background: url("https://tracker.example/b.png") }</style>',
+    '<style>@import "x.css";</style>',
+    '<foreignObject><div xmlns="http://www.w3.org/1999/xhtml"><img src="https://tracker.example/i.png"/></div></foreignObject>',
+    '<foreignObject><table xmlns="http://www.w3.org/1999/xhtml" background="https:tracker.example/t.png"/></foreignObject>',
+    '<foreignObject><img xmlns="http://www.w3.org/1999/xhtml" srcset="a.png 1x, https://tracker.example/2.png 2x"/></foreignObject>',
+    '<a href="https://tracker.example/"><text>x</text></a>',
+  ];
+  for (const body of refused) expect([body, acceptPlanDiagramSvg(parse(body))]).toEqual([body, false]);
+  const accepted = [
+    '<defs><marker id="a"/></defs><path marker-end="url(#a)"/>',
+    '<rect fill="url(#grad)" filter="url(#drop-shadow)"/>',
+    '<use href="#a"/>',
+    '<image href="data:image/png;base64,iVBORw0KGgo="/>',
+    '<style>#r .node rect { fill: #f9f; stroke: #333 }</style>',
+    '<a href="#a"><text>x</text></a>',
+  ];
+  for (const body of accepted) expect([body, acceptPlanDiagramSvg(parse(body))]).toEqual([body, true]);
 });
 
 test.skipIf(!hasDom)('a Mermaid fence that could load a picture is shown as its source, never drawn; a plain one is still a diagram', async () => {

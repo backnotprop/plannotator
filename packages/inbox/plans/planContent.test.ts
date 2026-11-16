@@ -38,6 +38,9 @@ const reachesAnotherHost = [
   'flowchart TD\n  A["<br onload=x>"]',
   // Mermaid's `#amp;` could rebuild an `&` reference.
   'flowchart TD\n  A["https#amp;#35;58;tracker.example"]',
+  // Re-check 4: Mermaid's own placeholders (`ﬂ°°` is `&#`, `ﬂ°` is `&`, `¶ß` is `;` across the svg it writes).
+  'sequenceDiagram\n  participant Alice\n  properties Alice: {"icon": "httpsﬂ°°58¶ßﬂ°°47¶ßﬂ°°47¶ßtracker.example/p.png"}\n  Alice->>Bob: hi',
+  'sequenceDiagram\n  participant Alice\n  properties Alice: {"icon": "httpsﬂ°colon¶ßﬂ°sol¶ßﬂ°sol¶ßtracker.example/p.png"}\n  Alice->>Bob: hi',
 ];
 
 test('a Mermaid source that could load something, or navigate on a click, is caught; a plain diagram is not', () => {
