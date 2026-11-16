@@ -1,4 +1,5 @@
 import React from 'react';
+import { ChevronsUpDown, FoldVertical } from 'lucide-react';
 import { configStore, useConfigValue } from '@plannotator/ui/config';
 import { DiffDisplayOptionsPopover } from '@plannotator/ui/components/DiffDisplayOptions';
 import { DiffLayoutToggle } from '@plannotator/ui/components/DiffLayoutToggle';
@@ -81,6 +82,19 @@ export const ReviewDockRightActions: React.FC<ReviewDiffControlsProps> = (props)
           {navButton('back')}
           {navButton('forward')}
         </div>
+      )}
+      {showCollapseAll && state && (
+        <button
+          type="button"
+          onClick={state.onToggleAllFilesCollapsed}
+          className={ICON_BUTTON}
+          title={state.allFilesAllCollapsed ? 'Expand all files' : 'Collapse all files'}
+          aria-label={state.allFilesAllCollapsed ? 'Expand all files' : 'Collapse all files'}
+          aria-pressed={state.allFilesAllCollapsed}
+          data-header-collapse-all-files={state.allFilesAllCollapsed ? 'collapsed' : 'open'}
+        >
+          {state.allFilesAllCollapsed ? <FoldVertical className="w-3.5 h-3.5" aria-hidden="true" /> : <ChevronsUpDown className="w-3.5 h-3.5" aria-hidden="true" />}
+        </button>
       )}
       <DiffLayoutToggle value={diffStyle} onChange={setDiffStyle} className={ICON_BUTTON} />
       <DiffDisplayOptionsPopover

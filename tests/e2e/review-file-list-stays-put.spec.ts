@@ -289,7 +289,7 @@ test('Hide viewed: the file you leave keeps its row while the pointer is in the 
   });
 });
 
-test('All changes: Collapse all files in the tree header folds every file and keeps the file you read in view', async ({ browser }) => {
+test('All changes: Collapse all files at the top right, left of Split/Unified, folds every file and keeps the file you read in view', async ({ browser }) => {
   await withReview(browser, async (page) => {
     await openAllChanges(page);
     await expect.poll(async () => (await mainHeaders(page)).filter((h) => h.height > 200).length).toBeGreaterThan(0);
@@ -303,7 +303,9 @@ test('All changes: Collapse all files in the tree header folds every file and ke
     expect(reading).toBeTruthy();
     const top = async () => (await mainHeaders(page)).find((h) => h.path === reading)?.top ?? Number.NaN;
 
-    const tools = page.locator('[data-review-sticky-tools]');
+    await expect(page.locator('[data-review-sticky-tools]').getByRole('button', { name: /all files/ })).toHaveCount(0);
+    const tools = page.locator('header [data-review-diff-controls]');
+    await expect(tools.locator('[data-header-collapse-all-files] + [data-diff-layout-toggle]')).toHaveCount(1);
     await tools.getByRole('button', { name: 'Collapse all files' }).click();
     await expect(tools.getByRole('button', { name: 'Expand all files' })).toBeVisible();
     await expect.poll(async () => (await mainHeaders(page)).length).toBe(15);

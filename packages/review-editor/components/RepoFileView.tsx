@@ -6,7 +6,6 @@ import { useRepoFileText, repoFileEmptyMessage } from '../hooks/useRepoFileText'
 import { useScrollMemory } from '../hooks/useScrollMemory';
 import { findSymbolLine, type JumpCrumb as JumpCrumbData, type RevealTarget } from '../utils/explorerNavigation';
 import { JumpCrumb } from './JumpCrumb';
-import { usePaneTabsInHeader } from '../workspace/paneContext';
 
 /** Code navigation's tokens in a whole-file view (where F12 looks, Cmd+click). */
 export interface FileTokenHandlers {
@@ -106,7 +105,6 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
   fetchImpl,
 }) => {
   const text = useRepoFileText(filePath, snapshotId, fetchImpl);
-  const paneTabs = usePaneTabsInHeader();
   const lastReady = useRef<{ path: string; content: string } | null>(null);
   if (text.status === 'ready') lastReady.current = { path: filePath, content: text.content };
   else if (text.status !== 'loading') lastReady.current = null;
@@ -121,16 +119,12 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
 
   return (
     <div className="h-full flex flex-col" data-repo-file-view={filePath}>
-      <div className="flex-none flex items-center gap-2 px-3 border-b border-border/50 min-w-0" style={{ height: 'var(--panel-header-h, 36px)' }}>
+      <div className="flex-none flex items-center gap-2 px-3 border-b border-border min-w-0" style={{ height: 'var(--panel-header-h, 36px)' }}>
         {crumb && crumb.targetPath === filePath && <JumpCrumb crumb={crumb} onBack={onNavigateBack} />}
-        {paneTabs ? (
-          <div className="min-w-0 flex-1 self-stretch flex items-stretch" data-file-header-tabs="">{paneTabs}</div>
-        ) : (
-          <span className="truncate text-sm min-w-0" title={filePath}>
-            <span className="text-muted-foreground">{dir}</span>
-            <span className="font-medium text-foreground">{name}</span>
-          </span>
-        )}
+        <span className="truncate text-[13px] min-w-0" title={filePath}>
+          <span className="text-muted-foreground">{dir}</span>
+          <span className="font-medium text-foreground">{name}</span>
+        </span>
         <span
           className="flex-none text-[10px] font-medium px-1.5 py-0.5 rounded bg-muted text-muted-foreground"
           data-not-in-review
@@ -143,7 +137,7 @@ export const RepoFileView: React.FC<RepoFileViewProps> = ({
             {revisionPhrase(revision)}
           </span>
         )}
-        <span className={`${paneTabs ? '' : 'ml-auto '}flex-none text-[11px] text-muted-foreground/80`}>
+        <span className="ml-auto flex-none text-[11px] text-muted-foreground/80">
           {onAddAnnotation ? 'Select lines to comment' : null}
           {preview && <span className="ml-3" data-preview-hint>Double-click the tab to keep it</span>}
         </span>

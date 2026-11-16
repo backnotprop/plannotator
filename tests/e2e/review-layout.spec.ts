@@ -162,24 +162,30 @@ const headerShape = (page: Page) =>
       .join(' '),
   );
 
-test('tabs live in the panes: the header never changes, a file header row carries them, All changes gets one slim row', async ({ browser }) => {
+const fileHeaderTop = (page: Page) =>
+  page.evaluate(() => Math.round(document.querySelector('[data-pane="0"] [data-pane-panel] [data-file-header]')!.getBoundingClientRect().top));
+
+test('tabs live in the panes: the header never changes, and All changes and a file share one tab row, so switching moves nothing', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
     await expect.poll(() => firstCodeTop(page)).not.toBeNull();
     const header = await headerShape(page);
     const top = await paneTop(page);
     await expect(page.locator('[data-pane-tab-row]')).toHaveCount(0);
     await row(page, 'routes.ts').click();
-    await expect(page.locator('[data-pane="0"] [data-file-header] [data-pane-tab]')).toHaveCount(2);
+    await expect(page.locator('[data-pane="0"] [data-pane-tab-row] [data-pane-tab]')).toHaveCount(2);
     expect(await headerShape(page)).toBe(header);
     expect(await paneTop(page)).toBe(top);
+    const tabRow = page.locator('[data-pane="0"] [data-pane-tab-row]');
+    const rowBox = (await tabRow.boundingBox())!;
+    expect(Math.round(rowBox.height)).toBe(32);
+    await expect.poll(() => fileHeaderTop(page)).toBe(Math.round(rowBox.y + rowBox.height));
 
     await page.locator('[data-pane-tab][aria-selected="true"]').focus();
     await page.keyboard.press('ArrowLeft');
     await expect(page.locator('[data-pane-tab="review-all-files"]')).toHaveAttribute('aria-selected', 'true');
     await expect(page.locator('[data-pane-tab="review-all-files"]')).toBeFocused();
-    const slim = page.locator('[data-pane-tab-row="slim"]');
-    await expect(slim).toHaveCount(1);
-    expect(Math.round((await slim.boundingBox())!.height)).toBe(28);
+    expect(await tabRow.boundingBox()).toEqual(rowBox);
+    await expect.poll(() => fileHeaderTop(page)).toBe(Math.round(rowBox.y + rowBox.height));
     expect(await headerShape(page)).toBe(header);
 
     await row(page, 'routes.ts').click({ button: 'right' });

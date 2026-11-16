@@ -112,4 +112,35 @@ describe('ReviewDockRightActions', () => {
     await render(true);
     expect(host.querySelector<HTMLButtonElement>('[data-nav-history="back"]')!.disabled).toBe(false);
   });
+
+  test.skipIf(!hasDom)('Collapse all files sits just left of Split/Unified while All changes is shown, and only then', async () => {
+    const onToggleAllFilesCollapsed = mock(() => {});
+    const render = async (panel: string, collapsed: boolean) => {
+      const state = {
+        diffStyle: 'split',
+        onDiffStyleChange: () => {},
+        isCompactTouchLayout: false,
+        allFilesAllCollapsed: collapsed,
+        onToggleAllFilesCollapsed,
+      } as unknown as ReviewState;
+      await act(async () => root?.render(
+        <ReviewStateProvider value={state}>
+          <ReviewDockRightActions activePanel={{ id: panel }} />
+        </ReviewStateProvider>,
+      ));
+    };
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await render('review-all-files', false);
+    const button = host.querySelector<HTMLButtonElement>('[data-header-collapse-all-files]')!;
+    expect(button.getAttribute('aria-label')).toBe('Collapse all files');
+    expect(button.nextElementSibling?.hasAttribute('data-diff-layout-toggle')).toBe(true);
+    await act(async () => button.click());
+    expect(onToggleAllFilesCollapsed).toHaveBeenCalledTimes(1);
+    await render('review-all-files', true);
+    expect(host.querySelector('[data-header-collapse-all-files]')!.getAttribute('aria-label')).toBe('Expand all files');
+    await render('review-diff', false);
+    expect(host.querySelector('[data-header-collapse-all-files]')).toBeNull();
+  });
 });

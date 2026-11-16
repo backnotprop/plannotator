@@ -1,6 +1,5 @@
 import { COMPACT_FILE_HEADER_HEIGHT } from '../utils/diffChromeMetrics';
 import { EllipsisName } from './EllipsisName';
-import { usePaneTabsInHeader } from '../workspace/paneContext';
 import React, { useRef } from 'react';
 import { CallFlowFileBadge } from './CallFlowFileBadge';
 import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
@@ -120,13 +119,10 @@ function countChanges(patch: string): { additions: number; deletions: number } {
 }
 
 /** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
-const NARROW_HEADER_WIDTH = 560;
 const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
-const NARROW_LABEL = '@max-[559px]/file-header:hidden';
 const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
 const ACTIONS_FOLD_WIDTH = 360;
 const ACTIONS_FOLD = '@max-[359px]/file-header:hidden';
-const NARROW_PAD = 'gap-1 px-2 py-1 @max-[559px]/file-header:px-1.5';
 
 const FileHeaderView: React.FC<FileHeaderProps> = ({
   filePath,
@@ -167,37 +163,25 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   const fileCommentRef = useRef<HTMLButtonElement>(null);
   useRovingToolbar(headerRef, viewedKeyHint);
   const { directory, name } = splitFilePath(filePath);
-  const paneTabs = usePaneTabsInHeader();
   const stageLabel = '';
   const commentLabel = '';
-  const foldsActions = !!paneTabs && !readOnly;
   const headerWidthNow = () => headerRef.current?.clientWidth ?? Infinity;
   const tinyNow = () => !readOnly && headerWidthNow() < ACTIONS_FOLD_WIDTH;
-  const foldedNow = () => (foldsActions && headerWidthNow() < NARROW_HEADER_WIDTH) || tinyNow();
+  const foldedNow = tinyNow;
   const actionFold = readOnly ? '' : ACTIONS_FOLD;
-  const tightLabel = paneTabs ? NARROW_LABEL : TIGHT_LABEL;
   const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
 
   return (
     <div
       ref={headerRef}
       data-file-header=""
-      className={`@container/file-header group/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 ${paneTabs ? '' : 'hover:bg-muted/30'} ${isCompactTouchLayout ? (paneTabs ? 'px-3' : 'pl-3 pr-1') : paneTabs ? 'pl-3 pr-2' : 'pl-2 pr-2'}`}
+      className={`@container/file-header group/file-header flex-shrink-0 border-b border-border flex items-center justify-between gap-2 transition-colors duration-150 hover:bg-muted/30 ${isCompactTouchLayout ? 'pl-3 pr-1' : 'pl-2 pr-2'}`}
       style={{ height: isCompactTouchLayout ? `${COMPACT_FILE_HEADER_HEIGHT}px` : 'var(--panel-header-h)' }}
       data-file-header-path={filePath}
       role={viewedKeyHint ? 'toolbar' : undefined}
       aria-label={viewedKeyHint ? filePath : undefined}
     >
-      {paneTabs ? (
-        <div className="min-w-0 flex flex-1 self-stretch items-stretch gap-2" data-file-header-tabs="" data-roving-skip="">
-          {paneTabs}
-          {status === 'renamed' && oldPath && (
-            <span className="@max-[559px]/file-header:hidden min-w-0 shrink-[1000] self-center max-w-[40%] truncate text-xs text-muted-foreground [font-variant-ligatures:no-contextual]" title={`Renamed from ${oldPath}`} data-file-header-renamed-from="">
-              from {splitFilePath(oldPath).name}
-            </span>
-          )}
-        </div>
-      ) : (
+      {(
         <div className="min-w-0 flex flex-1 items-center overflow-hidden" onClick={onCollapseToggle} style={onCollapseToggle ? { cursor: 'pointer' } : undefined}>
           {collapseToggle}
           <span
@@ -287,7 +271,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
         {showViewedControl && onToggleViewed && (
           <button
             onClick={onToggleViewed}
-            className={`text-xs rounded transition-colors flex items-center ${paneTabs ? NARROW_PAD : TIGHT_PAD} ${
+            className={`text-xs rounded transition-colors flex items-center ${TIGHT_PAD} ${
               isViewed
                 ? 'text-foreground hover:bg-muted'
                 : 'text-muted-foreground hover:text-foreground hover:bg-muted'
@@ -305,14 +289,14 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
                 <circle cx="12" cy="12" r="9" />
               </svg>
             )}
-            <span className={tightLabel}>Viewed</span>
+            <span className={TIGHT_LABEL}>Viewed</span>
           </button>
         )}
         {showStageControl && canStage && onStage && (
           <button
             onClick={onStage}
             disabled={isStaging}
-            className={`${foldsActions ? NARROW_LABEL : actionFold} text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
+            className={`${actionFold} text-xs rounded transition-colors flex items-center ${stageLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'} ${
               isStaging
                 ? 'opacity-50 cursor-not-allowed text-muted-foreground'
                 : isStaged
@@ -351,7 +335,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
               fileCommentButtonRef?.(el);
             }}
             onClick={() => fileCommentRef.current && onFileComment(fileCommentRef.current)}
-            className={`${foldsActions ? NARROW_LABEL : actionFold} text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
+            className={`${actionFold} text-xs rounded transition-colors flex items-center text-muted-foreground hover:text-foreground hover:bg-muted ${commentLabel ? 'gap-1 px-2 py-1' : 'px-1.5 py-1'}`}
             title="Add file-scoped comment"
             aria-label="Comment on this file"
           >
