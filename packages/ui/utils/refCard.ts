@@ -16,6 +16,8 @@
 
 import { forgeRefKey, parseForgeRefUrl, type ForgeRef, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
+import { providedRefCardTarget } from './refCardProviders';
+
 export type { ForgeRef, ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 
 /** Fetch the card for a link. Resolve null when the host does not read that link. */
@@ -70,7 +72,8 @@ export function refCardTarget(href: string | null | undefined): ForgeRef | null 
   if (!transport || !href) return null;
   const ref = parseForgeRefUrl(href);
   // Bitbucket issues get no card anywhere: the server reads only its pull requests.
-  return ref && (ref.platform !== 'bitbucket' || (bitbucketCards && ref.kind === 'pull')) ? ref : null;
+  if (ref) return ref.platform !== 'bitbucket' || (bitbucketCards && ref.kind === 'pull') ? ref : null;
+  return providedRefCardTarget(href);
 }
 
 /** The card for a link, through the installed transport (shared and cached per ref). */
