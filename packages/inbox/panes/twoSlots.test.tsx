@@ -594,6 +594,35 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(calls).toEqual(['open:msg_C1:main:right']);
   });
 
+  test("the pane's foot: closed (Reply, Looks good), it is the bottom edge and opens below; with the reply box open, a drop there does nothing", async () => {
+    const calls: string[] = [];
+    drawPanes(windowOf(L.follow(L.EMPTY_LAYOUT, A), calls), hostFor(A, noop), heldOf(A, false), true);
+    await wait(0);
+    const foot = paneOf(A).querySelector<HTMLElement>('.ib-pfoot')!;
+    expect(foot.querySelector('.ib-rbox')).toBeNull();
+    const reply = foot.querySelector<HTMLElement>('button') ?? foot;
+    stub(document, 'elementFromPoint', { value: () => reply });
+    setThreadDragHitTestForTests(() => paneOf(A));
+    const word = () => document.querySelector('[data-thread-ghost] .ib-tdrag-w')!.textContent;
+    pressRow();
+    drag(400, 870);
+    expect(word()).toBe('Open below');
+    expect(document.querySelector('.ib-droppreview')).not.toBeNull();
+    release(400, 870);
+    expect(calls).toEqual(['open:msg_C1:main:bottom']);
+    // The reply box open: the foot around it takes no pane drop (no word, no zone, nothing changes).
+    calls.length = 0;
+    pressR();
+    expect(foot.querySelector('.ib-rbox')).not.toBeNull();
+    stub(document, 'elementFromPoint', { value: () => foot });
+    pressRow();
+    drag(400, 870);
+    expect(word()).toBe('');
+    expect(document.querySelector('.ib-droppreview')).toBeNull();
+    release(400, 870);
+    expect(calls).toEqual([]);
+  });
+
   test('a press on a row that does not move is a click; Escape mid-drag puts it back', async () => {
     const calls: string[] = [];
     let clicks = 0;

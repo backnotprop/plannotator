@@ -152,8 +152,12 @@ export function usePaneDrop(options: PaneDropOptions): void {
       if (!box) return null;
       const target = box.id;
       if (carried.kind === 'pane' && carried.paneId === target) return null;
+      // An open reply box (and the foot around it) is the reply's: a drop never lands in or disturbs a draft, and the
+      // box's own target (a mention, layer `reply`) takes a thread there. A closed foot (Reply, Looks good) is the
+      // pane's bottom edge like the rest of it.
       const over = document.elementFromPoint(x, y);
-      if (carried.kind === 'thread' && over && box.el.contains(over) && over.closest('.ib-pfoot, .ib-rbox')) return null;
+      const foot = over && box.el.contains(over) ? over.closest('.ib-pfoot') : null;
+      if (carried.kind === 'thread' && over && box.el.contains(over) && (over.closest('.ib-rbox') || foot?.querySelector('.ib-rbox'))) return null;
       const r = box.el.getBoundingClientRect();
       const { edge, depth } = nearestEdge(x, y, r);
       const measured = measureRoom(true);
