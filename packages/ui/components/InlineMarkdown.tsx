@@ -8,7 +8,7 @@ import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { BarePathContext, CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
+import { BarePathContext, CodeSpan, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
@@ -599,6 +599,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost, linkLabel = false }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const matchLocalLink = useLocalLinkMatch();
   const barePaths = useContext(BarePathContext);
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
@@ -1284,7 +1285,7 @@ export const InlineMarkdown: React.FC<{
       const isInPageAnchor = safeLinkUrl.startsWith('#');
       // A host's resolver (Viewer `resolveLocalLink`) decides local paths
       // first; null from it, or no resolver, keeps the branches below.
-      const localLink = resolveLocalLink && isLocalLinkTarget(linkUrl) ? resolveLocalLink(linkUrl) : null;
+      const localLink = resolveLocalLink && matchLocalLink(linkUrl) ? resolveLocalLink(linkUrl) : null;
 
       if (localLink?.kind === 'open') {
         const openLink = localLink.open;

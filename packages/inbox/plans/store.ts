@@ -10,6 +10,7 @@ import type { PlanSummary, PlanVersion } from '@plannotator/core/plans';
 import type { SettingsModel } from '../api';
 import { InboxApiError } from '../apiError';
 import { plansApi, type PlanDiffTexts, type PlanRead } from './client';
+import { setSidebarUnsaved } from '../sidebarLayout';
 
 export const PLANS_IMPORT_POLL_MS = 2000;
 
@@ -19,9 +20,11 @@ export interface PlansSnapshot {
   error: string | null;
   /** The Inbox answered 404: Plans was turned off since this window read its settings. */
   off: boolean;
+  /** The Inbox could not read the plan history (its message): the list holds what it read before. */
+  importError: string | null;
 }
 
-const EMPTY: PlansSnapshot = { plans: null, importing: false, error: null, off: false };
+const EMPTY: PlansSnapshot = { plans: null, importing: false, error: null, off: false, importError: null };
 let on = false;
 let snap = EMPTY;
 let reading: Promise<void> | null = null;
@@ -36,11 +39,12 @@ function emit(next: Partial<PlansSnapshot>) {
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const isOff = (error: unknown) => error instanceof InboxApiError && error.status === 404;
 
-export function readPlans(): Promise<void> {
+/** `retry`: the list's Try again after the Inbox could not read the plan history. */
+export function readPlans(retry = false): Promise<void> {
   if (!on) return Promise.resolve();
   if (reading) return reading;
-  reading = plansApi.list().then(
-    (answer) => emit({ plans: answer.plans, importing: answer.importing, error: null, off: false }),
+  reading = plansApi.list(retry).then(
+    (answer) => emit({ plans: answer.plans, importing: answer.importing, error: null, off: false, importError: answer.import_error ?? null }),
     (error: unknown) => emit(isOff(error) ? { off: true, error: null } : { error: messageOf(error) }),
   );
   return reading.finally(() => {
@@ -52,6 +56,8 @@ export function readPlans(): Promise<void> {
 }
 
 export function setPlansOn(next: boolean): void {
+  // Off, its sidebar row is never saved in the layout (sidebarLayout.ts): nothing of an off Plans is written.
+  setSidebarUnsaved(next ? [] : ['plans']);
   if (on === next) return;
   on = next;
   if (!on) {

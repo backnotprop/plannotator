@@ -33,6 +33,9 @@ let root: Root | null = null;
 let unlisten = () => {};
 let dir = '';
 let store: PlanStore;
+/** The server's failed import, as the list reports it; a `?retry=1` read counts in `retries` and (here) succeeds. */
+let importError: string | null = null;
+let retries = 0;
 const realFetch = globalThis.fetch;
 
 beforeEach(() => {
@@ -40,13 +43,19 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'plans-page-'));
   store = createPlanStore({ dataDir: dir });
   resetPlansForTests(null, true);
+  importError = null;
+  retries = 0;
   window.history.replaceState(null, '', '/');
   // The Inbox's place: the real route handler over the scratch library.
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
+    if (url.searchParams.get('retry') === '1') {
+      retries++;
+      importError = null;
+    }
     const answer = await handlePlanRoute(
       { method: init?.method ?? 'GET', pathname: url.pathname, params: url.searchParams, json: async () => JSON.parse(String(init?.body ?? '{}')) },
-      { store },
+      { store, importError: () => importError },
     );
     if (!answer) return Response.json({ error: 'Not found', code: 'not_found' }, { status: 404 });
     if ('file' in answer) return new Response(readFileSync(answer.file.path), { headers: { 'Content-Type': answer.file.contentType } });
@@ -138,6 +147,32 @@ test.skipIf(!hasDom)('the list is the library: changed since you looked first, w
   expect(host.querySelector('[data-plans-group="p:field-notes"]')).not.toBeNull();
 });
 
+test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on the get-started screen; Try again reads again with ?retry=1', async () => {
+  importError = 'disk says no';
+  window.location.hash = '#plans';
+  const empty = draw();
+  await settle();
+  const startNote = empty.querySelector('[data-plans-start] [data-plans-import-error]');
+  expect(text(startNote)).toContain('Could not read your earlier plans');
+  unlisten();
+  act(() => root?.unmount());
+  empty.remove();
+
+  plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nv1\n']);
+  importError = 'disk says no';
+  resetPlansForTests(null, true);
+  const host = draw();
+  await settle();
+  const note = host.querySelector('[data-plans-home] [data-plans-import-error]')!;
+  expect(note.getAttribute('title')).toBe('disk says no');
+  expect(retries).toBe(0);
+  await act(async () => (note.querySelector('button') as HTMLButtonElement).click());
+  await settle();
+  expect(retries).toBe(1);
+  expect(host.querySelector('[data-plans-import-error]')).toBeNull();
+  expect(host.querySelector('[data-plan-row]')).not.toBeNull();
+});
+
 test.skipIf(!hasDom)('an empty library shows the get-started screen, whose action says how a plan arrives', async () => {
   window.location.hash = '#plans';
   const host = draw();
@@ -200,6 +235,41 @@ test.skipIf(!hasDom)('Show changes compares the version you saw with the newest,
   await settle();
   expect(window.location.hash).toBe(`#plans=${id}`);
   expect(host.querySelector('[data-plan-diff]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('an agent’s plan fetches no remote picture and no link takes the tab away: in the document and in the diff', async () => {
+  const risky = [
+    '# Links',
+    '',
+    '![tracker](https://tracker.example/p.png) ![inline](data:image/png;base64,iVBORw0KGgo=)',
+    '',
+    '[spec](docs/spec.md) [mail](mailto:someone@example.com) [editor](vscode://file/x.ts) [site](https://example.com/x) [top](#links)',
+    '',
+    '<p><a href="docs/raw.md">raw</a> <img src="https://tracker.example/h.png" alt="raw tracker"></p>',
+    '',
+  ].join('\n');
+  const id = plan('Links', 'harbor-api', ['# Links\n\nplain\n', risky]);
+  const check = (scope: Element) => {
+    const srcs = [...scope.querySelectorAll('img')].map((img) => img.getAttribute('src') ?? '');
+    // No picture from anywhere but the plan itself.
+    expect(srcs.filter((src) => !src.startsWith('data:'))).toEqual([]);
+    const hrefs = [...scope.querySelectorAll('a[href]')].map((a) => a.getAttribute('href'));
+    // A relative path, a mail link and an editor link are inert text; a web link opens in a new tab.
+    for (const inert of ['docs/spec.md', 'mailto:someone@example.com', 'vscode://file/x.ts', 'docs/raw.md']) expect(hrefs).not.toContain(inert);
+    expect(text(scope)).toContain('spec');
+    const site = scope.querySelector('a[href="https://example.com/x"]')!;
+    expect(site.getAttribute('target')).toBe('_blank');
+    expect(site.getAttribute('rel')).toContain('noopener');
+  };
+
+  window.location.hash = `#plans=${id}`;
+  const host = draw();
+  await settle();
+  check(host.querySelector('[data-plan-document="2"]')!);
+
+  window.location.hash = `#plans=${id}&from=1&to=2`;
+  await settle();
+  check(host.querySelector('[data-plan-diff="1-2"]')!);
 });
 
 test.skipIf(!hasDom)('off: the page draws nothing, reads nothing, and a #plans link goes to the Inbox in place', async () => {

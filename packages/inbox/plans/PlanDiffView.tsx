@@ -3,11 +3,13 @@
  * (`computePlanDiff`, packages/ui/utils/planDiffEngine.ts) and its clean view with words marked in place
  * (`PlanCleanDiffView`, Rendered). Read only: no comment is offered on a block (no `onAddAnnotation`). The texts come
  * from `GET /api/plans/:id/diff`. Added and removed blocks are drawn as fills (plans.css), unchanged ones dimmed.
+ * Under the same rules as the document (planContent.tsx): no remote picture is fetched, no link but a web one acts.
  */
 import { useMemo, useState } from 'react';
 import { computePlanDiff } from '@plannotator/ui/utils/planDiffEngine';
 import { PlanCleanDiffView } from '@plannotator/ui/components/plan-diff/PlanCleanDiffView';
 import { usePlanDiff } from './store';
+import { PlanContentRules } from './planContent';
 
 export function PlanDiffView({ id, from, to }: { id: string; from: number; to: number }) {
   const [retry, setRetry] = useState(0);
@@ -48,7 +50,11 @@ export function PlanDiffView({ id, from, to }: { id: string; from: number; to: n
             <span data-k="added">+{stats.additions}</span> / <span data-k="removed">−{stats.deletions}</span>
           </span>
         </div>
-        {same ? <p className="ib-plan-same">v{from} and v{to} have the same text.</p> : <PlanCleanDiffView blocks={blocks} wordLevel />}
+        {same ? <p className="ib-plan-same">v{from} and v{to} have the same text.</p> : (
+          <PlanContentRules>
+            <PlanCleanDiffView blocks={blocks} wordLevel />
+          </PlanContentRules>
+        )}
       </div>
     </div>
   );

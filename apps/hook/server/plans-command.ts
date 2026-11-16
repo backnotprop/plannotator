@@ -4,8 +4,8 @@
  *   plannotator plans        turn Plans on (config.json `inboxPlans`) and show the Inbox's Plans page: in the window
  *                            the person used last when one is open (as `plannotator inbox --open <thread>` shows a
  *                            thread), else in a new tab, starting the Inbox detached when it is not running (the
- *                            rules of `plannotator inbox --open`); prints the page's URL. Only from a person's terminal: typing it is the opt-in, so a
- *                            shell with no terminal (an agent's) is refused and nothing changes.
+ *                            rules of `plannotator inbox --open`); prints the page's URL. Not gated: any shell on this
+ *                            computer may run it (an agent's included).
  *   plannotator plans off    turn Plans off; the library stays on disk.
  *   plannotator plans list   the plans, one line each: from the running Inbox (which picks up what plan review
  *                            wrote since), else read from the library on disk. Never starts the Inbox, never writes.

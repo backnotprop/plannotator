@@ -4,12 +4,12 @@
  * action. Starting an agent in plan mode from here (the mock's box) needs words agents read, not approved yet; so the
  * action says how a plan arrives today: your agent's plan review lands it here.
  */
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { SidebarTrigger } from '../shell/sidebar';
 import { Icon } from '../icons';
 import { startPlansDither } from './dither';
 
-export function PlansGetStarted({ onBack, importing }: { onBack?: () => void; importing?: boolean }) {
+export function PlansGetStarted({ onBack, importing, note }: { onBack?: () => void; importing?: boolean; note?: ReactNode }) {
   const host = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const words = useRef<HTMLDivElement>(null);
@@ -53,6 +53,7 @@ export function PlansGetStarted({ onBack, importing }: { onBack?: () => void; im
             Bringing in the plans you reviewed before…
           </p>
         )}
+        {note}
       </div>
     </section>
   );

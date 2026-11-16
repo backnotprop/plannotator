@@ -36,6 +36,8 @@ export interface PlanRouteDeps {
   changed?: (id: string) => void;
   /** The import is running: the list says so (`importing: true`), so a reader can ask again. */
   importing?: () => boolean;
+  /** The last import failed: its message (`import_error`), else null; the list holds what was read before. */
+  importError?: () => string | null;
 }
 
 const CONTENT_TYPE: Record<string, string> = {
@@ -66,7 +68,7 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
 
   if (parts.length === 0) {
     if (method !== "GET") return bad("method not allowed", 405);
-    return { status: 200, body: { plans: store.list(), importing: deps.importing?.() ?? false } };
+    return { status: 200, body: { plans: store.list(), importing: deps.importing?.() ?? false, import_error: deps.importError?.() ?? null } };
   }
 
   const id = parts[0]!;

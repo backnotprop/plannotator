@@ -19,6 +19,8 @@ export interface PlansList {
   plans: PlanSummary[];
   /** The import is bringing in plan history: ask again shortly. */
   importing: boolean;
+  /** The Inbox's last read of the plan history failed (its message); absent from an Inbox before this answer. */
+  import_error?: string | null;
 }
 
 export interface PlanRead {
@@ -58,7 +60,8 @@ async function text(path: string): Promise<string> {
 }
 
 export const plansApi = {
-  list: () => get<PlansList>(BASE),
+  /** `retry`: the list's Try again, so the Inbox reads the plan history now, whatever its wait after a failure. */
+  list: (retry = false) => get<PlansList>(retry ? `${BASE}?retry=1` : BASE),
   read: (id: string) => get<PlanRead>(one(id)),
   versions: (id: string) => get<{ document_id: string; versions: PlanVersion[] }>(one(id, '/versions')),
   /** One version's text, as saved. */

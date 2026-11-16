@@ -1,11 +1,11 @@
 /**
  * A plan version drawn by the document UI's Viewer (@plannotator/ui), read only, as the Inbox draws a linked
- * Markdown page (components/LinkedMarkdown.tsx). Pictures the plan names by a path on the agent's computer are not
- * fetched (a quiet placeholder with their alt text); only a picture written into the plan (`data:`) shows.
+ * Markdown page (components/LinkedMarkdown.tsx), under the rules for a plan's own words (planContent.tsx): no picture
+ * is fetched but one written into the plan, and no link but a web one does anything.
  */
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
-import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
+import { PlanContentRules, resolvePlanLink } from './planContent';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { useVersionText } from './store';
@@ -18,7 +18,6 @@ export function PlanDocument({ id, version }: { id: string; version: number }) {
   const { text, error } = useVersionText(id, version, retry);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const blocks = useMemo(() => (text === null ? [] : parseMarkdownToBlocks(text)), [text]);
-  const resolveImage = useCallback<ImageResolver>((src) => (/^data:image\//i.test(src) ? { kind: 'src', src } : { kind: 'unavailable', title: src }), []);
   if (error) {
     return (
       <div className="ib-plan-docstate" role="alert">
@@ -39,7 +38,7 @@ export function PlanDocument({ id, version }: { id: string; version: number }) {
   return (
     <div className="ib-plan-docscroll" ref={setViewport} data-plan-document={version}>
       <ScrollViewportProvider viewport={viewport}>
-        <ImageResolverContext.Provider value={resolveImage}>
+        <PlanContentRules>
           <Viewer
             key={`${id}:${version}`}
             blocks={blocks}
@@ -55,8 +54,9 @@ export function PlanDocument({ id, version }: { id: string; version: number }) {
             mode="selection"
             taterMode={false}
             readOnly
+            resolveLocalLink={resolvePlanLink}
           />
-        </ImageResolverContext.Provider>
+        </PlanContentRules>
       </ScrollViewportProvider>
     </div>
   );

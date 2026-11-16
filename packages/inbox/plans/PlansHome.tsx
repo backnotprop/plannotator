@@ -13,13 +13,13 @@ import { writeRoute } from '../app/writeRoute';
 import { PlansGetStarted } from './PlansGetStarted';
 import { readPlans, usePlansPage } from './store';
 import { decisionLabel, decisionTone, filterPlans, holdsLine, newSince, newsLine, planGroups, planProjects } from './words';
-import { DecisionMark, PlansMessage } from './parts';
+import { DecisionMark, ImportErrorNote, PlansMessage } from './parts';
 
 const openPlan = (id: string) => writeRoute({ page: 'plans', project: null, thread: null, plan: id });
 
 export function PlansHome({ showStart }: { showStart: boolean }) {
   const snap = usePlansPage();
-  if (snap.off) return <PlansMessage title="Plans is off" body="Reload the window to hide it." />;
+  if (snap.off) return <PlansMessage title="Plans is off" body="Its plans stay on this computer." onBack={() => writeRoute({ page: 'inbox', project: null, thread: null })} backLabel="Inbox" />;
   if (!snap.plans) {
     if (snap.error) return <PlansMessage title="Plans could not be read" body={snap.error} onRetry={() => void readPlans()} />;
     return <PlansMessage busy title="Plans" body="Loading plans…" />;
@@ -28,14 +28,15 @@ export function PlansHome({ showStart }: { showStart: boolean }) {
     return (
       <PlansGetStarted
         importing={snap.importing && snap.plans.length === 0}
+        note={snap.importError && !snap.importing ? <ImportErrorNote error={snap.importError} onRetry={() => void readPlans(true)} /> : undefined}
         onBack={snap.plans.length > 0 ? () => writeRoute({ page: 'plans', project: null, thread: null }) : undefined}
       />
     );
   }
-  return <PlansList plans={snap.plans} importing={snap.importing} error={snap.error} />;
+  return <PlansList plans={snap.plans} importing={snap.importing} error={snap.error} importError={snap.importing ? null : snap.importError} />;
 }
 
-function PlansList({ plans, importing, error }: { plans: readonly PlanSummary[]; importing: boolean; error: string | null }) {
+function PlansList({ plans, importing, error, importError }: { plans: readonly PlanSummary[]; importing: boolean; error: string | null; importError: string | null }) {
   const [query, setQuery] = useState('');
   const [project, setProject] = useState<string | null>(null);
   const projects = useMemo(() => planProjects(plans), [plans]);
@@ -82,6 +83,7 @@ function PlansList({ plans, importing, error }: { plans: readonly PlanSummary[];
             Bringing in the plans you reviewed before…
           </p>
         )}
+        {importError && <ImportErrorNote error={importError} onRetry={() => void readPlans(true)} />}
         {error && (
           <p className="ib-plans-note" role="alert">
             {error}{' '}

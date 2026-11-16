@@ -23,6 +23,10 @@ const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof imp
 const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
 const { dispatchInboxFrame } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 const { namesCapability, withCapabilities } = (hasDom ? await import('../capabilities') : {}) as typeof import('../capabilities');
+const { writeSidebarLayout, resetSidebarLayoutForTests, SIDEBAR_LAYOUT_COOKIE } = (hasDom ? await import('../sidebarLayout') : {}) as typeof import('../sidebarLayout');
+const { setPlansOn } = (hasDom ? await import('./store') : {}) as typeof import('./store');
+const { setStorageBackend, resetStorageBackend } = (hasDom ? await import('@plannotator/ui/utils/storage') : {}) as typeof import('@plannotator/ui/utils/storage');
+const { INBOX_SIDEBAR_DEFAULT } = (hasDom ? await import('@plannotator/core/inbox-sidebar') : {}) as typeof import('@plannotator/core/inbox-sidebar');
 
 let root: Root | null = null;
 const realFetch = globalThis.fetch;
@@ -171,4 +175,35 @@ test.skipIf(!hasDom)('`plannotator plans` with a window open: the show frame nam
   dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ page: 'elsewhere', window: 'w1' }) }, handlers);
   dispatchInboxFrame({ name: 'show', id: null, data: JSON.stringify({ thread_id: 'thr_1', window: 'w1' }) }, handlers);
   expect(heard).toEqual([['', 'w1', 'plans'], ['thr_1', 'w1', undefined]]);
+});
+
+test.skipIf(!hasDom)('off, Plans is never written: a customised sidebar is saved and kept in the cookie without it; on, with it', async () => {
+  const saved: { top: string[]; bottom: string[]; hidden: string[] }[] = [];
+  const cookie = new Map<string, string>();
+  setStorageBackend({ getItem: (k) => cookie.get(k) ?? null, setItem: (k, v) => void cookie.set(k, v), removeItem: (k) => void cookie.delete(k) });
+  globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+    const sidebar = (JSON.parse(init?.body ?? '{}') as { sidebar: { top: string[]; bottom: string[]; hidden: string[] } }).sidebar;
+    saved.push(sidebar);
+    return Response.json({ sidebar, sidebar_rev: saved.length });
+  }) as unknown as typeof fetch;
+  try {
+    resetSidebarLayoutForTests();
+    resetPlansForTests(null, false);
+    // A person who never turned Plans on hides Feedback: the layout this page holds still has Plans in its place
+    // (core's default), but what is saved and kept in the cookie names nothing of it.
+    await writeSidebarLayout({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['feedback'] });
+    expect(saved.at(-1)!.top).not.toContain('plans');
+    expect([...saved.at(-1)!.top, ...saved.at(-1)!.bottom, ...saved.at(-1)!.hidden]).not.toContain('plans');
+    expect(cookie.get(SIDEBAR_LAYOUT_COOKIE)).not.toContain('plans');
+
+    // Plans on: its row is part of the layout saved.
+    setPlansOn(true);
+    await writeSidebarLayout({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['copy-prompt'] });
+    expect(saved.at(-1)!.top.indexOf('plans')).toBe(saved.at(-1)!.top.indexOf('inbox') + 1);
+    expect(cookie.get(SIDEBAR_LAYOUT_COOKIE)).toContain('plans');
+  } finally {
+    setPlansOn(false);
+    resetSidebarLayoutForTests();
+    resetStorageBackend();
+  }
 });

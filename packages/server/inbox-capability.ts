@@ -75,17 +75,23 @@ export async function routeInboxCapabilities(list: readonly InboxCapability[], r
   return (await capability.route!(req, url)) ?? NOT_FOUND();
 }
 
-/** Every capability's part of `GET /api/inbox/settings`. */
-export function capabilitiesWire(list: readonly InboxCapability[]): Record<string, unknown> {
-  return Object.assign({}, ...list.map((c) => c.settingsWire?.() ?? {}));
+/**
+ * Every capability's part of `GET /api/inbox/settings`. `local`: the window is the owner's on this computer, the only
+ * place a capability's routes answer (`routeInboxCapabilities`); any other window (the tailnet, a phone) is told
+ * nothing of them, so it draws no row that would lead to a 404.
+ */
+export function capabilitiesWire(list: readonly InboxCapability[], local = true): Record<string, unknown> {
+  return local ? Object.assign({}, ...list.map((c) => c.settingsWire?.() ?? {})) : {};
 }
 
 /**
  * Every capability's part of `event: capabilities`: its settings wire while on, and `{ [key]: { on: false } }` to
  * the frame of the change that turned it off (`changed`: a switch on this seam changed), so a window drops it at
- * once and a frame names nothing of it otherwise.
+ * once and a frame names nothing of it otherwise. `local`: as for `capabilitiesWire`, a window anywhere else hears
+ * nothing of them.
  */
-export function capabilitiesFrame(list: readonly InboxCapability[], changed: boolean): Record<string, unknown> {
+export function capabilitiesFrame(list: readonly InboxCapability[], changed: boolean, local = true): Record<string, unknown> {
+  if (!local) return {};
   return Object.assign({}, ...list.map((c) => (c.on() ? (c.settingsWire?.() ?? {}) : changed ? { [c.key]: { on: false } } : {})));
 }
 

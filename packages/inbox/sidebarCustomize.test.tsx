@@ -31,6 +31,8 @@ const { setInboxAgents } = await import('./agentsList');
 
 const stored = new Map<string, string>();
 const saves: unknown[] = [];
+/** What is saved while Plans is off (it is, here): its row is left out of the layout and the cookie (sidebarLayout.ts). */
+const SAVED_DEFAULT = { ...INBOX_SIDEBAR_DEFAULT, top: INBOX_SIDEBAR_DEFAULT.top.filter((id) => id !== 'plans') };
 let serverRev = 0;
 const realFetch = globalThis.fetch;
 let root: Root | null = null;
@@ -143,9 +145,9 @@ test.skipIf(!hasDom)('a tick hides the row at once, leaves the menu open, saves 
   expect(document.querySelector('[data-feedback-nav]')).toBeNull();
   expect(menu()).not.toBeNull();
   expect(document.querySelector('[data-sidebar-toggle="feedback"]')!.getAttribute('aria-checked')).toBe('false');
-  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['feedback'] });
+  expect(saves.at(-1)).toEqual({ ...SAVED_DEFAULT, hidden: ['feedback'] });
   // This browser remembers it for the next paint.
-  expect(stored.get(SIDEBAR_LAYOUT_COOKIE)).toBe(`${INBOX_SIDEBAR_DEFAULT.top.join(',')};${INBOX_SIDEBAR_DEFAULT.bottom.join(',')};feedback`);
+  expect(stored.get(SIDEBAR_LAYOUT_COOKIE)).toBe(`${SAVED_DEFAULT.top.join(',')};${SAVED_DEFAULT.bottom.join(',')};feedback`);
   // The logo and the Settings row's buttons hide too.
   await click(document.querySelector('[data-sidebar-toggle="logo"]'));
   await click(document.querySelector('[data-sidebar-toggle="theme"]'));
@@ -155,7 +157,7 @@ test.skipIf(!hasDom)('a tick hides the row at once, leaves the menu open, saves 
   await click(document.querySelector('[data-sidebar-reset]'));
   expect(document.querySelector('[data-feedback-nav]')).not.toBeNull();
   expect(document.querySelector('.ib-brand')).not.toBeNull();
-  expect(saves.at(-1)).toEqual(INBOX_SIDEBAR_DEFAULT);
+  expect(saves.at(-1)).toEqual(SAVED_DEFAULT);
   expect(stored.has(SIDEBAR_LAYOUT_COOKIE)).toBe(false);
 });
 
@@ -209,7 +211,7 @@ test.skipIf(!hasDom)('the panel: Top and Bottom in the sidebar\'s order, a switc
   expect(document.querySelector('[data-feedback-nav]')).toBeNull();
   await click(panel()!.querySelector('[data-sidebar-switch="copy-prompt"]'));
   expect(document.querySelector('[data-connect-prompt]')).toBeNull();
-  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['copy-prompt', 'feedback'] });
+  expect(saves.at(-1)).toEqual({ ...SAVED_DEFAULT, hidden: ['copy-prompt', 'feedback'] });
 });
 
 test.skipIf(!hasDom)('the grip\'s menu moves an item: Move to bottom, Move up, and Move up is off at the top of a stack', async () => {
@@ -338,7 +340,7 @@ test.skipIf(!hasDom)('hiding Agents takes the whole section away, saves it, and 
   expect(document.querySelector('.ib-side')!.textContent).not.toContain('Agents');
   // Projects and the rest are untouched.
   expect(document.querySelector('.ib-side [data-sidebar-section="projects"]')).not.toBeNull();
-  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['agents'] });
+  expect(saves.at(-1)).toEqual({ ...SAVED_DEFAULT, hidden: ['agents'] });
   // The panel still lists it, switched off: the way back.
   expect(panel()!.querySelector('[data-sidebar-switch="agents"]')!.getAttribute('aria-checked')).toBe('false');
 
@@ -349,7 +351,7 @@ test.skipIf(!hasDom)('hiding Agents takes the whole section away, saves it, and 
   await rightClick(document.querySelector('[data-board-nav]')!);
   await click(document.querySelector('[data-sidebar-toggle="agents"]'));
   expect(agentsHeading()).not.toBeNull();
-  expect(saves.at(-1)).toEqual(INBOX_SIDEBAR_DEFAULT);
+  expect(saves.at(-1)).toEqual(SAVED_DEFAULT);
 });
 
 test.skipIf(!hasDom)('a layout saved before Agents was an item shows the section, from the cookie and from the server', async () => {
@@ -418,12 +420,12 @@ test.skipIf(!hasDom)('hiding Starred or Projects takes the whole section away, h
   expect(starredHeading()).toBeNull();
   expect(starredSection()).toBeNull();
   expect(projectsHeading()).not.toBeNull();
-  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['starred'] });
+  expect(saves.at(-1)).toEqual({ ...SAVED_DEFAULT, hidden: ['starred'] });
   await click(panel()!.querySelector('[data-sidebar-switch="projects"]'));
   expect(projectsHeading()).toBeNull();
   expect(projectsBody()).toBeNull();
   expect(document.querySelector('.ib-side')!.textContent).not.toContain('alpha');
-  expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['starred', 'projects'] });
+  expect(saves.at(-1)).toEqual({ ...SAVED_DEFAULT, hidden: ['starred', 'projects'] });
   reload(WITH_BOTH);
   expect(starredHeading()).toBeNull();
   expect(projectsHeading()).toBeNull();

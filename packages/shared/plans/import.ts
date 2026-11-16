@@ -16,7 +16,9 @@
  *   file name in `legacy`, and the chain is listed in the report's `gaps`.
  * - A file that may still be being written (modified less than `PLAN_IMPORT_SETTLE_MS` ago, or changed while it was
  *   read) is not read yet: its chain stops there (listed in `unsettled`) and a later run reads it whole. An empty
- *   `NNN.md` is no version (listed in `empty_files`).
+ *   `NNN.md` is no version (listed in `empty_files`): the chain's newest file, empty, is a stalled write and the chain
+ *   waits for it in its place; one with a later file after it is over. Versions follow file numbers, never arrival: a
+ *   file numbered below a version already taken is never taken (listed in `late_files`).
  * - A file that cannot be read stops that chain there (listed in `unreadable`); the next run tries again from it, so
  *   the order is kept.
  * - A folder with no `NNN.md` (left by an interrupted run) is no plan yet; annotate's chains (`annotate-…-<hash>`)
@@ -68,6 +70,11 @@ export interface PlanImportReport {
   unsettled: string[];
   /** Empty files, which are no version or decision (relative to the data dir). */
   empty_files: string[];
+  /**
+   * Files numbered below a version already taken from their chain (one that was empty when a later file was written,
+   * filled in since): never taken, so versions stay in file order (relative to the data dir).
+   */
+  late_files: string[];
   /** Feedback lines read this run that have no plan or version to land on yet. */
   orphan_feedback: number;
   snapshot_only_plans: number;
@@ -100,6 +107,7 @@ const emptyReport = (): PlanImportReport => ({
   unreadable: [],
   unsettled: [],
   empty_files: [],
+  late_files: [],
   orphan_feedback: 0,
   snapshot_only_plans: 0,
   duplicate_snapshots: 0,
@@ -321,13 +329,20 @@ function* importChain(
   if (files.some((file, i) => file.n !== i + 1)) report.gaps.push(key);
 
   let plan: PlanRecord | null = entry ? store.get(entry.plan) : null;
+  const legacyOf = (name: string) => `history/${project}/${slug}/${name}`;
   const known = new Set(plan ? store.versions(plan.id).map((v) => v.legacy) : []);
+  // Versions follow file numbers, never arrival: a file numbered below the newest one taken is never taken after it.
+  const taken = Math.max(0, ...files.filter((file) => known.has(legacyOf(file.name))).map((file) => file.n));
   let complete = true;
   let newest: { text: string; at: string } | null = null;
   let added = 0;
-  for (const file of files) {
-    const legacy = `history/${project}/${slug}/${file.name}`;
+  for (const [i, file] of files.entries()) {
+    const legacy = legacyOf(file.name);
     if (known.has(legacy)) continue;
+    if (file.n < taken) {
+      report.late_files.push(legacy);
+      continue;
+    }
     const read = readSettled(join(dir, file.name), now);
     if (read.kind === "unreadable" || read.kind === "unsettled") {
       // Stop here, so the order is kept; the next run reads it again.
@@ -336,11 +351,13 @@ function* importChain(
       break;
     }
     if (read.kind === "empty") {
-      // No version, and the chain is not marked read: a write that truncated it and stalled (a laptop asleep mid-write)
-      // fills it in place later, which does not change the folder's time, so a mark here would skip it for good.
       report.empty_files.push(legacy);
+      // A later file was written: plan review writes in order, so this write is over and it is no version.
+      if (i < files.length - 1) continue;
+      // The newest file: a write that truncated it and stalled (a laptop asleep mid-write) fills it in place later,
+      // which does not change the folder's time. Wait for it in its place, with the chain not marked read.
       complete = false;
-      continue;
+      break;
     }
     const at = read.at.toISOString();
     const text = decode(read.bytes);
@@ -371,13 +388,16 @@ function* importChain(
     const heading = planHeadingOf(newest.text);
     if (heading && heading !== plan.name) store.updatePlan(plan.id, { name: heading }, newest.at);
   }
-  map.chains[key] = {
+  const next = {
     plan: plan.id,
     versions: store.versions(plan.id).length,
     last: files[files.length - 1]!.n,
     // Only a chain read to its end is skipped next time; one stopped at a file not read yet is read again.
     ...(complete && dirMtime !== undefined ? { dir_mtime: dirMtime } : {}),
   };
+  // Unchanged (a chain waiting on a file, read again on every pickup): the map is not written again for it.
+  if (entry && entry.plan === next.plan && entry.versions === next.versions && entry.last === next.last && entry.dir_mtime === next.dir_mtime) return false;
+  map.chains[key] = next;
   return true;
 }
 
