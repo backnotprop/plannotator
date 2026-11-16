@@ -1,4 +1,4 @@
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { useShortcutScope } from './panes/scope';
 import { inboxTileShortcuts } from './shortcuts/grid.shortcuts';
 import { gridStep, type GridKey } from './gridMove';
 import { keyTarget, modalOpen } from './shortcuts/guards';
