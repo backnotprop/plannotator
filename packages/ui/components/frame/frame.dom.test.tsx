@@ -317,7 +317,33 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     );
   }
 
-  test('comparing words and a count replace and join the reading words on the toggle', () => {
+  test('the newest reads "v6 · newest", named as a sentence; no "Reading"', () => {
+    const { ReadingLine } = readingModule!;
+    const frame = mount(<ReadingLine shownNumber={6} currentNumber={6} versionsOpen={false} onToggleVersions={() => {}} />);
+    const toggle = frame.querySelector('[data-reading-versions]')!;
+    expect(toggle.textContent).toBe('v6 · newest');
+    expect(toggle.getAttribute('aria-label')).toBe('Version 6, the newest');
+  });
+
+  test('an older version reads "v1 of 6 · You are looking at an older version."', () => {
+    const { ReadingLine } = readingModule!;
+    const frame = mount(
+      <ReadingLine
+        shownNumber={1}
+        currentNumber={6}
+        versionsOpen={false}
+        onToggleVersions={() => {}}
+        older={{ back: <a href="#v6" />, restore: null }}
+        versionAt="start"
+      />,
+    );
+    const toggle = frame.querySelector('[data-reading-versions]')!;
+    expect(toggle.getAttribute('aria-label')).toBe('Version 1 of 6, an older version');
+    expect(toggle.parentElement!.textContent).toBe('v1 of 6·You are looking at an older version.');
+    expect(frame.textContent).not.toContain('Reading');
+  });
+
+  test('comparing words and a count replace and join the version words on the toggle', () => {
     const { ReadingLine } = readingModule!;
     const frame = mount(
       <ReadingLine shownNumber={6} currentNumber={6} versionsOpen={false} onToggleVersions={() => {}} comparing="Comparing v2 with v6" count={6} />,
@@ -325,7 +351,7 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     const toggle = frame.querySelector('[data-reading-versions]')!;
     expect(toggle.querySelector('[data-reading-comparing]')!.textContent).toBe('Comparing v2 with v6');
     expect(toggle.querySelector('[data-reading-versions-count]')!.textContent).toBe('6');
-    expect(toggle.getAttribute('aria-label')).toBe('Versions. Comparing v2 with v6. 6 versions');
+    expect(toggle.getAttribute('aria-label')).toBe('Comparing v2 with v6. 6 versions');
   });
 
   test('start placement: the version first, the approval after it', () => {

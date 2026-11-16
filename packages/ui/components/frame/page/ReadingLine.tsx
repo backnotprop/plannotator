@@ -18,22 +18,18 @@ function readingWords(
   if (!older) {
     return shownNumber === null
       ? { tag: null, rest: "", spoken: "Versions" }
-      : {
-          tag: `v${shownNumber}`,
-          rest: " · newest",
-          spoken: `Versions. Reading version ${shownNumber}, the newest`,
-        };
+      : { tag: `v${shownNumber}`, rest: " · newest", spoken: `Version ${shownNumber}, the newest` };
   }
   if (shownNumber === null) {
-    return { tag: null, rest: "an older version", spoken: "Versions. Reading an older version" };
+    return { tag: null, rest: "An older version", spoken: "An older version" };
   }
   if (currentNumber === null) {
-    return { tag: `v${shownNumber}`, rest: "", spoken: `Versions. Reading version ${shownNumber}` };
+    return { tag: `v${shownNumber}`, rest: "", spoken: `Version ${shownNumber}, an older version` };
   }
   return {
     tag: `v${shownNumber}`,
     rest: ` of ${currentNumber}`,
-    spoken: `Versions. Reading version ${shownNumber} of ${currentNumber}`,
+    spoken: `Version ${shownNumber} of ${currentNumber}, an older version`,
   };
 }
 
@@ -55,7 +51,7 @@ export function ReadingLine({
   readonly onToggleVersions: ((next: boolean) => void) | null;
   readonly approved?: ReactNode;
   readonly older?: OlderVersion | null;
-  /** While two versions are compared, the host's words for it (for example "Comparing v2 with v6") replace "Reading". */
+  /** While two versions are compared, the host's words for it (for example "Comparing v2 with v6") replace the version words. */
   readonly comparing?: string | null;
   /** How many versions there are, shown on the versions toggle. */
   readonly count?: number | null;
@@ -86,7 +82,6 @@ export function ReadingLine({
       </>
     ) : (
       <>
-        Reading{" "}
         {words.tag !== null && (
           <span data-page-version="" className="font-medium text-foreground">
             {words.tag}
@@ -97,7 +92,7 @@ export function ReadingLine({
       </>
     );
   const spoken = [
-    comparing === null ? words.spoken : `Versions. ${comparing}`,
+    comparing ?? words.spoken,
     count === null ? null : `${count} ${count === 1 ? "version" : "versions"}`,
   ]
     .filter((part): part is string => part !== null)
@@ -143,7 +138,12 @@ export function ReadingLine({
       ) : (
         <span className={cn("flex min-w-0 flex-wrap items-baseline gap-x-2", older !== null && "max-md:basis-full")}>
           {toggle}
-          {older !== null && <span role="status">You are looking at an older version.</span>}
+          {older !== null && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span role="status">You are looking at an older version.</span>
+            </>
+          )}
         </span>
       )}
       {older !== null && (
