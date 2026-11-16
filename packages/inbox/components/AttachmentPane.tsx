@@ -89,7 +89,7 @@ import { createPortal } from 'react-dom';
 import type { Notice } from './Markup';
 import { MarkupPicture } from './Markup';
 import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { useShortcutScope } from '../panes/scope';
 import { inboxFileViewerShortcuts } from '../shortcuts/fileViewer.shortcuts';
 import { ShortcutHint, withShortcut } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
@@ -320,12 +320,12 @@ export interface AttachmentPaneHandle {
   exitFull: () => void;
 }
 
-/** The pane on screen (one at a time), as whether it holds a comment not saved yet. */
-let openPane: { unsaved: () => boolean } | null = null;
+/** The panes on screen (one per thread pane), each as whether it holds a comment not saved yet. */
+const openPanes = new Set<{ unsaved: () => boolean }>();
 
-/** Whether the file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
+/** Whether a file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
 export function openPaneUnsaved(): boolean {
-  return openPane?.unsaved() ?? false;
+  return [...openPanes].some((pane) => pane.unsaved());
 }
 
 /** The element that scrolls the open file (a document, code, or an image at its own size). */
@@ -696,10 +696,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // Whether the file holds a comment not saved yet, for the window's link listener (App.tsx): an edit not changed is not unsaved.
   useEffect(() => {
     const entry = { unsaved: () => !readOnlyRef.current && unsavedComposer(sectionRef.current, savedTextRef.current) !== null };
-    openPane = entry;
-    return () => {
-      if (openPane === entry) openPane = null;
-    };
+    openPanes.add(entry);
+    return () => void openPanes.delete(entry);
   }, []);
   const exitFullRef = useRef<() => void>(() => {});
   useImperativeHandle(ref, () => ({ leave: (to, go) => leaveRef.current(to, go), exitFull: () => exitFullRef.current() }), []);

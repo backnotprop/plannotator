@@ -108,7 +108,12 @@ const bad = (message: string, status = 400): ShapeRouteResult => ({ status, body
 export async function handleShapeRoute(req: ShapeRouteRequest, deps: ShapeRouteDeps): Promise<ShapeRouteResult | null> {
   if (req.pathname !== "/api/shapes" && !req.pathname.startsWith("/api/shapes/")) return null;
   const { store } = deps;
-  const parts = req.pathname.split("/").slice(3).map((p) => decodeURIComponent(p));
+  let parts: string[];
+  try {
+    parts = req.pathname.split("/").slice(3).map((p) => decodeURIComponent(p));
+  } catch {
+    return bad("malformed URL encoding");
+  }
   const method = req.method.toUpperCase();
 
   if (parts.length === 0) {
