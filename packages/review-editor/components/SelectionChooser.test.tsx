@@ -68,7 +68,8 @@ const frames = async (n = 8) => {
 function paintedDiff(rows: { column?: 'additions' | 'deletions'; line: number; top: number; left: number }[], parent: HTMLElement = document.body) {
   const host = document.createElement('diffs-container');
   parent.appendChild(host);
-  const shadow = host.attachShadow({ mode: 'open' });
+  // Once anything has loaded @pierre/diffs its own `diffs-container` is defined and attaches the shadow root itself.
+  const shadow = host.shadowRoot ?? host.attachShadow({ mode: 'open' });
   for (const row of rows) {
     const code = document.createElement('div');
     code.setAttribute('data-code', '');

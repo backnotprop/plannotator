@@ -11,7 +11,7 @@
  * selection bar on the page goes when Comments opens, by a tap or by a key. A
  * desktop's panel stays the 300 px column or edge sheet it was.
  */
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from './inbox-test';
 import { LONG_FILE, openPull, openReview, seedPull, seedReview, SHORT_FILE, startWorld, stopWorld, windowAt, type Comment, type PhoneWorld } from './inbox-review-comments-phone-world';
 
 const COMMENTS: Comment[] = [

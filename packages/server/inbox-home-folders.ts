@@ -22,12 +22,13 @@
  */
 import { accessSync, constants, lstatSync, mkdirSync, readdirSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { windowsAttributesOf, windowsFolderHidden, windowsFolderRefusal, windowsTypedUnderHome } from "./inbox-launch-windows";
+import { windowsAttributesOf, windowsFolderHidden, windowsFolderRefusal, windowsOutsideHomeRefusal, windowsTypedUnderHome } from "./inbox-launch-windows";
 
 /** At most this many names come back for one folder (alphabetical): the window filters as the person types. */
 export const HOME_FOLDERS_MAX = 500;
 
-export type HomeFolderRefusal = "outside" | "hidden" | "system";
+/** `home_only`: a full path outside home on Windows (another drive too), where a folder is picked under home for now. */
+export type HomeFolderRefusal = "outside" | "hidden" | "system" | "home_only";
 
 /**
  * Where a machine keeps its own files and its drives. `system`: never listed, never started in (nor anything under
@@ -109,17 +110,20 @@ function judge(real: string, realHome: string, places: FolderPlaces): { refused:
   return { refused: null, start: !above && !places.containers.includes(real) };
 }
 
+/** Windows' system folders, from this process's env, and home: what `windowsFolderRefusal` judges by. */
+function windowsPlaces(home: string) {
+  const env = process.env;
+  const programFiles = [env.ProgramFiles, env["ProgramFiles(x86)"], env.ProgramW6432].filter((path): path is string => Boolean(path));
+  return { systemRoot: env.SystemRoot ?? env.windir, programFiles, programData: env.ProgramData, home };
+}
+
 /**
  * Why a real folder outside home is never offered, or null: hidden on the way down, or under a system folder. On
  * Windows, by Windows' own rules (`windowsFolderRefusal`: the Windows and Program Files folders, other profiles, a
  * folder with the Hidden or System attribute).
  */
 function refusedOutside(real: string, realHome: string, places: FolderPlaces): HomeFolderRefusal | null {
-  if (process.platform === "win32") {
-    const env = process.env;
-    const programFiles = [env.ProgramFiles, env["ProgramFiles(x86)"], env.ProgramW6432].filter((path): path is string => Boolean(path));
-    return windowsFolderRefusal(real, { systemRoot: env.SystemRoot ?? env.windir, programFiles, programData: env.ProgramData, home: realHome }, windowsAttributesOf);
-  }
+  if (process.platform === "win32") return windowsFolderRefusal(real, windowsPlaces(realHome), windowsAttributesOf);
   if (real.split(sep).some((segment) => segment.startsWith("."))) return "hidden";
   if (places.system.some((root) => under(real, root)) && !places.open.some((root) => under(real, root))) return "system";
   return null;
@@ -191,9 +195,10 @@ export function isHomeItself(home: string, real: string): boolean {
 function parseTyped(home: string, realHome: string, typed: string): { base: Base; segments: string[] } | { refused: HomeFolderRefusal } {
   let text = typed.trim();
   if (process.platform === "win32") {
-    // `C:\Users\me\code`, `c:/users/me/code` or `~\code`: read as `~/code`. Another drive is outside home here.
+    // `C:\Users\me\code`, `c:/users/me/code` or `~\code`: read as `~/code`. Another drive, or a folder on this one
+    // outside home, is judged by its path alone: a system folder is `system`, anything else `home_only`.
     const underHome = windowsTypedUnderHome(text, home);
-    if (underHome === null) return { refused: "outside" };
+    if (underHome === null) return { refused: windowsOutsideHomeRefusal(text, windowsPlaces(realHome)) ?? "outside" };
     text = underHome;
   }
   let base: Base;
@@ -274,7 +279,9 @@ function foldersIn(real: string, realHome: string, places: FolderPlaces): { fold
   }
   folders.sort((a, b) => a.localeCompare(b));
   const kept = folders.slice(0, HOME_FOLDERS_MAX);
-  return { folders: kept, nostart: nostart.filter((name) => kept.includes(name)) };
+  // `nostart` in the folders' order: the disk's read order differs from one file system to the next.
+  const neverStarted = new Set(nostart);
+  return { folders: kept, nostart: kept.filter((name) => neverStarted.has(name)) };
 }
 
 /** A typed folder that isn't there: the nearest folder above it that is, and its folders (home, or `/`, at the latest). */
@@ -348,6 +355,7 @@ export function listHomeFolders(home: string, typed: string, places: FolderPlace
 export function folderRefusalMessage(refused: HomeFolderRefusal): string {
   if (refused === "hidden") return "Hidden folders can't be picked. Nothing was sent.";
   if (refused === "system") return "System folders can't be picked. Nothing was sent.";
+  if (refused === "home_only") return "Pick a folder inside the home folder. Nothing was sent.";
   return "Pick a folder by its full path. Nothing was sent.";
 }
 

@@ -39,6 +39,7 @@ function env(extra: Record<string, string> = {}): Record<string, string> {
   return {
     ...(process.env as Record<string, string>),
     PLANNOTATOR_CWD: root,
+    PLANNOTATOR_RELAY_URL: "http://127.0.0.1:9",
     PLANNOTATOR_DATA_DIR: join(root, "data"),
     PLANNOTATOR_PORT: "0",
     PLANNOTATOR_REMOTE: "0",

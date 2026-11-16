@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection, InboxSectionId } from '@plannotator/core/inbox-types';
-import { drawTabIcon, inboxTabCount, tabBadgeLabel, tabIconSvg, tabTitle } from './tabCount';
+import { drawTabIcon, inboxTabCount, setAppBadge, tabBadgeLabel, tabIconSvg, tabTitle } from './tabCount';
 
 let next = 0;
 function row(over: Partial<InboxListRow> & { section: InboxSectionId }): InboxListRow {
@@ -89,5 +89,24 @@ describe('the tab', () => {
     const full = { ...ctx, roundRect() {} };
     const fullDoc = { createElement: () => ({ width: 0, height: 0, getContext: () => full, toDataURL: () => 'data:image/png;base64,X' }) } as unknown as Document;
     expect(drawTabIcon({} as CanvasImageSource, 3, fullDoc)).toBe('data:image/png;base64,X');
+  });
+
+  test("the app's icon gets the count itself, and no badge at zero", () => {
+    const calls: (number | 'clear')[] = [];
+    const nav = { setAppBadge: async (n?: number) => void calls.push(n!), clearAppBadge: async () => void calls.push('clear') };
+    setAppBadge(3, nav);
+    // Past nine the number goes as it is: the system shortens it its own way.
+    setAppBadge(12, nav);
+    setAppBadge(0, nav);
+    expect(calls).toEqual([3, 12, 'clear']);
+  });
+
+  test('a browser without the Badging API, or one that refuses, changes nothing and throws nothing', async () => {
+    expect(() => setAppBadge(3, {} as Navigator)).not.toThrow();
+    const refuses = { setAppBadge: () => Promise.reject(new DOMException('no', 'NotAllowedError')), clearAppBadge: () => { throw new Error('no'); } };
+    expect(() => setAppBadge(3, refuses)).not.toThrow();
+    expect(() => setAppBadge(0, refuses)).not.toThrow();
+    // An unhandled rejection would fail this test on the next turn.
+    await new Promise((done) => setTimeout(done, 0));
   });
 });

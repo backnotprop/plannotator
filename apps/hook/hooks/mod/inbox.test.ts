@@ -96,6 +96,7 @@ function world(name: string): World {
       PATH: `${bin}:${agents.env.PATH}`,
       HOME: home,
       TMPDIR: tmpdir(),
+      PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
       PLANNOTATOR_DATA_DIR: dataDir,
       PLANNOTATOR_BROWSER: browser,
     },
@@ -197,7 +198,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const w = world('01-registry-and-tool-list')
     const silent = await open(w, 'session-silent')
     // Before this computer ever ran the Inbox: the list bundled with the mod (pinned to a real Inbox by inbox-default-tools.test.ts).
-    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual(INBOX_TOOL_ACTIONS.filter((name) => name !== 'card' && name !== 'steps'))
+    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual(INBOX_TOOL_ACTIONS.filter((name) => name !== 'card' && name !== 'steps' && name !== 'routine'))
     expect(silent.mod.inbox).not.toBeNull()
     await Bun.sleep(2_500)
     expect(silent.host.fetches).toEqual([])
@@ -274,7 +275,8 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(read.text.split('\n')[0]).toStartWith(`Thread ${first.thread_id} (What should the worker do on a Stripe 409?): 39 messages, 19 from the person.`)
     // The transcript is complete: the connection hands it over without the JSON.
     expect(read.text).not.toContain('{"thread"')
-    expect(read.text).toContain(`- ${first.message_id} · Claude Code · `)
+    // The session reads its own messages marked as its own (core's read_thread "you").
+    expect(read.text).toContain(`- ${first.message_id} · Claude Code (you) · `)
     expect(read.text).toContain(`Q1 `)
     expect(read.text).toMatch(/\nCursor \d+: read_thread after: \d+ returns only what is new since this read\.$/)
     expect(Buffer.byteLength(read.text)).toBeLessThan(12_000)
@@ -356,7 +358,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const noteId = /\((msg_[0-9A-Z]+)\)$/.exec(lines[0]!)![1]!
     const subject = (await thread(w, sent.thread_id)).subject
     expect(lines[0]).toBe(`Plannotator Inbox: ${subject} (${noteId})`)
-    expect(lines[1]).toBe(`The person reacted 👍 Looks good to your message (${sent.message_id}).`)
+    expect(lines[1]).toBe(`The person reacted 👍 Looks good to your message (${sent.message_id}). Take it as a go.`)
     expect(text).toBe(inboxWakeText({ id: noteId, thread_id: sent.thread_id, subject, body: lines[1]!, ack_of: sent.message_id }))
     w.proof(`turn.start ${turn.id}:\n${turn.text}\n`)
 

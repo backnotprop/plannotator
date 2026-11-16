@@ -143,10 +143,16 @@ export function PostEnding({ pull, agent, comments: all, readComments, anchor, b
             count: comments.length,
             hasFeedback: comments.length > 0,
             approvalNotesSupported: false,
-            platform: { label: rules.label, mrLabel: rules.mrLabel, selfAuthored: rules.selfAuthored, requestChangesSupported: rules.requestChangesSupported },
+            platform: {
+              label: rules.label,
+              mrLabel: rules.mrLabel,
+              selfAuthored: rules.selfAuthored,
+              requestChangesSupported: rules.requestChangesSupported,
+              selfRequestChangesBlocked: rules.selfRequestChangesBlocked,
+            },
           })
         : null,
-    [rules?.label, rules?.mrLabel, rules?.selfAuthored, rules?.requestChangesSupported, comments.length], // eslint-disable-line react-hooks/exhaustive-deps
+    [rules?.label, rules?.mrLabel, rules?.selfAuthored, rules?.requestChangesSupported, rules?.selfRequestChangesBlocked, comments.length], // eslint-disable-line react-hooks/exhaustive-deps
   );
   // As the review app's `runPlatformDecisionAction`: a muted decision (the person's own PR) does nothing; the rest
   // open the dialog on their event.

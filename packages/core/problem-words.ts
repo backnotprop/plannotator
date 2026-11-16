@@ -135,6 +135,8 @@ export function cardProblem(result: ForgeRefCardResult | null | undefined, ref: 
   const failed = result as Extract<ForgeRefCardResult, { ok: false }>;
   const sent = problemOf(failed.problem);
   if (sent) return sent;
+  // Bitbucket has no CLI: its failures keep the hover card's own lines.
+  if (ref.platform === "bitbucket") return null;
   const state = toolStateOfCardError(failed.error);
   if (!state) return null;
   return toolProblem(state, { cli: ref.platform === "gitlab" ? "glab" : "gh", host: ref.host, kind: ref.kind }, new Date(result.fetchedAt || Date.now()));

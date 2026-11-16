@@ -1,14 +1,15 @@
 import React from 'react';
 import { HighlightedCode } from './HighlightedCode';
 import { SuggestionDiff } from './SuggestionDiff';
+import { fileHighlightLanguage } from '../utils/highlightLanguage';
 
 /** Suggestion display with header + diff or highlighted code */
 export const SuggestionBlock: React.FC<{
   code: string;
   originalCode?: string;
-  language?: string;
+  filePath?: string;
   compact?: boolean;
-}> = ({ code, originalCode, language, compact }) => {
+}> = ({ code, originalCode, filePath, compact }) => {
   return (
     <div className={`suggestion-block${compact ? ' compact' : ''}`}>
       <div className="suggestion-block-header">
@@ -20,7 +21,7 @@ export const SuggestionBlock: React.FC<{
       {originalCode ? (
         <SuggestionDiff original={originalCode} suggested={code} />
       ) : (
-        <pre className="suggestion-block-code"><HighlightedCode code={code} language={language} /></pre>
+        <pre className="suggestion-block-code"><HighlightedCode code={code} language={filePath ? fileHighlightLanguage(filePath) : undefined} /></pre>
       )}
     </div>
   );

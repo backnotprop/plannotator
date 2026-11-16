@@ -59,6 +59,14 @@ export const sharedConfig = defineConfig({
     assetsInlineLimit: 100000000,
     chunkSizeWarningLimit: 100000000,
     cssCodeSplit: false,
+    // No <link rel="modulepreload"> for a lazy chunk's files. WebKit (Safari,
+    // every iPad browser) remembers a preload whose download broke off (a
+    // flaky link) for the tab: every later import of that file fails at once
+    // with no request, a reload of the tab included, and only a new tab
+    // recovers. Without the preload, the import itself fetches, and the
+    // diagram block's re-attempt or a reload gets the file. The cost is a
+    // lazy chunk's own imports starting after it arrives instead of with it.
+    modulePreload: false,
   },
 });
 

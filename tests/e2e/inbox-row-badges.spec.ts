@@ -34,7 +34,7 @@
  * an iPhone) land in PLANNOTATOR_ROW_BADGES_SHOTS, or .local/proof/row-badges/.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -92,7 +92,19 @@ async function hoverBadge(page: Page, threadId: string): Promise<void> {
   await page.mouse.move(5, 5);
   await expect(card(page)).toHaveCount(0);
   const words = page.locator(`[data-thread-id="${threadId}"] [data-wait-words]`);
-  await ((await words.count()) ? words : filled(page, threadId)).hover();
+  const target = (await words.count()) ? words : filled(page, threadId);
+  // A line above the list (the notification line waits for the agents' read) can land after the rows draw and push
+  // them down, out from under a pointer already resting there. Only then is the mark hovered again: one that stayed
+  // under the pointer must open the card.
+  for (let attempt = 1; ; attempt++) {
+    await target.hover();
+    const rested = await target.boundingBox();
+    if (await card(page).waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) return;
+    const now = await target.boundingBox();
+    const stayed = rested !== null && now !== null && Math.abs(rested.x - now.x) < 1 && Math.abs(rested.y - now.y) < 1;
+    if (stayed || attempt === 3) break;
+    await page.mouse.move(5, 5);
+  }
   await expect(card(page)).toBeVisible();
 }
 
@@ -104,7 +116,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   mkdirSync(proofDir, { recursive: true });
   const root = inboxScratch('plannotator-inbox-row-badges-e2e-');
   const dataDir = join(root, 'data');
-  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
   const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
   expect(started.status, started.stderr).toBe(0);
   const url = started.stdout.trim();

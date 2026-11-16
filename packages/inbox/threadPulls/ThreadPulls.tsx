@@ -15,7 +15,13 @@
  *   ("Stack of 3"), then the others under a divider with no heading, in the
  *   order they were added, each with its live state.
  *   The person adds a PR (its ref or link) and removes one there; a removal
- *   says so with Undo. On a touch screen a tap opens it as a bottom sheet.
+ *   says so with Undo. On a phone (phone.ts) it opens as a bottom sheet, the
+ *   width of the screen at its bottom edge; a tablet gets the card, as its
+ *   ⋯ menus do.
+ * - With Code review on, the thread's card gives each open or draft PR that
+ *   Reviews lists a line under it, "Open review thread": its review thread,
+ *   or with none yet its page in Reviews (`pullReviewLinks`). The row itself
+ *   still goes to the forge.
  *
  * Nothing here has a keyboard shortcut.
  */
@@ -24,6 +30,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type 
 import { createPortal } from 'react-dom';
 import type { InboxThreadPullsAnswer, InboxThreadPullsSummary, InboxThreadPullWire } from '@plannotator/core/inbox-types';
 import { forgePullRefShort, parseForgeRefUrl, type ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
+import { FORGE_SPECS } from '@plannotator/core/forge-refs';
 import { REF_CARD_CLOSE_MS, REF_CARD_DELAY_MS, RefCardView } from '@plannotator/ui/components/RefHoverCard';
 import { forgetRefCard, loadRefCard } from '@plannotator/ui/utils/refCard';
 import { cardProblem } from '@plannotator/core/problem-words';
@@ -32,7 +39,9 @@ import { inboxApi } from '../api';
 import { INBOX_UNREACHABLE } from '../toastError';
 import { RefMarkIcon } from '../board/RefMark';
 import { CountBadge, countBadgeText } from '../components/CountBadge';
-import { labelOfKey, pullExtras, pullHeadline, pullsHead, pullsMarkWords, pullStateWord, pullsSummaryOf, threadPullsBus } from './model';
+import { isPhone } from '../phone';
+import { HostMark, Icon } from '../icons';
+import { labelOfKey, pullExtras, pullHeadline, pullsHead, pullsMarkWords, pullStateWord, pullsSummaryOf, threadPullsBus, type PullReviewLink } from './model';
 
 const WIDTH = 400;
 const EDGE = 12;
@@ -238,6 +247,9 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
     const onDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (ref.current?.contains(t) || anchor.contains(t)) return;
+      // The sheet's scrim closes it on its click (below), not on the press: closed on the press, the touch's click
+      // would land on what was under the scrim (the thread header's Back, a link), as BottomSheet.tsx says.
+      if (t instanceof Element && t.closest('[data-pr-scrim]')) return;
       onClose();
     };
     const onScroll = (e: Event) => {
@@ -284,6 +296,7 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
       <>
         <div
           className="ib-prpop-scrim"
+          data-pr-scrim=""
           onClick={(e) => {
             e.stopPropagation();
             onClose();
@@ -302,7 +315,7 @@ function PullsPopover({ anchor, sheet, label, onClose, cardHover, children }: { 
  * One PR: the full hover card when the forge answers (its loading state meanwhile); else (no gh or glab, signed
  * out, a phone) the list's row from what the Inbox knows, never a card that makes up a description or comments.
  */
-function OnePull({ pull, sheet, onClose, onRetry, retrying, threadId, touch = sheet }: { pull: InboxThreadPullWire; sheet: boolean; onClose: () => void; onRetry?: () => void; retrying?: boolean; threadId: string; /** Thumb-sized problem actions (a phone's sheet), even where the card itself draws as on a computer. */ touch?: boolean }) {
+function OnePull({ pull, sheet, onClose, onRetry, retrying, threadId, touch = sheet, review }: { pull: InboxThreadPullWire; sheet: boolean; onClose: () => void; onRetry?: () => void; retrying?: boolean; threadId: string; /** Thumb-sized problem actions (a phone's sheet), even where the card itself draws as on a computer. */ touch?: boolean; review?: PullReviewLinks }) {
   const target = parseForgeRefUrl(pull.url);
   const [result, setResult] = useState<ForgeRefCardResult | null | undefined>(undefined);
   const problemCode = pull.problem?.code ?? null;
@@ -324,11 +337,23 @@ function OnePull({ pull, sheet, onClose, onRetry, retrying, threadId, touch = sh
   }, [pull.url, problemCode]);
   // The full card once the forge answers. While it loads, its skeleton, unless the Inbox already knows why the PR
   // can't be read: then what is known and why show at once, never a skeleton that turns into a failure.
-  if (target && (result?.ok || (result === undefined && !pull.problem))) return <RefCardView target={target} href={pull.url} result={result} sheet={sheet} onClose={onClose} />;
+  if (target && (result?.ok || (result === undefined && !pull.problem))) {
+    const link = review?.linkOf(pull) ?? null;
+    return (
+      <>
+        <RefCardView target={target} href={pull.url} result={result} sheet={sheet} onClose={onClose} />
+        {link && review && (
+          <div className="ib-prpop-row" data-rv="">
+            <ReviewLine link={link} onOpen={review.onOpen} />
+          </div>
+        )}
+      </>
+    );
+  }
   const problem = pull.problem ?? (target ? cardProblem(result, target) : null);
   return (
     <>
-      <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} />
+      <PullsList answer={{ pulls: [pull], groups: [{ kind: 'related', pulls: [pull.pull] }], removed: [] }} review={review} />
       <PullProblems problems={problem ? [{ problem, pull }] : []} onRetry={onRetry} retrying={retrying} touch={touch} linked={pull.url} threadId={threadId} onAsk={onClose} />
     </>
   );
@@ -341,17 +366,64 @@ function shortOf(pull: InboxThreadPullWire): string {
   return forgePullRefShort({ platform: pull.platform, host: pull.host, owner: pull.repo.slice(0, at), repo: pull.repo.slice(at + 1), number: pull.number });
 }
 
-function PullRow({ pull, oneRepo, onRemove, onPost }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove?: (pull: InboxThreadPullWire) => void; onPost?: (ref: string) => void }) {
-  const extras = pullExtras(pull);
+/**
+ * Decisions post on GitHub and GitLab PRs only: the server refuses a Bitbucket one (`forge_unsupported`), so no Post
+ * decisions button or menu row is offered for it.
+ */
+export function canPostDecisionsOn(pull: Pick<InboxThreadPullWire, 'platform'>): boolean {
+  return pull.platform !== 'bitbucket';
+}
+
+/**
+ * The thread header's PR list only (Code review on, this machine's thread): `linkOf` says where each row's "Open
+ * review thread" goes (`pullReviewLinks`, given the thread the list is in), `onOpen` goes there.
+ */
+interface PullReviewLinks {
+  linkOf: (pull: InboxThreadPullWire) => PullReviewLink | null;
+  onOpen: (link: PullReviewLink) => void;
+}
+
+/** What the thread's button is given for those links: `here` is its own thread. */
+export interface ThreadPullReview {
+  linkOf: (pull: InboxThreadPullWire, here: string) => PullReviewLink | null;
+  onOpen: (link: PullReviewLink) => void;
+}
+
+/**
+ * A PR's line under its row: "Open review thread", then the review thread's agent when there is one. The row's own
+ * link still goes to the forge; this one stays in the Inbox.
+ */
+function ReviewLine({ link, onOpen, of }: { link: PullReviewLink; onOpen: (link: PullReviewLink) => void; of?: string }) {
   return (
-    <li className="ib-prpop-row" data-pr-row={pull.ref} data-state={pull.state}>
+    <button type="button" className="ib-prpop-rv" onClick={() => onOpen(link)} aria-describedby={of} data-pr-review={link.kind}>
+      <span className="ib-prpop-rv-ic" aria-hidden="true">
+        <Icon name="questionBubble" size={14} />
+      </span>
+      <span className="ib-prpop-rv-w">Open review thread</span>
+      {link.kind === 'thread' && link.agent && (
+        <span className="ib-prpop-rv-with">
+          {' · with'}
+          <HostMark host={link.agent.host} /> <span className="ib-prpop-rv-n">{link.agent.name}</span>
+        </span>
+      )}
+    </button>
+  );
+}
+
+function PullRow({ pull, oneRepo, onRemove, onPost: offeredPost, review }: { pull: InboxThreadPullWire; oneRepo: boolean; onRemove?: (pull: InboxThreadPullWire) => void; onPost?: (ref: string) => void; review?: PullReviewLinks }) {
+  const extras = pullExtras(pull);
+  const onPost = canPostDecisionsOn(pull) ? offeredPost : undefined;
+  const link = review?.linkOf(pull) ?? null;
+  const titleId = useId();
+  return (
+    <li className="ib-prpop-row" data-pr-row={pull.ref} data-state={pull.state} data-rv={link ? '' : undefined}>
       <a className="ib-prpop-link" href={pull.url} target="_blank" rel="noopener noreferrer">
         <span className="ib-prpop-ic">
           <RefMarkIcon kind="pr" state={pull.state} size={16} />
         </span>
         <span className="ib-prpop-main">
           <span className="ib-prpop-t">
-            <span className="ib-prpop-title">{pull.title ?? shortOf(pull)}</span> <span className="ib-prpop-num">{pull.label}</span>
+            <span className="ib-prpop-title" id={titleId}>{pull.title ?? shortOf(pull)}</span> <span className="ib-prpop-num">{pull.label}</span>
           </span>
           <span className="ib-prpop-sub">
             <span className={`ib-prpop-st ib-prpop-st-${pull.state}`}>{pullStateWord(pull.state)}</span>
@@ -377,12 +449,19 @@ function PullRow({ pull, oneRepo, onRemove, onPost }: { pull: InboxThreadPullWir
           </svg>
         </button>
       )}
+      {link && review && <ReviewLine link={link} onOpen={review.onOpen} of={titleId} />}
     </li>
   );
 }
 
+/** "GitHub and GitLab", "GitHub, GitLab, and Bitbucket": the forges in the order the specs list them. */
+function forgeNames(forges: readonly InboxThreadPullWire['platform'][]): string {
+  const names = (Object.keys(FORGE_SPECS) as InboxThreadPullWire['platform'][]).filter((p) => forges.includes(p)).map((p) => FORGE_SPECS[p].name);
+  return names.length > 2 ? `${names.slice(0, -1).join(', ')}, and ${names.at(-1)}` : names.join(' and ');
+}
+
 /** Several PRs: each stack base first and joined, then the others (no heading) in the order they were added. */
-function PullsList({ answer, onRemove, onPost }: { answer: InboxThreadPullsAnswer; onRemove?: (pull: InboxThreadPullWire) => void; onPost?: (ref: string) => void }) {
+function PullsList({ answer, onRemove, onPost, review }: { answer: InboxThreadPullsAnswer; onRemove?: (pull: InboxThreadPullWire) => void; onPost?: (ref: string) => void; review?: PullReviewLinks }) {
   const head = pullsHead(answer);
   const byKey = new Map(answer.pulls.map((pull) => [pull.pull, pull]));
   const only = answer.groups.length === 1;
@@ -400,12 +479,12 @@ function PullsList({ answer, onRemove, onPost }: { answer: InboxThreadPullsAnswe
           {!only && group.kind === 'stack' && <div className="ib-prpop-gh">Stack of {group.pulls.length}</div>}
           <ol className={`ib-prpop-rows${group.kind === 'stack' ? ' ib-prpop-stack' : ''}`}>
             {group.pulls.flatMap((key) => byKey.get(key) ?? []).map((pull) => (
-              <PullRow key={pull.pull} pull={pull} oneRepo={head.oneRepo} onRemove={onRemove} onPost={onPost} />
+              <PullRow key={pull.pull} pull={pull} oneRepo={head.oneRepo} onRemove={onRemove} onPost={onPost} review={review} />
             ))}
           </ol>
         </section>
       ))}
-      {forges.size > 1 && <div className="ib-prpop-foot">GitHub and GitLab</div>}
+      {forges.size > 1 && <div className="ib-prpop-foot">{forgeNames([...forges])}</div>}
     </div>
   );
 }
@@ -414,7 +493,7 @@ function PullsList({ answer, onRemove, onPost }: { answer: InboxThreadPullsAnswe
  * The card's body: the PRs (one: the hover card; several: the list), then the person's edit, an Add field and,
  * after a removal, its Undo. `onPost` (a thread with question cards): a Post decisions row on each PR. `postOnAdd`
  * (Export decisions › Post on a pull request › Add a pull request…): the first PR added gets the post, and the card
- * closes for its toast.
+ * closes for its toast. `review`: each open PR's "Open review thread" (the thread header's list only).
  */
 export function PullsCard({
   threadId,
@@ -428,6 +507,7 @@ export function PullsCard({
   retrying = false,
   onPost,
   postOnAdd = false,
+  review,
 }: {
   threadId: string;
   answer: InboxThreadPullsAnswer | null;
@@ -441,6 +521,7 @@ export function PullsCard({
   retrying?: boolean;
   onPost?: (ref: string) => void;
   postOnAdd?: boolean;
+  review?: PullReviewLinks;
 }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -488,11 +569,11 @@ export function PullsCard({
     <div className="ib-prpop-body flex min-h-0 flex-1 flex-col" data-pr-card="">
       {pulls.length === 1 ? (
         <div className="ib-prpop-one min-h-0 overflow-y-auto" data-pr-one="">
-          <OnePull pull={pulls[0]!} sheet={false} touch={sheet} onClose={onClose} onRetry={onRetry} retrying={retrying} threadId={threadId} />
+          <OnePull pull={pulls[0]!} sheet={false} touch={sheet} onClose={onClose} onRetry={onRetry} retrying={retrying} threadId={threadId} review={review} />
         </div>
       ) : pulls.length > 1 ? (
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <PullsList answer={answer!} onRemove={(pull) => void remove(pull)} onPost={onPost} />
+          <PullsList answer={answer!} onRemove={(pull) => void remove(pull)} onPost={onPost} review={review} />
           <PullProblems problems={pullProblems(pulls)} onRetry={onRetry} retrying={retrying} touch={sheet} threadId={threadId} onAsk={onClose} />
         </div>
       ) : answer ? (
@@ -508,7 +589,7 @@ export function PullsCard({
         </div>
       )}
       <div className="ib-prpop-edit" data-pr-edit="">
-        {pulls.length === 1 && onPost && (
+        {pulls.length === 1 && onPost && canPostDecisionsOn(pulls[0]!) && (
           <button type="button" className="ib-prpop-tbtn ib-prpop-post1" aria-label={`Post decisions on ${pulls[0]!.ref}`} data-pr-post={pulls[0]!.ref} onClick={() => onPost(pulls[0]!.ref)}>
             Post decisions
           </button>
@@ -601,7 +682,7 @@ export function RowPullsMark({ threadId, summary }: { threadId: string; summary:
           // A tap on the mark opens its card, not the thread.
           e.preventDefault();
           e.stopPropagation();
-          setOpen({ anchor: e.currentTarget, sheet: true, pinned: true });
+          setOpen({ anchor: e.currentTarget, sheet: isPhone(), pinned: true });
         }}
       >
         <span className="ib-sr">{words}</span>
@@ -621,16 +702,21 @@ export function RowPullsMark({ threadId, summary }: { threadId: string; summary:
 /**
  * The thread's button, left of the artifacts icon: the state icon only (no number), the count over its corner for
  * several. Hover opens the card; a click opens it and keeps it open (a tap: the sheet). `adding`: the thread's ⋯
- * menu asked to add a PR, so the button shows with none and its card opens on the Add field.
+ * menu asked to add a PR, so the button shows with none and its card opens on the Add field. `review` (Code review
+ * on): each open PR's "Open review thread"; following one closes the card.
  */
-export function ThreadPullsButton({ threadId, summary, adding = false, onAddingDone, onPost, postOnAdd = false }: { threadId: string; summary: InboxThreadPullsSummary | undefined; adding?: boolean; onAddingDone?: () => void; onPost?: (ref: string) => void; postOnAdd?: boolean }) {
+export function ThreadPullsButton({ threadId, summary, adding = false, onAddingDone, onPost, postOnAdd = false, review }: { threadId: string; summary: InboxThreadPullsSummary | undefined; adding?: boolean; onAddingDone?: () => void; onPost?: (ref: string) => void; postOnAdd?: boolean; review?: ThreadPullReview }) {
   const { open, setOpen, hover, cardHover, close } = usePopover();
   const button = useRef<HTMLButtonElement>(null);
   // The thread is open: its PRs are read now (states older than 30 s again), and on every change.
-  const { answer, failed, retrying, setAnswer, retry } = useThreadPulls(threadId, true);
-  const shown = answer ? pullsSummaryOf(answer) : summary;
+  const { answer, failed, retrying, setAnswer, reload, retry } = useThreadPulls(threadId, true);
+  const shown = (answer && pullsSummaryOf(answer)) ?? summary;
+  const known = answer?.pulls.length;
   useEffect(() => {
-    if (adding && button.current) setOpen({ anchor: button.current, sheet: coarse(), pinned: true });
+    if (summary && known !== undefined && summary.count !== known) reload();
+  }, [summary?.count, known]);
+  useEffect(() => {
+    if (adding && button.current) setOpen({ anchor: button.current, sheet: isPhone(), pinned: true });
   }, [adding, setOpen]);
   const closeAll = (restoreFocus?: boolean) => {
     close();
@@ -656,14 +742,35 @@ export function ThreadPullsButton({ threadId, summary, adding = false, onAddingD
         onClick={(e) => {
           // Read now: React clears currentTarget once the handler returns, before the update runs.
           const anchor = e.currentTarget;
-          setOpen((now) => (now?.pinned ? null : { anchor, sheet: coarse(), pinned: true }));
+          setOpen((now) => (now?.pinned ? null : { anchor, sheet: isPhone(), pinned: true }));
         }}
       >
         {shown ? <PullsMarkIcon summary={shown} size={17} /> : <RefMarkIcon kind="pr" state="unknown" size={17} />}
       </button>
       {open && (
         <PullsPopover anchor={open.anchor} sheet={open.sheet} label={words} onClose={closeAll} cardHover={cardHover}>
-          <PullsCard threadId={threadId} answer={answer} failed={failed} onAnswer={setAnswer} sheet={open.sheet} onClose={() => closeAll(true)} adding={adding} onRetry={retry} retrying={retrying} onPost={onPost} postOnAdd={postOnAdd} />
+          <PullsCard
+            threadId={threadId}
+            answer={answer}
+            failed={failed}
+            onAnswer={setAnswer}
+            sheet={open.sheet}
+            onClose={() => closeAll(true)}
+            adding={adding}
+            onRetry={retry}
+            retrying={retrying}
+            onPost={onPost}
+            postOnAdd={postOnAdd}
+            review={
+              review && {
+                linkOf: (pull) => review.linkOf(pull, threadId),
+                onOpen: (link) => {
+                  closeAll();
+                  review.onOpen(link);
+                },
+              }
+            }
+          />
         </PullsPopover>
       )}
     </>

@@ -24,7 +24,7 @@ export const CHILD_ENV_EXEMPT_MARK = "child-env-guard:";
 /** node:child_process calls that read the startup env under Bun. The async ones read the live env. */
 const SYNC_CALLS = new Set(["spawnSync", "execFileSync", "execSync"]);
 
-function lineOf(text: string, index: number): number {
+export function lineOf(text: string, index: number): number {
   let line = 1;
   for (let i = 0; i < index; i++) if (text.charCodeAt(i) === 10) line++;
   return line;
@@ -34,8 +34,8 @@ function exempt(rawLines: string[], line: number): boolean {
   return [line, line - 1].some((n) => (rawLines[n - 1] ?? "").includes(CHILD_ENV_EXEMPT_MARK));
 }
 
-/** Local names (and namespace names) bound to node:child_process's synchronous calls. */
-function childProcessBindings(text: string): { names: Set<string>; namespaces: Set<string> } {
+/** Local names bound to node:child_process's `calls` (its synchronous ones by default), and namespace names. */
+export function childProcessBindings(text: string, calls: ReadonlySet<string> = SYNC_CALLS): { names: Set<string>; namespaces: Set<string> } {
   const names = new Set<string>();
   const namespaces = new Set<string>();
   const importRe = /import\s+([^;]*?)\s+from\s+["'](?:node:)?child_process["']/g;
@@ -45,7 +45,7 @@ function childProcessBindings(text: string): { names: Set<string>; namespaces: S
     if (named) {
       for (const part of named[1]!.split(",")) {
         const [orig, alias] = part.trim().split(/\s+as\s+/);
-        if (orig && SYNC_CALLS.has(orig.trim())) names.add((alias ?? orig).trim());
+        if (orig && calls.has(orig.trim())) names.add((alias ?? orig).trim());
       }
     }
     const ns = clause.match(/\*\s+as\s+([\w$]+)/);
@@ -59,7 +59,7 @@ function childProcessBindings(text: string): { names: Set<string>; namespaces: S
     if (target.startsWith("{")) {
       for (const part of target.slice(1, -1).split(",")) {
         const [orig, alias] = part.trim().split(/\s*:\s*/);
-        if (orig && SYNC_CALLS.has(orig.trim())) names.add((alias ?? orig).trim());
+        if (orig && calls.has(orig.trim())) names.add((alias ?? orig).trim());
       }
     } else namespaces.add(target);
   }
@@ -67,7 +67,7 @@ function childProcessBindings(text: string): { names: Set<string>; namespaces: S
 }
 
 /** The top-level properties of an object literal's source text (`{ a: 1, ...b, c }`). */
-function objectProperties(literal: string): string[] {
+export function objectProperties(literal: string): string[] {
   // callArgs splits the contents of a bracketed list at its top-level commas.
   return callArgs(literal, 0);
 }

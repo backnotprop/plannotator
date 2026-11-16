@@ -15,16 +15,14 @@ export interface MarkReadWarningProps {
   count: SetAsideCount;
   /** Mark all as read on a project, not one thread. */
   bulk: boolean;
-  /** Offer "Don't show this again" (not to a tailnet guest, who cannot save the switch). */
-  offerNever: boolean;
   onAnswer: (answer: SetAsideAnswer) => void;
 }
 
-export function MarkReadWarning({ count, bulk, offerNever, onAnswer }: MarkReadWarningProps) {
+export function MarkReadWarning({ count, bulk, onAnswer }: MarkReadWarningProps) {
   const id = useId();
   const [never, setNever] = useState(false);
   const words = setAsideWarning(count, bulk);
-  const go = () => onAnswer({ go: true, never: offerNever && never });
+  const go = () => onAnswer({ go: true, never });
   return (
     <Modal labelledBy={`${id}-t`} describedBy={`${id}-d`} onClose={() => onAnswer({ go: false })} testId="mark-read-warning" ownKeys className="ib-readwarn">
       <div
@@ -40,15 +38,13 @@ export function MarkReadWarning({ count, bulk, offerNever, onAnswer }: MarkReadW
         <p className="ib-sum" id={`${id}-d`}>
           {words.body}
         </p>
-        {offerNever && (
-          <label className="ib-opt ib-readwarn-never" data-mark-read-warning-never="">
-            <input type="checkbox" checked={never} onChange={(event) => setNever(event.target.checked)} />
-            <span>
-              Don&apos;t show this again
-              <small>You can turn it back on in Settings.</small>
-            </span>
-          </label>
-        )}
+        <label className="ib-opt ib-readwarn-never" data-mark-read-warning-never="">
+          <input type="checkbox" checked={never} onChange={(event) => setNever(event.target.checked)} />
+          <span>
+            Don&apos;t show this again
+            <small>You can turn it back on in Settings.</small>
+          </span>
+        </label>
         <div className="ib-acts-row">
           <button type="button" className="ib-btn" onClick={() => onAnswer({ go: false })} data-mark-read-warning-cancel="">
             Cancel

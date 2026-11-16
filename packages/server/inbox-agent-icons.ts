@@ -15,8 +15,7 @@
  *   POST /api/inbox/agent-icons  `{ picture: "data:image/…;base64,…" }`  keep it; `{ icon, faces, rev, icons }`
  *   POST /api/inbox/agent-icons  `{ remove: <sha256> }`  take it away (agents showing it go back to their own mark)
  *
- * This computer's windows and the owner's over the tailnet, as Set picture…: a tailnet guest's window draws each
- * agent's own mark. A change tells every window through `event: agent-faces` (the wire carries the pictures).
+ * Every window, as Set picture…. A change tells every window through `event: agent-faces` (the wire carries the pictures).
  */
 
 import { createHash } from "node:crypto";
@@ -171,7 +170,6 @@ export function createInboxAgentIcons(options: {
   icons: AgentIcons;
   faces: InboxAgentFacesFile;
   serverSession: string;
-  localOnly: () => Response;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   /** Pictures kept past the cap besides the ones agents show ("Animate it"'s originals and results). */
@@ -179,20 +177,17 @@ export function createInboxAgentIcons(options: {
 }) {
   const { icons, faces, serverSession, json } = options;
   const withIcons = (wire: InboxAgentFacesWire): InboxAgentFacesWire => ({ ...wire, icons: icons.list() });
-  /** `owner`: this computer's window, or the owner's over the tailnet (`ownerOrLocal`). */
-  const route = async (req: Request, url: URL, owner: boolean): Promise<Response | null> => {
+  const route = async (req: Request, url: URL): Promise<Response | null> => {
     const path = url.pathname;
     if (path !== INBOX_AGENT_ICONS_PATH && !path.startsWith(`${INBOX_AGENT_ICONS_PATH}/`)) return null;
     if (path !== INBOX_AGENT_ICONS_PATH) {
       if (req.method !== "GET" && req.method !== "HEAD") return json({ error: "Use GET." }, 405);
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
-      if (!owner) return options.localOnly();
       const picture = icons.read(path.slice(INBOX_AGENT_ICONS_PATH.length + 1), url.searchParams.get("still") === "1");
       if (!picture) return json({ error: "No such picture.", code: "no_picture" }, 404);
       return new Response(req.method === "HEAD" ? null : picture.body, { headers: agentIconHeaders(picture.type) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-    if (!owner) return options.localOnly();
     const body = await options.readBody(req);
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (body.remove !== undefined) {

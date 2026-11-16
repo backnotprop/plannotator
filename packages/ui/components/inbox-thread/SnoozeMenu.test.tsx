@@ -18,15 +18,14 @@ const { SnoozePicker } = (hasDom ? await import('./SnoozeMenu') : {}) as typeof 
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
-const savedTz = process.env.TZ;
+const savedTz = process.env.TZ ?? Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 afterEach(() => {
   if (root) act(() => root!.unmount());
   host?.parentElement?.remove();
   root = null;
   host = null;
-  if (savedTz === undefined) delete process.env.TZ;
-  else process.env.TZ = savedTz;
+  process.env.TZ = savedTz;
 });
 
 /** Local wall time in the test's zone. */

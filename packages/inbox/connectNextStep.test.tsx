@@ -1,8 +1,8 @@
 /**
  * First run, "One next step" (components/EmptyState.tsx; the approved design
  * inbox-connect-next-step, variant C), on each of the mock's computers:
- * Typical, Plugin missing, Nothing found, Tool locked off, and a page that
- * cannot read this computer's agents (opened over the tailnet). Turn on goes
+ * Typical, Plugin missing, Nothing found, Tool locked off, and a read of the
+ * agents that failed. Turn on goes
  * through POST /api/inbox/agents (a recording fetch) and the card moves to the
  * next step; Not now puts a step off; installing is a command to copy; MCP is
  * folded behind "Use MCP instead"; Message opens compose to the live session.
@@ -50,7 +50,7 @@ interface Mounted {
   model: () => InboxAgentsModel | null;
 }
 
-function mount(start: InboxAgentsModel | null, options: { unavailable?: 'tailnet' | 'failed' | null; sessions?: ComposeSessionsModel | null; onRetry?: () => void } = {}): Mounted {
+function mount(start: InboxAgentsModel | null, options: { unavailable?: 'failed' | null; sessions?: ComposeSessionsModel | null; onRetry?: () => void } = {}): Mounted {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -246,12 +246,6 @@ test.skipIf(!hasDom)('all set: nothing left, a quiet card, and Message is the pr
   expect(button(m.el, 'Message Claude Code')!.classList.contains('ib-pri')).toBe(true);
 });
 
-test.skipIf(!hasDom)('the agents cannot be read here (a page over the tailnet): the first step with the commands, and where to connect in one click', () => {
-  const m = mount(null, { unavailable: 'tailnet' });
-  expect(text(card(m.el).querySelector('h3'))).toBe('Connect your first agent');
-  expect(text(card(m.el))).toContain('Open the Inbox on the computer to connect agents with one click.');
-});
-
 test.skipIf(!hasDom)('while the agents load, nothing but the heading shows', () => {
   const m = mount(null);
   expect(m.el.querySelector('.ib-cn')).toBeNull();
@@ -259,11 +253,10 @@ test.skipIf(!hasDom)('while the agents load, nothing but the heading shows', () 
   expect(text(m.el.querySelector('h2'))).toBe('No agent has written yet');
 });
 
-test.skipIf(!hasDom)('a read of the agents that failed on this computer says so, with Try again; never the tailnet line', async () => {
+test.skipIf(!hasDom)('a read of the agents that failed on this computer says so, with Try again', async () => {
   let retried = 0;
   const m = mount(null, { unavailable: 'failed', onRetry: () => retried++ });
   expect(text(card(m.el).querySelector('h3'))).toBe('Connect your first agent');
-  expect(text(card(m.el))).not.toContain('Open the Inbox on the computer');
   expect(text(card(m.el).querySelector('[data-agents-failed]'))).toBe('The Inbox could not read the agents on this computer. Try again');
   await click(button(card(m.el), 'Try again')!);
   expect(retried).toBe(1);

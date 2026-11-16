@@ -13,6 +13,7 @@ import { chunkSegments, codeSegmentsToHtml, wordDiffSegments } from "../../utils
 import { useFenceTheme } from "../../hooks/useFenceTheme";
 import { ListItemBody } from "../ListItemBody";
 import { BlockquoteBlock, BLOCKQUOTE_CLASS_NAME } from "../blocks/BlockquoteBlock";
+import { parseTableContent } from "../blocks/TableBlock";
 import type { Block, Annotation, EditorMode, ImageAttachment } from "../../types";
 import { AnnotationType } from "../../types";
 import {
@@ -28,6 +29,7 @@ import { AnnotationToolbar } from "../AnnotationToolbar";
 import { CommentPopover } from "../CommentPopover";
 import { FloatingQuickLabelPicker } from "../FloatingQuickLabelPicker";
 import { getIdentity } from "../../utils/identity";
+import { useHighlightCopy } from "../../utils/highlightCopy";
 
 /**
  * Which version a rendered chunk comes from: 'old' for a removed block and
@@ -143,7 +145,14 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
     block: PlanDiffBlock;
     index: number;
     diffContext: Annotation['diffContext'];
+    /** The words dragged over when the composer opened: Ctrl+C copies them. */
+    selectedWords?: string;
   } | null>(null);
+
+  // A click on a block opens its composer, whose textarea then takes the
+  // focus and with it the person's selection, so Ctrl+C would copy nothing.
+  // Keep the words they dragged over inside that block.
+  useHighlightCopy(commentPopover?.selectedWords);
 
   const [quickLabelPicker, setQuickLabelPicker] = useState<{
     anchorEl: HTMLElement;
@@ -307,6 +316,7 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
       block: hoveredBlock.block,
       index: hoveredBlock.index,
       diffContext: hoveredBlock.diffContext,
+      selectedWords: selectedWordsIn(hoveredBlock.element),
     });
     setHoveredBlock(null);
   };
@@ -352,6 +362,7 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
         block,
         index,
         diffContext,
+        selectedWords: selectedWordsIn(element),
       });
     }
   }, [createDiffAnnotation, getBlockContent]);
@@ -508,6 +519,16 @@ export const PlanCleanDiffView: React.FC<PlanCleanDiffViewProps> = ({
 };
 
 // --- Line gutter + fold row (optional seams) ---
+
+/** The words the person has selected inside `element`, for Ctrl+C once its
+ *  composer has the focus; undefined when the selection is elsewhere or empty. */
+function selectedWordsIn(element: HTMLElement): string | undefined {
+  const live = window.getSelection();
+  if (!live || live.isCollapsed || live.rangeCount === 0) return undefined;
+  if (!element.contains(live.getRangeAt(0).commonAncestorContainer)) return undefined;
+  const text = live.toString();
+  return text.trim() ? text : undefined;
+}
 
 /** "11–12", or "14" for one line; null when the side has no lines. */
 function rangeLabel(start?: number, end?: number): string | null {
@@ -989,17 +1010,8 @@ const SimpleBlockRenderer: React.FC<{ block: Block; orderedIndex?: number | null
       return <hr className="border-border/30 my-8" />;
 
     case "table": {
-      const lines = block.content.split('\n').filter(line => line.trim());
-      if (lines.length === 0) return null;
-      const parseRow = (line: string): string[] =>
-        line.replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, '|'));
-      const headers = parseRow(lines[0]);
-      const rows: string[][] = [];
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i].trim();
-        if (/^[\|\-:\s]+$/.test(line)) continue;
-        rows.push(parseRow(line));
-      }
+      const { headers, rows } = parseTableContent(block.content);
+      if (headers.length === 0) return null;
       return (
         <div className="my-4 overflow-x-auto">
           <table className="min-w-full border-collapse text-sm">

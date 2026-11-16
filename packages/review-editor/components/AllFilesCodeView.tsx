@@ -65,6 +65,7 @@ import { GeneratedFileNotice } from './GeneratedFileNotice';
 import { EditSessionHud } from './EditSessionHud';
 import { FileCommentBanner } from './FileCommentBanner';
 import { annotationMatchesPrScope, isFileScopedAnnotation, lineRangeForAnnotation } from '../utils/annotationScope';
+import { openInLineForDiff } from '../utils/openInLine';
 import { useEditSession } from '../edit/useEditSession';
 import type { EditSelectionAnnotationRequest, EditSelectionComment } from '../edit/useEditSession';
 import type { SuggestionHunk } from '../edit/deriveSuggestions';
@@ -80,7 +81,7 @@ import {
   type HostFileNote,
   type HostLineNote,
 } from './hostLineNotes';
-import { detectLanguage } from '../utils/detectLanguage';
+import { applyFileLanguageFixes } from '../utils/highlightLanguage';
 import type { AIChatEntry } from '../hooks/useAIChat';
 import type { ReviewSearchMatch } from '../utils/reviewSearch';
 import {
@@ -88,6 +89,9 @@ import {
   clearItemSearchHighlights,
   swapActiveSearchHighlight,
 } from '../utils/reviewSearchHighlight';
+
+// Pierre picks each file's grammar from its name when the file renders.
+applyFileLanguageFixes();
 
 /** The left panel's file order the all-files surface follows. */
 export type AllFilesOrder = 'tree' | 'kind' | 'list';
@@ -1410,7 +1414,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       return (
         <InlineAnnotation
           metadata={annotation.metadata}
-          language={filePath ? detectLanguage(filePath) : undefined}
+          filePath={filePath}
           isSelected={selectedAnnotationId === annotation.metadata.annotationId}
           onSelect={onSelectAnnotation}
           onEdit={handleEditAnnotation}
@@ -1588,9 +1592,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
   });
 
+  const pendingAllCollapsedRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    const pending = pendingAllCollapsedRef.current;
+    if (!workerPoolReady || pending == null) return;
+    pendingAllCollapsedRef.current = null;
+    setAllItemsCollapsed(pending);
+  }, [workerPoolReady, setAllItemsCollapsed]);
+
   const handleToggleAllCollapsed = useStableCallback(() => {
     const handle = viewerRef.current;
-    if (handle == null) return;
+    if (handle == null) {
+      const next = !(pendingAllCollapsedRef.current ?? allCollapsed);
+      pendingAllCollapsedRef.current = next;
+      setAllCollapsed(next);
+      return;
+    }
     // If anything is open, collapse all; otherwise expand all. Computed from
     // live item state so it stays correct after manual per-file toggles.
     const anyExpanded = identity.items.some(
@@ -3394,6 +3411,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
         patch={file.patch}
+        // Read at the click: this file's picked lines (a selection or the
+        // picked comment's, both painted as selectedLines), else its first change.
+        openInLine={() => {
+          const picked = selectedLinesRef.current;
+          return openInLineForDiff(file.patch, picked?.id === item.id ? picked.range : null);
+        }}
         status={file.status}
         oldPath={file.oldPath}
         onEditFile={editEnabled ? () => editSession.startEdit(item.id) : undefined}

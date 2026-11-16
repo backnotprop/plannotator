@@ -102,6 +102,7 @@ import type { CommentAskAIHandler } from '@plannotator/ui/components/CommentPopo
 import { useResizablePanel } from '@plannotator/ui/hooks/useResizablePanel';
 import { useCodeAnnotationDraft, type CodeDraftMergeItems, type CodeDraftTargetState } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import { useGitAdd } from './hooks/useGitAdd';
+import { useHasSavedGuides } from './hooks/guide/useHasSavedGuides';
 import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import type { DiagramEngineUrls } from './utils/diagramEngineContract';
@@ -704,7 +705,10 @@ const ReviewApp: React.FC = () => {
   // discovery from starting before the server reports that AI is enabled.
   const [aiEnabled, setAiEnabled] = useState<boolean | null>(null);
   const aiUIEnabled = aiEnabled === true;
-  const guideVisible = aiUIEnabled && guideOpen;
+  // With AI off, the Guide stays for the saved guides (read only: no launch).
+  const hasSavedGuides = useHasSavedGuides(aiEnabled === false && !!origin);
+  const guideReachable = aiUIEnabled || hasSavedGuides;
+  const guideVisible = guideReachable && guideOpen;
   const [gitUser, setGitUser] = useState<string | undefined>();
   const [isWSL, setIsWSL] = useState(false);
   const [reviewMode, setReviewMode] = useState<string | null>(null);
@@ -955,11 +959,11 @@ const ReviewApp: React.FC = () => {
 
   // Derived: Platform mode is active when destination is platform AND we have PR/MR metadata
   const platformMode = reviewDestination === 'platform' && !!prMetadata;
-  // The viewer authored this PR/MR — forges refuse self-approval, so every
-  // platform approve path mutes (never disappears) on this flag.
+  // The viewer authored this PR/MR on a forge that always refuses
+  // self-approval (GitHub): every approve path mutes (never disappears) on it.
   const prCapabilities = prMetadata ? getPRPlatformCapabilities(prMetadata) : null;
-  // Only platforms that refuse a self-review mute approve / request changes
-  // (Bitbucket Cloud lets an author approve their own PR).
+  // GitLab and Bitbucket let an author approve; a project that forbids it
+  // refuses, and the submission dialog shows the forge's answer.
   const isOwnPR = !!platformUser && prMetadata?.author === platformUser && prCapabilities?.selfReviewBlocked !== false;
 
   // Platform-aware labels
@@ -967,14 +971,13 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
-  // #1611: GitHub has a REQUEST_CHANGES review (refused on your own PR, like
-  // approve) and Bitbucket a request-changes decision; GitLab has none, so
-  // Request changes posts as a comment there.
   const requestChangesSupported = prCapabilities?.requestChanges === true;
+  // GitHub refuses request changes on your own PR, like approve. GitLab accepts it.
+  const selfRequestChangesBlocked = prCapabilities?.selfRequestChangesBlocked !== false;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`
-    : isOwnPR
-      ? `You can't request changes on your own pull request on ${platformLabel}.`
+    : isOwnPR && selfRequestChangesBlocked
+      ? `You can't request changes on your own ${mrLabel === 'MR' ? 'merge request' : 'pull request'} on ${platformLabel}.`
       : undefined;
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
   // The server's update advert (the machine's once-a-day check): the Options
@@ -2549,6 +2552,26 @@ const ReviewApp: React.FC = () => {
       title: `${getMRLabel(prMetadata)} Artifacts`,
     });
   }, [dockApi, prMetadata]);
+
+  const [prArtifactFocus, setPRArtifactFocus] = useState<{ id: string; seq: number } | null>(null);
+  const openPRArtifact = useCallback((artifactId: string) => {
+    // A selected note on another artifact would pull the panel back to it.
+    const description = descriptionAnnotationsRef.current.find((a) => a.id === selectedDescriptionAnnotationIdRef.current);
+    if (description?.artifact && description.artifact.artifactId !== artifactId) {
+      selectedDescriptionAnnotationIdRef.current = null;
+      setSelectedDescriptionAnnotationId(null);
+    }
+    const comment = commentAnnotationsRef.current.find((a) => a.id === selectedCommentAnnotationIdRef.current);
+    if (comment?.artifact && comment.artifact.artifactId !== artifactId) {
+      selectedCommentAnnotationIdRef.current = null;
+      setSelectedCommentAnnotationId(null);
+    }
+    setPRArtifactFocus((prev) => ({ id: artifactId, seq: (prev?.seq ?? 0) + 1 }));
+    openPRArtifactsPanel();
+  }, [openPRArtifactsPanel]);
+  const handlePRArtifactFocusHandled = useCallback((seq: number) => {
+    setPRArtifactFocus((prev) => (prev?.seq === seq ? null : prev));
+  }, []);
 
   // A switch to local review must not leave a hosted-review panel behind.
   useEffect(() => {
@@ -4774,6 +4797,9 @@ const ReviewApp: React.FC = () => {
     prMetadata,
     prContext,
     prArtifacts,
+    openPRArtifact,
+    prArtifactFocus,
+    onPRArtifactFocusHandled: handlePRArtifactFocusHandled,
     isPRContextLoading,
     prContextError,
     fetchPRContext,
@@ -4835,7 +4861,7 @@ const ReviewApp: React.FC = () => {
     activeFileSearchMatches, activeSearchMatchId, activeSearchMatch, searchMatches,
     aiAvailable, aiMessages, aiIsCreatingSession, aiIsStreaming,
     handleAskAI, handleAskAIForFile, handleViewAIResponse, handleClickAIMarker,
-    aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts,
+    aiHistoryForSelection, getAIHistoryForFile, agentJobs.jobs, prMetadata, prContext, prArtifacts, openPRArtifact, prArtifactFocus, handlePRArtifactFocusHandled,
     isPRContextLoading, prContextError, fetchPRContext, platformUser, openDiffFile,
     handleAllFilesVisibleFileChange, handleFileScrolledPast,
     handleOpenTour, handleOpenGuide, isAllFilesActive, allFilesOrder, allFilesAllCollapsed, onToggleAllFilesCollapsed, registerAllFilesCollapseToggle, commitInfo, isSemanticDiffActive, semanticDiffUsable,
@@ -5056,6 +5082,9 @@ const ReviewApp: React.FC = () => {
   // Mod+Enter handler, and the compact primary row all call this. Platform
   // (PR) mode keeps its own row until PR6.
   const busyWithDecision = isSendingFeedback || isApproving || isExiting;
+  // Bumped by Mod+Shift+Enter so the note composer opens without the caret
+  // (#2913, which brought the chord to plan review and annotate).
+  const [decisionNoteRequest, setDecisionNoteRequest] = useState(0);
 
   const noteDispatchInFlightRef = useRef(false);
   const dispatchPendingNote = useCallback(() => {
@@ -5311,7 +5340,8 @@ const ReviewApp: React.FC = () => {
       const prLinks = openUrls.join(', ');
       const statusMessage = action === 'approve'
         ? `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} approved on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
-        : action === 'request_changes' && getPRPlatformCapabilities(prMetadata).requestChanges
+        // What went, not the button pressed: an older GitLab posts a request for changes as a comment.
+        : action === 'request_changes' && attempt.postedAs !== 'comment'
           ? `Changes requested on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`
           : `${mrLabel === 'MR' ? 'Merge request' : 'Pull request'} reviewed on ${platformLabel}${prLinks ? ': ' + prLinks : ''}`;
       await flushReviewProgress();
@@ -5432,8 +5462,8 @@ const ReviewApp: React.FC = () => {
     count: totalAnnotationCount,
     hasFeedback: totalAnnotationCount > 0,
     approvalNotesSupported: false, // ignored by the platform arm
-    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported },
-  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported]);
+    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported, selfRequestChangesBlocked },
+  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported, selfRequestChangesBlocked]);
 
   const runPlatformDecisionAction = useCallback((id: DecisionActionId) => {
     if (submitted || busyWithPlatformDecision) return;
@@ -5632,8 +5662,14 @@ const ReviewApp: React.FC = () => {
       if (platformMode) {
         // Platform mode (PR6): Mod+Enter is the header's visible primary,
         // always — including the muted self-approval no-op. Same
-        // runPlatformDecisionAction the header and compact rows call.
+        // runPlatformDecisionAction the header and compact rows call. Shift
+        // changes nothing here: this side has no composer, every action opens
+        // the submission dialog, whose own field is the note.
         runPlatformDecisionAction('primary');
+      } else if (e.shiftKey) {
+        // Mod+Shift+Enter opens the note composer instead of submitting, the
+        // same chord plan review and annotate took in #2913.
+        setDecisionNoteRequest((n) => n + 1);
       } else {
         // Agent mode: Mod+Enter is the header's visible primary, always —
         // the same submitPrimaryDecision the button and compact row call.
@@ -5912,7 +5948,7 @@ const ReviewApp: React.FC = () => {
               </>
             )}
             {isCompactTouchLayout && !shouldShowFileTree && <span aria-hidden />}
-            {!isCompactTouchLayout && aiUIEnabled && hasSearchableFiles && (
+            {!isCompactTouchLayout && guideReachable && hasSearchableFiles && (
               <>
                 <button
                   onClick={() => {
@@ -5953,6 +5989,7 @@ const ReviewApp: React.FC = () => {
                 </span>
                 <PRSelector
                   mrNumberLabel={mrNumberLabel}
+                  numberPrefix={getPRPlatformCapabilities(prMetadata).numberPrefix}
                   prTitle={prMetadata.title}
                   currentNumber={getPRNumber(prMetadata)}
                   onSelect={handlePRSwitch}
@@ -6233,6 +6270,7 @@ const ReviewApp: React.FC = () => {
                       busy={busyWithDecision}
                       isLoading={isSendingFeedback || isApproving}
                       labelBreakpoint="lg"
+                      openNoteRequest={decisionNoteRequest}
                     />
                   </>
                 ) : (
@@ -6359,7 +6397,7 @@ const ReviewApp: React.FC = () => {
               onCopyAgentInstructions={handleCopyAgentInstructions}
               onToggleFileTree={toggleNavigator}
               onToggleSidebar={() => reviewSidebar.isOpen ? reviewSidebar.close() : reviewSidebar.open()}
-              onOpenGuide={isCompactTouchLayout && aiUIEnabled && hasSearchableFiles ? () => {
+              onOpenGuide={isCompactTouchLayout && guideReachable && hasSearchableFiles ? () => {
                 if (guideHintActive) {
                   markGuideHintSeen();
                   setGuideHintActive(false);
@@ -6654,6 +6692,7 @@ const ReviewApp: React.FC = () => {
                 onClose={() => setGuideOpen(false)}
                 onOpenFixedGuide={handleOpenGuide}
                 onOpenSavedGuide={handleOpenGuide}
+                launchOff={!aiUIEnabled}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
                 onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
                 onShowGlobalComment={handleShowGlobalComment}

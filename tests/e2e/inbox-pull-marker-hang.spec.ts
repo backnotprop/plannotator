@@ -25,7 +25,7 @@
  * another binary (an older release, to see the bug). What each step saw lands
  * in PLANNOTATOR_E2E_PROOF_DIR/pull-marker-hang (default .local/proof).
  */
-import { expect, test, type Browser, type Page } from '@playwright/test';
+import { expect, test, type Browser, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -90,6 +90,7 @@ test.beforeAll(async () => {
   const env: Record<string, string> = {
     PATH: `${stubs}:${process.env.PATH ?? ''}`,
     HOME: root,
+    PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',

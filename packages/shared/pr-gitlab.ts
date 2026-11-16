@@ -7,11 +7,14 @@
 
 import { join } from "path";
 import { mkdirSync, writeFileSync } from "fs";
-import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRReviewFileComment, PRReviewFileLevelComment, PRReviewCommentFailure, PRReviewAction, PRReviewSubmissionResult, CommandResult } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { getPlannotatorDataDir } from "./data-dir";
 import { isAccessRefusal, markedCommentText, PRMarkedForbiddenError, PRMarkedRaceError, spliceMarkedSection, startsWithMarker, type PRMarkedCommentInput, type PRMarkedResult, type PRMarkedSectionInput } from "./pr-marked";
 import { diffHunkLines, parseDiffToFiles } from "@plannotator/core/diff-files";
+import { readGlVersionAt } from "./pr-gitlab-versions";
+import { foldFileLevelComments } from "./pr-github";
+import { postGlFileThreads } from "./pr-gitlab-file-threads";
 
 // GitLab-specific MRRef shape (used internally)
 interface GlMRRef {
@@ -22,12 +25,12 @@ interface GlMRRef {
 }
 
 /** URL-encode the project path for GitLab API (group/project → group%2Fproject) */
-function encodeProject(projectPath: string): string {
+export function encodeProject(projectPath: string): string {
   return encodeURIComponent(projectPath);
 }
 
 /** Build glab API args with optional --hostname for self-hosted */
-function apiArgs(host: string, endpoint: string, extra: string[] = []): string[] {
+export function apiArgs(host: string, endpoint: string, extra: string[] = []): string[] {
   const args = ["api", endpoint, ...extra];
   if (host !== "gitlab.com") {
     args.push("--hostname", host);
@@ -654,6 +657,119 @@ export async function fetchGlFileBytes(
 
 // --- Submit MR Review ---
 
+type RunWithInput = NonNullable<PRRuntime["runCommandWithInput"]>;
+
+function commandFailure(result: CommandResult): string {
+  return result.stderr.trim() || result.stdout.trim() || `exit code ${result.exitCode}`;
+}
+
+/**
+ * GitLab's own words for a refused approval: the JSON `message` glab prints on
+ * stdout, else glab's stderr. Null when the failure is not a refusal (401/403).
+ */
+function glApprovalRefusal(result: CommandResult): string | null {
+  const text = `${result.stderr}\n${result.stdout}`;
+  if (!/\bHTTP 40[13]\b|\b40[13] (?:Unauthorized|Forbidden)\b/i.test(text)) return null;
+  let message = "";
+  try {
+    const body: unknown = JSON.parse(result.stdout);
+    if (isRecord(body)) message = stringValue(body.message) || stringValue(body.error);
+  } catch {
+    // Not JSON: glab's stderr carries the answer.
+  }
+  return message || result.stderr.trim().replace(/^glab:\s*/, "") || `exit code ${result.exitCode}`;
+}
+
+/** Approve the MR. Returns the failure message, or null on success. */
+async function approveGlMR(run: RunWithInput, host: string, mrEndpoint: string): Promise<string | null> {
+  const result = await run(
+    "glab",
+    apiArgs(host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    "{}",
+  );
+  if (result.exitCode === 0) return null;
+  // The person may approve their own MR unless the project forbids it; GitLab
+  // then answers 401 (also when they already approved). Say so in plain words.
+  const refusal = glApprovalRefusal(result);
+  return refusal
+    ? `GitLab refused the approval (${refusal}). The project may not let you approve this merge request, for example because you are its author, or you already approved it.`
+    : `Failed to approve MR: ${commandFailure(result)}`;
+}
+
+// GitLab records requested changes only for a reviewer, and runs a document's
+// mutations in order, so the user is appended as a reviewer first.
+const REQUEST_CHANGES_MUTATION = `mutation($projectPath: ID!, $iid: String!, $username: String!) {
+  mergeRequestSetReviewers(input: { projectPath: $projectPath, iid: $iid, reviewerUsernames: [$username], operationMode: APPEND }) { errors }
+  mergeRequestRequestChanges(input: { projectPath: $projectPath, iid: $iid }) { errors }
+}`;
+
+/** GraphQL error messages from a top-level `errors` array and every mutation payload's `errors` strings. */
+function graphqlErrors(value: unknown): string[] {
+  if (!isRecord(value)) return [];
+  const top = Array.isArray(value.errors)
+    ? value.errors.map((e) => (isRecord(e) ? stringValue(e.message) : stringValue(e))).filter(Boolean)
+    : [];
+  const payloads = isRecord(value.data) ? Object.values(value.data) : [];
+  const nested = payloads.flatMap((payload) =>
+    isRecord(payload) && Array.isArray(payload.errors) ? payload.errors.map(stringValue).filter(Boolean) : [],
+  );
+  return [...top, ...nested];
+}
+
+/** The server has no `mergeRequestRequestChanges` (added in GitLab 18.9). */
+const REQUEST_CHANGES_MISSING = Symbol("request changes missing");
+
+/**
+ * GitLab before 18.9 rejects the mutation document as a whole, before running
+ * any of it (HTTP 200, no `data`; glab exits 1 and prints the body), with an
+ * `undefinedField` error naming `mergeRequestRequestChanges` on `Mutation`.
+ */
+function requestChangesMissing(value: unknown): boolean {
+  if (!isRecord(value) || value.data != null || !Array.isArray(value.errors)) return false;
+  return value.errors.some((e) => {
+    if (!isRecord(e)) return false;
+    const ext = isRecord(e.extensions) ? e.extensions : {};
+    if (ext.code === "undefinedField") {
+      return ext.typeName === "Mutation" && ext.fieldName === "mergeRequestRequestChanges";
+    }
+    return /^Field 'mergeRequestRequestChanges' doesn't exist on type 'Mutation'/.test(stringValue(e.message));
+  });
+}
+
+/**
+ * Add the current user as a reviewer and set their state to "Requested
+ * changes". Returns the failure message, null on success, or
+ * `REQUEST_CHANGES_MISSING` when the server is too old to have it (nothing
+ * changed on the MR).
+ */
+async function requestGlMRChanges(
+  runtime: PRRuntime,
+  run: RunWithInput,
+  ref: GlMRRef,
+): Promise<string | null | typeof REQUEST_CHANGES_MISSING> {
+  const username = await getGlUser(runtime, ref.host);
+  if (!username) return "could not read the current GitLab user";
+  const result = await run(
+    "glab",
+    apiArgs(ref.host, "graphql", ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
+    JSON.stringify({
+      query: REQUEST_CHANGES_MUTATION,
+      variables: { projectPath: ref.projectPath, iid: String(ref.iid), username },
+    }),
+  );
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(result.stdout);
+  } catch {
+    if (result.exitCode !== 0) return commandFailure(result);
+    return `unexpected GraphQL response: ${result.stdout.trim().slice(0, 200)}`;
+  }
+  if (requestChangesMissing(parsed)) return REQUEST_CHANGES_MISSING;
+  if (result.exitCode !== 0) return commandFailure(result);
+  const errors = graphqlErrors(parsed);
+  return errors.length > 0 ? errors.join("; ") : null;
+}
+
 /** One file of an MR's diff as a discussion's position needs it: its path before, and its unchanged lines' pairs. */
 interface GlPositionFile {
   oldPath: string;
@@ -683,7 +799,10 @@ async function readGlPositionFiles(runtime: PRRuntime, ref: GlMRRef): Promise<Ma
   } catch {
     return null;
   }
-  if (!patch?.trim()) return null;
+  return patch?.trim() ? glPositionFilesOf(patch) : null;
+}
+
+function glPositionFilesOf(patch: string): Map<string, GlPositionFile> {
   const files = new Map<string, GlPositionFile>();
   for (const file of parseDiffToFiles(patch)) {
     const newToOld = new Map<number, number>();
@@ -749,6 +868,7 @@ export async function submitGlMRReview(
   action: PRReviewAction,
   body: string,
   fileComments: PRReviewFileComment[],
+  fileLevelComments: PRReviewFileLevelComment[] = [],
 ): Promise<PRReviewSubmissionResult> {
   if (!runtime.runCommandWithInput) {
     throw new Error("Runtime does not support stdin input; cannot submit MR review");
@@ -760,6 +880,9 @@ export async function submitGlMRReview(
   let reviewBodyPosted = false;
   let failedFileComments: PRReviewCommentFailure[] = [];
   let recoveryFile: string | undefined;
+  let reviewBodyError: string | undefined;
+  const threads = await postGlFileThreads(runtime, (endpoint, extra) => apiArgs(ref.host, endpoint, extra), mrEndpoint, headSha, fileLevelComments);
+  body = foldFileLevelComments(body, threads.folded);
 
   // Fetch base SHA for position context (needed for line comments)
   // We use the headSha passed in and derive baseSha from MR metadata
@@ -774,10 +897,13 @@ export async function submitGlMRReview(
       notePayload,
     );
     if (noteResult.exitCode !== 0) {
-      const msg = noteResult.stderr.trim() || noteResult.stdout.trim() || `exit code ${noteResult.exitCode}`;
-      throw new Error(`Failed to post MR note: ${msg}`);
+      const msg = commandFailure(noteResult);
+      if (threads.posted === 0) throw new Error(`Failed to post MR note: ${msg}`);
+      reviewBodyError = `Failed to post MR note: ${msg}`;
+      console.error(`[plannotator] ${reviewBodyError}`);
+    } else {
+      reviewBodyPosted = true;
     }
-    reviewBodyPosted = true;
   }
 
   // 2. Post inline file comments as discussions with position
@@ -786,6 +912,8 @@ export async function submitGlMRReview(
     let baseSha = headSha; // fallback
     let startSha = headSha;
     let diffRefsError: string | undefined;
+    let olderHead = false;
+    let versionFiles: Map<string, GlPositionFile> | null = null;
     try {
       const mrResult = await runtime.runCommand(
         "glab",
@@ -797,9 +925,20 @@ export async function submitGlMRReview(
           if (mrData.diff_refs) {
             baseSha = mrData.diff_refs.base_sha;
             startSha = mrData.diff_refs.start_sha;
+            olderHead = typeof mrData.diff_refs.head_sha === "string" && mrData.diff_refs.head_sha.toLowerCase() !== headSha.toLowerCase();
           }
         } catch {
           // Use fallbacks
+        }
+      }
+      if (olderHead) {
+        const version = await readGlVersionAt(runtime, ref, headSha);
+        if (version) {
+          baseSha = version.baseSha;
+          startSha = version.startSha;
+          versionFiles = version.diffs ? glPositionFilesOf(reconstructPatch(version.diffs)) : null;
+        } else {
+          diffRefsError = `GitLab has no version of this merge request at ${headSha.slice(0, 7)}`;
         }
       }
     } catch (error) {
@@ -812,7 +951,7 @@ export async function submitGlMRReview(
         error: `${comment.path}:${comment.line}: Failed to prepare inline comment: ${diffRefsError}`,
       }));
     } else {
-      const positionFiles = await readGlPositionFiles(runtime, ref);
+      const positionFiles = olderHead ? versionFiles : await readGlPositionFiles(runtime, ref);
       // Submit comments in parallel
       const results = await Promise.allSettled(
         fileComments.map(async (comment) => {
@@ -826,7 +965,7 @@ export async function submitGlMRReview(
           );
 
           if (res.exitCode !== 0) {
-            const msg = res.stderr.trim() || res.stdout.trim() || `exit code ${res.exitCode}`;
+            const msg = commandFailure(res);
             throw new Error(`${comment.path}:${comment.line}: ${msg}`);
           }
         }),
@@ -864,7 +1003,7 @@ export async function submitGlMRReview(
       recoveryFile = savedTo ?? undefined;
       const suffix = savedTo ? ` (unposted bodies saved to ${savedTo})` : "";
 
-      if (errors.length === fileComments.length && !reviewBodyPosted) {
+      if (errors.length === fileComments.length && !reviewBodyPosted && threads.posted === 0) {
         // All failed and there was no review body — safe to throw because the
         // MR was not mutated. The client can replay the original request.
         throw new Error(
@@ -881,32 +1020,47 @@ export async function submitGlMRReview(
     }
   }
 
-  // 3. Approve if requested. GitLab has no request-changes review, so a
-  //    `request_changes` action posts exactly what `comment` posts (#1611).
   let approval: "not-requested" | "succeeded" | "failed" = "not-requested";
   let approvalError: string | undefined;
-  if (action === "approve") {
+  // An older GitLab without request changes: the review stays the plain comment it already is.
+  let postedAs: "comment" | undefined;
+  if (action === "approve" || action === "request_changes") {
+    const verb = action === "approve" ? "approve MR" : "request changes on MR";
     try {
-      const approveResult = await runCommandWithInput(
-        "glab",
-        apiArgs(ref.host, `${mrEndpoint}/approve`, ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
-        "{}",
-      );
-      if (approveResult.exitCode !== 0) {
-        const msg = approveResult.stderr.trim() || approveResult.stdout.trim() || `exit code ${approveResult.exitCode}`;
-        approval = "failed";
-        approvalError = `Failed to approve MR: ${msg}`;
+      if (action === "approve") {
+        const failure = await approveGlMR(runCommandWithInput, ref.host, mrEndpoint);
+        if (failure) {
+          approval = "failed";
+          approvalError = failure;
+        } else {
+          approval = "succeeded";
+        }
       } else {
-        approval = "succeeded";
+        const failure = await requestGlMRChanges(runtime, runCommandWithInput, ref);
+        if (failure === REQUEST_CHANGES_MISSING) {
+          postedAs = "comment";
+        } else if (failure) {
+          approval = "failed";
+          approvalError = `Failed to ${verb}: ${failure}`;
+        } else {
+          approval = "succeeded";
+        }
       }
     } catch (error) {
       approval = "failed";
       const message = error instanceof Error ? error.message : String(error);
-      approvalError = `Failed to approve MR: ${message}`;
+      approvalError = `Failed to ${verb}: ${message}`;
+    }
+    if (approval === "failed" && !reviewBodyPosted && threads.posted === 0 && failedFileComments.length === fileComments.length) {
+      // A decision refused before anything else landed changed nothing on the
+      // MR: an error, like Bitbucket, so the review stays open with no retry
+      // locked to it and the person can still comment or request changes.
+      throw new Error(approvalError);
     }
   }
 
-  if (failedFileComments.length > 0 || approval === "failed") {
+  const bodyStillOwed = !!reviewBodyError;
+  if (failedFileComments.length > 0 || approval === "failed" || bodyStillOwed) {
     return {
       status: "partial",
       postedFileCommentCount: fileComments.length - failedFileComments.length,
@@ -914,15 +1068,18 @@ export async function submitGlMRReview(
       reviewBodyPosted,
       approval,
       ...(approvalError ? { approvalError } : {}),
+      ...(reviewBodyError ? { reviewBodyError } : {}),
       ...(recoveryFile ? { recoveryFile } : {}),
+      ...(postedAs ? { postedAs } : {}),
       retry: {
-        action: approval === "failed" ? "approve" : "comment",
+        action: approval === "failed" ? action : "comment",
         fileComments: failedFileComments.map((failure) => failure.comment),
+        ...(bodyStillOwed ? { body: body.trim() } : {}),
       },
     };
   }
 
-  return { status: "complete" };
+  return postedAs ? { status: "complete", postedAs } : { status: "complete" };
 }
 
 // --- Marked text: a note or a description section found again by its marker (pr-marked.ts) ---

@@ -20,7 +20,7 @@
  * binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  */
 
-import { devices, expect, test, type Page } from '@playwright/test';
+import { devices, expect, test, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -213,7 +213,7 @@ test.describe('ref hover cards', () => {
     root = inboxScratch('plannotator-inbox-ref-cards-e2e-');
     forge = fakeForge(join(root, 'bin'));
     seed(forge);
-    const env = { PATH: `${forge.dir}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
+    const env = { PATH: `${forge.dir}:${process.env.PATH ?? ''}`, HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: join(root, 'data'), PLANNOTATOR_BROWSER: NO_BROWSER };
     const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
     expect(started.status, started.stderr).toBe(0);
     url = started.stdout.trim();

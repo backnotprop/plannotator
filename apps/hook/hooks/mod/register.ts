@@ -10,8 +10,10 @@
  * Loaded from `hooks/hooks.json` ("modules") only where Claude Code runs
  * hooks modules (function hooks, 2.1.287+, CLI). Elsewhere the same plugin's
  * classic command hooks and the `/plannotator-*` skills behave exactly as
- * before; the mod also stands down in `-p`/SDK sessions and where it finds no
- * shell for its scripts (shell.ts), leaving those classic paths in place.
+ * before. It runs in every session, interactive or not (what it does in each
+ * kind of session: `SESSION_KIND_FEATURES` in enabled.ts), and stands down in
+ * Plannotator's own Ask AI children and where it finds no shell for its
+ * scripts (shell.ts), leaving those classic paths in place.
  *
  * What it does:
  * - ExitPlanMode (`tool.call`): answers `deny` with "waiting for review" text
@@ -72,9 +74,10 @@
  *   carries a title, costs a "hook was skipped" line under
  *   `cc-plugin-sec-default` (#2243). `command.run` on `/rename` and `/clear` keeps
  *   the name in `$.store` by session id, and each Inbox poll reads it.
- * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` in the environment
- *   every process the session starts inherits, so a Plannotator server can be
- *   matched to the session that started it. Beside it,
+ * - `PLANNOTATOR_SESSION_TAG=claude-code:<session id>` (`t3:<thread id>` in a
+ *   T3 Code thread) in the environment every process the session starts
+ *   inherits, so a Plannotator server can be matched to the session that
+ *   started it. Beside it,
  *   `PLANNOTATOR_SESSION_PROJECT=claude-code:<session id>:<folder>`, the
  *   folder the session files under in the Inbox, so its shell's
  *   `plannotator inbox call` and `plannotator card` land where its
@@ -86,7 +89,25 @@
 
 import { AUTO_RELOAD_ARGS, AUTO_RELOAD_COMMAND, hidesReloadOutput } from './auto-reload'
 import { PlannotatorMod } from './controller'
-import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled, resolvePlanReviewEnabled } from './enabled'
+import {
+  isVsCodePanelSession,
+  promptOriginKind,
+  sessionKindOf,
+  SESSION_KIND_FEATURES,
+  t3ThreadOf,
+  isT3ThreadOwnTools,
+  T3_ENTRYPOINT,
+  T3_THREAD_SERVER,
+  type SessionKind,
+  resolveAgentToolEnabled,
+  resolveClaudeModEnabled,
+  resolveInboxReminderCustom,
+  resolveInboxReminderEnabled,
+  resolveInboxReminderRules,
+  resolveInboxToolEnabled,
+  resolvePlanReviewEnabled,
+  VSCODE_PANEL_ENTRYPOINT,
+} from './enabled'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
@@ -95,20 +116,29 @@ import {
   engineHasSessionAppend,
   inboxFirstPromptContext,
   inboxRegistryPathOf,
+  inboxT3Agent,
+  type InboxOwnerAnswer,
   inboxReminderEnvValue,
   inboxReminderWithThreads,
   INBOX_SESSION_NAME_COMMANDS,
   pluginVersionOf,
   readReminderSessions,
   readSessionNames,
+  readSessionStarts,
+  readSessionTitles,
   sessionNamesAfterCommand,
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
   STORE_INBOX_SESSION_NAMES,
+  STORE_INBOX_SESSION_STARTS,
+  STORE_INBOX_SESSION_TITLES,
   TranscriptContinuedIn,
   TranscriptForkedFrom,
   TranscriptTitle,
+  type InboxLaunchReminder,
   withReminderSession,
+  withSessionStart,
+  withSessionTitles,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
@@ -293,6 +323,21 @@ interface Allowed {
   inboxReminder: boolean
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
+  inboxReminderRules: string | null
+  /** A chat panel of Claude Code's VS Code extension (`isVsCodePanelSession`): not interactive, a person reading it. */
+  panel: boolean
+  /** The T3 Code thread this session is (`t3ThreadOf`), or null. */
+  t3Thread: string | null
+  kind: SessionKind
+  /** The non-blocking reviews: the slash commands, the `plannotator` tool, the Bash take-over (`SESSION_KIND_FEATURES`). */
+  reviews: boolean
+  /** The Inbox reply wake: the link polls and delivers replies as turns. */
+  wake: boolean
+}
+
+/** The session the Inbox files this one under: the T3 Code thread, else the Claude Code session itself. */
+function inboxSessionOf(settings: Allowed | null, sessionId: string): string {
+  return settings?.t3Thread ?? sessionId
 }
 
 // One plugin instance per Claude Code process.
@@ -395,7 +440,7 @@ async function plainReminderAgain($: Engine): Promise<void> {
   if (!reminderWithThreadsSet) return
   reminderWithThreadsSet = false
   if (!allowed) return
-  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom))).catch(() => undefined)
+  await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
 }
 
 /**
@@ -467,6 +512,33 @@ async function recordReminder($: Engine, sessionId: string): Promise<void> {
   await $.store.set(STORE_INBOX_REMINDER_SESSIONS, withReminderSession(readReminderSessions(stored), sessionId, now))
 }
 
+/** The longest a launched session's first wake waits to learn whether it carries the reminder. */
+const LAUNCH_REMINDER_MS = 1_500
+
+/**
+ * The reminder a launched session's first wake carries (approval "inbox-launched-agent-note"): that turn is the
+ * plugin's own prompt, which Claude Code never raises this module's `prompt.submit` for, so it carries the same
+ * text a typed first prompt would, under the same gate (`reminderOn`, decided at the first session.start), once
+ * per conversation: none when this conversation's first prompt had it (here or, by the store's record, in
+ * another process). Taken, it counts as that first prompt's, so a prompt the person types later carries none.
+ */
+async function launchReminderFor($: Engine, sessionId: string): Promise<InboxLaunchReminder | null> {
+  const settings = allowed
+  const toolName = inboxToolName
+  if (!settings || !toolName || reminderGateValue !== true) return null
+  const state = reminderConversation(sessionId)
+  if (state.delivered) return null
+  const recorded = await withinMs($, LAUNCH_REMINDER_MS, () => reminderRecorded($, sessionId))
+  if (recorded !== false) return null
+  return {
+    text: inboxReminderFor(settings.inboxReminderCustom, toolName),
+    entered: async () => {
+      state.delivered = true
+      await recordReminder($, sessionId).catch(() => undefined)
+    },
+  }
+}
+
 /**
  * The folder this session files under in the Inbox, for its thread lists
  * after a compaction or a resume: the session's own link's project folder
@@ -515,10 +587,27 @@ async function sessionNameOf($: Engine, sessionId: string): Promise<string> {
  * `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<folder>/<session id>.jsonl`,
  * for the folder the session started in (its first root), its root now, or its
  * working folder. Its null (no transcript, no title in it, no `/bin/sh`) leaves
- * the label to the `/rename` store.
+ * the label to the `/rename` store. What it read is kept in `$.store`
+ * (STORE_INBOX_SESSION_TITLES), so the instance a module reload makes starts
+ * from the last titles instead of none.
  */
 function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTitle {
-  return new TranscriptTitle(host, sessionId, transcriptCandidatesOf($, sessionId))
+  return new TranscriptTitle(host, sessionId, transcriptCandidatesOf($, sessionId), {
+    load: async () => readSessionTitles(await $.store.get(STORE_INBOX_SESSION_TITLES))[sessionId] ?? null,
+    save: async (known) => {
+      const stored = readSessionTitles(await $.store.get(STORE_INBOX_SESSION_TITLES))
+      const updated = withSessionTitles(stored, sessionId, known, await $.clock.now())
+      if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_TITLES, updated)
+    },
+  })
+}
+
+/** `sessionId`'s first start: the one kept in `$.store` (STORE_INBOX_SESSION_STARTS), else `startedAt`, which is kept. */
+async function sessionFirstStartOf($: Engine, sessionId: string, startedAt: number): Promise<number> {
+  const stored = readSessionStarts(await $.store.get(STORE_INBOX_SESSION_STARTS))
+  const updated = withSessionStart(stored, sessionId, startedAt)
+  if (updated !== stored) await $.store.set(STORE_INBOX_SESSION_STARTS, updated)
+  return Math.min(stored[sessionId] ?? startedAt, startedAt)
 }
 
 /** Where `sessionId`'s transcript may be, asked when needed: the folder it started in (its first root), its root now, its working folder. */
@@ -551,7 +640,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
     // `session.end` has usually disposed it already; its tracker is read after (carryQueued below).
     const previous = mod
     mod?.dispose()
-    await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
+    await $.env.set('PLANNOTATOR_SESSION_TAG', settings.t3Thread ? `t3:${settings.t3Thread}` : `claude-code:${sessionId}`)
     const host = hostOf($, settings.debugPath)
     const title = sessionTitleOf($, host, String(sessionId))
     // A branched conversation (a new session id) says which session it continues: the Inbox hands it that one's replies.
@@ -569,8 +658,13 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
+      title: () => title.generatedTitle() ?? '',
+      firstStart: (startedAt) => sessionFirstStartOf($, String(sessionId), startedAt),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
       ...(inboxTools ? { inboxTools } : {}),
+      ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),
+      ...(settings.wake ? {} : { inboxWake: false }),
+      launchReminder: () => launchReminderFor($, String(sessionId)),
       ...(options.healed ? { healed: true } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
@@ -587,6 +681,35 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
   } finally {
     switching = null
   }
+}
+
+/** Once yes, for the process: T3's `t3-code` server stays for the thread's Claude while it runs. */
+let t3ThreadOwn: InboxOwnerAnswer | null = null
+
+/**
+ * Whether this process is its T3 thread's own Claude: its tools include T3's
+ * `t3-code` ones (`isT3ThreadOwnTools`), or, where tool schemas load on demand
+ * and the list may leave them out, its context names a `t3-code` server
+ * (`$.session.usage`'s `mcpTools`, which lists a tool not searched for yet
+ * too). A Claude Code whose `$.tool.list` is missing or throws cannot tell:
+ * null, and the link runs as it did before the check.
+ */
+async function t3ThreadOwnHere($: Engine): Promise<InboxOwnerAnswer> {
+  if (t3ThreadOwn) return t3ThreadOwn
+  let tools: unknown
+  try {
+    tools = await $.tool.list()
+  } catch (error) {
+    return { yes: null, via: `no $.tool.list here (${error instanceof Error ? error.message : String(error)})` }
+  }
+  if (!Array.isArray(tools)) return { yes: null, via: 'no $.tool.list here' }
+  if (isT3ThreadOwnTools(tools.map((tool: { name?: unknown }) => tool?.name))) return (t3ThreadOwn = { yes: true, via: 'tools' })
+  const usage = await Promise.resolve()
+    .then(() => $.session.usage({ breakdown: 'summary' }))
+    .catch(() => null)
+  const servers = usage?.context?.breakdown?.mcpTools
+  if (Array.isArray(servers) && servers.some((tool: { serverName?: unknown }) => tool?.serverName === T3_THREAD_SERVER)) return (t3ThreadOwn = { yes: true, via: 'mcp server' })
+  return { yes: false, via: `no t3-code tools or server among ${tools.length} tools` }
 }
 
 /**
@@ -689,13 +812,35 @@ async function pickShellOf($: Engine, dataDir: string): Promise<ModShell | null>
   )
 }
 
-/** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
+/**
+ * Which SDK host this non-interactive session is: a chat panel of Claude
+ * Code's VS Code extension (`isVsCodePanelSession`) or a T3 Code thread
+ * (`t3ThreadOf`), both in enabled.ts. Each variable is named as a literal
+ * (env-get-literal.test.ts).
+ */
+async function sdkHostOf($: Engine): Promise<{ panel: boolean; t3Thread: string | null }> {
+  const entrypoint = await $.env.get('CLAUDE_CODE_ENTRYPOINT')
+  // Read the rest only for the panel's or T3's entrypoint: every other session decides on the first read.
+  if (entrypoint !== VSCODE_PANEL_ENTRYPOINT && entrypoint !== T3_ENTRYPOINT) return { panel: false, t3Thread: null }
+  const env = {
+    entrypoint,
+    claudecode: await $.env.get('CLAUDECODE'),
+    childSession: await $.env.get('CLAUDE_CODE_CHILD_SESSION'),
+    sessionTag: await $.env.get('PLANNOTATOR_SESSION_TAG'),
+  }
+  if (entrypoint === VSCODE_PANEL_ENTRYPOINT) return { panel: isVsCodePanelSession(env, String(await $.session.id())), t3Thread: null }
+  return { panel: false, t3Thread: t3ThreadOf({ ...env, thread: await $.env.get('T3CODE_THREAD_ID') }) }
+}
+
+/** Whether the mod runs here (on unless the user turned it off), in which kind of session, and where its data dir is; null: stay inert. */
 async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promise<Allowed | null> {
-  // A person at the prompt is what makes a later plugin turn mean anything;
-  // `-p` and SDK runs keep the classic, blocking flows.
-  if (!e.isInteractive) return null
-  // A `claude` Plannotator's Ask AI started (`isAskAiChild` in packages/shared/child-env.ts).
+  // A `claude` Plannotator's Ask AI started (`isAskAiChild` in packages/shared/child-env.ts): the mod
+  // there would hand Plannotator's own agent Plannotator's tools and the person's Inbox.
   if ((await $.env.get('PLANNOTATOR_ASK_AI_CHILD')) === '1') return null
+  const isInteractive = e.isInteractive === true
+  const host = isInteractive ? { panel: false, t3Thread: null } : await sdkHostOf($)
+  const kind = sessionKindOf({ isInteractive, ...host })
+  const features = SESSION_KIND_FEATURES[kind]
   const dataDir = await resolveDataDir(
     {
       home: await homeOf($),
@@ -718,11 +863,17 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
   return {
     dataDir,
     debugPath: debug && debug !== '0' ? `${dataDir}/claude-code-mod/debug.log` : null,
-    agentTool: resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
-    planReview: resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
-    inboxTool: resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
-    inboxReminder: resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    agentTool: features.reviews && resolveAgentToolEnabled(await $.env.get('PLANNOTATOR_AGENT_TOOL'), configText),
+    planReview: features.planReview && resolvePlanReviewEnabled(await $.env.get('PLANNOTATOR_PLAN_REVIEW'), configText),
+    inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
+    inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
+    inboxReminderRules: resolveInboxReminderRules(configText),
+    panel: host.panel,
+    t3Thread: host.t3Thread,
+    kind,
+    reviews: features.reviews,
+    wake: features.wake,
   }
 }
 
@@ -799,17 +950,19 @@ export function register(on: On) {
     const result = await next(e)
     if (allowed) return result
     try {
-      allowed = await resolveAllowed($, e)
+      const decided = await resolveAllowed($, e)
+      // Before `allowed` is set: a turn.start that beats this hook (a
+      // --reply-on-resume launch) would build the instance without the Inbox link.
+      if (decided?.inboxTool) await registerInboxTool($, decided)
+      allowed = decided
       modDecided = true
       if (!allowed) return result
-      // Before the instance exists: it owns the Inbox link when the tool is registered.
-      if (allowed.inboxTool) await registerInboxTool($, allowed)
       // The reminder for the plugin's SessionStart `compact` command hook
       // (hooks.json), which prints it after a compaction: the conversation then
       // holds it again after the summary replaced the first prompt's copy. Unset
       // when the reminder is off (a value inherited from a parent Claude Code
       // must not speak for this session).
-      await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom))).catch(() => undefined)
+      await Promise.resolve($.env.set('PLANNOTATOR_INBOX_REMINDER', inboxReminderEnvValue(reminderOn(), inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules))).catch(() => undefined)
     } finally {
       // Decided (or inert): a first prompt the engine may already be raising
       // gets its context now, without waiting for the commands and tools below.
@@ -819,7 +972,8 @@ export function register(on: On) {
     if (!instance) return result
     // A module the auto reload loaded says so first (auto-reload.ts); off the hook's path.
     const checkedIn = instance.checkInAfterReload()
-    await registerCommands($)
+    // A headless session keeps the `/plannotator-*` skills: their CLI waits for the decision inside the run.
+    if (allowed.reviews) await registerCommands($)
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
     if (allowed.agentTool) await registerTool($)
@@ -885,12 +1039,12 @@ export function register(on: On) {
   on('session.compact', async ($: Engine, e: any, next: Next) => {
     if (e?.trigger !== 'precompute' && !e?.agentId && reminderOn() && allowed && inboxToolName) {
       try {
-        const reminder = inboxReminderEnvValue(true, inboxToolName, allowed.inboxReminderCustom)
+        const reminder = inboxReminderEnvValue(true, inboxToolName, allowed.inboxReminderCustom, allowed.inboxReminderRules)
         if (reminder) {
           const threads = await readSessionThreads(
             hostOf($, allowed.debugPath),
             allowed.dataDir,
-            String(await $.session.id()),
+            inboxSessionOf(allowed, String(await $.session.id())),
             await inboxProjectFolderOf($),
             inboxToolName,
           )
@@ -907,7 +1061,7 @@ export function register(on: On) {
   // Matched by name: an unmatched hook makes the engine credit Plannotator on every plugin's command answer.
   on('command.run', { command: [...Object.keys(COMMANDS), INBOX_COMMAND.name] }, async ($: Engine, e: any, next: Next) => {
     const name: string = typeof e.command === 'string' ? e.command : ''
-    if (!allowed || (!isModCommand(name) && name !== INBOX_COMMAND.name)) return next(e)
+    if (!allowed?.reviews || (!isModCommand(name) && name !== INBOX_COMMAND.name)) return next(e)
     const instance = await currentMod($)
     if (!instance) return next(e)
     // `/plannotator-inbox`: open the Inbox and say where it is; no review opens.
@@ -978,7 +1132,7 @@ export function register(on: On) {
     // Claude running `plannotator annotate|review|last` in Bash on the main
     // loop: the same launch and result as the tool (take-over.ts); anything
     // the tool cannot represent, and every subagent's command, runs as written.
-    if (allowed && e.tool === SHELL_TOOL) {
+    if (allowed?.reviews && e.tool === SHELL_TOOL) {
       // A worktree move in this turn moved the project: the command's `plannotator inbox call` / `card` follow it
       // (written only on a change).
       const current = mod
@@ -1076,7 +1230,7 @@ export function register(on: On) {
     const ref = {
       fromUs: !!origin && origin.kind === 'plugin' && origin.name === PLUGIN_NAME,
       ...(typeof e.turnId === 'string' ? { turnId: e.turnId } : {}),
-      ...(origin && typeof origin.kind === 'string' ? { originKind: origin.kind } : {}),
+      ...(origin && typeof origin.kind === 'string' ? { originKind: promptOriginKind(origin.kind, !!allowed?.panel || !!allowed?.t3Thread) } : {}),
     }
     if (live) instance.onPromptSubmitting(ref)
     // The Inbox reminder (#2243): the conversation's first prompt here carries
@@ -1107,10 +1261,10 @@ export function register(on: On) {
         const recorded = resumed && !state.delivered && !isMeta && !command ? await reminderRecorded($, sessionId) : false
         const carries = inboxFirstPromptContext({ delivered: state.delivered, resumed, recorded, isMeta, command })
         const texts: string[] = []
-        if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName))
+        if (carries?.reminder) texts.push(inboxReminderFor(settings.inboxReminderCustom, toolName, { rules: settings.inboxReminderRules }))
         if (carries?.threads) {
           const threads = await withinMs($, SESSION_THREADS_RESUME_MS, async () =>
-            readSessionThreads(hostOf($, settings.debugPath), settings.dataDir, sessionId, await inboxProjectFolderOf($), toolName),
+            readSessionThreads(hostOf($, settings.debugPath), settings.dataDir, inboxSessionOf(settings, sessionId), await inboxProjectFolderOf($), toolName),
           )
           if (threads) texts.push(threads)
         }

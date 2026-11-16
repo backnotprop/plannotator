@@ -21,14 +21,15 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import { forgetUnsentReview, keepUnsentReview } from '../compose/reviewBox';
+import { forgetUnsentReview, keepUnsentReview, type ReviewBoxPull } from '../compose/reviewBox';
 import type { ComposeSent } from '../compose/ComposeDialog';
-import type { ReviewBoxPull } from '../compose/reviewBox';
+import type { PullViewScope } from './viewScope';
 import type { StartThreadInput } from '../api';
 import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 import { layerVerdictLink } from './topology';
 
 import { pullsStateOf } from './reviewsTestState';
+import { LAST, link, model, pull, STACK_ID, stack } from './pullReviewFixtures';
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
@@ -55,11 +56,7 @@ if (hasDom) {
       return null;
     },
   }));
-  // The real review-app dialog and submit (tsconfig `paths` points the window's typecheck at its .d.ts).
-  // By a path in a variable: the window's strict typecheck must not follow it into review-editor.
-  const seam: string = '../guide/PlatformPost.tsx';
-  const real = (await import(seam)) as Record<string, unknown>;
-  mock.module('#platform-post', () => real);
+  await (await import('./platformPostSeam')).realPlatformPost();
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
@@ -67,66 +64,6 @@ const { PostEnding } = (hasDom ? await import('./PostEnding') : {}) as typeof im
 const { ComposeDialog } = (hasDom ? await import('../compose/ComposeDialog') : {}) as typeof import('../compose/ComposeDialog');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 
-function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
-  const repo = fields.repo ?? 'northwind/billing-svc';
-  return {
-    key: `github.com/${repo}#${number}`,
-    platform: 'github',
-    host: 'github.com',
-    repo,
-    number,
-    url: `https://github.com/${repo}/pull/${number}`,
-    title: `Layer ${number}`,
-    author: 'dana',
-    mine: true,
-    requested: false,
-    state: 'open',
-    base: 'main',
-    head: `b${number}`,
-    head_repo: repo,
-    additions: 4,
-    deletions: 1,
-    files: 1,
-    review: null,
-    approved_by: null,
-    reviewers: [],
-    checks: 'success',
-    updated_at: '2026-11-03T09:00:00.000Z',
-    merged_at: null,
-    ...fields,
-  };
-}
-
-const LAST = 'msg_01M4H6G73M9H3Z32T859E72DPY';
-const link: InboxPullLink = {
-  via: 'url',
-  thread_id: 'thr_retries',
-  thread_subject: 'Retry the failed charges',
-  project_id: 'prj_1',
-  agent: { host: 'claude-code', session: 'ses_1', name: null },
-  last: { message_id: LAST, preview: 'The stack is up.', at: '2026-11-03T09:00:00.000Z' },
-  guide: null,
-};
-
-const stack = [
-  pull(412, { head: 'retry/schedule' }),
-  pull(413, { head: 'retry/backoff', base: 'retry/schedule' }),
-  pull(414, { head: 'retry/dunning', base: 'retry/backoff', state: 'draft' }),
-];
-const model: InboxPullsAnswer = {
-  fetched_at: '2026-11-03T09:30:00.000Z',
-  hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }],
-  pulls: [
-    ...stack,
-    pull(880, { repo: 'northwind/web-app', mine: false, requested: true, author: 'tomas', head: 'rtl', updated_at: '2026-11-03T10:00:00.000Z' }),
-    pull(872, { repo: 'northwind/web-app', review: 'approved', approved_by: 'priya', head: 'vite' }),
-    pull(869, { repo: 'northwind/web-app', reviewers: ['jun'], head: 'locale' }),
-  ],
-  links: { [stack[2]!.key]: link },
-  projects: { 'github.com/northwind/billing-svc': ['prj_1'], 'github.com/northwind/web-app': ['prj_2'] },
-  cards: {},
-};
-const STACK_ID = stack[2]!.key;
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -187,7 +124,7 @@ beforeEach(() => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
     if (init?.method === 'POST') {
-      posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
+      if (!url.pathname.endsWith('/pulls/looked')) posted.push({ path: url.pathname, body: JSON.parse(String(init.body)) });
       if (url.pathname.endsWith('/api/inbox/messages')) {
         const no = refuse[String((JSON.parse(String(init.body)) as { to?: { session?: string } }).to?.session)];
         if (no) return Response.json(no.body, { status: no.status });
@@ -258,7 +195,7 @@ function mount(node: React.ReactNode) {
 
 /** The review, with its layer and scope in state as the route keeps them. */
 function Review({ stackId, from, answer }: { stackId: string; from: string; answer: InboxPullsAnswer }) {
-  const [at, setAt] = useState<{ key: string; scope: 'layer' | 'stack' }>({ key: from, scope: 'layer' });
+  const [at, setAt] = useState<{ key: string; scope: PullViewScope }>({ key: from, scope: 'layer' });
   return <PullReview model={answer} modelError={null} stackId={stackId} layerKey={at.key} scope={at.scope} onLayer={(key, scope) => setAt({ key, scope })} onBack={() => {}} onSent={() => {}} />;
 }
 
@@ -598,6 +535,33 @@ test.skipIf(!hasDom)('with an agent, the person chooses: the agent by default, P
   await act(async () => el('[data-review-decision] [data-decision-primary]').click());
   await settle();
   expect(posted.map((p) => p.path)).toEqual([`/api/inbox/messages/${LAST}/reply`]);
+});
+
+// GitLab before 18.9 has no request changes: the review stays a comment there, and the words say what went.
+test.skipIf(!hasDom)('Request changes on GitLab reads as what went: changes requested, or a review posted on an older GitLab', async () => {
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA, platform: 'gitlab' as const, host: 'gitlab.com', key: 'gitlab.com/northwind/web-app#880:pull', url: 'https://gitlab.com/northwind/web-app/-/merge_requests/880' };
+  const answer = { ...model, pulls: [...model.pulls.filter((p) => p.number !== 880), theirs], projects: { ...model.projects, 'gitlab.com/northwind/web-app': ['prj_2'] } };
+  for (const [submission, words] of [[{ status: 'complete' }, 'Changes requested on GitLab'], [{ status: 'complete', postedAs: 'comment' }, 'Review posted on GitLab']] as const) {
+    keepComment(theirs, 'Broken.');
+    reviewAnswer = { status: 200, body: { ok: true, prUrl: theirs.url, submission } };
+    posted = [];
+    mount(<Review stackId={theirs.key} from={theirs.key} answer={answer} />);
+    await settle();
+    await act(async () => el('[data-review-posts] [data-decision-caret]').click());
+    await settle();
+    const choice = [...document.querySelectorAll<HTMLElement>('[data-decision-popover] button, [data-decision-popover] [role="menuitem"]')].find((b) => /Request changes/.test(b.textContent ?? ''));
+    await act(async () => choice!.click());
+    await settle();
+    await act(async () => document.querySelector<HTMLInputElement>('[role="dialog"] input[value="request_changes"]')?.click());
+    await settle();
+    await act(async () => dialogButton('Request Changes').click());
+    await settle();
+    expect(posted.filter((p) => p.path.endsWith('/pulls/review')).map((p) => p.body.action)).toEqual(['request_changes']);
+    expect(el('[data-pull-review-posted]').textContent).toContain(words);
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+  }
 });
 
 test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, with its retry; a refusal says why', async () => {
@@ -1430,8 +1394,8 @@ test('custom curation: the person\'s words follow /review-curate in step 1, in p
   const theirs = handoffOf(LOCALE_PR({ mine: false, author: 'tomas' }), { kind: 'custom', words: 'only the fallback chain, and its tests' });
   expect(theirs).toContain(`\n${step1}2. After that`);
   expect(theirs).not.toContain('Include what I might ask');
-  // Kept to PULL_HANDOFF_CUSTOM_MAX characters.
-  expect(handoffOf(LOCALE_PR(), { kind: 'custom', words: 'x'.repeat(5000) })).toContain(`/review-curate ${'x'.repeat(1000)} (its instructions`);
+  // Long words arrive whole.
+  expect(handoffOf(LOCALE_PR(), { kind: 'custom', words: 'x'.repeat(5000) })).toContain(`/review-curate ${'x'.repeat(5000)} (its instructions`);
 });
 
 test('an unsafe branch name is left out: the head alone keeps "into <base>"; an unsafe base drops the Branch line', () => {

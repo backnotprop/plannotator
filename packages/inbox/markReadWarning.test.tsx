@@ -1,8 +1,7 @@
 /**
  * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10): what it counts and when it
  * asks (pure, always run), and under DOM_TESTS=1 (happy-dom, from tests/dom-test-list.txt) the dialog itself: Enter
- * goes on, Escape and Cancel change nothing, "Don't show this again" is passed on only when ticked, and a guest is not
- * offered it. The whole window over a real Inbox is packages/inbox/markReadWarningWindow.test.tsx (CI).
+ * goes on, Escape and Cancel change nothing, "Don't show this again" is passed on only when ticked. The whole window over a real Inbox is packages/inbox/markReadWarningWindow.test.tsx (CI).
  *
  * What regresses: a warning on a Mark read that closes nothing, a Mark read that goes on after Cancel, a count that
  * disagrees with what the store closes, or a "Don't show this again" that is not kept.
@@ -80,14 +79,14 @@ afterEach(() => {
   host = null;
 });
 
-function show(props: { count?: SetAsideCount; bulk?: boolean; offerNever?: boolean }) {
+function show(props: { count?: SetAsideCount; bulk?: boolean }) {
   const answers: SetAsideAnswer[] = [];
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
-      <MarkReadWarning count={props.count ?? { questions: 2, actions: 0, threads: 1 }} bulk={props.bulk ?? false} offerNever={props.offerNever ?? true} onAnswer={(a) => answers.push(a)} />,
+      <MarkReadWarning count={props.count ?? { questions: 2, actions: 0, threads: 1 }} bulk={props.bulk ?? false} onAnswer={(a) => answers.push(a)} />,
     );
   });
   const dialog = document.querySelector<HTMLElement>('[data-dialog="mark-read-warning"]')!;
@@ -122,11 +121,6 @@ describe.skipIf(!hasDom)('the dialog', () => {
     act(() => dialog.querySelector<HTMLInputElement>('[data-mark-read-warning-never] input')!.click());
     act(() => dialog.querySelector<HTMLButtonElement>('[data-mark-read-warning-go]')!.click());
     expect(answers).toEqual([{ go: true, never: true }]);
-  });
-
-  test('a tailnet guest, who cannot save it, is not offered it', () => {
-    const { dialog } = show({ offerNever: false });
-    expect(dialog.querySelector('[data-mark-read-warning-never]')).toBeNull();
   });
 
   test('Mark all as read names the batch on its button', () => {

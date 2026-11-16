@@ -26,7 +26,7 @@
  * (default .local/proof/artifacts).
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { appendFileSync, chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -242,8 +242,8 @@ test('the header: icons on the right with component tooltips, Artifacts with its
   await expect(button).toHaveAttribute('aria-label', 'Artifacts, 11');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   await expect(button).not.toHaveAttribute('title');
-  // The read button is an icon (approval "inbox-thread-header"): its words are its name.
-  await expect(header().locator('[data-mark-read]')).toHaveAccessibleName('Mark read');
+  // No read button in the bar (it leads the ⋯ menu, the owner 2026-11-11).
+  await expect(header().locator('.ib-readbtn')).toHaveCount(0);
   // Expand all is an icon now, named by its label.
   const expand = header().locator('[data-expand-all]');
   await expect(expand).toHaveAttribute('aria-label', /Expand all messages|Fold the earlier messages/);

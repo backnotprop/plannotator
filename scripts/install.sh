@@ -845,7 +845,43 @@ if [ "$verify_attestation" -eq 1 ]; then
     fi
 fi
 
-binary_url="https://github.com/${REPO}/releases/download/${latest_tag}/${binary_name}"
+release_download_url_allowed() {
+    local url="$1" authority host
+    case "$url" in
+        https://*) authority="${url#https://}" ;;
+        http://*) authority="${url#http://}" ;;
+        *) return 1 ;;
+    esac
+    authority="${authority%%[/?#]*}"
+    case "$authority" in
+        ""|*@*) return 1 ;;
+    esac
+    case "$url" in
+        https://*) return 0 ;;
+    esac
+    host="$(printf '%s' "$authority" | tr '[:upper:]' '[:lower:]')"
+    case "$host" in
+        "[::1]"|"[::1]:"*) return 0 ;;
+    esac
+    host="${host%%:*}"
+    [ "$host" = "localhost" ] && return 0
+    [[ "$host" =~ ^127\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]
+}
+
+release_download_base="https://github.com/${REPO}/releases/download"
+release_download_override="${PLANNOTATOR_RELEASE_DOWNLOAD_URL:-}"
+# Read the value as update-prepare does (trim, then drop trailing slashes), so
+# the binary and the checksum Plannotator pinned come from the same place.
+release_download_override="${release_download_override#"${release_download_override%%[![:space:]]*}"}"
+release_download_override="${release_download_override%"${release_download_override##*[![:space:]]}"}"
+while [ "${release_download_override%/}" != "$release_download_override" ]; do
+    release_download_override="${release_download_override%/}"
+done
+if [ -n "$release_download_override" ] && release_download_url_allowed "$release_download_override"; then
+    release_download_base="$release_download_override"
+fi
+
+binary_url="${release_download_base}/${latest_tag}/${binary_name}"
 checksum_url="${binary_url}.sha256"
 
 mkdir -p "$INSTALL_DIR"
@@ -952,16 +988,6 @@ download_release_binary() {
     done
 }
 
-tmp_file=$(mktemp)
-# Exit 1, not curl's code: the updater gives some codes a meaning.
-binary_status=0
-download_release_binary "$binary_url" "$tmp_file" || binary_status=$?
-if [ "$binary_status" -ne 0 ]; then
-    rm -f "$tmp_file"
-    echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
-    exit 1
-fi
-
 # Safe updates (step 1): `plannotator update`, Update now and auto-update run
 # this script after the running Plannotator downloaded it, and the .sha256 of
 # both binaries this OS may use, with its OWN connection (not this script's
@@ -996,7 +1022,7 @@ else
     checksum_status=0
     download_release_file "$checksum_url" "$checksum_file" 120 || checksum_status=$?
     if [ "$checksum_status" -ne 0 ]; then
-        rm -f "$checksum_file" "$tmp_file"
+        rm -f "$checksum_file"
         echo "Could not download the checksum for ${binary_name} ${latest_tag} (curl exit ${checksum_status}). Nothing was changed; try again later." >&2
         exit 1
     fi
@@ -1008,17 +1034,73 @@ else
         *[!0123456789abcdef]*) expected_checksum="" ;;
     esac
     if [ "${#expected_checksum}" -ne 64 ]; then
-        rm -f "$tmp_file"
         echo "The checksum file for ${binary_name} ${latest_tag} is not a SHA-256 checksum. Nothing was changed; try again later." >&2
         exit 1
     fi
 fi
 
-if [ "$(uname -s)" = "Darwin" ]; then
-    actual_checksum=$(shasum -a 256 "$tmp_file" | cut -d' ' -f1)
-else
-    actual_checksum=$(sha256sum "$tmp_file" | cut -d' ' -f1)
+sha256_of() {
+    if [ "$(uname -s)" = "Darwin" ]; then
+        shasum -a 256 "$1" | cut -d' ' -f1
+    else
+        sha256sum "$1" | cut -d' ' -f1
+    fi
+}
+
+packed_suffixes=".tar.xz .gz"
+case "${PLANNOTATOR_SKIP_COMPRESSED_DOWNLOAD:-}" in
+    1|true|yes|TRUE|YES|True|Yes) packed_suffixes="" ;;
+esac
+
+can_unpack() {
+    case "$1" in
+        .tar.xz) command -v tar >/dev/null 2>&1 && { [ "$(uname -s)" = "Darwin" ] || command -v xz >/dev/null 2>&1; } ;;
+        .gz) command -v gzip >/dev/null 2>&1 ;;
+        *) return 1 ;;
+    esac
+}
+
+unpack_release_asset() {
+    case "$1" in
+        .tar.xz) tar -xJOf "$2" "$binary_name" ;;
+        .gz) gzip -dc < "$2" ;;
+    esac > "$3" 2>/dev/null
+}
+
+tmp_file=$(mktemp)
+taken=""
+actual_checksum=""
+for packed_suffix in $packed_suffixes; do
+    can_unpack "$packed_suffix" || continue
+    curl -fsSLI -o /dev/null --connect-timeout 30 --max-time 60 "${binary_url}${packed_suffix}" 2>/dev/null || continue
+    packed_file=$(mktemp)
+    if download_release_binary "${binary_url}${packed_suffix}" "$packed_file" 2>/dev/null &&
+        unpack_release_asset "$packed_suffix" "$packed_file" "$tmp_file"; then
+        actual_checksum=$(sha256_of "$tmp_file")
+        if [ "$actual_checksum" = "$expected_checksum" ]; then
+            taken="${binary_name}${packed_suffix}"
+        fi
+    fi
+    rm -f "$packed_file"
+    [ -z "$taken" ] || break
+    : > "$tmp_file"
+    actual_checksum=""
+done
+
+if [ -z "$taken" ]; then
+    # Exit 1, not curl's code: the updater gives some codes a meaning.
+    binary_status=0
+    download_release_binary "$binary_url" "$tmp_file" || binary_status=$?
+    if [ "$binary_status" -ne 0 ]; then
+        rm -f "$tmp_file"
+        echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2
+        exit 1
+    fi
+    taken="$binary_name"
 fi
+echo "Downloaded ${taken}."
+
+[ -n "$actual_checksum" ] || actual_checksum=$(sha256_of "$tmp_file")
 
 if [ "$actual_checksum" != "$expected_checksum" ]; then
     rm -f "$tmp_file"
