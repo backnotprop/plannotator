@@ -16,7 +16,7 @@ import { scheduledApi } from './client';
 import { InboxApiError } from '../apiError';
 import { putScheduled, readScheduled } from './store';
 import { FilesRow, FolderPick, RunsAs, type LaunchBlock } from './EditorParts';
-import { EditorFoot } from './EditorFoot';
+import { EditorFoot, routineOn } from './EditorFoot';
 import { SaveStatus } from './SaveStatus';
 import { localZone, ScheduleRow } from './ScheduleRow';
 import { useAutosave } from './useAutosave';
@@ -46,7 +46,7 @@ const doneWords = (record: InboxScheduledRow): string => {
   return `Done · ran ${runWhenWords(record.last_run.started_at).replace(/^Today /, '')}`;
 };
 
-function MoreMenu({ on, onTurn, onDelete }: { on: boolean | null; onTurn: () => void; onDelete: () => void }) {
+function MoreMenu({ on, onTurn, onRun, onDelete }: { on: boolean | null; onTurn: () => void; onRun: (() => void) | null; onDelete: () => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
   // On a phone, main's bottom sheet (inbox.css `.ib-pm-pos[data-phone]`): it fits the screen and scrolls.
   const sheet = usePhone();
@@ -64,6 +64,11 @@ function MoreMenu({ on, onTurn, onDelete }: { on: boolean | null; onTurn: () => 
             {on !== null && (
               <Menu.Item className="ib-pmi" onClick={onTurn}>
                 <span className="ib-pmi-l">{on ? 'Turn off' : 'Turn on'}</span>
+              </Menu.Item>
+            )}
+            {onRun && (
+              <Menu.Item className="ib-pmi" onClick={onRun} data-scheduled-menu-run="">
+                <span className="ib-pmi-l">Run once now</span>
               </Menu.Item>
             )}
             <Menu.Item className="ib-pmi" onClick={onDelete}>
@@ -106,6 +111,7 @@ export function ScheduledEditor(props: EditorProps) {
       const shown = JSON.stringify(fields.schedule);
       return verdicts.current.get(shown) === false || (!verdicts.current.has(shown) && shown !== firstSchedule.current);
     },
+    holdTyping: routineOn(record),
     onCreated: props.onCreated,
   });
   const { draft } = autosave;
@@ -138,9 +144,21 @@ export function ScheduledEditor(props: EditorProps) {
     );
   };
 
-  const on = record ? record.state !== 'off' && record.state !== 'done' : false;
+  // One rule for the switch, the ⋯ menu and the foot: a one-off run of an off routine leaves it off.
+  const on = routineOn(record);
   const ready = !!draft.name.trim() && !!draft.prompt.trim();
-  const turn = () => (record ? act(() => scheduledApi.turn(record.id, !on)) : autosave.turnOn());
+  // A turn and a run read the saved routine: what waits is saved first, and one that did not save is said, not run.
+  const turn = async (next: boolean) => {
+    if (!record) return autosave.turnOn();
+    const saved = await autosave.settle();
+    if (!saved && next) return setError("Not turned on: your last change isn't saved yet.");
+    return act(() => scheduledApi.turn(record.id, next));
+  };
+  const runOnce = async () => {
+    if (!record) return;
+    if (!(await autosave.settle())) return setError("Not run: your last change isn't saved yet.");
+    return act(() => scheduledApi.run(record.id));
+  };
   const remove = () => {
     if (!record) {
       autosave.drop();
@@ -168,7 +186,7 @@ export function ScheduledEditor(props: EditorProps) {
           {!props.narrow && <span className="ib-phsubj-t">{name}</span>}
         </span>
         <SaveStatus status={autosave.status} />
-        <MoreMenu on={record?.state === 'done' ? null : on} onTurn={() => void turn()} onDelete={remove} />
+        <MoreMenu on={record?.state === 'done' ? null : on} onTurn={() => void turn(!on)} onRun={record && record.state !== 'running' ? () => void runOnce() : null} onDelete={remove} />
         {!props.narrow && (
           <>
             <span className="ib-vsep" aria-hidden="true" />
@@ -194,7 +212,7 @@ export function ScheduledEditor(props: EditorProps) {
             <span>{doneWords(record)}</span>
           ) : (
             <>
-              <Switch on={on} label={on ? 'On' : 'Off'} disabled={!record && !ready} onClick={() => void turn()} />
+              <Switch on={on} label={on ? 'On' : 'Off'} disabled={!record && !ready} onClick={() => void turn(!on)} />
               <span>{on ? 'On' : 'Off'}</span>
             </>
           )}
@@ -287,8 +305,8 @@ export function ScheduledEditor(props: EditorProps) {
       <EditorFoot
         record={record}
         ready={ready}
-        onTurnOn={() => void turn()}
-        onRun={() => record && void autosave.settle().then(() => act(() => scheduledApi.run(record.id)))}
+        onTurnOn={() => void turn(true)}
+        onRun={() => void runOnce()}
         onStop={() => record && void act(() => scheduledApi.stop(record.id))}
       />
     </div>

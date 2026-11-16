@@ -25,3 +25,12 @@
 
 ## Out of scope
 - Any change to schedules, missed-run handling, or what a run does.
+
+## Addendum 2026-11-16 (as built, PR #3558)
+- Words on screen not in the mock:
+  - "Not saved · needs a name" / "Not saved · needs a prompt": a saved routine whose name or prompt was emptied. The empty value is never saved.
+  - "Couldn't save": a write the Inbox refused. The reason is in the red line under the On switch, and it is not retried.
+  - "Not run: your last change isn't saved yet." / "Not turned on: your last change isn't saved yet." in that same line.
+- Saving on a routine that is on (ops' decision in review): its typed name and prompt are not saved on the typing pause. They are saved when the field is left, when the panel closes, when the page hides or closes, and before Run once now or a turn. The header says "Not saved yet" until then.
+- Run once now is also in the ⋯ menu, as NOTES.md said.
+- 2026-11-16 20:38Z: the owner, after trying the build: "Hey, I trust it. Let's ship it." Merge after the review is clean and the browser suite is green.

@@ -45,7 +45,8 @@ async function post<T>(path: string, body: Record<string, unknown> = {}, keepali
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
     body: text,
-    ...(keepalive && text.length <= KEEPALIVE_MAX ? { keepalive: true } : {}),
+    // The browser's limit counts bytes, not characters.
+    ...(keepalive && new Blob([text]).size <= KEEPALIVE_MAX ? { keepalive: true } : {}),
   });
   return readJson<T>(response);
 }

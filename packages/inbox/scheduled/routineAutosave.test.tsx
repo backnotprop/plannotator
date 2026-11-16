@@ -1,9 +1,14 @@
 /**
  * The routine editor saves by itself and says so (approval "inbox-routine-editor-autosave"), against a stand-in Inbox.
- * Each test is one way typed work used to be lost (the approval's FACTS.md): the page going with the cursor in a
+ * Each loss test is one way typed work used to be lost (the approval's FACTS.md): the page going with the cursor in a
  * field, a half-made new one, typing while a new one is being made, a failed write, an emptied name, leaving with the
- * field focused, and a new one that opened again after it was closed. Then the header's status and the foot's Turn
- * on and Run once now. What regresses: any of those words lost, a status that lies, or the filled button back on Run.
+ * field focused, and a new one that opened again after it was closed. On main several of them fail first at the save
+ * on the typing pause, which main did not have; at this code each also pins its own rule (the same box and focus, no
+ * reopen, one create). Then: an on routine's typed words wait for the field to be left (its next run reads them), the
+ * header's status, the foot's Turn on and Run once now (each saves first, and is not taken when the save failed), a
+ * refusal, Delete while it is being made, and a saved one's edits kept through a reload. Timers are real: the waits
+ * are a little over the 600 ms pause and the 1 s first retry. What regresses: words lost, a status that lies, a half
+ * prompt saved to an on routine, the filled button back on Run, or a run or turn on with text that did not save.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -32,11 +37,14 @@ afterEach(() => {
 
 type Call = { method: string; path: string; body: Record<string, unknown> | null; keepalive: boolean };
 
-/** The scheduled routes over rows kept here. `hold`: a POST to that path waits for `release`. `fail`: that many writes to a routine fail with no answer. */
-function inbox(start: InboxScheduledRow[], options: { hold?: string; fail?: number } = {}) {
+/**
+ * The scheduled routes over rows kept here. `hold`: a POST to that path waits for `release` (which lets every held one
+ * go). `fail`: that many writes to a routine fail with no answer. `refuse`: writes to a routine answer that 4xx.
+ */
+function inbox(start: InboxScheduledRow[], options: { hold?: string; fail?: number; refuse?: { status: number; code: string; error: string } } = {}) {
   const rows = new Map(start.map((row) => [row.id, row]));
   const calls: Call[] = [];
-  let release: (() => void) | null = null;
+  const held: (() => void)[] = [];
   let fail = options.fail ?? 0;
   const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'Content-Type': 'application/json' } });
   const put = (id: string, change: Partial<InboxScheduledRow>) => {
@@ -49,7 +57,7 @@ function inbox(start: InboxScheduledRow[], options: { hold?: string; fail?: numb
     const method = init?.method ?? 'GET';
     const body = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
     calls.push({ method, path, body, keepalive: init?.keepalive === true });
-    if (method === 'POST' && path === options.hold) await new Promise<void>((resolve) => (release = resolve));
+    if (method === 'POST' && path === options.hold) await new Promise<void>((resolve) => held.push(resolve));
     if (path === '/api/inbox/scheduled') {
       if (method === 'GET') return json({ scheduled: [...rows.values()], launch_on: true });
       const row = scheduledRow('sch_made', { ...(body as Partial<InboxScheduledRow>), state: body?.enabled ? 'on' : 'off', enabled: body?.enabled === true });
@@ -64,12 +72,17 @@ function inbox(start: InboxScheduledRow[], options: { hold?: string; fail?: numb
       fail--;
       throw new TypeError('Failed to fetch');
     }
+    if (method === 'POST' && action === undefined && options.refuse) return json({ code: options.refuse.code, error: options.refuse.error }, options.refuse.status);
     if (action === undefined) return put(id, body as Partial<InboxScheduledRow>);
     if (action === 'on' || action === 'off') return put(id, { state: action, enabled: action === 'on' });
     if (action === 'run') return put(id, { state: 'running', running_since: new Date().toISOString() });
+    if (action === 'delete') {
+      rows.delete(id);
+      return json({ deleted: true });
+    }
     return json({ code: 'not_found', error: 'No route.' }, 404);
   }) as typeof fetch;
-  return { calls, rows, release: () => release?.() };
+  return { calls, rows, release: () => held.splice(0).forEach((go) => go()), fail: (n: number) => void (fail = n) };
 }
 
 async function settle() {
@@ -110,15 +123,25 @@ async function typeInto(el: HTMLInputElement | HTMLTextAreaElement, value: strin
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+/** On, as most are: its typed name and prompt wait for the field to be left. */
 const digest = () => scheduledRow('sch_digest', { name: 'Morning PR digest', prompt: 'Summarize the open pull requests.' });
+/** Off: its typed words save on the typing pause. */
+const draft = () => scheduledRow('sch_digest', { name: 'Morning PR digest', prompt: 'Summarize the open pull requests.', state: 'off', enabled: false });
 
 test.skipIf(!hasDom)('the page going with the cursor in the prompt sends the words with keepalive, inside the typing pause', async () => {
   const server = inbox([digest()]);
   page('sch_digest', [digest()]);
   await settle();
   await typeInto(promptBox(), 'Summarize the open pull requests and the failing checks.');
-  expect(status()?.textContent).toBe('Saving…');
-  await act(async () => void window.dispatchEvent(new Event('pagehide')));
+  expect(status()?.textContent).toBe('Not saved yet');
+  // A tab closes with visibilitychange then pagehide: one write, not two.
+  await act(async () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    document.dispatchEvent(new Event('visibilitychange'));
+    window.dispatchEvent(new Event('pagehide'));
+  });
+  // @ts-expect-error back to the document's own
+  delete document.visibilityState;
   await settle();
   const sent = writes(server.calls, '/api/inbox/scheduled/sch_digest');
   expect(sent.map((c) => [c.body?.prompt, c.keepalive])).toEqual([['Summarize the open pull requests and the failing checks.', true]]);
@@ -223,8 +246,8 @@ test.skipIf(!hasDom)('a write with no answer says so, keeps the words, and is tr
 });
 
 test.skipIf(!hasDom)('an emptied name is not saved, the status says why, and the field stays empty while a change comes in', async () => {
-  const server = inbox([digest()]);
-  page('sch_digest', [digest()]);
+  const server = inbox([draft()]);
+  page('sch_digest', [draft()]);
   await settle();
   await typeInto(nameBox(), '');
   await wait(PAUSE);
@@ -262,7 +285,11 @@ test.skipIf(!hasDom)('a new one closed while it is being made is made, and does 
   draw(null);
   server.release();
   await settle();
+  server.release();
+  await settle();
   expect(server.rows.has('sch_made')).toBe(true);
+  // The editor going sends nothing more: the same create is already on its way.
+  expect(writes(server.calls, '/api/inbox/scheduled').length).toBe(1);
   expect(opened).toEqual([]);
 });
 
@@ -307,4 +334,122 @@ test.skipIf(!hasDom)('a new one: Not saved yet and a dimmed Turn on until it has
   expect(creates.length).toBe(1);
   expect(creates[0]!.body).toMatchObject({ name: 'Feedback digest', enabled: true });
   expect(server.rows.get('sch_made')?.enabled).toBe(true);
+});
+
+test.skipIf(!hasDom)("an on routine's typed prompt is not saved on the typing pause, only when the field is left", async () => {
+  const server = inbox([digest()]);
+  page('sch_digest', [digest()]);
+  await settle();
+  await typeInto(promptBox(), 'Summarize');
+  await wait(PAUSE + 300);
+  // The clock could run it now: it would read the saved prompt, as nothing was sent.
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest')).toEqual([]);
+  expect(status()?.getAttribute('data-scheduled-status')).toBe('held');
+  expect(status()?.textContent).toBe('Not saved yet');
+  expect(said()).toBe('');
+  await typeInto(promptBox(), 'Summarize the open pull requests by team.');
+  await act(async () => promptBox().blur());
+  await settle();
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest').map((c) => c.body)).toEqual([{ prompt: 'Summarize the open pull requests by team.' }]);
+  expect(status()?.textContent).toBe('Saved');
+});
+
+test.skipIf(!hasDom)('Run once now saves what waits first, then runs it', async () => {
+  const server = inbox([draft()]);
+  page('sch_digest', [draft()]);
+  await settle();
+  await typeInto(promptBox(), 'Summarize the open pull requests, newest first.');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-run-now]')!.click());
+  await settle();
+  const order = server.calls.filter((c) => c.method === 'POST' && !c.path.endsWith('/preview')).map((c) => c.path);
+  expect(order).toEqual(['/api/inbox/scheduled/sch_digest', '/api/inbox/scheduled/sch_digest/run']);
+  expect(server.calls.find((c) => c.path === '/api/inbox/scheduled/sch_digest' && c.method === 'POST')?.body?.prompt).toBe('Summarize the open pull requests, newest first.');
+});
+
+test.skipIf(!hasDom)('Run once now and Turn on are not taken when the last change did not save, and say so', async () => {
+  const server = inbox([draft()], { fail: 99 });
+  page('sch_digest', [draft()]);
+  await settle();
+  await typeInto(promptBox(), 'Summarize the open pull requests by owner.');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-run-now]')!.click());
+  await settle();
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest/run')).toEqual([]);
+  expect(document.querySelector('[data-scheduled-editor] [role="alert"]')?.textContent).toBe("Not run: your last change isn't saved yet.");
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-turn-on]')!.click());
+  await settle();
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest/on')).toEqual([]);
+  expect(document.querySelector('[data-scheduled-editor] [role="alert"]')?.textContent).toBe("Not turned on: your last change isn't saved yet.");
+  expect(promptBox().value).toBe('Summarize the open pull requests by owner.');
+});
+
+test.skipIf(!hasDom)('after Run once now on an off routine, it is still off and Turn on turns it on', async () => {
+  const server = inbox([draft()]);
+  page('sch_digest', [draft()]);
+  await settle();
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-run-now]')!.click());
+  await settle();
+  expect(server.rows.get('sch_digest')?.state).toBe('running');
+  expect(document.querySelector('[data-scheduled-editor] [role="switch"]')?.getAttribute('aria-checked')).toBe('false');
+  expect(footLine()).toBe("Off, so it won't run on its own.");
+  expect(document.querySelector('[data-scheduled-stop]')).not.toBeNull();
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-turn-on]')!.click());
+  await settle();
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest/on').length).toBe(1);
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest/off')).toEqual([]);
+});
+
+test.skipIf(!hasDom)('a refused write is said in the alert line and not tried again until the next edit', async () => {
+  const server = inbox([draft()], { refuse: { status: 404, code: 'routine_not_found', error: 'No routine sch_digest.' } });
+  page('sch_digest', [draft()]);
+  await settle();
+  await typeInto(promptBox(), 'Summarize the open pull requests.\nSkip drafts.');
+  await act(async () => promptBox().blur());
+  await settle();
+  expect(status()?.textContent).toBe("Couldn't save");
+  expect(document.querySelector('[data-scheduled-editor] [role="alert"]')?.textContent).toBe('No routine sch_digest.');
+  await wait(1200);
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_digest').length).toBe(1);
+  expect(promptBox().value).toBe('Summarize the open pull requests.\nSkip drafts.');
+});
+
+test.skipIf(!hasDom)('Delete on a new one while it is being made deletes what was made', async () => {
+  const server = inbox([], { hold: '/api/inbox/scheduled' });
+  page('new', []);
+  await settle();
+  await typeInto(nameBox(), 'Feedback digest');
+  await typeInto(promptBox(), 'Read the feedback threads.');
+  await wait(PAUSE);
+  expect(writes(server.calls, '/api/inbox/scheduled').length).toBe(1);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-scheduled-editor] button[aria-label="More"]')!.click());
+  await settle();
+  await act(async () => [...document.querySelectorAll<HTMLElement>('.ib-pmi')].find((item) => item.textContent === 'Delete')!.click());
+  server.release();
+  await settle();
+  expect(writes(server.calls, '/api/inbox/scheduled/sch_made/delete').length).toBe(1);
+  expect(server.rows.has('sch_made')).toBe(false);
+  expect(document.querySelector('[data-scheduled-row="sch_made"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)("a saved routine's words that did not save come back after a reload", async () => {
+  const server = inbox([digest()], { fail: 99 });
+  const { draw } = page('sch_digest', [digest()]);
+  await settle();
+  await typeInto(promptBox(), 'Summarize the open pull requests and who is waiting on whom.');
+  await act(async () => promptBox().blur());
+  await settle();
+  expect(status()?.textContent).toBe("Couldn't save · retrying");
+  // The page goes (an Inbox that updated asks for a reload), and comes back.
+  draw(null);
+  await settle();
+  server.fail(0);
+  draw('sch_digest');
+  await settle();
+  expect(promptBox().value).toBe('Summarize the open pull requests and who is waiting on whom.');
+  await act(async () => {
+    promptBox().focus();
+    promptBox().blur();
+  });
+  await settle();
+  expect(server.rows.get('sch_digest')?.prompt).toBe('Summarize the open pull requests and who is waiting on whom.');
+  expect(sessionStorage.getItem('plannotator-routine-edits:sch_digest')).toBeNull();
 });

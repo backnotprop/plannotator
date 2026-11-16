@@ -194,6 +194,9 @@ describe("the window's editor", () => {
     expect([first.status, second.status, third.status]).toEqual([201, 201, 201]);
     expect(new Set(ids).size).toBe(1);
     expect(w.server.store.scheduledThreads()).toHaveLength(1);
+    // The key is kept on the record (so a restart still knows it) and never sent out.
+    expect(w.server.store.scheduledThreads()[0]!.create_key).toBe("k-editor-1");
+    expect(JSON.stringify(await (await fetch(`${w.base}/api/inbox/scheduled`)).json())).not.toContain("k-editor-1");
     // Another key is another routine.
     expect((await w.window("/api/inbox/scheduled", { ...fields, idempotency_key: "k-editor-2" })).status).toBe(201);
     expect(w.server.store.scheduledThreads()).toHaveLength(2);

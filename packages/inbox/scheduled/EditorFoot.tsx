@@ -8,9 +8,12 @@ import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types'
 import { Icon } from '../icons';
 import { footNextWords } from './words';
 
+/** On: the clock runs it. A one-off run of an off routine (Run once now) leaves it off. The editor's one rule. */
+export const routineOn = (record: InboxScheduledRow | null): boolean => !!record && record.state !== 'done' && (record.state === 'on' || (record.state === 'running' && record.enabled));
+
 export function EditorFoot({ record, ready, onTurnOn, onRun, onStop }: { record: InboxScheduledRow | null; ready: boolean; onTurnOn: () => void; onRun: () => void; onStop: () => void }) {
   const state = record?.state ?? null;
-  const on = state === 'on' || (state === 'running' && !!record?.enabled);
+  const on = routineOn(record);
   const line = !record ? (
     ready ? (
       "Off, so it won't run on its own."

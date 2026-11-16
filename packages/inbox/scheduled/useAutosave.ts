@@ -1,27 +1,32 @@
 /**
  * The routine editor's saving (approval "inbox-routine-editor-autosave"). A field saves after a typing pause, when it
  * is left, at once for a pick, and with `keepalive` as the page hides or goes (pagehide, visibilitychange). Only what
- * differs from the last save is sent. A write that gets no answer, or a 5xx, is tried again with a growing pause and
+ * differs from the server's is sent, and what the server answers is what it has: an answer older than one already in
+ * (two writes in flight) is let go. A write that gets no answer, or a 5xx, is tried again with a growing pause and
  * the words stay in the field; a refusal (4xx) is said and waits for the next edit. An emptied name or prompt is not
  * sent (a routine needs both): the status says which is missing, and the field is never put back while typed in.
  *
+ * A routine that is on runs what is saved, so its typed name and prompt are not saved on the typing pause, only when
+ * the field is left, the editor goes, the page hides, or before Run once now or a turn ("Not saved yet" until then).
+ *
  * A new routine is made once it has a name and a prompt, with one key for every try (the server answers a key's
- * routine again), and until then it is kept in the tab's sessionStorage (routineDraft.ts). The editor stays mounted
- * when the new one takes its id (ScheduledPage), so words typed while it is being made, and the cursor, stay.
+ * routine again), and until then it is kept in the tab's sessionStorage (routineDraft.ts), as a saved one's edits not
+ * saved yet are. The editor stays mounted when the new one takes its id (ScheduledPage), so words typed while it is
+ * being made, and the cursor, stay.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import { InboxApiError } from '../apiError';
 import { newUuid } from '../uuid';
 import { scheduledApi, type ScheduledFields } from './client';
-import { forgetKeptRoutine, keepRoutine, readKeptRoutine } from './routineDraft';
+import { forgetKeptRoutine, keepEdits, keepRoutine, readKeptEdits, readKeptRoutine } from './routineDraft';
 import { putScheduled } from './store';
 
 export const TYPING_PAUSE_MS = 600;
 export const RETRY_MS = [1000, 2000, 4000, 8000, 15000, 30000];
 
 export type SaveStatus =
-  | { kind: 'new' | 'saving' | 'saved' | 'failed' }
+  | { kind: 'new' | 'held' | 'saving' | 'saved' | 'failed' }
   | { kind: 'needs'; field: 'name' | 'prompt' }
   | { kind: 'refused'; message: string };
 
@@ -42,9 +47,19 @@ export const fieldsOf = (row: InboxScheduledRow): ScheduledFields => ({
 /** As the server keeps it: a name's spaces folded, a prompt trimmed. */
 const norm = (key: Key, value: unknown) => (key === 'name' ? String(value ?? '').trim().replace(/\s+/g, ' ') : key === 'prompt' ? String(value ?? '').trim() : JSON.stringify(value ?? null));
 const json = (value: unknown) => JSON.stringify(value ?? null);
-const keysOf = (...all: ScheduledFields[]) => [...new Set(all.flatMap((f) => Object.keys(f)))] as Key[];
+const keysOf = (...all: Partial<ScheduledFields>[]) => [...new Set(all.flatMap((f) => Object.keys(f)))] as Key[];
+const TYPED: Key[] = ['name', 'prompt'];
 /** No answer at all (the fetch threw), or the Inbox failing or busy: worth another try. */
 const retryable = (cause: unknown) => !(cause instanceof InboxApiError) || cause.status >= 500 || cause.status === 408 || cause.status === 429;
+
+/** A saved routine's edits kept through a reload, over a field nobody else changed meanwhile. */
+function withKept(id: string | null, fields: ScheduledFields): ScheduledFields {
+  const kept = id ? readKeptEdits(id) : null;
+  if (!kept) return fields;
+  const next = { ...fields };
+  for (const k of keysOf(kept.fields)) if (json(fields[k]) === json(kept.was[k])) Object.assign(next, { [k]: kept.fields[k] });
+  return next;
+}
 
 export function useAutosave(opts: {
   id: string;
@@ -53,35 +68,40 @@ export function useAutosave(opts: {
   fresh: () => ScheduledFields;
   /** A field not to send yet: a schedule the preview refused or has not answered. */
   held: (key: Key, fields: ScheduledFields) => boolean;
+  /** It is on: a typed name or prompt waits for the field to be left, not the typing pause. */
+  holdTyping: boolean;
   onCreated: (id: string) => void;
 }) {
   const live = useRef(opts);
   live.current = opts;
-  const kept = useRef(opts.id === 'new' ? readKeptRoutine() : null);
-  const [draft, setDraftState] = useState<ScheduledFields>(() => (opts.record ? fieldsOf(opts.record) : (kept.current?.fields ?? opts.fresh())));
+  const madeAt = opts.id === 'new' ? null : opts.id;
+  const kept = useRef(madeAt ? null : readKeptRoutine());
+  const [draft, setDraftState] = useState<ScheduledFields>(() => (opts.record ? withKept(madeAt, fieldsOf(opts.record)) : (kept.current?.fields ?? opts.fresh())));
   const typed = useRef(draft);
   /** What the server has, as far as this window knows; null before a new one is made or a linked one is read. */
   const base = useRef<ScheduledFields | null>(opts.record ? fieldsOf(opts.record) : null);
-  const made = useRef<string | null>(opts.id === 'new' ? null : opts.id);
+  const lastAt = useRef(opts.record?.updated_at ?? '');
+  const made = useRef<string | null>(madeAt);
   const createdHere = useRef(false);
   const key = useRef(kept.current?.key ?? newUuid());
   const wantOn = useRef(false);
   const busy = useRef<Promise<void> | null>(null);
+  /** The writes on their way, by what they send: the same one is never sent twice at once. */
+  const inflight = useRef(new Map<string, Promise<unknown>>());
   const again = useRef(false);
   const pause = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tries = useRef(0);
   const gone = useRef(false);
   const dropped = useRef(false);
-  const [failure, setFailure] = useState<{ retrying: boolean; message: string } | null>(null);
+  const failed = useRef<{ retrying: boolean; message: string } | null>(null);
   const [, rerender] = useState(0);
   const redraw = () => !gone.current && rerender((n) => n + 1);
-
-  const setDraft = (next: ScheduledFields) => {
-    typed.current = next;
-    setDraftState(next);
-    if (!made.current && !dropped.current) keepRoutine(next, key.current);
+  const setFailure = (next: { retrying: boolean; message: string } | null) => {
+    failed.current = next;
+    redraw();
   };
+
   const missing = (fields: ScheduledFields) => !fields.name.trim() || !fields.prompt.trim();
   const heldAny = (fields: ScheduledFields) => keysOf(fields).some((k) => live.current.held(k, fields));
   /** What differs from the server's, less an emptied name or prompt and anything held. */
@@ -98,10 +118,61 @@ export function useAutosave(opts: {
     }
     return out;
   };
-  const work = () => {
+  /** Something to send. `auto`: on its own (after a save, on mount), so an on routine's typed words wait. */
+  const work = (auto = false) => {
     if (dropped.current) return false;
     if (!made.current) return !missing(typed.current) && !heldAny(typed.current);
-    return Object.keys(changes()).length > 0 || wantOn.current;
+    const keys = Object.keys(changes()) as Key[];
+    return (auto && live.current.holdTyping ? keys.filter((k) => !TYPED.includes(k)) : keys).length > 0 || wantOn.current;
+  };
+  /** The tab keeps what is not saved yet: a new one whole, a saved one's edits with what the server had. */
+  const keepNow = () => {
+    if (dropped.current) return;
+    if (!made.current) return keepRoutine(typed.current, key.current);
+    if (!base.current) return;
+    const fields = changes();
+    const was: Partial<ScheduledFields> = {};
+    for (const k of keysOf(fields)) Object.assign(was, { [k]: base.current[k] });
+    keepEdits(made.current, { fields, was });
+  };
+  const setDraft = (next: ScheduledFields) => {
+    typed.current = next;
+    setDraftState(next);
+    keepNow();
+  };
+  /** The server's answer: what it has now, unless a newer answer is already in. */
+  const accept = (row: InboxScheduledRow, sent: Partial<ScheduledFields>) => {
+    if (row.updated_at < lastAt.current) return;
+    lastAt.current = row.updated_at;
+    const theirs = fieldsOf(row);
+    base.current = theirs;
+    // What the server keeps for what was sent (a folder by its path, say) is shown while the field is as it was sent.
+    const next = { ...typed.current };
+    let adopt = false;
+    for (const k of keysOf(sent)) {
+      if (json(typed.current[k]) === json(sent[k]) && norm(k, theirs[k]) !== norm(k, sent[k])) {
+        Object.assign(next, { [k]: theirs[k] });
+        adopt = true;
+      }
+    }
+    if (adopt) setDraft(next);
+    else keepNow();
+    putScheduled(row);
+  };
+  /** One write, once: the same body on its way is waited for (or, as the page goes, left to land). */
+  const once = async <T>(sig: string, keepalive: boolean, write: () => Promise<T>): Promise<T | null> => {
+    const same = inflight.current.get(sig);
+    if (same) {
+      if (!keepalive) await same;
+      return null;
+    }
+    const pending = write();
+    inflight.current.set(sig, pending);
+    try {
+      return await pending;
+    } finally {
+      inflight.current.delete(sig);
+    }
   };
 
   const send = async (keepalive: boolean): Promise<void> => {
@@ -109,27 +180,33 @@ export function useAutosave(opts: {
     const d = typed.current;
     if (!made.current) {
       if (missing(d) || heldAny(d)) return;
-      const answer = await scheduledApi.create({ ...d, ...(wantOn.current ? { enabled: true } : {}) }, key.current, keepalive);
-      // A keepalive and an ordinary create raced: one key, one routine.
-      if (made.current) return;
+      const body = { ...d, ...(wantOn.current ? { enabled: true } : {}) };
+      const answer = await once(`new ${json(body)}`, keepalive, () => scheduledApi.create(body, key.current, keepalive));
+      // Answered already (the same create, or one that raced it with this key): one routine.
+      if (!answer || made.current) return;
+      if (dropped.current) {
+        // Deleted while it was being made: it goes, as the person asked.
+        forgetKeptRoutine();
+        void scheduledApi.remove(answer.scheduled.id).catch(() => {});
+        return;
+      }
       made.current = answer.scheduled.id;
       createdHere.current = true;
-      base.current = fieldsOf(answer.scheduled);
       if (answer.scheduled.state !== 'off') wantOn.current = false;
       forgetKeptRoutine();
-      putScheduled(answer.scheduled);
+      accept(answer.scheduled, body);
       if (!gone.current) live.current.onCreated(answer.scheduled.id);
       return;
     }
+    const id = made.current;
     const change = changes();
     if (Object.keys(change).length > 0) {
-      const answer = await scheduledApi.update(made.current, change, keepalive);
-      base.current = { ...(base.current ?? d), ...change };
-      putScheduled(answer.scheduled);
+      const answer = await once(`${id} ${json(change)}`, keepalive, () => scheduledApi.update(id, change, keepalive));
+      if (answer) accept(answer.scheduled, change);
     }
     if (wantOn.current) {
       wantOn.current = false;
-      putScheduled((await scheduledApi.turn(made.current, true)).scheduled);
+      putScheduled((await scheduledApi.turn(id, true)).scheduled);
     }
   };
 
@@ -143,14 +220,14 @@ export function useAutosave(opts: {
     if (!work()) return void redraw();
     if (retry.current) clearTimeout(retry.current);
     retry.current = null;
-    let failed = false;
+    let fell = false;
     const run = send(false).then(
       () => {
         tries.current = 0;
-        if (!gone.current) setFailure(null);
+        if (failed.current) setFailure(null);
       },
       (cause: unknown) => {
-        failed = true;
+        fell = true;
         if (gone.current) return;
         if (retryable(cause)) {
           retry.current = setTimeout(flush, RETRY_MS[Math.min(tries.current++, RETRY_MS.length - 1)]);
@@ -164,7 +241,7 @@ export function useAutosave(opts: {
       busy.current = null;
       const more = again.current;
       again.current = false;
-      if (!gone.current && !failed && (more || work())) flush();
+      if (!gone.current && !fell && (more || work(true))) flush();
       else redraw();
     });
   };
@@ -184,17 +261,17 @@ export function useAutosave(opts: {
     const onVisible = () => document.visibilityState === 'hidden' && latest.current.leave();
     window.addEventListener('pagehide', onHide);
     document.addEventListener('visibilitychange', onVisible);
-    // A kept new one that already has a name and a prompt (the page went mid-pause or mid-create) is made now.
-    if (!made.current && work()) latest.current.flush();
+    // Kept words that can be saved (the page went mid-pause or mid-create) are saved now; an on one's wait for leaving.
+    if (work(true)) latest.current.flush();
     return () => {
       window.removeEventListener('pagehide', onHide);
       document.removeEventListener('visibilitychange', onVisible);
       if (retry.current) clearTimeout(retry.current);
-      // Closed or another routine opened: what waits is saved; a new one made now does not open again.
-      gone.current = true;
-      if (pause.current || retry.current || work()) void send(false).catch(() => {});
       if (pause.current) clearTimeout(pause.current);
       pause.current = retry.current = null;
+      // Closed or another routine opened: what waits is saved; a new one made now does not open again.
+      gone.current = true;
+      if (work()) void send(false).catch(() => {});
     };
   }, []);
 
@@ -206,10 +283,11 @@ export function useAutosave(opts: {
     const before = seen.current;
     seen.current = record;
     if (!record || before === record) return;
+    if (record.updated_at > lastAt.current) lastAt.current = record.updated_at;
     if (!before) {
       base.current = fieldsOf(record);
       // Opened by its link before the list was read: the record fills the fields. One made here keeps its words.
-      if (!createdHere.current) setDraft(fieldsOf(record));
+      if (!createdHere.current) setDraft(withKept(made.current, fieldsOf(record)));
       return;
     }
     const theirs = fieldsOf(record);
@@ -230,20 +308,23 @@ export function useAutosave(opts: {
 
   const status = (): SaveStatus => {
     const d = typed.current;
-    if (failure?.retrying) return { kind: 'failed' };
-    if (failure) return { kind: 'refused', message: failure.message };
+    if (failed.current?.retrying) return { kind: 'failed' };
+    if (failed.current) return { kind: 'refused', message: failed.current.message };
     if (!made.current) return missing(d) || heldAny(d) ? { kind: 'new' } : { kind: 'saving' };
     if (!d.name.trim()) return { kind: 'needs', field: 'name' };
     if (!d.prompt.trim()) return { kind: 'needs', field: 'prompt' };
-    return busy.current || pause.current || work() ? { kind: 'saving' } : { kind: 'saved' };
+    if (busy.current || pause.current) return { kind: 'saving' };
+    if (work(true)) return { kind: 'saving' };
+    return work() ? { kind: 'held' } : { kind: 'saved' };
   };
 
   return {
     draft,
     status: status(),
-    /** Typed into a field: saved after the typing pause. */
+    /** Typed into a field: saved after the typing pause (an on routine's name and prompt: when the field is left). */
     type: (change: Partial<ScheduledFields>) => {
       setDraft({ ...typed.current, ...change });
+      if (live.current.holdTyping && made.current && (Object.keys(change) as Key[]).every((k) => TYPED.includes(k))) return;
       if (pause.current) clearTimeout(pause.current);
       pause.current = setTimeout(() => latest.current.flush(), TYPING_PAUSE_MS);
     },
@@ -254,17 +335,19 @@ export function useAutosave(opts: {
     },
     /** A field left, or a held field let go: what waits is saved now. */
     flush,
-    /** What waits, saved before an action that reads the record (Run once now). */
-    settle: async () => {
+    /** Before an action that reads the saved routine (Run once now, a turn): what waits is saved. False when it is not. */
+    settle: async (): Promise<boolean> => {
       flush();
-      for (let i = 0; i < 4 && busy.current; i++) await busy.current;
+      for (let i = 0; i < 6 && busy.current; i++) await busy.current;
+      const d = typed.current;
+      return !failed.current && !work() && !missing(d);
     },
     /** A new one's Turn on: made on, or turned on once made. */
     turnOn: () => {
       wantOn.current = true;
       flush();
     },
-    /** A new one's Delete: forgotten, never made. */
+    /** A new one's Delete: forgotten, never made (one being made now is deleted when it answers). */
     drop: () => {
       dropped.current = true;
       forgetKeptRoutine();

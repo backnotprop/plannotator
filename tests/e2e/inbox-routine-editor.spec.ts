@@ -11,8 +11,9 @@
  *    pause: the write on the way out keeps them, in the Inbox and in the
  *    editor after the reload.
  *  - A new routine being made (its create held back a moment) keeps the
- *    focus and every character typed while it gets its id: the editor and its
- *    prompt box are the same elements before and after, and one routine is made.
+ *    focus and every character typed after its create was sent and while it
+ *    gets its id: the editor and its prompt box are the same elements before
+ *    and after, the later words go to it as an update, and one routine is made.
  *
  * The Inbox gets a PATH of the system's own tools and the test sandbox: a
  * create checks the routine's agent, which looks `claude` up on PATH (the
@@ -188,14 +189,22 @@ test('a new routine keeps focus and words while it is being made', async ({ page
   await openNew(page);
   const root = await editor(page).elementHandle();
   const box = await promptBox(page).elementHandle();
+  const isCreate = (r: { method(): string; url(): string }) => r.method() === 'POST' && new URL(r.url()).pathname === '/api/inbox/scheduled';
+  const createSent = page.waitForRequest(isCreate);
   await nameBox(page).fill(NAME);
   await promptBox(page).click();
   await promptBox(page).pressSequentially(FIRST, { delay: 20 });
-  // The pause after FIRST starts the create (it has a name and a prompt now).
+  // The pause after FIRST sends the create (it has a name and a prompt now); MORE is typed only once it is on its way.
+  const create = await createSent;
+  expect((create.postDataJSON() as { prompt: string }).prompt).toBe(FIRST);
   await expect(status(page)).toHaveAttribute('data-scheduled-status', 'saving');
+  const updateSent = page.waitForRequest((r) => r.method() === 'POST' && /^\/api\/inbox\/scheduled\/sch_[^/]+$/.test(new URL(r.url()).pathname));
   await promptBox(page).pressSequentially(MORE, { delay: 60 });
 
   const id = await madeId(page);
+  // MORE, typed while the create was in flight, goes to the routine it made, as an update.
+  const update = await updateSent;
+  expect(new URL(update.url()).pathname).toBe(`/api/inbox/scheduled/${id}`);
   await expect(promptBox(page)).toBeFocused();
   await expect(promptBox(page)).toHaveValue(FIRST + MORE);
   // Not remounted when it got its id: the same editor and the same box.

@@ -9,6 +9,8 @@ import type { SaveStatus as Status } from './useAutosave';
 
 export const STATUS_WORDS: Record<Exclude<Status['kind'], 'needs'>, string> = {
   new: 'Not saved yet',
+  /** An on routine's typed name or prompt: saved when the field is left. */
+  held: 'Not saved yet',
   saving: 'Saving…',
   saved: 'Saved',
   failed: "Couldn't save · retrying",
