@@ -3180,6 +3180,30 @@ Bridge protocol 2 takes a person's link clicks off the window. The bridge no lon
    - Treat it as untrusted: refuse control characters, resolve it, and check its scheme and origin.
    - Never post a port to the frame. Ignore a window `link-click`.
 
+**A host that loads the bridge as an external script** cannot use step 2's inline guard, for example because its CSP blocks inline scripts. Such a host builds its own document with `bridge-script.asset.js`, which is the same code as `BRIDGE_SCRIPT`. It puts the load's key on the bridge's own tag:
+
+```ts
+const key = newLinkKey(); // step 1; arm it before the frame loads (step 3)
+const tag = `<script src="${bridgeAssetUrl}" data-plannotator-link-key="${key}"></script>`;
+iframe.srcdoc = withMyBridgeTag(page, tag); // no injectLinkGuard: the bridge installs the guard from its tag
+```
+
+What the bridge does with the tag:
+
+- When it starts, the bridge reads `data-plannotator-link-key` from its own tag (`document.currentScript`) and installs the link guard with that key.
+- It does this only when no guard ran before it and the session is not live.
+- The guard accepts only 32 lowercase hex characters, which `newLinkKey()` makes.
+- The guard then offers the port exactly as in step 4, and steps 3 to 5 are unchanged.
+
+What the host must get right:
+
+- **A classic script.** Use a classic `<script src>`, not `type="module"`: a module has no `document.currentScript`, so the bridge finds no key.
+- **A served frame.** You can also give the same key in the address (`withLinkKey`). The guard prefers the address's key. Arm the key you put in the address.
+- **No key on the tag.** Without the attribute there is no guard, and no link is followed. Annotation still works.
+- **Where the guard runs.** The guard runs where the tag is. Any script of the page that comes before the tag runs first and can take the guard's place, then send links with no click.
+  - Put the tag before every script of the page that your document allows.
+  - `HtmlViewer`'s `bridgeScriptUrl` path puts it at the end of `<head>`, which has the same limit.
+
 **A host that stays on protocol 1 with the new bridge script fails closed for links.** On a link click:
 
 - The bridge still stops the frame from navigating.
