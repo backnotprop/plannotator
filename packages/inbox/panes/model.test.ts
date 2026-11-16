@@ -5,7 +5,7 @@
  * slot drawn again for nothing).
  */
 import { describe, expect, test } from 'bun:test';
-import { MAIN_PANE, addressThread, close, focusPane, followAddress, move, open, paneOf, paneThread, singlePane, split, type PaneSet } from './model';
+import { MAIN_PANE, addressThread, close, closePane, focusPane, followAddress, move, open, paneOf, paneThread, singlePane, split, type PaneSet } from './model';
 
 const ids = (set: PaneSet) => set.panes.map((pane) => `${pane.id}:${pane.thread ?? '-'}`);
 const two = () => split(singlePane('t1'), MAIN_PANE, { id: 'p2', thread: 't2' }, 'right');
@@ -124,5 +124,15 @@ describe('focusPane and lookups', () => {
     expect(paneThread(set, 'gone')).toBeNull();
     expect(paneOf(set, 't1')).toBe(MAIN_PANE);
     expect(paneOf(set, 't9')).toBeNull();
+  });
+});
+
+describe('closePane: the person closes a pane', () => {
+  test("beside another, the main pane takes the other's thread, so one pane left is the main pane; alone it only empties", () => {
+    expect(ids(closePane(two(), MAIN_PANE))).toEqual(['main:t2']);
+    expect(closePane(two(), MAIN_PANE).active).toBe(MAIN_PANE);
+    expect(ids(closePane(two(), 'p2'))).toEqual(['main:t1']);
+    expect(closePane(two(), 'p2').active).toBe(MAIN_PANE);
+    expect(ids(closePane(singlePane('t1'), MAIN_PANE))).toEqual(['main:-']);
   });
 });

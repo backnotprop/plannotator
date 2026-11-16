@@ -1,0 +1,303 @@
+/*
+ * Frame: tokens, card layout and sheet / tooltip motion for components/frame.
+ * Import it once in a Tailwind v4 entry, after `@import "tailwindcss"` and the
+ * theme: it declares theme names and variants, and scans the frame's sources.
+ * It only defines `--frame-*` names (and `frame-*` theme names) and rules on
+ * the frame's own attributes; no host token is redefined, so the package
+ * themes and a host document inside the frame are untouched.
+ */
+@source "./**/*.tsx";
+@source "./**/*.ts";
+@source not "./**/*.test.tsx";
+@source not "./**/*.test.ts";
+
+/* Dark is "not under .light", the class the themes put on the root, so the frame follows the app, not the OS. */
+@custom-variant frame-dark (&:not(.light *));
+
+@custom-variant frame-reduce-transparency (@media (prefers-reduced-transparency: reduce));
+
+@theme {
+  --text-frame-2xs: 0.6875rem;
+  --text-frame-2xs--line-height: 0.875rem;
+  --text-frame-xs: 0.75rem;
+  --text-frame-xs--line-height: 1rem;
+  --text-frame-sm: 0.8125rem;
+  --text-frame-sm--line-height: 1.25rem;
+  --spacing-frame-control: 2rem;
+  --spacing-frame-row: 1.75rem;
+  --ease-frame-enter: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@theme inline {
+  --color-frame-ground: var(--frame-ground);
+  --color-frame-hover: var(--frame-surface-hover);
+  --color-frame-selected: var(--frame-selected);
+  --color-frame-selected-fg: var(--frame-selected-fg);
+  --color-frame-muted-fg: var(--frame-muted-fg);
+  --color-frame-tertiary: var(--frame-tertiary);
+  --color-frame-divider: var(--frame-divider);
+  --color-frame-border-subtle: var(--frame-border-subtle);
+  --color-frame-ring-soft: var(--frame-ring-soft);
+  --color-frame-band: var(--frame-surface-0);
+  --color-frame-quiet-fill: var(--frame-quiet-fill);
+  --color-frame-quiet-fill-hover: var(--frame-quiet-fill-hover);
+  --shadow-frame-pane: var(--frame-pane-shadow);
+  --shadow-frame-float: var(--frame-float-shadow);
+  --radius-frame-pane: var(--frame-r-pane);
+  --radius-frame-structure: var(--frame-r-structure);
+  --radius-frame-control: var(--frame-r-control);
+  --radius-frame-selection: var(--frame-r-selection);
+  --radius-frame-floating: var(--frame-r-floating);
+  --radius-frame-dialog: var(--frame-r-dialog);
+}
+
+/* ── tokens: dark on :root, light under .light ── */
+:root {
+  --frame-r-pane: 10px;
+  --frame-r-structure: 4px;
+  --frame-r-control: 10px;
+  --frame-r-selection: 8px;
+  --frame-r-floating: 10px;
+  --frame-r-dialog: 12px;
+  --frame-ground: var(--background);
+  --frame-surface-0: color-mix(in oklch, var(--muted) 40%, var(--background));
+  /* Selected, hover and subtle border are fixed by default; FrameGround colors="theme" derives them from the theme. */
+  --frame-surface-hover: oklch(0.90 0.01 260 / 0.07);
+  --frame-selected: oklch(0.72 0.15 280 / 0.13);
+  --frame-selected-fg: oklch(0.72 0.15 280);
+  --frame-muted-fg: var(--muted-foreground);
+  --frame-tertiary: color-mix(in oklch, var(--muted-foreground) 86%, var(--background));
+  --frame-divider: var(--border);
+  --frame-border-subtle: oklch(0.90 0.02 260 / 0.055);
+  --frame-ring-soft: color-mix(in oklch, var(--ring) 30%, transparent);
+  --frame-overlay: rgb(0 0 0 / 0.45);
+  --frame-quiet-fill: color-mix(in oklch, var(--muted) 60%, transparent);
+  --frame-quiet-fill-hover: color-mix(in oklch, var(--muted) 90%, transparent);
+  --frame-quiet-fg: color-mix(in oklch, var(--muted-foreground) 75%, var(--foreground));
+  --frame-shadow-ink: var(--background);
+  --frame-pane-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 6%, transparent), inset 0 1px 0 color-mix(in oklch, var(--foreground) 4%, transparent), 0 8px 24px -10px color-mix(in oklch, var(--frame-shadow-ink) 60%, transparent);
+  --frame-float-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent), 0 16px 40px -10px color-mix(in oklch, var(--frame-shadow-ink) 70%, transparent);
+}
+
+.light {
+  --frame-ground: color-mix(in oklch, var(--muted) 55%, var(--background));
+  --frame-surface-hover: oklch(0.30 0.02 260 / 0.06);
+  --frame-selected: oklch(0.50 0.23 280 / 0.08);
+  --frame-selected-fg: oklch(0.50 0.25 280);
+  --frame-tertiary: color-mix(in oklch, var(--muted-foreground) 82%, var(--background));
+  --frame-border-subtle: oklch(0.35 0.02 260 / 0.09);
+  --frame-ring-soft: color-mix(in oklch, var(--ring) 22%, transparent);
+  --frame-quiet-fg: var(--muted-foreground);
+  --frame-shadow-ink: var(--foreground);
+  --frame-pane-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent), 0 1px 2px color-mix(in oklch, var(--frame-shadow-ink) 5%, transparent), 0 6px 18px -8px color-mix(in oklch, var(--frame-shadow-ink) 12%, transparent);
+  --frame-float-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent), 0 12px 32px -8px color-mix(in oklch, var(--frame-shadow-ink) 22%, transparent);
+}
+
+@supports (color: oklch(from red calc(0.5 - sign(l - 0.6) * 0.5) 0 h)) {
+  :root {
+    --frame-shadow-ink: oklch(from var(--background) calc(l * 0.2) calc(c * 0.5) h);
+    --frame-card-ink: oklch(from var(--card) calc(0.5 - sign(l - 0.6) * 0.5) 0 none);
+    --frame-quiet-fg: color-mix(in oklch, var(--muted-foreground) 82%, var(--frame-card-ink));
+  }
+  .light {
+    --frame-shadow-ink: var(--foreground);
+    --frame-quiet-fg: var(--muted-foreground);
+  }
+}
+
+/*
+ * FrameGround's `colors="theme"`: selected, hover and subtle border follow the
+ * host theme's --primary and --foreground. The amounts match the fixed colours
+ * above when the theme's primary is the frame's violet (README.md). The
+ * selected text is the foreground, so only the fill carries the accent and
+ * the text keeps its contrast on any theme. Put the attribute on the root
+ * as well to reach the phone sheets, which portal out.
+ */
+[data-frame-colors="theme"] {
+  --frame-selected: color-mix(in oklch, var(--primary) 13%, transparent);
+  --frame-selected-fg: var(--foreground);
+  --frame-surface-hover: color-mix(in oklch, var(--foreground) 7%, transparent);
+  --frame-border-subtle: color-mix(in oklch, var(--foreground) 5.5%, transparent);
+}
+
+.light[data-frame-colors="theme"],
+.light [data-frame-colors="theme"] {
+  --frame-selected: color-mix(in oklch, var(--primary) 7.5%, transparent);
+  --frame-selected-fg: var(--foreground);
+  --frame-surface-hover: color-mix(in oklch, var(--foreground) 5.5%, transparent);
+  --frame-border-subtle: color-mix(in oklch, var(--foreground) 7.5%, transparent);
+}
+
+/* FrameGround's `tone`: the host picks a plain or tinted ground behind the cards. */
+[data-frame-tone="plain"] {
+  --frame-ground: var(--background);
+}
+
+[data-frame-tone="tinted"] {
+  --frame-ground: color-mix(in oklch, var(--muted) 55%, var(--background));
+}
+
+/* ── layout: every child of the frame row becomes a card from 768px up ── */
+@media (min-width: 768px) {
+  [data-frame-ground] {
+    background: var(--frame-ground);
+  }
+  [data-frame-ground] > [data-frame-pane]:has([data-frame]) {
+    margin: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+  [data-frame] {
+    padding: 0 8px 8px;
+    background: transparent;
+  }
+  [data-frame] > [data-page-header] {
+    border-bottom-color: transparent;
+    background: transparent;
+    backdrop-filter: none;
+  }
+  [data-frame-row] {
+    gap: 8px;
+  }
+  [data-frame-row] :is([data-document-rail], [data-rail-reserved]) {
+    border-right-color: transparent;
+    border-radius: var(--frame-r-pane);
+    background-color: var(--card);
+    box-shadow: var(--frame-pane-shadow);
+  }
+  [data-frame-row] [data-document-rail] + .collapsible-edge {
+    margin-inline: -4px;
+  }
+  [data-frame-row] > :not([data-document-rail], [data-rail-reserved], [data-rail-flags]) {
+    overflow: hidden;
+    border-radius: var(--frame-r-pane);
+    background-color: var(--card);
+    box-shadow: var(--frame-pane-shadow);
+  }
+  [data-docked-panel-clip] [data-comments-panel] {
+    border-left-color: transparent;
+  }
+}
+
+/* Inside a dark pane, the frame's own quiet text is a little brighter; the host's --muted-foreground is left as it is. */
+:root:not(.light) [data-frame-pane] {
+  --frame-muted-fg: var(--frame-quiet-fg);
+  --frame-tertiary: color-mix(in oklch, var(--frame-quiet-fg) 86%, var(--background));
+}
+
+.frame-scrim {
+  background-color: var(--frame-overlay);
+  backdrop-filter: blur(2px);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .frame-scrim {
+    backdrop-filter: none;
+    background-color: rgb(0 0 0 / 0.65);
+  }
+}
+
+.collapsible-edge [data-resize-track] {
+  background-color: transparent;
+}
+
+.collapsible-edge:focus-visible [data-resize-track] {
+  background-color: var(--ring);
+}
+
+/* ── motion for the sheets and tooltips (Base UI sets data-open / data-closed) ── */
+@keyframes frame-fade-in {
+  from { opacity: 0; }
+}
+
+@keyframes frame-fade-out {
+  to { opacity: 0; }
+}
+
+@keyframes frame-pop-in {
+  from { opacity: 0; transform: scale(0.98); }
+}
+
+@keyframes frame-pop-out {
+  to { opacity: 0; transform: scale(0.98); }
+}
+
+@keyframes frame-slide-in-right {
+  from { transform: translateX(100%); }
+}
+
+@keyframes frame-slide-out-right {
+  to { transform: translateX(100%); }
+}
+
+@keyframes frame-slide-in-left {
+  from { transform: translateX(-100%); }
+}
+
+@keyframes frame-slide-out-left {
+  to { transform: translateX(-100%); }
+}
+
+@keyframes frame-slide-in-top {
+  from { transform: translateY(-100%); }
+}
+
+@keyframes frame-slide-out-top {
+  to { transform: translateY(-100%); }
+}
+
+@keyframes frame-slide-in-bottom {
+  from { transform: translateY(100%); }
+}
+
+@keyframes frame-slide-out-bottom {
+  to { transform: translateY(100%); }
+}
+
+/* Only with motion allowed: under reduced motion the sheets and tooltips appear and leave at once. */
+@media (prefers-reduced-motion: no-preference) {
+  .frame-sheet-overlay[data-open] {
+    animation: frame-fade-in 300ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .frame-sheet-overlay[data-closed] {
+    animation: frame-fade-out 150ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .frame-sheet[data-open] {
+    animation-duration: 300ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .frame-sheet[data-closed] {
+    animation-duration: 150ms;
+    animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+    animation-fill-mode: forwards;
+  }
+
+  .frame-sheet[data-side="right"][data-open] { animation-name: frame-slide-in-right; }
+  .frame-sheet[data-side="right"][data-closed] { animation-name: frame-slide-out-right; }
+  .frame-sheet[data-side="left"][data-open] { animation-name: frame-slide-in-left; }
+  .frame-sheet[data-side="left"][data-closed] { animation-name: frame-slide-out-left; }
+  .frame-sheet[data-side="top"][data-open] { animation-name: frame-slide-in-top; }
+  .frame-sheet[data-side="top"][data-closed] { animation-name: frame-slide-out-top; }
+  .frame-sheet[data-side="bottom"][data-open] { animation-name: frame-slide-in-bottom; }
+  .frame-sheet[data-side="bottom"][data-closed] { animation-name: frame-slide-out-bottom; }
+
+  .frame-tooltip {
+    animation: frame-pop-in 120ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .frame-tooltip[data-closed] {
+    animation: frame-pop-out 120ms cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  }
+
+  .frame-tooltip[data-frame-motion="fade"] {
+    animation-name: frame-fade-in;
+  }
+
+  .frame-tooltip[data-frame-motion="fade"][data-closed] {
+    animation-name: frame-fade-out;
+  }
+}
