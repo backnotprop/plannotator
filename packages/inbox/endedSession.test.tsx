@@ -244,6 +244,31 @@ test.skipIf(!hasDom)('ended, live sessions exist: "session ended" on the asking 
   expect(pill(el)?.getAttribute('aria-label')).toBe('To Claude Code, ended. Change who gets this reply');
 });
 
+test.skipIf(!hasDom)('an unnamed ended Pi asker: the pill names the agent, never the thread its agent got first (this thread, the one being read)', async () => {
+  const { setInboxAgents } = await import('./agentsList');
+  const piAsker = { ...ASKER, host: 'pi' };
+  act(() =>
+    setInboxAgents([
+      {
+        agents: [
+          { id: 'ses_asker', session: 'ses_asker', host: 'pi', project: { id: PROJECT.id, name: PROJECT.name }, state: 'ended', waiting: 0, live: false, started_at: null, last_seen_at: null, first_thread: { id: M1, name: 'Retry policy for the nightly ledger sync' } },
+          { id: 'ses_other', session: 'ses_other', host: 'pi', project: { id: PROJECT.id, name: PROJECT.name }, state: 'idle', waiting: 0, live: true, started_at: null, last_seen_at: null, first_thread: { id: 'msg_other', name: 'Queue timeouts' } },
+        ],
+        total: 2,
+        ended_today: 1,
+      },
+    ]),
+  );
+  try {
+    sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+    const el = await render(threadOf({ ...asking(), author: piAsker }));
+    await writeReply(el);
+    expect(pill(el)?.getAttribute('aria-label')).toBe('To Pi, ended. Change who gets this reply');
+  } finally {
+    act(() => setInboxAgents(null));
+  }
+});
+
 test.skipIf(!hasDom)('a session with no evidence it wakes (MCP-only, OpenCode 1) is never "ended": no mark, no note, Send sends to it with no choice', async () => {
   sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
   const el = await render(threadOf(asking(false, false)));
