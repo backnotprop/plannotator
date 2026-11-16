@@ -51,8 +51,6 @@ Plannotator is a local, browser-based review surface for AI coding agents: Claud
 
 Annotate plans, specs, messages, html, then send the feedback to your agent. 
 
-<p><strong>Demo:</strong> <a href="https://youtu.be/XqFun9XCXPw">Plan review with Pi</a></p>
-
 </td>
 <td width="60%">
 
@@ -75,10 +73,6 @@ Review local changes or remote PRs. Comment on diffs, suggest code. Your comment
 </td>
 </tr>
 </table>
-
-<p align="center">
-  <sub><strong>AI built in:</strong> ask AI about anything you're reviewing,<br/>or launch AI reviews that post comments to the diff.</sub>
-</p>
 
 ## Plannotator Inbox
 
@@ -171,55 +165,30 @@ plannotator archive                    # Browse saved plan decisions read-only
 
 ---
 
-## Privacy and network behavior
+## AI built in
 
-Plannotator does not collect usage telemetry or analytics. Plans, diffs, annotations, drafts, history, and configuration stay local by default.
-
-Each plan review, annotate, archive, share-portal, and code-review app surface checks GitHub for the latest Plannotator release when it loads. This sends no plan or review content and gives the Plannotator project owner no usage analytics, although GitHub receives an ordinary request. There is currently no opt-out setting for the release check. Local Git code review can also query the configured `origin` with `git ls-remote` to detect the default branch and a stale baseline; it does not send the local diff. That remote query runs when the review opens, when the page loads its diff, when you switch the diff type or base (including the "Diff out of date &middot; Refresh" button), and when you press Fetch &mdash; never on a timer, so an idle review page makes no network calls. Turn it off entirely with `plannotator review --no-git-remote-check`, `PLANNOTATOR_GIT_REMOTE_CHECK=0`, or `{ "gitRemoteCheck": false }` in `~/.plannotator/config.json`; the compare target then comes from local refs only and the "behind GitHub" banner never appears.
-
-Content leaves the local workflow only when a network feature needs it:
-
-- URL annotation fetches the requested site, through Jina Reader by default for public pages or directly when Jina is disabled or unavailable.
-- GitHub and GitLab review uses your authenticated CLI and Git remote to retrieve PR or MR data.
-- Ask AI and review agents send the selected question and relevant plan, document, repository, or diff context to your configured provider. When Ask AI is answered by the agent session that opened Plannotator ("Ask this session"), the question goes to that session instead.
-- Sharing sends the complete link to whoever or whatever service you use to deliver it. Encrypted short links upload ciphertext to the paste service.
-- Workspaces is a separate hosted product, so the open source app's local-storage model does not apply to content placed there.
-
-The [privacy policy](https://plannotator.ai/privacy) documents these boundaries and the hosted website and waitlist data.
+Ask AI about anything you're reviewing, or launch AI reviews that post comments to the diff.
 
 ---
 
-## Link sharing
+## Sharing
 
-Open source asynchronous link sharing remains available for compatibility but is moving to deprecated support. Workspaces is the primary direction for team sharing. No removal date has been announced.
+Send a plan as a link. A teammate annotates it, and you import their feedback for your agent.
 
-<p align="center">
-  <a href="https://room.plannotator.ai/">
-    <img src=".github/assets/sharing.png" alt="Sharing portal with upload options" width="720" />
-  </a>
-</p>
-
-<p align="center">
-  <sub>Legacy link-sharing demo: <a href="https://room.plannotator.ai/">room.plannotator.ai</a></sub>
-</p>
+Small shares live in the link itself. Large ones are encrypted before upload and expire after 7 days. Anyone with the full link can read it. Turn sharing off with `PLANNOTATOR_SHARE=disabled`. [How sharing works](https://docs.plannotator.ai/open-source/workflows/sharing)
 
 <p align="center">
   <a href="https://plannotator.ai/workspaces">
-    <img src=".github/assets/workspaces-cta.svg" alt="Workspaces is the team-sharing direction. Join the waitlist." height="44" />
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset=".github/assets/workspaces-dark.png" />
+      <img src=".github/assets/workspaces-light.png" alt="Plannotator Workspaces: several cursors working in one shared space" width="720" />
+    </picture>
   </a>
 </p>
 
-Share a plan with a teammate and they can annotate it themselves. Import their feedback and send it straight back to your agent.
-
-**Small markdown shares** are compressed into the URL fragment. The fragment is not included in the browser's request to the share portal, but it is not encrypted. Anyone or any messaging service with the complete link can read the shared content. The portal host still receives ordinary request metadata.
-
-**Large markdown and raw HTML shares** use a short-link service. The share payload is encrypted with AES-256-GCM before upload, the server stores only ciphertext, and the key is kept in the URL fragment rather than sent in the paste request. Anyone with the complete link can decrypt it. Hosted pastes expire after 7 days.
-
-Same model as [PrivateBin](https://privatebin.info/). The paste service is [self-hostable](https://docs.plannotator.ai/open-source/workflows/sharing).
-
-Sharing can be disabled entirely with `PLANNOTATOR_SHARE=disabled`.
-
-[Workspaces](https://plannotator.ai/workspaces) is the primary path for hosted team collaboration.
+<p align="center">
+  For teams: <a href="https://plannotator.ai/workspaces"><strong>join the Workspaces waitlist</strong></a>
+</p>
 
 ---
 
@@ -282,6 +251,9 @@ Use `--purge` for a full removal of known local Plannotator data as well:
 plannotator uninstall --purge
 ```
 
+<details>
+<summary>What uninstall removes, what it keeps, and when it stops</summary>
+
 Purge requires typing `purge` at the prompt and explains that the data is
 local-only: it is not stored on a Plannotator server and cannot be recovered.
 For automation, pass `--yes` (or `-y`); non-interactive removal refuses to run
@@ -321,6 +293,8 @@ commands, immediately before the synchronous data-removal block; a replaced
 data directory is refused without touching either the old or replacement data.
 If your dedicated data directory is symlinked, point `PLANNOTATOR_DATA_DIR` at
 its resolved target and retry.
+
+</details>
 
 If you installed only the standalone Pi extension and do not have the
 `plannotator` CLI, use `pi remove npm:@plannotator/pi-extension`.
