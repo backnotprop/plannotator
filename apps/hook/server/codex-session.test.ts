@@ -199,6 +199,29 @@ describe("findCodexRolloutByThreadId", () => {
       else process.env.CODEX_HOME = prev;
     }
   });
+  test("finds the exact Codex thread when another rollout uses that UUID only as its suffix", () => {
+    const home = mkdtempSync(join(tmpdir(), "plannotator-codex-home-"));
+    tempFiles.push(home);
+    const threadId = "0196f8a2-aaaa-bbbb-cccc-1234567890ab";
+    const ownRolloutId = "0196f8a2-2222-3333-4444-1234567890ab";
+    const otherThreadId = "0196f8a2-9999-8888-7777-1234567890ab";
+    const dayDir = join(home, "sessions", "2026", "06", "04");
+    mkdirSync(dayDir, { recursive: true });
+    const own = join(dayDir, `rollout-2026-06-04T10-00-00-${threadId}_${ownRolloutId}.jsonl`);
+    const other = join(dayDir, `rollout-2026-06-04T11-00-00-${otherThreadId}_${threadId}.jsonl`);
+    const backup = join(dayDir, `rollout-2026-06-04T12-00-00-${threadId}_backup.jsonl`);
+    for (const path of [own, other, backup]) writeFileSync(path, buildRollout(sessionMeta(), assistantMessage("fixture")));
+
+    const prev = process.env.CODEX_HOME;
+    process.env.CODEX_HOME = home;
+    try {
+      expect(findCodexRolloutsByThreadId(threadId)).toEqual([own]);
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_HOME;
+      else process.env.CODEX_HOME = prev;
+    }
+  });
+
 });
 
 // --- Multi-rollout threads (#1367) ---

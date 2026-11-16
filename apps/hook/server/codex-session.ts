@@ -81,6 +81,10 @@ const PROPOSED_PLAN_RE = /<proposed_plan>([\s\S]*?)<\/proposed_plan>/gi;
 
 // --- Rollout File Discovery ---
 
+// A reverted rollout appends its own UUID after the stable thread ID.
+// Older layouts also use numeric segment suffixes (#1367).
+const ROLLOUT_BASENAME_RE = /^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-([0-9a-f-]{36})(?:_(?:\d+|[0-9a-f-]{36}))?\.jsonl$/i;
+
 /**
  * Resolve the Codex home directory. Codex stores config and state under
  * $CODEX_HOME when set, falling back to ~/.codex
@@ -138,7 +142,7 @@ export function findCodexRolloutsByThreadId(threadId: string): string[] {
           if (!isDir(dayDir)) continue;
 
           for (const file of readdirSync(dayDir)) {
-            if (file.endsWith(".jsonl") && file.includes(threadId)) {
+            if (ROLLOUT_BASENAME_RE.exec(file)?.[1] === threadId) {
               matches.push(join(dayDir, file));
             }
           }
