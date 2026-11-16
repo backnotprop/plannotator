@@ -657,9 +657,12 @@ describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
         "open|-a",
         "open|Sublime Text",
         `open|${file}`,
-        // JetBrains has no matching URL scheme, so macOS opens at the top too.
-        "open|-a",
+        // JetBrains has no URL scheme; its own launcher takes the line (openInMacArgv).
+        "open|-na",
         "open|WebStorm",
+        "open|--args",
+        "open|--line",
+        "open|12",
         `open|${file}`,
         "open|-a",
         "open|Visual Studio Code",
