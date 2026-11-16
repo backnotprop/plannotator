@@ -91,8 +91,13 @@ export function ReadingLine({
         {counted}
       </>
     );
+  const shown = `${words.tag ?? ""}${words.rest}`;
+  const named =
+    shown === "" || shown === words.spoken
+      ? words.spoken
+      : `${shown}, ${words.spoken.charAt(0).toLowerCase()}${words.spoken.slice(1)}`;
   const spoken = [
-    comparing ?? words.spoken,
+    comparing === null ? named : typeof comparing === "string" ? comparing : "Versions",
     count === null ? null : `${count} ${count === 1 ? "version" : "versions"}`,
   ]
     .filter((part): part is string => part !== null)

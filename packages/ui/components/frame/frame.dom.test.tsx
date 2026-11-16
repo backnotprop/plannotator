@@ -364,12 +364,13 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     );
   }
 
-  test('the newest reads "v6 · newest", named as a sentence; no "Reading"', () => {
+  test('the newest reads "v6 · newest"; its name starts with those words and goes on as a sentence; no "Reading"', () => {
     const { ReadingLine } = readingModule!;
     const frame = mount(<ReadingLine shownNumber={6} currentNumber={6} versionsOpen={false} onToggleVersions={() => {}} />);
     const toggle = frame.querySelector('[data-reading-versions]')!;
     expect(toggle.textContent).toBe('v6 · newest');
-    expect(toggle.getAttribute('aria-label')).toBe('Version 6, the newest');
+    expect(toggle.getAttribute('aria-label')).toBe('v6 · newest, version 6, the newest');
+    expect(toggle.getAttribute('aria-label')!.startsWith(toggle.textContent!)).toBe(true);
   });
 
   test('an older version reads "v1 of 6 · You are looking at an older version."', () => {
@@ -385,7 +386,8 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
       />,
     );
     const toggle = frame.querySelector('[data-reading-versions]')!;
-    expect(toggle.getAttribute('aria-label')).toBe('Version 1 of 6, an older version');
+    expect(toggle.getAttribute('aria-label')).toBe('v1 of 6, version 1 of 6, an older version');
+    expect(toggle.getAttribute('aria-label')!.startsWith(toggle.textContent!)).toBe(true);
     expect(toggle.parentElement!.textContent).toBe('v1 of 6·You are looking at an older version.');
     expect(frame.textContent).not.toContain('Reading');
   });
