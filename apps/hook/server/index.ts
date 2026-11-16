@@ -83,6 +83,8 @@
  *   PLANNOTATOR_PORT   - Fixed port to use (default: random locally, 19432 for remote)
  */
 
+// First import: loopback requests ignore a proxy from here on (loopback-no-proxy.ts).
+import "./loopback-no-proxy";
 import { childEnv, GIT_REPO_ENV, isAskAiChild } from "@plannotator/shared/child-env";
 import {
   startPlannotatorServer as startPlannotatorServerUnguarded,
@@ -140,7 +142,7 @@ import { readTailnetOwners, setSessionTailnetOwners, setSessionTailnetServedUrl 
 import { CF_ACCESS_SESSION_LINE, openSessionDoor } from "@plannotator/server/session-cf-access";
 import { resolveCfAccess } from "@plannotator/shared/inbox/cf-access";
 import { allowIgnoredLine } from "@plannotator/shared/inbox/tailnet-refusal";
-import { scrubModSessionEnv } from "./mod-session-env";
+import { planReviewEnvFor, scrubModSessionEnv } from "./mod-session-env";
 import { resolveAnnotateTarget } from "./annotate-resolution";
 import { annotateDecisionTarget, reviewDecisionTarget, takeHostReviewId, targetText } from "./decision-target";
 import { formatSessionsJson, formatSessionsTable } from "./sessions-output";
@@ -155,6 +157,7 @@ import {
 } from "./host-result";
 import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
+import { exitWhenParentGone } from "./orphan-plan-review";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
 import { LIVE_APP_REMOTE_MESSAGE, LIVE_APP_REQUIRES_URL_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
@@ -335,9 +338,10 @@ takeHostResultPath();
 takeHostMessagesPath();
 // The `pn-` id a host gave this review, for the `sessions/` registry.
 const hostReviewId = takeHostReviewId();
-// What the Claude Code mod sets for its plugin's own hooks (the Inbox reminder):
-// nothing this process starts, Claude agent jobs included, may inherit it.
-scrubModSessionEnv();
+// What the Claude Code mod sets for its plugin's own hooks (the Inbox reminder,
+// its marked plan review switch): nothing this process starts, Claude agent
+// jobs included, may inherit it. The switch is kept for this process's own plan hook.
+const modPlanReviewSwitch = scrubModSessionEnv();
 
 const rawArgs = process.argv.slice(2);
 // The Board's cards from a shell (unreleased, HIDDEN_SUBCOMMANDS): a thin
@@ -3331,6 +3335,10 @@ if (args[0] === "sessions") {
     process.exit(1);
   }
 
+  // The agent that ran this hook reads the decision from stdout: if it dies,
+  // stop instead of holding the port open forever (orphan-plan-review.ts).
+  exitWhenParentGone(takeHostResultPath() !== undefined);
+
   if (event.hook_event_name === "Stop") {
     const transcriptPath = typeof event.transcript_path === "string" && event.transcript_path
       ? event.transcript_path
@@ -3505,11 +3513,13 @@ if (args[0] === "sessions") {
     process.exit(0);
   }
 
-  // Plan review turned off for Claude Code: no decision, so Claude Code shows its own dialog.
+  // Plan review turned off for Claude Code: no decision, so Claude Code shows
+  // its own dialog (or, where the host draws its own plan card, the mod's
+  // marked `0` for this session: the host's card decides).
   if (
     event.hook_event_name === "PermissionRequest" &&
     event.tool_name === "ExitPlanMode" &&
-    !resolvePlanReview(loadConfig(), process.env)
+    !resolvePlanReview(loadConfig(), planReviewEnvFor(modPlanReviewSwitch, event.session_id))
   ) {
     process.exit(0);
   }

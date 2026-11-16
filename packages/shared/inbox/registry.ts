@@ -31,6 +31,7 @@ import { isInboxHealth, type InboxHealth } from "@plannotator/core/inbox-types";
 import { inboxDir } from "./schema";
 import { processMatchesEntry, proveInboxProcess, readProcessInfo, type ProcessInfo } from "./process-proof";
 import { INBOX_DB_FILE, INBOX_RETURN_PARTIAL } from "./store-log/sqlite-return/names";
+import { directFetchInit } from "../loopback-proxy";
 
 export const INBOX_REGISTRY_FILE = "inbox.json";
 export const INBOX_START_LOCK = "start.lock";
@@ -273,9 +274,9 @@ type HealthProbe =
 
 async function probeInboxHealth(port: number, timeoutMs: number): Promise<HealthProbe> {
   try {
-    const response = await fetch(`http://127.0.0.1:${port}/api/inbox/health`, {
+    const response = await fetch(`http://127.0.0.1:${port}/api/inbox/health`, directFetchInit({
       signal: AbortSignal.timeout(timeoutMs),
-    });
+    }));
     if (!response.ok) return { kind: "none" };
     const body: unknown = await response.json();
     return isInboxHealth(body) ? { kind: "health", health: body } : { kind: "none" };
@@ -366,7 +367,7 @@ export async function inboxOutOfReach(
   if (info && !processMatchesEntry(info, entry)) return null;
   let detail: string;
   try {
-    await fetch(`http://127.0.0.1:${entry.port}/api/inbox/health`, { signal: AbortSignal.timeout(2000) });
+    await fetch(`http://127.0.0.1:${entry.port}/api/inbox/health`, directFetchInit({ signal: AbortSignal.timeout(2000) }));
     return null;
   } catch (error) {
     detail = error instanceof Error ? error.message : String(error);
@@ -645,12 +646,12 @@ export async function stopInbox(dataDir: string, options: StopInboxOptions = {})
   try {
     // `data_dir`: an Inbox refuses (409 not_ours) a stop for another data dir, so a copied record
     // never stops the original. An older Inbox ignores the body and stops, as before.
-    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/stop`, {
+    const response = await fetch(`http://127.0.0.1:${entry.port}/api/inbox/control/stop`, directFetchInit({
       method: "POST",
       headers: { Authorization: `Bearer ${entry.token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ data_dir: resolve(dataDir) }),
       signal: AbortSignal.timeout(2000),
-    });
+    }));
     if (response.status === 409) {
       const body = (await response.json().catch(() => null)) as { code?: unknown } | null;
       // Its refusal is the proof it is not this data dir's: nothing is signalled.
