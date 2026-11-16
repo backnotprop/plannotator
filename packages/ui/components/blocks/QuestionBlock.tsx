@@ -17,7 +17,7 @@ import { HostTitle } from '../HostTitle';
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from '../ImageResolverContext';
 import { getImageSrc } from '../ImageThumbnail';
 import type { Block } from '../../types';
-import { SourceLineGutter } from '../SourceLineGutter';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import {
   questionChoiceWords,
   questionPictureShape,
@@ -856,8 +856,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
       aria-disabled={readOnly || undefined}
       data-question-decision={question.decision ? 'recorded' : question.decisionOnAnswer ? 'on-answer' : undefined}
       data-question-decision-recording={recordingAttr}
+      {...sourceLineAttrs(sourceBlock)}
     >
-      <SourceLineGutter block={sourceBlock} />
       <div className="annotation-exclude select-none mb-1.5 flex items-center gap-2" data-pinpoint-ignore="">
         <span className="text-[10.5px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{eyebrow}</span>
         <span className="ml-auto inline-flex items-center gap-1">

@@ -8,7 +8,7 @@ import { Callout } from './Callout';
 // BlockRenderer: a cycle that only meets at render time, after both modules
 // have loaded (the QuestionContext precedent).
 import { BlockRenderer } from '../BlockRenderer';
-import { SourceLineGutter } from '../SourceLineGutter';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 /** The quote's look. Shared by both render paths so they cannot drift. */
 export const BLOCKQUOTE_CLASS_NAME = 'relative border-l-2 border-primary/50 pl-4 my-4 text-muted-foreground italic';
@@ -94,8 +94,7 @@ export const BlockquoteBlock: React.FC<BlockquoteBlockProps> = ({ block, ...inli
       .join('\n')
       .split(/\n\n+/);
     return (
-      <blockquote className={BLOCKQUOTE_CLASS_NAME} data-block-id={block.id}>
-        <SourceLineGutter block={block} />
+      <blockquote className={BLOCKQUOTE_CLASS_NAME} data-block-id={block.id} {...sourceLineAttrs(block)}>
         {paragraphs.map((para, i) => (
           <p key={i} className={i > 0 ? 'mt-2' : ''}>
             <InlineMarkdown text={para} {...inlineProps} />
@@ -106,8 +105,7 @@ export const BlockquoteBlock: React.FC<BlockquoteBlockProps> = ({ block, ...inli
   }
 
   return (
-    <blockquote className={`${BLOCKQUOTE_CLASS_NAME} pn-quote-body`} data-block-id={block.id}>
-      <SourceLineGutter block={block} />
+    <blockquote className={`${BLOCKQUOTE_CLASS_NAME} pn-quote-body`} data-block-id={block.id} {...sourceLineAttrs(block)}>
       {/* React hoists this into <head> once for every quote. */}
       <style href="plannotator-quote-body" precedence="default">{QUOTE_BODY_CSS}</style>
       <QuoteDepthContext.Provider value={depth + 1}>

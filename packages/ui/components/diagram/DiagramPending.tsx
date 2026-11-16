@@ -1,7 +1,7 @@
 import React from 'react';
 import type { DiagramKind } from '@plannotator/core/diagram-anchor';
 import type { Block } from '../../types';
-import { SourceLineGutter } from '../SourceLineGutter';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 /**
  * The diagram fence before there is a diagram: the source under a quiet
@@ -55,8 +55,7 @@ export const DiagramPending: React.FC<{ block: Block; kind: DiagramKind }> = ({ 
  * notice takes the status line's place over the same source.
  */
 export const DiagramBlockPending: React.FC<{ block: Block; kind: DiagramKind; notice?: React.ReactNode }> = ({ block, kind, notice }) => (
-  <div className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind}>
-    <SourceLineGutter block={block} />
+  <div className="annotation-exclude my-5 group relative" data-block-id={block.id} data-pinpoint-ignore="" data-diagram-block={kind} {...sourceLineAttrs(block)}>
     <div data-diagram-inline="">
       <div data-diagram-fallback="" className="h-full min-h-0 w-full">
         {notice === undefined ? (

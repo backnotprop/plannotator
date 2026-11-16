@@ -119,15 +119,47 @@ function injectTheme(): void {
   document.head.appendChild(style);
 }
 
-/** The label's display under the real theme.css. happy-dom keeps an
- *  element's computed style across an ancestor's attribute change, so this
- *  reads a fresh twin in the same place (same parent, same attributes). */
-function displayOf(el: HTMLElement): string {
-  const twin = el.cloneNode(false) as HTMLElement;
-  el.after(twin);
-  const display = getComputedStyle(twin).display;
-  twin.remove();
-  return display;
+/** The label the real theme.css draws as this block's ::before, or null.
+ *  happy-dom computes no pseudo-elements, so this reads the injected sheet's
+ *  rules: a ::before rule with content, in a media query that matches now,
+ *  whose selector (without ::before) matches the block. happy-dom keeps an
+ *  element's selector matches across an ancestor's attribute change, so the
+ *  rules are matched against a fresh twin in the same place. */
+function drawnLabel(el: Element): string | null {
+  const block = el.cloneNode(false) as Element;
+  el.after(block);
+  try {
+    return drawnLabelOf(block);
+  } finally {
+    block.remove();
+  }
+}
+
+function drawnLabelOf(block: Element): string | null {
+  const walk = (rules: CSSRuleList): string | null => {
+    for (const rule of Array.from(rules)) {
+      if (rule instanceof CSSMediaRule) {
+        if (!window.matchMedia(rule.media.mediaText).matches) continue;
+        const found = walk(rule.cssRules);
+        if (found) return found;
+      } else if (rule instanceof CSSStyleRule && rule.style.getPropertyValue('content')) {
+        for (const part of rule.selectorText.split(',')) {
+          if (!part.trim().endsWith('::before')) continue;
+          if (block.matches(part.trim().slice(0, -'::before'.length))) {
+            return rule.style.getPropertyValue('content').includes('attr(data-doc-source-line)')
+              ? block.getAttribute('data-doc-source-line')
+              : null;
+          }
+        }
+      }
+    }
+    return null;
+  };
+  for (const sheet of Array.from(document.styleSheets)) {
+    const found = walk(sheet.cssRules);
+    if (found) return found;
+  }
+  return null;
 }
 
 async function flip(value: boolean) {
@@ -176,10 +208,10 @@ describe.if(hasDom)('Source line numbers toggled over painted comments', () => {
     configStore.set('documentSourceLineNumbers', true);
     const article = await mount();
 
-    const label = article.querySelector<HTMLElement>(`[data-block-id="${SECOND.id}"] [data-doc-source-line]`)!;
-    expect(label).not.toBeNull();
+    const block = article.querySelector<HTMLElement>(`[data-block-id="${SECOND.id}"]`)!;
+    expect(block.getAttribute('data-doc-source-line')).toBe('5');
     expect(document.documentElement.hasAttribute('data-doc-source-lines')).toBe(false);
-    expect(displayOf(label)).toBe('none');
+    expect(drawnLabel(block)).toBeNull();
   });
 
   test('plan review and annotate opt in: labels show in the Viewer only while the setting is on', async () => {
@@ -192,20 +224,21 @@ describe.if(hasDom)('Source line numbers toggled over painted comments', () => {
         <div data-outside-viewer=""><BlockRenderer block={SECOND} /></div>
       </OptedIn>,
     );
-    const label = article.querySelector<HTMLElement>(`[data-block-id="${SECOND.id}"] [data-doc-source-line]`)!;
+    const block = article.querySelector<HTMLElement>(`[data-block-id="${SECOND.id}"]`)!;
     const outside = host!.querySelector<HTMLElement>('[data-outside-viewer] [data-doc-source-line]')!;
 
     expect(document.documentElement.hasAttribute('data-doc-source-lines')).toBe(true);
-    expect(displayOf(label)).toBe('block');
-    expect(displayOf(outside)).toBe('none');
-    expect(article.querySelector(`[data-block-id="${SECOND.id}"]`)?.textContent).toBe('Second paragraph here.');
+    expect(drawnLabel(block)).toBe('5');
+    expect(outside).not.toBeNull();
+    expect(drawnLabel(outside)).toBeNull();
+    expect(block.textContent).toBe('Second paragraph here.');
 
     await flip(false);
     expect(document.documentElement.hasAttribute('data-doc-source-lines')).toBe(false);
-    expect(displayOf(label)).toBe('none');
+    expect(drawnLabel(block)).toBeNull();
 
     await flip(true);
-    expect(displayOf(label)).toBe('block');
+    expect(drawnLabel(block)).toBe('5');
     await act(async () => root?.unmount());
     root = null;
     expect(document.documentElement.hasAttribute('data-doc-source-lines')).toBe(false);

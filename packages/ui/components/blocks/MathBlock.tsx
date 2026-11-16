@@ -2,7 +2,7 @@ import React, { useMemo } from 'react';
 import type { Block } from '../../types';
 import { normalizeMathTex, renderMathToHtml } from '../../utils/math';
 import { useMathRenderer } from '../../hooks/useMathRenderer';
-import { SourceLineGutter } from '../SourceLineGutter';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 
 // Kept as re-exports: InlineMarkdown and older consumers import them from here.
 export { normalizeMathTex, renderMathToHtml };
@@ -44,8 +44,7 @@ export const MathBlock: React.FC<MathBlockProps> = ({ block }) => {
     />
   );
   return (
-    <div className="relative my-5">
-      <SourceLineGutter block={block} />
+    <div className="relative my-5" {...sourceLineAttrs(block)}>
       {body}
     </div>
   );

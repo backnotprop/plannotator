@@ -7,7 +7,7 @@ import { parseSrcset, serializeSrcset, type SrcsetCandidate } from "../../utils/
 import { getImageSrc } from "../ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, PreserveResolvedVideosContext, ResolvedResponsiveImagesContext, useImageResolver, type ImageResolver } from "../ImageResolverContext";
 import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type LocalLinkResolver } from "../LocalLinkContext";
-import { SourceLineGutter } from "../SourceLineGutter";
+import { sourceLineAttrs } from "../../utils/sourceLineAttrs";
 
 interface HtmlBlockProps {
   block: Block;
@@ -278,8 +278,7 @@ const HtmlBlockImpl: React.FC<HtmlBlockProps> = ({ block, imageBaseDir, onOpenLi
     };
   }, [sanitized, imageBaseDir, onOpenLinkedDoc, onOpenCodeFile, onNavigateAnchor, resolveLocalLink, resolveImage, preserveVideos, responsiveImages]);
   return (
-    <div className="relative my-4">
-      <SourceLineGutter block={block} />
+    <div className="relative my-4" {...sourceLineAttrs(block)}>
       <div
         ref={ref}
         data-block-id={block.id}

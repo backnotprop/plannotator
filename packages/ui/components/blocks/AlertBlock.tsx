@@ -1,6 +1,6 @@
 import React from 'react';
 import type { AlertKind, Block } from '../../types';
-import { SourceLineGutter } from '../SourceLineGutter';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import { renderProseBody } from './proseBody';
 import { CalloutBlocks, calloutNeedsBlocks, parseQuoteBody, useAtQuoteDepthCap } from './BlockquoteBlock';
 import { InlineMarkdown } from '../InlineMarkdown';
@@ -97,8 +97,8 @@ export const AlertBlock: React.FC<AlertBlockProps> = ({
       data-block-id={blockId}
       data-block-type="alert"
       data-alert-kind={kind}
+      {...sourceLineAttrs(sourceBlock)}
     >
-      <SourceLineGutter block={sourceBlock} />
       <div className="alert-title flex items-center gap-2 font-semibold mb-1">
         {icon}
         <span>

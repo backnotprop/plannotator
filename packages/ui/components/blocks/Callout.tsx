@@ -1,6 +1,6 @@
 import React from 'react';
 import type { Block } from '../../types';
-import { SourceLineGutter } from '../SourceLineGutter';
+import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import { renderProseBody } from './proseBody';
 
 interface CalloutProps {
@@ -44,8 +44,8 @@ export const Callout: React.FC<CalloutProps> = ({
       data-block-id={blockId}
       data-block-type={blockType}
       {...kindAttr}
+      {...sourceLineAttrs(sourceBlock)}
     >
-      <SourceLineGutter block={sourceBlock} />
       <div className={`${blockType}-title text-xs font-semibold uppercase tracking-wide mb-1`}>
         {kind}
       </div>

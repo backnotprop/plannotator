@@ -1,7 +1,7 @@
 /**
  * Optional source-line gutter on the REAL Viewer (DOM-gated, DOM_TESTS=1).
  *
- * Failures to catch: a label's number entering the document text; a multi-line
+ * Failures to catch: a label adding an element or text to a block; a multi-line
  * paragraph is not `start–end`; a one-line block is not `start`; a code fence
  * or table grows a number per visual line; the label joins copied HTML or a
  * new annotation's quote.
@@ -82,15 +82,16 @@ async function mount(onAddAnnotation: (annotation: Annotation) => void = () => {
   return article;
 }
 
-function labelOf(scope: ParentNode, blockId: string): HTMLElement | null {
-  return scope.querySelector<HTMLElement>(`[data-block-id="${blockId}"] [data-doc-source-line]`);
+/** The label a block carries (drawn by theme.css as the block's ::before). */
+function labelOf(scope: ParentNode, blockId: string): string | null {
+  return scope.querySelector<HTMLElement>(`[data-block-id="${blockId}"]`)?.getAttribute('data-doc-source-line') ?? null;
 }
 
 async function selectPhrase(scope: HTMLElement, phrase: string): Promise<string> {
   const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
   let node: Text | null = null;
   for (let n = walker.nextNode(); n; n = walker.nextNode()) {
-    if (n.textContent?.includes(phrase) && !(n.parentElement?.closest('[data-doc-source-line]'))) {
+    if (n.textContent?.includes(phrase)) {
       node = n as Text;
       break;
     }
@@ -113,12 +114,16 @@ async function selectPhrase(scope: HTMLElement, phrase: string): Promise<string>
 }
 
 describe.if(hasDom)('Viewer source line numbers', () => {
-  test('labels are empty: no number in the document text, whatever the setting', async () => {
+  test('a label adds no element and no text: each block reads exactly as before', async () => {
     configStore.set('documentSourceLineNumbers', true);
     const article = await mount();
-    const labels = [...article.querySelectorAll('[data-doc-source-line]')];
-    expect(labels.length).toBeGreaterThan(0);
-    for (const label of labels) expect(label.textContent).toBe('');
+    const labelled = [...article.querySelectorAll<HTMLElement>('[data-doc-source-line]')];
+    expect(labelled.length).toBeGreaterThan(0);
+    for (const el of labelled) expect(el.hasAttribute('data-block-id')).toBe(true);
+    const single = parseMarkdownToBlocks(DOC).find((b) => b.content === 'One line.')!;
+    const para = article.querySelector<HTMLElement>(`[data-block-id="${single.id}"]`)!;
+    expect(para.textContent).toBe('One line.');
+    expect(para.firstChild?.nodeType).toBe(Node.TEXT_NODE);
   });
 
   test('on: a span is start–end, a single line is start, code and tables get one label', async () => {
@@ -132,29 +137,23 @@ describe.if(hasDom)('Viewer source line numbers', () => {
     const table = blocks.find((b) => b.type === 'table')!;
     const items = blocks.filter((b) => b.type === 'list-item');
 
-    expect(labelOf(article, heading.id)?.getAttribute('data-doc-source-line')).toBe(
+    expect(labelOf(article, heading.id)).toBe(
       formatBlockSourceLineLabel(heading),
     );
     expect(formatBlockSourceLineLabel(multi)).toMatch(/^\d+–\d+$/);
-    expect(labelOf(article, multi.id)?.getAttribute('data-doc-source-line')).toBe(
+    expect(labelOf(article, multi.id)).toBe(
       formatBlockSourceLineLabel(multi),
     );
     expect(formatBlockSourceLineLabel(single)).toMatch(/^\d+$/);
-    expect(labelOf(article, single.id)?.getAttribute('data-doc-source-line')).toBe(
+    expect(labelOf(article, single.id)).toBe(
       formatBlockSourceLineLabel(single),
     );
 
-    expect(article.querySelectorAll(`[data-block-id="${code.id}"] [data-doc-source-line]`)).toHaveLength(1);
-    expect(article.querySelectorAll(`[data-block-id="${table.id}"] [data-doc-source-line]`)).toHaveLength(1);
     expect(items.length).toBe(2);
-    for (const item of items) {
-      expect(article.querySelectorAll(`[data-block-id="${item.id}"] [data-doc-source-line]`)).toHaveLength(1);
+    for (const block of [code, table, ...items]) {
+      expect(labelOf(article, block.id)).toBe(formatBlockSourceLineLabel(block));
+      expect(article.querySelectorAll(`[data-block-id="${block.id}"] [data-doc-source-line]`)).toHaveLength(0);
     }
-
-    const gutter = labelOf(article, multi.id)!;
-    expect(gutter.className).toContain('annotation-exclude');
-    expect(gutter.className).toContain('select-none');
-    expect(gutter.getAttribute('aria-hidden')).toBe('true');
   });
 
   test('labels stay out of copied HTML and a new annotation still quotes the selected text', async () => {
@@ -164,7 +163,7 @@ describe.if(hasDom)('Viewer source line numbers', () => {
     const blocks = parseMarkdownToBlocks(DOC);
     const multi = blocks.find((b) => b.content.startsWith('This paragraph'))!;
     const para = article.querySelector<HTMLElement>(`[data-block-id="${multi.id}"]`)!;
-    const label = labelOf(article, multi.id)!.getAttribute('data-doc-source-line')!;
+    const label = labelOf(article, multi.id)!;
 
     const range = document.createRange();
     range.selectNodeContents(para);

@@ -12,7 +12,7 @@ import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
-import { SourceLineGutter } from './SourceLineGutter';
+import { sourceLineAttrs } from '../utils/sourceLineAttrs';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
 import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
@@ -668,8 +668,7 @@ const FrontmatterCard: React.FC<{ frontmatter: Frontmatter; markdown: string }> 
   const end = Math.max(1, contentStartLine - 1);
 
   return (
-    <div className="relative mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg" data-doc-text="">
-      <SourceLineGutter startLine={1} endLine={end} />
+    <div className="relative mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg" data-doc-text="" {...sourceLineAttrs(undefined, { startLine: 1, endLine: end })}>
       <div className="grid gap-2 text-sm">
         {entries.map(([key, value]) => (
           <FrontmatterRow key={key} field={key} value={value} />
@@ -2193,8 +2192,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   : undefined;
               if (hostCard !== undefined) {
                 return (
-                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive" className={textCommentsOnly ? 'relative annotation-exclude' : 'relative'}>
-                    <SourceLineGutter block={group.block} />
+                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive" className={textCommentsOnly ? 'relative annotation-exclude' : 'relative'} {...sourceLineAttrs(group.block)}>
                     {hostCard}
                   </div>
                 );

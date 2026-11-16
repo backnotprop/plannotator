@@ -10,7 +10,7 @@ import { BlockquoteBlock } from "./blocks/BlockquoteBlock";
 import { TableBlock } from "./blocks/TableBlock";
 import { MathBlock } from "./blocks/MathBlock";
 import { QuestionBlock, type QuestionBlockProps } from "./blocks/QuestionBlock";
-import { SourceLineGutter } from "./SourceLineGutter";
+import { sourceLineAttrs } from "../utils/sourceLineAttrs";
 import {
   indexQuestionBlocks,
   isQuestionDirectiveKind,
@@ -98,8 +98,8 @@ const BlockRendererBody: React.FC<{
           className={styles}
           data-block-id={block.id}
           data-block-type="heading"
+          {...sourceLineAttrs(block)}
         >
-          <SourceLineGutter block={block} />
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </Tag>
       );
@@ -157,8 +157,8 @@ const BlockRendererBody: React.FC<{
           data-rich-list-index={orderedIndex ?? undefined}
           data-rich-list-checked={isCheckbox ? String(isChecked) : undefined}
           style={{ marginLeft: `${indent}rem` }}
+          {...sourceLineAttrs(block)}
         >
-          <SourceLineGutter block={block} />
           <ListItemBody
             level={block.level || 0}
             ordered={block.ordered}
@@ -196,8 +196,7 @@ const BlockRendererBody: React.FC<{
 
     case 'hr':
       return (
-        <div className="relative my-8" data-block-id={block.id}>
-          <SourceLineGutter block={block} />
+        <div className="relative my-8" data-block-id={block.id} {...sourceLineAttrs(block)}>
           <hr className="border-border/30" />
         </div>
       );
@@ -275,8 +274,8 @@ const BlockRendererBody: React.FC<{
           // previous block's bottom margin (mb-4), so the gap is max(the two), i.e. N lines, not N lines plus 1rem.
           style={block.blankLinesBefore ? { marginTop: `${block.blankLinesBefore}lh` } : undefined}
           data-blank-lines={block.blankLinesBefore}
+          {...sourceLineAttrs(block)}
         >
-          <SourceLineGutter block={block} />
           <InlineMarkdown imageBaseDir={imageBaseDir} onImageClick={onImageClick} text={block.content} onOpenLinkedDoc={onOpenLinkedDoc} onOpenCodeFile={onOpenCodeFile} githubRepo={githubRepo} repoHost={repoHost} onNavigateAnchor={onNavigateAnchor} />
         </p>
       );
