@@ -1,0 +1,353 @@
+/**
+ * A board opened from its thread fits within the thread view (the owner, 2026-11-16: "shape needs to appear to left
+ * of artifacts", "I no longer like that it takes up the full screen and has a different background color. It should
+ * just fit within the thread view."). The real slot (thread/ThreadSlot.tsx), the real thread pane and the real board
+ * (`ShapeLayer` with `inThread`, as App.tsx hands it to the slot), the Inbox's doors stubbed at `fetch`.
+ *
+ * What regresses:
+ *  - the Pebble leaving its place immediately left of Artifacts, on a desktop, a phone, a stacked window, the thread
+ *    in full screen, or with the board open;
+ *  - the board drawn as a window layer again (outside the thread's pane, `ib-wlayer`, its own background), or the
+ *    thread's header going away under it; the messages or the reply box showing beside it;
+ *  - the Pebble and Artifacts both showing their view (the board and the Artifacts view are one place);
+ *  - the focus: the Pebble's press takes it to the board's title, and a close from the board (its ×) gives it back to
+ *    the Pebble, as leaving the Artifacts view gives it to its button;
+ *  - the board losing a control in a 400 px pane (the narrowest pane a thread gets): its views, Comment, References,
+ *    Chat, Global comment and its ×.
+ *
+ * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
+ */
+import { afterEach, expect, mock, test } from 'bun:test';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { act } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { createRoot, type Root } from 'react-dom/client';
+import type { InboxAuthor, InboxMessageWire, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
+import { createShapeStore } from '../../shared/shape/store';
+import type { InboxShapeSummary } from '../api';
+import type { Route } from '../app/route';
+import { machinesModel } from '../machines';
+import { PHONE_QUERY } from '../phone';
+import { createPanesOnScreen } from '../panes/onScreen';
+import { NO_OPEN, type PaneReads } from '../panes/paneReads';
+import { createKeyedSignal } from '../signal';
+import { createStepsBus } from '../steps/useThreadSteps';
+import type { ThreadSlotHost } from '../thread/slotHost';
+
+const hasDom = typeof document !== 'undefined';
+if (hasDom) {
+  // The real board (tsconfig `paths` points the window's typecheck at its .d.ts). By a path in a variable: the
+  // window's strict typecheck must not follow it into review-editor.
+  const seam: string = './ShapeBoard.tsx';
+  const real = (await import(seam)) as Record<string, unknown>;
+  mock.module('#shape-board', () => real);
+}
+const { ThreadSlot } = (hasDom ? await import('../thread/ThreadSlot') : {}) as typeof import('../thread/ThreadSlot');
+const { ShapeLayer } = (hasDom ? await import('./ShapeParts') : {}) as typeof import('./ShapeParts');
+const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
+
+const PROJECT: InboxProject = { id: 'prj_1', key: 'billing-svc-abcdef', name: 'billing-svc', root: '/work/billing-svc', created_at: '2026-10-12T09:00:00.000Z' };
+const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: 'Claude Code' };
+const T = 'msg_T1';
+
+function message(id: string, seq: number, body: string): InboxMessageWire {
+  return {
+    id,
+    project_id: PROJECT.id,
+    thread_id: T,
+    reply_to: id === T ? null : T,
+    author: AGENT,
+    subject: id === T ? 'Refund events: webhook or polling?' : null,
+    body,
+    created_at: `2026-10-12T17:${String(30 + seq).padStart(2, '0')}:00.000Z`,
+    resolved_at: null,
+    idempotency_key: null,
+    seq,
+  };
+}
+const THREAD: InboxThread = {
+  thread_id: T,
+  project: PROJECT,
+  subject: 'Refund events: webhook or polling?',
+  thread_name: null,
+  resolved_at: null,
+  messages: [message(T, 1, 'Refunds can reach billing-svc two ways.'), message('msg_T2', 2, 'The board is up.')],
+};
+/** Two files: the Artifacts button with its count. */
+const ATTACHMENTS = [0, 1].map((i) => ({
+  id: `att_${i}`,
+  message_id: T,
+  path: `/work/billing-svc/notes/part-${i}.md`,
+  name: `part-${i}.md`,
+  named_path: null,
+  kind: 'markdown',
+  sent_sha256: '0'.repeat(64),
+  size: 10,
+  sent_at: '2026-10-12T17:31:00.000Z',
+  sent_mtime: '2026-10-12T17:31:00.000Z',
+  current: null,
+  changed_since_sent: false,
+  unavailable: null,
+}));
+
+const restore: (() => void)[] = [];
+const dirs: string[] = [];
+let root: Root | null = null;
+let el: HTMLElement | null = null;
+
+afterEach(() => {
+  if (!hasDom) return;
+  act(() => root?.unmount());
+  el?.remove();
+  root = null;
+  el = null;
+  for (const undo of restore.splice(0).reverse()) undo();
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  document.body.innerHTML = '';
+});
+
+function stub<T extends object>(target: T, key: string, descriptor: PropertyDescriptor) {
+  const saved = Object.getOwnPropertyDescriptor(target, key);
+  Object.defineProperty(target, key, { configurable: true, ...descriptor });
+  restore.push(() => (saved ? Object.defineProperty(target, key, saved) : delete (target as Record<string, unknown>)[key]));
+}
+
+/** The window as a phone (the Inbox's PHONE_QUERY matches) or a desktop, for this test only. */
+function windowIs(phone: boolean) {
+  stub(window, 'matchMedia', {
+    value: (query: string) => ({ matches: phone && query === PHONE_QUERY, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false }),
+  });
+}
+
+function board(): ShapeLoaded {
+  const dir = mkdtempSync(join(tmpdir(), 'shape-in-thread-'));
+  dirs.push(dir);
+  const store = createShapeStore({ dataDir: join(dir, 'data') });
+  const made = store.update({
+    board: { title: 'Two ways a refund arrives', claim: 'Webhook or polling.', views: { picture: { html: '<p data-mark="hook">Webhook</p>' }, how: { html: '<p data-mark="poll">Poll</p>' } }, refs: [{ n: 1, kind: 'link', title: 'Stripe docs', target: 'https://example.com/stripe' }] },
+    project: { root: dir, name: 'billing-svc' },
+    session: { id: 'ses_a', host: 'claude-code' },
+  });
+  if (!made.ok) throw new Error(JSON.stringify(made));
+  return { shape: made.record, version: store.read(made.id)!, seen: 1, notes: [], session: { state: 'live', agent: 'Claude Code' } };
+}
+
+const noop = () => {};
+const none = async () => null;
+
+interface Drawn {
+  routes: { kind: 'go' | 'close'; route: Route }[];
+  draw: (route: Route) => void;
+}
+
+/** The window's side of the slot, as App.tsx builds it: `board` draws the real ShapeLayer in the thread's pane. */
+function mount(options: { phone?: boolean; stacked?: boolean; full?: boolean; width?: number; route?: Partial<Route> } = {}): Drawn & { id: string } {
+  windowIs(options.phone ?? false);
+  // happy-dom lays nothing out: the board reads the pane's width from here (its phone layout is ≤ 640 px).
+  stub(HTMLElement.prototype, 'clientWidth', { get: () => options.width ?? 1000 });
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const path = String(input);
+    if (init?.method === 'POST') return Response.json({ questions: [] });
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: ATTACHMENTS, annotations: [] });
+    if (path.includes('/artifact-pins')) return Response.json({ pins: [] });
+    if (path.includes('/sessions')) return Response.json({ home: null, project: PROJECT, sessions: [] });
+    return Response.json({});
+  }) as typeof fetch;
+  restore.push(() => (globalThis.fetch = savedFetch));
+  const loaded = board();
+  const id = loaded.shape.id;
+  const shapeHost: ShapeHost = {
+    load: async () => loaded,
+    version: async () => loaded.version,
+    note: async () => { throw new Error('not in this test'); },
+    ask: async () => { throw new Error('not in this test'); },
+    seen: () => {},
+    events: () => () => {},
+  };
+  const summary: InboxShapeSummary = { id, title: 'Two ways a refund arrives', project: { name: 'billing-svc', root: '/work/billing-svc' }, thread: T, state: 'active', updated: new Date().toISOString(), latest: 1, seen: 1, changed: false, drawing: false, waiting: 0, session: null };
+  const routes: Drawn['routes'] = [];
+  const queries = new QueryClient();
+  const draw = (route: Route) => {
+    const go = (next: Route) => routes.push({ kind: 'go', route: next });
+    const close = (next: Route) => routes.push({ kind: 'close', route: next });
+    const host = {
+      route, routeRef: { current: route }, rowsPending: false,
+      paneReads: { view: () => ({ ...NO_OPEN, look: { threadId: T, seq: 2, through: 2 } }), retry: noop } as unknown as PaneReads,
+      outbox: new Map(), dismissOutbox: noop, phone: options.phone ?? false, stack: { thread: options.stacked ?? false, file: false }, full: options.full ?? false, fromCard: null,
+      fileOpen: false, staleNotice: null, notifyAgainIn: null, notifications: {} as ThreadSlotHost['notifications'], soundOn: false, settings: null,
+      saveTour: noop, go, leave: noop, close, openCompose: noop, pullReviewOf: null, reviewView: null, pullsShown: false,
+      stepsBus: createStepsBus(), boardEnabled: null, boardsOn: true, cards: null, backToCard: noop, openThreadRow: null, snoozeBack: null,
+      refreshThread: none, refreshList: none, shown: null, markRead: none, markUnread: none, acknowledge: none,
+      markAction: none, archive: none, pinnedIds: new Set(), pinsOn: false, machines: machinesModel([]), setPin: none, setPriority: noop,
+      snoozeOn: false, snooze: noop, unsnooze: noop, setMachineUpdateOpen: noop, threadAgentContext: null, replyFor: null, setReplyFor: noop,
+      draftSignals: createKeyedSignal(), filesSignals: createKeyedSignal(), shapes: { byThread: new Map([[T, summary]]) } as unknown as ThreadSlotHost['shapes'],
+      board: route.shape
+        ? (inThread: boolean, sidebarToggle: boolean) => (
+            <ShapeLayer host={shapeHost} id={route.shape!} thread={THREAD} inThread={inThread} sidebarToggle={sidebarToggle} onClose={() => close({ ...route, shape: null })} />
+          )
+        : null,
+      ask: { side: undefined, sideWords: undefined }, askReply: null, setAskReply: noop, shapeReply: null, setShapeReply: noop,
+      patchQuestions: noop, onPickSaves: noop, afterWrite: async () => {}, rowPatches: new Map(), decideInThread: () => null,
+      searchLanding: { current: null }, decideLanding: { current: null }, landed: noop,
+      seenOnSight: noop, covered: false, panesOnScreen: createPanesOnScreen(), setOpenThreadCovered: noop, listTitle: 'Inbox', fullSidebar: true,
+      setThreadFull: noop, leaveFull: noop, showToast: noop, toastNow: { current: null }, dismissToast: noop, inboxLink: () => null,
+      holdSidebarIfTight: noop, backFromFile: { current: null },
+    } satisfies ThreadSlotHost;
+    const tree = (
+      <QueryClientProvider client={queries}>
+        <SidebarProvider open onOpenChange={noop}>
+          <main className="ib-main">
+            <ThreadSlot paneId="main" threadId={T} active held={{ serverSession: 's', cursor: 0, thread: THREAD }} host={host} />
+          </main>
+        </SidebarProvider>
+      </QueryClientProvider>
+    );
+    if (!root) {
+      el = document.createElement('div');
+      el.className = 'pn-inbox';
+      document.body.appendChild(el);
+      root = createRoot(el);
+    }
+    act(() => root!.render(tree));
+  };
+  draw({ page: 'inbox', project: null, thread: T, ...options.route });
+  return { routes, draw, id };
+}
+
+async function until(check: () => boolean, what: string, ms = 4000) {
+  const end = Date.now() + ms;
+  while (!check()) {
+    if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
+    await act(() => new Promise((r) => setTimeout(r, 15)));
+  }
+}
+
+const pane = () => el!.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${T}"]`)!;
+const head = () => pane().querySelector<HTMLElement>(':scope > .ib-phead')!;
+const pebble = () => head().querySelector<HTMLButtonElement>('[data-shape-pebble]')!;
+const layer = () => el!.querySelector<HTMLElement>('[data-shape-layer]');
+
+/** The header's right group, left to right: the views and the controls after the subject. */
+function rightGroup(): string[] {
+  const names: string[] = [];
+  for (const b of head().querySelectorAll<HTMLElement>('button')) {
+    if (b.hasAttribute('data-shape-pebble')) names.push('Shape');
+    else if (b.hasAttribute('data-artifacts-button')) names.push('Artifacts');
+    else if (b.hasAttribute('data-expand-all')) names.push('Expand');
+    else if (b.hasAttribute('data-thread-more')) names.push('More');
+    else if (b.getAttribute('aria-label') === 'Close the thread') names.push('×');
+  }
+  return names;
+}
+
+async function ready() {
+  await until(() => !!pane()?.querySelector('[data-artifacts-button]') && !!pane()?.querySelector('[data-shape-pebble]'), 'the Pebble and Artifacts');
+}
+
+async function boardDrawn() {
+  await until(() => !!layer()?.querySelector('.shp-head h1'), 'the board');
+}
+
+for (const [where, options, expected] of [
+  ['a desktop beside the list', {}, ['Shape', 'Artifacts', 'Expand', 'More', '×']],
+  ['a phone', { phone: true }, ['Shape', 'Artifacts', 'Expand', 'More']],
+  ['a stacked window', { stacked: true }, ['Shape', 'Artifacts', 'Expand', 'More']],
+  ['the thread in full screen', { full: true }, ['Shape', 'Artifacts', 'Expand', 'More']],
+] as const) {
+  test.skipIf(!hasDom)(`${where}: the Pebble sits immediately left of Artifacts`, async () => {
+    mount(options);
+    await ready();
+    expect(rightGroup()).toEqual([...expected]);
+  });
+}
+
+test.skipIf(!hasDom)('the board draws in the thread’s own pane, under its header, in the messages’ and the reply’s place', async () => {
+  const { id, draw } = mount({});
+  await ready();
+  expect(layer()).toBeNull();
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await ready();
+  await boardDrawn();
+  const board = layer()!;
+  // In the pane, right under the header: not a layer over the window.
+  expect(board.parentElement).toBe(pane());
+  expect(board.previousElementSibling).toBe(head());
+  expect(board.classList.contains('ib-shape-inthread')).toBe(true);
+  expect(board.classList.contains('ib-wlayer')).toBe(false);
+  expect(el!.querySelectorAll('[data-shape-layer]')).toHaveLength(1);
+  // The header stays, the Pebble pressed and still left of Artifacts; Expand has nothing to expand.
+  expect(pebble().getAttribute('aria-pressed')).toBe('true');
+  expect(rightGroup()).toEqual(['Shape', 'Artifacts', 'More', '×']);
+  expect(head().querySelector('[data-artifacts-button]')!.getAttribute('aria-pressed')).toBe('false');
+  // The subject the hidden messages' heading held is in the bar.
+  expect(head().querySelector('[data-header-subject]')!.hasAttribute('data-on')).toBe(true);
+  // The messages and the reply box are kept, out of sight.
+  expect(pane().querySelector<HTMLElement>(':scope > .ib-pbody')!.hidden).toBe(true);
+  expect(pane().querySelector<HTMLElement>(':scope > .ib-pfoot')!.hidden).toBe(true);
+  // The list (and its sidebar toggle) is beside the thread: the board has no toggle of its own.
+  expect(board.querySelector('[data-sidebar="trigger"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a stacked window, where the thread covers the list: the board keeps its sidebar toggle', async () => {
+  const { id, draw } = mount({ stacked: true });
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await ready();
+  await boardDrawn();
+  expect(layer()!.querySelector('.shp-head [data-sidebar="trigger"]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('one view at a time: the Pebble closes Artifacts, Artifacts closes the board', async () => {
+  const { id, routes, draw } = mount({ route: { artifacts: true } });
+  await ready();
+  await act(async () => pebble().click());
+  expect(routes.at(-1)).toEqual({ kind: 'go', route: { page: 'inbox', project: null, thread: T, artifacts: false, links: false, shape: id } });
+  // An address that names both (an old link): the board wins and the Artifacts view stays shut.
+  draw({ page: 'inbox', project: null, thread: T, artifacts: true, shape: id });
+  await boardDrawn();
+  expect(pane().querySelector('[data-artifacts-button]')!.getAttribute('aria-pressed')).toBe('false');
+  expect(pane().querySelector('.ib-artbody')).toBeNull();
+  await act(async () => pane().querySelector<HTMLButtonElement>('[data-artifacts-button]')!.click());
+  expect(routes.at(-1)!.route.shape).toBeNull();
+  expect(routes.at(-1)!.route.artifacts).toBe(true);
+});
+
+test.skipIf(!hasDom)('the focus: the Pebble’s press goes to the board’s title, the board’s × gives it back to the Pebble', async () => {
+  const { id, routes, draw } = mount({});
+  await ready();
+  pebble().focus();
+  await act(async () => pebble().click());
+  expect(routes.at(-1)!.route.shape).toBe(id);
+  draw(routes.at(-1)!.route);
+  await boardDrawn();
+  await until(() => document.activeElement === layer()!.querySelector('.shp-head h1'), 'the focus on the board’s title');
+  // The board's × closes it: the window writes the address without the board.
+  await act(async () => layer()!.querySelector<HTMLButtonElement>('[aria-label="Close Shape"]')!.click());
+  expect(routes.at(-1)).toEqual({ kind: 'close', route: { page: 'inbox', project: null, thread: T, artifacts: false, links: false, shape: null } });
+  draw(routes.at(-1)!.route);
+  expect(layer()).toBeNull();
+  await until(() => document.activeElement === pebble(), 'the focus back on the Pebble');
+  expect(pane().querySelector<HTMLElement>(':scope > .ib-pbody')!.hidden).toBe(false);
+});
+
+test.skipIf(!hasDom)('a 400 px pane: the board takes its narrow layout and keeps every control', async () => {
+  const { id, draw } = mount({ width: 400 });
+  draw({ page: 'inbox', project: null, thread: T, shape: id });
+  await ready();
+  await boardDrawn();
+  const board = layer()!;
+  await until(() => !!board.querySelector('.shp-root.phone'), 'the narrow layout');
+  const dock = board.querySelector<HTMLElement>('[role="toolbar"][aria-label="Shape toolbar"]')!;
+  const views = [...dock.querySelectorAll<HTMLButtonElement>('[aria-label="Views"] button')].map((b) => b.title);
+  expect(views).toEqual(['Shape', 'How it works']);
+  for (const name of ['Comment', 'Global comment']) expect(dock.querySelector(`button[aria-label="${name}"]`), name).not.toBeNull();
+  for (const title of ['References', 'Chat']) expect(dock.querySelector(`button[title="${title}"]`), title).not.toBeNull();
+  expect(board.querySelector('button[aria-label="Close Shape"]')).not.toBeNull();
+  for (const b of dock.querySelectorAll<HTMLButtonElement>('button')) expect(b.disabled, b.title).toBe(false);
+  // Chat opens the panel (a sheet here) with the board's tabs.
+  await act(async () => dock.querySelector<HTMLButtonElement>('button[title="Chat"]')!.click());
+  expect(board.querySelector('.shp-sidep.sheet.open')).not.toBeNull();
+});

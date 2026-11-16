@@ -10316,6 +10316,15 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-shape-layer > * { flex: 1; min-height: 0; }
 .ib-shape-layer[hidden] { display: none; }
 .ib-review > .ib-shape-layer { inset: 0; }
+/* In its thread (the owner, 2026-11-16: "It should just fit within the thread view"): the board takes the messages'
+   and the reply's place under the thread's header, as the Artifacts view does, on the thread's own background. */
+.ib-pane > .ib-shape-layer.ib-shape-inthread {
+  position: relative; inset: auto; z-index: auto; flex: 1; min-height: 0; background: transparent;
+  border-radius: 0; border-bottom-left-radius: inherit; border-bottom-right-radius: inherit;
+}
+.ib-shape-inthread .shp-root { --shp-paper: var(--card); }
+/* Not a window layer: its head is no window-dragging band (the thread's header, above it, is). */
+.ib-shape-inthread .shp-head { -webkit-app-region: no-drag; }
 .ib-shape-loading { flex: 1; }
 /* The board's sidebar toggle sits alone in the gutter, 22px from the pane's edge where every full page's head has it;
    the title and the claim share one left edge after it (the board's own phone layout: 10px, its padding). */

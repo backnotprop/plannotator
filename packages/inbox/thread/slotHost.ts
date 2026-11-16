@@ -78,6 +78,11 @@ export interface ThreadSlotHost {
   draftSignals: KeyedSignal;
   filesSignals: KeyedSignal;
   shapes: ReturnType<typeof useInboxShapes>;
+  /**
+   * The board open in this thread (`#thread=…&shape=…`), drawn in the thread's own pane under its header, or null.
+   * `sidebarToggle`: the board's own sidebar toggle, where the list's (and its toggle) is not beside the thread.
+   */
+  board: ((inThread: boolean, sidebarToggle: boolean) => ReactNode) | null;
   ask: { side: ThreadPaneProps['onSide']; sideWords: ThreadPaneProps['onSideWords'] };
   askReply: { threadId: string; words: string } | null;
   setAskReply: (next: null) => void;

@@ -350,7 +350,9 @@ test('full-window layers clear the height, their controls click and their band d
     { name: 'pr-page', open: () => openRoute(page, world, '#reviews&stack=none&layer=none', 'collapsed'), first: '.ib-prreview .ib-vhead' },
     { name: 'guided-review', open: () => openRoute(page, world, `#thread=${world.thread}&guide=${world.guide}`), first: '.ib-viewer .ib-vhead' },
     { name: 'code-review', open: () => openRoute(page, world, `#thread=${world.review.thread}&guide=${world.review.message}`, 'collapsed'), first: '.ib-review .ib-vhead' },
-    { name: 'shape-board', open: () => openRoute(page, world, `#thread=${world.picture}&shape=${world.board}`, 'collapsed'), first: '.ib-shape-layer .shp-head' },
+    // A thread's board is no window layer any more: it sits in the thread's pane under the thread's header (which
+    // clears the height), so its head lies below the band and none of its controls drag.
+    { name: 'shape-board-in-thread', open: () => openRoute(page, world, `#thread=${world.picture}&shape=${world.board}`, 'collapsed'), first: 'section.ib-pane > .ib-shape-layer .shp-head' },
   ];
   for (const layer of layers) {
     await test.step(layer.name, async () => {

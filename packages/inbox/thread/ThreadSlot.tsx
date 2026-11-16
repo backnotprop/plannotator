@@ -15,6 +15,7 @@ import { MAIN_PANE, type PaneId } from '../panes/model';
 import { PaneScopeContext } from '../panes/scope';
 import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
+import { focusBoardTitle } from '../shape/boardFocus';
 import { ShapePebbleButton } from '../shape/ShapeParts';
 import { threadBoardCard } from '../steps/model';
 import { openTakenBack } from '../takenBackCompose';
@@ -64,6 +65,8 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
     document.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
   }, [thread, threadId]);
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
+  // The board named in the address, in this pane while it shows that thread (the window's one board).
+  const boardHere = !!route.shape && !!host.board && !!thread && thread.thread_id === route.thread;
   return (
     <PaneScopeContext.Provider value={scope}>
       {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
@@ -183,8 +186,15 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
             const board = host.boardsOn && thread ? host.shapes.byThread.get(thread.thread_id) : undefined;
             if (!board) return null;
             const open = !!route.shape;
-            return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
+            // The board takes the Artifacts view's place: one view of the thread at a time. Opened by this press, its
+            // title takes the focus, as the Artifacts view's heading does.
+            const show = () => {
+              go({ ...route, shape: board.id, artifacts: false, links: false });
+              focusBoardTitle(board.id);
+            };
+            return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
           })()}
+          board={boardHere ? host.board!(true, stack.thread) : null}
           onSide={host.ask.side}
           onSideWords={host.ask.sideWords}
           replyWords={host.askReply?.threadId === thread.thread_id ? host.askReply.words : null}
@@ -211,9 +221,9 @@ export function ThreadSlot({ paneId, threadId, active, held: given, host }: Thre
           fullFromSide={fullFromSide(window.history.state)}
           fullExitFile={fullExitFile(window.history.state)}
           onOpenGuide={(messageId, at) => go({ ...route, guide: messageId, ...(at ? { guideAt: at } : {}) })}
-          artifacts={route.artifacts === true}
-          onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
-          links={route.artifacts === true && route.links === true}
+          artifacts={route.artifacts === true && !boardHere}
+          onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null, shape: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
+          links={route.artifacts === true && route.links === true && !boardHere}
           // Between the view's two sides: the same screen, so Back still returns to the thread.
           onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
           // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
