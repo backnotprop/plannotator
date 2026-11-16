@@ -12369,7 +12369,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* Dragging threads (approval "inbox-drag-threads"; threadDrag.ts, replyMentions.tsx). Fills and tints only: never an
    outline on a row. The ghost is a pill of the thread under the pointer; the row it came from keeps its fill, its words
    faded. Reduced motion: no lift, no fly-back, no flash, no blinking caret. */
-:root[data-thread-drag], :root[data-thread-drag] * { cursor: grabbing !important; }
+:root[data-thread-drag] .pn-inbox, :root[data-thread-drag] .pn-inbox * { cursor: grabbing !important; }
 .ib-tghost { position: fixed; left: 0; top: 0; z-index: 1000; pointer-events: none; display: flex; align-items: center; gap: 8px; max-width: 280px; height: 34px; padding: 0 12px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground); box-shadow: var(--ib-float-shadow); font-size: var(--ib-fs-13, 13px); font-weight: 550; white-space: nowrap; transform-origin: 16px 17px; }
 .ib-tghost-t { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ib-tghost-n { flex: none; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-size: var(--ib-fs-11-5, 11.5px); display: grid; place-items: center; }
