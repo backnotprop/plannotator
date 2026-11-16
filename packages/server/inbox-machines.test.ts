@@ -385,6 +385,48 @@ describe("linked machines, on three real Inboxes", () => {
       // The viewer in the thread: its page names its folder through the forward too.
       const viewed = await getJson(A, `/api/inbox/m/${B.id}/attachments/${htmlFile.id}/view`);
       expect(viewed.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      // A Markdown file on B (the owner, 2026-11-16: "Yes, for linked computers only"): its pictures and a document
+      // next to it open from A as B's own window shows them, through B's window routes on its door for a machine only.
+      const docs = join(B.w.project, "docs");
+      mkdirSync(docs, { recursive: true });
+      const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==", "base64");
+      writeFileSync(join(docs, "shot.png"), png);
+      writeFileSync(join(docs, "plan.md"), "# Plan\n\n![shot](shot.png)\n\nSee [the notes](notes.md).\n");
+      writeFileSync(join(docs, "notes.md"), "# Notes\n\nNext to the plan.\n");
+      const mdSent = await agent.send("The plan.", { thread: "case-1", attachments: [join(docs, "plan.md")] });
+      const withMd = await getJson(A, `/api/inbox/m/${B.id}/threads/${mdSent.thread_id}`);
+      const mdFile = (withMd.thread.messages as Json[]).find((m) => m.id === mdSent.message_id)!.attachments[0] as Json;
+      const farShot = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`, { headers: { "Sec-Fetch-Site": "same-origin" } });
+      const localShot = await fetch(`${base(B)}/api/inbox/attachments/${mdFile.id}/markdown-image?path=shot.png&version=current`);
+      expect([farShot.status, localShot.status]).toEqual([200, 200]);
+      for (const name of ["content-type", "content-security-policy", "x-content-type-options", "cross-origin-resource-policy", "etag"]) {
+        expect([name, farShot.headers.get(name)]).toEqual([name, localShot.headers.get(name)]);
+      }
+      expect(Buffer.from(await farShot.arrayBuffer()).equals(png)).toBe(true);
+      await localShot.arrayBuffer();
+      // Only what the file shows, inside its folder: B's own refusals come back.
+      for (const path of ["notes.md", "../site/style.css", join(docs, "shot.png").replace(/shot\.png$/, "other.png")]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/attachments/${mdFile.id}/markdown-image?path=${encodeURIComponent(path)}&version=current`, { headers: { "Sec-Fetch-Site": "same-origin" } });
+        expect([path, refused.status >= 400]).toEqual([path, true]);
+        await refused.arrayBuffer();
+      }
+      const linkedMd = await getJson(A, `/api/inbox/m/${B.id}/attachments/${mdFile.id}/linked-page?path=notes.md`);
+      expect([linkedMd.name, linkedMd.html, linkedMd.url]).toEqual(["notes.md", null, null]);
+      expect(linkedMd.text).toContain("Next to the plan.");
+      // An HTML page's sibling page, in the viewer: its folder named through the forward, its new tab too.
+      writeFileSync(join(site, "faq.html"), '<!doctype html><html><head><link rel="stylesheet" href="style.css"></head><body><h1>FAQ</h1></body></html>');
+      const linkedHtml = await getJson(A, `/api/inbox/m/${B.id}/attachments/${htmlFile.id}/linked-page?path=faq.html`);
+      expect(linkedHtml.html).toContain(`<base href="/api/inbox/m/${B.id}/html-assets/`);
+      expect(linkedHtml.url).toMatch(new RegExp(`^/api/inbox/m/${B.id}/html-assets/[A-Za-z0-9_-]+/faq\\.html$`));
+      const faqTab = await fetch(`${base(A)}${linkedHtml.url}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate" } });
+      expect([faqTab.status, faqTab.headers.get("content-security-policy")]).toEqual([200, "sandbox allow-scripts allow-modals; connect-src 'none'"]);
+      await faqTab.arrayBuffer();
+      // Not cross-site, and never a phone's: B's door answers them for a linked machine only.
+      for (const route of [`attachments/${mdFile.id}/markdown-image?path=shot.png`, `attachments/${mdFile.id}/linked-page?path=notes.md`]) {
+        const refused = await fetch(`${base(A)}/api/inbox/m/${B.id}/${route}`, { headers: { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" } });
+        expect([route, refused.status]).toEqual([route, 403]);
+        await refused.arrayBuffer();
+      }
       // B's door is unchanged: it still has no page route, for a linked machine as for a phone.
       const tokenForB = linksFile(A).links.find((l: Json) => l.id === B.id).token as string;
       const atDoor = await fetch(`${base(B)}/api/inbox/device/attachments/${htmlFile.id}/page`, { headers: { Authorization: `Bearer ${tokenForB}` } });
