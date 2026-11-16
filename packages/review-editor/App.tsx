@@ -798,9 +798,10 @@ const ReviewApp: React.FC = () => {
   // host that ships no engine, the demo): diagram fences show as code.
   const [diagramEngine, setDiagramEngine] = useState<DiagramEngineUrls | null>(null);
   const [semDiff, setSemDiff] = useState<SemDiffAdvert | null>(null);
+  const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const semDiffClient = useMemo(
-    () => (semDiff ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: loadSemDiffWorker }) : null),
-    [semDiff],
+    () => (semDiff && semanticDiffEnabled ? createSemDiffClient({ advert: semDiff, origin: window.location.origin, createWorker: loadSemDiffWorker }) : null),
+    [semDiff, semanticDiffEnabled],
   );
   useEffect(() => () => semDiffClient?.dispose(), [semDiffClient]);
   const semanticDiffUsable = semDiffClient != null;

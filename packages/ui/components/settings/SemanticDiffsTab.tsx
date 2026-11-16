@@ -88,6 +88,7 @@ function Row({ title, hint, children }: { title: string; hint?: React.ReactNode;
 
 export function SemanticDiffsTab() {
   const semantic = useConfigValue('diffSemantic');
+  const semanticDiffEnabled = useConfigValue('semanticDiffEnabled');
   const powerUp = useConfigValue('diffPowerUp');
   const motion = useConfigValue('diffPowerUpMotion');
   const [available, setAvailable] = useState<boolean | null>(null);
@@ -173,16 +174,19 @@ export function SemanticDiffsTab() {
         <p className="mt-1 text-xs leading-relaxed text-muted-foreground">Labels what each change really is: moved, renamed, reformatted, extracted.</p>
       </div>
       <AnalysisLayerToggle
-        checked={semantic}
+        checked={semantic && semanticDiffEnabled}
+        disabled={!semanticDiffEnabled}
         onChange={(on) => configStore.set('diffSemantic', on)}
         label="Show moved & renamed code"
-        description="Draw moved, renamed, reformatted, extracted and inlined code as what it is."
+        description={semanticDiffEnabled
+          ? 'Draw moved, renamed, reformatted, extracted and inlined code as what it is.'
+          : 'Off while Semantic changes is off in Settings › Analysis.'}
       />
       <div data-power-up-settings="">
         <div className="border-t border-border pt-3">
           <AnalysisLayerToggle
             checked={powerUp && configured}
-            disabled={!configured || !semantic}
+            disabled={!configured || !semantic || !semanticDiffEnabled}
             onChange={(on) => {
               configStore.set('diffPowerUp', on);
               changed();
