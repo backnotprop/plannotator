@@ -13,8 +13,8 @@ export const FEEDBACK_PATH = "/feedback";
 /** The global ceiling's one key: every caller shares it. */
 export const GLOBAL_LIMIT_KEY = "all";
 
-/** The legitimate body is under 5 KB (a 4,000-character message and short labels). */
-export const MAX_BODY_BYTES = 16 * 1024;
+/** Covers a 4,000-code-point message and 200-code-point contact at four UTF-8 bytes each, plus labels and the JSON envelope. */
+export const MAX_BODY_BYTES = 18 * 1024;
 
 /** The Cloudflare rate-limit binding's shape (`[[ratelimits]]` in wrangler.toml). */
 export interface RateLimiter {

@@ -122,6 +122,16 @@ describe("validation", () => {
     expect(res.status).toBe(201);
   });
 
+  test("accepts the maximum message and optional contact together as UTF-8", async () => {
+    const d = deps();
+    const message = "🙂".repeat(4000);
+    const contact = "🙂".repeat(190) + "@example.x";
+    const res = await handleRequest(post({ message, contact }), d);
+
+    expect(res.status).toBe(201);
+    expect(d.store.rows[0]).toMatchObject({ message, contact });
+  });
+
   test("control characters are stripped, newlines kept", async () => {
     const d = deps();
     await handleRequest(post({ message: "line one\u0000\nline two\u0007" }), d);
@@ -198,7 +208,7 @@ describe("body", () => {
     expect(res.status).toBe(400);
   });
 
-  test("a body over 16 KB is 413, by its declared length or by what arrives", async () => {
+  test("a body over the wire limit is 413, by its declared length or by what arrives", async () => {
     const d = deps();
     const big = JSON.stringify({ message: "x".repeat(MAX_BODY_BYTES) });
     expect((await handleRequest(post(null, { raw: big }), d)).status).toBe(413);

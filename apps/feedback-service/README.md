@@ -30,7 +30,7 @@ wrangler.toml
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| POST | `/feedback` | JSON body, at most 16 KB. Answer: `201 {"ok":true}`, nothing echoed. |
+| POST | `/feedback` | JSON body, at most 18 KiB. Answer: `201 {"ok":true}`, nothing echoed. |
 | OPTIONS | `/feedback` | CORS preflight, only for an origin listed in `ALLOWED_ORIGINS` (none by default). |
 
 Every other path is `404`, every other method on `/feedback` is `405`.
@@ -48,7 +48,7 @@ Body fields (any other field is refused with `400`):
 | `agents` | no | a list of agent names (`["Claude Code", "Codex"]`). Each kept name is a short label: words of letters, digits and `+ _ ( ) -`, one space or ` / ` between them, at most 40 characters (so no dot, comma or bare slash: no path passes); any other entry is dropped, repeats too, and only the first 8 are kept. Stored as one text, `Claude Code, Codex`. Refused (`400`) only when it is not a list, or a list of more than 64. |
 
 Errors: `400` bad JSON or a bad field, `403` an Origin that is not allowed,
-`413` a body over 16 KB, `415` not `application/json`, `429` over a limit,
+`413` a body over 18 KiB, `415` not `application/json`, `429` over a limit,
 `500` the insert failed.
 
 ### Fallback for agents without the CLI
@@ -105,7 +105,7 @@ its /64 (one host usually holds a whole /64).
    caller per 10 minutes, in one Worker isolate's memory. Soft: Cloudflare
    spreads a caller over many isolates and recycles them, so it only slows a
    burst that lands on one warm isolate.
-4. **Body cap**: 16 KB; the message cap is 4,000 characters.
+4. **Body cap**: 18 KiB; the message cap is 4,000 characters.
 
 There is no daily or total cap: rows from a slow, distributed flood stay
 until the owner removes them ("Removing a row").
