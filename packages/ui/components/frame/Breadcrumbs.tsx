@@ -84,12 +84,12 @@ export function Breadcrumbs({
             {cloneElement(root.link, {
               "data-breadcrumb-root": "",
               className: cn(
-                "shrink-0 whitespace-nowrap rounded-frame-structure font-sans text-frame-sm text-muted-foreground hover:text-foreground hover:underline",
+                "shrink-0 whitespace-nowrap rounded-frame-structure font-sans text-frame-sm text-frame-muted-fg hover:text-foreground hover:underline",
                 FOCUS_RING,
               ),
               children: root.label,
             } as Record<string, unknown>)}
-            <span className="shrink-0 text-frame-xs text-muted-foreground" aria-hidden="true">
+            <span className="shrink-0 text-frame-xs text-frame-muted-fg" aria-hidden="true">
               /
             </span>
           </>
@@ -114,19 +114,15 @@ export function Breadcrumbs({
         </Tooltip>
         {filename !== null && path != null && (
           <>
-            <span className="shrink-0 text-frame-xs text-muted-foreground" aria-hidden="true">
+            <span className="shrink-0 text-frame-xs text-frame-muted-fg" aria-hidden="true">
               /
             </span>
             <Tooltip>
               <TooltipTrigger
                 render={
                   <span
-                    tabIndex={0}
                     aria-current="page"
-                    className={cn(
-                      "min-w-0 flex-1 truncate rounded-frame-structure font-sans text-frame-sm font-medium text-foreground",
-                      FOCUS_RING,
-                    )}
+                    className="min-w-0 flex-1 truncate font-sans text-frame-sm font-medium text-foreground"
                   />
                 }
               >

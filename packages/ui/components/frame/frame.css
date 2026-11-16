@@ -2,12 +2,14 @@
  * Frame: tokens, card layout and sheet / tooltip motion for components/frame.
  * Import it once in a Tailwind v4 entry, after `@import "tailwindcss"` and the
  * theme: it declares theme names and variants, and scans the frame's sources.
- * It only defines `--frame-*` names and rules on the frame's own attributes;
- * the package themes are untouched.
+ * It only defines `--frame-*` names (and `frame-*` theme names) and rules on
+ * the frame's own attributes; no host token is redefined, so the package
+ * themes and a host document inside the frame are untouched.
  */
 @source "./**/*.tsx";
 @source "./**/*.ts";
 @source not "./**/*.test.tsx";
+@source not "./**/*.test.ts";
 
 /* Dark is "not under .light", the class the themes put on the root, so the frame follows the app, not the OS. */
 @custom-variant frame-dark (&:not(.light *));
@@ -31,6 +33,7 @@
   --color-frame-hover: var(--frame-surface-hover);
   --color-frame-selected: var(--frame-selected);
   --color-frame-selected-fg: var(--frame-selected-fg);
+  --color-frame-muted-fg: var(--frame-muted-fg);
   --color-frame-tertiary: var(--frame-tertiary);
   --color-frame-divider: var(--frame-divider);
   --color-frame-border-subtle: var(--frame-border-subtle);
@@ -61,7 +64,8 @@
   /* Selected, hover and subtle border are fixed by default; FrameGround colors="theme" derives them from the theme. */
   --frame-surface-hover: oklch(0.90 0.01 260 / 0.07);
   --frame-selected: oklch(0.72 0.15 280 / 0.13);
-  --frame-selected-fg: var(--primary);
+  --frame-selected-fg: oklch(0.72 0.15 280);
+  --frame-muted-fg: var(--muted-foreground);
   --frame-tertiary: color-mix(in oklch, var(--muted-foreground) 86%, var(--background));
   --frame-divider: var(--border);
   --frame-border-subtle: oklch(0.90 0.02 260 / 0.055);
@@ -79,6 +83,7 @@
   --frame-ground: color-mix(in oklch, var(--muted) 55%, var(--background));
   --frame-surface-hover: oklch(0.30 0.02 260 / 0.06);
   --frame-selected: oklch(0.50 0.23 280 / 0.08);
+  --frame-selected-fg: oklch(0.50 0.25 280);
   --frame-tertiary: color-mix(in oklch, var(--muted-foreground) 82%, var(--background));
   --frame-border-subtle: oklch(0.35 0.02 260 / 0.09);
   --frame-ring-soft: color-mix(in oklch, var(--ring) 22%, transparent);
@@ -175,10 +180,10 @@
   }
 }
 
-/* Inside a dark pane, quiet text is a little brighter; the only host token the frame sets, and only here. */
+/* Inside a dark pane, the frame's own quiet text is a little brighter; the host's --muted-foreground is left as it is. */
 :root:not(.light) [data-frame-pane] {
-  --muted-foreground: var(--frame-quiet-fg);
-  --frame-tertiary: color-mix(in oklch, var(--muted-foreground) 86%, var(--background));
+  --frame-muted-fg: var(--frame-quiet-fg);
+  --frame-tertiary: color-mix(in oklch, var(--frame-quiet-fg) 86%, var(--background));
 }
 
 .frame-scrim {

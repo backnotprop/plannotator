@@ -15,9 +15,9 @@ import { FrameBox, DocumentRailShell, PageCard, VersionsPanel } from "@plannotat
 | `FrameGround`, `FrameBox` | The ground behind the cards, and the column that holds the top bar and the card row (`data-frame`, `data-frame-row`). |
 | `AppRail`, `AppRailBand` | The top bar, with `leading` and `account` slots. |
 | `PageHeader`, `Breadcrumbs` | The page's identity (root, collection, file, collapsing when narrow) and its actions group. |
-| `DocumentRailShell`, `DocumentRail`, `RailSlot`, `ShellTabFlags` | The left rail: resizable by drag or arrow keys, collapsible by click or keyboard, remembered open or closed (or controlled by the host), with a tab to bring it back. The tab sits in its own narrow column at the start of the row, so it never covers the page. `RailSlot` keeps its place while the host loads it. |
+| `DocumentRailShell`, `DocumentRail`, `RailSlot`, `ShellTabFlags` | The left rail: resizable by drag or arrow keys, collapsible by click or keyboard, remembered open or closed (or controlled by the host), with a tab to bring it back. Focus follows: collapsing from inside the rail lands on the tab, and the tab lands focus in the rail. The tab sits in its own narrow column at the start of the row, so it never covers the page. `RailSlot` keeps its place while the host loads it. |
 | `PagesRailHead`, `FilesRailHeading`, `FileRow`, `FolderRow`, `FilesRail*` states | The rail's head, rows and empty, loading, error and no-match states. `fileIcon` picks a mark by kind or extension, with neutral marks for `html`, `mermaid` and `graphviz` (lucide's file-code, workflow and network). |
-| `PageCard`, `ReadingLine` | The page card, and the strip above the document that says which version is on screen. |
+| `PageCard`, `ReadingLine` | The page card, and the strip above the document that says which version is on screen ("v6 · newest"). |
 | `VersionsPanel`, `VersionActions` | The versions list: consecutive saves by one author within 30 minutes fold together, and the fold holding the version on screen opens itself. |
 | `DockedPanelClip`, `useRailMotion` | The spring that opens and closes a docked panel (through `motion`). |
 | `RailSheet`, `VersionsSheet`, `CommentsSheet` | The phone sheets. |
@@ -35,7 +35,7 @@ In the host's Tailwind v4 entry, after Tailwind and the theme:
 @import "@plannotator/ui/frame.css";
 ```
 
-`frame.css` declares the frame's theme names (`text-frame-sm`, `h-frame-row`, `rounded-frame-pane`, `bg-frame-selected` and the rest), the `frame-dark` and `frame-reduce-transparency` variants, the card layout, and the sheet and tooltip motion. It also points Tailwind at the frame's own files, so no `@source` line is needed for them. It does not change the package themes: it defines only `--frame-*` names and rules on the frame's own attributes.
+`frame.css` declares the frame's theme names (`text-frame-sm`, `h-frame-row`, `rounded-frame-pane`, `bg-frame-selected` and the rest), the `frame-dark` and `frame-reduce-transparency` variants, the card layout, and the sheet and tooltip motion. It also points Tailwind at the frame's own files, so no `@source` line is needed for them. It does not change the package themes or a host document inside the frame: it defines only `--frame-*` names (and the `frame-*` theme names above) and rules on the frame's own attributes, and redefines no host token. The frame's own quiet text uses `--frame-muted-fg` (`text-frame-muted-fg`), which follows `--muted-foreground` and is a little brighter inside a dark pane; the host's `--muted-foreground` stays as it is.
 
 ### Host tokens it reads
 
@@ -45,7 +45,7 @@ Every `--frame-*` value can be set by the host.
 
 ### Fixed or theme colours
 
-By default the selected row, the hover fill and the subtle border (`--frame-selected`, `--frame-surface-hover`, `--frame-border-subtle`) are fixed colours: a violet selection and a cool grey hover and border, whatever the theme. The selected row's text (`--frame-selected-fg`) is the theme's `--primary`.
+By default the selected row, the hover fill and the subtle border (`--frame-selected`, `--frame-surface-hover`, `--frame-border-subtle`) are fixed colours: a violet selection and a cool grey hover and border, whatever the theme. The selected row's text (`--frame-selected-fg`) is fixed too: the frame's own violet, `oklch(0.72 0.15 280)` dark and `oklch(0.50 0.25 280)` light, not the host's `--primary`, so its contrast does not depend on the host theme. On the selected fill over Plannotator's card (`oklch(0.22 0.02 260)` dark, white light) it measures 5.45:1 dark and 5.97:1 light (WCAG 2, composited in sRGB).
 
 `<FrameGround colors="theme">` sets `data-frame-colors="theme"`, and under it the three are mixed from the theme instead:
 
@@ -161,7 +161,7 @@ A fuller page, with the versions panel, its phone sheet and the rail sheet, is `
 | `VersionsPanel` | `status`, `entries`, `place`, `onRetry`, `hasMore`, `loadingMore`, `onLoadMore`, `onScreenActions`, `onClose`, `footer` | The data, loading more, the actions under the version on screen, and a footer slot under the list. Each entry may carry a `decision: { label, tone }` (`positive`, `negative` or `neutral`) shown beside `approval`, for example "Changes asked". |
 | `VersionRowPlace` | `rowLink(entry, { phone, exact })`, `exactMatch`, `onRowOpen`, `explainAgent`, `note`, `authors` | Each row's link, what happens after a row opens (for example closing the panel on a phone), a hover line for agent authors, a note under a row (outside its link), and `authors: false` to drop the author line for a host with no authors (by default an unnamed author reads "No name recorded"). |
 | `VersionActions` | `onCompare`, `onCopyLink`, `actions` | Compare and copy link, with the host's own actions between them. |
-| `ReadingLine` | `onToggleVersions`, `approved`, `older: { back, actions, restore }`, `comparing`, `count`, `versionAt`, `start` | The versions toggle, an approval slot, and the controls shown while an older version is on screen. `comparing` (the host's words, for example "Comparing v2 with v6") replaces "Reading"; `count` shows on the toggle. `versionAt` places the version words and toggle: `"end"` (default) at the right, next to the panel they open, with `approved` on the start side; `"start"` at the left, with `approved` at the right. `start` is a slot at the start of the line (a project name, a decision mark). |
+| `ReadingLine` | `onToggleVersions`, `approved`, `older: { back, actions, restore }`, `comparing`, `count`, `versionAt`, `start` | The versions toggle, an approval slot, and the controls shown while an older version is on screen. The line reads "v6 · newest", or "v1 of 6 · You are looking at an older version." for an older one; the toggle's accessible name starts with its visible words and goes on as a sentence ("v6 · newest, version 6, the newest", "v1 of 6, version 1 of 6, an older version"). `comparing` (the host's words, for example "Comparing v2 with v6") replaces the version words; `count` shows on the toggle. `versionAt` places the version words and toggle: `"end"` (default) at the right, next to the panel they open, with `approved` on the start side; `"start"` at the left, with `approved` at the right. `start` is a slot at the start of the line (a project name, a decision mark). |
 | `PageHeader` | `identity`, `actions`, `actionsClassName` | The identity and actions slots, and extra classes for the actions group. |
 | `FrameGround` | `tone`, `colors`, `as` | `plain` or `tinted` ground (unset is tinted in light and plain in dark); `fixed` (default) or `theme` colours for selected, hover and subtle border; `as="div"` for a host that has its own `<main>`: no `<main>`, and the ground fills its container instead of the viewport. |
 

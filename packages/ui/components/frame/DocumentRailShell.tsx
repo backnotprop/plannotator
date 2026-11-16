@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type DragEventHandler, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type DragEventHandler, type ReactNode } from "react";
 
 import { useResizablePanel } from "../../hooks/useResizablePanel";
 import { useRailMotion } from "./lib/shellMotion";
@@ -12,6 +12,9 @@ import {
   type RailStorageKeys,
 } from "./railGeometry";
 import { ShellTabFlags } from "./ShellTabFlags";
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 export function DocumentRailShell({
   head,
@@ -76,11 +79,32 @@ export function DocumentRailShell({
   }, [onFlagsChange, flagsVisible]);
   useLayoutEffect(() => () => onFlagsChange?.(false), [onFlagsChange]);
 
+  const railGroupRef = useRef<HTMLDivElement>(null);
+  const [focusTab, setFocusTab] = useState(false);
+  const [focusRail, setFocusRail] = useState(false);
+  useLayoutEffect(() => {
+    if (!rail.railOpen && railGroupRef.current?.contains(document.activeElement)) setFocusTab(true);
+  }, [rail.railOpen]);
+  useLayoutEffect(() => {
+    if (!flagsVisible) setFocusTab(false);
+  }, [flagsVisible]);
+  useLayoutEffect(() => {
+    if (!focusRail || !rail.railOpen) return;
+    const group = railGroupRef.current;
+    if (group === null) return;
+    group.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    setFocusRail(false);
+  }, [focusRail, rail.railOpen, railMotion.mounted]);
+  const openFromTab = () => {
+    setFocusRail(true);
+    rail.openFiles();
+  };
+
   return (
     <>
-      {flagsVisible && <ShellTabFlags onOpenFiles={rail.openFiles} />}
+      {flagsVisible && <ShellTabFlags onOpenFiles={openFromTab} autoFocus={focusTab} />}
       {railMotion.mounted && enabled && (
-        <div className="contents group/sidebar">
+        <div ref={railGroupRef} className="contents group/sidebar">
           <DocumentRail
             head={head}
             width={railMotion.width}

@@ -4,7 +4,7 @@ import { extendTailwindMerge } from "tailwind-merge";
 /**
  * The frame's `cn`. tailwind-merge is told the `--frame-*` theme names, so
  * `text-frame-sm` counts as a font size (not a colour) and survives next to
- * `text-muted-foreground`, and `rounded-frame-*` / `shadow-frame-*` /
+ * `text-frame-muted-fg`, and `rounded-frame-*` / `shadow-frame-*` /
  * `h-frame-row` merge like their built-in neighbours.
  */
 const twMerge = extendTailwindMerge({

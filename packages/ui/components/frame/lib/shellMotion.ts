@@ -1,7 +1,9 @@
 /** Spring progress for the rail and docked panels. The animate function loads on first use; reduced motion jumps. */
-import { useEffect, useLayoutEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { cancelFrame, frame, useMotionValue, type MotionValue } from "motion/react";
+
+import { usePrefersReducedMotion } from "../../../hooks/usePrefersReducedMotion";
 
 import type { ShellAnimate } from "./shellAnimate";
 
@@ -30,18 +32,21 @@ export function useCombinedMotionValue<T>(
   values: readonly MotionValue<number>[],
   combine: (latest: number[]) => T,
 ): MotionValue<T> {
-  const read = () => combine(values.map((value) => value.get()));
-  const combined = useMotionValue<T>(read());
-  const update = () => combined.set(read());
-  update();
+  const combined = useMotionValue<T>(combine(values.map((value) => value.get())));
+  combined.set(combine(values.map((value) => value.get())));
+  const combineRef = useRef(combine);
   useLayoutEffect(() => {
+    combineRef.current = combine;
+  });
+  useLayoutEffect(() => {
+    const update = () => combined.set(combineRef.current(values.map((value) => value.get())));
     const schedule = () => frame.preRender(update, false, true);
     const subscriptions = values.map((value) => value.on("change", schedule));
     return () => {
       for (const unsubscribe of subscriptions) unsubscribe();
       cancelFrame(update);
     };
-  });
+  }, [combined, ...values]);
   return combined;
 }
 
@@ -50,22 +55,6 @@ export const shellSpring = {
   duration: 0.5,
   bounce: 0.1,
 } as const;
-
-export function usePrefersReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(
-    () =>
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-  );
-  useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const onChange = () => setReduced(query.matches);
-    query.addEventListener?.("change", onChange);
-    return () => query.removeEventListener?.("change", onChange);
-  }, []);
-  return reduced;
-}
 
 export interface ShellProgress {
   progress: MotionValue<number>;

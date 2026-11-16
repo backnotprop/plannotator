@@ -23,7 +23,7 @@ import {
 } from "./versionsModel";
 
 const TEXT_ACTION = cn(
-  "relative rounded-frame-structure text-frame-xs font-medium text-muted-foreground hover:text-foreground",
+  "relative rounded-frame-structure text-frame-xs font-medium text-frame-muted-fg hover:text-foreground",
   "max-md:after:absolute max-md:after:-inset-x-1 max-md:after:-inset-y-3.5 max-md:after:content-['']",
   FOCUS_RING,
 );
@@ -42,7 +42,7 @@ function When({ iso }: { readonly iso: string }) {
     <time
       dateTime={iso}
       title={fullDate(iso)}
-      className="whitespace-nowrap text-frame-xs text-muted-foreground tabular-nums"
+      className="whitespace-nowrap text-frame-xs text-frame-muted-fg tabular-nums"
     >
       {whenWords(iso)}
     </time>
@@ -135,7 +135,7 @@ export interface VersionRowPlace {
 const DECISION_ICON = {
   positive: { Icon: CircleCheck, className: "text-success" },
   negative: { Icon: CircleAlert, className: "text-destructive" },
-  neutral: { Icon: Circle, className: "text-muted-foreground" },
+  neutral: { Icon: Circle, className: "text-frame-muted-fg" },
 } as const;
 
 function Decision({ decision }: { readonly decision: VersionDecision }) {
@@ -185,7 +185,7 @@ function Who({
       data-agent-chip={author.kind === "agent" ? author.agentKind : undefined}
       data-version-unnamed={author.kind === "unnamed" ? "" : undefined}
       title={agent === null ? detail || undefined : `${detail}. ${agent}`}
-      className="min-h-4 truncate text-frame-xs text-muted-foreground"
+      className="min-h-4 truncate text-frame-xs text-frame-muted-fg"
     >
       {detail}
     </span>
@@ -215,7 +215,7 @@ function RowLines({
         {entry.current && (
           <span
             data-version-current-label=""
-            className="ml-auto shrink-0 text-frame-xs text-muted-foreground"
+            className="ml-auto shrink-0 text-frame-xs text-frame-muted-fg"
           >
             Newest
           </span>
@@ -284,7 +284,7 @@ function VersionRow({
         </div>
       )}
       {note !== undefined && note !== null && (
-        <div data-version-note="" className="px-3 pb-2 pt-1 text-frame-xs text-muted-foreground">
+        <div data-version-note="" className="px-3 pb-2 pt-1 text-frame-xs text-frame-muted-fg">
           {note}
         </div>
       )}
@@ -339,13 +339,13 @@ function FoldRow({
           <When iso={newest.createdAt} />
           <ChevronDown
             className={cn(
-              "ml-auto size-3.5 shrink-0 self-center text-muted-foreground transition-transform",
+              "ml-auto size-3.5 shrink-0 self-center text-frame-muted-fg transition-transform",
               open && "rotate-180",
             )}
             aria-hidden="true"
           />
         </span>
-        <span className="truncate text-frame-xs text-muted-foreground" title={summary}>
+        <span className="truncate text-frame-xs text-frame-muted-fg" title={summary}>
           {summary}
         </span>
         {hidden && onScreen !== undefined && (
@@ -404,11 +404,11 @@ export function VersionsPanel({
   const onScreen =
     status === "success" ? (entries.find((entry) => entry.viewing) ?? null) : null;
   const compared = compareEntry(entries);
-  const toggle = (key: string) =>
+  const toggle = (fold: { readonly key: string; readonly entries: readonly FrameVersionEntry[]; readonly open: boolean }) =>
     setOpened((previous) => {
       const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
+      if (fold.open) for (const entry of fold.entries) next.delete(entry.key);
+      else next.add(fold.key);
       return next;
     });
   return (
@@ -440,7 +440,7 @@ export function VersionsPanel({
           </div>
         )}
         {status === "error" && (
-          <div className="flex flex-col items-start gap-2 px-3 py-2 text-frame-sm text-muted-foreground">
+          <div className="flex flex-col items-start gap-2 px-3 py-2 text-frame-sm text-frame-muted-fg">
             <span>Couldn't load the versions.</span>
             <button type="button" className={TEXT_ACTION} onClick={onRetry}>
               Try again
@@ -448,7 +448,7 @@ export function VersionsPanel({
           </div>
         )}
         {status === "success" && entries.length === 0 && (
-          <p data-versions-empty="" className="px-3 py-2 text-frame-sm text-muted-foreground">
+          <p data-versions-empty="" className="px-3 py-2 text-frame-sm text-frame-muted-fg">
             No versions yet. Each save of this page shows here.
           </p>
         )}
@@ -469,7 +469,7 @@ export function VersionsPanel({
                   entries={item.entries}
                   open={item.open}
                   holdsViewing={item.holdsViewing}
-                  onToggle={() => toggle(item.key)}
+                  onToggle={() => toggle(item)}
                 />
               ),
             )}
@@ -479,7 +479,7 @@ export function VersionsPanel({
           <div className="mt-3 px-3">{onScreenActions(onScreen, compared)}</div>
         )}
         {status === "success" && entries.length === 1 && !hasMore && (
-          <p data-versions-one="" className="px-3 pt-3 text-frame-xs text-muted-foreground">
+          <p data-versions-one="" className="px-3 pt-3 text-frame-xs text-frame-muted-fg">
             Later saves show here, newest first.
           </p>
         )}

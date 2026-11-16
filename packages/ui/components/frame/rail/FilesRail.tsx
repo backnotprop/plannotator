@@ -260,7 +260,8 @@ export function FolderRow({
         disabled={toggleDisabled}
         onClick={onToggle}
         className={cn(
-          "inline-flex size-5 shrink-0 items-center justify-center rounded-frame-structure",
+          "relative inline-flex size-5 shrink-0 items-center justify-center rounded-frame-structure",
+          "[[data-mobile=true]_&]:after:absolute [[data-mobile=true]_&]:after:-inset-x-1.5 [[data-mobile=true]_&]:after:-inset-y-3",
           FOCUS_RING,
         )}
       >

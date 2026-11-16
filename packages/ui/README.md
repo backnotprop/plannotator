@@ -65,8 +65,13 @@ The sidebar/panel resize handle exposes seams for hosts that want different edge
   ```ts
   const resize = useResizablePanel({ storageKey, side: "left", onSnapClose: collapse, onClick: collapse });
   ```
+- **Resize from the keyboard.** `resizeTo(px)` from `useResizablePanel` sets the width the way a finished drag does: clamped to `minWidth`/`maxWidth`, applied, and saved under `storageKey`. A value that is not a finite number is ignored.
 
 Building your own tooltip and removing the built-in double-click reset are host-side concerns (override `onDoubleClick` where you render the handle).
+
+### Page frame (`components/frame`, `frame.css`)
+
+The rail, edges, versions panel, reading line and phone sheets around a document, with host words, storage and colours passed in. See [`components/frame/README.md`](components/frame/README.md).
 
 ### Lazy renderers and the eager entries (`utils/math`, `utils/generateIdentity`, `utils/mermaid`; 0.32.0)
 

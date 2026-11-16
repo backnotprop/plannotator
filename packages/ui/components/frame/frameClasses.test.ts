@@ -170,7 +170,17 @@ describe('theme colours opt-in', () => {
     }
     const root = declared(':root');
     for (const name of MIXED_TOKENS) expect(root[name]).toMatch(/^oklch\(/);
-    expect(root['--frame-selected-fg']).toBe('var(--primary)');
+    expect(root['--frame-selected-fg']).toBe('oklch(0.72 0.15 280)');
+    expect(declared('.light')['--frame-selected-fg']).toBe('oklch(0.50 0.25 280)');
+  });
+});
+
+describe('host tokens', () => {
+  test('frame.css sets only --frame-* properties and frame-* theme names, never a host token', () => {
+    const names = [...frameCss.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name);
+    expect(names.length).toBeGreaterThan(40);
+    const foreign = names.filter((name) => !/^--frame-/.test(name) && !/^--(text|spacing|ease|color|shadow|radius)-frame-/.test(name));
+    expect(foreign).toEqual([]);
   });
 });
 

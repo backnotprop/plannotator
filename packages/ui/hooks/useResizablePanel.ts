@@ -192,6 +192,7 @@ export function useResizablePanel({
   /** Set the width directly (keyboard resizing): clamped, applied and saved like a finished drag. */
   const resizeTo = useCallback(
     (px: number) => {
+      if (!Number.isFinite(px)) return;
       const w = Math.min(maxWidth, Math.max(minWidth, px));
       widthRef.current = w;
       applyRef.current?.(w);
