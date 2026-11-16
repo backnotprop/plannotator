@@ -5,8 +5,8 @@
  * by what it is (PlanArtifactView.tsx). The header says which version is being read ("Reading v5 · newest");
  * versions change only in the rail. "Changed since you looked" compares with the version the person had seen of that
  * document when the page opened, and Show changes opens the diff from it to the newest. The address carries the file
- * (`&doc=`, `&file=`); the main page keeps the plan's own address. Short of room the rail floats from the top bar
- * first; the files go to a sheet only when even their least width does not fit. On a phone the rail is a bar at the
+ * (`&doc=`, `&file=`); the main page keeps the plan's own address. The rail closes from its head (kept), and
+ * "Versions N" on the top bar opens it again. Short of room the rail floats from the top bar first; the files go to a sheet only when even their least width does not fit. On a phone the rail is a bar at the
  * bottom that opens as a sheet, and the files open from the top bar as a sheet from the left. Comments, Send and the
  * plan's thread come later.
  */
@@ -20,9 +20,10 @@ import { useResizablePanel } from '../shell/useResizablePanel';
 import { Icon } from '../icons';
 import { writeRoute } from '../app/writeRoute';
 import { BottomSheet } from '../components/BottomSheet';
+import { Tip } from '../components/Tip';
 import type { PlanRead } from './client';
 import { recordPlanLook, useDocVersions, usePlan } from './store';
-import { artifactKindLabel, artifactName, changedSinceDecision, decisionLabel, decisionTone, PLAN_FILES_WORDS, sizeWords } from './words';
+import { artifactKindLabel, artifactName, changedSinceDecision, decisionLabel, decisionTone, PLAN_FILES_WORDS, PLAN_RAIL_WORDS, sizeWords } from './words';
 import { DecisionMark, PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
 import { PlanDiffView } from './PlanDiffView';
@@ -48,12 +49,18 @@ const RAIL_WIDTH = 341;
 /** The document's room beside a docked rail: narrower, the rail floats from the top bar instead. */
 const PLAN_DOC_ROOM = 560;
 
+/** The rail closed by the person (its Hide versions), kept on this computer as the files panel's fold is. */
+export const PLAN_RAIL_HIDDEN_KEY = 'plannotator-inbox-plan-rail-hidden';
+
 /** Where the rail is: beside the document, floating over the pane from the top bar, or a phone's bottom sheet. */
 type RailMode = 'docked' | 'float' | 'phone';
 interface RailPlacement {
   mode: RailMode;
-  /** The top bar's end, where a floating rail's button goes. */
+  /** The top bar's end, where a floating or closed rail's button goes. */
   slot: HTMLElement | null;
+  /** Closed by the person: the document takes its width, and "Versions N" on the top bar opens it again. */
+  hidden: boolean;
+  setHidden: (hidden: boolean) => void;
 }
 
 export interface PlanPageProps {
@@ -150,13 +157,14 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
   const docRoom = frameWidth - (docked ? panelWidth : 0) - RAIL_WIDTH;
   const rail: RailMode = phone ? 'phone' : frameWidth > 0 && docRoom < PLAN_DOC_ROOM ? 'float' : 'docked';
   const [railSlot, setRailSlot] = useState<HTMLElement | null>(null);
+  const [railHidden, setRailHidden] = useStoredFlag(PLAN_RAIL_HIDDEN_KEY);
   const [sheet, setSheet] = useState(false);
   useEffect(() => {
     if (docked) setSheet(false);
   }, [docked]);
   const showFiles = () => (phone || squeezed ? setSheet(true) : setHidden(false));
   const filesProps = { plan: id, name: read.plan.name, primary, documents: read.documents, artifacts, onScreen };
-  const place = { mode: rail, slot: railSlot };
+  const place: RailPlacement = { mode: rail, slot: railSlot, hidden: railHidden, setHidden: setRailHidden };
 
   const middle = artifact ? (
     <ArtifactPane id={id} artifact={artifact} place={place} project={project} />
@@ -404,37 +412,98 @@ function ArtifactPane({ id, artifact, place, project }: { id: string; artifact: 
 }
 
 /**
- * The rail beside the file on a wide desktop. With less room it floats over the pane's right side (Shape's one
- * panel), opened from "Versions" at the end of the top bar and closed by its own button or Escape inside it; picking
- * a version closes it. On a phone, a bar at the bottom whose Versions opens it as a sheet.
+ * The rail beside the file on a wide desktop, open until the person closes it (Hide versions in its head, kept on
+ * this computer); closed, the document takes its width and "Versions N" at the end of the top bar opens it again.
+ * With less room it floats over the pane's right side (Shape's one panel), opened from that same button and closed by
+ * its own button, a press outside it or Escape inside it; picking a version closes it. On a phone, a bar at the bottom
+ * whose Versions opens it as a sheet.
  */
 function RailPlace({ place, rail, count, sheet, setSheet, host, title }: { place: RailPlacement; rail: ReactNode; count: number | null; sheet: boolean; setSheet: (open: boolean) => void; host: HTMLElement | null; title: string }) {
   const toggle = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLElement>(null);
+  const hide = useRef<HTMLButtonElement>(null);
+  // Where focus goes once a docked rail has closed (its button on the top bar) or opened again (its Hide).
+  const focusNext = useRef<'toggle' | 'hide' | null>(null);
   const label = count === null ? 'Versions' : `Versions ${count}`;
+  const docked = place.mode === 'docked' && !place.hidden;
   useEffect(() => {
     if (place.mode !== 'float') setSheet(false);
   }, [place.mode, setSheet]);
   useEffect(() => {
     if (place.mode === 'float' && sheet) panel.current?.querySelector<HTMLElement>('[data-plan-rail-close]')?.focus();
   }, [place.mode, sheet]);
-  if (place.mode === 'docked') return <aside className="ib-plan-rail" aria-label="Versions and activity">{rail}</aside>;
-  if (place.mode === 'float') {
+  useEffect(() => {
+    const next = focusNext.current;
+    focusNext.current = null;
+    if (next === 'toggle') toggle.current?.focus();
+    if (next === 'hide') hide.current?.focus();
+  }, [docked, place.slot]);
+  // A floating rail closes on a press anywhere outside it (its own button toggles it).
+  useEffect(() => {
+    if (place.mode !== 'float' || !sheet) return;
+    const down = (e: Event) => {
+      const target = e.target as Node | null;
+      if (target && (panel.current?.contains(target) || toggle.current?.contains(target))) return;
+      setSheet(false);
+    };
+    document.addEventListener('pointerdown', down, true);
+    return () => document.removeEventListener('pointerdown', down, true);
+  }, [place.mode, sheet, setSheet]);
+  if (docked) {
+    return (
+      <aside className="ib-plan-rail" aria-label="Versions and activity">
+        <div className="ib-plan-railend">
+          <Tip content={PLAN_RAIL_WORDS.hide} side="bottom">
+            <button
+              ref={hide}
+              type="button"
+              className="ib-plan-files-icon"
+              aria-label={PLAN_RAIL_WORDS.hide}
+              onClick={() => {
+                focusNext.current = 'toggle';
+                place.setHidden(true);
+              }}
+              data-plan-rail-hide=""
+            >
+              <Icon name="panelsHide" className="ib-plan-flip" />
+            </button>
+          </Tip>
+        </div>
+        {rail}
+      </aside>
+    );
+  }
+  if (place.mode === 'docked' || place.mode === 'float') {
+    const floating = place.mode === 'float';
     const close = () => {
       setSheet(false);
       toggle.current?.focus();
+    };
+    const open = () => {
+      if (floating) return setSheet(!sheet);
+      focusNext.current = 'hide';
+      place.setHidden(false);
     };
     return (
       <>
         {place.slot &&
           createPortal(
-            <button ref={toggle} type="button" className="ib-plans-back ib-plan-railbtn" aria-expanded={sheet} aria-controls="ib-plan-railfloat" onClick={() => setSheet(!sheet)} data-on={sheet ? '' : undefined} data-plan-rail-toggle="">
+            <button
+              ref={toggle}
+              type="button"
+              className="ib-plans-back ib-plan-railbtn"
+              aria-expanded={floating ? sheet : false}
+              aria-controls={floating ? 'ib-plan-railfloat' : undefined}
+              onClick={open}
+              data-on={floating && sheet ? '' : undefined}
+              data-plan-rail-toggle=""
+            >
               <Icon name="stack" />
               {label}
             </button>,
             place.slot,
           )}
-        {sheet && (
+        {floating && sheet && (
           <aside
             ref={panel}
             id="ib-plan-railfloat"

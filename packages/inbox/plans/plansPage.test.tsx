@@ -386,6 +386,76 @@ test.skipIf(!hasDom)('a kept panel width wider than the room is drawn narrower, 
   }
 });
 
+test.skipIf(!hasDom)('the rail closes from its head and stays closed after a remount; Versions N opens it again; floating, a press outside closes it', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n', '# Rotate refresh tokens\n\nThe plan, again.\n'], { seen: 2 });
+  const kept = new Map<string, string>();
+  storageModule!.setStorageBackend({ getItem: (k) => kept.get(k) ?? null, setItem: (k, v) => void kept.set(k, v), removeItem: (k) => void kept.delete(k) });
+  let paneWidth = 1400;
+  const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const inherited = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.hasAttribute('data-plan-page')) return paneWidth;
+      return (own ?? inherited)?.get?.call(this) ?? 0;
+    },
+  });
+  const redraw = async () => {
+    unlisten();
+    act(() => root!.unmount());
+    document.body.innerHTML = '';
+    const next = draw();
+    await settle();
+    return next;
+  };
+  try {
+    window.location.hash = `#plans=${id}`;
+    let host = draw();
+    await settle();
+    // First use: open beside the document, with no reopen button on the top bar.
+    expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('docked');
+    expect(host.querySelector('aside.ib-plan-rail')).not.toBeNull();
+    expect(host.querySelector('[data-plan-rail-toggle]')).toBeNull();
+    const hide = host.querySelector('aside.ib-plan-rail [data-plan-rail-hide]') as HTMLButtonElement;
+    expect(hide.getAttribute('aria-label')).toBe('Hide versions');
+    // Escape does not close a docked rail.
+    await act(async () => hide.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(host.querySelector('aside.ib-plan-rail')).not.toBeNull();
+    await act(async () => hide.click());
+    // Closed: the document's column is the body's only column, and the top bar's Versions N (focused) opens it again.
+    expect(host.querySelector('aside.ib-plan-rail')).toBeNull();
+    expect([...host.querySelector('.ib-plan-body')!.children].map((el) => el.className)).toEqual(['ib-plan-main']);
+    let toggle = host.querySelector('.ib-plan-top [data-plan-rail-toggle]') as HTMLButtonElement;
+    expect(text(toggle)).toBe('Versions 2');
+    expect(document.activeElement).toBe(toggle);
+    // Kept on this computer: a remount draws it closed.
+    host = await redraw();
+    expect(host.querySelector('aside.ib-plan-rail')).toBeNull();
+    toggle = host.querySelector('.ib-plan-top [data-plan-rail-toggle]') as HTMLButtonElement;
+    expect(text(toggle)).toBe('Versions 2');
+    await act(async () => toggle.click());
+    expect(host.querySelector('aside.ib-plan-rail [data-plan-version="2"]')).not.toBeNull();
+    expect(host.querySelector('[data-plan-rail-toggle]')).toBeNull();
+    expect(document.activeElement).toBe(host.querySelector('[data-plan-rail-hide]'));
+    // Narrow: it floats from the top bar; its own Close and a press outside it both close it.
+    paneWidth = 1000;
+    host = await redraw();
+    expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('float');
+    toggle = host.querySelector('[data-plan-rail-toggle]') as HTMLButtonElement;
+    await act(async () => toggle.click());
+    await act(async () => (host.querySelector('[data-plan-rail-close]') as HTMLButtonElement).click());
+    expect(host.querySelector('[data-plan-rail-float]')).toBeNull();
+    await act(async () => toggle.click());
+    await act(async () => host.querySelector('[data-plan-rail-float] [data-plan-version="1"]')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(host.querySelector('[data-plan-rail-float]')).not.toBeNull();
+    await act(async () => host.querySelector('[data-plan-reading]')!.dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    expect(host.querySelector('[data-plan-rail-float]')).toBeNull();
+  } finally {
+    if (own) Object.defineProperty(HTMLElement.prototype, 'clientWidth', own);
+    else delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+  }
+});
+
 test.skipIf(!hasDom)('a plan reads in the Inbox reader: the file pane frame, its 640 px column, and the contents rail in the gutter', async () => {
   const headings = ['Rotate refresh tokens', 'Context', 'Design', 'Rollout'];
   const id = plan('Rotate refresh tokens', 'harbor-api', [`# ${headings[0]}\n\n## ${headings[1]}\n\nWhy.\n\n## ${headings[2]}\n\nHow.\n\n## ${headings[3]}\n\nWhen.\n`], { seen: 1 });

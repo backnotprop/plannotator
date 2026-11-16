@@ -210,7 +210,10 @@
 .ib-plan-diff .plan-diff-modified { background: transparent; }
 
 /* The rail */
-.ib-plan-rail { flex: none; width: 340px; min-height: 0; overflow-y: auto; border-left: 1px solid var(--border); overscroll-behavior: contain; }
+.ib-plan-rail { position: relative; flex: none; width: 340px; min-height: 0; overflow-y: auto; border-left: 1px solid var(--border); overscroll-behavior: contain; }
+/* Its close, at the end of the Versions heading (the files panel's own icon button) */
+.ib-plan-railend { position: absolute; top: 12px; right: 12px; z-index: 1; }
+.ib-plan-flip { transform: scaleX(-1); }
 /* With less room the rail floats over the pane's right side: Shape's one panel (.shp-sidep), opened from the top bar */
 .ib-plan-railfloat { position: absolute; top: 12px; right: 12px; bottom: 12px; z-index: 30; width: min(380px, calc(100% - 24px)); display: flex; flex-direction: column; background: var(--popover); color: var(--popover-foreground, var(--foreground)); border-radius: 14px; box-shadow: 0 22px 60px -20px rgb(0 0 0 / 0.38), 0 0 0 1px var(--border); overflow: hidden; }
 .ib-plan-railfloat-head { display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 8px 0 16px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); font-size: var(--ib-fs-14, 14px); font-weight: 600; }
