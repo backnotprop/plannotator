@@ -5,6 +5,7 @@ import { OpenInAppButton } from '@plannotator/ui/components/OpenInAppButton';
 interface CompactFileActionsProps {
   filePath: string;
   patch: string;
+  line?: () => number | undefined;
   canOpen: boolean;
   base: string | null;
   markdownView?: React.ReactNode;
@@ -17,7 +18,7 @@ interface CompactFileActionsProps {
 
 const ICON = 'w-4 h-4';
 
-export const CompactFileActions: React.FC<CompactFileActionsProps> = ({ filePath, patch, canOpen, base, markdownView, viewSwitch, viewed, onComment, stage, onEdit }) => {
+export const CompactFileActions: React.FC<CompactFileActionsProps> = ({ filePath, patch, line, canOpen, base, markdownView, viewSwitch, viewed, onComment, stage, onEdit }) => {
   const items = [
     onComment && { label: 'Comment on this file', onSelect: onComment, icon: <MessageSquare className={ICON} /> },
     stage && { label: stage.isStaged ? 'Unstage this file' : 'Stage this file (git add)', onSelect: () => { if (!stage.isStaging) stage.onStage(); }, icon: <GitBranchPlus className={ICON} /> },
@@ -49,6 +50,7 @@ export const CompactFileActions: React.FC<CompactFileActionsProps> = ({ filePath
         filePath={filePath}
         base={base}
         diffText={patch}
+        line={line}
         canOpen={canOpen}
         extraItems={items}
         menuHeader={viewSwitch ? <div className="px-2 py-1.5" data-compact-view-switch="">{viewSwitch}</div> : undefined}

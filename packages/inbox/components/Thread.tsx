@@ -67,9 +67,9 @@ import { threadLink } from '../rowMenu';
 import { ArmScope, createMessageArms } from '../messageArming';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
-import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
+import { clearLateVoiceMiss, LATE_VOICE_MISSED, useLateVoiceMiss } from '../lateVoice';
 import { replyBoxSetAside } from '../floaters/model';
-import { landInReplyDraft, landWordsInReplyDraft, takeHeldVoiceWords, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
+import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
 import { useReplyHasWords, useReplyTextStore, useReplyTextWhile } from '../replyText';
@@ -133,8 +133,7 @@ import { replyRecipientList } from '../thread/recipientList';
 import { isStartRow, replyStartOf } from '../thread/replyStart';
 import { useReplyLaunchBlock } from '../data/replyLaunch';
 import { coverVoice, useThreadVoice } from '../thread/useThreadVoice';
-import { spaced } from '../voiceField';
-import type { VoiceLate } from '../voiceSession';
+import { useLateVoice } from '../thread/useLateVoice';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
@@ -183,7 +182,7 @@ import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } fro
 import { lastInput, traversedJustNow } from '../lastInput';
 import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
-import { useShortcutScope } from '@plannotator/ui/shortcuts';
+import { useShortcutScope } from '../panes/scope';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
@@ -522,10 +521,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
   const [errorUpdate, setErrorUpdate] = useState<{ for: string; machine: string } | null>(null);
   const voice = useThreadVoice(thread.thread_id, (outcome, takenIn) => onLateVoice(outcome, takenIn));
-  /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
-  const lateVoice = useRef<string[]>([]);
-  const [lateVoiceTick, setLateVoiceTick] = useState(0);
-  const paneMounted = useRef(true);
   const lateMiss = useLateVoiceMiss(thread.thread_id);
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
@@ -2882,50 +2877,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     replyDraft.save(text, files);
   };
 
-  /** A take that outlived its field (full screen's card, or the closed box): its words go to the reply of the thread it was taken in, else to that draft. */
-  const onLateVoice = useCallback((outcome: VoiceLate, takenIn?: string) => {
-    const threadId = takenIn ?? threadRef.current.thread_id;
-    if ('failed' in outcome) {
-      noteLateVoiceMiss(threadId, outcome.retry && (() => {
-        clearLateVoiceMiss(threadId);
-        outcome.retry?.();
-      }));
-    } else if (paneMounted.current && threadId === threadRef.current.thread_id) {
-      lateVoice.current.push(outcome.text);
-      setLateVoiceTick((tick) => tick + 1);
-    } else void landWordsInReplyDraft(threadId, outcome.text);
-  }, []);
-  useEffect(() => {
-    // While a Send is on its way the box takes no words: these wait for it to end.
-    const waiting = boxRef.current.open && !sending ? [...lateVoice.current, ...takeHeldVoiceWords(thread.thread_id)] : lateVoice.current;
-    if (waiting.length === 0 || sending) return;
-    lateVoice.current = [];
-    if (!boxRef.current.open) {
-      // What this pane knows of the draft can be behind a save still on its way (Cancel's): the Inbox's copy decides.
-      for (const words of waiting) void landWordsInReplyDraft(thread.thread_id, words);
-      return;
-    }
-    let text = boxRef.current.text;
-    for (const words of waiting) text += spaced(text.at(-1), undefined, words);
-    // They go after the words, so someone typing keeps their place: the field holds them first, and React finds nothing to set.
-    const field = textRef.current;
-    if (field && document.activeElement === field) {
-      const { selectionStart, selectionEnd } = field;
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(field, text);
-      field.setSelectionRange(selectionStart, selectionEnd);
-    }
-    changeReply(text, true);
-    // changeReply reads this render's Send state.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lateVoiceTick, sending, box.open]);
-  useEffect(() => {
-    paneMounted.current = true;
-    return () => {
-      paneMounted.current = false;
-      for (const words of lateVoice.current) void landWordsInReplyDraft(threadRef.current.thread_id, words);
-      lateVoice.current = [];
-    };
-  }, []);
+  const onLateVoice = useLateVoice({ thread, threadRef, boxRef, textRef, boxOpen: box.open, sending, changeReply });
 
   /** The reply box opens behind full screen, without taking focus (full screen's composer writes into it). */
   const openBehind = () => {

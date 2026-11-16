@@ -78,6 +78,11 @@ interface FileHeaderProps {
    * read apart (the Inbox's PR page on a phone). Off: a narrow header shows the name alone, as before.
    */
   keepsFolder?: boolean;
+  /**
+   * The line "Open in" opens the file at, read at the click (openInLineForDiff):
+   * the picked lines or comment, else the file's first change.
+   */
+  openInLine?: () => number | undefined;
 }
 
 function splitFilePath(filePath: string): { directory: string; name: string } {
@@ -154,6 +159,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   semanticNote,
   openIn,
   keepsFolder = false,
+  openInLine,
 }) => {
   const state = useReviewStateOptional();
   const isCompactTouchLayout = compactTouchLayout ?? state?.isCompactTouchLayout ?? false;
@@ -269,6 +275,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           filePath={filePath}
           base={state?.agentCwd ?? null}
           diffText={patch}
+          line={openInLine}
           canOpen={
             state?.canUseLiveWorkspaceActions !== false &&
             !(state?.prMetadata && !state?.agentCwd) &&
@@ -386,6 +393,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
         <CompactFileActions
           filePath={filePath}
           patch={patch}
+          line={openInLine}
           canOpen={state?.canUseLiveWorkspaceActions !== false && !(state?.prMetadata && !state?.agentCwd) && status !== 'deleted'}
           base={state?.agentCwd ?? null}
           markdownView={renderMarkdownView?.({ iconOnly: true, touch: isCompactTouchLayout })}

@@ -61,6 +61,7 @@ import {
   resolveLineSelectionBehavior,
   type LineSelectionSource,
 } from '../utils/lineSelectionBehavior';
+import { openInLineForDiff } from '../utils/openInLine';
 import {
   changeJumpDirection,
   findChangeElement,
@@ -1127,11 +1128,19 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   }, [selectedAnnotationId, annotations]);
 
   const minimapOn = !collapsed && !bodyOverride && !markdownPreviewEnabled && !compactTouchLayout;
+  const openInLineRef = useRef({ patch, range: pendingSelection ?? selectedAnnotationRange });
+  openInLineRef.current = { patch, range: pendingSelection ?? selectedAnnotationRange };
+  const openInLine = useCallback(
+    () => openInLineForDiff(openInLineRef.current.patch, openInLineRef.current.range),
+    [],
+  );
+
   return (
     <div className="relative h-full flex flex-col">
       <FileHeader
         filePath={filePath}
         patch={patch}
+        openInLine={openInLine}
         status={status}
         oldPath={oldPath}
         isViewed={isViewed}

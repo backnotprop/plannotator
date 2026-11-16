@@ -44,6 +44,7 @@ interface OpenInAppButtonProps {
   quiet?: boolean;
   menuOnly?: boolean;
   menuHeader?: React.ReactNode;
+  line?: number | (() => number | undefined);
 }
 
 type OpenInExtraItem = { label: string; onSelect: () => void; icon?: React.ReactNode };
@@ -64,6 +65,7 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
   quiet = false,
   menuOnly = false,
   menuHeader,
+  line,
 }) => {
   const detected = useOpenInApps(OPEN_IN_APPS_URL);
   const apps = detected?.apps ?? null;
@@ -122,12 +124,18 @@ export const OpenInAppButton: React.FC<OpenInAppButtonProps> = ({
     if (!filePath || busy) return;
     setBusy(true);
     setError(null);
+    const at = typeof line === 'function' ? line() : line;
     try {
       const res = await fetch('/api/open-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // The stale-tab guard: a server that took over this port refuses it.
-        body: JSON.stringify(withServerSession({ filePath, base: base ?? null, appId })),
+        body: JSON.stringify(withServerSession({
+          filePath,
+          base: base ?? null,
+          appId,
+          ...(typeof at === 'number' && Number.isSafeInteger(at) && at > 0 ? { line: at } : {}),
+        })),
       });
       if (await noteServerSessionMismatch(res)) {
         flashError('This review was replaced. Reload the page.');
