@@ -5,7 +5,7 @@
  * the page may be framed only by the window's tailnet origin; the bridge names
  * that origin; a loopback redirect stays on the relay; the relay's cookie never
  * reaches the app. Through a running Inbox and the tailnet listener (owner,
- * guest, Host, the mapping): inbox-tailscale.test.ts.
+ * another account, Host, the mapping): inbox-tailscale.test.ts.
  */
 import { afterAll, expect, test } from "bun:test";
 import { createLiveRelay, LIVE_RELAY_COOKIE, LIVE_RELAY_ENTER_PATH, liveRelayEnterUrl } from "./inbox-live-relay";

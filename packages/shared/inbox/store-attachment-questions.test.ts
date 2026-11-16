@@ -6,8 +6,8 @@
  *
  * What regresses if this fails: a file's question is not counted or not
  * answerable, its key collides with a body question (one pick answering two
- * cards), or the agent cannot tell which file and which question an answer
- * is for.
+ * cards), a file that repeats a body question asks it twice, or the agent
+ * cannot tell which file and which question an answer is for.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -52,8 +52,14 @@ const PLAN = [
   ":::",
 ].join("\n");
 
-/** The body asks one question the file also asks: the file's must take another key. */
-const BODY = ["The plan is attached; two questions sit in it, beside their sections.", "", ":::question", "Ship the retry behind a flag?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
+/** The body asks a question of its own. */
+const BODY = ["The plan is attached; two questions sit in it, beside their sections.", "", ":::question", "Who reviews the plan?", "", "- [ ] Ana", "- [ ] Bo", ":::"].join("\n");
+
+/** The body asks the file's flag question word for word, with the same choices (a spec the message quotes). */
+const REPEAT = ["The plan is attached.", "", ":::question", "Ship the retry behind a flag?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
+
+/** The body asks the flag question with other choices: a question of its own, so the file's takes another key. */
+const OTHER_CHOICES = ["The plan is attached.", "", ":::question", "Ship the retry behind a flag?", "", "- [ ] Yes", "- [ ] No", "- [ ] Later", ":::"].join("\n");
 
 function attachment(id: string, name: string): InboxAttachment {
   return { id, path: `/work/billing/${name}`, named_path: null, name, kind: "markdown", sent_sha256: "0".repeat(64), size: PLAN.length, sent_at: "", sent_mtime: "2026-11-09T00:00:00.000Z" };
@@ -80,17 +86,38 @@ const pick = (q: InboxQuestion, label: string): QuestionAnswer => ({ v: 1, key: 
 describe("questions inside an attached file", () => {
   test("each is a question of the message, after the body's, with its file and its key in the file; no key is shared", () => {
     const { questions, plan } = setup();
-    expect(questions.map((q) => q.prompt)).toEqual(["Ship the retry behind a flag?", "Which database should invoices live in?", "Ship the retry behind a flag?"]);
+    expect(questions.map((q) => q.prompt)).toEqual(["Who reviews the plan?", "Which database should invoices live in?", "Ship the retry behind a flag?"]);
     const [body, db, flag] = questions as [InboxQuestion, InboxQuestion, InboxQuestion];
     expect(body.attachment ?? null).toBeNull();
     expect(db.attachment).toEqual({ id: plan.id, name: "plan.md", key: db.key });
-    // The file's flag question has the body's key in the file: the record takes the next free one.
+    expect(flag.attachment).toEqual({ id: plan.id, name: "plan.md", key: flag.key });
+    // Numbered within the file (its cards are Q1 and Q2).
+    expect([db.position, flag.position]).toEqual([0, 1]);
+    expect(db.state).toBe("open");
+  });
+
+  test("a file's question with a body question's prompt and other choices takes the next free key", () => {
+    const { questions } = setup(OTHER_CHOICES);
+    expect(questions).toHaveLength(3);
+    const [body, , flag] = questions as [InboxQuestion, InboxQuestion, InboxQuestion];
     expect(flag.attachment!.key).toBe(body.key);
     expect(flag.key).toBe(`${body.key}-2`);
     expect(new Set(questions.map((q) => q.key)).size).toBe(3);
-    // Numbered within the file (its cards are Q1 and Q2), with the prompt's line in the file (frontmatter counted).
-    expect([db.position, flag.position]).toEqual([0, 1]);
-    expect(db.state).toBe("open");
+  });
+
+  test("a file's question that repeats a body question is asked once, as the body's", () => {
+    const { store, sent, questions } = setup(REPEAT);
+    expect(questions.map((q) => [q.prompt, q.attachment?.name ?? null])).toEqual([
+      ["Ship the retry behind a flag?", null],
+      ["Which database should invoices live in?", "plan.md"],
+    ]);
+    expect(store.listRows().find((r) => r.thread_id === sent.thread_id)!.questions.open).toBe(2);
+    // Answering the file's other question leaves the one repeated question open, counted once.
+    const db = questions[1]!;
+    store.savePicks(sent.id, [{ key: db.key, revision: 0, answer: pick(db, "Postgres") }]);
+    const reply = store.sendReply(sent.id, { idempotency_key: "r-repeat", questions: [{ key: db.key, revision: 1 }] }).reply;
+    expect(reply.body).toContain("You have 1 other question open in this thread. It stays open; the person will answer it in the Inbox. Don't re-ask it.");
+    expect(reply.body).toContain("1 of 1 question answered.");
   });
 
   test("they wait on the person: the thread's row counts them with the body's", () => {
@@ -134,7 +161,7 @@ describe("questions inside an attached file", () => {
     const { store, sent, questions } = setup();
     const [body, db] = questions as [InboxQuestion, InboxQuestion];
     store.savePicks(sent.id, [
-      { key: body.key, revision: 0, answer: pick(body, "Yes") },
+      { key: body.key, revision: 0, answer: pick(body, "Ana") },
       { key: db.key, revision: 0, answer: pick(db, "SQLite") },
     ]);
     const reply = store.sendReply(sent.id, { idempotency_key: "r2", questions: [{ key: body.key, revision: 1 }, { key: db.key, revision: 1 }] }).reply;
@@ -142,7 +169,7 @@ describe("questions inside an attached file", () => {
     const file = reply.body.indexOf(`### Your file plan.md, attached to message ${sent.id}`);
     expect(own).toBeGreaterThan(0);
     expect(file).toBeGreaterThan(own);
-    expect(reply.body.slice(own, file)).toContain("#### Q1. Ship the retry behind a flag?");
+    expect(reply.body.slice(own, file)).toContain("#### Q1. Who reviews the plan?");
     expect(reply.body.slice(file)).toContain("#### Q1. Which database should invoices live in?");
     expect(splitInboxReplyBody(reply.body).answers).toBe(true);
   });

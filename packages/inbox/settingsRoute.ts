@@ -27,7 +27,7 @@ export const SETTINGS_SECTION_LABEL: Record<SettingsSection, string> = {
   'cloud-agents': 'Cloud agents',
   accounts: 'Accounts',
   prompts: 'Prompts',
-  devices: 'Devices',
+  devices: 'Remote devices',
   machines: 'Machines',
   voice: 'Voice',
   archived: 'Archived',

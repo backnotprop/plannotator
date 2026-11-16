@@ -42,6 +42,7 @@
 import { createHash } from "node:crypto";
 import type { PatchBlobIds } from "@plannotator/core/diff-files";
 import { gitlabCompareEndpoint, gitlabForkProjects, textsFitPatch, type GitlabForkProjects } from "./inbox-gitlab-stack";
+import { pullDiffBases } from "./inbox-pull-diff-scope";
 import { forgeRefKey } from "@plannotator/core/forge-ref-card";
 import {
   INBOX_PULLS_MERGED_DAYS,
@@ -71,6 +72,7 @@ import {
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { fetchPRContextWithReviewers, fetchPRFileBytes, fetchPRFileContent, fetchPRTree, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
 import type { PRContext, PRRef, PRRuntime } from "@plannotator/shared/pr-types";
+import { glVersionOf, glVersionsEndpoint } from "@plannotator/shared/pr-gitlab-versions";
 import { pullDetailsOf, type PullDetailsRead } from "./inbox-pull-details";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { compareRepoPaths, MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath, type RepoFileListing } from "@plannotator/shared/review-core";
@@ -86,6 +88,8 @@ export const INBOX_PULLS_FRESH_MS = 60_000;
 export const INBOX_PULLS_REFRESH_MS = 20_000;
 /** How long a PR merged from this Inbox shows merged whatever the forge's reads still say (`markMerged`). */
 export const INBOX_PULLS_MERGED_HOLD_MS = 10 * 60_000;
+/** How long a PR closed from this Inbox shows closed whatever the forge's reads still say (`markClosed`). */
+export const INBOX_PULLS_CLOSED_HOLD_MS = 10 * 60_000;
 /** GitHub's GraphQL budget below this many points: the host is not read again until it fills (`rateLimit.resetAt`). */
 export const INBOX_PULLS_RATE_FLOOR = 100;
 /** A patch larger than this is refused (the review says to open it on the forge). */
@@ -723,6 +727,13 @@ export interface InboxPulls {
    * `INBOX_PULLS_MERGED_HOLD_MS` or until a read says it is no longer open.
    */
   markMerged(key: string): void;
+  /**
+   * This Inbox closed the PR (the board's Close): every list shows it closed, as `markMerged` does, for
+   * `INBOX_PULLS_CLOSED_HOLD_MS` or until a read says it is no longer open.
+   */
+  markClosed(key: string): void;
+  /** This Inbox reopened a PR it closed (Close's Undo): the hold ends and the list shows it as it was before. */
+  markReopened(key: string): void;
   /** Whether this CLI says it's signed in to the host: nothing is asked of a host it isn't. */
   signedInTo(cli: RefCli, host: string): Promise<boolean>;
   /**
@@ -732,8 +743,8 @@ export interface InboxPulls {
   othersSettled(): Promise<void>;
   /** The profile pictures' URLs of the authors of the PRs the last list showed on this host, by login. */
   avatarUrls(host: string): Record<string, string>;
-  /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
-  diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
+  /** One layer's patch, or a compare up to that layer (`InboxPullDiffScope`; `from` for a range or a commit). Throws InboxPullsError. */
+  diff(key: string, scope: InboxPullDiffScope, from?: string): Promise<InboxPullDiffAnswer>;
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
   /** The PR's own text as the details read answered it, for the PR media route. Throws InboxPullsError. */
@@ -756,8 +767,10 @@ export interface InboxPulls {
    * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
    */
   file(key: string, path: string, repos?: InboxPullRepo[]): Promise<InboxPullFile | null>;
-  /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
+  /** Whether a PR still has this commit (a force-push takes it off); null when the forge did not say. */
   hasCommit(key: string, sha: string): Promise<boolean | null>;
+  /** Whether a GitLab MR has a version whose head is this commit; null when the forge did not say. */
+  hasVersion(key: string, sha: string): Promise<boolean | null>;
   /**
    * The rail's All files: every file of the PR's repository at a head commit this Inbox read for it (`snapshot`, the
    * head the patch on screen was read at, or the list's), as the review app's `GET /api/repo-files` answers
@@ -774,7 +787,7 @@ export interface InboxPulls {
    * the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
-  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string): Promise<InboxFileContents>;
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string): Promise<InboxFileContents>;
 }
 
 export type PullFileCheck = PatchBlobIds | { patch: string };
@@ -1122,20 +1135,32 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   let knownWide = new Map<string, InboxPull>();
   let lastWideRepos = new Set<string>();
   const findKnown = (key: string): InboxPull | undefined => known.get(key) ?? knownWide.get(key);
+  /** The stack a listed PR is a layer of, from the list that names it (Reviews' first, as `findKnown`). */
+  const stackOf = (pull: InboxPull) => {
+    const from = known.has(pull.key) ? known : knownWide;
+    return inboxPullStacks([...from.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === pull.key));
+  };
   /** PRs merged from this Inbox, by key: when (`markMerged`). */
   const mergedHere = new Map<string, number>();
   const asMerged = (pull: InboxPull, at: number): InboxPull => ({ ...pull, state: "merged", merged_at: pull.merged_at ?? new Date(at).toISOString() });
-  /** A list's PRs with the ones this Inbox merged shown merged (a read that says they are not open any more ends the hold). */
+  /** PRs closed from this Inbox, by key: when, and the state they had (`markClosed`; `markReopened` puts it back). */
+  const closedHere = new Map<string, { at: number; was: InboxPull["state"] }>();
+  /** A list's PRs with the ones this Inbox merged or closed shown so (a read that says they are not open any more ends the hold). */
   const withMergedHere = (pulls: InboxPull[]): InboxPull[] => {
-    if (mergedHere.size === 0) return pulls;
+    if (mergedHere.size === 0 && closedHere.size === 0) return pulls;
     return pulls.map((pull) => {
+      const open = pull.state === "open" || pull.state === "draft";
       const at = mergedHere.get(pull.key);
-      if (at === undefined) return pull;
-      if (now() - at > INBOX_PULLS_MERGED_HOLD_MS || (pull.state !== "open" && pull.state !== "draft")) {
+      if (at !== undefined) {
+        if (now() - at <= INBOX_PULLS_MERGED_HOLD_MS && open) return asMerged(pull, at);
         mergedHere.delete(pull.key);
-        return pull;
       }
-      return asMerged(pull, at);
+      const closed = closedHere.get(pull.key);
+      if (closed !== undefined) {
+        if (now() - closed.at <= INBOX_PULLS_CLOSED_HOLD_MS && open) return { ...pull, state: "closed" };
+        closedHere.delete(pull.key);
+      }
+      return pull;
     });
   };
   /** A repository one of the last lists (scoped or everywhere) showed. */
@@ -1572,6 +1597,23 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         if (pull) map.set(key, asMerged(pull, at));
       }
     },
+    markClosed(key) {
+      const was = findKnown(key)?.state;
+      if (was !== "open" && was !== "draft") return;
+      closedHere.set(key, { at: now(), was });
+      for (const map of [known, knownWide]) {
+        const pull = map.get(key);
+        if (pull) map.set(key, { ...pull, state: "closed" });
+      }
+    },
+    markReopened(key) {
+      const closed = closedHere.get(key);
+      closedHere.delete(key);
+      for (const map of [known, knownWide]) {
+        const pull = map.get(key);
+        if (pull && pull.state === "closed") map.set(key, { ...pull, state: closed?.was ?? "open" });
+      }
+    },
     signedInTo: async (cli, host) => (await signedIn(cli)).has(host),
     async othersSettled() {
       await Promise.all([...hosts.values()].map((state) => state.others.pending));
@@ -1689,13 +1731,35 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     async hasCommit(key, sha) {
       const pull = findKnown(key);
       const parts = pull ? splitPath(pull.repo) : null;
-      if (!pull || !parts || pull.platform !== "github") return null;
-      const read = await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null);
+      if (!pull || !parts) return null;
+      const read =
+        pull.platform === "github"
+          ? await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null)
+          : await run("glab", ["api", "--hostname", pull.host, `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/commits?per_page=100`, "--paginate"]).catch(() => null);
       if (!read || read.exitCode !== 0) return null;
-      const commits = read.stdout.split("\n").map((line) => line.trim().toLowerCase()).filter(Boolean);
+      let commits: string[];
+      try {
+        commits =
+          pull.platform === "github"
+            ? read.stdout.split("\n").map((line) => line.trim().toLowerCase()).filter(Boolean)
+            : parsePaginatedArray<{ id?: unknown }>(read.stdout).flatMap((commit) => (typeof commit.id === "string" ? [commit.id.toLowerCase()] : []));
+      } catch {
+        return null;
+      }
       if (commits.includes(sha.toLowerCase())) return true;
       // GitHub lists at most 250: past that, not listed says nothing.
       return commits.length >= PULL_COMMITS_LISTED_MAX ? null : false;
+    },
+    async hasVersion(key, sha) {
+      const pull = findKnown(key);
+      if (!pull || pull.platform !== "gitlab") return null;
+      const read = await run("glab", ["api", "--hostname", pull.host, `${glVersionsEndpoint({ host: pull.host, projectPath: pull.repo, iid: pull.number })}?per_page=100`, "--paginate"]).catch(() => null);
+      if (!read || read.exitCode !== 0) return null;
+      try {
+        return glVersionOf(read.stdout, sha) !== null;
+      } catch {
+        return null;
+      }
     },
     async repoFiles(key, params) {
       const at = repoAt(key);
@@ -1723,22 +1787,21 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         readWorkingTree: readRepoWorkingTreeFile,
       });
     },
-    async diff(key, scope) {
+    async diff(key, scope, from) {
       const pull = findKnown(key);
       if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // Whole stack: from the branch the lowest open layer is based on (merged layers are not read again), and from
-      // the stack's own base when that branch is gone (a merged layer's branch, deleted).
-      let bases = [pull.base];
-      if (scope === "stack") {
-        const stack = inboxPullStacks([...known.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === key));
-        bases = [...new Set([stack?.open_base ?? pull.base, stack?.base ?? pull.base])];
-      }
+      // the stack's own base when that branch is gone (a merged layer's branch, deleted). A range likewise.
+      const found = pullDiffBases(stackOf(pull), pull, scope, from);
+      if ("error" in found) throw new InboxPullsError("pull_diff_failed", found.error);
+      const bases = found.bases;
+      const compare = scope !== "layer";
       // A layer from a fork: its branch lives in the fork, never under the same name upstream.
       const fork = !!pull.head_repo && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase();
       let head = pull.head;
       // The compare's head as its URL takes it: the branch percent-encoded, a fork's owner before it.
       let headRef = compareRef(pull.head);
-      if (scope === "stack" && fork) {
+      if (compare && fork) {
         const owner = splitPath(pull.head_repo!)?.owner ?? "";
         if (pull.platform === "github" ? !FORK_OWNER.test(owner) : !owner) {
           throw new InboxPullsError("pull_diff_fork", "This layer comes from a fork, which the forge can't compare with the stack here. Review it layer by layer, or open it on the forge.");
@@ -1752,7 +1815,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
       // head the forge did not pin down.
       if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
-      if (scope === "stack" && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
+      if (compare && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
       const state = hosts.get(pull.host);
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
@@ -1782,7 +1845,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }
       };
       const before = await pullNow();
-      if (scope === "stack" && fork && pull.platform === "gitlab") {
+      if (compare && fork && pull.platform === "gitlab") {
         forkProjects = before?.fork ?? null;
         if (!forkProjects) throw new InboxPullsError("pull_diff_failed", `${cli} could not read where this layer's fork is. Try again, or open it on the forge.`);
       }
@@ -1802,7 +1865,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         throw new InboxPullsError("pull_diff_failed", error === "signed_out" ? `${cli} is not signed in to ${pull.host}.` : `${cli} could not read this diff. Try again, or open it on the forge.`);
       }
       let patch = result.stdout;
-      if (pull.platform === "gitlab" && scope === "stack") {
+      if (pull.platform === "gitlab" && compare) {
         try {
           const diffsOf = obj(JSON.parse(result.stdout)).diffs;
           patch = reconstructGitlabPatch((Array.isArray(diffsOf) ? diffsOf : []) as GitLabDiffEntry[]);
@@ -1876,7 +1939,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
       return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
-    async fileContents(key, scope, path, roots, ids, oldPath) {
+    async fileContents(key, scope, path, roots, ids, oldPath, from) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
       if (!ids) return none;
       // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
@@ -1909,13 +1972,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       };
       /** The commit the diff runs from: where the head left its base branch, not the branch's tip. */
       const mergeBase = (): Promise<string | null> => {
-        const bases =
-          scope === "layer"
-            ? [pull.base]
-            : (() => {
-                const stack = inboxPullStacks([...known.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === key));
-                return [...new Set([stack?.open_base ?? pull.base, stack?.base ?? pull.base])];
-              })();
+        const found = pullDiffBases(stackOf(pull), pull, scope, from);
+        if ("error" in found) return Promise.resolve(null);
+        const bases = found.bases;
         // With the bases: a retarget keeps the head and moves where the diff runs from.
         const baseKey = `${key}\u0000${scope}\u0000${head}\u0000${bases.join("\u0000")}`;
         const hit = mergeBases.get(baseKey);
@@ -2133,7 +2192,9 @@ export function linkInboxPulls(
       project_id: projectId,
       agent: threadAgent(store, threadId),
       last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
-      guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true } : null,
+      guide: guide?.guide
+        ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
+        : null,
     };
   };
 

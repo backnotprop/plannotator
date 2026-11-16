@@ -59,10 +59,29 @@ export function normalizeForgeHost(host: string | null | undefined): string | nu
 export function classifyForgeHost(host: string): ForgePlatform | null {
   if (host === "github.com" || host.startsWith("github.")) return "github";
   if (host === "bitbucket.org") return "bitbucket";
-  if (host === "gitlab.com" || host.startsWith("gitlab.") || host.includes(".gitlab.")) {
+  if (host === "gitlab.com" || host.startsWith("gitlab.") || host.includes(".gitlab.") || knownGitlabHosts.has(host)) {
     return "gitlab";
   }
   return null;
+}
+
+let knownGitlabHosts: ReadonlySet<string> = new Set();
+const knownGitlabListeners = new Set<() => void>();
+
+export function learnGitlabHosts(hosts: Iterable<string>): void {
+  const next = new Set([...hosts].map((host) => host.toLowerCase()));
+  if (next.size === knownGitlabHosts.size && [...next].every((host) => knownGitlabHosts.has(host))) return;
+  knownGitlabHosts = next;
+  for (const listener of knownGitlabListeners) listener();
+}
+
+export function subscribeGitlabHosts(listener: () => void): () => void {
+  knownGitlabListeners.add(listener);
+  return () => knownGitlabListeners.delete(listener);
+}
+
+export function gitlabHostsSnapshot(): ReadonlySet<string> {
+  return knownGitlabHosts;
 }
 
 export interface ForgeRefLinks {

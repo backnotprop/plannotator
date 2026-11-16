@@ -128,7 +128,7 @@ export function parseInboxThreadPullRefs(values: unknown, field: string, project
 
 /** A stored key's parts (`host/owner/repo#n`, GitLab and Bitbucket with `:pull`), or null. */
 export function inboxThreadPullRefOfKey(key: string, url: string): ForgeRef | null {
-  const match = /^([a-z0-9.-]+)\/(.+)#(\d+)(:pull)?$/.exec(key);
+  const match = /^([a-z0-9.-]+(?::\d+)?)\/(.+)#(\d+)(:pull)?$/.exec(key);
   if (!match) return null;
   // The key is lowercased; the URL keeps the forge's own spelling, so the parts come from it when they agree.
   const fromUrl = parseForgePullRef(url);

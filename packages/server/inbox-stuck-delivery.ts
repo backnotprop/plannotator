@@ -18,6 +18,7 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { inboxClaimName, INBOX_UNDELIVERED_AFTER_MS } from "@plannotator/shared/inbox/connection";
+import { inboxModClaimDir } from "@plannotator/shared/inbox/claims";
 
 /** The session's wake as the Inbox knows it now. */
 export interface InboxClaimWake {
@@ -63,9 +64,8 @@ function processGone(pid: number): boolean {
 
 /** Whether `session`'s connection claimed reply `replyId` and will never deliver it. `inboxDir`: the store's folder. */
 export function inboxClaimAbandoned(inboxDir: string, replyId: string, session: string, wake: InboxClaimWake, now: number): boolean {
-  // The mod's claim (the store's rule for which session names make a folder there).
-  if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(session)) {
-    const dir = join(inboxDir, "..", "claude-code-mod", session, "inbox", "claims", replyId);
+  const dir = inboxModClaimDir(inboxDir, replyId, session);
+  if (dir) {
     const made = madeAt(dir);
     if (made !== null) {
       if (existsSync(join(dir, "delivered"))) return false;

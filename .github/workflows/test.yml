@@ -223,6 +223,10 @@ jobs:
       - name: Generate Pi extension shared copies
         run: bash apps/pi-extension/vendor.sh
 
+      - name: Fetch the released plugins' tags
+        if: matrix.lane == 'heavy-mod'
+        run: git fetch --no-tags --depth 1 origin tag v0.28.8 tag v0.28.30
+
       - name: Run tests
         env:
           LANE: ${{ matrix.lane }}
@@ -373,6 +377,35 @@ jobs:
           name: inbox-opencode-proof
           path: .local/proof/
           if-no-files-found: ignore
+
+  # The mod's engine-harness tests (apps/hook/tests/): bun cannot load them,
+  # they import 'claude-code/testing'. `claude plugin test` runs every hook
+  # against mocks in the test file, so it needs no login, API key or model call.
+  # It runs for a minute or less, so it stays on ubuntu-24.04 like guides-show.
+  claude-code-mod:
+    name: Claude Code mod (engine harness)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install Claude Code
+        # zizmor: ignore[adhoc-packages] The harness is part of the Claude Code
+        # CLI itself (2.1.287 or later). Owner: maintainers; reassess a locked
+        # fixture by 2027-08-11.
+        run: npm install --global @anthropic-ai/claude-code@2.1.325
+
+      - name: Run the harness tests
+        env:
+          DISABLE_AUTOUPDATER: "1"
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+        run: |
+          export HOME="$(mktemp -d)"
+          export CLAUDE_CONFIG_DIR="$(mktemp -d)"
+          export PLANNOTATOR_DATA_DIR="$(mktemp -d)"
+          sh scripts/test-claude-code-mod.sh
 
   guides-show:
     name: guides.show viewer (budgets + pinned manifest)

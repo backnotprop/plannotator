@@ -84,9 +84,16 @@ describe("thread tags", () => {
     await tagThread(server, a.thread_id, windows.id, true);
     // Two tags made in the same millisecond list in id order (the Board's rule), so the order is not checked here.
     expect((await rowTags(server, a.thread_id))?.sort()).toEqual([release.id, windows.id].sort());
-    // A mark writes no store line: no cursor moves, no agent hears of it.
+    // The thread's own read carries them on its `row` too (an archived thread's header line reads them).
+    const readTags = async () => (((await (await fetch(url(server, `/api/inbox/threads/${a.thread_id}`))).json()) as { row: InboxListRow }).row.tags ?? []).slice().sort();
+    expect(await readTags()).toEqual([release.id, windows.id].sort());
+    // A mark, and reading it, writes no store line: no cursor moves, no agent hears of it.
     expect(server.store.cursor()).toBe(cursor);
     expect(server.store.changesSince(cursor)).toEqual([]);
+    // Archived, the read still carries them. (Archive and Unarchive are store lines of their own, so this comes after.)
+    expect((await post(server, `/api/inbox/messages/${a.message_id}/resolve`, { resolved: true })).status).toBe(200);
+    expect(await readTags()).toEqual([release.id, windows.id].sort());
+    expect((await post(server, `/api/inbox/messages/${a.message_id}/resolve`, { resolved: false })).status).toBe(200);
     expect(((await (await tagThread(server, a.thread_id, windows.id, false)).json()) as Json).tags).toEqual([release.id]);
     const file = join(dataDir, "inbox", "tags.json");
     expect(statSync(file).mode & 0o777).toBe(0o600);
@@ -135,6 +142,24 @@ describe("thread tags", () => {
     expect((await post(server, path, { tag: release.id, on: "yes" })).status).toBe(422);
     expect((await fetch(url(server, path))).status).toBe(405);
     expect(await rowTags(server, a.thread_id)).toEqual([]);
+  });
+
+  test("by name (a linked machine's write): the live tag of that name, case and space ignored, made when none is; out by name", async () => {
+    const { server, send } = await setup();
+    const a = await send("Tag me by name", "ses_a");
+    const release = await makeTag(server, "Release");
+    const path = `/api/inbox/threads/${a.thread_id}/tags`;
+    expect(((await (await post(server, path, { name: " release", on: true })).json()) as Json).tags).toEqual([release.id]);
+    const made = (await (await post(server, path, { name: "Billing", on: true })).json()) as Json;
+    const billing = (await list(server)).tags!.find((t) => t.name === "Billing")!;
+    // Oldest tag first, even when both were made in one millisecond.
+    expect(made.tags).toEqual([release.id, billing.id]);
+    expect(((await (await post(server, path, { name: "BILLING", on: false })).json()) as Json).tags).toEqual([release.id]);
+    // A name no tag has takes nothing out and makes nothing; a missing thread makes no tag either.
+    expect(((await (await post(server, path, { name: "Nowhere", on: false })).json()) as Json).tags).toEqual([release.id]);
+    expect((await post(server, "/api/inbox/threads/msg_01K70000000000000000000099/tags", { name: "Fresh", on: true })).status).toBe(404);
+    expect((await post(server, path, { name: "", on: true })).status).toBe(422);
+    expect((await list(server)).tags!.map((t) => t.name).sort()).toEqual(["Billing", "Release"]);
   });
 
   test("every open window hears `event: tags`; the phone's stream (no window id) does not", async () => {

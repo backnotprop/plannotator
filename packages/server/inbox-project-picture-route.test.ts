@@ -187,20 +187,19 @@ describe("POST /api/inbox/projects/:id/picture", () => {
 });
 
 describe("over the tailnet", () => {
-  test("a guest the owner allowed reads and sets a picture as the owner does (owner ruling 2026-11-11: a picture is a logo)", async () => {
+  test("the owner reads and sets a picture from a phone", async () => {
     const MAGIC = "macbook-pro.tail0000.ts.net";
     const OWNER = "ramos@example.com";
-    const GUEST = "guest@example.com";
-    const w = await world({ inboxTailscale: true, inboxTailscaleAllow: [GUEST], inboxRows: ["marksProjects", "repoLogo"], inboxRowsDefaults: 99 }, { magic: MAGIC, owner: OWNER });
+    const w = await world({ inboxTailscale: true, inboxRows: ["marksProjects", "repoLogo"], inboxRowsDefaults: 99 }, { magic: MAGIC, owner: OWNER });
     const listener = w.server.tailscale.listenerPort();
     expect(listener).not.toBeNull();
     const headers = (login: string) => ({ Host: `${MAGIC}:${w.server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${w.server.port}`, "Content-Type": "application/json" });
     const at = `http://127.0.0.1:${listener}${w.path}`;
 
-    const read = await fetch(at, { headers: headers(GUEST) });
+    const read = await fetch(at, { headers: headers(OWNER) });
     expect(read.status).toBe(200);
     expect(read.headers.get("content-type")).toBe("image/svg+xml");
-    const write = await fetch(at, { method: "POST", headers: headers(GUEST), body: JSON.stringify({ serverSession: w.server.serverSession, picture: dataUrl(PNG, "image/png") }) });
+    const write = await fetch(at, { method: "POST", headers: headers(OWNER), body: JSON.stringify({ serverSession: w.server.serverSession, picture: dataUrl(PNG, "image/png") }) });
     expect(write.status).toBe(200);
     expect((await w.get()).headers.get("content-type")).toBe("image/png");
 

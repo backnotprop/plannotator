@@ -10,8 +10,18 @@
  *   same-origin wrapper page (`LiveSiteViewer`, the engine of #2258); on the
  *   owner's phone over the tailnet the wrapper frames the prototype relay
  *   instead (server side; nothing differs here); comments are `live`
- *   records, grouped by page in the export. A page that does not open (a
- *   guest login over the tailnet, say) is the server's words in one line.
+ *   records, grouped by page in the export. A page that does not open is the
+ *   server's words in one line.
+ *
+ * A file's page opens with its `Prototype:` line's query and fragment
+ * (`proto/a.html?variant=2#step-2`), as a tab opens that address, so several
+ * options can show one file at different variants (each its own page).
+ * A link in a file's page works as in a tab: one to the page itself with a
+ * query (`?variant=2`, a GET form's fields) loads it again with that query, or
+ * steps to the option that shows the page at that query; one to another
+ * option's page steps to that option; one to another site
+ * opens a new tab; an in-page `#` link scrolls (the bridge). Anything else
+ * stays put (the window shows no other file).
  *
  * The window opens on Interact, with Annotate one click away. Its bottom row
  * (‹ option › Pick) is the window's own, under the page: never drawn over it
@@ -23,14 +33,17 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { HtmlViewer, LiveSiteViewer } from '@plannotator/ui/components/html-viewer';
+import { HtmlViewer, LiveSiteViewer, type HtmlViewerFrame } from '@plannotator/ui/components/html-viewer';
+import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
 import type { Annotation } from '@plannotator/ui/types';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type AttachmentView, type LiveSiteWire } from '../api';
 import { annotationOf } from '../attachments';
+import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { useInboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { LIVE_FRAME_SANDBOX, type PrototypePage } from '../prototypes';
+import { WebPage } from './PrototypeWebPage';
 
 /** The open window keeps an app's proxy alive (the server stops one after 10 idle minutes). */
 const PING_MS = 60_000;
@@ -64,8 +77,24 @@ function shortUrl(url: string): string {
   return url.replace(/^https?:\/\//, '').replace(/\/$/, '');
 }
 
+/** One frame per page: a file at another query (`a.html?variant=2`) is another page, loaded fresh. */
 function pageKey(page: PrototypePage): string {
-  return page.kind === 'app' ? `app:${page.siteId}` : `file:${page.attachmentId}`;
+  return page.kind === 'file' ? `file:${page.attachmentId}${page.start}` : `${page.kind}:${page.siteId}`;
+}
+
+/**
+ * The option a link in a page steps to, or undefined: the option showing that file at that query and fragment,
+ * else (a link with no query or fragment of its own, to another file) the first option showing that file.
+ */
+export function optionForLink(options: readonly PrototypeOption[], steps: readonly number[], attachmentId: string, start: string, from: number): number | undefined {
+  const shows = (i: number) => {
+    const page = options[i]!.page;
+    return page?.kind === 'file' && page.attachmentId === attachmentId ? page : null;
+  };
+  const exact = steps.find((i) => shows(i)?.start === start);
+  if (exact !== undefined) return exact;
+  if (start !== '' || shows(from)) return undefined;
+  return steps.find((i) => shows(i) !== null);
 }
 
 export function PrototypeWindow(props: {
@@ -92,6 +121,7 @@ export function PrototypeWindow(props: {
   const option = options[at]!;
   const page = option.page;
   const [armed, setArmed] = useState(false);
+  const commentRef = useRef<HTMLButtonElement>(null);
   const [justPicked, setJustPicked] = useState(false);
   const closeRef = useRef(props.onClose);
   closeRef.current = props.onClose;
@@ -124,7 +154,8 @@ export function PrototypeWindow(props: {
     closing.current = setTimeout(() => closeRef.current(), PICK_CLOSE_MS);
   };
   const attachment = page?.kind === 'file' ? (props.attachments.find((a) => a.id === page.attachmentId) ?? null) : null;
-  const name = !page ? option.label : page.kind === 'app' ? shortUrl(page.url) : page.name;
+  const name = !page ? option.label : page.kind === 'file' ? page.name : shortUrl(page.url);
+  const web = page?.kind === 'web' ? page : null;
 
   const arrow = (dir: -1 | 1, to: number | undefined) => (
     <button
@@ -136,6 +167,7 @@ export function PrototypeWindow(props: {
         if (to === undefined) return;
         setAt(to);
         setJustPicked(false);
+        if (web) setArmed(false);
       }}
       data-prototype-step={dir < 0 ? 'prev' : 'next'}
     >
@@ -146,7 +178,7 @@ export function PrototypeWindow(props: {
   return (
     <div className="ib-pw" role="dialog" aria-modal="true" aria-label={`Prototype: ${option.label}`} data-prototype-window="" data-prototype-kind={page?.kind}>
       <header className="ib-pw-bar">
-        <span className="ib-pw-name" title={page?.kind === 'app' ? page.url : undefined} data-prototype-url="">
+        <span className="ib-pw-name" title={page && page.kind !== 'file' ? page.url : undefined} data-prototype-url="">
           {name}
         </span>
         {!props.shared && pages.length > 1 && <span className="ib-pw-pill">{`Page ${place + 1} of ${pages.length}`}</span>}
@@ -156,10 +188,21 @@ export function PrototypeWindow(props: {
             <button type="button" role="radio" aria-checked={!armed} className="ib-seg-o" data-on={!armed ? '' : undefined} onClick={() => setArmed(false)} aria-label="Interact" data-prototype-interact="">
               <Icon name="frame" size={13} /> <span className="ib-pw-segt">Interact</span>
             </button>
-            <button type="button" role="radio" aria-checked={armed} className="ib-seg-o" data-on={armed ? '' : undefined} onClick={() => setArmed(true)} aria-label="Annotate" data-prototype-annotate="">
-              <Icon name="pen" size={13} /> <span className="ib-pw-segt">Annotate</span>
-            </button>
+            {web ? (
+              <button ref={commentRef} type="button" role="radio" aria-checked={armed} className="ib-seg-o" data-on={armed ? '' : undefined} onClick={() => setArmed(true)} aria-label="Comment" data-prototype-comment="">
+                <Icon name="comment" size={13} /> <span className="ib-pw-segt">Comment</span>
+              </button>
+            ) : (
+              <button type="button" role="radio" aria-checked={armed} className="ib-seg-o" data-on={armed ? '' : undefined} onClick={() => setArmed(true)} aria-label="Annotate" data-prototype-annotate="">
+                <Icon name="pen" size={13} /> <span className="ib-pw-segt">Annotate</span>
+              </button>
+            )}
           </div>
+        )}
+        {web && (
+          <a className="ib-iconbtn" href={web.url} target="_blank" rel="noopener noreferrer" aria-label="Open in a new tab" title="Open in a new tab" data-prototype-open="">
+            <Icon name="external" size={16} />
+          </a>
         )}
         <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Close the prototype" data-prototype-close="">
           <Icon name="x" size={16} />
@@ -168,6 +211,18 @@ export function PrototypeWindow(props: {
       <div className="ib-pw-stage">
         {!page ? (
           <p className="ib-pw-line">This option has no prototype.</p>
+        ) : page.kind === 'web' ? (
+          <WebPage
+            key={pageKey(page)}
+            threadId={props.threadId}
+            siteId={page.siteId}
+            url={page.url}
+            framed={page.framed}
+            title={`Prototype ${option.label}`}
+            commentAnchor={armed ? commentRef.current : null}
+            onCommentDone={() => setArmed(false)}
+            onSaved={props.onSaved}
+          />
         ) : page.kind === 'app' ? (
           <AppPage
             key={pageKey(page)}
@@ -184,6 +239,15 @@ export function PrototypeWindow(props: {
           <FilePage
             key={pageKey(page)}
             attachment={attachment}
+            attachments={props.attachments}
+            start={page.start}
+            onOpenPage={(attachmentId, start) => {
+              const to = optionForLink(options, pages, attachmentId, start, at);
+              if (to === undefined || to === at) return false;
+              setAt(to);
+              setJustPicked(false);
+              return true;
+            }}
             title={`Prototype ${option.label}`}
             armed={armed}
             setArmed={setArmed}
@@ -336,8 +400,42 @@ function AppPage(props: PageProps & { threadId: string; siteId: string; url: str
   );
 }
 
+/**
+ * What a link in a prototype's page does (the page's bridge hands it over): the page itself with a query loads again
+ * with it, another option's page steps to that option, another site opens a new tab. Anything else stays put.
+ */
+export function followPrototypeLink(
+  href: string,
+  frame: HtmlViewerFrame | undefined,
+  page: { attachment: Pick<InboxAttachmentState, 'id' | 'path'>; html: string | null; attachments: readonly InboxAttachmentState[] },
+  onOpenPage: (attachmentId: string, start: string) => boolean,
+): void {
+  const link = resolveInboxHtmlLink(href, {
+    folder: folderOf(page.attachment.path),
+    baseDir: folderOf(page.attachment.path),
+    attachments: page.attachments,
+    assetRoute: htmlAssetRouteFromDocument(page.html),
+    serverOrigin: window.location.origin,
+    selfPath: page.attachment.path,
+  });
+  // The page itself at another option's query (`?variant=2` where option B is `a.html?variant=2`) steps to that
+  // option; else it loads again with the query, in place.
+  if (link.kind === 'self') {
+    if (!onOpenPage(page.attachment.id, `${link.search === '?' ? '' : link.search}${link.hash}`)) frame?.reload(link.search, link.hash);
+  } else if (link.kind === 'external') window.open(link.url, '_blank', 'noopener,noreferrer');
+  else if (link.kind === 'attachment') onOpenPage(link.id, `${link.search ?? ''}${link.hash ? `#${link.hash}` : ''}`);
+}
+
 /** An HTML file the message attached, at the version that was sent, in the file viewer's own HTML frame. */
-function FilePage(props: PageProps & { attachment: InboxAttachmentState }) {
+function FilePage(
+  props: PageProps & {
+    attachment: InboxAttachmentState;
+    attachments: readonly InboxAttachmentState[];
+    /** The query and fragment the page opens with (its `Prototype:` line's), `""` for none. */
+    start: string;
+    onOpenPage: (attachmentId: string, start: string) => boolean;
+  },
+) {
   const { attachment } = props;
   const source = useInboxFileSource();
   const [view, setView] = useState<AttachmentView | null>(null);
@@ -394,6 +492,10 @@ function FilePage(props: PageProps & { attachment: InboxAttachmentState }) {
       onAnnotateModeExit={() => props.setArmed(false)}
       onAnnotateModeToggle={() => props.setArmed((v) => !v)}
       allowCommentImages={false}
+      // Links and forms work as in a tab (followPrototypeLink).
+      onOpenLink={(href, frame) => followPrototypeLink(href, frame, { attachment, html: view.html, attachments: props.attachments }, props.onOpenPage)}
+      pageNavigation
+      frameStart={props.start || undefined}
       fullViewport
       hideControls
     />

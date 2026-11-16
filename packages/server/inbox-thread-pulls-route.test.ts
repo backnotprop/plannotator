@@ -1,8 +1,8 @@
 /**
  * The window's route for a thread's PRs and the state reader behind it
  * (approval "inbox-pr-binding", 2026-11-08). The forge is a stand-in runner:
- * no gh runs. The failures these guard: a tailnet guest (or any request the
- * Inbox does not count as the owner's) that changes a thread's PRs; a bad ref
+ * no gh runs. The failures these guard: a stale window that changes a
+ * thread's PRs; a bad ref
  * that half-writes; the person's change recorded as an agent's; one gh call
  * per PR instead of one per repository; a merged PR read again on every view;
  * a state that lands on one thread but not on another holding the same PR;
@@ -56,6 +56,7 @@ function world(
     gh?: { run: unknown; calls: string[][] };
     onLiveChange?: (threadIds: readonly string[]) => void;
     bitbucket?: BitbucketRefReader;
+    cards?: boolean;
     projectHost?: (projectId: string) => Promise<string | null>;
   } = {},
 ) {
@@ -66,7 +67,7 @@ function world(
   const project = store.ensureProject({ name: "billing", root: "/work/billing" });
   const thread = store.sendMessage({ project_id: project.id, author: AGENT, body: "Opened the retry PR.", subject: "Invoice retries" }).message.id;
   const gh = options.gh ?? fakeGh({});
-  const refCards = options.bitbucket ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
+  const refCards = options.bitbucket || options.cards ? createRefCards({ run: gh.run as never, now: () => now, avatar: async () => null, bitbucket: options.bitbucket }) : undefined;
   const states = createThreadPullStates({ store, run: gh.run as never, ...(refCards ? { refCards } : {}), now: () => now, fixture: options.fixture ?? null, onLiveChange: options.onLiveChange });
   const route = createThreadPullsRoute({
     store,
@@ -75,14 +76,13 @@ function world(
     json: (data, status = 200) => Response.json(data, { status }),
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     sessionMismatch: (body) => (typeof body.serverSession === "string" && body.serverSession !== "srv_1" ? Response.json({ error: "stale" }, { status: 409 }) : null),
-    localOnly: () => Response.json({ error: "owner only" }, { status: 403 }),
     projectHost: options.projectHost,
     now: () => now,
   });
   const path = (id: string) => `/api/inbox/threads/${id}/pulls`;
-  const get = (id: string, owner = true) => route.route(new Request(`http://x${path(id)}`), path(id), owner);
-  const post = (id: string, body: Record<string, unknown>, owner = true) =>
-    route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id), owner);
+  const get = (id: string) => route.route(new Request(`http://x${path(id)}`), path(id));
+  const post = (id: string, body: Record<string, unknown>) =>
+    route.route(new Request(`http://x${path(id)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path(id));
   const agentAdd = (id: string, ...values: string[]) => {
     const parsed = parseInboxThreadPullRefs(values, "add");
     if ("error" in parsed) throw new Error(parsed.error);
@@ -92,12 +92,8 @@ function world(
 }
 
 describe("the window's route", () => {
-  test("only the owner's window may change a thread's PRs; anyone else gets 403 and nothing is written", async () => {
+  test("a window from before a restart is told so, and writes nothing", async () => {
     const w = world();
-    const refused = await w.post(w.thread, { add: ["o/r#1"] }, false);
-    expect(refused!.status).toBe(403);
-    expect(w.store.threadPulls(w.thread)).toEqual([]);
-    // A window from before a restart is told so, and writes nothing either.
     expect((await w.post(w.thread, { serverSession: "srv_old", add: ["o/r#1"] }))!.status).toBe(409);
     expect(w.store.threadPulls(w.thread)).toEqual([]);
   });
@@ -219,13 +215,30 @@ describe("the state reader", () => {
     expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
   });
 
-  test("a tailnet guest's read runs no gh: it gets the stored state", async () => {
-    const gh = fakeGh({ 1: { state: "OPEN" } });
-    const w = world({ gh });
-    w.agentAdd(w.thread, "o/r#1");
-    const answer = (await (await w.get(w.thread, false))!.json()) as InboxThreadPullsAnswer;
-    expect(gh.calls).toEqual([]);
-    expect(answer.pulls[0]!.state).toBe("unknown");
+  test("a self-managed GitLab's MR reads its state through the glab signed in there; a host glab is not signed in to is never asked", async () => {
+    const calls: string[][] = [];
+    const run = async (cli: string, args: string[]) => {
+      calls.push([cli, ...args]);
+      if (args[0] === "auth") return { stdout: "", stderr: "git.acme.com\n  ✓ Logged in to git.acme.com as dev (keyring)\n", exitCode: 0 };
+      if (cli === "glab" && args.includes("git.acme.com")) {
+        const mergeRequest = { iid: "61", title: "Retry invoices", webUrl: "https://git.acme.com/acme/api/-/merge_requests/61", state: "opened", draft: false, createdAt: "", updatedAt: "", closedAt: null, mergedAt: null, description: "", author: null, labels: { nodes: [] }, assignees: { nodes: [] }, userNotesCount: 0, notes: { nodes: [] }, sourceBranch: "retries", targetBranch: "main", diffStatsSummary: {}, approved: true, detailedMergeStatus: "MERGEABLE", headPipeline: null };
+        return { stdout: JSON.stringify({ data: { project: { fullPath: "acme/api", mergeRequest } } }), stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
+    };
+    const w = world({ gh: { run, calls }, cards: true });
+    w.agentAdd(w.thread, "https://git.acme.com/acme/api/-/merge_requests/61", "https://gitlab.evil.example/acme/api/-/merge_requests/1", "https://evil.example/acme/api/-/merge_requests/2");
+    await w.get(w.thread);
+    await settle();
+    const answer = (await (await w.get(w.thread))!.json()) as InboxThreadPullsAnswer;
+    expect(answer.pulls.map((p) => [p.host, p.platform, p.label, p.state])).toEqual([
+      ["git.acme.com", "gitlab", "!61", "open"],
+      ["gitlab.evil.example", "gitlab", "!1", "unknown"],
+      ["evil.example", "gitlab", "!2", "unknown"],
+    ]);
+    expect(w.store.threadPulls(w.thread)[0]).toMatchObject({ state: "open", base: "main", head: "retries" });
+    expect(calls.filter((call) => call.includes("--hostname")).map((call) => call[call.indexOf("--hostname") + 1])).toEqual(["git.acme.com"]);
+    expect(calls.some((call) => call.some((arg) => arg.includes("evil.example")))).toBe(false);
   });
 
   test("the sandbox's stand-in states are read instead of the forge, by ref, key or URL", async () => {

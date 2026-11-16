@@ -7,7 +7,8 @@
  * `query` (the module refuses to load otherwise); it is the endpoint `gh pr
  * view` reads too. Nothing runs until a person rests on a link long enough for
  * the card to open, or opens a thread's Links (the rows on screen read their
- * state), so drawing a message costs nothing.
+ * state), so drawing a message costs nothing. The Inbox also reads one after
+ * an agent's send names a number it does not know (inbox-pull-lookups.ts).
  *
  * - GitHub: `issueOrPullRequest` answers both kinds in one call. When GitHub
  *   refuses the account in use (404/401/403/SAML), every other account signed
@@ -44,6 +45,7 @@
 import {
   FORGE_REF_BODY_MAX,
   FORGE_REF_COMMENT_MAX,
+  forgeHostTrusted,
   forgeRefKey,
   parseForgeRefUrl,
   type ForgeRef,
@@ -477,7 +479,7 @@ export function refErrorOf(cli: RefCli, result: RefCommandResult): ForgeRefCardE
 export async function readSignedInHosts(run: RefRunner, cli: RefCli): Promise<Set<string>> {
   const hosts = new Set<string>();
   const fromText = (text: string) => {
-    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+)/g)) hosts.add(m[1].toLowerCase());
+    for (const m of text.replace(/\u001b\[[0-9;]*m/g, "").matchAll(/Logged in to ([A-Za-z0-9.-]+(?::\d+)?)/g)) hosts.add(m[1].toLowerCase());
   };
   if (cli === "gh") {
     const json = await run("gh", ["auth", "status", "--json", "hosts"]);
@@ -564,7 +566,7 @@ export function createRefCards(options: {
   now?: () => number;
   /** Avatar URL → data URI (default: `fetchAvatarDataUri`). */
   avatar?: (url: string) => Promise<string | null>;
-}): RefCards & { sizes(): RefCardsSizes } {
+}): RefCards & { sizes(): RefCardsSizes; cached(key: string): ForgeRefCardData | null } {
   const run = options.run;
   const now = options.now ?? Date.now;
   const avatarOf = options.avatar ?? fetchAvatarDataUri;
@@ -653,8 +655,8 @@ export function createRefCards(options: {
    */
   const fetchesFrom = async (ref: ForgeRef): Promise<boolean> => {
     if (ref.platform === "bitbucket") return !!options.bitbucket && ref.host === "bitbucket.org" && ref.kind === "pull";
-    if (ref.host === (ref.platform === "github" ? "github.com" : "gitlab.com")) return true;
-    return (await signedInHosts(ref.platform === "github" ? "gh" : "glab")).has(ref.host);
+    if (forgeHostTrusted(ref, new Set())) return true;
+    return forgeHostTrusted(ref, await signedInHosts(ref.platform === "github" ? "gh" : "glab"));
   };
 
   const fail = (error: ForgeRefCardError): ForgeRefCardResult => ({ ok: false, error, fetchedAt: now() });
@@ -778,6 +780,11 @@ export function createRefCards(options: {
         }
       }
       return refresh(key, ref);
+    },
+    /** The card a read already holds for a `forgeRefKey`, still showable; never fetches. */
+    cached(key) {
+      const hit = cache.get(key);
+      return hit?.ok && now() - hit.fetchedAt < REF_STALE_MAX_MS ? hit.data : null;
     },
     sizes() {
       return {

@@ -33,7 +33,7 @@
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_MESSAGE_COMMENT_QUOTE_MAX, INBOX_SESSION_ID_PATTERN, isInboxId, type InboxDraftFile, type InboxReplyDraft, type InboxReplyQuote } from "@plannotator/core/inbox-types";
+import { INBOX_MESSAGE_COMMENT_QUOTE_MAX, isInboxId, isInboxRecipientSessionId, type InboxDraftFile, type InboxReplyDraft, type InboxReplyQuote } from "@plannotator/core/inbox-types";
 import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
 import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
 import { InboxError } from "./schema";
@@ -79,7 +79,7 @@ function parse(text: string): InboxReplyDraft | null {
 /** A list of recipient session ids, or null when it is not one (not session ids as a tag names them, repeats). */
 function recipientList(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null;
-  if (value.some((id) => typeof id !== "string" || !INBOX_SESSION_ID_PATTERN.test(id))) return null;
+  if (value.some((id) => !isInboxRecipientSessionId(id))) return null;
   if (new Set(value).size !== value.length) return null;
   return [...(value as string[])];
 }
@@ -171,6 +171,7 @@ export function checkInboxReplyDraftInput(
         add: checkInboxDraftFiles(inboxDirPath, input.files_add, body.length, { list: "files_add", skipGone: true }),
         remove: checkInboxDraftIds(input.files_remove, "files_remove"),
         place: checkInboxDraftPlaces(input.files_place, body.length, "files_place"),
+        ...(input.files_order !== undefined ? { order: checkInboxDraftIds(input.files_order, "files_order") } : {}),
       }
     : null;
   const recipients = input.recipients === undefined || input.recipients === null ? null : recipientList(input.recipients);
@@ -195,6 +196,7 @@ export interface InboxReplyDraftInput {
   files_add?: unknown;
   files_remove?: unknown;
   files_place?: unknown;
+  files_order?: unknown;
   /** Who the reply goes to: session ids (the recipient pill); absent, the draft keeps its own. */
   recipients?: unknown;
   /** The message the reply quotes, `{ of, words? }` (approval "inbox-reply-quote"); null: none; absent, the draft keeps its own. */

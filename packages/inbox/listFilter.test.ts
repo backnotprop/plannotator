@@ -8,7 +8,10 @@
  * the filter; a menu count that applies its own group; a cookie that keeps junk or breaks the list; a Pull request
  * pick that reads the wrong state, treats a removed PR as one, or puts a PR not read yet under a state (or under No PR);
  * a Not seen that reads anything but the row's bold (`unread`), a row the person opened that a Not seen list drops, or
- * a cookie from before Not seen that no longer loads.
+ * a cookie from before Not seen that no longer loads. Tags (approval "inbox-thread-tags", step 2): several tags that
+ * AND instead of OR, a Tag pick that ignores the other groups, a row's tags read past the window's rule (an older
+ * linked machine's), a tag's list that still applies Tag picks, a pick whose tag moved to another machine's id or was
+ * deleted.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxThreadPullsSummary, type InboxListRow, type InboxListSection, type InboxThreadPull, type InboxThreadPullState } from '@plannotator/core/inbox-types';
@@ -29,6 +32,8 @@ import {
   writeListFilter,
   type ListFilter,
 } from './listFilter';
+import { toggledTagPick, withLiveTagPicks } from './listFilterTags';
+import { clearedFrom } from './components/ListFilter';
 import { setStorageBackend, resetStorageBackend, getItem } from '@plannotator/ui/utils/storage';
 
 /** Local times, so the spans read the window's own days. */
@@ -178,9 +183,9 @@ test('the row summary the server builds is what the picks read: the PR still in 
 });
 
 test('a project\'s page sets its Project picks aside, and the badge counts what applies', () => {
-  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false };
+  const filter: ListFilter = { projects: ['prj_web', 'prj_docs'], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, tags: [] };
   expect(pickCount(filter)).toBe(4);
-  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false });
+  expect(appliedFilter(filter, true)).toEqual({ projects: [], updated: '7d', agents: ['Pi'], pulls: [], notSeen: false, tags: [] });
   expect(pickCount(appliedFilter(filter, true))).toBe(2);
   expect(appliedFilter(filter, false)).toBe(filter);
 });
@@ -201,7 +206,7 @@ test('Smart groups keep their order and names and count only the matches; nothin
 });
 
 test('a menu row counts with the other groups\' picks, not its own group\'s', () => {
-  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false };
+  const filter: ListFilter = { projects: ['prj_web'], updated: '7d', agents: [], pulls: [], notSeen: false, tags: [] };
   // docs is not picked, but its row says what ticking it would add: docs rows in the last 7 days.
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_docs')).toBe(0);
   expect(countWhere(ALL, filter, NOW, 'projects', (r) => r.project.id === 'prj_billing')).toBe(1);
@@ -222,7 +227,7 @@ describe('remembered per browser', () => {
   });
 
   test('picks are written, read back, and removed when cleared', () => {
-    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true };
+    const filter: ListFilter = { projects: ['prj_web'], updated: { from: '2026-10-20', to: '2026-11-01' }, agents: ['Codex'], pulls: ['merged', 'none'], notSeen: true, tags: ['ini_release'] };
     writeListFilter(filter);
     expect(parseListFilter(getItem(LIST_FILTER_COOKIE))).toEqual(filter);
     writeListFilter(NO_LIST_FILTER);
@@ -232,11 +237,68 @@ describe('remembered per browser', () => {
   const junk: Array<[string, string | null, ListFilter]> = [
     ['no cookie', null, NO_LIST_FILTER],
     ['not JSON', '{oops', NO_LIST_FILTER],
-    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false }],
+    ['wrong shapes are dropped', JSON.stringify({ projects: 'prj_web', updated: 'yesterday', agents: [1, 'Pi', ''] }), { projects: [], updated: null, agents: ['Pi'], pulls: [], notSeen: false, tags: [] }],
     ['unknown Pull request picks are dropped', JSON.stringify({ pulls: ['open', 'stale', 3] }), { ...NO_LIST_FILTER, pulls: ['open'] }],
     ['Not seen is on only for true', JSON.stringify({ notSeen: 'yes' }), NO_LIST_FILTER],
     ['a cookie from before Not seen loads with it off', JSON.stringify({ projects: ['prj_web'], updated: '7d', agents: [], pulls: ['open'] }), { ...NO_LIST_FILTER, projects: ['prj_web'], updated: '7d', pulls: ['open'] }],
+    ['a cookie from before tags loads with no Tag pick', JSON.stringify({ agents: ['Pi'], notSeen: true }), { ...NO_LIST_FILTER, agents: ['Pi'], notSeen: true }],
     ['a range with a bad day is dropped', JSON.stringify({ updated: { from: '2026-13', to: '2026-11-01' } }), NO_LIST_FILTER],
   ];
   for (const [name, raw, want] of junk) test(name, () => expect(parseListFilter(raw)).toEqual(want));
+});
+
+describe('Tag picks (approval "inbox-thread-tags", step 2)', () => {
+  const tagged = (r: InboxListRow, tags: string[]) => ({ ...r, tags }) as InboxListRow;
+  const T = {
+    release: tagged(ROWS.billingToday, ['ini_release']),
+    both: tagged(ROWS.webLateYesterday, ['ini_release', 'ini_windows']),
+    windows: tagged(ROWS.opsOld, ['ini_windows']),
+    none: ROWS.webSixDaysBack,
+  };
+  const ROWS_T = Object.values(T);
+  const keptT = (filter: Partial<ListFilter>, tagsOf?: (row: InboxListRow) => readonly string[]) => ROWS_T.filter((r) => rowMatches(r, { ...NO_LIST_FILTER, ...filter }, NOW, undefined, tagsOf)).map((r) => r.thread_id);
+
+  test('several tags widen the list; with another group they narrow it', () => {
+    expect(keptT({ tags: ['ini_release'] })).toEqual(['billingToday', 'webLateYesterday']);
+    expect(keptT({ tags: ['ini_release', 'ini_windows'] })).toEqual(['billingToday', 'webLateYesterday', 'opsOld']);
+    expect(keptT({ tags: ['ini_release', 'ini_windows'], projects: ['prj_web'] })).toEqual(['webLateYesterday']);
+    expect(keptT({ tags: ['ini_windows'], updated: '7d' })).toEqual(['webLateYesterday']);
+    expect(pickCount({ ...NO_LIST_FILTER, tags: ['ini_release', 'ini_windows'], notSeen: true })).toBe(3);
+  });
+
+  test('a row\'s tags are read by the window\'s rule, not the row\'s own field', () => {
+    // An older linked machine's row: the window reads no tags on it, so no Tag pick keeps it.
+    expect(keptT({ tags: ['ini_release'] }, (r) => (r.thread_id === 'billingToday' ? [] : (r.tags ?? [])))).toEqual(['webLateYesterday']);
+  });
+
+  test('a Tag row counts with the other groups\' picks, not its own', () => {
+    const filter: ListFilter = { ...NO_LIST_FILTER, tags: ['ini_windows'], projects: ['prj_billing', 'prj_web'] };
+    expect(countWhere(ROWS_T, filter, NOW, 'tags', (r) => (r.tags ?? []).includes('ini_release'))).toBe(2);
+    expect(countWhere(ROWS_T, filter, NOW, 'projects', (r) => r.project.id === 'prj_ops')).toBe(1);
+  });
+
+  test('on a tag\'s list the Tag picks step aside, and Clear filters keeps them for the Inbox', () => {
+    const filter: ListFilter = { ...NO_LIST_FILTER, tags: ['ini_release'], agents: ['Pi'] };
+    expect(appliedFilter(filter, false, true)).toEqual({ ...filter, tags: [] });
+    expect(appliedFilter(filter, false, false)).toBe(filter);
+    expect(clearedFrom(filter, false, true)).toEqual({ ...NO_LIST_FILTER, tags: ['ini_release'] });
+    expect(clearedFrom({ ...filter, projects: ['prj_web'] }, true, true)).toEqual({ ...NO_LIST_FILTER, projects: ['prj_web'], tags: ['ini_release'] });
+    expect(clearedFrom(filter, false)).toEqual(NO_LIST_FILTER);
+  });
+
+  test('a pick names its tag by any machine\'s id; a deleted tag\'s pick applies nothing; no tags kept, no Tag pick', () => {
+    const release = { id: 'ini_here', name: 'Release', created_at: '', created_by: { kind: 'person' }, updated_at: '', deleted_at: null, machines: { self: 'ini_here', far: 'ini_far' } } as const;
+    const live = [release];
+    const filter: ListFilter = { ...NO_LIST_FILTER, tags: ['ini_far', 'ini_gone'] };
+    expect(withLiveTagPicks(filter, live).tags).toEqual(['ini_here']);
+    expect(pickCount(withLiveTagPicks(filter, live))).toBe(1);
+    expect(withLiveTagPicks(filter, null).tags).toEqual([]);
+    // The list not read yet: the picks hold as they are, so the rows never show unfiltered for a moment.
+    expect(withLiveTagPicks(filter, undefined)).toBe(filter);
+    const none = { ...NO_LIST_FILTER };
+    expect(withLiveTagPicks(none, live)).toBe(none);
+    // Unticking takes every pick that names it; ticking adds the list's id.
+    expect(toggledTagPick(['ini_far', 'ini_gone'], release, live)).toEqual(['ini_gone']);
+    expect(toggledTagPick([], release, live)).toEqual(['ini_here']);
+  });
 });

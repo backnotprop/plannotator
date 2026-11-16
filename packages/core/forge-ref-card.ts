@@ -39,7 +39,7 @@ const NUMBER = /^[1-9]\d{0,9}$/;
  * - GitLab: `https://<host>/<namespace>/<project>/-/(issues|work_items|merge_requests)/<n>`
  * - Bitbucket Cloud: `https://bitbucket.org/<workspace>/<repo>/(issues|pull-requests)/<n>`
  * A trailing `/files`, `?query` or `#fragment` is ignored. Only https, no
- * credentials, no port.
+ * credentials, no port on github.com, gitlab.com or bitbucket.org.
  */
 export function parseForgeRefUrl(href: string): ForgeRef | null {
   let url: URL;
@@ -48,11 +48,10 @@ export function parseForgeRefUrl(href: string): ForgeRef | null {
   } catch {
     return null;
   }
-  if (url.protocol !== "https:" || url.username || url.password || url.port) return null;
-  const host = webForgeHost(url.hostname);
-  if (!host) return null;
-  const platform = classifyForgeHost(host);
-  if (!platform) return null;
+  if (url.protocol !== "https:" || url.username || url.password) return null;
+  const forge = forgeOfUrl(url);
+  if (!forge) return null;
+  const { host, platform } = forge;
   const parts = url.pathname.split("/").filter(Boolean);
   let owner: string;
   let repo: string | undefined;
@@ -86,6 +85,24 @@ export function webForgeHost(hostname: string): string | null {
   if (!/^[a-z0-9.-]+$/.test(h) || !h.includes(".")) return null;
   if (/^(github\.com|gitlab\.com|bitbucket\.org)[.-]/.test(h)) return null;
   return h;
+}
+
+const PUBLIC_FORGE_HOSTS: Readonly<Record<ForgePlatform, string>> = { github: "github.com", gitlab: "gitlab.com", bitbucket: "bitbucket.org" };
+const GITLAB_REF_PATHS = new Set(["merge_requests", "issues", "work_items"]);
+
+export function forgeOfUrl(url: URL): { host: string; platform: ForgePlatform } | null {
+  const name = webForgeHost(url.hostname);
+  if (!name) return null;
+  if (url.port && Object.values(PUBLIC_FORGE_HOSTS).includes(name)) return null;
+  const host = url.port ? `${name}:${url.port}` : name;
+  const parts = url.pathname.split("/").filter(Boolean);
+  const dash = parts.indexOf("-");
+  const platform = classifyForgeHost(host) ?? (dash >= 2 && GITLAB_REF_PATHS.has(parts[dash + 1] ?? "") ? "gitlab" : null);
+  return platform ? { host, platform } : null;
+}
+
+export function forgeHostTrusted(ref: Pick<ForgeRef, "platform" | "host">, signedIn: ReadonlySet<string>): boolean {
+  return ref.host === PUBLIC_FORGE_HOSTS[ref.platform] || signedIn.has(ref.host);
 }
 
 function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | null {
