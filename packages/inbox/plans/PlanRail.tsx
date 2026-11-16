@@ -1,10 +1,12 @@
 /**
  * The plan page's versions, in the shared frame's versions panel (@plannotator/ui/components/frame `VersionsPanel`,
  * the Space page screen's): the versions of the file on screen, newest first, consecutive saves by one author within
- * 30 minutes folded; who saved each (a display name only) and when; an approval on its version. Under the version on
- * screen: the frame's Compare and Copy link (`VersionActions`), our Compare of the version you saw with the newest
- * when the newest is on screen, then that file's own activity (its versions saved, the decisions on it; nothing
- * plan-wide). An artifact has no versions: the page's line says so (`ArtifactLine`).
+ * 30 minutes folded; who saved each (a display name only; no author line at all while no version has one) and when;
+ * the decision on its version (an approval, or "Changes asked"); "You saw this" under the version the person had
+ * seen. Under the version on screen: the frame's Compare and Copy link (`VersionActions`), with our Compare of the
+ * version you saw with the newest between them when the newest is on screen. Under the list (its footer): that
+ * file's own activity (its versions saved, the decisions on it; nothing plan-wide). An artifact has no versions: the
+ * page's line says so (`ArtifactLine`).
  */
 import type { ReactElement } from 'react';
 import type { PlanArtifact, PlanDecision, PlanVersion } from '@plannotator/core/plans';
@@ -54,6 +56,12 @@ function approvalWords(decision: PlanDecision | undefined): string | null {
   return decision.decision === 'approved-with-notes' ? 'you, with notes' : 'you';
 }
 
+/** "Changes asked" on a version the person sent back (an approval is the frame's own line, `approval`). */
+function decisionOf(decision: PlanDecision | undefined): FrameVersionEntry['decision'] {
+  if (!decision || decisionTone(decision.decision) !== 'changes') return null;
+  return { label: decisionLabel(decision.decision), tone: 'negative' };
+}
+
 /** The plan's versions as the frame's entries, newest first. */
 export function planVersionEntries(versions: readonly PlanVersion[], shown: number, head: number, decisions: ReadonlyMap<number, PlanDecision>): FrameVersionEntry[] {
   return [...versions]
@@ -69,6 +77,7 @@ export function planVersionEntries(versions: readonly PlanVersion[], shown: numb
       linked: true,
       sameAsOlder: !!all[i + 1] && all[i + 1]!.version === v.version,
       approval: approvalWords(decisions.get(v.version_number)),
+      decision: decisionOf(decisions.get(v.version_number)),
       canCompare: v.version_number !== head,
     }));
 }
@@ -77,32 +86,45 @@ export function PlanVersions(props: PlanVersionsProps) {
   const { versions, documentId, read, shown, head, seen, compare, decisions, rowLink, onPicked, onCompare, onCopyLink, onClose } = props;
   const entries = planVersionEntries(versions, shown, head, decisions);
   const pair = compare || shown !== head ? null : comparePair(shown, seen);
+  // Plans keep a display name only when one was given: with none on any version, no "No name recorded" lines.
+  const authors = entries.some((e) => e.author.kind === 'person');
   return (
     <VersionsPanel
       status="success"
       entries={entries}
-      place={{ rowLink: (entry) => rowLink(entry.number!), onRowOpen: () => onPicked() }}
+      place={{
+        rowLink: (entry) => rowLink(entry.number!),
+        onRowOpen: () => onPicked(),
+        authors,
+        note: (entry) =>
+          seen !== null && entry.number === seen && seen !== head ? (
+            <span className="ib-plan-seen" data-plan-seen="">
+              <Icon name="eye" />
+              You saw this
+            </span>
+          ) : null,
+      }}
       onRetry={() => {}}
       onClose={onClose}
       onScreenActions={(onScreen) => (
-        <div className="ib-plan-onscreen" data-plan-onscreen="">
-          {pair && (
-            <FrameButton variant="outline" size="sm" className="ib-plan-compare" onClick={() => onCompare(pair.from, pair.to)} data-plan-compare="">
-              Compare v{pair.from} with v{pair.to}
-            </FrameButton>
-          )}
-          <VersionActions
-            version={onScreen.version}
-            number={onScreen.number}
-            currentNumber={head}
-            canCompare={!compare && onScreen.canCompare}
-            soft
-            onCompare={() => onCompare(onScreen.number!, head)}
-            onCopyLink={() => onCopyLink(onScreen.number!)}
-          />
-          <Activity versions={versions} decisions={read.decisions.filter((d) => d.document_id === documentId)} />
-        </div>
+        <VersionActions
+          version={onScreen.version}
+          number={onScreen.number}
+          currentNumber={head}
+          canCompare={!compare && onScreen.canCompare}
+          soft
+          onCompare={() => onCompare(onScreen.number!, head)}
+          onCopyLink={() => onCopyLink(onScreen.number!)}
+          actions={
+            pair && (
+              <FrameButton variant="outline" size="sm" onClick={() => onCompare(pair.from, pair.to)} data-plan-compare="">
+                Compare v{pair.from} with v{pair.to}
+              </FrameButton>
+            )
+          }
+        />
       )}
+      footer={<Activity versions={versions} decisions={read.decisions.filter((d) => d.document_id === documentId)} />}
     />
   );
 }

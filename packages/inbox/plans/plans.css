@@ -108,12 +108,11 @@
 .ib-plans-steps { margin: 18px 0 0; padding: 14px 18px 14px 36px; border-radius: 12px; background: color-mix(in oklch, var(--card) 92%, transparent); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08), 0 0 0 1px var(--border); font-size: var(--ib-fs-14, 14px); line-height: 1.6; }
 .ib-plans-steps li + li { margin-top: 4px; }
 
-/* A plan, drawn from the shared frame (@plannotator/ui/components/frame, frame.css): its top bar and three cards on
-   the ground. Here only what is ours: the frame fills the Inbox's main column on the frame's ground (its own 8 px
-   gutter, so the Inbox's is not added), and the plan's own parts inside the frame's slots. */
-.ib-main:has(> .ib-plan-shell) { padding: 0; }
-.ib-plan-shell { position: relative; display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; height: 100%; background: var(--frame-ground); }
-.ib-plan-shell > [data-frame] { flex: 1; min-height: 0; }
+/* A plan, drawn from the shared frame (@plannotator/ui/components/frame, frame.css): its ground (`FrameGround
+   as="div"`), top bar and three cards. Here only what is ours: the ground fills the Inbox's main column (the frame
+   keeps its own 8 px gutter, so the Inbox's is not added), and the plan's own parts inside the frame's slots. */
+.ib-main:has(> [data-frame-ground]) { padding: 0; }
+.ib-plan-page { height: 100%; min-width: 0; }
 /* The page card's body: a banner, then the file filling the rest */
 .ib-plan-cardbody { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .ib-plan-doc { flex: 1; min-height: 0; display: flex; }
@@ -126,26 +125,23 @@
 .ib-plan-banner { display: flex; align-items: center; gap: 12px; margin: 4px 16px 4px; padding: 8px 12px 8px 14px; border-radius: 10px; background: color-mix(in oklch, var(--primary) 9%, transparent); font-size: 13px; }
 .ib-plan-banner > .ib-ic { width: 16px; height: 16px; flex: none; color: var(--primary); }
 .ib-plan-banner p { margin: 0; flex: 1; min-width: 0; }
-/* The reading line's end: the project, then the newest decision on this file */
-.ib-plan-decision { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); font-size: 13px; white-space: nowrap; }
-.ib-plan-readend { display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
-.ib-plan-project { color: var(--muted-foreground); }
+/* The reading line's start: the newest decision on this file */
+.ib-plan-decision { display: inline-flex; align-items: center; gap: 6px; min-width: 0; color: var(--foreground); font-size: 13px; white-space: nowrap; }
 .ib-plan-on { color: var(--muted-foreground); }
+/* The rail head's quiet line: the plan's project */
+.ib-plan-railproj { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-plan-railproj > .ib-ic { width: 12px; height: 12px; flex: none; }
+.ib-plan-railproj > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The versions panel: "You saw this" under a row */
+.ib-plan-seen { display: inline-flex; align-items: center; gap: 6px; }
+.ib-plan-seen > .ib-ic { width: 12px; height: 12px; flex: none; }
 /* An artifact's line on its card: no versions, and what the file is */
 .ib-plan-artline { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; padding: 8px 16px 6px; font-size: 13px; color: var(--muted-foreground); }
-/* The rail's list (the frame's rows), the Main mark, our Artifacts heading in the frame's eyebrow, the filter field */
+/* The rail's list (the frame's rows and headings), the Main mark at a row's end, the filter field */
 .ib-plan-files { display: flex; flex-direction: column; }
-.ib-plan-file-main { flex: none; margin-left: 6px; font-size: 11px; color: var(--frame-tertiary); }
-.ib-plan-files-sec { display: flex; align-items: baseline; gap: 6px; padding: 12px 8px 4px; }
-.ib-plan-files-count { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--frame-tertiary); }
+.ib-plan-files-art { margin-top: 8px; }
+.ib-plan-file-main { font-size: 11px; color: var(--frame-tertiary); }
 .ib-plan-files-field { width: 100%; height: 28px; padding: 0 10px; border: 0; border-radius: 8px; background: var(--muted); color: var(--foreground); font-size: 13px; }
-/* Our sheet from the left, where a desktop pane cannot dock the rail */
-.ib-plan-filesheet { position: fixed; inset: 0 auto 0 0; width: min(360px, 100vw - 2rem); max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 0; border: 0; color: var(--foreground); box-shadow: 0 8px 32px rgba(0, 0, 0, 0.28); display: flex; }
-.ib-plan-filesheet:not([open]) { display: none; }
-.ib-plan-filesheet::backdrop { background: rgba(0, 0, 0, 0.32); }
-.ib-plan-filesheet-in { display: flex; flex-direction: column; width: 100%; overflow-y: auto; padding-top: env(safe-area-inset-top); }
-/* Under the version on screen in the frame's versions panel: our Compare, the frame's actions, the file's activity */
-.ib-plan-onscreen { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; }
 
 
 /* An artifact, or an HTML page, in the card */
@@ -178,7 +174,8 @@
 .ib-plan-diff .plan-diff-removed { background: color-mix(in oklch, var(--destructive) 10%, transparent); }
 .ib-plan-diff .plan-diff-modified { background: transparent; }
 
-.ib-plan-activity { align-self: stretch; margin-top: 8px; }
+/* The versions panel's footer: the file's activity */
+.ib-plan-activity { margin-top: 8px; }
 .ib-plan-activity h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; }
 .ib-plan-activity ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
 .ib-plan-activity li { display: flex; align-items: center; gap: 8px; font-size: 13px; }
@@ -213,6 +210,6 @@
   .ib-plans-table .ib-plans-c-date { text-align: right; }
   .ib-plans-c-date .ib-plans-new-n { display: block; width: fit-content; margin: 4px 0 0 auto; }
   .ib-plan-banner { flex-wrap: wrap; }
-  .ib-plan-shell { padding-top: env(safe-area-inset-top); }
+  .ib-plan-page { padding-top: env(safe-area-inset-top); }
   .ib-plans-words { padding: 24px 20px; }
 }

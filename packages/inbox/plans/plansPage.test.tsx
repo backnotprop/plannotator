@@ -8,18 +8,24 @@
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
  * - a decision on an older version reads as current in the list or the page line (it must say "changed since");
- * - the page leaves the shared frame (its top bar, rail, page card and versions panel);
+ * - the page leaves the shared frame (its ground, top bar, rail, page card and versions panel), the reading line's
+ *   version words leave its end, or the decision its start;
+ * - the project leaves the rail head's quiet line or the top bar's "Plans / project / plan", or its crumb becomes a
+ *   link (the Plans list has no address for one project);
  * - the files rail loses the main page's place or mark, mixes artifacts in with pages, shows Artifacts with none,
  *   opens a row without the versions and the address following, draws an HTML artifact that can run, load or follow
  *   a link, shows a picture the server sends as a download, or forgets that it was closed;
- * - short of room the rail does not give way to our sheet first, then the versions to the frame's sheet;
+ * - short of room the rail does not give way to the frame's sheet first (with no tab that opens nothing), then the
+ *   versions to the frame's sheet;
  * - the versions panel cannot be closed, forgets that it was, or cannot be opened again from the reading line;
  * - another page's activity shows the main page's history, or an artifact's shows anything plan-wide;
  * - opening a plan through another page's link marks every version new in the list;
  * - the compact list leaves out a plan or orders it differently, loses a column, is not a link, is not remembered,
  *   or search and the empty search stop working in it;
- * - picking a version in the versions panel does not show that version, or Compare and Copy link are lost;
- * - the diff does not compare the two versions with the plan diff engine;
+ * - picking a version in the versions panel does not show that version, Compare and Copy link are lost, the version
+ *   you saw loses "You saw this", a sent-back version loses "Changes asked", or versions with no name each say
+ *   "No name recorded";
+ * - the diff does not compare the two versions with the plan diff engine, or the reading line does not say so;
  * - with Plans off, the page draws nothing and a `#plans` link goes to the Inbox.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -155,6 +161,17 @@ function draw(on = true) {
 const text = (el: Element | null) => (el?.textContent ?? '').replace(/\s+/g, ' ').trim();
 /** A file row's name in the frame's rail (`FileRow`: the name, then our Main mark). */
 const fileNames = (scope: Element, sel = '') => [...scope.querySelectorAll(`${sel} [data-plan-file] span.truncate`)].map(text);
+/**
+ * The reading line's version words, without the count on its toggle (the frame's `count`) and the leading "Reading"
+ * (the frame is dropping that word): "v2 · newest", "v2 of 3".
+ */
+function readingWords(host: Element) {
+  const toggle = host.querySelector('[data-plan-reading] [data-reading-versions]');
+  if (!toggle) return '';
+  const copy = toggle.cloneNode(true) as Element;
+  copy.querySelector('[data-reading-versions-count]')?.remove();
+  return text(copy).replace(/^Reading /, '');
+}
 /** Plannotator's storage in memory for one test (happy-dom keeps no cookie here); put back in afterEach. */
 function keptStorage(entries: [string, string][] = []) {
   const kept = new Map<string, string>(entries);
@@ -215,7 +232,7 @@ test.skipIf(!hasDom)('a decision on an older version never reads as current: the
 
   window.location.hash = `#plans=${older}`;
   await settle();
-  expect(text(host.querySelector('[data-plan-reading] [data-plan-decision]'))).toBe('Approved on v2 · changed since');
+  expect(text(host.querySelector('[data-plan-reading] [data-reading-start] [data-plan-decision]'))).toBe('Approved on v2 · changed since');
   // The version row keeps its own approval (the frame's), without the note.
   expect(text(host.querySelector('[data-plan-version="2"] [data-version-approval]'))).toBe('Approved by you');
 
@@ -316,17 +333,46 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(row.querySelector('[data-document-rail] [data-plan-files]')).not.toBeNull();
   expect(row.querySelector('[data-document-shell] [data-plan-document]')).not.toBeNull();
   expect(row.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
+  // On the frame's own ground, in theme colours.
+  expect(host.querySelector('[data-frame-ground][data-frame-colors="theme"] [data-plan-page] [data-frame]')).not.toBeNull();
+  // The top bar: Plans / the project / the plan; the project is words, not a link (no address for one project).
+  expect(text(shell.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Plans');
+  expect(shell.querySelector('[data-page-header] [data-breadcrumb-root]')?.getAttribute('href')).toBe('#plans');
+  const projectCrumb = shell.querySelector('[data-page-header] [data-plan-crumb-project]')!;
+  expect(text(projectCrumb)).toBe('harbor-api');
+  expect(projectCrumb.closest('a')).toBeNull();
+  expect(projectCrumb.hasAttribute('href')).toBe(false);
   expect(text(shell.querySelector('[data-page-header] [aria-current="page"]'))).toBe('Rotate refresh tokens');
+  // The rail head: back to Plans with the plan's name, the project on the quiet line under it.
   expect(text(row.querySelector('[data-pages-back-link]'))).toBe('Rotate refresh tokens');
+  const railProject = row.querySelector('[data-pages-rail-head] [data-pages-rail-meta] [data-plan-rail-project]')!;
+  expect(text(railProject)).toBe('harbor-api');
+  expect(railProject.getAttribute('title')).toBe('harbor-api');
+  // The reading line: the decision at its start, the version words and the versions toggle (with their count) at its end.
+  const reading = host.querySelector('[data-plan-reading]')!;
+  const start = reading.querySelector('[data-reading-start] [data-plan-decision]')!;
+  const end = reading.querySelector('[data-reading-version-end] [data-reading-versions]')!;
+  expect(text(start)).toBe('Approved on v1');
+  expect(readingWords(host)).toBe('v1 · newest');
+  expect(text(end.querySelector('[data-reading-versions-count]'))).toBe('1');
+  expect(start.compareDocumentPosition(end) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(text(reading)).not.toContain('harbor-api');
   const panel = host.querySelector('[data-plan-files]')!;
   const names = (sel: string) => fileNames(panel, sel);
   expect(names('[data-plan-files-pages]')).toEqual(['Rotate refresh tokens', 'Flow', 'Rollout']);
-  expect(text(panel.querySelector('[data-plan-files-pages] > :first-child [data-plan-file-main]'))).toBe('Main');
+  // "Main" at the main page's row end (the frame's `trailing`).
+  expect(text(panel.querySelector('[data-plan-files-pages] > :first-child [data-file-row-trailing] [data-plan-file-main]'))).toBe('Main');
   expect(panel.querySelectorAll('[data-plan-file-main]').length).toBe(1);
   expect(names('[data-plan-files-artifacts]')).toEqual(['mockup.html', 'scan.bmp', 'Screen']);
-  expect(text(panel)).toContain('Artifacts 3');
+  // The frame's second heading: Artifacts and their count, with no Filter of its own (one Filter, under Pages).
+  const artHeading = panel.querySelector('[data-plan-files-art-heading]')!;
+  expect(text(artHeading)).toBe('Artifacts3');
+  expect(artHeading.querySelector('[title="3 artifacts"]')).not.toBeNull();
+  expect(artHeading.querySelector('button')).toBeNull();
+  expect(panel.querySelectorAll('button[aria-label="Filter files"]').length).toBe(1);
   expect(panel.querySelector(`[data-plan-file="d:${store.get(id)!.primary_doc_id}"]`)?.getAttribute('aria-current')).toBe('page');
-  // The main page's activity: its versions and your decisions.
+  // The main page's activity, under the versions list (the panel's footer): its versions and your decisions.
+  expect(host.querySelector('[data-versions-panel] [data-versions-footer] .ib-plan-activity')).not.toBeNull();
   const activity = () => [...host.querySelectorAll('.ib-plan-activity li')].map(text);
   expect(activity().some((line) => line.startsWith('You approved v1'))).toBe(true);
 
@@ -338,8 +384,11 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(host.querySelectorAll('[data-versions-panel] [data-version-row]').length).toBe(2);
   expect(host.querySelector(`[data-plan-file="d:${rollout.id}"]`)?.getAttribute('aria-current')).toBe('page');
   // The top bar: Plans / the plan / the page.
+  expect(text(host.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Plans');
+  expect(host.querySelector('[data-page-header] a[aria-label="Rotate refresh tokens"]')?.getAttribute('href')).toBe(`#plans=${id}`);
   expect(text(host.querySelector('[data-page-header] [aria-current="page"]'))).toBe('Rollout');
-  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions]'))).toBe('Reading v2 · newest');
+  expect(readingWords(host)).toBe('v2 · newest');
+  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions-count]'))).toBe('2');
   // Its activity is its own history only: nothing of the main page's versions or decisions.
   expect(activity().map((line) => line.split(' saved')[0])).toEqual(['v2', 'v1']);
 
@@ -392,29 +441,42 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(host.querySelector('[data-plan-files]')).toBeNull();
   await act(async () => (host.querySelector('button[aria-label="Show files"]') as HTMLButtonElement).click());
   await settle();
-  // A plan with no artifacts: one page, no Artifacts heading.
+  // A plan with no artifacts: one page, no Artifacts heading. With no project: no quiet line, Plans / the plan.
   expect(fileNames(host.querySelector('[data-plan-files]')!)).toEqual(['Ledger import']);
+  expect(host.querySelector('[data-pages-rail-meta]')).toBeNull();
+  expect(host.querySelector('[data-plan-crumb-project]')).toBeNull();
+  expect(text(host.querySelector('[data-page-header] a[data-plans-back]'))).toBe('Plans');
   expect(host.querySelector('[data-plan-files-artifacts]')).toBeNull();
   expect(text(host.querySelector('[data-plan-files]'))).not.toContain('Artifacts');
 });
 
-test.skipIf(!hasDom)('short of room the rail gives way first, to our sheet; then the versions, to the frame\'s sheet', async () => {
+test.skipIf(!hasDom)('short of room the rail gives way first, to the frame\'s sheet; then the versions, to the frame\'s sheet', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nThe plan.\n'], { seen: 1 });
-  keptStorage();
+  // The rail kept closed: where it cannot dock, no tab offers to open it (it would open nothing).
+  const kept = keptStorage([['plannotator-inbox-plan-files-open', '0']]);
   let width = 1000;
   const restore = rowWidth(() => width);
   try {
     window.location.hash = `#plans=${id}`;
     let host = draw();
     await settle();
-    // 1000 px: the versions dock (288 beside 480 of document), the rail (306 more) does not: Show files opens our sheet.
+    // 1000 px: the versions dock (288 beside 480 of document), the rail (306 more) does not: the frame's rail sheet
+    // (`RailSheet docked={false}`, from `onFitChange`) takes it, its trigger in the top bar.
     const page = () => host.querySelector('[data-plan-page]')!;
-    expect(page().getAttribute('data-files')).toBe('hidden');
+    expect(page().getAttribute('data-files')).toBe('sheet');
     expect(page().getAttribute('data-rail')).toBe('docked');
     expect(host.querySelector('[data-document-rail]')).toBeNull();
+    expect(host.querySelector('[data-rail-flags]')).toBeNull();
     expect(host.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
-    await act(async () => (host.querySelector('[data-page-header] [data-plan-show-files]') as HTMLButtonElement).click());
-    expect(fileNames(host.querySelector('[data-plan-files-sheet]')!)).toEqual(['Rotate refresh tokens']);
+    const shows = [...host.querySelectorAll('button[aria-label="Show files"]')];
+    expect(shows.length).toBe(1);
+    expect(shows[0]!.closest('[data-frame] > *:first-child')).not.toBeNull();
+    await act(async () => (shows[0] as HTMLButtonElement).click());
+    await settle();
+    expect(fileNames(document.querySelector('[data-plan-sidebar="compact"]')!)).toEqual(['Rotate refresh tokens']);
+    expect(text(document.querySelector('[data-plan-sidebar="compact"] [data-pages-rail-meta]'))).toBe('harbor-api');
+    // The kept choice waits for a row that fits.
+    expect(kept.get('plannotator-inbox-plan-files-open')).toBe('0');
     // 700 px: the versions do not dock either; the reading line opens them as the frame's sheet.
     width = 700;
     unlisten();
@@ -460,7 +522,7 @@ test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, a
     expect(host.querySelector('[data-plan-page]')!.getAttribute('data-rail')).toBe('docked');
     expect(host.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
     // The newest on screen: our Compare offers the one before; Copy link copies this version's address.
-    expect(text(host.querySelector('[data-plan-compare]'))).toBe('Compare v1 with v2');
+    expect(text(host.querySelector('[data-version-actions] [data-plan-compare]'))).toBe('Compare v1 with v2');
     await act(async () => (host.querySelector('[data-version-copy-link]') as HTMLButtonElement).click());
     expect(copied).toEqual([`${window.location.href.split('#')[0]}#plans=${id}&v=2`]);
     await act(async () => (host.querySelector('button[aria-label="Close versions"]') as HTMLButtonElement).click());
@@ -475,7 +537,8 @@ test.skipIf(!hasDom)('the versions panel closes, stays closed after a remount, a
     expect(host.querySelector('[data-versions-panel]')).toBeNull();
     const toggle = host.querySelector('[data-reading-versions]') as HTMLButtonElement;
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    expect(toggle.getAttribute('aria-label')).toBe('Versions. Reading version 2, the newest');
+    // Its name is a full sentence: which version is on screen, and how many there are (the frame's words).
+    expect(toggle.getAttribute('aria-label')).toMatch(/^Versions\. .*version 2, the newest\. 2 versions$/);
     await act(async () => toggle.click());
     await settle();
     expect(host.querySelector('[data-versions-panel] [data-plan-version="2"]')).not.toBeNull();
@@ -533,7 +596,7 @@ test.skipIf(!hasDom)('only the main page counts as looking: a link to another pa
   window.location.hash = `#plans=${id}&doc=${notes.id}`;
   const host = draw();
   await settle();
-  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions]'))).toBe('Reading v1 · newest');
+  expect(readingWords(host)).toBe('v1 · newest');
   // That page's versions are remembered; the plan is still unlooked, so the list marks nothing.
   expect(store.looks().plans[id]?.docs[notes.id]).toBe(1);
   expect(store.list()[0]).toMatchObject({ seen_version_number: null, changed: false });
@@ -592,9 +655,17 @@ test.skipIf(!hasDom)('a plan opens on its newest version, versions newest first,
   const host = draw();
   await settle();
 
-  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions]'))).toBe('Reading v3 · newest');
+  expect(readingWords(host)).toBe('v3 · newest');
   expect(text(host.querySelector('[data-plan-document]'))).toContain('three keys now');
   expect([...host.querySelectorAll('[data-plan-version]')].map((b) => b.getAttribute('data-plan-version'))).toEqual(['3', '2', '1']);
+  // The version you saw says so under its row (outside its link); the one you sent back says "Changes asked".
+  expect(text(host.querySelector('[data-version-row][data-version="1"] [data-version-note] [data-plan-seen]'))).toBe('You saw this');
+  expect(host.querySelectorAll('[data-plan-seen]').length).toBe(1);
+  expect(host.querySelector('[data-plan-version="1"] [data-plan-seen]')).toBeNull();
+  expect(text(host.querySelector('[data-plan-version="1"] [data-version-decision="negative"]'))).toBe('Changes asked');
+  // No version has a name: no author line ("No name recorded" on each) at all.
+  expect(host.querySelector('[data-versions-panel] [data-version-author]')).toBeNull();
+  expect(text(host.querySelector('[data-versions-panel]'))).not.toContain('No name recorded');
   expect(host.querySelector('[data-plan-version="3"]')?.getAttribute('aria-current')).toBe('true');
   // Changed since you looked: you saw v1, and Show changes is offered.
   expect(text(host.querySelector('[data-plan-banner="changed"]'))).toContain('You saw v1');
@@ -604,7 +675,7 @@ test.skipIf(!hasDom)('a plan opens on its newest version, versions newest first,
   act(() => host.querySelector<HTMLAnchorElement>('[data-plan-version="2"]')!.click());
   await settle();
   expect(window.location.hash).toBe(`#plans=${id}&v=2`);
-  expect(text(host.querySelector('[data-plan-reading]'))).toContain('Reading v2 of 3');
+  expect(readingWords(host)).toBe('v2 of 3');
   expect(host.querySelector('[data-plan-reading] [data-plan-newest]')?.getAttribute('href')).toBe(`#plans=${id}`);
   expect(text(host.querySelector('[data-plan-document]'))).toContain('second pass');
   expect(host.querySelector('[data-plan-version="2"]')?.getAttribute('aria-current')).toBe('true');
@@ -621,6 +692,9 @@ test.skipIf(!hasDom)('Show changes compares the version you saw with the newest,
   await settle();
   expect(window.location.hash).toBe(`#plans=${id}&from=1&to=2`);
   expect(text(host.querySelector('[data-plan-banner="diff"]'))).toContain('the one you saw');
+  // The reading line says which two are compared, and still how many versions there are.
+  expect(text(host.querySelector('[data-plan-reading] [data-reading-comparing]'))).toBe('Comparing v1 with v2');
+  expect(text(host.querySelector('[data-plan-reading] [data-reading-versions-count]'))).toBe('2');
   const diff = host.querySelector('[data-plan-diff="1-2"]')!;
   expect(diff).not.toBeNull();
   // The old words are marked removed and the new ones added; nothing offers a comment (read only).

@@ -1,14 +1,16 @@
 /**
  * A plan's left rail, from the shared frame (@plannotator/ui/components/frame, the Space page screen): the frame's
- * head (back to Plans and the plan's name), its "Pages N" heading with Filter files, and its file rows; the plan's
- * main page first, marked "Main", then its other documents by name; "Artifacts" and their count only when it has
- * some, by name. A row is a link to its file (the address carries it). Read only: no file management, no shortcut.
- * Docked, open, closed, its width and its phone sheet are the frame's (`DocumentRailShell`, `RailSheet`, PlanPage.tsx);
- * only a desktop pane too narrow to dock it opens it as our own sheet from the left (`PlanFilesSheet`).
+ * head (back to Plans and the plan's name, the project on a quiet line under it), its "Pages N" heading with Filter
+ * files, and its file rows; the plan's main page first, marked "Main" at the row's end, then its other documents by
+ * name; the frame's "Artifacts N" heading (no Filter of its own) only when it has some, by name. A row is a link to
+ * its file (the address carries it). Read only: no file management, no shortcut. Docked, open, closed, its width
+ * (drag or arrow keys) and its sheet (a phone, or a row too narrow to dock it) are the frame's (`DocumentRailShell`,
+ * `RailSheet`, PlanPage.tsx).
  */
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import type { PlanArtifact, PlanDocument, PlanDocumentKind } from '@plannotator/core/plans';
-import { EYEBROW, FileRow, FilesRailFilter, FilesRailHeading, FilesRailNoMatch, FilesRailRows, FilesRailEmpty, PagesRailHead, fileIcon, type FileIconKind } from '@plannotator/ui/components/frame';
+import { FileRow, FilesRailFilter, FilesRailHeading, FilesRailNoMatch, FilesRailRows, FilesRailEmpty, PagesRailHead, fileIcon, type FileIconKind } from '@plannotator/ui/components/frame';
+import { Icon } from '../icons';
 import { hashOf, writeRoute } from '../app/writeRoute';
 import { artifactKind, artifactName, byName, noFileMatches, PLAN_FILES_WORDS, type PlanArtifactKind } from './words';
 
@@ -69,9 +71,22 @@ function routeClick(go: () => void) {
   };
 }
 
-/** The frame's rail head: back to Plans, with the plan's name. */
-export function PlanRailHead({ name }: { name: string }) {
-  return <PagesRailHead label={name} backLink={<a href={hashOf(plansRoute)} onClick={routeClick(() => writeRoute(plansRoute))} data-plan-files-back="" />} />;
+/** The frame's rail head: back to Plans, with the plan's name; its project (when it has one) on the quiet line under it. */
+export function PlanRailHead({ name, project }: { name: string; project: string | null }) {
+  return (
+    <PagesRailHead
+      label={name}
+      backLink={<a href={hashOf(plansRoute)} onClick={routeClick(() => writeRoute(plansRoute))} data-plan-files-back="" />}
+      meta={
+        project ? (
+          <span className="ib-plan-railproj" title={project} data-plan-rail-project="">
+            <Icon name="folder" />
+            <span>{project}</span>
+          </span>
+        ) : null
+      }
+    />
+  );
 }
 
 export interface PlanFilesProps {
@@ -122,7 +137,7 @@ export function PlanFiles({ plan, primary, documents, artifacts, onScreen, onPic
       active={sameFile(r.ref, onScreen)}
       icon={fileIcon({ kind: r.icon, path: r.tip })}
       link={<a href={hashOf(planFileRoute(plan, primary, r.ref))} aria-current={sameFile(r.ref, onScreen) ? 'page' : undefined} onClick={routeClick(() => open(r.ref))} data-plan-file={r.key} />}
-      presence={
+      trailing={
         r.main ? (
           <span className="ib-plan-file-main" data-plan-file-main="">
             {PLAN_FILES_WORDS.main}
@@ -148,9 +163,9 @@ export function PlanFiles({ plan, primary, documents, artifacts, onScreen, onPic
       )}
       {rows.artifacts.length > 0 && (
         <>
-          {/* The frame's heading always carries Filter files; a second one would repeat it, so this is the frame's eyebrow only. */}
-          <div className="ib-plan-files-sec">
-            <span className={EYEBROW}>{PLAN_FILES_WORDS.artifacts}</span> <span className="ib-plan-files-count">{rows.artifacts.length}</span>
+          {/* A second heading: the Filter above covers it (no onToggleFilter, no button). */}
+          <div className="ib-plan-files-art" data-plan-files-art-heading="">
+            <FilesRailHeading label={PLAN_FILES_WORDS.artifacts} count={rows.artifacts.length} countTitle={(n) => `${n} artifact${n === 1 ? '' : 's'}`} />
           </div>
           <FilesRailRows>
             <div data-plan-files-artifacts="">{files.map(row)}</div>
@@ -163,35 +178,5 @@ export function PlanFiles({ plan, primary, documents, artifacts, onScreen, onPic
         </div>
       )}
     </nav>
-  );
-}
-
-/** The rail as our own sheet from the left, where a desktop pane cannot dock it: closes on a pick, Escape or the scrim. */
-export function PlanFilesSheet({ open, onClose, name, ...props }: PlanFilesProps & { name: string; open: boolean; onClose: () => void }) {
-  const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const el = dialog.current;
-    if (!el) return;
-    if (open && !el.open) el.showModal?.();
-    if (!open && el.open) el.close?.();
-  }, [open]);
-  return (
-    <dialog
-      ref={dialog}
-      className="ib-plan-filesheet bg-card"
-      aria-label={PLAN_FILES_WORDS.panel}
-      onClose={onClose}
-      onCancel={onClose}
-      // A press on the scrim (the dialog itself, outside its panel) closes it.
-      onClick={(e) => e.target === e.currentTarget && onClose()}
-      data-plan-files-sheet=""
-    >
-      {open && (
-        <div className="ib-plan-filesheet-in">
-          <PlanRailHead name={name} />
-          <PlanFiles {...props} onPicked={onClose} />
-        </div>
-      )}
-    </dialog>
   );
 }

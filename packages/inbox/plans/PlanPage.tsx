@@ -1,14 +1,16 @@
 /**
  * One plan (approval "inbox-plans"), drawn from the shared frame (@plannotator/ui/components/frame, the Space page
- * screen): its top bar outside the cards (the Inbox's sidebar toggle, then Plans / the plan / the file), and from
- * 768 px three cards on the ground: the frame's left rail with the plan's files (PlanFiles.tsx), the frame's page
- * card whose reading line says which version is on screen, holding the file (a Markdown page in the Inbox's own
- * reader, PlanDocument.tsx; an artifact by what it is, PlanArtifactView.tsx), and the frame's versions panel
- * (PlanRail.tsx), open until the person closes it (kept), reopened from the reading line. "Changed since you looked"
- * compares with the version the person had seen of that document when the page opened, and Show changes opens the
- * diff from it to the newest. The address carries the file (`&doc=`, `&file=`); the main page keeps the plan's own
- * address. Short of room the rail gives way first (our sheet from the left), then the versions open as the frame's
- * sheet; on a phone the frame's sheets carry both. Comments, Send and the plan's thread come later.
+ * screen) on its ground (`FrameGround as="div"`, theme colours): its top bar outside the cards (the Inbox's sidebar
+ * toggle, then Plans / the project / the plan on the main page, Plans / the plan / the file on another), and from
+ * 768 px three cards: the frame's left rail with the plan's files (PlanFiles.tsx), the frame's page card whose
+ * reading line starts with the newest decision and ends with which version is on screen (or which two are compared)
+ * and how many there are, holding the file (a Markdown page in the Inbox's own reader, PlanDocument.tsx; an artifact
+ * by what it is, PlanArtifactView.tsx), and the frame's versions panel (PlanRail.tsx), open until the person closes
+ * it (kept), reopened from the reading line. "Changed since you looked" compares with the version the person had
+ * seen of that document when the page opened, and Show changes opens the diff from it to the newest. The address
+ * carries the file (`&doc=`, `&file=`); the main page keeps the plan's own address. Short of room the rail gives way
+ * first (the frame's sheet, `RailSheet docked={false}`), then the versions open as the frame's sheet; on a phone the
+ * frame's sheets carry both. Comments, Send and the plan's thread come later.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent, type ReactElement } from 'react';
 import type { PlanDecision, PlanDocument as PlanDocumentRecord, PlanVersion } from '@plannotator/core/plans';
@@ -19,13 +21,12 @@ import {
   DockedPanelClip,
   DocumentRailShell,
   FrameBox,
-  FrameButton,
+  FrameGround,
   PageCard,
   PageHeader,
   RailSheet,
   ReadingLine,
   VersionsSheet,
-  savedRailWidth,
   useRailMotion,
 } from '@plannotator/ui/components/frame';
 import { SidebarTrigger } from '../shell/sidebar';
@@ -39,7 +40,7 @@ import { PlanDocument } from './PlanDocument';
 import { PlanDiffView } from './PlanDiffView';
 import { PlanArtifactView } from './PlanArtifactView';
 import { ArtifactLine, PlanVersions } from './PlanRail';
-import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanFiles, PlanFilesSheet, PlanRailHead, planFileRoute, type PlanFileRef } from './PlanFiles';
+import { PLAN_FILES_OPEN_KEY, PLAN_FILES_WIDTH_KEY, PlanFiles, PlanRailHead, planFileRoute, type PlanFileRef } from './PlanFiles';
 
 const plansRoute = { page: 'plans' as const, project: null, thread: null };
 const toList = () => writeRoute(plansRoute);
@@ -86,9 +87,12 @@ function decisionsOf(decisions: readonly PlanDecision[], doc: string): { byVersi
   return { byVersion, newest };
 }
 
-/** A kept yes/no, in Plannotator's own storage. */
-function useStoredFlag(key: string): [boolean, (next: boolean) => void] {
-  const [value, setValue] = useState(() => storage.getItem(key) === '1');
+/** A kept yes/no, in Plannotator's own storage ('1' or '0'; `fallback` until one is kept). */
+function useStoredFlag(key: string, fallback = false): [boolean, (next: boolean) => void] {
+  const [value, setValue] = useState(() => {
+    const kept = storage.getItem(key);
+    return kept === null ? fallback : kept === '1';
+  });
   const set = useCallback(
     (next: boolean) => {
       setValue(next);
@@ -141,7 +145,9 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
   const project = read.plan.project_name;
 
   // The row's room: the versions dock while the document keeps PLAN_DOC_MIN beside them; the rail docks while it
-  // keeps that beside both. Narrower, the rail gives way first (our sheet), then the versions (the frame's sheet).
+  // keeps that beside both. Narrower, the rail gives way first (the frame's sheet), then the versions (the frame's
+  // sheet). The rail's open flag is ours (the frame's key and format), so a rail that does not fit draws no tab that
+  // would open nothing, and the person's choice waits for a row that fits.
   const [row, setRow] = useState<HTMLDivElement | null>(null);
   const rowWidth = useWidth(row);
   const [versionsHidden, setVersionsHidden] = useStoredFlag(PLAN_RAIL_HIDDEN_KEY);
@@ -150,11 +156,8 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
   const versionsDocked = versionsFit && !versionsHidden;
   const sideWidth = versionsDocked ? VERSIONS_WIDTH + CARD_GAP : 0;
   const railFits = useCallback((railWidth: number) => rowWidth === 0 || rowWidth - railWidth - CARD_GAP - sideWidth >= PLAN_DOC_MIN, [rowWidth, sideWidth]);
-  const railDocks = !phone && railFits(savedRailWidth(PLAN_FILES_WIDTH_KEY));
-  const [filesSheet, setFilesSheet] = useState(false);
-  useEffect(() => {
-    if (railDocks || phone) setFilesSheet(false);
-  }, [railDocks, phone]);
+  const [railDocks, setRailDocks] = useState(!phone);
+  const [filesOpen, setFilesOpen] = useStoredFlag(PLAN_FILES_OPEN_KEY, true);
   useEffect(() => {
     if (versionsFit) setVersionsSheet(false);
   }, [versionsFit]);
@@ -163,17 +166,18 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
     : { docked: false, open: versionsSheet, setOpen: setVersionsSheet };
 
   const filesProps = { plan: id, primary, documents: read.documents, artifacts, onScreen };
-  // The top bar: Plans / the plan on its main page; Plans / the plan / the file on another (its path when it has one).
+  // The top bar: Plans / the project / the plan on its main page (the project is words: the Plans list has no address
+  // for one project); Plans / the plan / the file on another (its path when it has one).
   const onMain = !artifact && document.id === primary;
   const fileName = artifact ? artifact.asset_path : document.doc_path || document.title || read.plan.name;
-  const head = <PlanRailHead name={read.plan.name} />;
+  const head = <PlanRailHead name={read.plan.name} project={project} />;
   const band = (
     <AppRail
       variant="dense"
       leading={
         <>
           <SidebarTrigger />
-          <RailSheet closeKey={`${document.id}:${file ?? ''}`} head={head} triggerLabel={PLAN_FILES_WORDS.show} triggerTitle={PLAN_FILES_WORDS.panel} title={PLAN_FILES_WORDS.panel} description="This plan's pages and artifacts.">
+          <RailSheet closeKey={`${document.id}:${file ?? ''}`} docked={railDocks ? undefined : false} head={head} triggerLabel={PLAN_FILES_WORDS.show} triggerTitle={PLAN_FILES_WORDS.panel} title={PLAN_FILES_WORDS.panel} description="This plan's pages and artifacts.">
             <PlanFiles {...filesProps} />
           </RailSheet>
         </>
@@ -181,41 +185,46 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions }: Pla
     >
       <PageHeader
         identity={
-          onMain ? (
+          onMain && project ? (
+            <Breadcrumbs root={{ label: 'Plans', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
+          ) : onMain ? (
             <Breadcrumbs collectionName="Plans" collectionLink={routeLink(plansRoute, { 'data-plans-back': '' })} path={read.plan.name} />
           ) : (
             <Breadcrumbs root={{ label: 'Plans', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
           )
         }
-        actions={
-          !railDocks && !phone ? (
-            <FrameButton variant="ghost" size="xs" onClick={() => setFilesSheet(true)} aria-label={PLAN_FILES_WORDS.show} data-plan-show-files="">
-              <Icon name="contents" />
-              {PLAN_FILES_WORDS.show}
-            </FrameButton>
-          ) : null
-        }
+        actions={null}
       />
     </AppRail>
   );
   return (
-    <section className="ib-plans ib-plan-shell" aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={railDocks ? 'docked' : 'hidden'} data-rail={place.docked ? (place.open ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'}>
-      <FrameBox band={band} rowRef={setRow}>
-        <DocumentRailShell head={head} defaults={{ open: true }} enabled={!phone} fitsForWidth={railFits} storageKeys={{ open: PLAN_FILES_OPEN_KEY, width: PLAN_FILES_WIDTH_KEY }}>
-          <PlanFiles {...filesProps} />
-        </DocumentRailShell>
-        {artifact ? (
-          <PageCard top={<ArtifactLine artifact={artifact} />}>
-            <div className="ib-plan-cardbody">
-              <PlanArtifactView id={id} artifact={artifact} />
-            </div>
-          </PageCard>
-        ) : (
-          <DocPane key={document.id} id={id} document={document} primary={primary} read={read} mainVersions={versions} version={version} diff={diff} place={place} project={project} phone={phone} />
-        )}
-      </FrameBox>
-      {!railDocks && !phone && <PlanFilesSheet {...filesProps} name={read.plan.name} open={filesSheet} onClose={() => setFilesSheet(false)} />}
-    </section>
+    <FrameGround as="div" colors="theme">
+      <section className="ib-plans ib-plan-page" aria-label={read.plan.name} data-plan-page={id} data-phone={phone ? '' : undefined} data-files={railDocks ? (filesOpen ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'} data-rail={place.docked ? (place.open ? 'docked' : 'closed') : phone ? 'phone' : 'sheet'}>
+        <FrameBox band={band} rowRef={setRow}>
+          <DocumentRailShell
+            head={head}
+            defaults={{ open: true }}
+            enabled={!phone}
+            fitsForWidth={railFits}
+            onFitChange={setRailDocks}
+            open={railDocks ? filesOpen : true}
+            onOpenChange={setFilesOpen}
+            storageKeys={{ open: PLAN_FILES_OPEN_KEY, width: PLAN_FILES_WIDTH_KEY }}
+          >
+            <PlanFiles {...filesProps} />
+          </DocumentRailShell>
+          {artifact ? (
+            <PageCard top={<ArtifactLine artifact={artifact} />}>
+              <div className="ib-plan-cardbody">
+                <PlanArtifactView id={id} artifact={artifact} />
+              </div>
+            </PageCard>
+          ) : (
+            <DocPane key={document.id} id={id} document={document} primary={primary} read={read} mainVersions={versions} version={version} diff={diff} place={place} phone={phone} />
+          )}
+        </FrameBox>
+      </section>
+    </FrameGround>
   );
 }
 
@@ -229,7 +238,6 @@ function DocPane({
   version,
   diff,
   place,
-  project,
   phone,
 }: {
   id: string;
@@ -240,7 +248,6 @@ function DocPane({
   version: number | null;
   diff: { from: number; to: number } | null;
   place: VersionsPlace;
-  project: string | null;
   phone: boolean;
 }) {
   const isMain = document.id === primary;
@@ -278,7 +285,7 @@ function DocPane({
       </div>,
     );
   }
-  return <DocLoaded id={id} document={document} isMain={isMain} read={read} versions={versions} version={version} diff={diff} place={place} project={project} phone={phone} />;
+  return <DocLoaded id={id} document={document} isMain={isMain} read={read} versions={versions} version={version} diff={diff} place={place} phone={phone} />;
 }
 
 function DocLoaded({
@@ -290,7 +297,6 @@ function DocLoaded({
   version,
   diff,
   place,
-  project,
   phone,
 }: {
   id: string;
@@ -301,7 +307,6 @@ function DocLoaded({
   version: number | null;
   diff: { from: number; to: number } | null;
   place: VersionsPlace;
-  project: string | null;
   phone: boolean;
 }) {
   const head = versions[versions.length - 1]!.version_number;
@@ -349,31 +354,37 @@ function DocLoaded({
       onClose={() => place.setOpen(false)}
     />
   );
-  const decision = (isMain || newest || project) && (
-    <span className="ib-plan-readend">
-      {project && <span className="ib-plan-project">{project}</span>}
-      {(isMain || newest) && (
-    <span className="ib-plan-decision" data-plan-decision={decisionTone(newest?.decision)}>
-      <DecisionMark tone={decisionTone(newest?.decision)} />
-      {decisionLabel(newest?.decision)}
-      {newest?.version_number ? (
-        <span className="ib-plan-on">
-          {' '}
-          on v{newest.version_number}
-          {changedSinceDecision(newest, head)}
-        </span>
-      ) : null}
-    </span>
-      )}
-    </span>
-  );
+  // The reading line's start: the newest decision on this file (the main page says "No decision" too).
+  const decision =
+    isMain || newest ? (
+      <span className="ib-plan-decision" data-plan-decision={decisionTone(newest?.decision)}>
+        <DecisionMark tone={decisionTone(newest?.decision)} />
+        {decisionLabel(newest?.decision)}
+        {newest?.version_number ? (
+          <span className="ib-plan-on">
+            {' '}
+            on v{newest.version_number}
+            {changedSinceDecision(newest, head)}
+          </span>
+        ) : null}
+      </span>
+    ) : null;
   const older = !compare && shown !== head ? { back: routeLink(routeOf({ version: null }), { 'data-plan-newest': '' }, { replace: true }), restore: null } : null;
   return (
     <>
       <PageCard
         top={
           <div data-plan-reading="" className="ib-plan-reading">
-            <ReadingLine shownNumber={shown} currentNumber={head} versionsOpen={place.open} onToggleVersions={place.setOpen} approved={decision || null} older={older} />
+            <ReadingLine
+              shownNumber={shown}
+              currentNumber={head}
+              versionsOpen={place.open}
+              onToggleVersions={place.setOpen}
+              start={decision}
+              older={older}
+              comparing={compare ? `Comparing v${compare.from} with v${compare.to}` : null}
+              count={versions.length}
+            />
           </div>
         }
       >
