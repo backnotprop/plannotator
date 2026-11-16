@@ -1,54 +1,98 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ChildSize } from '@plannotator/vendor-pierre-layouts';
 import type { HeldThread } from '../data/apply/record';
 import { useHeldThread } from '../data/queries/thread';
-import { useBesideRoom } from './beside';
-import { addressThread, closePane as closeIn, followAddress, paneOf, paneThread, singlePane, split, type PaneId, type PaneSet } from './model';
+import * as L from './layoutModel';
+import { addressThread, paneOf, singlePane, type PaneSet } from './model';
+import { usePhone } from '../phone';
+import { loadLayout, saveLayout } from './savedLayout';
+
+type PaneId = L.PaneId;
 
 export interface WindowPanes {
+  /** The panes the window reads (paneReads.ts): the layout's, or the one pane of a window without the switch. */
   panes: PaneSet;
-  /** `threadId` opens in a second pane beside the active one, and the person is in it. */
+  /** The free layout: where each pane sits and how big it is (empty without the switch). */
+  layout: L.FreeLayout;
+  /** The thread columns side by side the layout needs beside the list (sidebarHold.ts). */
+  columns: number;
+  /** `threadId` opens in a new pane right of the active one, and the person is in it ("Open beside"). */
   openBeside: (threadId: string) => void;
-  /** The person closed pane `id` (its ✕, or leaving full screen from the other one). */
+  /** `threadId` opens in a new pane at `edge` of `target` (a row dropped on a pane's edge). */
+  openAt: (threadId: string, target: PaneId, edge: L.Edge) => void;
+  /** `threadId` takes pane `target`'s place (a row dropped on a pane's centre). */
+  replaceIn: (target: PaneId, threadId: string) => void;
+  /** Pane `id` goes to `edge` of pane `target` (a pane dragged by its header, or the ⋯ menu's Move). */
+  movePane: (id: PaneId, target: PaneId, edge: L.Edge) => void;
+  /** The person closed pane `id` (its ✕, or the ⋯ menu's Close pane). */
   closePane: (id: PaneId) => void;
+  /** The panes showing these threads close (archived or deleted while beside others). */
+  closeThreads: (threads: readonly string[]) => void;
   /** The person is in pane `id` now (a click or focus in it): the address names its thread. */
   focus: (id: PaneId) => void;
-  /** Two panes can show (the switch is on, and the window has room). */
+  /** The person dragged a divider: the splits' new sizes. */
+  resized: (sizes: Readonly<Record<string, readonly ChildSize[]>>) => void;
+  /** Several panes can show: the switch is on and the window is not a phone. */
   allowed: boolean;
+  /** The panes that came back from the kept layout (savedLayout.ts) when the window opened. */
+  restored: ReadonlySet<PaneId>;
 }
 
+const NONE: ReadonlySet<PaneId> = new Set();
+
 /**
- * The window's panes, following the address's thread (`#thread=`, the active pane's thread: model.ts). Off (the
- * switch, or no room), always one pane, as before any split. `write` puts a thread in the address (`replace`: no new
- * history entry); a closed address with two panes (on the Inbox page, `onInbox`) closes the active one and names the
- * other's thread.
+ * The window's panes, following the address's thread (`#thread=`, the active pane's thread: layoutModel.ts). Without
+ * the switch (config.json `inboxSplitView`), or on a phone, always the one pane a window draws today. `write` puts a
+ * thread in the address (`replace`: no new history entry).
+ *
+ * With the switch, the address and the layout follow each other: a thread the address names shows in the pane that
+ * has it or in the active pane; the address closing (Escape, ‹ Inbox) on the Inbox page closes the active pane, and
+ * the address then names the pane the person was in before. Another page parks the layout; the Inbox with no thread
+ * open (coming back to it, or a reload) brings back a layout of two panes or more, and the address names its active
+ * pane's thread again. The layout is kept for the window (savedLayout.ts).
  */
 export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn: boolean, write: (thread: string | null, replace: boolean) => void): WindowPanes {
-  const room = useBesideRoom();
-  const allowed = switchOn && room;
-  const held = useRef<PaneSet | null>(null);
+  const phone = usePhone();
+  const allowed = switchOn && !phone;
+  const held = useRef<L.FreeLayout | null>(null);
   const threadRef = useRef(thread);
   threadRef.current = thread;
   const writeRef = useRef(write);
   writeRef.current = write;
-  /** A change the panes made is on its way to the address (`to`), written while it named `from`: not followed back. */
+  /** A change the layout made is on its way to the address (`to`), written while it named `from`: not followed back. */
   const ahead = useRef<{ to: string | null; from: string | null } | null>(null);
-  const ids = useRef(0);
+  /** The last draw was on the Inbox page with the layout in hand: an empty address there closes a pane, not restores. */
+  const wasInbox = useRef(false);
+  const restored = useRef<ReadonlySet<PaneId>>(NONE);
   const [, drawn] = useState(0);
-  let set = held.current ?? singlePane(thread);
-  if (ahead.current && (thread === ahead.current.to || thread !== ahead.current.from)) ahead.current = null;
-  // The thread closed (Escape, ‹ Inbox): with two panes, the active one; another page: back to one pane.
-  if (!ahead.current && thread === null && set.panes.length > 1) set = onInbox ? closeIn(set, set.active) : singlePane(null);
-  else if (!ahead.current) set = followAddress(set, thread);
-  if (!allowed && set.panes.length > 1) set = singlePane(addressThread(set));
-  held.current = set;
-  const owed = ahead.current ? undefined : addressThread(set) === thread ? undefined : addressThread(set);
+  let layout = L.EMPTY_LAYOUT;
+  let owed: string | null | undefined;
+  if (allowed) {
+    if (!held.current) {
+      layout = loadLayout();
+      restored.current = layout.root ? new Set(Object.keys(layout.threads)) : NONE;
+    } else layout = held.current;
+    if (ahead.current && (thread === ahead.current.to || thread !== ahead.current.from)) ahead.current = null;
+    if (!ahead.current) {
+      if (thread !== null) layout = L.follow(layout, thread);
+      else if (onInbox && wasInbox.current && layout.active) layout = L.close(layout, layout.active);
+      else if (onInbox && L.paneCount(layout) < 2) layout = L.EMPTY_LAYOUT;
+    }
+    held.current = layout;
+    wasInbox.current = onInbox;
+    const named = L.activeThread(layout);
+    owed = ahead.current || !onInbox || named === thread ? undefined : named;
+  }
   useEffect(() => {
     if (owed !== undefined) writeRef.current(owed, true);
   }, [owed]);
-  const move = useCallback((next: PaneSet, replace: boolean) => {
+  useEffect(() => {
+    if (allowed) saveLayout(layout);
+  }, [allowed, layout]);
+  const commit = useCallback((next: L.FreeLayout, replace: boolean) => {
     if (next === held.current) return;
     held.current = next;
-    const to = addressThread(next);
+    const to = L.activeThread(next);
     if (to === threadRef.current) {
       drawn((n) => n + 1);
       return;
@@ -56,27 +100,26 @@ export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn:
     ahead.current = { to, from: threadRef.current };
     writeRef.current(to, replace);
   }, []);
-  const openBeside = useCallback(
-    (threadId: string) => {
-      const now = held.current!;
-      move(split(now, now.active, { id: `beside-${++ids.current}`, thread: threadId }, 'right'), false);
-    },
-    [move],
-  );
-  const closePane = useCallback((id: PaneId) => move(closeIn(held.current!, id), false), [move]);
-  const focus = useCallback(
-    (id: PaneId) => {
-      const to = paneThread(held.current!, id);
-      if (to !== null && id !== held.current!.active) writeRef.current(to, true);
-    },
-    [],
-  );
-  return { panes: set, openBeside, closePane, focus, allowed };
+  const now = () => held.current ?? L.EMPTY_LAYOUT;
+  const openBeside = useCallback((threadId: string) => {
+    const at = now();
+    commit(at.active ? L.openAt(at, threadId, at.active, 'right') : L.follow(at, threadId), false);
+  }, [commit]);
+  const openAt = useCallback((threadId: string, target: PaneId, edge: L.Edge) => commit(L.openAt(now(), threadId, target, edge), false), [commit]);
+  const replaceIn = useCallback((target: PaneId, threadId: string) => commit(L.replace(now(), target, threadId), false), [commit]);
+  const movePane = useCallback((id: PaneId, target: PaneId, edge: L.Edge) => commit(L.move(now(), id, target, edge), true), [commit]);
+  const closePane = useCallback((id: PaneId) => commit(L.close(now(), id), false), [commit]);
+  const closeThreads = useCallback((threads: readonly string[]) => commit(L.closeWhere(now(), (t) => threads.includes(t)), true), [commit]);
+  const focus = useCallback((id: PaneId) => commit(L.focus(now(), id), true), [commit]);
+  const resized = useCallback((sizes: Readonly<Record<string, readonly ChildSize[]>>) => commit(L.resize(now(), sizes), true), [commit]);
+  const panes = !allowed ? singlePane(thread) : onInbox || thread !== null ? L.asPaneSet(layout) : singlePane(null);
+  const columns = onInbox ? L.columns(layout.root) : 1;
+  return { panes, layout, columns, openBeside, openAt, replaceIn, movePane, closePane, closeThreads, focus, resized, allowed, restored: restored.current };
 }
 
 /**
  * The active pane's thread as the cache holds it (`useHeldThread`). Moving into a pane whose thread was already on
- * screen (a click in the other pane, or the one beside it closing) keeps it drawn; a thread that was not on screen
+ * screen (a click in another pane, or the one beside it closing) keeps it drawn; a thread that was not on screen
  * waits for its fresh read, as opening one always did.
  */
 export function useActiveHeld(panes: PaneSet): HeldThread | null {

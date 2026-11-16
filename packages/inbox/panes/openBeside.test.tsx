@@ -17,7 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import type { Route } from '../app/route';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH } from '../stack';
-import { BesideContext, besideOf, besideRoom } from './beside';
+import { BesideContext, besideOf } from './beside';
 import type { PaneSet } from './model';
 import { useSidebarHold } from './sidebarHold';
 import { useRoutePanes, type WindowPanes } from './useRoutePanes';
@@ -36,6 +36,8 @@ afterEach(() => {
   root = null;
   host = null;
   setWidth(savedWidth);
+  // The kept layout (savedLayout.ts) is the window's: each test opens a new one.
+  sessionStorage.clear();
 });
 
 function setWidth(width: number) {
@@ -66,7 +68,7 @@ function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = t
     routeRef.current = route;
     const rootRef = useRef<HTMLDivElement | null>(null);
     const [open, setOpen] = useState(sidebarOpen);
-    const hold = useSidebarHold(rootRef, routeRef, route, panes.panes.panes.length, open);
+    const hold = useSidebarHold(rootRef, routeRef, route, panes.columns, open);
     out.sidebarHeld = hold.held;
     out.sidebarOpen = open;
     // The sidebar's own toggle, as App.tsx wires it: the person's choice, which ends a fold for room.
@@ -83,7 +85,10 @@ function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = t
         measured(el, () => window.innerWidth);
       }}>
         <div className="ib-sb-inner" ref={(el) => measured(el, () => SIDEBAR)} />
-        <BesideContext.Provider value={besideOf(panes, thread, () => hold.holdIfTight(2))}>
+        <div className="ib-main" ref={(el) => measured(el, () => window.innerWidth)}>
+          <div className="ib-listcol" ref={(el) => measured(el, () => LIST_MIN_WIDTH)} />
+        </div>
+        <BesideContext.Provider value={besideOf(panes, thread, hold.holdIfTight)}>
           <ThreadRowMenu className="ib-lbody" rowOf={(id) => (['thr_a', 'thr_b'].includes(id) ? rowOf(id) : null)} canMarkRead={true} held={thread !== null} onAction={() => {}} onTarget={() => {}}>
             {['thr_a', 'thr_b'].map((id) => (
               <div key={id} className="ib-rw" data-row={id}>
@@ -228,16 +233,42 @@ describe.skipIf(!hasDom)('Open beside', () => {
     expect(w.sidebarHeld).toBe(false);
   });
 
-  test('a window too narrow for two panes offers none, and narrowing to it leaves the active pane alone', async () => {
+  test('the layout comes back after a reload: the same panes, the person in the same one, the address naming it', async () => {
+    setWidth(1440);
     const w = draw(true);
-    setWidth(besideRoom(0) - 1);
+    act(() => w.panes!.openBeside('thr_b'));
+    act(() => root!.unmount());
+    host!.remove();
+    // A reload with no thread in the address: the kept layout, and the address names its active pane's thread.
+    const again = draw(true, null);
+    expect(shape(again.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
+    expect(again.thread).toBe('thr_b');
+    act(() => root!.unmount());
+    host!.remove();
+    // A reload whose address names the other thread: the same panes, the person in that one.
+    const named = draw(true, 'thr_a');
+    expect(shape(named.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 0 });
+    // Closing down to one pane keeps nothing: the next reload is today's window.
+    act(() => named.panes!.closePane(named.panes!.panes.panes[1]!.id));
+    act(() => root!.unmount());
+    host!.remove();
+    const plain = draw(true, null);
+    expect(plain.panes!.layout.root).toBeNull();
+    expect(plain.thread).toBeNull();
+  });
+
+  test('a window too narrow for two panes offers none; narrowing keeps both panes in the layout and the active one in the address', async () => {
+    // The list's narrowest column and two 440 px panes with the 1 px gap between them (layoutRoom.ts).
+    const two = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + 1;
+    const w = draw(true);
+    setWidth(two - 1);
     await openMenu('thr_b');
     expect(besideItem()).toBeNull();
-    setWidth(besideRoom(0));
+    setWidth(two);
     act(() => w.panes!.openBeside('thr_b'));
     expect(w.panes!.panes.panes).toHaveLength(2);
-    setWidth(besideRoom(0) - 1);
-    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_b'], active: 0 });
+    setWidth(two - 1);
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
     expect(w.thread).toBe('thr_b');
   });
 });

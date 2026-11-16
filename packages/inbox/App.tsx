@@ -125,7 +125,7 @@ import { TourEntry, tourEntryModel } from './tour/TourEntry';
 import { TOUR_FIT_LINES, TOUR_FIT_TITLE, TourIntro } from './tour/Fit';
 import { TOUR_COMPOSE_STEP, TOUR_FIRST_QUESTION_PROMPT, TOUR_PROJECT_ID, TOUR_SETTINGS_STEP, TOUR_START, TOUR_STEPS, TOUR_THREAD, tourCanBack, tourCanForward, tourCoach, tourCoachSpeech, tourReducer, type TourAction, type TourDegraded, type TourUi } from './tour/model';
 import { paneThread } from './panes/model';
-import { PaneRow, paneRoute } from './panes/PaneRow';
+import { ThreadPanes, paneRoute } from './panes/ThreadPanes';
 import { BesideContext, besideOf, splitViewOn } from './panes/beside';
 import { useSidebarHold } from './panes/sidebarHold';
 import { createPanesOnScreen } from './panes/onScreen';
@@ -2460,7 +2460,7 @@ function Inbox() {
   useEffect(() => installPlainTextPaste(), []);
   // A window too narrow for two panes (an iPad in portrait, a narrow desktop window): the pane on top covers the one under it (stack.ts).
   // The docked sidebar folded on screen for room, the person's choice unchanged (‹ Inbox from a file, leaving full screen, Open beside): panes/sidebarHold.ts.
-  const { held: sidebarHeld, setHeld: setSidebarHeld, holdIfTight: holdSidebarIfTight } = useSidebarHold(rootRef, routeRef, route, panes.panes.length, sidebarOpen);
+  const { held: sidebarHeld, setHeld: setSidebarHeld, holdIfTight: holdSidebarIfTight } = useSidebarHold(rootRef, routeRef, route, windowPanes.columns, sidebarOpen);
   // The thread in full screen (a click on the list column's edge, or Enter on it): the sidebar and the list hide, without
   // writing the person's sidebar choice. A reading mode: it stays on when the person opens another thread (search, a
   // notification, a pin), and ends when no thread is open, with "‹ Inbox", Escape or ⌘B. A stacked window never counts
@@ -2470,8 +2470,9 @@ function Inbox() {
     if (!route.thread) setThreadFull(false);
   }, [route.thread]);
   sidebarHeldNow.current = sidebarHeld;
-  // Full screen changes the sidebar's and the list's room without a route change: measured again too. Two threads beside the list need room for both.
-  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull], threadFull ? 1 : panes.panes.length);
+  // Full screen changes the sidebar's and the list's room without a route change: measured again too. Several thread
+  // panes give way to one before the list is covered (panes/layoutRoom.ts), so only one thread's room counts here.
+  const stack = useStack(rootRef, phone, [hashOf(route), sidebarOpen, sidebarHeld, threadFull]);
   // The thread panel view (threadPanel.ts): the list stays at its short width and the thread's pane stays drawn with
   // no thread open. Off by default, and never on a phone or in a window that stacks.
   const [threadPanelOn, setThreadPanelOn] = useThreadPanel();
@@ -5689,14 +5690,11 @@ function Inbox() {
             <EmptyThreadPanel />
           </div>
         )}
-        <PaneRow
-          windowPanes={windowPanes}
-          held={openHeld}
-          host={{
+        <ThreadPanes windowPanes={windowPanes} held={openHeld} host={{
             route, routeRef, rowsPending: reviewRowsPending, paneReads, outbox, dismissOutbox,
             phone, stack, full, fromCard, fileOpen, staleNotice, notifyAgainIn: notifyAgain ? notifyAgainThread : null, notifications,
             soundOn: sound.settings.enabled, settings, saveTour, go, leave, close, openCompose, pullReviewOf, reviewView, pullsShown, stepsBus,
-            boardEnabled, boardsOn, cards, backToCard, openThreadRow, snoozeBack, refreshThread, refreshList, shown,
+            boardEnabled, boardsOn, cards, backToCard, openThreadRow, rowOf: (id) => latestRows.get(id) ?? null, snoozeBack, refreshThread, refreshList, shown,
             markRead, markUnread, acknowledge, markAction, archive, pinnedIds, pinsOn, machines, setPin, setPriority, snoozeOn, snooze, unsnooze,
             setMachineUpdateOpen, threadAgentContext, replyFor, setReplyFor, draftSignals, filesSignals, shapes, ask, askReply, setAskReply,
             shapeReply, setShapeReply, patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed,
@@ -5738,7 +5736,7 @@ function Inbox() {
     <LiveInitiativesContext.Provider value={liveTags}>
     <ThreadTagsContext.Provider value={threadTagsHost}>
     <SideButtonContext.Provider value={ask.sideButton}>
-    <BesideContext.Provider value={besideOf(windowPanes, route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, () => holdSidebarIfTight(2))}>
+    <BesideContext.Provider value={besideOf(windowPanes, route.page === 'inbox' && !phone && !fileOpen && !fromCard ? route.thread : null, holdSidebarIfTight)}>
     <div
       ref={rootRef}
       className="pn-inbox"

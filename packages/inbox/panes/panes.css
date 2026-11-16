@@ -1,17 +1,42 @@
-/* Two thread panes side by side after the list (panes/PaneRow.tsx, "Open beside"): each half of the room the list
-   leaves until the divider is dragged (`--ib-pane-split` on .ib-main, the left pane's flex-grow against the right's 1).
-   The divider takes no room of its own: it sits in the gutter between the two cards, a hairline on the flat look, and
-   its grab area is wider than what it draws. */
-.ib-main > .ib-pane:has(+ .ib-panesplit) { flex-grow: var(--ib-pane-split, 1); }
-.ib-panesplit { position: relative; flex: none; width: 0; margin-inline: calc(var(--ib-gutter) / -2); z-index: 5; cursor: col-resize; touch-action: none; }
-.ib-panesplit::before { content: ""; position: absolute; inset: 0 -5px; }
-/* The floating panes (--ib-soft-panes) have no rules between them: their line shows only while grabbed. */
-.ib-panesplit { --ib-panesplit-soft: var(--ib-soft-panes) 0; }
-.ib-panesplit::after { content: ""; position: absolute; top: 0; bottom: 0; left: -0.5px; width: 1px; background: var(--ib-pane-line); opacity: var(--ib-panesplit-soft, 1); transition: background-color 120ms ease-out, opacity 120ms ease-out; }
-.ib-panesplit:hover::after, .ib-main[data-pane-dragging] .ib-panesplit::after { opacity: 1; background: var(--ring); }
-.ib-main[data-pane-dragging] { cursor: col-resize; user-select: none; }
+/* The free layout of thread panes after the list (config.json `inboxSplitView`; panes/ThreadPanes.tsx, FreeLayout.tsx).
+   @pierre/layouts (packages/vendor-pierre-layouts) places the panes; each pane's own card is the thread's section, as
+   with one thread, so the engine's host draws nothing of its own: no border, no background, no ring, no header. The
+   gutter between the cards is the engine's gap, and a divider sits in it. */
+.ib-layout.pierre-layout { flex: 1; width: auto; min-width: 0; min-height: 0; overflow: visible; isolation: auto; --layout-duration: 200ms; }
+.ib-layout > .pierre-layout-pane { transform: none; overflow: visible; border: 0; border-radius: var(--ib-pane-r); background: transparent; contain: none; }
+.ib-layout > .pierre-layout-pane:focus-visible { outline: none; }
+.ib-layout .pierre-layout-pane-inner { transform: none; }
+.ib-layout .pierre-layout-content { display: flex; gap: var(--ib-gutter); overflow: visible; }
+.ib-layout :is(.pierre-layout-focus, .pierre-layout-sr, .pierre-layout-drop, .pierre-layout-corner) { display: none; }
+/* What `.ib-main > …` gives a thread's card and a file beside it (inbox.css), inside a pane. */
+.ib-layout .pierre-layout-content > :is(.ib-pane, .ib-view) { border-radius: var(--ib-pane-r); box-shadow: var(--ib-pane-shadow); min-height: 0; overflow: var(--ib-clip-s, visible); }
+.ib-layout .pierre-layout-content > .ib-pane { flex: 1; min-width: 0; }
+.ib-layout .pierre-layout-content > .ib-view { background: var(--ib-pane-bg-s, var(--background)); }
+/* Only a pane against the window's left edge clears the window's buttons (inbox.css `--ib-controls-left`). */
+.ib-layout > .pierre-layout-pane:not([data-layout-edges~="left"]) { --ib-controls-left: 0px; }
+/* The divider: nothing until hovered or dragged, then a hairline in the gutter. */
+.ib-layout > .pierre-layout-separator { background: transparent; border-radius: 0; }
+.ib-layout > .pierre-layout-separator::after { content: ""; position: absolute; background: var(--ring); opacity: 0; transition: opacity 120ms ease-out; }
+.ib-layout > .pierre-layout-separator[data-direction="horizontal"]::after { top: 0; bottom: 0; left: calc(50% - 0.5px); width: 1px; }
+.ib-layout > .pierre-layout-separator[data-direction="vertical"]::after { left: 0; right: 0; top: calc(50% - 0.5px); height: 1px; }
+.ib-layout > .pierre-layout-separator:is(:hover, :focus-visible, [data-preview="true"]) { background: transparent; }
+.ib-layout > .pierre-layout-separator:is(:hover, :focus-visible, [data-preview="true"])::after { opacity: 1; }
+/* A pane is moved by its header. */
+.ib-layout .ib-phead { cursor: grab; }
+.ib-layout > .pierre-layout-pane[data-pane-dragging] { opacity: 0.55; }
 /* The pane the person is not in: its header quieter, so the active one reads as the one keys and typing go to. */
-.ib-pane[data-pane-quiet] .ib-phead { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
+[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
 /* Dark themes put --muted barely above --card: the quiet header sinks toward the window's background instead. */
-.dark .ib-pane[data-pane-quiet] .ib-phead { background: color-mix(in oklch, var(--background) 70%, var(--card)); }
-.ib-pane[data-pane-quiet] .ib-phead :is(.ib-subject, .ib-phsubj) { color: var(--muted-foreground); }
+.dark [data-pane-quiet] > .pierre-layout-pane-inner .ib-phead { background: color-mix(in oklch, var(--background) 70%, var(--card)); }
+[data-pane-quiet] > .pierre-layout-pane-inner .ib-phead :is(.ib-subject, .ib-phsubj) { color: var(--muted-foreground); }
+
+/* A drag (drag/threadDrag.ts): the pill that follows the pointer, and where letting go puts what it carries. */
+:root[data-ib-dragging], :root[data-ib-dragging] * { cursor: grabbing !important; user-select: none !important; }
+.ib-dragghost { position: fixed; left: 0; top: 0; z-index: 90; pointer-events: none; display: flex; align-items: center; gap: 8px; max-width: 320px; padding: 5px 10px; border-radius: 999px; background: var(--popover); color: var(--popover-foreground); box-shadow: 0 6px 20px rgb(0 0 0 / 0.16), 0 0 0 1px color-mix(in oklch, var(--foreground) 8%, transparent); font-size: 12.5px; line-height: 18px; white-space: nowrap; }
+.ib-dragghost-what { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ib-dragghost-act { flex: none; color: var(--primary); font-weight: 550; }
+.ib-dragghost[data-none] .ib-dragghost-act { display: none; }
+.ib-droppreview { position: fixed; z-index: 60; pointer-events: none; border-radius: var(--ib-pane-r, 10px); background: color-mix(in oklch, var(--primary) 14%, transparent); transition: left 120ms ease-out, top 120ms ease-out, width 120ms ease-out, height 120ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-droppreview, .ib-layout > .pierre-layout-separator::after { transition: none; }
+}

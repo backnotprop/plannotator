@@ -32,7 +32,7 @@ export interface ThreadSlotHost {
   phone: boolean;
   stack: Stack;
   full: boolean;
-  /** Beside another pane (panes/PaneRow.tsx): its ✕ stays with full screen's or a stacked window's ‹ Inbox. */
+  /** Beside other panes (panes/ThreadPanes.tsx): its ✕ closes the pane and stays with full screen's ‹ Inbox. */
   paired?: boolean;
   fromCard: string | null;
   fileOpen: boolean;
@@ -107,6 +107,7 @@ export interface ThreadSlotHost {
   toastNow: RefObject<InboxToastModel | null>;
   dismissToast: () => void;
   inboxLink: (href: string) => (() => void) | null;
-  holdSidebarIfTight: () => void;
+  /** Fold a docked sidebar on screen when the list and `columns` thread columns (the open ones by default) fit only without it. */
+  holdSidebarIfTight: (columns?: number) => void;
   backFromFile: RefObject<{ thread: string; name: string | null; label: string } | null>;
 }

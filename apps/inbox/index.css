@@ -51,7 +51,8 @@
 @import "../../packages/inbox/prs/prs.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */
 @import "../../packages/inbox/permissionCard.css";
-/* Two thread panes side by side ("Open beside", packages/inbox/panes/). */
+/* The free layout of thread panes ("Open beside", packages/inbox/panes/): the engine's sheet, then the Inbox's over it. */
+@import "../../packages/vendor-pierre-layouts/src/styles.css";
 @import "../../packages/inbox/panes/panes.css";
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
 @import "../../packages/inbox/agents/agents.css";

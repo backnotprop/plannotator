@@ -9,6 +9,8 @@
  *   pair takes the window) and the first pane's ‹ Inbox brings it back. Closing the second pane is today's one pane.
  * - On, at 1440 with the sidebar docked: offered; choosing it folds the sidebar on screen (the person's choice not
  *   written) and closing the second pane brings it back. At 1240 the list and two threads cannot fit: no item.
+ * - On, at 1920: a row dragged onto a pane's edge opens beside it; a pane dragged by its header goes to another's
+ *   half; the ⋯ menu's Move pane up and Close pane do the same without a drag; the layout comes back after a reload.
  * - Off (another Inbox, no key): the item does not exist.
  *
  * Build the binary first (see inbox.spec.ts), then
@@ -71,6 +73,8 @@ test.afterAll(async () => {
 });
 
 const pane = (page: Page, thread: string) => page.locator(`section.ib-pane[data-thread-id="${thread}"]`);
+/** The free layout's place for a thread's pane (packages/inbox/panes/FreeLayout.tsx): it carries the quieter header's mark. */
+const host = (page: Page, thread: string) => page.locator('.ib-layout > [data-layout-pane]', { has: pane(page, thread) });
 const row = (page: Page, thread: string) => page.locator(`.ib-listcol .ib-lbody [data-thread-id="${thread}"]`);
 const besideItem = (page: Page) => page.locator('[data-row-menu] [data-row-action="open-beside"]');
 
@@ -90,7 +94,7 @@ test('two threads side by side after the list: each its own pane, unread stays i
 
   await expect(pane(page, a)).toBeVisible();
   await expect(pane(page, b)).toBeVisible();
-  await expect(page.locator('.ib-main > [data-pane-split]')).toHaveCount(1);
+  await expect(page.locator('.ib-layout > .pierre-layout-separator')).toHaveCount(1);
   // The list stays, left of the two.
   await expect(page.locator('.ib-listcol')).toBeVisible();
   const list = (await page.locator('.ib-listcol').boundingBox())!;
@@ -100,8 +104,8 @@ test('two threads side by side after the list: each its own pane, unread stays i
   expect(Math.abs(left.width - right.width)).toBeLessThan(24);
   // The person is in the new pane: the address names it, and the first pane's header is the quieter.
   await expect(page).toHaveURL(new RegExp(`#thread=${b}`));
-  await expect(pane(page, a)).toHaveAttribute('data-pane-quiet', '');
-  await expect(pane(page, b)).not.toHaveAttribute('data-pane-quiet', '');
+  await expect(host(page, a)).toHaveAttribute('data-pane-quiet', '');
+  await expect(host(page, b)).not.toHaveAttribute('data-pane-quiet', '');
   for (const thread of [a, b]) await expect(pane(page, thread).getByRole('button', { name: 'Close the thread' })).toBeVisible();
 
   // An agent writes in the other pane's thread: it stays unread there while the person is in this one.
@@ -117,7 +121,7 @@ test('two threads side by side after the list: each its own pane, unread stays i
   // A click in it: the person is there now, and it is seen.
   await pane(page, a).locator('h2.ib-subject').click();
   await expect(page).toHaveURL(new RegExp(`#thread=${a}`));
-  await expect(pane(page, b)).toHaveAttribute('data-pane-quiet', '');
+  await expect(host(page, b)).toHaveAttribute('data-pane-quiet', '');
   await expect.poll(unseen, { timeout: 15_000 }).toBe(false);
 
   // The list's edge hides the list: the two take the window; the first pane's ‹ Inbox brings it back.
@@ -136,8 +140,8 @@ test('two threads side by side after the list: each its own pane, unread stays i
   // Closing the second pane: one pane, the list beside it, as before.
   await pane(page, b).getByRole('button', { name: 'Close the thread' }).click();
   await expect(pane(page, b)).toHaveCount(0);
-  await expect(page.locator('.ib-main > [data-pane-split]')).toHaveCount(0);
-  await expect(pane(page, a)).not.toHaveAttribute('data-pane-quiet', '');
+  await expect(page.locator('.ib-layout > .pierre-layout-separator')).toHaveCount(0);
+  await expect(host(page, a)).not.toHaveAttribute('data-pane-quiet', '');
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await expect(page).toHaveURL(new RegExp(`#thread=${a}`));
 });
@@ -183,6 +187,45 @@ test('a window where the list and two threads cannot fit even with the sidebar f
   await row(page, b).click({ button: 'right' });
   await expect(page.locator('[data-row-menu]')).toBeVisible();
   await expect(besideItem(page)).toHaveCount(0);
+});
+
+/** A real pointer drag from `from` to `to`, in steps, as a person's mouse moves. */
+async function dragBetween(page: Page, from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  await page.mouse.move(from.x + 12, from.y + 4, { steps: 3 });
+  await page.mouse.move(to.x, to.y, { steps: 10 });
+  await page.mouse.up();
+}
+
+test('a row dragged onto a pane opens there; a pane dragged by its header moves; the ⋯ menu moves and closes it; the layout survives a reload', async ({ page }) => {
+  await page.setViewportSize({ width: 1920, height: 1080 });
+  const [a, b] = await freshPair('drag');
+  await openThread(page, on, a);
+  // The row onto the right edge of A's pane: B opens right of it, the person in it.
+  const rowBox = (await row(page, b).boundingBox())!;
+  const aBox = (await pane(page, a).boundingBox())!;
+  await dragBetween(page, { x: rowBox.x + 40, y: rowBox.y + rowBox.height / 2 }, { x: aBox.x + aBox.width - 20, y: aBox.y + aBox.height / 2 });
+  await expect(pane(page, b)).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`#thread=${b}`));
+  const [left, right] = [(await pane(page, a).boundingBox())!, (await pane(page, b).boundingBox())!];
+  expect(left.x + left.width).toBeLessThanOrEqual(right.x + 1);
+  // B's pane by its header onto the bottom half of A's: one over the other.
+  const head = (await pane(page, b).locator('.ib-phead').boundingBox())!;
+  const aNow = (await pane(page, a).boundingBox())!;
+  await dragBetween(page, { x: head.x + head.width - 120, y: head.y + head.height / 2 }, { x: aNow.x + aNow.width / 2, y: aNow.y + aNow.height - 30 });
+  await expect.poll(async () => (await pane(page, b).boundingBox())!.y).toBeGreaterThan(aNow.y + 100);
+  // The pane's ⋯ menu: Move pane up puts it back over A; the layout comes back after a reload; Close pane closes it.
+  await pane(page, b).locator('[data-thread-more]').click();
+  await page.locator('[data-pane-move="top"]').click();
+  await expect.poll(async () => (await pane(page, b).boundingBox())!.y).toBeLessThan((await pane(page, a).boundingBox())!.y);
+  await page.reload();
+  await expect(pane(page, a)).toBeVisible({ timeout: 30_000 });
+  await expect(pane(page, b)).toBeVisible();
+  await pane(page, b).locator('[data-thread-more]').click();
+  await page.locator('[data-pane-close]').click();
+  await expect(pane(page, b)).toHaveCount(0);
+  await expect(page.locator('.ib-layout > .pierre-layout-separator')).toHaveCount(0);
 });
 
 test('with the switch off there is no Open beside', async ({ page }) => {
