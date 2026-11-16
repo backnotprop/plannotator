@@ -143,7 +143,13 @@ test('two threads side by side after the list: each its own pane, unread stays i
 
 test('at 1440 with the sidebar docked the list and two threads do not fit: no Open beside', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
-  const [a, b] = on.threads as [string, string];
+  // Two fresh threads: the first test read the others, and read rows can fold away under Quiet.
+  const fresh: string[] = [];
+  for (const [n, subject] of ['Refund retries capped', 'Payout report ready'].entries()) {
+    const sent = await on.agent.send({ project_path: on.path, subject, body: `${subject}. Nothing to answer.`, agent_session: `ses_beside_narrow_${n}` } as Parameters<SimAgent['send']>[0]);
+    fresh.push(String(sent.thread_id));
+  }
+  const [a, b] = fresh as [string, string];
   await openThread(page, on, a);
   await row(page, b).click({ button: 'right' });
   await expect(page.locator('[data-row-menu]')).toBeVisible();
