@@ -3,8 +3,9 @@
  * for the far machine (PLANNOTATOR_TEST_SANDBOX lets the transport take it) and serves only what a real door
  * serves for it, `attachments/<id>/view` and `html-assets/<token>/<path>`. What regresses: the new tab asking the far
  * door for a page route it does not have, the redirect leaving the forward, the page or its folder losing the
- * sandbox, the folder's cross-site reads refused (the page is an opaque origin), or that exception reaching any other
- * forwarded route.
+ * sandbox, the folder's cross-site reads refused (the page is an opaque origin), that exception reaching any other
+ * forwarded route (an encoded or stepped path included), or a hostile far machine's headers loosening what this
+ * origin serves.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -12,11 +13,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInboxMachines } from "./inbox-machines";
 import { InboxLinks } from "./inbox-links";
+import { HTML_ASSET_SUBRESOURCE_CSP } from "@plannotator/shared/html-assets";
 import { INBOX_HTML_DOCUMENT_CSP } from "./inbox-attachments";
 
 const FAR = "ibx_01K00000000000000000000000";
 const TOKEN = "tok_test";
 const ATT = "att_01K7DDDDDDDDDDDDDDDDDDDDDD";
+/** An attachment whose far `view` is not JSON at all. */
+const ODD = "att_01K7EEEEEEEEEEEEEEEEEEEEEE";
+/** A sandbox that would let a document act as this origin, and leave its tab. */
+const HOSTILE_CSP = "sandbox allow-scripts allow-same-origin allow-top-navigation allow-popups-to-escape-sandbox";
 const FOLDER = "f0f1f2f3f4f5f6f7";
 
 let root: string;
@@ -75,8 +81,19 @@ function farDoor() {
           headers: { "Content-Type": "text/html; charset=utf-8", "Content-Security-Policy": INBOX_HTML_DOCUMENT_CSP, "X-Content-Type-Options": "nosniff", "Cache-Control": "no-store", "Access-Control-Allow-Origin": "*" },
         });
       }
-      // An older or careless far machine's stylesheet with no CSP at all: the forward adds the sandbox.
-      if (route === `html-assets/${FOLDER}/style.css`) return new Response("h1{background:url(/api/html-assets/pic00000000000001/bg.png)}", { headers: { "Content-Type": "text/css; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+      // An older or careless far machine's stylesheet with no CSP at all: the forward gives it a local asset's.
+      if (route === `html-assets/${FOLDER}/style.css`) {
+        const css = "h1{background:url(/api/html-assets/pic00000000000001/bg.png)}";
+        const range = req.headers.get("range");
+        if (range === "bytes=0-9") return new Response(css.slice(0, 10), { status: 206, headers: { "Content-Type": "text/css; charset=utf-8", "Content-Range": `bytes 0-9/${css.length}`, "Accept-Ranges": "bytes" } });
+        return new Response(css, { headers: { "Content-Type": "text/css; charset=utf-8", "Access-Control-Allow-Origin": "*" } });
+      }
+      // A hostile far machine: loosened sandboxes, a sniffing hint, a CORS grant on a route that is not the folder.
+      const hostile = { "Content-Security-Policy": HOSTILE_CSP, "X-Content-Type-Options": "sniff", "Access-Control-Allow-Origin": "*" };
+      if (route === `html-assets/${FOLDER}/evil.html`) return new Response("<script>parent.x</script>", { headers: { ...hostile, "Content-Type": "text/html; charset=utf-8" } });
+      if (route === `html-assets/${FOLDER}/evil.svg`) return new Response("<svg/>", { headers: { ...hostile, "Content-Type": "image/svg+xml" } });
+      if (route === `attachments/${ATT}/image`) return new Response("<svg/>", { headers: { ...hostile, "Content-Type": "image/svg+xml" } });
+      if (route === `attachments/${ODD}/view`) return new Response("<script>x</script>", { headers: { ...hostile, "Content-Type": "text/html" } });
       return Response.json({ code: "device_route_not_found" }, { status: 404 });
     },
   });
@@ -111,9 +128,9 @@ async function linkedInbox() {
   cleanups.push(() => machines.stop());
   machines.start();
   for (let i = 0; i < 100 && machines.machinesView().find((m) => m.id === FAR)?.state !== "online"; i++) await Bun.sleep(20);
-  const get = async (path: string, headers: Record<string, string> = {}) => {
+  const get = async (path: string, headers: Record<string, string> = {}, method = "GET") => {
     const url = new URL(`http://127.0.0.1:1${path}`);
-    return (await machines.route(new Request(url, { headers: { Host: "127.0.0.1:1", ...headers } }), url, "local"))!;
+    return (await machines.route(new Request(url, { method, headers: { Host: "127.0.0.1:1", ...headers } }), url, "local"))!;
   };
   return { get };
 }
@@ -139,11 +156,11 @@ test("the new tab: a 303 to the page's own file through the forward, made from t
   expect(await doc.text()).toContain(`<img src="/api/inbox/m/${FAR}/html-assets/pic00000000000001/shot.png">`);
 });
 
-test("its folder loads cross-site, as the sandboxed page asks; a far answer without a sandbox gets one; nothing else under the forward opens cross-site", async () => {
+test("its folder loads cross-site, as the sandboxed page asks, under a local folder's CSP; nothing else under the forward opens cross-site", async () => {
   const { get } = await linkedInbox();
   const style = await get(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/style.css`, FROM_PAGE);
   expect(style.status).toBe(200);
-  expect(style.headers.get("content-security-policy")).toBe("sandbox");
+  expect(style.headers.get("content-security-policy")).toBe(HTML_ASSET_SUBRESOURCE_CSP);
   expect(await style.text()).toBe(`h1{background:url(/api/inbox/m/${FAR}/html-assets/pic00000000000001/bg.png)}`);
   // A font or a module script: CORS mode, `Origin: null`.
   const cors = await get(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/style.css`, { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", Origin: "null" });
@@ -171,3 +188,61 @@ test("the sent version is the page itself under a local page's headers; the view
   expect(body.html).toContain(`<base href="/api/inbox/m/${FAR}/html-assets/${FOLDER}/">`);
   expect(body.text).toBe("<h1>Pricing</h1>");
 });
+
+test("a hostile far machine's headers: its folder gets a local folder's CSP, everything else a sandbox it cannot escape, always nosniff, CORS only for the folder", async () => {
+  const { get } = await linkedInbox();
+  const doc = await get(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/evil.html`, SAME);
+  expect([doc.status, doc.headers.get("content-security-policy"), doc.headers.get("x-content-type-options")]).toEqual([200, INBOX_HTML_DOCUMENT_CSP, "nosniff"]);
+  const svg = await get(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/evil.svg`, SAME);
+  expect([svg.status, svg.headers.get("content-security-policy"), svg.headers.get("x-content-type-options")]).toEqual([200, HTML_ASSET_SUBRESOURCE_CSP, "nosniff"]);
+  // The picture's own tab (Open in → Browser) and a page whose far `view` is not JSON.
+  for (const route of [`attachments/${ATT}/image`, `attachments/${ODD}/page`]) {
+    const answer = await get(`/api/inbox/m/${FAR}/${route}`, SAME);
+    expect([route, answer.status, answer.headers.get("content-security-policy"), answer.headers.get("x-content-type-options"), answer.headers.get("access-control-allow-origin")]).toEqual([
+      route,
+      200,
+      "sandbox allow-scripts",
+      "nosniff",
+      null,
+    ]);
+  }
+});
+
+test("an encoded, stepped or empty path under the forwarded folder opens nothing cross-site", async () => {
+  const { get } = await linkedInbox();
+  for (const path of [
+    `html-assets/${FOLDER}/..%2fthreads`,
+    `html-assets/${FOLDER}/..%2Fthreads`,
+    `html-assets/${FOLDER}/%2e%2e/threads`,
+    `html-assets/%2e%2e/threads`,
+    `html-assets/${FOLDER}/a%5c..%5cthreads`,
+    `html-assets/${FOLDER}//threads`,
+    `html-assets//threads`,
+  ]) {
+    // Refused by the forward (404), or stepped by the URL itself (`%2e%2e` is `..` to it) out of the folder's path
+    // and refused as any cross-site read (403), or still inside the far folder route, which refuses it there.
+    const refused = await get(`/api/inbox/m/${FAR}/${path}`, FROM_PAGE);
+    expect([path, [403, 404].includes(refused.status)]).toEqual([path, true]);
+  }
+  const stepped = await get(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/../../threads`, FROM_PAGE);
+  expect(stepped.status).toBe(403);
+  // Nothing but the far folder route was ever asked.
+  expect(asked.filter((route) => !route.startsWith("html-assets/"))).toEqual([]);
+  expect(asked).toEqual([`html-assets/threads`]);
+});
+
+test("a part of a far page or stylesheet passes untouched; HEAD answers the new tab and the folder as locally", async () => {
+  const { get } = await linkedInbox();
+  const part = await get(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/style.css`, { ...FROM_PAGE, Range: "bytes=0-9" });
+  expect([part.status, part.headers.get("content-range"), await part.text()]).toEqual([206, "bytes 0-9/61", "h1{backgro"]);
+  const tab = await get(`/api/inbox/m/${FAR}/attachments/${ATT}/page`, SAME, "HEAD");
+  expect([tab.status, tab.headers.get("location"), await tab.text()]).toEqual([303, `/api/inbox/m/${FAR}/html-assets/${FOLDER}/pricing.html`, ""]);
+  const sent = await get(`/api/inbox/m/${FAR}/attachments/${ATT}/page?version=sent`, SAME, "HEAD");
+  expect([sent.status, sent.headers.get("content-security-policy"), await sent.text()]).toEqual([200, INBOX_HTML_DOCUMENT_CSP, ""]);
+  const doc = await get(`/api/inbox/m/${FAR}/html-assets/${FOLDER}/pricing.html`, FROM_PAGE, "HEAD");
+  expect([doc.status, doc.headers.get("content-security-policy"), await doc.text()]).toEqual([200, INBOX_HTML_DOCUMENT_CSP, ""]);
+  // HEAD elsewhere under the forward is still not a forwarded read, and cross-site HEAD is refused as GET is.
+  expect((await get(`/api/inbox/m/${FAR}/threads`, SAME, "HEAD")).status).toBe(405);
+  expect((await get(`/api/inbox/m/${FAR}/threads`, FROM_PAGE, "HEAD")).status).toBe(403);
+});
+

@@ -213,11 +213,12 @@ export function htmlAssetRouteFromDocument(rawHtml: string | null | undefined): 
 	const withoutComments = rawHtml.replace(HTML_COMMENT_PATTERN, "");
 	const baseTag = /<base\b[^>]*>/i.exec(withoutComments);
 	if (!baseTag) return null;
-	// A linked machine's page in the Inbox names that machine's route through the forward (`/api/inbox/m/<id>/html-assets/`).
-	const match = /\bhref\s*=\s*["']?(\/api\/html-assets|\/api\/inbox\/m\/ibx_[0-9A-HJKMNP-TV-Z]{26}\/html-assets)\/([A-Za-z0-9_-]+)\//i.exec(baseTag[0]);
-	if (!match) return null;
-	const route = match[1]!.toLowerCase() === HTML_ASSET_ROUTE_PREFIX ? HTML_ASSET_ROUTE_PREFIX : match[1]!;
-	return `${route}/${match[2]}/`;
+	const local = /\bhref\s*=\s*["']?\/api\/html-assets\/([A-Za-z0-9_-]+)\//i.exec(baseTag[0]);
+	if (local) return `${HTML_ASSET_ROUTE_PREFIX}/${local[1]}/`;
+	// A linked machine's page in the Inbox names that machine's route through the forward, as the Inbox writes it
+	// (`/api/inbox/m/<id>/html-assets/`, the id in capitals): matched exactly.
+	const far = /\bhref\s*=\s*["']?(\/api\/inbox\/m\/ibx_[0-9A-HJKMNP-TV-Z]{26}\/html-assets)\/([A-Za-z0-9_-]+)\//.exec(baseTag[0]);
+	return far ? `${far[1]}/${far[2]}/` : null;
 }
 
 /**

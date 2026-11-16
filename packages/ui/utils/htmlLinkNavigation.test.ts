@@ -346,6 +346,8 @@ describe("htmlAssetRouteFromDocument", () => {
 		// Nothing else under the forward, and no malformed machine id, is an asset route.
 		expect(htmlAssetRouteFromDocument(`<base href="/api/inbox/m/${machine}/threads/tok/">`)).toBeNull();
 		expect(htmlAssetRouteFromDocument('<base href="/api/inbox/m/ibx_short/html-assets/tok/">')).toBeNull();
+		// The id as the Inbox writes it, exactly: a lowercased one names no machine.
+		expect(htmlAssetRouteFromDocument(`<base href="/api/inbox/m/${machine.toLowerCase()}/html-assets/tok/">`)).toBeNull();
 	});
 
 	test("a page without the server's base has no asset route", () => {

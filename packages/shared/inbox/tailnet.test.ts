@@ -8,6 +8,7 @@ import { describe, expect, test } from "bun:test";
 import { resolveInboxTailscale, resolveInboxTailscaleAllow } from "../config";
 import { decodeTailscaleHeaderValue, parseTailscaleSelfIdentity, serveStatusRoutes, serveTargetIsLoopbackPort } from "../tailscale";
 import { checkTailnetIdentity, isServedTailnetHost, tailnetFetchSiteAllowed } from "./tailnet";
+import { cfAccessFetchSiteAllowed } from "./cf-access";
 
 const status = (self: Record<string, unknown>, users: Record<string, unknown> = { "42": { LoginName: "me@example.com" } }) =>
   JSON.stringify({ Self: self, User: users });
@@ -122,6 +123,15 @@ describe("tailnetFetchSiteAllowed", () => {
         expect([method, path, tailnetFetchSiteAllowed(method, path, h({ "Sec-Fetch-Site": site, "Sec-Fetch-Mode": "no-cors" }))]).toEqual([method, path, false]);
       }
     }
+  });
+  test("the Cloudflare Access door answers the forwarded folder as the tailnet does, and with session links only its entry, as for a local folder", () => {
+    const machine = "ibx_01K7MMMMMMMMMMMMMMMMMMMMMM";
+    const fromPage = h({ "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "no-cors" });
+    for (const path of [`/api/inbox/m/${machine}/html-assets/tok/style.css`, "/api/html-assets/tok/style.css"]) {
+      expect([path, cfAccessFetchSiteAllowed("GET", path, fromPage)]).toEqual([path, true]);
+      expect([path, cfAccessFetchSiteAllowed("GET", path, fromPage, true)]).toEqual([path, false]);
+    }
+    expect(cfAccessFetchSiteAllowed("GET", `/api/inbox/m/${machine}/threads`, fromPage)).toBe(false);
   });
 });
 
