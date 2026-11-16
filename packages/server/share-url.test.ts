@@ -4,7 +4,7 @@ import { generateRemoteShareUrl, writeRemoteShareLink } from "./share-url";
 
 describe("generateRemoteShareUrl", () => {
   test("keeps markdown remote shares hash-based", async () => {
-    const url = await generateRemoteShareUrl("# Plan", "https://share.example.test");
+    const url = await generateRemoteShareUrl("# Plan", "https://share.example.test/");
     expect(url.startsWith("https://share.example.test/#")).toBe(true);
 
     const payload = await decompress(url.split("#")[1]) as { p: string; a: unknown[] };
@@ -24,9 +24,9 @@ describe("generateRemoteShareUrl", () => {
       });
     }) as typeof fetch;
 
-    const url = await generateRemoteShareUrl("", "https://share.example.test", {
+    const url = await generateRemoteShareUrl("", "https://share.example.test/", {
       rawHtml: "<!doctype html><h1>Hello</h1>",
-      pasteApiUrl: "https://paste.example.test",
+      pasteApiUrl: "https://paste.example.test/",
       fetchImpl,
     });
 

@@ -28,7 +28,7 @@ export async function generateRemoteShareUrl(
   shareBaseUrl?: string,
   options: RemoteShareOptions = {},
 ): Promise<string> {
-  const base = shareBaseUrl || DEFAULT_SHARE_BASE;
+  const base = (shareBaseUrl || DEFAULT_SHARE_BASE).replace(/\/+$/, "");
   if (options.rawHtml) {
     // Callers that start from a local file should pass self-contained HTML
     // so sibling assets keep working after the payload leaves the machine.
@@ -52,7 +52,8 @@ async function generateRemotePasteShareUrl(
   const compressed = await compress(payload);
   const { ciphertext, key } = await encrypt(compressed);
 
-  const response = await fetchImpl(`${pasteApiUrl}/api/paste`, {
+  const pasteBase = pasteApiUrl.replace(/\/+$/, "");
+  const response = await fetchImpl(`${pasteBase}/api/paste`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ data: ciphertext }),
@@ -69,8 +70,8 @@ async function generateRemotePasteShareUrl(
   }
 
   const pasteParam =
-    pasteApiUrl !== DEFAULT_PASTE_API
-      ? `&paste=${base64UrlEncode(pasteApiUrl)}`
+    pasteBase !== DEFAULT_PASTE_API
+      ? `&paste=${base64UrlEncode(pasteBase)}`
       : "";
   return `${shareBaseUrl}/p/${result.id}#key=${key}${pasteParam}`;
 }
