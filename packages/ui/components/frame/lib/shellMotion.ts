@@ -28,25 +28,41 @@ export function preloadShellAnimate(): void {
   if (shellAnimate === null) void loadShellAnimate().catch(() => {});
 }
 
+function sameValues(a: readonly MotionValue<number>[], b: readonly MotionValue<number>[]): boolean {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
 export function useCombinedMotionValue<T>(
   values: readonly MotionValue<number>[],
   combine: (latest: number[]) => T,
 ): MotionValue<T> {
   const combined = useMotionValue<T>(combine(values.map((value) => value.get())));
-  combined.set(combine(values.map((value) => value.get())));
   const combineRef = useRef(combine);
+  const subscriptionRef = useRef<{ values: readonly MotionValue<number>[]; stop: () => void } | null>(null);
   useLayoutEffect(() => {
     combineRef.current = combine;
-  });
-  useLayoutEffect(() => {
     const update = () => combined.set(combineRef.current(values.map((value) => value.get())));
+    update();
+    const current = subscriptionRef.current;
+    if (current !== null && sameValues(current.values, values)) return;
+    current?.stop();
     const schedule = () => frame.preRender(update, false, true);
     const subscriptions = values.map((value) => value.on("change", schedule));
-    return () => {
-      for (const unsubscribe of subscriptions) unsubscribe();
-      cancelFrame(update);
+    subscriptionRef.current = {
+      values,
+      stop: () => {
+        for (const unsubscribe of subscriptions) unsubscribe();
+        cancelFrame(update);
+      },
     };
-  }, [combined, ...values]);
+  });
+  useLayoutEffect(
+    () => () => {
+      subscriptionRef.current?.stop();
+      subscriptionRef.current = null;
+    },
+    [],
+  );
   return combined;
 }
 

@@ -520,28 +520,31 @@ describe.skipIf(!hasDom)('PagesRailHead meta', () => {
 });
 
 describe.skipIf(!hasDom)('useCombinedMotionValue', () => {
-  test('subscribes once across renders and reads the latest combine', () => {
+  test('subscribes once across renders, again only when the values change, and reads the latest combine', () => {
     const { useCombinedMotionValue } = motionModule!;
     const a = motionValues!.motionValue(2);
     const b = motionValues!.motionValue(3);
+    const c = motionValues!.motionValue(5);
     let subscriptions = 0;
-    for (const value of [a, b]) {
+    for (const value of [a, b, c]) {
       const on = value.on.bind(value);
       value.on = ((event: Parameters<typeof on>[0], callback: Parameters<typeof on>[1]) => {
         subscriptions += 1;
         return on(event, callback);
       }) as typeof value.on;
     }
-    const seen: number[] = [];
-    function Harness({ scale }: { scale: number }) {
-      const combined = useCombinedMotionValue([a, b], ([x, y]) => (x! + y!) * scale);
-      seen.push(combined.get());
+    let combined: { get: () => number } | null = null;
+    function Harness({ scale, values }: { scale: number; values: (typeof a)[] }) {
+      combined = useCombinedMotionValue(values, (latest) => latest.reduce((sum, next) => sum + next, 0) * scale);
       return null;
     }
-    mount(<Harness scale={1} />);
-    act(() => root!.render(<Harness scale={2} />));
-    act(() => root!.render(<Harness scale={3} />));
+    mount(<Harness scale={1} values={[a, b]} />);
+    act(() => root!.render(<Harness scale={2} values={[a, b]} />));
+    act(() => root!.render(<Harness scale={3} values={[a, b]} />));
     expect(subscriptions).toBe(2);
-    expect(seen.at(-1)).toBe(15);
+    expect(combined!.get()).toBe(15);
+    act(() => root!.render(<Harness scale={1} values={[a, b, c]} />));
+    expect(subscriptions).toBe(5);
+    expect(combined!.get()).toBe(10);
   });
 });
