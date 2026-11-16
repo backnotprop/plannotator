@@ -3,7 +3,7 @@
  * A decision reads from the plan's decision record: "Approved" (with or without notes), "Changes asked" (denied, or
  * feedback sent; both local to this computer), or "No decision".
  */
-import { isPlanApproval, isPlanPictureType, planMediaType, PLAN_PERSON, type PlanApprovalMoved, type PlanApprovalState, type PlanDecisionKind, type PlanSummary, type PlanVersion } from '@plannotator/core/plans';
+import { isPlanApproval, isPlanPictureType, planDecisionVersion, planMediaType, PLAN_PERSON, type PlanApprovalMoved, type PlanApprovalState, type PlanDecisionKind, type PlanSummary, type PlanVersion } from '@plannotator/core/plans';
 
 export type PlanDecisionTone = 'approved' | 'changes' | 'none';
 
@@ -71,10 +71,12 @@ export function summaryApproval(plan: Pick<PlanSummary, 'approval' | 'decision' 
   const head = plan.head_version_number;
   if (!d) return { kind: 'none' };
   const approves = isPlanApproval(d.decision);
-  if (!d.version_number || d.version_number >= head) {
+  // A decision whose version was never found is on the first (`planDecisionVersion`): history, never lost.
+  const on = planDecisionVersion(d);
+  if (on >= head) {
     return approves ? { kind: 'approved', version_number: head, names: [PLAN_PERSON], notes: d.decision === 'approved-with-notes', moved: null } : { kind: 'changes', version_number: head };
   }
-  return approves ? { kind: 'cleared', version_number: head, from_version_number: d.version_number, names: [PLAN_PERSON] } : { kind: 'undecided', version_number: head, from_version_number: d.version_number };
+  return approves ? { kind: 'cleared', version_number: head, from_version_number: on, names: [PLAN_PERSON] } : { kind: 'undecided', version_number: head, from_version_number: on };
 }
 
 /** A plan's decision as a list shows it: "Approved" on the newest version, else "v4 is new and not approved". */

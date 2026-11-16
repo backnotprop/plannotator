@@ -63,22 +63,25 @@ export function buildDirectEditsSection(
   base: string | null,
   current: string | null | undefined,
   sourceConverted: boolean,
+  /** The Inbox's Plans: the page's own file name, and words that name the versions the diff runs between. */
+  options: { label?: string; preamble?: string } = {},
 ): string {
   const edited = normalizeEditedMarkdown(base, current);
   if (base === null || edited === null) return '';
 
+  const label = options.label ?? 'plan.md';
   const patch = createTwoFilesPatch(
-    'plan.md (original)',
-    'plan.md (edited)',
+    `${label} (original)`,
+    `${label} (edited)`,
     base,
     edited,
     undefined,
     undefined,
     { context: 3 },
   );
-  const preamble = sourceConverted
+  const preamble = options.preamble ?? (sourceConverted
     ? 'The user edited a markdown conversion of the original source. This diff describes the desired content changes (it is not a literal patch to a file on disk):'
-    : 'The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:';
+    : 'The user edited the document directly. Apply these exact changes — a unified diff against the version you submitted:');
 
   return ['# Direct Edits', '', preamble, '', '```diff', patch.trimEnd(), '```'].join('\n');
 }

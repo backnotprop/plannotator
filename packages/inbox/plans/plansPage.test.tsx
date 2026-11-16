@@ -65,6 +65,7 @@ const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
 const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
 const { acceptPlanDiagramSvg } = (hasDom ? await import('./planContent') : {}) as typeof import('./planContent');
 const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
+const deliver = (hasDom ? await import('./deliver') : null) as typeof import('./deliver') | null;
 // Loaded here so the page's lazy contents rail resolves at once.
 if (hasDom) await import('@plannotator/ui/components/MarkdownContentsRail');
 
@@ -673,11 +674,16 @@ test.skipIf(!hasDom)('a comment on a plan is kept in the plan library, is back w
   expect(card()).toBeNull();
 });
 
-test.skipIf(!hasDom)('Send opens New message to the plan’s own agent session with the comments as plan feedback; with no session it is disabled and says why', async () => {
-  const quiet = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+test.skipIf(!hasDom)('Send opens New message to the agent live in the plan’s project (its own session first) with the comments as plan feedback; with none live it is disabled and says why', async () => {
+  const quiet = plan('Rotate refresh tokens', 'ledger', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
   const { plan: record, document: doc } = store.createPlan({ name: 'Rate limits', project_name: 'harbor-api', created_at: at(1), document: { title: 'Rate limits' } });
   store.addVersion(record.id, doc.id, { bytes: bytes('# Rate limits\n\nA token bucket per key.\n'), committed_at: at(2), source: 'plan-review', agent_session: 'sess-42', agent_host: 'claude-code' });
   keptStorage();
+  // Two agents live in harbor-api (the plan's own session among them), one in another project, none in ledger.
+  const replies = interceptInbox([
+    { project: { id: 'prj_harbor', name: 'harbor-api', root: '/Users/me/harbor-api' }, sessions: [{ session: 'sess-7', host: 'codex' }, { session: 'sess-42', host: 'claude-code' }] },
+    { project: { id: 'prj_other', name: 'ledger-ui', root: '/Users/me/ledger-ui' }, sessions: [{ session: 'sess-9', host: 'codex' }] },
+  ]);
   const opened: unknown[] = [];
   const listen = (event: Event) => opened.push((event as CustomEvent).detail);
   window.addEventListener('plannotator-inbox:open-composer', listen);
@@ -686,10 +692,10 @@ test.skipIf(!hasDom)('Send opens New message to the plan’s own agent session w
     let host = draw();
     await settle();
     const button = () => host.querySelector<HTMLButtonElement>('[data-plan-send-button]')!;
-    // No session known: disabled, in the Inbox's words for a project with no live agent.
+    // No agent live in ledger: disabled, in the Inbox's words for a project with no live agent.
     await globalComment(host, 'Shorter.');
     expect(button().disabled).toBe(true);
-    expect(text(host.querySelector(`#${button().getAttribute('aria-describedby')}`))).toBe('No agent is running in harbor-api');
+    expect(text(host.querySelector(`#${button().getAttribute('aria-describedby')}`))).toBe('No agent is running in ledger');
     act(() => root!.unmount());
     unlisten();
     document.body.innerHTML = '';
@@ -720,7 +726,6 @@ test.skipIf(!hasDom)('Send opens New message to the plan’s own agent session w
     expect(text(host.querySelector(`#${button().getAttribute('aria-describedby')}`))).toBe('0 annotations ride your next Send to Claude Code.');
 
     // The next Send is a reply in that thread, at once; its comment is sent with that reply.
-    const replies = interceptInbox();
     await globalComment(host, 'And per route.');
     await act(async () => button().click());
     await settle();
@@ -733,12 +738,19 @@ test.skipIf(!hasDom)('Send opens New message to the plan’s own agent session w
   }
 });
 
-/** The Inbox's own routes for one test: replies are taken (`msg_reply_<n>`), the rest still go to Plans' routes. */
-function interceptInbox() {
+/**
+ * The Inbox's own routes for one test: the live sessions are `live` (New message's list), replies are taken
+ * (`msg_reply_<n>`), the rest still go to Plans' routes.
+ */
+function interceptInbox(live: { project: { id: string | null; name: string; root: string }; sessions: { session: string; host: string; label?: string }[] }[] = []) {
   const seen: { path: string; body: Record<string, unknown> }[] = [];
   const plans = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
+    if (url.pathname === '/api/inbox/sessions') {
+      const projects = live.map((group) => ({ project: group.project, sessions: group.sessions.map((one) => ({ started_at: at(1), last_seen_at: at(1), busy: false, idle_since: null, last_thread: null, ...one })) }));
+      return Response.json({ serverSession: 's', home: '/Users/me', projects });
+    }
     if (!url.pathname.startsWith('/api/inbox/')) return plans(input, init);
     seen.push({ path: url.pathname, body: JSON.parse(String(init?.body ?? '{}')) });
     return Response.json({ reply: { id: `msg_reply_${seen.length}` }, questions: [], replayed: false });
@@ -845,11 +857,147 @@ test.skipIf(!hasDom)('Done makes a new version of the person’s words and sends
   expect(store.versions(id).length).toBe(3);
   expect(replies.map((r) => r.path)).toEqual(['/api/inbox/messages/msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ/reply']);
   const words = String(replies[0]!.body.words);
-  expect(words.startsWith('# Direct Edits')).toBe(true);
-  expect(words).toContain('-Retire keys after 7 days.\n+Retire keys after 3 days.');
+  // v2's edit was never sent (no agent then): the diff starts at v1, the newest version the agent knows.
+  expect(words.startsWith('# Direct Edits\n\nThe person edited Rotate refresh tokens.md; it is now v3, in the Plannotator Inbox. Apply these exact changes: a unified diff from v1 (the newest version you know) to v3:')).toBe(true);
+  expect(words).toContain('-Retire keys after 14 days.\n+Retire keys after 3 days.');
+  for (let i = 0; i < 20 && !store.get(id)!.agent_told; i++) await settle();
+  expect(store.get(id)!.agent_told).toEqual({ [store.get(id)!.primary_doc_id]: 3 });
   expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v3. The agent was sent what changed.');
   // The person saw v2 when the page opened; v3 is their own, so it is not "Changed since you looked".
   expect(host.querySelector('[data-plan-banner="changed"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Done with an agent live in the plan’s project opens New message to it with what changed; once sent, the next Done replies in the plan’s thread; several live: New message asks which', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+  const several = plan('Rate limits', 'ledger', ['# Rate limits\n\nA bucket.\n']);
+  keptStorage();
+  const replies = interceptInbox([
+    { project: { id: null, name: 'harbor-api', root: '/Users/me/harbor-api' }, sessions: [{ session: 'sess-7', host: 'codex' }] },
+    { project: { id: null, name: 'ledger', root: '/Users/me/ledger' }, sessions: [{ session: 'sess-1', host: 'codex' }, { session: 'sess-2', host: 'claude-code' }] },
+  ]);
+  const opened: { to: unknown; body: string; onSent: (sent: object) => void }[] = [];
+  const listen = (event: Event) => opened.push((event as CustomEvent).detail);
+  window.addEventListener('plannotator-inbox:open-composer', listen);
+  try {
+    window.location.hash = `#plans=${id}`;
+    let host = draw();
+    await settle();
+    await editAndDone(host, '# Rotate refresh tokens\n\nRetire keys after 7 days.\n');
+    expect(opened.map((o) => o.to)).toEqual([{ session: 'sess-7' }]);
+    expect(opened[0]!.body).toContain('-Retire keys after 14 days.\n+Retire keys after 7 days.');
+    expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v2. What changed is in New message to Codex: send it there.');
+    // The person sends it: the plan has the thread, and the agent knows v2.
+    await act(async () => opened[0]!.onSent({ threadId: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ', session: 'sess-7', host: 'codex', projectName: 'harbor-api', draftId: null }));
+    await settle();
+    expect(store.get(id)!.thread_id).toBe('msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ');
+    expect(store.get(id)!.agent_told).toEqual({ [store.get(id)!.primary_doc_id]: 2 });
+    await editAndDone(host, '# Rotate refresh tokens\n\nRetire keys after 3 days.\n');
+    expect(opened).toHaveLength(1);
+    expect(replies.map((r) => r.path)).toEqual(['/api/inbox/messages/msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ/reply']);
+    expect(String(replies[0]!.body.words)).toContain('-Retire keys after 7 days.\n+Retire keys after 3 days.');
+    expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v3. The agent was sent what changed.');
+
+    // Two agents live in ledger, neither the plan's: New message opens on its To list.
+    act(() => root!.unmount());
+    unlisten();
+    document.body.innerHTML = '';
+    window.location.hash = `#plans=${several}`;
+    host = draw();
+    await settle();
+    await editAndDone(host, '# Rate limits\n\nTwo buckets.\n');
+    expect(opened.map((o) => o.to)).toEqual([{ session: 'sess-7' }, 'pick']);
+    expect(text(host.querySelector('[data-plan-banner="saved"] p'))).toBe('Saved as v2. What changed is in New message: choose the agent there.');
+  } finally {
+    window.removeEventListener('plannotator-inbox:open-composer', listen);
+  }
+});
+
+test.skipIf(!hasDom)('an open edit and a kept text outlive another page and a reload of the plan page; Done untouched on a CRLF page makes no version', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\r\n\r\nRetire keys after 14 days.\r\n']);
+  const notes = store.addDocument(id, { title: 'Notes', kind: 'markdown', created_at: at(3) });
+  store.addVersion(id, notes.id, { bytes: bytes('# Notes\n\none\n'), committed_at: at(3), source: 'plan-review' });
+  keptStorage();
+  window.location.hash = `#plans=${id}`;
+  let host = draw();
+  await settle();
+  // CRLF: opened and Done untouched is no version (the editor gives the lines back with `\n`).
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-done]')!.click());
+  await settle();
+  expect(store.versions(id).length).toBe(1);
+  expect(text(host.querySelector('[data-plan-banner="unchanged"] p'))).toBe('Nothing changed, so no new version was made.');
+  // An open edit, then another page: back on the plan's page, the editor is open with the person's words.
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  const view = editorView();
+  await act(async () => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: '# Mine\n\nNot saved yet.\n' } }));
+  window.location.hash = `#plans=${id}&doc=${notes.id}`;
+  await settle();
+  expect(document.querySelector('[data-plan-editor]')).toBeNull();
+  window.location.hash = `#plans=${id}`;
+  await settle();
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  expect(editorView().state.doc.toString()).toBe('# Mine\n\nNot saved yet.\n');
+  // The agent writes v2 meanwhile; Done keeps the text, and a reload of the page still holds it.
+  store.addVersion(id, store.get(id)!.primary_doc_id, { bytes: bytes('# Rotate refresh tokens\n\nv2 by the agent\n'), committed_at: at(9), source: 'plan-review' });
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-done]')!.click());
+  await settle();
+  expect(host.querySelector('[data-plan-banner="stale"]')).not.toBeNull();
+  act(() => root!.unmount());
+  unlisten();
+  document.body.innerHTML = '';
+  host = draw();
+  await settle();
+  expect(text(host.querySelector('[data-plan-banner="stale"] p'))).toBe('v2 came while you were editing, so your edit was not saved. Your text is kept here.');
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-kept-edit]')!.click());
+  for (let i = 0; i < 40 && !document.querySelector('[data-plan-editor] .cm-content'); i++) await settle();
+  expect(editorView().state.doc.toString()).toBe('# Mine\n\nNot saved yet.\n');
+  // Discarded or saved, it is gone: Cancel here, and a reload shows no editor and no kept text.
+  await act(async () => host.querySelector<HTMLButtonElement>('[data-plan-edit-cancel]')!.click());
+  act(() => root!.unmount());
+  unlisten();
+  document.body.innerHTML = '';
+  host = draw();
+  await settle();
+  expect(document.querySelector('[data-plan-editor]')).toBeNull();
+  expect(host.querySelector('[data-plan-banner="stale"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a reply that went is never said to have failed when recording it does: the record is tried again; a held Send is recorded once its outbox entry was delivered, never when refused', async () => {
+  const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
+  store.updatePlan(id, { thread_id: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ' });
+  const replies = interceptInbox();
+  // The first record of the Send fails (the Inbox was busy); the reply had gone.
+  const inner = globalThis.fetch;
+  let failures = 1;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/sent') && failures-- > 0) return Response.json({ error: 'busy' }, { status: 503 });
+    return inner(input, init);
+  }) as typeof fetch;
+  let told = 0;
+  const how = await deliver!.deliverToPlanAgent({ plan: store.get(id)!, agent: { kind: 'thread', thread: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ', label: 'the agent' }, words: '# Direct Edits\n\nx', comments: [], told: { doc: store.get(id)!.primary_doc_id, version: 1 }, onSent: () => told++ });
+  expect(how).toBe('replied');
+  for (let i = 0; i < 30 && told === 0; i++) await new Promise((r) => setTimeout(r, 100));
+  expect(told).toBe(1);
+  expect(store.get(id)!.agent_told).toEqual({ [store.get(id)!.primary_doc_id]: 1 });
+  // The same words again are the same reply (one key per plan and words): the Inbox answers it once.
+  await deliver!.deliverToPlanAgent({ plan: store.get(id)!, agent: { kind: 'thread', thread: 'msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ', label: 'the agent' }, words: '# Direct Edits\n\nx', comments: [], onSent: () => {} });
+  expect(new Set(replies.map((r) => r.body.idempotency_key)).size).toBe(1);
+
+  // Held for another machine: recorded once the entry left the waiting list with no notice.
+  const waiting = new Set(['k-delivered', 'k-refused']);
+  const notices: { key: string }[] = [];
+  const look = async () => ({ waiting: [...waiting].map((key) => ({ key })), notices }) as unknown as Awaited<ReturnType<typeof import('../api').inboxApi.outbox>>;
+  const went: string[] = [];
+  deliver!.whenHeldDelivered('k-delivered', () => went.push('k-delivered'), look, 10);
+  deliver!.whenHeldDelivered('k-refused', () => went.push('k-refused'), look, 10);
+  await new Promise((r) => setTimeout(r, 40));
+  expect(went).toEqual([]);
+  waiting.clear();
+  notices.push({ key: 'k-refused' });
+  await new Promise((r) => setTimeout(r, 60));
+  expect(went).toEqual(['k-delivered']);
 });
 
 test.skipIf(!hasDom)('a newer version that came while editing: nothing is saved, the newest shows, and the person’s text is kept to edit again; one banner carries Show changes', async () => {

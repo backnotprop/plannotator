@@ -334,6 +334,20 @@ describe("plan import", () => {
     expect(store.list()[0]!.decision).toMatchObject({ decision: "approved", version_number: 1 });
   });
 
+  test("a snapshot of an older text lands on the agent's version, never on the person's Restore of it", () => {
+    const dataDir = scratch();
+    version(dataDir, "api", "cache-2026-11-10", 1, "# Cache\n\nv1\n", day(9));
+    version(dataDir, "api", "cache-2026-11-10", 2, "# Cache\n\nv2\n", day(10));
+    const store = createPlanStore({ dataDir });
+    importPlanLibrary(store, { dataDir, now: () => day(11).getTime() });
+    const id = store.list()[0]!.id;
+    const doc = store.get(id)!.primary_doc_id;
+    store.addVersion(id, doc, { bytes: new TextEncoder().encode("# Cache\n\nv1\n"), committed_at: day(12).toISOString(), source: "person", author_via: "person", restored_from: 1 });
+    put(join(dataDir, "plans", "cache-2026-11-10-approved.md"), "# Cache\n\nv1\n", day(13));
+    importPlanLibrary(store, { dataDir, now: () => day(14).getTime() });
+    expect(store.events(id).filter((e) => e.kind === "decision").map((e) => e.decision!.version_number)).toEqual([1]);
+  });
+
   test("a feedback line with nothing to land on waits without the file being read again; it lands once its version is in", () => {
     const dataDir = scratch();
     const t = day(10).getTime();

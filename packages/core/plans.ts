@@ -93,6 +93,11 @@ export interface PlanRecord {
   last_approval_cleared?: PlanApprovalCleared | null;
   /** The last time the person's own edit carried their approval to the new version; absent before the first. */
   last_approval_moved?: PlanApprovalMoved | null;
+  /**
+   * Per document id, the newest version of the person's the agent was told about (a Done or Restore's "Direct Edits"
+   * that went: `POST /:id/sent` with `told`). The agent knows its own versions anyway; absent before the first.
+   */
+  agent_told?: Record<string, number>;
 }
 
 export interface PlanDocument {
@@ -477,17 +482,20 @@ export function checkPlanApproveInput(input: unknown): { ok: true; doc: string |
  * The body of `POST /api/plans/:id/sent`: a Send from the plan page went out (New message's first thread, or a reply
  * in the plan's thread), so its comments are sent and the plan has that thread.
  */
-export function checkPlanSentInput(input: unknown): { ok: true; thread_id: string; message_id: string; to: { host: string; session: string } | null; comments: string[] } | { ok: false; error: string } {
-  if (!isObject(input)) return { ok: false, error: "the body is { thread_id, message_id, to?, comments }" };
-  const unknown = Object.keys(input).find((key) => !["thread_id", "message_id", "to", "comments", "serverSession"].includes(key));
+export function checkPlanSentInput(input: unknown): { ok: true; thread_id: string | null; message_id: string; to: { host: string; session: string } | null; comments: string[]; told: { doc: string; version: number } | null } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { thread_id, message_id, to?, comments, told? }" };
+  const unknown = Object.keys(input).find((key) => !["thread_id", "message_id", "to", "comments", "told", "serverSession"].includes(key));
   if (unknown) return { ok: false, error: `unknown field ${unknown}` };
   const id = (value: unknown) => typeof value === "string" && /^[A-Za-z0-9_:-]{1,128}$/.test(value);
-  if (!id(input.thread_id)) return { ok: false, error: "thread_id: the Inbox thread's id" };
+  // null: a Send held for another machine went, and its thread is that machine's (not known here).
+  if (input.thread_id !== null && !id(input.thread_id)) return { ok: false, error: "thread_id: the Inbox thread's id, or null" };
   if (!id(input.message_id)) return { ok: false, error: "message_id: the message that carried it" };
+  const told = input.told;
+  if (told !== undefined && told !== null && !(isObject(told) && isPlanId("doc", told.doc) && isPlanVersionNumber(told.version))) return { ok: false, error: "told: { doc, version }, the version a Direct Edits section carried" };
   const to = input.to;
   if (to !== undefined && to !== null && !(isObject(to) && typeof to.host === "string" && typeof to.session === "string")) return { ok: false, error: "to: { host, session }" };
   if (!Array.isArray(input.comments) || input.comments.length > 1000 || !input.comments.every(isPlanAnnotationId)) return { ok: false, error: "comments: the annotation ids sent" };
-  return { ok: true, thread_id: input.thread_id as string, message_id: input.message_id as string, to: to ? { host: (to as { host: string }).host, session: (to as { session: string }).session } : null, comments: input.comments as string[] };
+  return { ok: true, thread_id: (input.thread_id as string | null) ?? null, message_id: input.message_id as string, to: to ? { host: (to as { host: string }).host, session: (to as { session: string }).session } : null, comments: input.comments as string[], told: told ? { doc: (told as { doc: string }).doc, version: (told as { version: number }).version } : null };
 }
 
 // ─────────────────────────────── Approvals ───────────────────────────────
@@ -522,13 +530,19 @@ export interface PlanApprovalMoved {
 
 export const isPlanApproval = (decision: PlanDecisionKind | null | undefined) => decision === "approved" || decision === "approved-with-notes";
 
+/**
+ * The version a decision is on: its own, else (an imported decision whose version was never found) the first, so a
+ * past approval stays in view as history (approval "plans-editing").
+ */
+export const planDecisionVersion = (decision: Pick<PlanDecision, "version_number">): number => decision.version_number ?? 1;
+
 /** Who a decision is by: its recorded name, else the person on this computer. */
 export const planApproverName = (actor: Pick<PlanActor, "author_label">) => actor.author_label?.trim() || PLAN_PERSON;
 
 /** The approvals version `n` of a document holds: each approver's newest decision on it, when that one approves. */
 export function planApprovalsOn(events: readonly PlanEvent[], docId: string, n: number): { name: string; event: PlanEvent }[] {
   const newest = new Map<string, PlanEvent>();
-  const ordered = events.filter((e) => e.kind === "decision" && e.decision?.document_id === docId && e.decision.version_number === n).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
+  const ordered = events.filter((e) => e.kind === "decision" && e.decision?.document_id === docId && planDecisionVersion(e.decision) === n).sort((a, b) => a.at.localeCompare(b.at) || a.id.localeCompare(b.id));
   for (const event of ordered) newest.set(planApproverName(event), event);
   return [...newest].filter(([, event]) => isPlanApproval(event.decision!.decision)).map(([name, event]) => ({ name, event }));
 }
@@ -548,18 +562,28 @@ export function planApprovalState(events: readonly PlanEvent[], docId: string, h
     const moved = facts.moved && facts.moved.document_id === docId && facts.moved.version_number === head ? facts.moved : null;
     return { kind: "approved", version_number: head, names: approvals.map((a) => a.name), notes: approvals.some((a) => a.event.decision!.decision === "approved-with-notes"), moved };
   }
-  const decided = events.filter((e) => e.kind === "decision" && e.decision?.document_id === docId && e.decision.version_number);
-  if (decided.some((e) => e.decision!.version_number === head)) return { kind: "changes", version_number: head };
+  const decided = events.filter((e) => e.kind === "decision" && e.decision?.document_id === docId);
+  if (decided.some((e) => planDecisionVersion(e.decision!) === head)) return { kind: "changes", version_number: head };
   const cleared = facts.cleared;
   if (cleared && cleared.document_id === docId && cleared.version_number === head && cleared.approver_names.length > 0) {
     return { kind: "cleared", version_number: head, from_version_number: cleared.from_version_number, names: cleared.approver_names };
   }
   // No fact (history imported before facts were kept, or versions since): the newest older version with a decision.
-  const older = Math.max(0, ...decided.map((e) => e.decision!.version_number!).filter((n) => n < head));
+  const older = Math.max(0, ...decided.map((e) => planDecisionVersion(e.decision!)).filter((n) => n < head));
   if (older === 0) return { kind: "none" };
   const held = planApprovalsOn(events, docId, older);
   return held.length > 0 ? { kind: "cleared", version_number: head, from_version_number: older, names: held.map((a) => a.name) } : { kind: "undecided", version_number: head, from_version_number: older };
 }
+
+const PLAN_KIND_EXTENSION: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot" };
+
+/** A page's file name: the last part of its `doc_path`, else its title with its kind's extension ("Rollout.md"). */
+export function planDocumentFileName(doc: Pick<PlanDocument, "doc_path" | "title" | "kind">): string {
+  return doc.doc_path?.split("/").pop() || `${doc.title || "Plan"}.${PLAN_KIND_EXTENSION[doc.kind] ?? "md"}`;
+}
+
+/** Text compared as a person sees it: `\r\n` and a lone `\r` read as `\n` (an editor gives back `\n`). */
+export const planTextLines = (text: string): string => text.replace(/\r\n?/g, "\n");
 
 /** The first `# heading` of a markdown document, trimmed; null when it has none. */
 export function planHeadingOf(markdown: string): string | null {

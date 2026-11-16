@@ -13,12 +13,13 @@
  * closes the file" is for a thread's file). × still goes back to Plans, as the Plans crumb and the rail's back do.
  *
  * Send (deliver.ts): the comments on the version on screen as plan feedback, into the plan's thread once it has one,
- * else New message to the agent session that wrote the plan; once it went, they are sent and the plan has the thread.
- * With neither, Send is disabled and says why in the Inbox's words for a project with no live agent.
+ * else New message to the agent live in the plan's project (`agent`, the page's read of the Inbox's live sessions,
+ * found again as Send is pressed); once it went, they are sent and the plan has the thread. With neither, Send is
+ * disabled and says why in the Inbox's words for a project with no live agent.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { planCommentAnnotationId, type PlanComment, type PlanDocument, type PlanVersion } from '@plannotator/core/plans';
+import { planCommentAnnotationId, planDocumentFileName, type PlanComment, type PlanDocument, type PlanVersion } from '@plannotator/core/plans';
 import { exportAnnotations, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { pageServerSession } from '../api';
 import { attachmentBlocks } from '../attachments';
@@ -26,14 +27,14 @@ import { AttachmentPane } from '../components/AttachmentPane';
 import { INBOX_FILE_SOURCE, InboxFileSourceProvider, type InboxFileSource } from '../fileSource';
 import { Icon } from '../icons';
 import { plansApi, type PlanRead } from './client';
-import { deliverToPlanAgent, noAgentWords, planAgentLabel, planSession } from './deliver';
+import { deliverToPlanAgent, noAgentWords, planAgentNow, type PlanAgent } from './deliver';
 import { PlanContentRules, planBlocks, resolvePlanImage, resolvePlanLink } from './planContent';
 
 const noop = () => {};
 
 /** A version as the pane's file: one attachment per version, so its comments are keyed by it ("current" always). */
 export function planAttachment(planId: string, document: PlanDocument, version: PlanVersion): InboxAttachmentState {
-  const name = document.doc_path?.split('/').pop() || `${document.title || 'Plan'}.md`;
+  const name = planDocumentFileName(document);
   return {
     id: `plan-${document.id}-v${version.version_number}`,
     path: `plans/${planId}/${document.id}/${version.version_number}`,
@@ -96,7 +97,7 @@ function useCloseNotOnEscape(onClose: () => void): () => void {
   }, [onClose]);
 }
 
-export function PlanAnnotate({ read, document, docRef, versions, shown, phone, onClose, onChanged }: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; shown: number; phone: boolean; onClose: () => void; onChanged: () => void }) {
+export function PlanAnnotate({ read, document, docRef, versions, shown, phone, agent: found, onClose, onChanged }: { read: PlanRead; document: PlanDocument; docRef: string | null; versions: readonly PlanVersion[]; shown: number; phone: boolean; agent: PlanAgent; onClose: () => void; onChanged: () => void }) {
   const planId = read.plan.id;
   const byAttachment = useMemo(() => new Map(versions.map((v) => [planAttachment(planId, document, v).id, v])), [planId, document, versions]);
   const attachmentOf = useCallback((v: PlanVersion) => planAttachment(planId, document, v), [planId, document]);
@@ -145,11 +146,10 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, o
     };
   }, [byAttachment, planId, docRef, read.plan, shown]);
 
-  const session = planSession(versions);
-  const agent = planAgentLabel(session);
+  const agent = found.kind === 'none' ? 'the agent' : found.label;
   const project = read.plan.project_name;
   const onScreen = waiting.filter((r) => r.path === attachment.path);
-  const reachable = !!read.plan.thread_id || session !== null;
+  const reachable = found.kind !== 'none';
   const canSend = reachable && onScreen.length > 0;
   const [sending, setSending] = useState(false);
   const [failed, setFailed] = useState<string | null>(null);
@@ -161,7 +161,9 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, o
       const text = await plansApi.version(planId, version.version_number, docRef);
       const blocks = planBlocks(parseMarkdownToBlocks(text));
       const body = exportAnnotations(blocks, onScreen.map((r) => r.annotation), [], 'Plan Feedback', 'plan');
-      await deliverToPlanAgent({ plan: read.plan, session, words: body, comments: onScreen.map((r) => r.id), onSent: onChanged });
+      const now = await planAgentNow(read.plan, versions);
+      if (now.kind === 'none') throw new Error(`${noAgentWords(project)} now.`);
+      await deliverToPlanAgent({ plan: read.plan, agent: now, words: body, comments: onScreen.map((r) => r.id), onSent: onChanged });
     } catch (error) {
       setFailed(error instanceof Error ? error.message : String(error));
     } finally {

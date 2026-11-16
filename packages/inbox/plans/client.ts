@@ -103,14 +103,19 @@ export const plansApi = {
   saveVersion: (id: string, base: number, change: { text: string } | { restore: number }, doc: string | null = null) => post<PlanVersionSaved>(one(id, '/versions'), { ...(doc ? { doc } : {}), base, ...change }),
   /** Approve the version on screen; refused (409, `moved_on`) when a newer one came. */
   approve: (id: string, version: number, doc: string | null = null) => post<{ decision: PlanDecision }>(one(id, '/approve'), doc ? { doc, version } : { version }),
-  /** A Send went out (`thread_id`, the message that carried it): its comments are sent, and the plan has that thread. */
-  sent: (id: string, sent: { thread_id: string; message_id: string; to: { host: string; session: string } | null; comments: string[] }) => post<{ plan: PlanRecord; comments: PlanComment[] }>(one(id, '/sent'), sent),
+  /**
+   * A Send went out (`thread_id`, the message that carried it; null: held for another machine, whose thread is not
+   * known here): its comments are sent, the plan has that thread, and `told` is the version a Direct Edits section carried.
+   */
+  sent: (id: string, sent: { thread_id: string | null; message_id: string; to: { host: string; session: string } | null; comments: string[]; told?: { doc: string; version: number } | null }) => post<{ plan: PlanRecord; comments: PlanComment[] }>(one(id, '/sent'), sent),
 };
 
 export interface PlanVersionSaved {
   version: PlanVersion;
-  /** Plan review's "# Direct Edits" section: the unified diff from the version before to this one. */
+  /** Plan review's "# Direct Edits" section: the unified diff from the newest version the agent knows to this one. */
   direct_edits: string;
+  /** The version that diff starts from. */
+  told_from: number;
   cleared: PlanApprovalCleared | null;
   moved: PlanApprovalMoved | null;
 }

@@ -3,9 +3,12 @@
  * - Only the newest version of a Markdown page can be edited: Edit, in the reading line's start, opens the shared
  *   Markdown editor (PlanEditor.tsx, loaded then) on its text, with Done and Cancel. Never a diagram or an HTML page.
  * - Done makes a new newest version, the person's (`POST /api/plans/:id/versions`, `source: "person"`), and the agent
- *   is sent what changed, plan review's "# Direct Edits" (deliver.ts: the plan's thread, else New message to its
- *   session, else the page says the agent was not told). Nothing changed: no version. A newer version came while
- *   the person was editing: nothing is written, the newest shows, and their text is kept here to copy or edit again.
+ *   is sent what changed, plan review's "# Direct Edits" (deliver.ts: the plan's thread, else New message to the
+ *   agent live in the plan's project, else the page says no agent is running there). Nothing changed (line endings
+ *   aside): no version. A newer version came while the person was editing: nothing is written, the newest shows, and
+ *   their text is kept here to copy or edit again.
+ * - An open edit and a kept text live in the tab's sessionStorage per plan and page (`planEditKey`), so another page,
+ *   a read that failed or a reload brings them back.
  * - An older version cannot be edited: it is read, compared, or Restored (the reading line's restore slot), which
  *   makes a new newest version holding its text, sent to the agent the same way.
  * - Approve names the version on screen and is refused once a newer one came (the newest then shows). An approval
@@ -14,21 +17,45 @@
  *   edit carried their approval, "Your approval moved to v4." until the next version or its Dismiss.
  * No keyboard shortcut (one for Edit needs the owner).
  */
-import { lazy, Suspense, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { MarkdownEditorHandle } from '@plannotator/ui/components/MarkdownEditor';
-import { planApprovalState, type PlanApprovalState, type PlanDocument, type PlanVersion } from '@plannotator/core/plans';
+import { planApprovalState, planTextLines, type PlanApprovalState, type PlanDocument, type PlanVersion } from '@plannotator/core/plans';
 import { storage } from '@plannotator/ui/utils/storage';
 import { FrameButton } from '@plannotator/ui/components/frame';
 import { InboxApiError } from '../apiError';
 import { Icon } from '../icons';
 import { plansApi, type PlanRead } from './client';
-import { deliverToPlanAgent, noAgentWords, planAgentLabel, planSession } from './deliver';
+import { deliverToPlanAgent, noAgentWords, planAgentNow } from './deliver';
 import { approvalClearedLine, approvalMovedLine, approverList } from './words';
 
 const PlanEditor = lazy(() => import('./PlanEditor'));
 
 /** The moved approval's line the person dismissed, per plan and page: the version it was about. */
 export const planMovedDismissedKey = (plan: string, doc: string) => `plannotator-inbox-plan-moved-dismissed-${plan}-${doc}`;
+
+/** An open edit, or the text a newer version kept from being saved (`kept`), per plan and page, in the tab's sessionStorage. */
+export const planEditKey = (plan: string, doc: string) => `plannotator-inbox-plan-edit-${plan}-${doc}`;
+interface KeptEdit {
+  base: number;
+  text: string;
+  kept?: true;
+}
+function readKeptEdit(key: string): KeptEdit | null {
+  try {
+    const value = JSON.parse(window.sessionStorage.getItem(key) ?? 'null') as KeptEdit | null;
+    return value && typeof value.base === 'number' && typeof value.text === 'string' ? value : null;
+  } catch {
+    return null;
+  }
+}
+function keepEdit(key: string, value: KeptEdit | null): void {
+  try {
+    if (value) window.sessionStorage.setItem(key, JSON.stringify(value));
+    else window.sessionStorage.removeItem(key);
+  } catch {
+    // A full or closed storage only means the text is not kept past this page.
+  }
+}
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const codeOf = (error: unknown) => (error instanceof InboxApiError ? error.code : null);
@@ -66,28 +93,70 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
   const { read, document, docRef, versions, head, shown, comparing, onChanged, toNewest, showChanges } = p;
   const id = read.plan.id;
   const project = read.plan.project_name;
-  const session = planSession(versions);
-  const agent = planAgentLabel(session);
-  const [editing, setEditing] = useState<{ base: number; original: string; text: string } | null>(null);
+  const editKey = planEditKey(id, document.id);
+  const [editing, setEditingNow] = useState<{ base: number; original: string; text: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<Notice | null>(null);
   /** The person's text a newer version kept from being saved, and the version they had edited. */
   const [kept, setKept] = useState<{ text: string; base: number } | null>(null);
   const typed = useRef('');
   const handle = useRef<MarkdownEditorHandle | null>(null);
+  const setEditing = (next: { base: number; original: string; text: string } | null) => {
+    setEditingNow(next);
+    keepEdit(editKey, next ? { base: next.base, text: next.text } : null);
+  };
+  const keep = (next: { text: string; base: number } | null) => {
+    setKept(next);
+    keepEdit(editKey, next ? { ...next, kept: true } : null);
+  };
+  // Back on this page: the open edit comes back on the newest (its version still the newest), else as kept text.
+  useEffect(() => {
+    const saved = readKeptEdit(editKey);
+    if (!saved || document.kind !== 'markdown') return;
+    if (saved.kept || saved.base !== head) {
+      keep({ text: saved.text, base: saved.base });
+      return;
+    }
+    let live = true;
+    plansApi.version(id, saved.base, docRef).then(
+      (original) => {
+        if (!live) return;
+        typed.current = saved.text;
+        if (shown !== head || comparing) toNewest();
+        setEditing({ base: saved.base, original, text: saved.text });
+      },
+      () => live && keep({ text: saved.text, base: saved.base }),
+    );
+    return () => {
+      live = false;
+    };
+    // Once per page: the edit kept for it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editKey]);
   const movedKey = planMovedDismissedKey(id, document.id);
   const [dismissed, setDismissed] = useState(() => storage.getItem(movedKey));
   const approval = planApprovalState(read.events, document.id, head, { cleared: read.plan.last_approval_cleared, moved: read.plan.last_approval_moved });
   const onNewest = !comparing && shown === head;
 
-  /** Send the agent what changed, and say how it went after `lead` ("Saved as v5."). */
-  const tell = async (lead: string, words: string) => {
+  /** Send the agent what changed (to the agent found now), and say how it went after `lead` ("Saved as v5."). */
+  const tell = async (lead: string, words: string, told: number) => {
+    // The agent already holds this text (a Restore of what it last knew): nothing to send.
+    if (!words) {
+      setNotice({ kind: 'saved', alert: false, words: `${lead} The agent already has this text, so nothing was sent.` });
+      return;
+    }
+    const agent = await planAgentNow(read.plan, versions);
+    const label = agent.kind === 'none' ? 'the agent' : agent.label;
     try {
-      const how = await deliverToPlanAgent({ plan: read.plan, session, words, comments: [], onSent: onChanged });
-      const after = how === 'replied' ? `${agent.charAt(0).toUpperCase()}${agent.slice(1)} was sent what changed.` : how === 'composing' ? `What changed is in New message to ${agent}: send it there.` : `${noAgentWords(project)}, so the agent was not told.`;
+      const how = await deliverToPlanAgent({ plan: read.plan, agent, words, comments: [], told: { doc: document.id, version: told }, onSent: onChanged });
+      const after =
+        how === 'replied' ? `${label.charAt(0).toUpperCase()}${label.slice(1)} was sent what changed.`
+        : how === 'held' ? `It goes to ${label} when that machine is back.`
+        : how === 'composing' ? (agent.kind === 'pick' ? 'What changed is in New message: choose the agent there.' : `What changed is in New message to ${label}: send it there.`)
+        : `${noAgentWords(project)}, so the agent was not told.`;
       setNotice({ kind: 'saved', alert: false, words: `${lead} ${after}` });
     } catch (error) {
-      setNotice({ kind: 'saved', alert: true, words: `${lead} It could not be sent to ${agent}: ${messageOf(error)}` });
+      setNotice({ kind: 'saved', alert: true, words: `${lead} It could not be sent to ${label}: ${messageOf(error)}` });
     }
   };
 
@@ -100,8 +169,8 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
       typed.current = text ?? original;
       // From the kept text's banner the page may be showing changes: the editor is on the newest.
       if (comparing) toNewest();
-      setEditing({ base: head, original, text: text ?? original });
       setKept(null);
+      setEditing({ base: head, original, text: text ?? original });
     } catch (error) {
       setNotice({ kind: 'refused', alert: true, words: messageOf(error) });
     } finally {
@@ -113,7 +182,8 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
     if (!editing || busy) return;
     const text = handle.current?.getMarkdown() ?? typed.current;
     const unchanged: Notice = { kind: 'unchanged', alert: false, words: 'Nothing changed, so no new version was made.' };
-    if (text === editing.original) {
+    // Line endings are not a change (the editor gives `\r\n` back as `\n`).
+    if (planTextLines(text) === planTextLines(editing.original)) {
       setEditing(null);
       setNotice(unchanged);
       return;
@@ -124,12 +194,12 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
       setEditing(null);
       toNewest();
       onChanged();
-      await tell(`Saved as v${saved.version.version_number}.`, saved.direct_edits);
+      await tell(`Saved as v${saved.version.version_number}.`, saved.direct_edits, saved.version.version_number);
     } catch (error) {
       if (codeOf(error) === 'moved_on') {
         // Nothing is written over unseen: the newest shows, and the person's words wait here.
-        setKept({ text, base: editing.base });
-        setEditing(null);
+        setEditingNow(null);
+        keep({ text, base: editing.base });
         setNotice(null);
         toNewest();
         onChanged();
@@ -153,7 +223,7 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
       const saved = await plansApi.saveVersion(id, head, { restore: from }, docRef);
       toNewest();
       onChanged();
-      await tell(`Restored v${from} as v${saved.version.version_number}.`, saved.direct_edits);
+      await tell(`Restored v${from} as v${saved.version.version_number}.`, saved.direct_edits, saved.version.version_number);
     } catch (error) {
       if (codeOf(error) === 'moved_on') onChanged();
       setNotice({ kind: 'refused', alert: true, words: messageOf(error) });
@@ -265,7 +335,7 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
             Edit v{head} with your text
           </button>
         )}
-        <button type="button" className="ib-plans-quiet" onClick={() => setKept(null)} data-plan-kept-discard="">
+        <button type="button" className="ib-plans-quiet" onClick={() => keep(null)} data-plan-kept-discard="">
           Discard your text
         </button>
       </div>
@@ -293,6 +363,7 @@ export function usePlanEditing(p: { read: PlanRead; document: PlanDocument; docR
         handle={handle}
         onChange={(markdown) => {
           typed.current = markdown;
+          keepEdit(editKey, { base: editing.base, text: markdown });
         }}
       />
     </Suspense>

@@ -14,7 +14,7 @@
  * frame's sheets carry both. A write of the page's own (a version, an approval, a Send) reads the plan again in place.
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type MouseEvent, type ReactElement } from 'react';
-import { planApprovalState, type PlanDecision, type PlanDocument as PlanDocumentRecord, type PlanVersion } from '@plannotator/core/plans';
+import { planApprovalState, planDecisionVersion, type PlanDecision, type PlanDocument as PlanDocumentRecord, type PlanVersion } from '@plannotator/core/plans';
 import { storage } from '@plannotator/ui/utils/storage';
 import {
   AppRail,
@@ -37,6 +37,8 @@ import type { PlanRead } from './client';
 import { recordPlanLook, useDocVersions, usePlan } from './store';
 import { approvalTone, approvalWords, PLAN_FILES_WORDS } from './words';
 import { usePlanEditing } from './PlanEditing';
+import { planAgentOf } from './deliver';
+import { useComposeSessions } from '../compose/useComposeSessions';
 import { PlansMessage } from './parts';
 import { PlanDocument } from './PlanDocument';
 import { PlanAnnotate } from './PlanAnnotate';
@@ -86,7 +88,7 @@ function decisionsOf(decisions: readonly PlanDecision[], doc: string): { byVersi
   const byVersion = new Map<number, PlanDecision>();
   let newest: PlanDecision | null = null;
   for (const d of [...decisions].filter((d) => d.document_id === doc).sort((a, b) => a.at.localeCompare(b.at))) {
-    if (d.version_number) byVersion.set(d.version_number, d);
+    byVersion.set(planDecisionVersion(d), d);
     newest = d;
   }
   return { byVersion, newest };
@@ -375,6 +377,9 @@ function DocLoaded({
       onClose={() => place.setOpen(false)}
     />
   );
+  // Whom Send goes to, as the page reads the Inbox's live sessions (found again as it is pressed).
+  const live = useComposeSessions(true).model;
+  const agent = useMemo(() => planAgentOf(read.plan, versions, live), [read.plan, versions, live]);
   const editing = usePlanEditing({ read, document, docRef, versions, head, shown, comparing: !!compare, onChanged, toNewest: () => go({ version: null }), showChanges: (from, to) => go({ diff: { from, to } }) });
   // An older version is read, compared or restored (approval "plans-editing"): never edited.
   const older = !compare && shown !== head ? { back: routeLink(routeOf({ version: null }), { 'data-plan-newest': '' }, { replace: true }), restore: editing.restore } : null;
@@ -429,7 +434,7 @@ function DocLoaded({
             ) : (
               document.kind === 'markdown' ? (
                 // A Markdown page in the Inbox's own file viewer, with its toolbars and comments (PlanAnnotate.tsx); × goes back to Plans.
-                <PlanAnnotate read={read} document={document} docRef={docRef} versions={versions} shown={shown} phone={phone} onClose={toList} onChanged={onChanged} />
+                <PlanAnnotate read={read} document={document} docRef={docRef} versions={versions} shown={shown} phone={phone} agent={agent} onClose={toList} onChanged={onChanged} />
               ) : (
                 <PlanDocument id={id} version={shown} doc={docRef} kind={document.kind} title={document.title} phone={phone} />
               )

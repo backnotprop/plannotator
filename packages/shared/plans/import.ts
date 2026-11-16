@@ -651,6 +651,9 @@ function matchSnapshot(store: PlanStore, map: PlanLegacyMap, slug: string, text:
     const versions = store.versions(chain.plan);
     for (let i = versions.length - 1; i >= 0; i--) {
       const v = versions[i]!;
+      // Plan review decides on what the agent submitted: never on the person's own version (an edit, or a Restore
+      // holding an older version's text), which would put an old approval on the newest.
+      if (v.source === "person") continue;
       const bytes = store.versionBytes(chain.plan, v.document_id, v.version_number);
       if (!bytes) continue;
       const own = decode(bytes);

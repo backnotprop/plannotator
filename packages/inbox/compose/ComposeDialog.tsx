@@ -155,8 +155,8 @@ export interface ComposeRequest {
   files?: readonly File[];
   /** To opens on its own list at once: the person picks a running agent or a new session (compose/openComposer.ts). */
   pickTo?: boolean;
-  /** Told once this message is sent, after the window's own `onSent` (compose/openComposer.ts: a plan's Send). */
-  onSent?: (sent: ComposeSent) => void;
+  /** Told once this message is sent, after the window's own `onSent`, or held for another machine (`{ held }`): a plan's Send. */
+  onSent?: (sent: ComposeSent | { held: ComposeHeld }) => void;
 }
 
 export interface ComposeTransport {
@@ -868,7 +868,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         // That machine's Inbox could not take it now (asleep, or slow): it waits in this Inbox's outbox and starts there
         // when it is back. Compose closes; the window's toast offers Cancel while it has not left.
         if (draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
-        props.onHeld({
+        [props.onHeld, (held: ComposeHeld) => request.onSent?.({ held })].forEach((tell) => tell?.({
           key: cause.outbox.key,
           queued: cause.outbox.state === 'queued',
           machineName: cause.machine?.name ?? startMachineName ?? targetMachineName ?? 'the other machine',
@@ -878,7 +878,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ...(start?.clone ? { first: `clones ${start.clone.slug}` } : start?.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
           words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
-        });
+        }));
       } else if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
         setError('That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.');

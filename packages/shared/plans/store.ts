@@ -203,7 +203,7 @@ export interface PlanStore {
   /** A Send carried these comments (by annotation id): each one not sent yet gets `sent`, one line each. The ones marked. */
   markCommentsSent(id: string, annotationIds: readonly string[], sent: NonNullable<PlanComment["sent"]>): PlanComment[];
   /** The plan record changed (its name): one more snapshot line. */
-  updatePlan(id: string, change: Partial<Pick<PlanRecord, "name" | "note" | "status" | "thread_id" | "legacy">>, at?: string): PlanRecord;
+  updatePlan(id: string, change: Partial<Pick<PlanRecord, "name" | "note" | "status" | "thread_id" | "legacy" | "agent_told">>, at?: string): PlanRecord;
   /** Append an index line for every plan whose last one is missing or behind its files (a crash between writes); how many. */
   repairIndex(): number;
   /** The same, yielding after each plan (the import runs it in the background). */
@@ -505,6 +505,9 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       const file = versionFile(docId, n, doc.kind);
       // Approval "plans-editing": the approvals the version before holds end with it. The person's own edit (a person's
       // version, no Restore, no agent in it) carries their own approval to the new version; any other approval clears.
+      // Clearing needs no write (approvals are read on the newest version). Moving is two more appends after the version
+      // lines, the moved decision and then the plan's fact; a crash between them reads as cleared, the safe way: no
+      // approval ever survives a change it was not given on.
       const held = doc.head_version > 0 ? planApprovalsOn(eventsOf(id), docId, doc.head_version) : [];
       const ownEdit = input.source === "person" && input.author_via === "person" && !input.restored_from && !input.agent_host && !input.agent_session && !input.agent_name;
       const mover = ownEdit ? planApproverName({ author_label: input.author_label ?? null }) : null;

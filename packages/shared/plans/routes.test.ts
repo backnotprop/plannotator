@@ -12,7 +12,12 @@
  * - approval "plans-editing": the person's edit is not a new person version with plan review's Direct Edits diff for
  *   the agent, a stale base or a save that changes nothing writes a version, a diagram is edited, a Restore does not
  *   make a new newest version of the older text, an approval is given on a version the plan moved past, or a Send
- *   does not mark its comments sent and record the plan's thread.
+ *   does not mark its comments sent and record the plan's thread;
+ * - a write that lands while a POST's body is arriving (the import's pickup, another tab) is overwritten: a stale Done
+ *   is saved, a second tab's Done replaces the first, an approval lands on an older version, a second first Send
+ *   replaces the plan's thread;
+ * - a save that only changes line endings makes a version; the agent's diff skips an edit it was never sent, or
+ *   names the wrong file.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -36,10 +41,19 @@ function world() {
     store.addVersion(plan.id, document.id, { bytes: new TextEncoder().encode(`# Auth refactor\n\nv${n}\n`), committed_at: `2026-11-0${day}T09:00:00.000Z`, source: "plan-review" });
   }
   let changed: string[] = [];
-  const call = (method: string, path: string, body?: unknown) => {
+  /** `meanwhile`: what lands while the body is arriving (the import's pickup, another tab's write). */
+  const call = (method: string, path: string, body?: unknown, meanwhile?: () => unknown) => {
     const url = new URL(`http://localhost${path}`);
     return handlePlanRoute(
-      { method, pathname: url.pathname, params: url.searchParams, json: async () => (typeof body === "string" ? JSON.parse(body) : body) },
+      {
+        method,
+        pathname: url.pathname,
+        params: url.searchParams,
+        json: async () => {
+          await meanwhile?.();
+          return typeof body === "string" ? JSON.parse(body) : body;
+        },
+      },
       { store, changed: (id) => changed.push(id), importing: () => false },
     );
   };
@@ -144,9 +158,75 @@ describe("Plans' routes", () => {
     expect(body(saved)!.version).toMatchObject({ version_number: 4, source: "person", author_via: "person", agent_session: null });
     expect(new TextDecoder().decode(store.versionBytes(plan.id, doc, 4)!)).toBe("# Auth refactor\n\nv3, edited by hand\n");
     const edits: string = body(saved)!.direct_edits;
-    expect(edits.startsWith("# Direct Edits\n\nThe user edited the document directly.")).toBe(true);
+    expect(edits.startsWith("# Direct Edits\n\nThe person edited Auth refactor.md; it is now v4, in the Plannotator Inbox. Apply these exact changes: a unified diff from v3 (the newest version you know) to v4:")).toBe(true);
+    expect(edits).toContain("--- Auth refactor.md (original)\n+++ Auth refactor.md (edited)");
     expect(edits).toContain("-v3\n+v3, edited by hand");
     expect(changes()).toEqual([plan.id]);
+  });
+
+  test("a write that lands while the body is arriving is seen: a stale Done, a second tab's Done, an approval and a second first Send are refused or kept apart", async () => {
+    const { store, plan, doc, call } = world();
+    const agentV4 = () => store.addVersion(plan.id, doc, { bytes: new TextEncoder().encode("# Auth refactor\n\nv4 by the agent\n"), committed_at: "2026-11-06T09:00:00.000Z", source: "plan-review" });
+    // The import picks up the agent's v4 while the person's Done (made on v3) is arriving: refused, v4 kept.
+    const stale = await call("POST", `/api/plans/${plan.id}/versions`, { base: 3, text: "# Mine\n" }, agentV4);
+    expect(stale?.status).toBe(409);
+    expect(body(stale)).toMatchObject({ code: "moved_on", head: { version_number: 4 } });
+    expect(store.versions(plan.id).map((v) => v.version_number)).toEqual([1, 2, 3, 4]);
+    expect(new TextDecoder().decode(store.versionBytes(plan.id, doc, 4)!)).toBe("# Auth refactor\n\nv4 by the agent\n");
+    // Two tabs press Done on v4: the second, arriving after the first was written, does not replace it.
+    let second: PlanRouteResult | null = null;
+    const first = await call("POST", `/api/plans/${plan.id}/versions`, { base: 4, text: "# Tab one\n" }, async () => {
+      second = await call("POST", `/api/plans/${plan.id}/versions`, { base: 4, text: "# Tab two\n" });
+    });
+    expect(body(second)).toMatchObject({ version: { version_number: 5 } });
+    expect(first?.status).toBe(409);
+    expect(body(first)).toMatchObject({ code: "moved_on", head: { version_number: 5 } });
+    expect(store.versions(plan.id).map((v) => v.version_number)).toEqual([1, 2, 3, 4, 5]);
+    // Approve of v5 while the agent's v6 arrives: refused, no decision written.
+    const v6 = () => store.addVersion(plan.id, doc, { bytes: new TextEncoder().encode("# Auth refactor\n\nv6\n"), committed_at: "2026-11-07T09:00:00.000Z", source: "plan-review" });
+    const approve = await call("POST", `/api/plans/${plan.id}/approve`, { version: 5 }, v6);
+    expect(approve?.status).toBe(409);
+    expect(store.events(plan.id).filter((e) => e.kind === "decision")).toEqual([]);
+    // Two first Sends: the thread the first one recorded stays the plan's.
+    const sentOne = { thread_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHAA", message_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHAA", comments: [] };
+    const sentTwo = { thread_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHBB", message_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHBB", comments: [] };
+    await call("POST", `/api/plans/${plan.id}/sent`, sentTwo, () => call("POST", `/api/plans/${plan.id}/sent`, sentOne));
+    expect(store.get(plan.id)!.thread_id).toBe("msg_01M7JKWTSFEGR2XJQEJ1R2GHAA");
+  });
+
+  test("line endings are no change; the agent's diff starts at the newest version it knows, under the page's own name", async () => {
+    const { store, plan, doc, call } = world();
+    const crlf = "# Auth refactor\r\n\r\nv4 with CRLF\r\n";
+    store.addVersion(plan.id, doc, { bytes: new TextEncoder().encode(crlf), committed_at: "2026-11-06T09:00:00.000Z", source: "plan-review" });
+    // The editor gives `\r\n` back as `\n`: opened and Done untouched is no version.
+    const same = await call("POST", `/api/plans/${plan.id}/versions`, { base: 4, text: crlf.replace(/\r\n/g, "\n") });
+    expect(body(same)).toMatchObject({ code: "unchanged" });
+    expect(store.versions(plan.id).length).toBe(4);
+    // v5, the person's: its New message never went (no `told`). v6, the person's again: the agent is sent v4 to v6.
+    await call("POST", `/api/plans/${plan.id}/versions`, { base: 4, text: "# Auth refactor\n\nv5 mine\n" });
+    const six = await call("POST", `/api/plans/${plan.id}/versions`, { base: 5, text: "# Auth refactor\n\nv6 mine\n" });
+    expect(body(six)).toMatchObject({ told_from: 4 });
+    expect(body(six)!.direct_edits).toContain("a unified diff from v4 (the newest version you know) to v6:");
+    expect(body(six)!.direct_edits).toContain("-v4 with CRLF\n+v6 mine");
+    // v6 went (its Send recorded `told`): v7's diff starts at v6.
+    expect((await call("POST", `/api/plans/${plan.id}/sent`, { thread_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ", message_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ", comments: [], told: { doc, version: 6 } }))?.status).toBe(200);
+    expect(store.get(plan.id)!.agent_told).toEqual({ [doc]: 6 });
+    const seven = await call("POST", `/api/plans/${plan.id}/versions`, { base: 6, text: "# Auth refactor\n\nv7 mine\n" });
+    expect(body(seven)).toMatchObject({ told_from: 6 });
+    expect(body(seven)!.direct_edits).toContain("-v6 mine\n+v7 mine");
+    // A second page is labelled with its own name; a Restore says what it restored.
+    const notes = store.addDocument(plan.id, { title: "Load test notes", kind: "markdown", created_at: "2026-11-06T09:00:00.000Z" });
+    store.addVersion(plan.id, notes.id, { bytes: new TextEncoder().encode("# Notes\n\none\n"), committed_at: "2026-11-06T09:00:00.000Z", source: "plan-review" });
+    const noted = await call("POST", `/api/plans/${plan.id}/versions`, { doc: notes.id, base: 1, text: "# Notes\n\ntwo\n" });
+    expect(body(noted)!.direct_edits).toContain("--- Load test notes.md (original)");
+    // Back to v1 while the agent was never told of v2: it already holds that text, so there is nothing to send.
+    const back = await call("POST", `/api/plans/${plan.id}/versions`, { doc: notes.id, base: 2, restore: 1 });
+    expect(body(back)).toMatchObject({ told_from: 1, direct_edits: "" });
+    // Told of v4 (its edit), a Restore of v1 says what it restored.
+    await call("POST", `/api/plans/${plan.id}/versions`, { doc: notes.id, base: 3, text: "# Notes\n\nfour\n" });
+    await call("POST", `/api/plans/${plan.id}/sent`, { thread_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCQ", message_id: "msg_01M7JKWTSFEGR2XJQEJ1R2GHCR", comments: [], told: { doc: notes.id, version: 4 } });
+    const restored = await call("POST", `/api/plans/${plan.id}/versions`, { doc: notes.id, base: 4, restore: 1 });
+    expect(body(restored)!.direct_edits).toContain("The person restored v1 of Load test notes.md as v5, in the Plannotator Inbox. Apply these exact changes: a unified diff from v4");
   });
 
   test("a stale base is refused with the newest (nothing written), and so is a save that changes nothing", async () => {
