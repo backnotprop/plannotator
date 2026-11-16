@@ -105,6 +105,17 @@ describe('check', () => {
     expect((await check({ dir, root, at: sha })).missing).toEqual(['src/main.ts']);
   });
 
+  test('a project folder beginning with a space keeps that part of its Git path', async () => {
+    const top = temp();
+    git(top, 'init', '-q');
+    writeTree(top, { ' app/src/main.ts': '', ' app/src/api/index.ts': '' });
+    const sha = commit(top);
+    const root = join(top, ' app');
+    const dir = join(root, '.plannotator', 'system');
+    writeTree(dir, smallDrawing());
+    expect(await check({ dir, root, at: sha })).toEqual({ errors: [], warnings: [], missing: [] });
+  });
+
   test('outside git, the disk is read, with the same case and symlink rules', async () => {
     const root = temp();
     const dir = join(root, '.plannotator', 'system');

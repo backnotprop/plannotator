@@ -125,7 +125,8 @@ async function lookupIn(root: string, at: string | undefined, name: string, erro
     });
     return null;
   }
-  const prefix = (await git(root, ['rev-parse', '--show-prefix'])).trim();
+  // Git ends the prefix with a newline; leading whitespace belongs to the path.
+  const prefix = (await git(root, ['rev-parse', '--show-prefix'])).replace(/\r?\n$/, '');
   const tree = await lsTree(root, commit);
   return async (p) => {
     const e = tree.get(prefix + p);
