@@ -66,10 +66,12 @@ export function ReadingLine({
   const words = readingWords(shownNumber, currentNumber, older !== null);
   if (older === null && words.tag === null && approved === null && comparing === null && start === null) return null;
   const end = versionAt === "end";
+  const totalShown = comparing === null && older !== null && shownNumber !== null && currentNumber !== null;
+  const shownCount = totalShown ? null : count;
   const counted =
-    count === null || onToggleVersions === null ? null : (
+    shownCount === null || onToggleVersions === null ? null : (
       <span data-reading-versions-count="" className="ml-1.5 tabular-nums text-frame-tertiary">
-        {count}
+        {shownCount}
       </span>
     );
   const inner =
@@ -99,7 +101,7 @@ export function ReadingLine({
   const main = comparing ?? named;
   const spoken = [
     main,
-    count === null ? null : `${count} ${count === 1 ? "version" : "versions"}`,
+    shownCount === null ? null : `${shownCount} ${shownCount === 1 ? "version" : "versions"}`,
     main === "Versions" ? null : "Versions",
   ]
     .filter((part): part is string => part !== null)

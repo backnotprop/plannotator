@@ -450,6 +450,24 @@ describe.skipIf(!hasDom)('ReadingLine', () => {
     expect(frame.textContent).not.toContain('Reading');
   });
 
+  test('an older version whose words carry the total shows no count beside them', () => {
+    const { ReadingLine } = readingModule!;
+    const frame = mount(
+      <ReadingLine
+        shownNumber={2}
+        currentNumber={4}
+        versionsOpen={false}
+        onToggleVersions={() => {}}
+        older={{ back: <a href="#v4" />, restore: null }}
+        count={4}
+      />,
+    );
+    const toggle = frame.querySelector('[data-reading-versions]')!;
+    expect(toggle.textContent).toBe('v2 of 4');
+    expect(toggle.querySelector('[data-reading-versions-count]')).toBeNull();
+    expect(toggle.getAttribute('aria-label')).toBe('v2 of 4, version 2 of 4, an older version. Versions');
+  });
+
   test('an older version with no number says it is older once, and its toggle reads "Versions"', () => {
     const { ReadingLine } = readingModule!;
     const frame = mount(
@@ -511,6 +529,27 @@ describe.skipIf(!hasDom)('Breadcrumbs without a file', () => {
     expect(current[0]!.tagName).toBe('A');
     expect([...frame.querySelectorAll('span')].some((span) => span.textContent === '/')).toBe(false);
   });
+  test('only a link crumb underlines on hover; a plain-text crumb does not', async () => {
+    const { Breadcrumbs } = crumbsModule!;
+    const { compile } = await import('tailwindcss');
+    const frame = mount(
+      <>
+        <Breadcrumbs collectionName="Linked" collectionLink={<a href="#linked" />} />
+        <Breadcrumbs collectionName="Plain" collectionLink={<span />} />
+      </>,
+    );
+    const linked = frame.querySelector<HTMLElement>('a[aria-label="Linked"]')!;
+    const plain = frame.querySelector<HTMLElement>('span[aria-label="Plain"]')!;
+    const underline = linked.className.split(' ').find((name) => name.endsWith('underline'))!;
+    expect(underline).toBe('[&[href]]:hover:underline');
+    expect(plain.className).toBe(linked.className);
+    const css = (await compile('@tailwind utilities;')).build([underline]);
+    expect(css).toContain('[href]');
+    expect(css).toContain(':hover');
+    expect(linked.matches('[href]')).toBe(true);
+    expect(plain.matches('[href]')).toBe(false);
+  });
+
   test('with a file, the file crumb is the current page and not a tab stop, since it does nothing', () => {
     const { Breadcrumbs } = crumbsModule!;
     const frame = mount(<Breadcrumbs collectionName="Porto launch plan" collectionLink={<a href="#porto" />} path="plans/brief.md" />);
