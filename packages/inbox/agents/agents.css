@@ -250,3 +250,5 @@
 .ib-seg-ic { display: inline-flex; flex: none; }
 /* The animated mark while the project's tile stands in its place: kept, not drawn. */
 .pn-inbox .am[hidden] { display: none; }
+/* Its three long choices with their pictures keep one line in the Rows page's control column (438 px at 1440). */
+.ib-rws-ctl [data-rows-control="agents"] .ib-seg-o { padding: 0 8px; gap: 5px; }
