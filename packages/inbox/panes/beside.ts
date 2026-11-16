@@ -1,5 +1,6 @@
 import { createContext, useContext } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { LayoutNode } from '@plannotator/vendor-pierre-layouts';
 import type { SettingsModel } from '../api';
 import type { InboxToastModel } from '../components/Toast';
 import * as L from './layoutModel';
@@ -44,7 +45,8 @@ export function sidePlace(layout: L.FreeLayout, threadId: string): SidePlace | n
 /** What the window tells the person when a pane steps aside for one opened to the side. */
 export interface BesideNotice {
   toast: (toast: Omit<InboxToastModel, 'id'>) => void;
-  dismiss: () => void;
+  /** Takes the toast away if it is still the one on screen, the one with this Undo. */
+  dismiss: (undo: () => void) => void;
   rowOf: (threadId: string) => InboxListRow | null;
 }
 
@@ -54,6 +56,27 @@ export function steppedAsideToast(threads: readonly string[], rowOf: BesideNotic
   const lead = names.length === 1 ? 'No room for another pane' : 'No room for more panes';
   const detail = names.length === 1 ? `“${names[0]}” stepped aside` : `${names.length} panes stepped aside`;
   return { icon: 'check', lead, detail, speech: `${lead}: ${detail}.`, onUndo: undo };
+}
+
+/** What a layout places, its sizes left out: its rows and columns, each pane's thread, the active pane. */
+export function placementKey(layout: L.FreeLayout): string {
+  const shape = (node: LayoutNode | null): unknown => (!node ? null : node.type === 'split' ? [node.direction, node.children.map(shape)] : node.id);
+  return JSON.stringify([shape(layout.root), Object.entries(layout.threads).sort(), layout.active]);
+}
+
+/** The placement the stepped-aside toast on screen announced, and its Undo: null once the layout is another. */
+let announced: { key: string; undo: () => void; dismiss: BesideNotice['dismiss'] } | null = null;
+
+/**
+ * Every layout the window holds comes here (useRoutePanes.ts). Once it is not the placement the toast announced (the
+ * new pane shows another thread, it closed, another pane opened or moved, the person went into another pane), the
+ * toast leaves and its Undo does nothing: Undo only ever takes back the placement it named.
+ */
+export function besideLayoutSeen(layout: L.FreeLayout): void {
+  if (!announced || placementKey(layout) === announced.key) return;
+  const gone = announced;
+  announced = null;
+  gone.dismiss(gone.undo);
 }
 
 /**
@@ -74,10 +97,15 @@ export function besideOf(panes: WindowPanes, open: string | null, makeRoom?: (co
       if (place.stepsAside.length === 0) makeRoom?.(L.columns(place.next.root));
       panes.openAt(threadId, place.target, place.edge);
       const added = place.next.active!;
-      if (place.stepsAside.length && notice) notice.toast(steppedAsideToast(place.stepsAside.map((id) => panes.layout.threads[id]!), notice.rowOf, () => {
-          notice.dismiss();
-          panes.closePane(added);
-        }));
+      if (!place.stepsAside.length || !notice) return;
+      const undo = () => {
+        if (announced?.undo !== undo) return;
+        announced = null;
+        notice.dismiss(undo);
+        panes.closePane(added);
+      };
+      notice.toast(steppedAsideToast(place.stepsAside.map((id) => panes.layout.threads[id]!), notice.rowOf, undo));
+      announced = { key: placementKey(place.next), undo, dismiss: notice.dismiss };
     },
   };
 }

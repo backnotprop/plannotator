@@ -6,6 +6,7 @@ import * as L from './layoutModel';
 import { addressThread, paneOf, singlePane, type PaneSet } from './model';
 import { usePhone } from '../phone';
 import { loadLayout, saveLayout } from './savedLayout';
+import { besideLayoutSeen } from './beside';
 
 type PaneId = L.PaneId;
 
@@ -87,7 +88,9 @@ export function useRoutePanes(thread: string | null, onInbox: boolean, switchOn:
     if (owed !== undefined) writeRef.current(owed, true);
   }, [owed]);
   useEffect(() => {
-    if (allowed) saveLayout(layout);
+    if (!allowed) return;
+    saveLayout(layout);
+    besideLayoutSeen(layout);
   }, [allowed, layout]);
   const commit = useCallback((next: L.FreeLayout, replace: boolean) => {
     if (next === held.current) return;

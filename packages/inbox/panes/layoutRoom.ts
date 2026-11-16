@@ -75,7 +75,7 @@ export interface SidePlace {
 /**
  * Where "Open to the side" opens `thread`, the same way every time for the same layout and room: right of the active
  * pane if a column fits there; else below it if a row does; else the largest pane on screen (`rects`) split along its
- * longer side, if both halves keep 440 x 260 px. "Fits" is that no pane steps aside for it. When nothing fits, right of
+ * longer side, else its shorter one, where both halves keep 440 x 260 px. "Fits" is that no pane steps aside for it. When nothing fits, right of
  * the active pane anyway: the least recent panes step aside as they do for a narrow window, and `stepsAside` names them.
  */
 export function placeToSide(layout: FreeLayout, thread: string, room: Room, gap: number, rects: readonly PaneRect[]): SidePlace {
@@ -95,10 +95,13 @@ export function placeToSide(layout: FreeLayout, thread: string, room: Room, gap:
   if (largest) {
     const width = largest.right - largest.left;
     const height = largest.bottom - largest.top;
-    const across = width >= height;
-    const halves = across ? (width - gap) / 2 >= PANE_MIN_WIDTH : (height - gap) / 2 >= PANE_MIN_HEIGHT;
-    const place = halves ? at(largest.id, across ? 'right' : 'bottom') : null;
-    if (place && place.stepsAside.length === 0) return place;
+    // Its longer side first, then the shorter: either, when both halves keep the minimums and nothing steps aside.
+    const sides = width >= height ? (['right', 'bottom'] as const) : (['bottom', 'right'] as const);
+    for (const edge of sides) {
+      const halves = edge === 'right' ? (width - gap) / 2 >= PANE_MIN_WIDTH : (height - gap) / 2 >= PANE_MIN_HEIGHT;
+      const place = halves ? at(largest.id, edge) : null;
+      if (place && place.stepsAside.length === 0) return place;
+    }
   }
   return at(active, 'right');
 }

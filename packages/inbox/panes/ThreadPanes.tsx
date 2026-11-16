@@ -74,7 +74,9 @@ export function ThreadPanes({ windowPanes, held, host }: ThreadPanesProps) {
   const [keeper] = useState(createPaneKeeper);
   keeper.live.current = { active: layout.active, onFocus: windowPanes.focus, engine, title };
   const idsKey = ids.join('\u0000');
-  useLayoutEffect(() => keeper.keep(new Set(ids)), [keeper, idsKey]);
+  // Today's one slot docks `shownAlone` even before a thread is in it (nothing open yet): its node is kept too, or the
+  // slot would hold a node forgotten here while the pane's thread draws into a new one off the page.
+  useLayoutEffect(() => keeper.keep(new Set([...ids, shownAlone])), [keeper, idsKey, shownAlone]);
   const gone = useCallback((thread: string) => windowPanes.closeThreads([thread]), [windowPanes]);
   const watch = L.paneCount(layout) > 1 && host.route.page === 'inbox';
   const watches = watch

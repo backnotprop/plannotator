@@ -194,10 +194,10 @@ test('a window where the list and two threads cannot fit even with the sidebar f
   await row(page, b).click({ button: 'right' });
   await expect(besideItem(page)).toHaveText('Open to the side');
   await besideItem(page).click();
-  // B alone beside the list: A stepped aside for room (its pane kept off the page), and the toast says so.
+  // B alone beside the list: A stepped aside for room (its pane kept off the page, so not in it at all), and the toast says so.
   await expect(pane(page, b)).toBeVisible();
-  await expect(pane(page, a)).toBeHidden();
-  await expect(page.locator('.ib-layout > [data-layout-pane][data-pane-hidden="true"]', { has: pane(page, a) })).toHaveCount(1);
+  await expect(pane(page, a)).toHaveCount(0);
+  await expect(page.locator('.ib-layout > [data-layout-pane][data-pane-hidden="true"]')).toHaveCount(1);
   await expect(page).toHaveURL(new RegExp(`#thread=${b}`));
   const toast = page.locator('[data-inbox-toast]');
   await expect(toast).toContainText('No room for another pane');

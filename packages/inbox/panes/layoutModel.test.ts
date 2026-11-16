@@ -118,15 +118,21 @@ describe('room', () => {
     expect(neighbor(rects, 'b', 'left')).toBe('c');
   });
 
-  test('"Open to the side": right of the active pane, else below it, else the largest pane along its longer side, else right with the least recent stepping aside', () => {
+  test('"Open to the side": right of the active pane, else below it, else the largest pane along its longer side, then its shorter, else right with the least recent stepping aside', () => {
     const gap = 8;
     const box = (id: string, left: number, top: number, right: number, bottom: number): PaneRect => ({ id, left, top, right, bottom });
     // b below c on the right of a, the person in c: (a|(b/c)).
     const three = L.openAt(two, 'c', 'p1', 'bottom');
+    // Three columns, the person in c: (a|b|c); then c with e below it, the person in e: (a|b|(c/e)).
+    const columns = L.openAt(two, 'c', 'p1', 'right');
+    const tied = L.openAt(columns, 'e', 'p2', 'bottom');
     const cases: { name: string; layout: L.FreeLayout; room: { width: number; height: number }; rects: PaneRect[]; target: string; edge: SidePlace['edge']; shape: string; aside: string[] }[] = [
       { name: 'a third column fits', layout: two, room: { width: 1400, height: 900 }, rects: [box('main', 0, 0, 696, 900), box('p1', 704, 0, 1400, 900)], target: 'p1', edge: 'right', shape: '(a|b|d)', aside: [] },
       { name: 'no third column: below the active pane', layout: two, room: { width: 1000, height: 900 }, rects: [box('main', 0, 0, 496, 900), box('p1', 504, 0, 1000, 900)], target: 'p1', edge: 'bottom', shape: '(a|(b/d))', aside: [] },
       { name: 'the active pane too short for another row: the largest pane, taller than wide, split below', layout: three, room: { width: 1000, height: 700 }, rects: [box('main', 0, 0, 496, 700), box('p1', 504, 0, 1000, 346), box('p2', 504, 354, 1000, 700)], target: 'main', edge: 'bottom', shape: '((a/d)|(b/c))', aside: [] },
+      { name: 'the largest pane wider than tall but too narrow to halve across: split below instead', layout: three, room: { width: 1300, height: 700 }, rects: [box('main', 0, 0, 800, 700), box('p1', 808, 0, 1300, 346), box('p2', 808, 354, 1300, 700)], target: 'main', edge: 'bottom', shape: '((a/d)|(b/c))', aside: [] },
+      { name: 'two panes as large: the earlier in the tree is split', layout: tied, room: { width: 1500, height: 600 }, rects: [box('main', 0, 0, 495, 600), box('p1', 503, 0, 998, 600), box('p2', 1006, 0, 1500, 296), box('p3', 1006, 304, 1500, 600)], target: 'main', edge: 'bottom', shape: '((a/d)|b|(c/e))', aside: [] },
+      { name: 'a pane already aside does not count against a place: below the active pane fits with a still aside', layout: columns, room: { width: 1000, height: 900 }, rects: [box('p1', 0, 0, 496, 900), box('p2', 504, 0, 1000, 900)], target: 'p2', edge: 'bottom', shape: '(a|b|(c/d))', aside: [] },
       { name: 'nothing fits: right of the active pane, the least recent steps aside', layout: two, room: { width: 1000, height: 500 }, rects: [box('main', 0, 0, 496, 500), box('p1', 504, 0, 1000, 500)], target: 'p1', edge: 'right', shape: '(a|b|d)', aside: ['a'] },
       { name: 'below two columns of room: the new pane alone, the other stepped aside', layout: one, room: { width: 800, height: 900 }, rects: [box('main', 0, 0, 800, 900)], target: 'main', edge: 'right', shape: '(a|d)', aside: ['a'] },
     ];

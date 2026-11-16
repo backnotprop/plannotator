@@ -413,6 +413,17 @@ describe.skipIf(!hasDom)('two thread slots: only the active pane takes keys and 
     expect(paneOf(B)).toBeNull();
   });
 
+  test('a stacked window with no thread open, then a row opened: the thread shows in today\'s one slot', async () => {
+    putThread(queries, A, heldOf(A, false));
+    const stacked = { ...hostFor(A, noop), stack: { thread: true, file: false } };
+    drawPanes(windowOf(L.EMPTY_LAYOUT), stacked);
+    await wait(0);
+    drawPanes(windowOf(L.follow(L.EMPTY_LAYOUT, A)), stacked);
+    await wait(0);
+    expect(paneOf(A)).not.toBeNull();
+    expect(paneOf(A).closest('.ib-panehost')).not.toBeNull();
+  });
+
   test('the pane the person leaves keeps its thread on screen, its cached copy stale: no "Opening the thread…"', async () => {
     putThread(queries, A, heldOf(A, false));
     putThread(queries, B, heldOf(B, false));

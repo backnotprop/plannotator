@@ -94,7 +94,7 @@ function draw(switchOn: boolean, start: string | null = 'thr_a', sidebarOpen = t
         <div className="ib-main" ref={(el) => measured(el, () => window.innerWidth)}>
           <div className="ib-listcol" ref={(el) => measured(el, () => LIST_MIN_WIDTH)} />
         </div>
-        <BesideContext.Provider value={besideOf(panes, thread, hold.holdIfTight, { toast: (toast) => void out.toasts.push(toast), dismiss: () => void (out.dismissed += 1), rowOf: (id) => (ROWS.includes(id) ? rowOf(id) : null) })}>
+        <BesideContext.Provider value={besideOf(panes, thread, hold.holdIfTight, { toast: (toast) => void out.toasts.push(toast), dismiss: (undo) => void (out.toasts.at(-1)?.onUndo === undo && (out.dismissed += 1)), rowOf: (id) => (ROWS.includes(id) ? rowOf(id) : null) })}>
           <ThreadRowMenu className="ib-lbody" rowOf={(id) => (ROWS.includes(id) ? rowOf(id) : null)} canMarkRead={true} held={thread !== null} onAction={() => {}} onTarget={() => {}}>
             {ROWS.map((id) => (
               <div key={id} className="ib-rw" data-row={id}>
@@ -297,5 +297,49 @@ describe.skipIf(!hasDom)('Open to the side', () => {
     setWidth(two - 1);
     expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b'], active: 1 });
     expect(w.thread).toBe('thr_b');
+  });
+
+  test('Undo only takes back the placement its toast named: once the layout is another, the toast leaves and its Undo does nothing', async () => {
+    const two = LIST_MIN_WIDTH + 2 * THREAD_BESIDE_FILE_WIDTH + 1;
+    const toSide = async (w: ReturnType<typeof draw>, id: string) => {
+      await openMenu(id);
+      await act(async () => besideItem()!.click());
+      expect(w.toasts.at(-1)?.lead).toBe('No room for another pane');
+    };
+    // Another thread opened in the new pane (a row clicked within the toast's time).
+    const w = draw(true);
+    setWidth(two - 1);
+    await toSide(w, 'thr_b');
+    // The open itself is the placement announced: the toast stays.
+    expect(w.dismissed).toBe(0);
+    act(() => w.go('thr_c'));
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_c'], active: 1 });
+    expect(w.dismissed).toBe(1);
+    act(() => w.toasts.at(-1)!.onUndo!());
+    expect(shape(w.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_c'], active: 1 });
+    expect(w.thread).toBe('thr_c');
+    act(() => root!.unmount());
+    host!.remove();
+    sessionStorage.clear();
+    // The new pane closed (its ✕), then Undo: nothing more closes.
+    const x = draw(true);
+    setWidth(two - 1);
+    await toSide(x, 'thr_b');
+    const added = x.panes!.layout.active!;
+    act(() => x.panes!.closePane(added));
+    expect(x.dismissed).toBe(1);
+    act(() => x.toasts.at(-1)!.onUndo!());
+    expect(shape(x.panes!.panes)).toEqual({ threads: ['thr_a'], active: 0 });
+    act(() => root!.unmount());
+    host!.remove();
+    sessionStorage.clear();
+    // Another pane opened beside the new one: Undo would no longer give back the layout it named.
+    const y = draw(true);
+    setWidth(two - 1);
+    await toSide(y, 'thr_b');
+    act(() => y.panes!.openBeside('thr_d'));
+    expect(y.dismissed).toBe(1);
+    act(() => y.toasts[0]!.onUndo!());
+    expect(shape(y.panes!.panes)).toEqual({ threads: ['thr_a', 'thr_b', 'thr_d'], active: 2 });
   });
 });
