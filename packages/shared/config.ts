@@ -31,6 +31,7 @@ import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './a
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
 import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
+import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -270,6 +271,14 @@ export interface PlannotatorConfig {
    * annotate sessions fully stateless. Default: true.
    */
   annotateHistory?: boolean;
+  /**
+   * The view an annotate session opens in: "wide", "focus" or "edit" (the
+   * document toolbar's Wide | Focus | Edit). Unset or invalid keeps today's
+   * default (panels as they are, not editing); a view the document cannot
+   * use falls back to that default too. Config only: a click in the toolbar
+   * changes the view for that session and is never written back here.
+   */
+  annotateView?: AnnotateView;
   /**
    * Durably archive every submitted review under ~/.plannotator/feedback/
    * (or PLANNOTATOR_DATA_DIR): one append-only JSONL record per submission
@@ -1582,6 +1591,7 @@ export function getServerConfig(
   agentTerminalSide?: PlannotatorConfig["agentTerminalSide"];
   agentTerminalDefaultAgent?: string;
   agentSwitch?: AgentSwitchConfigValue;
+  annotateView?: AnnotateView;
   autoUpdate: boolean;
   autoUpdateEnv?: boolean;
   updateCheck: boolean;
@@ -1600,6 +1610,7 @@ export function getServerConfig(
   const updateCheckEnv = parseUpdateCheckEnv();
   const agentToolEnv = parseAgentToolEnv();
   const agentToolHost = agentToolHostOf(agentToolIntegration);
+  const annotateView = parseAnnotateView(cfg.annotateView);
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
@@ -1622,6 +1633,8 @@ export function getServerConfig(
         agentTerminalDefaultAgent: cfg.agentTerminalDefaultAgent,
       }),
     ...agentSwitchAdvert(cfg.agentSwitch),
+    // Only a known view is advertised; a typo leaves the page on today's default.
+    ...(annotateView !== undefined && { annotateView }),
     // Always explicit (the config-file value, default false) so a stale
     // cookie can never show the toggle on while the config says off.
     // autoUpdateEnv carries PLANNOTATOR_AUTO_UPDATE when it overrides the file.

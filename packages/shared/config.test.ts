@@ -152,6 +152,44 @@ describe("reviewDefaults persistence", () => {
   });
 });
 
+describe("annotateView (the view an annotate session opens in)", () => {
+  const originalDataDir = process.env.PLANNOTATOR_DATA_DIR;
+  let tempDir: string;
+
+  beforeEach(() => {
+    tempDir = mkdtempSync(join(tmpdir(), "plannotator-config-annotate-view-"));
+    process.env.PLANNOTATOR_DATA_DIR = tempDir;
+  });
+
+  afterEach(() => {
+    if (originalDataDir !== undefined) process.env.PLANNOTATOR_DATA_DIR = originalDataDir;
+    else delete process.env.PLANNOTATOR_DATA_DIR;
+    rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  const advertised = (raw: unknown): unknown => {
+    writeFileSync(join(tempDir, "config.json"), JSON.stringify({ annotateView: raw }));
+    return getServerConfig(null).annotateView;
+  };
+
+  test("each of the toolbar's three views is served to the page as written", () => {
+    expect(advertised("wide")).toBe("wide");
+    expect(advertised("focus")).toBe("focus");
+    expect(advertised("edit")).toBe("edit");
+  });
+
+  test("a value the toolbar does not offer is left out, so the page keeps today's default", () => {
+    for (const raw of ["Focus", " focus", "zen", "", 1, true, null, ["focus"], { view: "focus" }]) {
+      expect(advertised(raw)).toBeUndefined();
+    }
+  });
+
+  test("unset is left out", () => {
+    writeFileSync(join(tempDir, "config.json"), JSON.stringify({ displayName: "x" }));
+    expect("annotateView" in getServerConfig(null)).toBe(false);
+  });
+});
+
 describe("parseReviewAnalysisConfig", () => {
   test("accepts independent boolean analysis flags", () => {
     expect(parseReviewAnalysisConfig({ semanticDiff: false })).toEqual({ semanticDiff: false });
