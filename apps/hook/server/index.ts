@@ -441,7 +441,6 @@ if (isReviewDrawCommand(rawArgs, () => {
     process.exit(
       await runPlansCommand(args.slice(1), {
         dataDir: getPlannotatorDataDir(),
-        interactive: process.stdin.isTTY === true,
         ensureInbox: () => ensureInboxRunning(getPlannotatorDataDir()),
         openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
         remoteHint: inboxRemoteOpenHint,

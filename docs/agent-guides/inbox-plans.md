@@ -7,7 +7,7 @@ On screen and in every word an agent may read, it is "Plans", one item "a plan".
 ### The switch
 
 - config.json `inboxPlans` (`true` / `false`, unset is off): `plansOn()` / `setPlansSwitch()` in `packages/shared/plans/switch.ts`, read on every request.
-- On only by the person: `plannotator plans` in their own terminal (a shell with no terminal is refused: `PLANS_NOT_A_TERMINAL`), or `POST /api/inbox/settings` `{ plans: { on } }` from the window. No agent tool, agent text, skill or `--help` names it (the subcommand is in `HIDDEN_SUBCOMMANDS`; its help is the usage line only).
+- On only by the person: `plannotator plans` (no gate: running it is the opt-in, from any shell), or `POST /api/inbox/settings` `{ plans: { on } }` from the window. No agent tool, agent text, skill or `--help` names it (the subcommand is in `HIDDEN_SUBCOMMANDS`; its help is the usage line only).
 - `plannotator plans off` (or the settings switch) turns it off and keeps `plan-library/`.
 
 ### Off costs nothing
@@ -35,6 +35,12 @@ Browser-safe types, id prefixes, pure checks and the version id; no I/O. Field n
 | Look | (looks.json) | per plan `looked_at`, per document the newest version seen |
 | Artifact, Comment `anno_`, Reply `reply_` | | types only: not written yet |
 
+Rules the records keep, so a later copy kept elsewhere stays possible (nothing leaves the computer today):
+
+- A version's author is a display name only (`author_label`, with `author_via` and the agent fields): never an email or a user id. The import writes none.
+- Events and Looks are local-only: they never go with a plan; a copy kept elsewhere writes its own.
+- Of the decisions, only "approved" (and "approved-with-notes") maps to a document approval at a version. "denied" and "feedback", with the person's notes, stay local-only.
+
 ### The library on disk (`packages/shared/plans/store.ts`)
 
 ```
@@ -58,13 +64,15 @@ Read-only: it reads `history/`, `plans/` and `feedback/` and writes only under `
 - A `history/{project}/{slug}/` folder with `NNN.md` files is one plan: its files in number order are versions 1, 2, 3…, dated by each file's modified time; the plan's name is the newest version's first heading.
 - Chains are never joined. A heading change (a new slug) or the same heading after two quiet days (a new dated slug) is a second plan; two projects with the same slug are two plans. Joining is the person's later merge.
 - Missing numbers (001, 002, 004): imported in order and numbered without a gap; each keeps its file name; the chain is listed in the report's `gaps`.
+- A file plan review may still be writing (it truncates, then writes: modified less than `PLAN_IMPORT_SETTLE_MS`, 2 s, ago, or a different size or time after the read than before) is not read yet: its chain stops there (`unsettled`), is not marked read, and a later run takes the whole file. The same for a snapshot. An empty `NNN.md` is no version (`empty_files`).
 - An unreadable file stops its chain there (`unreadable`); the next run goes on from it, in order.
 - A folder with no `NNN.md` is no plan yet; annotate's chains (`annotate-…-<8 hex>`), `submissions/` and other files are left out.
-- A feedback line of plan review (`surface: "plan"`) is a decision on the version it names (`target.slug`, `target.planVersion`), with the person's notes. A line whose chain is not in the library is counted (`orphan_feedback`) and read again next time; other surfaces and torn lines are skipped.
+- A feedback line of plan review (`surface: "plan"`) is a decision on the version it names (`target.slug`, `target.planVersion`), with the person's notes. A line with nothing to land on yet (its chain is not in the library, or the version it names is on disk but not imported yet) waits, counted in `orphan_feedback`; the map keeps the file's size, the offset after its last whole line read and the waiting lines' byte ranges, so the file is not read again until it grows (then only its new lines), and the waiting lines are tried again only after a run that added versions. A line still being appended (no newline yet) waits for the next run. Other surfaces and torn lines are skipped.
 - A decision snapshot is matched by its text (the version's text, or it followed by `\n\n---\n\n` and the notes) to a version of a chain with the same heading. If a feedback line already gave that decision on that version, it is not kept twice (`duplicate_snapshots`); otherwise it is a decision. A snapshot written over by a later decision is a new decision. Feedback lines are read before snapshots; plan review writes the snapshot a moment before its line, so a pickup landing exactly between the two would keep both.
-- A snapshot with no matching history (a decision without history) is a plan of its own: the snapshot file as its one version (the plan text and the notes cannot be told apart), its decision, no project.
+- A snapshot with no matching history (a decision without history) is a plan of its own: the snapshot file as its one version (the plan text and the notes cannot be told apart), its decision, no project. The plan's `legacy.snapshots` names the snapshot (`plans/<file>#<blob sha>`) from its first record, and it counts as done only once it holds its decision: a run after a crash between its steps finishes that plan rather than making a second one.
 - Snapshots saved to a custom folder (a browser setting the server never keeps) are not found.
-- New versions plan review writes while Plans is on are picked up by the same function: the Inbox runs it in the background once it is up and when the switch turns on, and a request to `/api/plans` runs it again at most every 2 seconds (`packages/server/plans-capability.ts`). There is no file watch.
+- New versions plan review writes while Plans is on are picked up by the same function: the Inbox runs it in the background once it is up and when the switch turns on, and a request to `/api/plans` runs it again at most every 2 seconds (`packages/server/plans-capability.ts`). There is no file watch. The import yields after each chain, snapshot and feedback file, every 10 versions and 25 feedback lines, and after each plan while it repairs the index and rebuilds the map, so a first import of a long history does not hold the Inbox.
+- Not yet: `index.jsonl` only grows (one line per change); compacting it (written whole when it holds many more lines than plans) is a follow-up.
 
 ### The capability seam (`packages/server/inbox-capability.ts`)
 
@@ -82,4 +90,4 @@ Nothing: Plans lives in the Inbox, which is Bun-only. No module is vendored (`ap
 
 ### Tests
 
-`packages/core/plans.test.ts` (the version id against `git hash-object`, the ids, the checks), `packages/shared/plans/store.test.ts` (round trips, the list, looks, modes, every crash window), `packages/shared/plans/import.test.ts` (a fixture tree with every odd case above, source files byte-identical, idempotence and a lost map, the pickup, an unreadable file), `packages/shared/plans/switch.test.ts`, `packages/shared/plans/routes.test.ts` (the handler with no server), `packages/server/plans-capability.test.ts` (off costs nothing, the guards, the settings switch, the background import), `apps/hook/server/plans-command.test.ts` (on, off, list, the off line, the terminal rule).
+`packages/core/plans.test.ts` (the version id against `git hash-object`, the ids, the checks), `packages/shared/plans/store.test.ts` (round trips, the list, looks, modes, every crash window), `packages/shared/plans/import.test.ts` (a fixture tree with every odd case above, source files byte-identical, idempotence and a lost map, the pickup, an unreadable file, files caught mid-write, waiting feedback lines, both crash windows of a decision without history, the steps), `packages/shared/plans/switch.test.ts`, `packages/shared/plans/routes.test.ts` (the handler with no server), `packages/server/plans-capability.test.ts` (off costs nothing, the guards, the settings switch, the background import), `apps/hook/server/plans-command.test.ts` (on, off, list, the off line, no terminal gate).

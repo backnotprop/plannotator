@@ -67,7 +67,7 @@ export const NO_ACTOR: PlanActor = { author_label: null, author_via: null, agent
 export interface PlanLegacy {
   /** `history/{project}/{slug}` chains. */
   chains: { project: string; slug: string }[];
-  /** `plans/{slug}-approved.md` / `-denied.md` decision snapshots. */
+  /** Decision snapshots, as `plans/{slug}-approved.md#{blob sha}` (or `-denied.md`): the file and the text it held. */
   snapshots: string[];
 }
 

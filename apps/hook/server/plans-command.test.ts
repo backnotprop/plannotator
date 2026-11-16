@@ -1,7 +1,7 @@
 /**
  * `plannotator plans`, in process with its Inbox and browser faked, on a scratch data dir. What regresses if these
  * fail:
- * - Plans turns on without a person at a terminal, or `plans` does not turn it on and open the Inbox's Plans page;
+ * - `plans` does not turn Plans on and open the Inbox's Plans page, or refuses where no terminal is attached;
  * - `plans off` does not turn it off (or starts anything);
  * - while off, another `plans …` does more than print one line naming `plannotator plans` and exit 1;
  * - `plans list` writes anything, starts the Inbox, or prints other than the library holds.
@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createPlanStore } from "@plannotator/shared/plans/store";
-import { PLANS_COMMAND_USAGE, PLANS_NOT_A_TERMINAL, PLANS_OFF_TEXT, runPlansCommand, type PlansCommandDeps } from "./plans-command";
+import { PLANS_COMMAND_USAGE, PLANS_OFF_TEXT, runPlansCommand, type PlansCommandDeps } from "./plans-command";
 
 let dataDir = "";
 let savedEnv: string | undefined;
@@ -34,7 +34,6 @@ function cli(overrides: Partial<PlansCommandDeps> = {}) {
   const calls = { ensure: 0, opened: [] as string[], running: 0 };
   const deps: PlansCommandDeps = {
     dataDir,
-    interactive: true,
     ensureInbox: async () => {
       calls.ensure++;
       return INBOX;
@@ -71,7 +70,7 @@ describe("plannotator plans", () => {
     expect(readdirSync(dataDir)).toEqual([]);
   });
 
-  test("bare, from a person's terminal: on, the Inbox started or found, its Plans page opened and printed", async () => {
+  test("bare: on, the Inbox started or found, its Plans page opened and printed", async () => {
     const { run, out, err, calls } = cli();
     expect(await run()).toBe(0);
     expect(inboxPlans()).toBe(true);
@@ -81,12 +80,19 @@ describe("plannotator plans", () => {
     expect(err).toEqual(["Plans is on."]);
   });
 
-  test("bare, from a shell with no terminal (an agent's): refused, nothing changes, nothing starts", async () => {
-    const { run, out, err, calls } = cli({ interactive: false });
-    expect(await run()).toBe(1);
-    expect([out, err]).toEqual([[], [PLANS_NOT_A_TERMINAL]]);
-    expect(inboxPlans()).toBeUndefined();
-    expect(calls).toEqual({ ensure: 0, opened: [], running: 0 });
+  test("bare, with no terminal attached (an IDE's task runner, a wrapper): no gate, it turns on and opens the same", async () => {
+    const saved = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { value: undefined, configurable: true });
+    try {
+      const { run, out, calls } = cli();
+      expect(await run()).toBe(0);
+      expect(inboxPlans()).toBe(true);
+      expect(calls.opened).toEqual(["http://localhost:4100/#plans"]);
+      expect(out).toEqual(["http://localhost:4100/#plans"]);
+    } finally {
+      if (saved) Object.defineProperty(process.stdin, "isTTY", saved);
+      else delete (process.stdin as { isTTY?: boolean }).isTTY;
+    }
   });
 
   test("bare, remote: no browser, the Inbox's hint; an Inbox that cannot start says why", async () => {

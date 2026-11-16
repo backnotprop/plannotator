@@ -70,11 +70,33 @@ export interface PlanLegacyMap {
   snapshots: Record<string, { plan: string; event: string | null }>;
   /** `{file name}` → `size:mtimeMs` when last read, so an unchanged snapshot is not read again. */
   snapshot_files: Record<string, string>;
-  /** `feedback/{project}/index.jsonl` → its size when last read. */
-  feedback_files: Record<string, number>;
+  /** `feedback/{project}/index.jsonl` → how far it was read. */
+  feedback_files: Record<string, PlanFeedbackFileState>;
 }
 
-const EMPTY_LEGACY_MAP = (): PlanLegacyMap => ({ v: 1, chains: {}, snapshots: {}, snapshot_files: {}, feedback_files: {} });
+/**
+ * How far a feedback archive was read: its size then, the byte offset after its last whole line read, and the byte
+ * ranges of the lines that had no plan or version to land on yet (read again only when the history changed).
+ */
+export interface PlanFeedbackFileState {
+  size: number;
+  read: number;
+  pending: [number, number][];
+}
+
+const isFeedbackFileState = (value: unknown): value is PlanFeedbackFileState => {
+  const state = value as Partial<PlanFeedbackFileState> | null;
+  return (
+    !!state &&
+    typeof state === "object" &&
+    Number.isSafeInteger(state.size) &&
+    Number.isSafeInteger(state.read) &&
+    Array.isArray(state.pending) &&
+    state.pending.every((range) => Array.isArray(range) && range.length === 2 && range.every((n) => Number.isSafeInteger(n) && n >= 0) && range[0]! <= range[1]!)
+  );
+};
+
+const EMPTY_LEGACY_MAP =(): PlanLegacyMap => ({ v: 1, chains: {}, snapshots: {}, snapshot_files: {}, feedback_files: {} });
 
 export interface NewPlanInput {
   /** A chosen id (the import allocates one before it writes the legacy map); absent: a new one. */
@@ -125,6 +147,8 @@ export interface PlanStore {
   updatePlan(id: string, change: Partial<Pick<PlanRecord, "name" | "note" | "status" | "thread_id" | "legacy">>, at?: string): PlanRecord;
   /** Append an index line for every plan whose last one is missing or behind its files (a crash between writes); how many. */
   repairIndex(): number;
+  /** The same, yielding after each plan (the import runs it in the background). */
+  repairIndexSteps(): Generator<void, number>;
   legacyMap(): PlanLegacyMap;
   saveLegacyMap(map: PlanLegacyMap): void;
 }
@@ -437,14 +461,24 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
     },
 
     repairIndex() {
+      const steps = this.repairIndexSteps();
+      for (;;) {
+        const next = steps.next();
+        if (next.done) return next.value;
+      }
+    },
+
+    *repairIndexSteps() {
       const listed = new Map<string, string>();
       for (const line of readLines(join(root, PLAN_INDEX_FILE), isPlanIndexLine)) listed.set(line.id, JSON.stringify(line));
       let repaired = 0;
       for (const id of planFolders(options.dataDir)) {
         const line = indexLineOf(id);
-        if (!line || listed.get(id) === JSON.stringify(line)) continue;
-        appendLine(join(root, PLAN_INDEX_FILE), line);
-        repaired++;
+        if (line && listed.get(id) !== JSON.stringify(line)) {
+          appendLine(join(root, PLAN_INDEX_FILE), line);
+          repaired++;
+        }
+        yield;
       }
       return repaired;
     },
@@ -457,7 +491,7 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
         chains: value.chains && typeof value.chains === "object" ? value.chains : {},
         snapshots: value.snapshots && typeof value.snapshots === "object" ? value.snapshots : {},
         snapshot_files: value.snapshot_files && typeof value.snapshot_files === "object" ? value.snapshot_files : {},
-        feedback_files: value.feedback_files && typeof value.feedback_files === "object" ? value.feedback_files : {},
+        feedback_files: Object.fromEntries(Object.entries(value.feedback_files && typeof value.feedback_files === "object" ? value.feedback_files : {}).filter(([, state]) => isFeedbackFileState(state))),
       };
     },
 

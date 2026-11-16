@@ -15,7 +15,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, s
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createPlanStore, planLibraryDir, type PlanStore } from "./store";
-import { importPlanLibrary, importPlanLibraryInSteps } from "./import";
+import { importPlanLibrary, importPlanLibraryInSteps, planImportSteps } from "./import";
 
 const dirs: string[] = [];
 const scratch = () => {
@@ -212,6 +212,123 @@ describe("plan import", () => {
     expect(next).toMatchObject({ plans_created: 0, versions_added: 2, unreadable: [] });
     const [plan] = store.list();
     expect(store.versions(plan!.id).map((v) => v.legacy?.split("/").pop())).toEqual(["001.md", "002.md", "003.md"]);
+  });
+
+  test("a file caught mid-write (truncated, then partly written) is left alone and imported whole on a later run", () => {
+    const dataDir = scratch();
+    const t = day(10).getTime();
+    version(dataDir, "api", "steps-2026-11-10", 1, "# Steps\n\n1\n", day(9));
+    const second = join(dataDir, "history", "api", "steps-2026-11-10", "002.md");
+    const store = createPlanStore({ dataDir });
+
+    // Plan review has truncated 002.md (0 bytes) and is about to write it.
+    put(second, "", new Date(t));
+    let report = importPlanLibrary(store, { dataDir, now: () => t + 100 });
+    expect(report.unsettled).toEqual(["history/api/steps-2026-11-10/002.md"]);
+    expect(store.list()[0]!.head_version_number).toBe(1);
+
+    // Half the text is in.
+    put(second, "# Steps\n\n", new Date(t + 200));
+    report = importPlanLibrary(store, { dataDir, now: () => t + 300 });
+    expect(report).toMatchObject({ versions_added: 0, unsettled: ["history/api/steps-2026-11-10/002.md"] });
+
+    // The write finished (in place: the folder's time does not change). A later run takes the whole text, once.
+    put(second, "# Steps\n\n2, written whole\n", new Date(t + 400));
+    report = importPlanLibrary(store, { dataDir, now: () => t + 5000 });
+    expect(report).toMatchObject({ versions_added: 1, unsettled: [] });
+    const [plan] = store.list();
+    expect(plan!.head_version_number).toBe(2);
+    expect(new TextDecoder().decode(store.versionBytes(plan!.id, plan!.primary_doc_id, 2)!)).toBe("# Steps\n\n2, written whole\n");
+    expect(importPlanLibrary(store, { dataDir, now: () => t + 9000 })).toMatchObject({ versions_added: 0 });
+  });
+
+  test("a decision snapshot caught mid-write makes no plan of its own; written whole, it lands on its version", () => {
+    const dataDir = scratch();
+    const t = day(10).getTime();
+    version(dataDir, "api", "cache-2026-11-10", 1, "# Cache\n\nv1\n", day(9));
+    const snapshot = join(dataDir, "plans", "cache-2026-11-10-approved.md");
+    put(snapshot, "# Cac", new Date(t));
+    const store = createPlanStore({ dataDir });
+    const first = importPlanLibrary(store, { dataDir, now: () => t + 100 });
+    expect(first).toMatchObject({ snapshot_only_plans: 0, decisions_added: 0, unsettled: ["plans/cache-2026-11-10-approved.md"] });
+
+    put(snapshot, "# Cache\n\nv1\n" + "\n\n---\n\n" + "Fine.", new Date(t + 200));
+    const next = importPlanLibrary(store, { dataDir, now: () => t + 5000 });
+    expect(next).toMatchObject({ snapshot_only_plans: 0, decisions_added: 1 });
+    expect(store.list()).toHaveLength(1);
+    expect(store.list()[0]!.decision).toMatchObject({ decision: "approved", version_number: 1 });
+  });
+
+  test("a feedback line with nothing to land on waits without the file being read again; it lands once its version is in", () => {
+    const dataDir = scratch();
+    const t = day(10).getTime();
+    version(dataDir, "api", "plan-2026-11-10", 1, "# Plan\n\n1\n", day(9));
+    // 002.md is still being written when its decision is already in the archive (a removed chain's line too).
+    version(dataDir, "api", "plan-2026-11-10", 2, "# Plan\n\n2\n", new Date(t));
+    const index = join(dataDir, "feedback", "api", "index.jsonl");
+    const lines = [
+      feedbackLine({ ts: day(9, 1).toISOString(), project: "api", surface: "plan", decision: "approved", target: { slug: "removed-2026-10-01", planVersion: 1 } }),
+      feedbackLine({ ts: new Date(t + 50).toISOString(), project: "api", surface: "plan", decision: "denied", target: { slug: "plan-2026-11-10", planVersion: 2 }, feedback: "No." }),
+    ];
+    put(index, `${lines.join("\n")}\n`, new Date(t + 50));
+    const store = createPlanStore({ dataDir });
+    expect(importPlanLibrary(store, { dataDir, now: () => t + 100 })).toMatchObject({ decisions_added: 0, orphan_feedback: 2 });
+
+    // Nothing changed: the waiting lines are not read again (before, every run read the whole file).
+    expect(importPlanLibrary(store, { dataDir, now: () => t + 200 })).toMatchObject({ decisions_added: 0, orphan_feedback: 0 });
+
+    // 002.md is now in: the waiting line lands on v2 (not on no version); the removed chain's line still waits.
+    const settled = importPlanLibrary(store, { dataDir, now: () => t + 5000 });
+    expect(settled).toMatchObject({ versions_added: 1, decisions_added: 1, orphan_feedback: 1 });
+    const [plan] = store.list();
+    expect(plan!.decision).toMatchObject({ decision: "denied", version_number: 2 });
+    expect(store.read(plan!.id)!.events[0]!.decision!.version).toBe(store.versions(plan!.id)[1]!.version);
+
+    // A new line is read alone; the waiting one is not tried again (no version was added).
+    writeFileSync(index, `${readFileSync(index, "utf8")}${feedbackLine({ ts: day(11).toISOString(), project: "api", surface: "plan", decision: "approved", target: { slug: "plan-2026-11-10", planVersion: 2 } })}\n`);
+    expect(importPlanLibrary(store, { dataDir, now: () => t + 9000 })).toMatchObject({ decisions_added: 1, orphan_feedback: 0 });
+    expect(store.read(plan!.id)!.events.map((e) => e.decision!.decision)).toEqual(["denied", "approved"]);
+  });
+
+  for (const step of ["addVersion", "addEvent"] as const) {
+    test(`a crash before ${step} of a decision without history: the next run finishes that plan, with no second one`, () => {
+      const dataDir = scratch();
+      put(join(dataDir, "plans", "ghost-plan-2026-11-03-approved.md"), "# Ghost plan\n\nno history\n", day(3, 20));
+      const store = createPlanStore({ dataDir });
+      const crashing: PlanStore = {
+        ...store,
+        [step]: () => {
+          throw new Error("crash");
+        },
+      };
+      expect(() => importPlanLibrary(crashing, { dataDir })).toThrow("crash");
+
+      const report = importPlanLibrary(store, { dataDir });
+      expect(report).toMatchObject({ plans_created: 0, decisions_added: 1 });
+      const plans = store.list();
+      expect(plans).toHaveLength(1);
+      expect(plans[0]).toMatchObject({ name: "Ghost plan", head_version_number: 1, decision: { decision: "approved", version_number: 1 } });
+      expect(importPlanLibrary(store, { dataDir })).toMatchObject({ plans_created: 0, versions_added: 0, decisions_added: 0 });
+      rmSync(join(planLibraryDir(dataDir), "legacy-map.json"));
+      expect(importPlanLibrary(store, { dataDir })).toMatchObject({ plans_created: 0, versions_added: 0, decisions_added: 0 });
+      expect(store.list()).toHaveLength(1);
+    });
+  }
+
+  test("a long feedback archive is taken in many steps, not one", () => {
+    const dataDir = scratch();
+    version(dataDir, "api", "plan-2026-11-01", 1, "# Plan\n\n1\n", day(1));
+    const lines = Array.from({ length: 100 }, (_, i) =>
+      feedbackLine({ ts: day(2, 0).toISOString().replace("00:00:00", `00:${String(Math.floor(i / 60)).padStart(2, "0")}:${String(i % 60).padStart(2, "0")}`), project: "api", surface: "plan", decision: "feedback", target: { slug: "plan-2026-11-01", planVersion: 1 }, feedback: `note ${i}` }),
+    );
+    put(join(dataDir, "feedback", "api", "index.jsonl"), `${lines.join("\n")}\n`, day(2));
+    const store = createPlanStore({ dataDir });
+    const steps = planImportSteps(store, { dataDir });
+    let pauses = 0;
+    for (let next = steps.next(); !next.done; next = steps.next()) pauses++;
+    // One chain, one feedback file: two steps without pauses inside; 100 lines at 25 a step make at least four more.
+    expect(pauses).toBeGreaterThanOrEqual(6);
+    expect(store.read(store.list()[0]!.id)!.events).toHaveLength(100);
   });
 
   test("no history, snapshots or feedback: nothing to import, and nothing written", () => {

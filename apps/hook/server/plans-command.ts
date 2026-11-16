@@ -22,13 +22,8 @@ export { PLANS_COMMAND_USAGE };
 /** What every `plannotator plans …` but `plans` and `plans off` says while Plans is off. */
 export const PLANS_OFF_TEXT = "plans_off: Plans is off. To turn it on, run `plannotator plans`.";
 
-/** Bare `plannotator plans` from a shell with no terminal. */
-export const PLANS_NOT_A_TERMINAL = "plans: Plans turns on from your own terminal: run `plannotator plans` there.";
-
 export interface PlansCommandDeps {
   dataDir: string;
-  /** A person at a terminal (stdin is a TTY). */
-  interactive: boolean;
   /** The running Inbox, starting it detached when needed (`ensureInboxRunning`). */
   ensureInbox: () => Promise<{ url: string; port: number }>;
   /** Open a URL in the browser without waiting on it; "remote" when no browser could open here. */
@@ -59,10 +54,6 @@ export async function runPlansCommand(argv: readonly string[], deps: PlansComman
   }
 
   if (which === undefined) {
-    if (!deps.interactive) {
-      err(PLANS_NOT_A_TERMINAL);
-      return 1;
-    }
     if (!setPlansSwitch(true)) {
       err(`config_not_saved: ${PLANS_SWITCH_NOT_SAVED}`);
       return 1;
