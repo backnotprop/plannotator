@@ -316,9 +316,8 @@ test("the pane area's right rim (switch on, 1920 x 1080): a row opens a column t
   await expect(page.locator('[data-thread-ghost] .ib-tdrag-w').last()).toHaveText('Open on the right');
   await carryTo(page, { x: before.right - 6, y: before.top + 120 });
   await expect(page.locator('[data-thread-ghost] .ib-tdrag-w').last()).toHaveText('Open on the right, full height');
-  const zone = page.locator('.ib-droppreview');
-  await expect(zone).toBeVisible();
-  const z = (await zone.boundingBox())!;
+  // The preview eases from a's own right zone (a's height) to the rim's in 120 ms (panes.css): read it once it settles.
+  const z = await settledBox(page.locator('.ib-droppreview'));
   expect(Math.abs(z.y - before.top)).toBeLessThanOrEqual(1);
   expect(Math.abs(z.y + z.height - before.bottom)).toBeLessThanOrEqual(1);
   expect(Math.abs(z.x + z.width - before.right)).toBeLessThanOrEqual(1);
