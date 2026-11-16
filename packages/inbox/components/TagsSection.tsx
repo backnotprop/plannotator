@@ -9,7 +9,7 @@
  * into a field: Enter saves, Escape or leaving the field cancels) and Delete tag (no question: the toast has Undo).
  * Closed, the section keeps only the tag the list shows.
  */
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxInitiative } from '@plannotator/core/inbox-types';
@@ -18,6 +18,7 @@ import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
 import { TagColourItem, TagColourList } from './TagColourMenu';
+import { MenuCheckbox } from './Tidy';
 import { focusAfterSwap } from '@plannotator/ui/components/inbox-thread/SnoozeMenu';
 import { tintAttrs } from '../tagColours';
 import type { TagColourControls } from '../useThreadTagsHost';
@@ -167,7 +168,6 @@ export function TagsSection(props: TagsSectionProps) {
                 data-tag-row={tag.id}
                 data-menu={aimed === tag.id ? '' : undefined}
                 data-tint={tint?.['data-tint']}
-                style={tint?.style as CSSProperties | undefined}
               >
                 <span className="ib-name" dir="auto">
                   {tag.name}
@@ -211,7 +211,13 @@ export function TagsSection(props: TagsSectionProps) {
                     <Icon name="pen" size={15} />
                     Rename
                   </Menu.Item>
-                  {colours && <TagColourItem colour={colours.colourOf(target.id)} onOpen={() => setColourView(true)} />}
+                  {colours && (
+                    <>
+                      {/* Two rows (the owner, 2026-11-16): the tint on and off at once, and the colour chosen apart. */}
+                      <MenuCheckbox label="Highlight rows" checked={colours.colourOf(target.id) !== null} onChange={(on) => colours.highlight(target, on)} data-tag-action="highlight" />
+                      <TagColourItem colour={colours.pickOf(target.id)} onOpen={() => setColourView(true)} />
+                    </>
+                  )}
                   <Menu.Separator className="ib-pm-sep" />
                   <Menu.Item
                     className="ib-pmi"

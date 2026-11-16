@@ -9333,7 +9333,8 @@ dialog.ib-pqi .ib-listcol.ib-pqi-list { position: relative; inset: auto; visibil
 .ib-zband-tri { display: inline-flex; color: var(--ib-badge-hold-fg-soft); }
 .ib-zband-tri[data-stopped] { color: var(--ib-badge-stop-fg-soft); }
 .pn-inbox .ib-band .ib-zband-tri .ib-ic { margin-left: 0; color: inherit; }
-.ib-zsub { margin-left: auto; display: inline-flex; padding-left: 16px; }
+/* The value and the chevron on one centre line (a value's line box is taller than the 13px chevron). */
+.ib-zsub { margin-left: auto; display: inline-flex; align-items: center; padding-left: 16px; }
 .ib-zi { justify-content: space-between; gap: 24px; }
 .ib-zw { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-zb { color: var(--muted-foreground); }
