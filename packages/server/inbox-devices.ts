@@ -126,6 +126,15 @@ function refuse(status: number, code: string, error: string, details: Record<str
 }
 
 /**
+ * A path the door does not open to this caller: `404 device_route_not_found`. Clients act on the code (a linked
+ * machine reads it as "needs an update"), never the words. A linked machine's own Inbox gets words for a computer;
+ * a phone, and a caller not known yet, "Not a phone route."
+ */
+function routeNotFound(device: Pick<InboxDevice, "platform"> | null = null): Response {
+  return refuse(404, "device_route_not_found", device?.platform === MACHINE_PLATFORM ? "This isn't available from another computer." : "Not a phone route.");
+}
+
+/**
  * The allowlist (contract section 2): door route to the window's route. A
  * door path outside it is `404 device_route_not_found`; the window, `/mcp`,
  * the bridge, control, settings, restart, the raw text route
@@ -980,7 +989,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       stream.signal.addEventListener("abort", () => open.delete(stream));
       return await toWindow(req, device, windowPath, url.search, null, stream.signal);
     }
-    return refuse(404, "device_route_not_found", "Not a phone route.");
+    return routeNotFound(device);
   };
 
   /**
@@ -1045,16 +1054,16 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
       if (device.revoked_at !== null) return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
       if (device.platform === AGENT_PLATFORM) return refuse(403, "agent_not_accepted_here", "A cloud agent's pairing opens the agent door only.");
-      if (input.method !== "GET" && input.method !== "POST") return refuse(404, "device_route_not_found", "Not a phone route.");
+      if (input.method !== "GET" && input.method !== "POST") return routeNotFound(device);
       let url: URL;
       try {
         url = new URL(input.path, `http://127.0.0.1:${context.port()}`);
       } catch {
-        return refuse(404, "device_route_not_found", "Not a phone route.");
+        return routeNotFound(device);
       }
       const route = url.pathname.startsWith(DOOR_PREFIX) ? url.pathname.slice(DOOR_PREFIX.length) : "";
       if (!route || route === "pair" || route === "events" || url.origin !== `http://127.0.0.1:${context.port()}`) {
-        return refuse(404, "device_route_not_found", "Not a phone route.");
+        return routeNotFound(device);
       }
       // A file (an upload, a drawing) is not carried: a sealed command's body is JSON, and a file in it would be
       // base64 inside the envelope, past Cloudflare's message limit well under the 100 MB cap. v1: the Wi-Fi or the tailnet.
@@ -1090,10 +1099,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
       try {
         url = new URL(req.url, "http://127.0.0.1");
       } catch {
-        return refuse(404, "device_route_not_found", "Not a phone route.");
+        return routeNotFound();
       }
-      if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
-      return door(req, url, via).then((answer) => answer ?? refuse(404, "device_route_not_found", "Not a phone route."));
+      if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return routeNotFound();
+      return door(req, url, via).then((answer) => answer ?? routeNotFound());
     };
 
   // ── The Wi-Fi (contract section 3): the same door-only handler, over TLS on every interface. ──

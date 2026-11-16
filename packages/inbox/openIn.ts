@@ -7,12 +7,16 @@
  * it, the file manager; then Copy path. The current choice is checked.
  * A referenced file (Shape, a review's diff headers) has the same list, by its
  * kind on disk, with no Browser: only an attachment has a page to open.
+ * A file of a thread on another linked machine has no list at all
+ * (`onAnotherMachine`): every surface asks `openInMenu` and `newTabUrl`, so
+ * each follows.
  */
 
 import { INBOX_OPEN_IN_DEFAULT_APP, inboxOpenInPolicy, readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import type { OpenInPlatform } from '@plannotator/core/open-in-apps';
 import type { DetectedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { attachmentImageUrl, attachmentPageUrl } from './attachments';
+import { machineOf, selfMachineId } from './inboxUrl';
 
 export type OpenInItem =
   /** A new tab of the page (a link in the window; nothing launches). */
@@ -31,9 +35,22 @@ export interface OpenInMenu {
 }
 
 /**
+ * Whether the file's thread lives on another linked machine (docs/agent-guides/inbox-machines.md: Open in stays on
+ * this computer). Its bytes are on that machine's disk, so this computer's apps, its file manager and Copy path have
+ * nothing to open, and that machine's door has no new-tab page. What still works from here: the viewer in the
+ * thread, Download, and an image in a new tab.
+ */
+export function onAnotherMachine(attachment: Pick<InboxAttachmentState, 'id'>): boolean {
+  const machine = machineOf(attachment.id);
+  return machine !== null && machine !== selfMachineId();
+}
+
+/**
  * The menu for one attachment. `version` is the one the window shows: a new
  * tab shows that version; the apps always open the file as it is now
- * (owner's recommendation 1: no temp copy of the sent bytes).
+ * (owner's recommendation 1: no temp copy of the sent bytes). Null for a file
+ * on another machine: nothing in the list works for it here (`newTabUrl` says
+ * what does).
  */
 export function openInMenu(
   attachment: InboxAttachmentState,
@@ -41,7 +58,8 @@ export function openInMenu(
   platform: OpenInPlatform,
   remembered: string | null,
   version: 'current' | 'sent',
-): OpenInMenu {
+): OpenInMenu | null {
+  if (onAnotherMachine(attachment)) return null;
   return openInMenuFor(attachment, detected, platform, remembered, attachmentPageUrl(attachment, version), attachment.unavailable !== null);
 }
 
@@ -84,10 +102,12 @@ export function remembersOpenInItem(item: OpenInItem): boolean {
 /**
  * Over the tailnet and on a phone the only "Open in" is a new tab: the page
  * route for HTML, the image route for an image, nothing for anything else.
+ * The same for a file on another machine, minus the page: its door has no
+ * page route (the viewer in the thread shows the page).
  */
 export function newTabUrl(attachment: InboxAttachmentState, version: 'current' | 'sent'): string | null {
   const kind = readInboxAttachmentKind(attachment.kind);
-  if (kind === 'html') return attachmentPageUrl(attachment, version);
+  if (kind === 'html') return onAnotherMachine(attachment) ? null : attachmentPageUrl(attachment, version);
   if (kind === 'image') return attachmentImageUrl(attachment, version);
   return null;
 }
