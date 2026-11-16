@@ -336,7 +336,7 @@ test.skipIf(!hasDom)('two sessions titled alike carry their names after it, on a
   });
 });
 
-test.skipIf(!hasDom)('rows are named as the sidebar names their agents: a session with no title of its own by the thread its agent got first; a title over that; alike names still carry their fallback names', async () => {
+test.skipIf(!hasDom)('rows are named by the thread context of the name ladder: a session\'s own name, else its agent\'s (numbered), never the thread its agent got first', async () => {
   const { setInboxAgents } = await import('./agentsList');
   const agent = (session: string, host: string, name: string) => ({ id: session, session, host, project: { id: PROJECT.id, name: PROJECT.name }, state: 'idle' as const, waiting: 0, live: true, started_at: null, last_seen_at: null, first_thread: { id: M1, name } });
   taggable.push(tagged('ses_claude2', 'claude-code'));
@@ -346,7 +346,7 @@ test.skipIf(!hasDom)('rows are named as the sidebar names their agents: a sessio
       const el = await render(threadOf(agentMessage(M1, CLAUDE, 41), agentMessage(M2, CLAUDE2, 43), agentMessage(M3, PI, 45)));
       await write(el, 'Use the old totals.');
       await openList(el);
-      expect(named(el).map((r) => r[0])).toEqual(['Invoice retries (Claude Code)', 'Invoice retries (Claude Code 2)', 'Pi tidy']);
+      expect(named(el).map((r) => r[0])).toEqual(['Claude Code', 'Claude Code 2', 'Pi tidy']);
     });
   } finally {
     act(() => setInboxAgents(null));

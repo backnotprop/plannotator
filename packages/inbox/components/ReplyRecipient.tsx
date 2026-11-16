@@ -26,7 +26,7 @@ import type { SessionLabels } from '../sessionLabels';
 import { namesList } from '../tags';
 import { skillMenuHost } from './ComposerField';
 import { skillListRoom } from '../caretMenu';
-import { recipientNames, useRecipientLabels } from '../thread/recipientNames';
+import { recipientNames } from '../thread/recipientNames';
 import { TagStack } from './TagPicker';
 import { Tip } from './Tip';
 import { markRecipientList } from '../pageMarks';
@@ -165,7 +165,7 @@ export function ReplyRecipient({
   const host = pillRef.current ? skillMenuHost(pillRef.current) : null;
   const chosenIds = chosen.map((r) => r.session);
   const one = chosen.length === 1 ? chosen[0]! : null;
-  const named = recipientNames(rows, useRecipientLabels(labels), folderOf);
+  const named = recipientNames(rows, labels, folderOf);
   const nameOf = (row: RecipientRow) => named.get(row.session)?.name ?? row.label;
   /** The pill's wide name: the row's name while it is short enough to fit, else the fallback name. */
   const pillOf = (row: RecipientRow) => {
