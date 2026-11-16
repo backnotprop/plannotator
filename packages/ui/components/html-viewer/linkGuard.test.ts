@@ -31,6 +31,11 @@ describe('withLinkKey', () => {
     expect(withLinkKey('/api/inbox/pages/abc?variant=2&n=3#top', KEY, base)).toBe(`http://localhost:4000/api/inbox/pages/abc?variant=2&n=3&__pnk=${KEY}#top`);
   });
 
+  test('a path on the host server keeps its key when the host document is not at a web address', () => {
+    expect(withLinkKey('/api/inbox/pages/abc?variant=2#top', KEY, 'about:blank')).toBe(`/api/inbox/pages/abc?variant=2&__pnk=${KEY}#top`);
+    expect(withLinkKey('//elsewhere.example/p', KEY, 'about:blank')).toBe('//elsewhere.example/p');
+  });
+
   test("a key the page's own query carried is dropped, so the guard reads only the host's", () => {
     const other = 'b'.repeat(32);
     expect(withLinkKey(`/p?__pnk=${other}&v=1`, KEY, base)).toBe(`http://localhost:4000/p?v=1&__pnk=${KEY}`);

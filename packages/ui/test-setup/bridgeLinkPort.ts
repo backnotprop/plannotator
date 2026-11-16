@@ -16,7 +16,14 @@ export function frameLinkKey(frame: HTMLIFrameElement): string | null {
   const src = frame.getAttribute('src');
   if (src) {
     try {
-      const keys = new URL(src, window.location.href).searchParams.getAll('__pnk');
+      // happy-dom's window is at about:blank: a served path is read as a path.
+      let address: URL;
+      try {
+        address = new URL(src, window.location.href);
+      } catch {
+        address = new URL(src, 'http://root-path.invalid/');
+      }
+      const keys = address.searchParams.getAll('__pnk');
       const fromUrl = keys[keys.length - 1];
       if (fromUrl) return fromUrl;
     } catch {
@@ -39,7 +46,14 @@ export async function offerLinkPort(frame: HTMLIFrameElement, key: string | null
 
 /** The guard's port for this frame's current load: offered the first time a load is seen. */
 export async function bridgeLinkPort(frame: HTMLIFrameElement): Promise<MessagePort> {
-  const key = frameLinkKey(frame);
+  // A served frame (`frameUrl`) gets its address, and so its key, once the host has kept the page.
+  let key = frameLinkKey(frame);
+  for (let i = 0; !key && i < 100; i++) {
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    key = frameLinkKey(frame);
+  }
   if (!key) throw new Error('the frame carries no link key');
   const had = offered.get(frame);
   if (had && had.key === key) return had.port;

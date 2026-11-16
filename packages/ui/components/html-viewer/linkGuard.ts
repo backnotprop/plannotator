@@ -55,15 +55,25 @@ export function newLinkKey(): string {
  */
 export function withLinkKey(url: string, key: string, base: string): string {
   let next: URL;
+  let rootPath = false;
   try {
     next = new URL(url, base);
   } catch {
-    return url;
+    // A root-relative path under a base that is not a web address (a host
+    // document at about:blank): it stays a path, with its key.
+    if (!isRootPath(url)) return url;
+    next = new URL(url, "http://root-path.invalid/");
+    rootPath = true;
   }
   const kept = next.search.slice(1).split("&").filter((part) => part !== "" && !part.startsWith(`${LINK_KEY_PARAM}=`));
   kept.push(`${LINK_KEY_PARAM}=${key}`);
   next.search = `?${kept.join("&")}`;
-  return next.href;
+  return rootPath ? `${next.pathname}${next.search}${next.hash}` : next.href;
+}
+
+/** A path on the host's own server (`/x`, not `//host/x`). */
+export function isRootPath(url: string): boolean {
+  return url.startsWith("/") && !url.startsWith("//");
 }
 
 /** The guard, as a function expression taking the key of this load. */

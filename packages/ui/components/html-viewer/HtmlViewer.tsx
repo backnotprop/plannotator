@@ -73,7 +73,7 @@ import {
   injectSandboxShim,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
-import { newLinkKey, withLinkKey } from "./linkGuard";
+import { isRootPath, newLinkKey, withLinkKey } from "./linkGuard";
 
 const PREFIX = "plannotator-bridge-";
 
@@ -592,7 +592,8 @@ function isWebAddress(url: string, base: string): boolean {
   try {
     return /^https?:$/i.test(new URL(url, base).protocol);
   } catch {
-    return false;
+    // A path on the host's own server, under a base that is not a web address.
+    return isRootPath(url);
   }
 }
 
