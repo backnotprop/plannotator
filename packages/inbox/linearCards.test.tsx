@@ -9,7 +9,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { RefCardView } from '@plannotator/ui/components/RefHoverCard';
-import { refCardTarget, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { loadRefCard, refCardTarget, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { providedRefCardLabel, registerPlainTextLinker, registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { installLinearCards, linearIdentifierLinker, linearRefCardProvider } from './linearCards';
@@ -75,6 +75,18 @@ test('a Linear link is a card target once a provider is registered, and its card
   expect(card).not.toContain('GitHub');
   const failed = renderToStaticMarkup(createElement(RefCardView, { target, href, result: { ok: false, error: 'signed_out', fetchedAt: 0 } }));
   expect(failed).toContain('Settings → Accounts');
+});
+
+test("a hover's load reaches the transport for a Linear ref (no forge spec for its platform), and answers its card", async () => {
+  const asked: string[] = [];
+  setRefCardTransport(async (href) => {
+    asked.push(href);
+    return { ok: false, error: 'signed_out', fetchedAt: 0 };
+  });
+  undo.push(registerRefCardProvider(linearRefCardProvider));
+  const href = 'https://linear.app/acme/issue/ENG-9';
+  expect(await loadRefCard(href, refCardTarget(href)!)).toMatchObject({ ok: false, error: 'signed_out' });
+  expect(asked).toEqual([href]);
 });
 
 test('nothing is fetched on page load: the teams are asked once, when prose first shows a candidate identifier', async () => {

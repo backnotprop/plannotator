@@ -118,10 +118,11 @@ function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | nu
 
 /**
  * One cache entry per ref. On GitHub an issue link to a PR is the same item, so the kind is not part of it there;
- * GitLab and Bitbucket number them apart (`:pull`, `:issue`).
+ * GitLab and Bitbucket number them apart (`:pull`, `:issue`). A ref card provider's ref (the Inbox's Linear issues, ui
+ * `utils/refCardProviders`) names a platform with no spec here: no kind in its key.
  */
 export function forgeRefKey(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number" | "kind">): string {
-  const kind = FORGE_SPECS[ref.platform].numbersByKind ? `:${ref.kind}` : "";
+  const kind = (FORGE_SPECS as Partial<typeof FORGE_SPECS>)[ref.platform]?.numbersByKind ? `:${ref.kind}` : "";
   return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}${kind}`.toLowerCase();
 }
 
