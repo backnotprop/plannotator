@@ -78,10 +78,10 @@ test("the grill-me tip is registered beside the line, waiting for every other ca
 
 test("the same-day group, in the owner's order (2026-11-10): the tab icon, themes, Grouping, Rows, the sound, voice, none with a tenure; then the later group, each with one", () => {
   const ids = INBOX_REVEALS.filter((entry) => !entry.aside && entry.id !== "code_review").map((entry) => entry.id);
-  expect(ids).toEqual(["tab_icon", "theme_chooser", LIST_VIEW, "list_intro", "sound", "voice", "snooze", "personal_agents", "priority", "board", "steps", BRO, AGENT_RULES]);
+  expect(ids).toEqual(["tab_icon", "theme_chooser", LIST_VIEW, "list_intro", "sound", "voice", "snooze", "personal_agents", "priority", "board", "routines", "steps", BRO, AGENT_RULES]);
   const tenure = (id: RevealId) => INBOX_REVEALS.find((entry) => entry.id === id)!.tenureMs;
   expect(ids.slice(0, 6).map(tenure)).toEqual([0, 0, 0, 0, 0, 0]);
-  expect(ids.slice(6).map(tenure)).toEqual([2 * DAY, 2 * DAY, 3 * DAY, 3 * DAY, 5 * DAY, 2 * DAY, 2 * DAY]);
+  expect(ids.slice(6).map(tenure)).toEqual([2 * DAY, 2 * DAY, 3 * DAY, 3 * DAY, 2 * DAY, 5 * DAY, 2 * DAY, 2 * DAY]);
   expect(INBOX_REVEALS.find((entry) => entry.id === "tab_icon")).toEqual({ id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true });
 });
 
@@ -115,6 +115,8 @@ interface User {
   noPersonalAgent?: boolean;
   /** Never added a thread to Priority (packages/server/inbox-priority-intro.ts): the Priority dialog is open. Absent: they did. */
   neverPriority?: boolean;
+  /** The day the person's third good day of sends ends (shared/inbox/routines-intro.ts): from then Routines' intro is open. Absent: never. */
+  goodDays?: number;
 }
 
 interface Shown {
@@ -134,6 +136,8 @@ function simulate(user: User, days = 30): Shown[] {
   let loadCount = 0;
   /** The last `aside` card shown (the star ask's `inboxReveals.star.shownAt`). */
   let asideShownAt: string | null = null;
+  /** Routines' show (`inboxReveals.routines.shownAt`): its day is its own. */
+  let ownDayShownAt: string | null = null;
   for (let day = 0; day < days; day++) {
     for (const hour of user.loads(day)) {
       const now = at(day, hour);
@@ -150,15 +154,17 @@ function simulate(user: User, days = 30): Shown[] {
         open: Object.fromEntries(
           TABLE.map((entry) => [
             entry.id,
-            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.kind === "offer" || user.update),
+            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.id === "routines" ? user.goodDays !== undefined && day >= user.goodDays : entry.kind === "offer" || user.update),
           ]),
         ),
         waitingSince: saved.waitingSince,
         asideShownAt: asideShownAt,
+        ownDayShownAt,
       });
       const show = (id: Dialog, spaced: boolean) => {
         saved = revealStamp(saved, now.toISOString(), { spaced, load });
         if (id !== "agent_note" && user.notNow?.includes(id)) saved = revealStampNotNow(saved, now.toISOString());
+        if (TABLE.some((entry) => entry.id === id && entry.ownDay)) ownDayShownAt = now.toISOString();
         done.add(id);
         shown.push({ id, day, at: now });
       };
@@ -688,5 +694,46 @@ describe("the line's rules", () => {
 
   test("a dev build keeps no line: the agent note is always free", () => {
     expect(revealLineFree("setup", base({ release: false, dayShownAt: new Date(NOW.getTime() - MINUTE).toISOString() }), NOW)).toBe(true);
+  });
+});
+
+describe("Routines: three good days, then a day of its own", () => {
+  test("registered after the Board and before the Checklist: an offer, two days' tenure, no thread minimum, a day of its own", () => {
+    const place = INBOX_REVEALS.findIndex((entry) => entry.id === "routines");
+    expect(INBOX_REVEALS[place - 1]!.id).toBe("board");
+    expect(INBOX_REVEALS[place + 1]!.id).toBe("steps");
+    expect(INBOX_REVEALS[place]).toEqual({ id: "routines", kind: "offer", tenureMs: 2 * DAY, minThreads: 0, ownDay: true, enabled: true });
+  });
+
+  /** Routines' day, and every dialog shown on it. */
+  const aroundRoutines = (shown: Shown[]) => {
+    const day = shown.find((s) => s.id === "routines")!.day;
+    return { day, sameDay: shown.filter((s) => s.day === day).map((s) => s.id) };
+  };
+
+  test("a heavy user whose third good day ends on day 3: Routines alone on day 4 (day 3 already showed the Board), nothing else that day, every other card once", () => {
+    const shown = simulate({ ...HEAVY, goodDays: 3 });
+    expect(aroundRoutines(shown)).toEqual({ day: 4, sameDay: ["routines"] });
+    expect(when(shown).filter(([id]) => id === "routines")).toEqual([["routines", 4, 9]]);
+    expect(when(shown).filter(([id]) => id !== "routines").map(([id]) => id)).toEqual(when(simulate(HEAVY)).map(([id]) => id));
+    expectSpaced(shown);
+  });
+
+  test("never on a day another one-time dialog took, even 40 minutes and more later: open from day 2, it waits for the first day nothing else showed", () => {
+    const shown = simulate({ ...HEAVY, goodDays: 2 });
+    // Day 2 had Snooze and Bro mode, day 3 the Board.
+    expect(aroundRoutines(shown)).toEqual({ day: 4, sameDay: ["routines"] });
+  });
+
+  test("someone already here when it ships (three good days in their history) updates on day 0: the update day's dialogs first, Routines on a later day, alone", () => {
+    const shown = simulate({ ...UPGRADER, goodDays: 0 });
+    const { day, sameDay } = aroundRoutines(shown);
+    expect(day).toBeGreaterThanOrEqual(1);
+    expect(sameDay).toEqual(["routines"]);
+    expect(shown.filter((s) => s.id === "routines")).toHaveLength(1);
+  });
+
+  test("never for someone without three good days", () => {
+    expect(simulate(HEAVY).some((s) => s.id === "routines")).toBe(false);
   });
 });

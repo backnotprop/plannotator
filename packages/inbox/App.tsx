@@ -239,6 +239,8 @@ import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
+import { useRoutinesReveal } from './components/useRoutinesReveal';
+import { revealFeatureSave } from './revealSaves';
 import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
 import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
@@ -3986,6 +3988,9 @@ function Inbox() {
     mayClaim: (pageAge) => lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
   });
+  const openCapabilities = () => void (window.location.hash = '#settings/capabilities');
+  // The Routines intro (components/useRoutinesReveal.tsx): three good days of sends, on a day of its own.
+  const { reveal: routinesReveal, dialog: routinesDialog } = useRoutinesReveal({ due: lineLatch?.next === 'routines', revealAt, idle: pageIdle, listLoaded: lineLatch !== null, firstRun, phone, settings: () => settingsRef.current, setSettings, showToast, dismissToast, refreshSettings, openSettings: openCapabilities });
   // Personal agents (core/inbox-personal-agents.ts): the Inbox names it only while none is connected. Its banner is
   // loaded before the claim, so the dialog opens with it or, offline, without it, and never changes while open.
   const personalAgentsDue = lineLatch?.next === 'personal_agents';
@@ -4073,7 +4078,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -4083,28 +4088,7 @@ function Inbox() {
   });
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
-    void turnOnRevealFeature(feature, close, {
-      save:
-        feature === 'board'
-          ? () => inboxApi.saveBoard(true).then((saved) => saved.board)
-          : feature === 'steps'
-            ? () => inboxApi.saveSteps(true).then((saved) => saved.steps)
-            : feature === 'bro'
-              ? () => inboxApi.saveBro(true).then((saved) => saved.bro)
-              : () =>
-                inboxApi.saveCodeReview(true).then((saved) => {
-                  // As Settings' switch: the "/" list gains the review skills.
-                  reloadSkillCatalog();
-                  return saved.code_review;
-                }),
-      setSettings,
-      showToast,
-      dismissToast,
-      refreshSettings,
-      openSettings: () => {
-        window.location.hash = '#settings/capabilities';
-      },
-    });
+    void turnOnRevealFeature(feature, close, { save: revealFeatureSave(feature), setSettings, showToast, dismissToast, refreshSettings, openSettings: openCapabilities });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;
@@ -4152,6 +4136,7 @@ function Inbox() {
     broReveal.stage !== 'claimed' &&
     agentRulesReveal.stage !== 'open' &&
     agentRulesReveal.stage !== 'claimed' &&
+    routinesReveal.stage !== 'open' && routinesReveal.stage !== 'claimed' &&
     personalAgentsReveal.stage !== 'open' &&
     personalAgentsReveal.stage !== 'claimed' &&
     priorityReveal.stage !== 'open' &&
@@ -4611,7 +4596,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -6095,6 +6080,7 @@ function Inbox() {
           }}
         />
       )}
+      {routinesDialog}
       {personalAgentsReveal.stage === 'open' && (
         <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}

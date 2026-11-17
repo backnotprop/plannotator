@@ -10,6 +10,8 @@ A routine is managed on the computer that made it, and its runs' thread works fr
 
 Settings → Capabilities, config.json `inboxScheduledThreads` (`true`, else off). Not offered on Windows. Off: no timer, no run, no write, no `routine` tool in tools/list, every `/api/inbox/scheduled…` route answers `404 routines_off`, and a tool call from a session that listed it before answers `routines_off` with nothing written. Records on disk are kept. Turning it on starts every routine that is on from the next due time, with no catch-up; so does turning "Start agents" back on. "Start agents from New message" (`inboxLaunch.enabled`) must be on too: a run is a launch.
 
+The one-time Routines intro offers the switch once, after three good days of sends, on a local day of its own; its "Turn on" saves this switch and opens `#routines`. Who, when and the dialog: "The Routines intro" under "The schedule of one-time dialogs" in `inbox-window.md`.
+
 On also adds a start-at-login item, removed when it goes off and by `plannotator uninstall` (the file only, on macOS; disabled, not stopped, on Linux: removing it never ends the Inbox it started): on macOS `~/Library/LaunchAgents/ai.plannotator.inbox.plist` (launchd reads it at the next login; it runs `plannotator inbox --no-open` for this data dir, no window); on Linux a systemd user unit `~/.config/systemd/user/plannotator-inbox.service`, enabled, only when `systemctl --user` answers (else none, and the switch reads `login: "unavailable"`).
 
 ### The record and the runs

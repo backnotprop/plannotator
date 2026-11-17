@@ -310,6 +310,7 @@ import {
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
+import { routinesIntroOpen, routinesIntroSend } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
@@ -3344,6 +3345,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const lineOffers: Partial<Record<RevealId, () => boolean>> = {
     code_review: codeReviewUndecided,
     board: boardUndecided,
+    // Routines (shared/inbox/routines-intro.ts): offered here and never decided, no routine made, launches on, and three
+    // good days of sends. Read once the routines module exists (`routinesIntroUndecided`), on a release build only.
+    routines: () => routinesIntroUndecided(),
     steps: stepsUndecided,
     agent_rules: agentRulesUnset,
     personal_agents: noPersonalAgent,
@@ -3410,6 +3414,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   /** Voice's who (inbox-voice.ts), read once the voice module exists. */
   let voiceIntroOpen: () => boolean = () => false;
+  /** The Routines intro's who (shared/inbox/routines-intro.ts), read once the routines switch and launch exist. */
+  let routinesIntroUndecided: () => boolean = () => false;
+  /** The times of the person's own sends in this store, newest threads' order as the store keeps them (the intro's walk). */
+  const personSends = function* (): Generator<string> {
+    for (const threadId of store.threadIds())
+      for (const id of store.threadMessageIds(threadId)) {
+        const message = store.message(id);
+        if (message && routinesIntroSend(message)) yield message.created_at;
+      }
+  };
   const revealState = (now: Date, load: string | null = null): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
@@ -3447,6 +3461,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
       // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
       tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
+      // Routines' day of its own (reveals.ts `ownDay`): nothing else on the local day it was shown.
+      ownDayShownAt: reveals?.routines?.shownAt ?? null,
     };
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
@@ -4811,6 +4827,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   scheduled.sync();
   if (scheduledCap.on()) void scheduledCap.syncLogin();
+  routinesIntroUndecided = () =>
+    snoozeIntroRelease &&
+    routinesIntroOpen({
+      supported: scheduledCap.wire().scheduled_threads !== undefined,
+      saved: () => options.scheduled ?? loadConfig().inboxScheduledThreads,
+      routineMade: () => store.scheduledEverMade(),
+      launchOn: () => launch.settingsState().enabled,
+      sends: personSends,
+    });
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
