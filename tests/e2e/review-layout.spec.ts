@@ -208,20 +208,15 @@ test('tabs live in the panes: the header never changes, and one tab row from the
 
 test('All changes: after ] and End, Home goes back to the first file', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
-    await expect.poll(() => firstCodeTop(page)).not.toBeNull();
-    const scrollTop = () =>
-      page.evaluate(() => {
-        const scroller = [...document.querySelectorAll<HTMLElement>('[data-pane="0"] [data-pane-panel] *')]
-          .filter((el) => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 10 && /(auto|scroll)/.test(getComputedStyle(el).overflowY))
-          .sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
-        return scroller ? Math.round(scroller.scrollTop) : -1;
-      });
     const activeTab = page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]');
-    await page.locator('[data-pane="0"] [data-pane-panel] diffs-container').first().click({ position: { x: 400, y: 60 } });
+    const focusIn = (selector: string) => page.evaluate((within) => !!document.activeElement?.closest(within), selector);
+    await page.locator('[data-pane="0"] [data-pane-panel] [data-line]', { hasText: 'export const part0 = 0;' }).first().click();
+    await expect.poll(() => focusIn('[data-pane="0"] [data-pane-panel]')).toBe(true);
     await page.keyboard.press(']');
-    await expect.poll(scrollTop).toBeGreaterThan(0);
+    await expect(activeTab).toHaveText('All changes');
     await page.keyboard.press('End');
     await expect(activeTab).toHaveText('bun.lock');
+    await expect.poll(() => focusIn('[data-file-header]')).toBe(true);
     await page.keyboard.press('Home');
     await expect(activeTab).toHaveText('routes.ts');
     await expect(page.locator('[data-pane="0"] [data-file-header]').filter({ visible: true }).first()).toContainText('routes.ts');
