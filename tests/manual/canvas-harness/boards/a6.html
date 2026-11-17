@@ -1,0 +1,42 @@
+<div id="app" data-frame="phone">
+ <div id="header" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:12px 16px;border:1px solid var(--rule);background:var(--paper)">
+  <p id="back" style="font-size:22px;color:var(--ink)">←</p>
+  <p id="header-title" style="font-size:18px;font-weight:600;color:var(--ink)">Settings</p>
+ </div>
+ <div id="profile" style="display:flex;flex-direction:row;align-items:center;gap:12px;padding:16px;background:var(--paper)">
+  <i id="avatar" style="width:48px;height:48px;border-radius:50%;background:var(--blue-soft);border:1px solid var(--rule)"></i>
+  <div id="profile-text" style="display:flex;flex-direction:column;gap:2px;flex:1">
+   <p id="profile-name" style="font-size:16px;font-weight:600;color:var(--ink)">Alex Morgan</p>
+   <p id="profile-email" style="font-size:13px;color:var(--muted)">alex@example.com</p>
+  </div>
+  <p id="profile-chevron" style="font-size:18px;color:var(--muted)">›</p>
+ </div>
+ <div id="group-a" style="display:flex;flex-direction:column;margin-top:16px;background:var(--paper);border:1px solid var(--rule);border-radius:12px">
+  <div id="row-1" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--rule)">
+   <p id="row-1-label" style="font-size:16px;color:var(--ink)">Push notifications</p>
+   <i id="toggle-1" style="width:44px;height:26px;border-radius:13px;background:var(--green)"></i>
+  </div>
+  <div id="row-2" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:14px 16px">
+   <p id="row-2-label" style="font-size:16px;color:var(--ink)">Email updates</p>
+   <i id="toggle-2" style="width:44px;height:26px;border-radius:13px;background:var(--sunk);border:1px solid var(--rule)"></i>
+  </div>
+ </div>
+ <div id="group-b" style="display:flex;flex-direction:column;margin-top:16px;background:var(--paper);border:1px solid var(--rule);border-radius:12px">
+  <div id="row-3" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--rule)">
+   <p id="row-3-label" style="font-size:16px;color:var(--ink)">Face ID</p>
+   <i id="toggle-3" style="width:44px;height:26px;border-radius:13px;background:var(--green)"></i>
+  </div>
+  <div id="row-4" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid var(--rule)">
+   <p id="row-4-label" style="font-size:16px;color:var(--ink)">Dark mode</p>
+   <i id="toggle-4" style="width:44px;height:26px;border-radius:13px;background:var(--sunk);border:1px solid var(--rule)"></i>
+  </div>
+  <div id="row-5" style="display:flex;flex-direction:row;align-items:center;justify-content:space-between;padding:14px 16px">
+   <p id="row-5-label" style="font-size:16px;color:var(--ink)">Haptics</p>
+   <i id="toggle-5" style="width:44px;height:26px;border-radius:13px;background:var(--green)"></i>
+  </div>
+ </div>
+ <div id="delete" style="display:flex;flex-direction:row;align-items:center;justify-content:center;margin-top:auto;padding:14px 16px;margin-bottom:16px;background:var(--red-soft);border:1px solid var(--red);border-radius:12px">
+  <p id="delete-label" style="font-size:16px;font-weight:600;color:var(--red)">Delete account</p>
+ </div>
+</div>
+<aside id="n1" data-note="toggle-2">Second toggle: starts off, so email updates are not sent until the person turns it on.</aside>

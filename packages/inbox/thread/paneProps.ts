@@ -13,6 +13,7 @@ import type { Signal } from '../signal';
 import type { ShapeReplyPart } from '../shape/addToReply';
 import type { ThreadPullReview } from '../threadPulls/ThreadPulls';
 import type { OpenFileRef } from '../components/ReferencedFilePane';
+import type { ThreadCanvasSeat } from '../canvas/seat';
 
 export interface ThreadPaneProps {
   inReviews?: boolean;
@@ -74,6 +75,8 @@ export interface ThreadPaneProps {
   replyRequest?: string | null;
   onReplyOpened?: () => void;
   shapeButton?: ReactNode;
+  /** The thread canvas (only while on; canvas/seat.tsx): its button, pane, cards and reply chip. */
+  canvas?: ThreadCanvasSeat | null;
   /** The thread's open board (ThreadShapeLayer): it takes the messages' and the reply's place under the header. */
   board?: ReactNode;
   onSide?: (selected: string, source?: string) => void;

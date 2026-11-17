@@ -151,6 +151,9 @@ export function packedInboxApp(): Plugin {
             const css = output.source;
             html = html.replace(link, () => `<style rel="stylesheet" crossorigin>${css}</style>`);
             stylesheets++;
+          } else if (path.startsWith('/assets/excalidraw/fonts/') && path.endsWith('.woff2') && typeof output.source !== 'string') {
+            // The thread canvas's fonts (build/excalidraw-assets.ts): fetched by the canvas only when it draws text.
+            assets[path] = { type: 'font/woff2', base64: Buffer.from(output.source).toString('base64') };
           } else {
             // Fonts and pictures stay data URLs (assetsInlineLimit): a file here would be a request the page never made before.
             throw new Error(`packed-inbox: ${output.fileName} is not inlined (raise build.assetsInlineLimit)`);

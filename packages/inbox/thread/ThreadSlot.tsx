@@ -18,6 +18,7 @@ import { priorityAction } from '../priority';
 import { threadLink } from '../rowMenu';
 import { focusBoardTitle } from '../shape/boardFocus';
 import { ShapePebbleButton } from '../shape/ShapeParts';
+import { useThreadCanvasSeat } from '../canvas/seat';
 import { threadBoardCard } from '../steps/model';
 import { openTakenBack } from '../takenBackCompose';
 import { pageOffersUpdates } from '../updateNotice';
@@ -88,6 +89,8 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   const onClose = fromCard ? host.backToCard : () => close({ ...route, thread: null, file: null });
   // The address's board, in this pane while it shows that thread: only one the window draws (none with Shape off, or
   // while a review draws its own). On a phone it is a screen of its own, as the Artifacts view is: back is the thread.
+  // The thread canvas (only while on): its button, its pane beside the thread, its cards and its reply chip.
+  const canvasSeat = useThreadCanvasSeat({ thread: ready ? thread : null, on: settings?.canvas?.on === true, route, phone, go, close });
   const boardNode = route.shape && host.board && thread && thread.thread_id === route.thread ? host.board(true, stack.thread) || null : null;
   return (
     <PaneScopeContext.Provider value={scope}>
@@ -212,6 +215,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
             const show = () => (go({ ...route, shape: board.id, artifacts: false, links: false }), focusBoardTitle(board.id));
             return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : show())} />;
           })()}
+          canvas={canvasSeat}
           board={boardNode}
           onSide={host.ask.side}
           onSideWords={host.ask.sideWords}

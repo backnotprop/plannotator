@@ -375,7 +375,7 @@ import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName, unlocked as unlockedShape } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
-import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities } from "./inbox-capability";
+import { answerInboxCapabilities, capabilitiesFrame, capabilitiesInstructions, capabilitiesThreadLines, capabilitiesWire, checkInboxCapabilities, inboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, streamInboxCapabilities } from "./inbox-capability";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -1633,6 +1633,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     boardOn: () => boardOn(),
     // Thread steps: the steps tool and field are listed and served only while the person has them on.
     stepsOn: () => stepsOn(),
+    // Capabilities on the seam (the thread canvas): their instruction lines and read_thread lines, only while on.
+    capabilityInstructions: () => capabilitiesInstructions(capabilities),
+    capabilityThreadLines: (threadId) => capabilitiesThreadLines(capabilities, threadId),
     // Routines: the routine tool is listed and served only while the person has them on.
     scheduledOn: () => scheduledCap.on(),
     scheduled: () => scheduled,
@@ -3973,8 +3976,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         };
         syncShapes();
+        // A capability's own frames (the thread canvas's `event: canvas`): the owner's window on this computer only, while on.
+        const capabilityStreams = streamInboxCapabilities(capabilities, send, !!windowId && via === "local" && !fromDeviceDoor.has(req));
         const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => {
           syncShapes();
+          capabilityStreams.sync();
           const floats = floatDraftsOn();
           const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
@@ -4030,6 +4036,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           tailscaleListeners.delete(onTailscale);
           stopShapes?.();
           stopShapes = null;
+          capabilityStreams.stop();
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
           leave();

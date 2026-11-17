@@ -6,6 +6,7 @@ import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inb
 import { INBOX_AGENT_CALL_ACTIONS } from "@plannotator/shared/inbox/agent-pairing";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
+import { CANVAS_HELP_TEXT } from "@plannotator/core/canvas-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
 import { LOCKFILE_NAMES, SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS, TEST_FOLDERS } from "@plannotator/system/commands";
 
@@ -253,9 +254,10 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  * `t3` (the T3 Code connection) was the last one to launch. Today:
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
  * runs; `shape`; `system`, System's drawing commands, until the Inbox's
- * System surfaces ship; and `plans`, Plans' switch and list, until its screens ship.
+ * System surfaces ship; `plans`, Plans' switch and list, until its screens ship; and `canvas`, the thread
+ * canvas (config.json `inboxCanvas`; off, it answers as an unknown command).
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system", "plans"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape", "system", "plans", "canvas"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -906,6 +908,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
   shape: SHAPE_COMMAND_USAGE,
+  canvas: CANVAS_HELP_TEXT,
   plans: PLANS_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
   system: SYSTEM_COMMAND_USAGE,

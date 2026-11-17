@@ -1,0 +1,117 @@
+<div id="app" data-frame="browser" style="display:flex;flex-direction:column">
+ <div id="topbar" style="display:flex;flex-direction:row;align-items:center;gap:16px;padding:12px 16px;border:1px solid var(--rule);background:var(--paper)">
+  <p id="top-title" style="font-size:18px;font-weight:700">Analytics</p>
+  <div id="top-search" style="display:flex;flex:1;padding:6px 12px;border:1px solid var(--rule);background:var(--sunk)">
+   <p id="top-search-text" style="color:var(--muted);font-size:13px">Search</p>
+  </div>
+  <p id="top-range" style="font-size:13px">Last 30 days ▾</p>
+  <i id="top-avatar" style="width:28px;height:28px;border-radius:50%;background:var(--blue-soft)"></i>
+ </div>
+ <div id="body" style="display:flex;flex-direction:row">
+  <div id="sidebar" style="display:flex;flex-direction:column;gap:14px;padding:16px;width:180px;border:1px solid var(--rule);background:var(--sunk)">
+   <p id="nav-overview" style="font-weight:700;background:var(--blue-soft);padding:6px 8px">Overview</p>
+   <p id="nav-customers" style="padding:6px 8px">Customers</p>
+   <p id="nav-orders" style="padding:6px 8px">Orders</p>
+   <p id="nav-reports" style="padding:6px 8px">Reports</p>
+   <p id="nav-settings" style="padding:6px 8px;margin-top:auto">⚙ Settings</p>
+  </div>
+  <div id="main" style="display:flex;flex-direction:column;gap:16px;padding:16px;flex:1">
+   <div id="stats" style="display:flex;flex-direction:row;gap:16px">
+    <div id="stat-1" style="display:flex;flex-direction:column;gap:6px;flex:1;padding:12px;border:1px solid var(--rule)">
+     <p id="stat-1-label" style="font-size:12px;color:var(--muted)">Revenue</p>
+     <p id="stat-1-value" style="font-size:24px;font-weight:700">$48.2k</p>
+    </div>
+    <div id="stat-2" style="display:flex;flex-direction:column;gap:6px;flex:1;padding:12px;border:1px solid var(--rule)">
+     <p id="stat-2-label" style="font-size:12px;color:var(--muted)">Customers</p>
+     <p id="stat-2-value" style="font-size:24px;font-weight:700">1,284</p>
+    </div>
+    <div id="stat-3" style="display:flex;flex-direction:column;gap:6px;flex:1;padding:12px;border:1px solid var(--rule)">
+     <p id="stat-3-label" style="font-size:12px;color:var(--muted)">Orders</p>
+     <p id="stat-3-value" style="font-size:24px;font-weight:700">912</p>
+    </div>
+    <div id="stat-4" style="display:flex;flex-direction:column;gap:6px;flex:1;padding:12px;border:1px solid var(--rule)">
+     <p id="stat-4-label" style="font-size:12px;color:var(--muted)">Refund rate</p>
+     <p id="stat-4-value" style="font-size:24px;font-weight:700">2.1%</p>
+    </div>
+   </div>
+   <div id="chart" style="display:flex;flex-direction:column;gap:10px;padding:16px;border:1px solid var(--rule)">
+    <p id="chart-title" style="font-weight:700">Revenue by week</p>
+    <div id="bars" style="display:flex;flex-direction:row;align-items:flex-end;gap:12px;height:160px;padding-top:8px">
+     <i id="bar-1" style="flex:1;height:60px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+     <i id="bar-2" style="flex:1;height:96px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+     <i id="bar-3" style="flex:1;height:76px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+     <i id="bar-4" style="flex:1;height:130px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+     <i id="bar-5" style="flex:1;height:112px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+     <i id="bar-6" style="flex:1;height:148px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+     <i id="bar-7" style="flex:1;height:120px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+     <i id="bar-8" style="flex:1;height:154px;background:var(--blue-soft);border:1px solid var(--blue)"></i>
+    </div>
+   </div>
+   <div id="table" style="display:flex;flex-direction:column;border:1px solid var(--rule)">
+    <div id="thead" style="display:flex;flex-direction:row;background:var(--sunk);border:1px solid var(--rule)">
+     <p id="h-date" style="flex:1;padding:8px;font-weight:700;font-size:13px">Date</p>
+     <p id="h-customer" style="flex:1;padding:8px;font-weight:700;font-size:13px">Customer</p>
+     <p id="h-plan" style="flex:1;padding:8px;font-weight:700;font-size:13px">Plan</p>
+     <p id="h-amount" style="flex:1;padding:8px;font-weight:700;font-size:13px">Amount</p>
+     <p id="h-status" style="flex:1;padding:8px;font-weight:700;font-size:13px">Status</p>
+    </div>
+    <div id="row1" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r1-date" style="flex:1;padding:8px;font-size:13px">Nov 14</p>
+     <p id="r1-customer" style="flex:1;padding:8px;font-size:13px">Acme Co</p>
+     <p id="r1-plan" style="flex:1;padding:8px;font-size:13px">Pro</p>
+     <p id="r1-amount" style="flex:1;padding:8px;font-size:13px">$240</p>
+     <p id="r1-status" style="flex:1;padding:8px;font-size:13px;color:var(--green)">Paid</p>
+    </div>
+    <div id="row2" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r2-date" style="flex:1;padding:8px;font-size:13px">Nov 14</p>
+     <p id="r2-customer" style="flex:1;padding:8px;font-size:13px">Northwind</p>
+     <p id="r2-plan" style="flex:1;padding:8px;font-size:13px">Team</p>
+     <p id="r2-amount" style="flex:1;padding:8px;font-size:13px">$590</p>
+     <p id="r2-status" style="flex:1;padding:8px;font-size:13px;color:var(--amber)">Pending</p>
+    </div>
+    <div id="row3" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r3-date" style="flex:1;padding:8px;font-size:13px">Nov 13</p>
+     <p id="r3-customer" style="flex:1;padding:8px;font-size:13px">Globex</p>
+     <p id="r3-plan" style="flex:1;padding:8px;font-size:13px">Enterprise</p>
+     <p id="r3-amount" style="flex:1;padding:8px;font-size:13px">$2,100</p>
+     <p id="r3-status" style="flex:1;padding:8px;font-size:13px;color:var(--green)">Paid</p>
+    </div>
+    <div id="row4" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r4-date" style="flex:1;padding:8px;font-size:13px">Nov 13</p>
+     <p id="r4-customer" style="flex:1;padding:8px;font-size:13px">Initech</p>
+     <p id="r4-plan" style="flex:1;padding:8px;font-size:13px">Pro</p>
+     <p id="r4-amount" style="flex:1;padding:8px;font-size:13px">$240</p>
+     <p id="r4-status" style="flex:1;padding:8px;font-size:13px;color:var(--red)">Failed</p>
+    </div>
+    <div id="row5" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r5-date" style="flex:1;padding:8px;font-size:13px">Nov 12</p>
+     <p id="r5-customer" style="flex:1;padding:8px;font-size:13px">Umbrella</p>
+     <p id="r5-plan" style="flex:1;padding:8px;font-size:13px">Team</p>
+     <p id="r5-amount" style="flex:1;padding:8px;font-size:13px">$590</p>
+     <p id="r5-status" style="flex:1;padding:8px;font-size:13px;color:var(--green)">Paid</p>
+    </div>
+    <div id="row6" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r6-date" style="flex:1;padding:8px;font-size:13px">Nov 12</p>
+     <p id="r6-customer" style="flex:1;padding:8px;font-size:13px">Hooli</p>
+     <p id="r6-plan" style="flex:1;padding:8px;font-size:13px">Enterprise</p>
+     <p id="r6-amount" style="flex:1;padding:8px;font-size:13px">$4,800</p>
+     <p id="r6-status" style="flex:1;padding:8px;font-size:13px;color:var(--amber)">Pending</p>
+    </div>
+    <div id="row7" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r7-date" style="flex:1;padding:8px;font-size:13px">Nov 11</p>
+     <p id="r7-customer" style="flex:1;padding:8px;font-size:13px">Stark Ind</p>
+     <p id="r7-plan" style="flex:1;padding:8px;font-size:13px">Pro</p>
+     <p id="r7-amount" style="flex:1;padding:8px;font-size:13px">$240</p>
+     <p id="r7-status" style="flex:1;padding:8px;font-size:13px;color:var(--muted)">Refunded</p>
+    </div>
+    <div id="row8" style="display:flex;flex-direction:row;border:1px solid var(--rule)">
+     <p id="r8-date" style="flex:1;padding:8px;font-size:13px">Nov 10</p>
+     <p id="r8-customer" style="flex:1;padding:8px;font-size:13px">Wayne Corp</p>
+     <p id="r8-plan" style="flex:1;padding:8px;font-size:13px">Team</p>
+     <p id="r8-amount" style="flex:1;padding:8px;font-size:13px">$1,180</p>
+     <p id="r8-status" style="flex:1;padding:8px;font-size:13px;color:var(--green)">Paid</p>
+    </div>
+   </div>
+  </div>
+ </div>
+</div>

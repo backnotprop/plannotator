@@ -75,13 +75,17 @@ export function hashOf(route: Route): string {
     if (route.thread && route.guide) params.set('guide', route.guide);
     if (route.thread && route.guide) writeShapeReviewAt(params, route.guideAt);
     if (route.thread && route.shape) params.set('shape', route.shape);
+    if (route.thread && route.canvas && !route.file) {
+      params.set('canvas', route.canvas.view === 'full' ? 'full' : '');
+      if (route.canvas.version) params.set('cv', String(route.canvas.version));
+    }
     // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
     if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
-    // `&artifacts`, `&links` and `&files`, flags: written without their empty `=`.
-    hash = params.toString().replace(/(^|&)(artifacts|links|files)=(?=&|$)/g, '$1$2');
+    // `&artifacts`, `&links`, `&files` and `&canvas`, flags: written without their empty `=`.
+    hash = params.toString().replace(/(^|&)(artifacts|links|files|canvas)=(?=&|$)/g, '$1$2');
     if (route.reviews) hash = hash ? `reviews&${hash}` : 'reviews';
   }
   return hash ? `#${hash}` : '';

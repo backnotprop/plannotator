@@ -73,6 +73,12 @@ export interface Route {
    * over the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
    */
   shape?: string | null;
+  /**
+   * The thread canvas (only while config.json `inboxCanvas` is on; docs/agent-guides/inbox-canvas.md): open beside
+   * the thread (`&canvas`) or full screen (`&canvas=full`); `&cv=N` shows an older version, read only. Never with
+   * `file` or `ref`: it takes their place beside the thread.
+   */
+  canvas?: { view: 'side' | 'full'; version: number | null } | null;
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
@@ -225,6 +231,7 @@ export function routeOf(fullHash: string): Route {
     guide: thread ? params.get('guide') : null,
     guideAt: thread && params.get('guide') ? shapeReviewAtOf(params) : null,
     shape: thread ? params.get('shape') : null,
+    canvas: thread && !fileId && params.has('canvas') ? { view: params.get('canvas') === 'full' ? 'full' : 'side', version: versionOf(params.get('cv')) } : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
     links: thread ? params.has('artifacts') && params.has('links') : false,

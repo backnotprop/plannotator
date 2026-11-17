@@ -648,6 +648,13 @@ export interface PlannotatorConfig {
    */
   inboxSplitView?: boolean;
   /**
+   * The thread canvas (docs/agent-guides/inbox-canvas.md): a whiteboard beside every thread the agent draws on with
+   * `plannotator canvas` and the person draws, moves and writes on. Off unless `true`. Config only: no Settings row,
+   * no menu item; while off no route answers, the window shows no button and no agent text names it. Read on every
+   * request.
+   */
+  inboxCanvas?: boolean;
+  /**
    * Branch reviews in the Inbox (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): agents report a branch
    * ready for review (`send_message`'s `branch`), each report one review thread per project and branch in Reviews, and
    * the by-hand list of branches nobody reported. Off unless `true`, and only while Code review is on. Config only, no

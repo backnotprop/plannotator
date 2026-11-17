@@ -339,6 +339,13 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    */
   stepsOn?: () => boolean;
   /**
+   * The lines capabilities that are on add to the server instructions (the thread canvas's pointer at
+   * `plannotator canvas --help`, docs/agent-guides/inbox-canvas.md). Off or absent: none.
+   */
+  capabilityInstructions?: () => readonly string[];
+  /** The lines capabilities that are on add to read_thread for one thread (the canvas: the person changed it). */
+  capabilityThreadLines?: (threadId: string) => readonly string[];
+  /**
    * A thread's PRs (approval "inbox-pr-binding"): the state reader, for what
    * it knows now (checks) and a read of the PRs an agent just added. Absent:
    * the states as stored, and nothing is read.
@@ -1185,7 +1192,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   const clock = () => context.now?.() ?? Date.now();
   const server = new McpServer(
     { name: "plannotator-inbox", version: "1.0.0" },
-    { instructions: INBOX_MCP_INSTRUCTIONS, capabilities: { tools: {} } },
+    { instructions: [INBOX_MCP_INSTRUCTIONS, ...(context.capabilityInstructions?.() ?? [])].join("\n"), capabilities: { tools: {} } },
   );
   // Every tool's result carries a Tidy waiting on an agent no connection wakes (MCP only), once, at its end.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: (input: never, ctx: unknown) => Promise<ToolResult>) => unknown;
@@ -1439,7 +1446,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           // The thread's PRs (approval "inbox-pr-binding"), after its open questions: with who added each, and what was removed lately.
           const pulls = threadPullsText(context, threadId, reader);
           const prs = pulls.length > 0 ? { pulls: store.threadPulls(threadId).map(({ pull: _key, id: _id, ...rest }) => rest) } : {};
-          return okComplete(windowedThreadText(result, order, naming?.line ?? "", [...pulls, ...steps]), { ...result, ...(naming?.structured ?? {}), ...lists, ...prs });
+          // A capability's lines for this thread (the canvas: the person changed it since the agent's latest version).
+          const seam = context.capabilityThreadLines?.(threadId) ?? [];
+          return okComplete(windowedThreadText(result, order, naming?.line ?? "", [...pulls, ...steps, ...seam]), { ...result, ...(naming?.structured ?? {}), ...lists, ...prs });
         }
         if (input.expand || input.before !== undefined || input.after !== undefined) {
           throw new InboxError("validation_error", "expand, before and after read one thread: pass thread_id (or message_id).");

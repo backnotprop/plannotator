@@ -7,6 +7,7 @@ import { katexWoff2Only } from '../../build/katex-woff2-only';
 import { packedInboxApp } from '../../build/pack-inbox';
 import { diffsWorkerCatalogs } from '../../build/diffs-worker-catalogs';
 import { inboxPageMarks } from '../../build/inbox-page-marks';
+import { excalidrawLocalAssets } from '../../build/excalidraw-assets';
 
 /**
  * What the window, the phone's surface (vite.surface.config.ts) and the Shape
@@ -87,6 +88,7 @@ export default mergeConfig(
   defineConfig({
     esbuild: { charset: 'ascii' },
     // The window's sheet keys on page marks, not on :has() anchored on the page (build/inbox-page-marks.ts).
-    plugins: [packedInboxApp(), inboxPageMarks()],
+    // The thread canvas's fonts from the Inbox itself, never esm.sh (build/excalidraw-assets.ts).
+    plugins: [excalidrawLocalAssets(path.resolve(__dirname, '../../packages/ui')), packedInboxApp(), inboxPageMarks()],
   }),
 );

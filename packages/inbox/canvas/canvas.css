@@ -1,0 +1,50 @@
+/* The thread canvas's pane (CanvasPane.tsx), in a file's place beside the thread. The whiteboard's own look is
+   packages/ui/components/canvas/canvas.css. */
+.ib-canvasview .ib-vhead .ib-cv-name { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: var(--ib-fs-14, 14px); white-space: nowrap; }
+.ib-canvasview .ib-vhead .ib-cv-name .ib-ic { color: var(--muted-foreground); }
+.ib-canvasview .ib-vhead .ib-cv-meta { min-width: 0; flex: 0 1 auto; }
+.ib-canvasview .ib-vhead .ib-cv-proj { color: var(--foreground); font-weight: 500; }
+.ib-canvasview .ib-cv-body { position: relative; min-height: 0; overflow: hidden; background: var(--background); }
+.ib-canvasview .ib-cv-wait { position: absolute; inset: 0; }
+.ib-canvasview.ib-full { grid-template-rows: 46px 0 minmax(0, 1fr); }
+
+/* Version n of m · Back to now, over an older version (read only). */
+.ib-cv-pill { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 12px; padding: 5px 6px 5px 14px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); box-shadow: 0 4px 16px color-mix(in oklch, var(--foreground) 10%, transparent); font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+.ib-cv-pill .ib-btn { border-radius: 999px; }
+
+/* The agent's new version: one quiet line, above the dock (under it when the dock is at the top). */
+.ib-cv-line { position: absolute; left: 50%; bottom: 68px; transform: translateX(-50%); z-index: 5; display: flex; align-items: center; gap: 10px; padding: 5px 6px 5px 14px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); box-shadow: 0 4px 16px color-mix(in oklch, var(--foreground) 10%, transparent); font-size: var(--ib-fs-13, 13px); white-space: nowrap; max-width: calc(100% - 24px); }
+.ib-cv-line.ib-cv-line-top { bottom: auto; top: 72px; }
+.ib-cv-line b { font-weight: 600; }
+.ib-cv-line .ib-btn { border-radius: 999px; }
+
+/* The header's canvas button, pressed while the canvas is open. */
+.ib-cvbtn[aria-pressed='true'] { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); }
+
+/* The preview card under the message that drew a version. */
+.ib-cvcard { display: block; width: 100%; max-width: 360px; margin-top: 10px; padding: 6px; border-radius: 12px; border: 0; background: var(--muted); color: var(--foreground); text-align: left; cursor: pointer; font: inherit; }
+.ib-cvcard:hover { background: color-mix(in oklch, var(--muted) 80%, var(--foreground) 6%); }
+.ib-cvcard:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
+.ib-cvcard-pic { display: flex; align-items: center; justify-content: center; height: 180px; border-radius: 8px; background: #fff; overflow: hidden; }
+.ib-cvcard-pic img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.ib-cvcard-foot { display: flex; align-items: center; gap: 7px; padding: 8px 6px 2px; font-size: var(--ib-fs-13, 13px); }
+.ib-cvcard-foot .ib-ic { color: var(--muted-foreground); }
+.ib-cvcard-foot b { font-weight: 600; }
+.ib-cvcard-v { color: var(--muted-foreground); }
+.ib-cvcard-changed { color: var(--primary); }
+.ib-cvcard-state { margin-left: auto; color: var(--muted-foreground); }
+
+/* The reply box's "Canvas marks N" chip and its words. */
+.ib-cvmarks { margin: 6px 0 2px; }
+.ib-cvmarks-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--muted); font-size: var(--ib-fs-13, 13px); }
+.ib-cvmarks-chip .ib-ic { color: var(--muted-foreground); }
+.ib-cvmarks-n { color: var(--muted-foreground); }
+.ib-cvmarks-chip button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 0; border-radius: 999px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.ib-cvmarks-chip button:hover { background: color-mix(in oklch, var(--foreground) 8%, transparent); color: var(--foreground); }
+.ib-cvmarks-words { margin: 6px 0 0; padding: 10px 14px; border-radius: 10px; background: var(--muted); font-size: var(--ib-fs-13, 13px); }
+.ib-cvmarks-words ul { margin: 0; padding-left: 16px; }
+.ib-cvmarks-words li { margin: 2px 0; }
+.ib-cvmarks-words p { margin: 8px 0 0; color: var(--muted-foreground); }
+@media (pointer: coarse) {
+  .ib-cvmarks-chip button { width: 32px; height: 32px; }
+}

@@ -1,0 +1,30 @@
+<div id="browser" style="display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);margin-right:96px">
+ <p id="browser-title" style="font-weight:700;color:var(--ink)">Browser</p>
+ <p id="browser-note" style="color:var(--muted)">Sends the request</p>
+</div>
+<div id="cdn" style="display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);margin-right:96px">
+ <p id="cdn-title" style="font-weight:700;color:var(--ink)">CDN</p>
+ <p id="cdn-note" style="color:var(--muted)">Edge cache</p>
+</div>
+<div id="api" style="display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);margin-right:96px">
+ <p id="api-title" style="font-weight:700;color:var(--ink)">API</p>
+ <p id="api-note" style="color:var(--muted)">Validates, enqueues</p>
+</div>
+<div id="queue" style="display:flex;flex-direction:column;gap:8px;padding:16px;border:2px solid var(--amber);border-radius:8px;background:var(--amber-soft);margin-right:96px">
+ <p id="queue-title" style="font-weight:700;color:var(--ink)">Queue</p>
+ <p id="queue-note" style="color:var(--ink)">Waits here</p>
+</div>
+<div id="worker" style="display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:var(--paper);margin-right:96px">
+ <p id="worker-title" style="font-weight:700;color:var(--ink)">Worker</p>
+ <p id="worker-note" style="color:var(--muted)">Does the work</p>
+</div>
+<div id="database" style="display:flex;flex-direction:column;gap:8px;padding:16px;border:1px solid var(--rule);border-radius:8px;background:var(--paper)">
+ <p id="database-title" style="font-weight:700;color:var(--ink)">Database</p>
+ <p id="database-note" style="color:var(--muted)">Stores the result</p>
+</div>
+<a data-arrow="" from="browser" to="cdn" id="arrow-browser-cdn">HTTPS</a>
+<a data-arrow="" from="cdn" to="api" id="arrow-cdn-api">forward</a>
+<a data-arrow="" from="api" to="queue" id="arrow-api-queue">enqueue</a>
+<a data-arrow="" from="queue" to="worker" id="arrow-queue-worker">SLOW HOP</a>
+<a data-arrow="" from="worker" to="database" id="arrow-worker-database">write</a>
+<aside id="slow-note" data-note="queue">Slow hop: queue to worker</aside>

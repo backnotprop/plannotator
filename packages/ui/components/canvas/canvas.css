@@ -1,0 +1,154 @@
+/* The canvas surface (CanvasBoard.tsx): Excalidraw under Plannotator's quiet dock. Excalidraw's own toolbar, menus,
+   library and help are hidden; its zoom and undo stay, quietly. Colours come from the host's theme tokens. */
+.pn-canvas {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+  container-type: size;
+}
+.pn-canvas .excalidraw {
+  --color-primary: var(--primary, #5b5bd6);
+  --color-primary-darker: var(--primary, #5b5bd6);
+  --color-primary-darkest: var(--primary, #5b5bd6);
+  --color-primary-light: color-mix(in oklab, var(--primary, #5b5bd6) 16%, transparent);
+  --island-bg-color: var(--card, #fff);
+  --default-border-color: var(--border, #e5e7eb);
+  --ui-font: inherit;
+  font-family: inherit;
+}
+.pn-canvas .excalidraw.theme--dark {
+  --island-bg-color: var(--card, #1c1c1f);
+}
+.pn-canvas .excalidraw .App-toolbar-container,
+.pn-canvas .excalidraw .App-toolbar,
+.pn-canvas .excalidraw .App-menu_top__left > .dropdown-menu-button,
+.pn-canvas .excalidraw .main-menu-trigger,
+.pn-canvas .excalidraw .layer-ui__wrapper__top-right,
+.pn-canvas .excalidraw .default-sidebar-trigger,
+.pn-canvas .excalidraw .sidebar-trigger,
+.pn-canvas .excalidraw .HintViewer,
+.pn-canvas .excalidraw .help-icon,
+.pn-canvas .excalidraw .welcome-screen-center,
+.pn-canvas .excalidraw .welcome-screen-decor,
+.pn-canvas .excalidraw .App-mobile-menu,
+.pn-canvas .excalidraw .mobile-misc-tools-container,
+.pn-canvas .excalidraw .App-toolbar-content,
+.pn-canvas .excalidraw .layer-ui__wrapper__footer-right,
+.pn-canvas .excalidraw .footer-center {
+  display: none !important;
+}
+/* Zoom and undo sit at the bottom right; the dock owns the middle (or the left, in a narrow canvas). */
+.pn-canvas .excalidraw .layer-ui__wrapper__footer-left {
+  margin-left: auto;
+  opacity: 0.9;
+}
+.pn-canvas[data-dock="top"] .excalidraw .layer-ui__wrapper__footer-left {
+  margin-left: 0;
+}
+.pn-canvas .excalidraw .Island {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 0 0 1px var(--border, #e5e7eb);
+}
+
+.pn-canvas-dock {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--card, #fff);
+  color: var(--foreground, #1f2328);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 16px rgb(0 0 0 / 0.06), 0 0 0 1px var(--border, #e5e7eb);
+  max-width: calc(100% - 24px);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.pn-canvas[data-dock="top"] .pn-canvas-dock {
+  top: 12px;
+  bottom: auto;
+}
+/* Too narrow for the dock in the middle and zoom on the right: the dock moves left, clear of them. */
+@container (max-width: 1080px) {
+  .pn-canvas[data-dock="bottom"] .pn-canvas-dock {
+    left: 12px;
+    transform: none;
+    max-width: calc(100% - 260px);
+  }
+}
+@container (max-width: 640px) {
+  .pn-canvas[data-dock="bottom"] .pn-canvas-dock {
+    bottom: 64px;
+    max-width: calc(100% - 24px);
+  }
+}
+.pn-canvas-tool {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted-foreground, #6b7280);
+  cursor: pointer;
+}
+.pn-canvas-tool:hover {
+  background: var(--muted, #f3f4f6);
+  color: var(--foreground, #1f2328);
+}
+.pn-canvas-tool[aria-pressed="true"] {
+  background: color-mix(in oklab, var(--primary, #5b5bd6) 14%, transparent);
+  color: var(--primary, #5b5bd6);
+}
+.pn-canvas-tool:focus-visible {
+  outline: 2px solid var(--ring, var(--primary, #5b5bd6));
+  outline-offset: 1px;
+}
+.pn-canvas-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 4px;
+  background: var(--border, #e5e7eb);
+  flex: none;
+}
+.pn-canvas-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  pointer-events: none;
+  z-index: 2;
+  text-align: center;
+  padding: 0 24px;
+}
+.pn-canvas-empty-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--foreground, #1f2328);
+}
+.pn-canvas-empty-body {
+  margin: 0;
+  max-width: 320px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--muted-foreground, #6b7280);
+}
+@media (pointer: coarse) {
+  .pn-canvas-tool {
+    width: 40px;
+    height: 40px;
+  }
+}

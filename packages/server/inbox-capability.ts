@@ -3,7 +3,7 @@
  * it is on. The Inbox core (packages/server/inbox.ts) knows each one only by its key: it routes, answers the
  * settings and starts them through the list below, and never imports a capability's records, routes or text.
  *
- * Plans is the only one on it (packages/server/plans-capability.ts). Shape, Routines, the Board and code review are
+ * Plans and the thread canvas are on it (packages/server/plans-capability.ts, canvas-capability.ts). Shape, Routines, the Board and code review are
  * still wired by hand in inbox.ts; each may move here later, one at a time, once this holds.
  *
  * A capability's agent tool (`tools`) and the window's capability rows come with the first capability that has
@@ -11,6 +11,7 @@
  */
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { createCanvasCapability } from "./canvas-capability";
 import { createPlansCapability } from "./plans-capability";
 
 export interface InboxCapability {
@@ -28,6 +29,15 @@ export interface InboxCapability {
   settingsWire?(): Record<string, unknown>;
   /** The Inbox is up (it runs any background work it needs while on). */
   started?(): void;
+  /**
+   * A local window's event stream opened while on: the capability may send it frames (`send`) until the returned stop
+   * runs (the stream closed, or the switch went off).
+   */
+  stream?(send: (frame: string) => void): () => void;
+  /** Lines the Inbox MCP server's instructions gain while on (each a `- ` rule line). */
+  agentInstructions?(): readonly string[];
+  /** Lines read_thread adds for one thread while on. */
+  agentThreadLines?(threadId: string): readonly string[];
 }
 
 /** What a capability may use of the Inbox core: only this. */
@@ -39,7 +49,7 @@ export interface InboxCore {
 
 /** The Inbox's capabilities, in order. */
 export function inboxCapabilities(core: InboxCore): InboxCapability[] {
-  return [createPlansCapability(core)];
+  return [createPlansCapability(core), createCanvasCapability(core)];
 }
 
 /** The request's standing, as the Inbox's guards decide it. */
@@ -132,3 +142,39 @@ export function answerInboxCapabilities(list: readonly InboxCapability[], body: 
 export function startInboxCapabilities(list: readonly InboxCapability[]): void {
   for (const c of list) c.started?.();
 }
+
+/**
+ * A window's event stream: every capability that is on and streams sends it frames, only on the owner's window on this
+ * computer (`local`). Re-run it when a switch changes; it stops what went off and starts what came on. The returned
+ * stop ends them all.
+ */
+export function streamInboxCapabilities(list: readonly InboxCapability[], send: (frame: string) => void, local: boolean) {
+  const running = new Map<string, () => void>();
+  const sync = () => {
+    for (const c of list) {
+      if (!c.stream) continue;
+      const want = local && c.on();
+      const stop = running.get(c.key);
+      if (want && !stop) running.set(c.key, c.stream(send));
+      if (!want && stop) {
+        stop();
+        running.delete(c.key);
+      }
+    }
+  };
+  sync();
+  return {
+    sync,
+    stop() {
+      for (const stop of running.values()) stop();
+      running.clear();
+    },
+  };
+}
+
+/** What the capabilities that are on add to the Inbox MCP server's instructions. */
+export const capabilitiesInstructions = (list: readonly InboxCapability[]): string[] => list.flatMap((c) => (c.on() ? [...(c.agentInstructions?.() ?? [])] : []));
+
+/** What the capabilities that are on add to read_thread for one thread. */
+export const capabilitiesThreadLines = (list: readonly InboxCapability[], threadId: string): string[] =>
+  list.flatMap((c) => (c.on() ? [...(c.agentThreadLines?.(threadId) ?? [])] : []));

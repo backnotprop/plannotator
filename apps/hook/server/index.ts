@@ -259,12 +259,14 @@ import {
   parseUninstallOptions,
   hasHelpFlag,
 } from "./cli";
-import { exitOnUnknownSubcommand } from "./unknown-subcommand";
+import { exitOnUnknownSubcommand, formatUnknownSubcommandError } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, inboxRemoteOpenHint, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runPlansCommand } from "./plans-command";
 import { runCardCommand } from "./card-command";
 import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT, shapeCommandFolder } from "./shape-command";
+import { runCanvasCommand } from "./canvas-command";
+import { canvasOn } from "@plannotator/shared/canvas/switch";
 // @ts-expect-error a text import of the optional helper file
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
@@ -390,6 +392,19 @@ if (isReviewDrawCommand(rawArgs, () => {
 })) {
   process.stderr.write(`${INBOX_REVIEW_DRAW_GONE}\n`);
   process.exit(1);
+}
+// `plannotator canvas …`: an agent's side of the thread canvas (canvas-command.ts; unreleased, HIDDEN_SUBCOMMANDS).
+// Off (config.json `inboxCanvas` not true) it is answered exactly as an unknown command, help included, so an agent
+// learns nothing of it. Before the strict-annotate parse, which takes `--file` for itself.
+{
+  const args = rawArgs;
+  if (args[0] === "canvas") {
+    if (!canvasOn()) {
+      console.error(formatUnknownSubcommandError("canvas"));
+      process.exit(1);
+    }
+    process.exit(await runCanvasCommand(args.slice(1), { dataDir: getPlannotatorDataDir(), cwd: process.env.PLANNOTATOR_CWD || process.cwd() }));
+  }
 }
 // `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
 // HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
