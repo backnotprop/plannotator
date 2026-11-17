@@ -7,8 +7,8 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxNoteBlockWith } from "../../packages/server/inbox-agent-notes";
-import { INBOX_RULES_LEAD, inboxReminderText } from "../../packages/shared/inbox/connection";
+import { inboxNoteBlockWith } from "../../packages/server/inbox-agent-notes.ts";
+import { INBOX_RULES_LEAD, inboxReminderText } from "../../packages/shared/inbox/connection.ts";
 import { piInboxReminder } from "./inbox.ts";
 
 const RULES = "Ask me before you delete any file.";
