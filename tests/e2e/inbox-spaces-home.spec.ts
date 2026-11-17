@@ -1,7 +1,8 @@
 /**
  * The Spaces home (approval "plans-home"): with Plans on, the sidebar's Spaces row opens the home; "Now" holds the
  * plan that waits on the person, "Recent" the rest; the list view is kept for the person (config.json, so a reload
- * opens on it); a card's pin lists the space in the sidebar; a card opens its plan page, whose crumbs say Spaces. An
+ * opens on it); a card's pin lists the space in the sidebar; on a touch screen the rows show no pin at rest and a
+ * long-press opens a row's menu, which pins it; a card opens its plan page, whose crumbs say Spaces. An
  * HTML page's face moves nothing in a real browser: its CSS animation computes to none (approval "plans-home": "Idle
  * page: nothing moves").
  * Real browser, compiled binary, temp PLANNOTATOR_DATA_DIR and HOME; the plan library is seeded with the store before
@@ -102,6 +103,41 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
     await expect(page.locator(`[data-space-pins] [data-pinned-space="${done[0]}"]`)).toBeVisible();
     await expect.poll(() => createPlanStore({ dataDir }).pins()).toEqual([done[0]]);
     await page.screenshot({ path: join(proofDir, 'pinned-light.png') });
+
+    // A touch screen: the rows show no pin at rest (the card's `actionAtRest="never"`), a pinned row keeps the pin after
+    // its title, and a long-press (Base UI's 500 ms) opens the row's menu, which pins it.
+    const touchContext = await browser.newContext({ viewport: { width: 820, height: 1180 }, hasTouch: true, isMobile: true, colorScheme: 'light' });
+    try {
+      const touchPage = await touchContext.newPage();
+      touchPage.on('pageerror', (error) => errors.push(error.message));
+      await touchPage.goto(`${url}#plans`);
+      expect(await touchPage.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true);
+      await expect(touchPage.locator('[data-spaces-home]')).toHaveAttribute('data-spaces-view', 'list');
+      const kept = touchPage.locator(`[data-space="${done[0]}"]`);
+      const loose = touchPage.locator(`[data-space="${done[1]}"]`);
+      await expect(kept.locator('a [data-frame-card-pinned-mark]')).toBeVisible();
+      for (const row of [kept, loose]) {
+        const pin = row.locator('[data-space-pin-toggle]');
+        await expect(pin).toHaveCount(1);
+        expect(await pin.evaluate((el) => { const box = el.closest('[data-frame-card-action]') ?? el; return [getComputedStyle(box).opacity, getComputedStyle(box).pointerEvents]; })).toEqual(['0', 'none']);
+      }
+      const titleEl = loose.locator('[data-frame-card-title]');
+      await titleEl.scrollIntoViewIfNeeded({ timeout: 15_000 });
+      const title = await titleEl.boundingBox({ timeout: 15_000 });
+      const cdp = await touchContext.newCDPSession(touchPage);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: title!.x + 20, y: title!.y + title!.height / 2 }] });
+      await touchPage.waitForTimeout(700);
+      await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      const item = touchPage.locator(`[data-space-menu="${done[1]}"] [data-space-menu-pin="pin"]`);
+      await expect(item).toBeVisible();
+      await touchPage.screenshot({ path: join(proofDir, 'touch-menu-light.png') });
+      await item.tap({ timeout: 15_000 });
+      await expect.poll(() => createPlanStore({ dataDir }).pins()).toEqual([done[0], done[1]]);
+      await expect(loose.locator('a [data-frame-card-pinned-mark]')).toBeVisible();
+      expect(await touchPage.evaluate(() => location.hash)).toBe('#plans');
+    } finally {
+      await touchContext.close();
+    }
 
     // A card opens its plan page; its crumbs say Spaces.
     await page.locator(`[data-space="${waiting}"] a`).click();
