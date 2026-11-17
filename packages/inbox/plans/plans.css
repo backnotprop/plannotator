@@ -19,6 +19,9 @@
 .ib-plans-back:hover { background: var(--muted); }
 .ib-plans-back .ib-ic { width: 16px; height: 16px; }
 .ib-plans :is(button, input, select, a):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+/* The card and the row draw their own focus ring around the whole card (or fill the row); their link takes none of the
+   window's own (.pn-inbox :focus-visible), which would be a second ring around the title. */
+.pn-inbox :is([data-frame-card], [data-frame-card-row]) a:focus-visible { outline: none; }
 .ib-plans-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 
 /* A whole-page message: loading, failed, missing */
@@ -147,7 +150,7 @@
 }
 
 /* Spaces' home (SpacesHome.tsx, approval "plans-home", home-5.html): the question over the field, the tools at the top
-   right, then Now, Recent and the groups. The cards and rows are the frame's stand-in's (frameCardStandIn.tsx); this
+   right, then Now, Recent and the groups. The cards and rows are the frame's (@plannotator/ui/components/frame); this
    is only the page around them. Fills for hover and focus, never a border; no uppercase labels. */
 .ib-dpage.ib-spaces { padding: 0; display: flex; flex-direction: column; color: var(--foreground); }
 .ib-spaces :is(.ib-plans-primary, .ib-plans-link):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -189,11 +192,11 @@
 .ib-spc-h.ib-spc-nowh { height: 20px; margin: 8px 0 16px; padding-bottom: 0; box-shadow: none; }
 .ib-spc-list .ib-spc-h { margin: 0 0 4px; padding: 0 8px 8px; }
 .ib-spc-list .ib-spc-h.ib-spc-nowh { padding-bottom: 0; }
-.ib-spc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 44px 24px; }
-.ib-spc-grid.ib-spc-now { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 24px; }
-/* The rest of Now, under its one row of large cards: rows, as the list draws them. */
-.ib-spc-grid.ib-spc-now + .ib-spc-rows { margin-top: 20px; }
+/* The card grids are the card's CardGrid (its `<li>` holds the item); the rest of Now, under its one row of large
+   cards, is rows, as the list draws them. */
+.ib-spaces [data-frame-card-grid="large"] + .ib-spc-rows { margin-top: 20px; }
 .ib-spc-item { min-width: 0; display: flex; }
+[data-frame-card-grid] > li > .ib-spc-item { flex: 1; }
 .ib-spc-item > .ib-spc-in { display: contents; }
 .ib-spc-item > .ib-spc-in > * { flex: 1; min-width: 0; }
 .ib-spc-rows { display: flex; flex-direction: column; }
@@ -223,7 +226,8 @@
 .ib-spc-crumbs b { font-weight: 600; }
 .ib-spc-list .ib-spc-crumbs { margin-left: 4px; }
 .ib-spc-none { margin: 8px 0; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
-/* A face: the plan's top in the sheet's type (home-5's `.dd`), at the sheet's scale (the card scales the 420 px column).
+/* A face: the plan's top in the sheet's type (home-5's `.dd`), laid out at the card's face width (`CARD_FACE_WIDTH`, set on
+   the home as --ib-spc-face-w) and scaled by the card.
    Scoped here, so the plan page's own type is untouched. Headings are the body's size, set apart by weight and space;
    list markers muted; the first sentence the lede. */
 .ib-spc-face { padding: 34px 36px; font-size: 15px; line-height: 24px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
@@ -237,21 +241,20 @@
 .ib-spc-fb > div > div:last-child[data-rich-list-kind] { margin-bottom: 10px; }
 .ib-spc-face pre, .ib-spc-face table { margin: 0 0 10px; }
 /* A row's thumbnail: the same sheet, drawn at the thumbnail's scale (a texture of the plan's own lines). */
-.ib-spc-thumbface { width: 420px; transform: scale(0.066); transform-origin: 0 0; pointer-events: none; }
+.ib-spc-thumbface { width: var(--ib-spc-face-w, 420px); transform-origin: 0 0; pointer-events: none; }
 .ib-spc-thumbface > * { display: block; margin: 0 0 10px; }
 .ib-spc-thumbface .ib-spc-tli::before { content: "• "; color: color-mix(in oklch, var(--foreground) 40%, transparent); }
 .ib-spc-thumbface .ib-spc-tcells { font-family: var(--font-mono, ui-monospace, monospace); white-space: pre; }
-.ib-spc-dataface.ib-spc-thumbface { transform: scale(0.072); }
-.ib-spc-pageface { width: 420px; height: 315px; overflow: hidden; }
+.ib-spc-pageface { width: var(--ib-spc-face-w, 420px); height: calc(var(--ib-spc-face-w, 420px) * 0.75); overflow: hidden; }
 .ib-spc-pageface iframe { border: 0; transform-origin: 0 0; background: white; pointer-events: none; }
 /* A picture or a drawn diagram: drawn once into a canvas, fitted whole on the flat panel. */
-.ib-spc-picface { width: 420px; height: 307px; }
+.ib-spc-picface { width: var(--ib-spc-face-w, 420px); height: calc(var(--ib-spc-face-w, 420px) * 0.731); }
 .ib-spc-still { display: block; width: 100%; height: 100%; }
 /* Dark: what the plan brought (its picture, its HTML page) is lit for a light page; on the home it is dimmed, never
    recoloured (the colours stay its own), so it is no bright slab. The plan's page shows it as it is. */
 :root:not(.light) :is(.ib-spc-own, .ib-spc-pageface iframe) { filter: brightness(0.78); }
 /* Data: a spreadsheet's top, mono 12/16, the header and the row numbers tinted (home-5's `.fx-cells`). */
-.ib-spc-dataface { width: 420px; overflow: hidden; }
+.ib-spc-dataface { width: var(--ib-spc-face-w, 420px); overflow: hidden; }
 .ib-spc-cells { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 16px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
 .ib-spc-cells :is(th, td) { padding: 6px 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 7%, transparent), inset -1px 0 0 color-mix(in oklch, var(--foreground) 7%, transparent); }
 .ib-spc-cells th { font-weight: 500; color: var(--foreground); background: color-mix(in oklch, var(--foreground) 5%, transparent); }
@@ -292,5 +295,4 @@
   .ib-spc-words h1 { font-size: 24px; line-height: 30px; }
   .ib-spc-body, .ib-spc-list .ib-spc-body { padding: 8px 16px 48px; }
   .ib-spc-list .ib-spc-body { padding-left: 8px; padding-right: 8px; }
-  .ib-spc-grid, .ib-spc-grid.ib-spc-now { grid-template-columns: minmax(0, 1fr); }
 }

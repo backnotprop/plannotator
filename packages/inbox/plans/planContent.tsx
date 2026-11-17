@@ -162,7 +162,8 @@ const RESOURCE_HINTS = 'link[rel~="dns-prefetch" i], link[rel~="preconnect" i], 
  * A click on a link never takes the frame anywhere. Every link and image-map area opens a new window instead
  * (`target="_blank"`, its own `target` and the page's own `<base>` dropped), and a frame without `allow-popups` opens
  * none: the click does nothing. A link with no target follows the `<base target="_blank">` written first. Resource
- * hints (`dns-prefetch`, `preconnect`, …) are dropped, so a page never tells another host it was drawn. `still`: a
+ * hints (`dns-prefetch`, `preconnect`, …) are dropped, so a page never tells another host it was drawn, and so is a
+ * `<meta http-equiv="refresh">` (the sandbox already stops it; the page does not depend on that alone). `still`: a
  * face on the Spaces home (`stillPage`; the selectors it hides go into `hidden`). Read in an inert document
  * (DOMParser runs and loads nothing); where there is none, the page is left as written.
  */
@@ -172,6 +173,7 @@ function linksGoNowhere(html: string, still = false, hidden: string[] = []): str
   for (const base of doc.querySelectorAll('base')) base.remove();
   for (const link of doc.querySelectorAll('a, area, form')) link.setAttribute('target', '_blank');
   for (const hint of doc.querySelectorAll(RESOURCE_HINTS)) hint.remove();
+  for (const meta of doc.querySelectorAll('meta[http-equiv]')) if (/^\s*refresh\s*$/i.test(meta.getAttribute('http-equiv') ?? '')) meta.remove();
   if (still) hidden.push(...stillPage(doc));
   return doc.documentElement.outerHTML;
 }

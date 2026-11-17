@@ -32,7 +32,7 @@ export function takeHomeScroll(route: HomeRoute): number | null {
   return top;
 }
 
-const faceOf = (id: string) => document.querySelector<HTMLElement>(`[data-spaces-home] [data-card-key="${CSS.escape(id)}"] [data-card-face]`);
+const faceOf = (id: string) => document.querySelector<HTMLElement>(`[data-spaces-home] [data-card-key="${CSS.escape(id)}"] [data-frame-card-well]`);
 const viewTransition = () => (typeof document.startViewTransition === 'function' && !reducedMotion() ? document.startViewTransition.bind(document) : null);
 
 /** Open a plan; where View Transitions are, its face grows into the page's document; else a cut. */

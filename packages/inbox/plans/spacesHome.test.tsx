@@ -76,8 +76,8 @@ function seen(margin: string, isIntersecting: boolean) {
     for (const o of observers.filter((o) => o.margin === margin)) o.cb(o.els.map((target) => ({ target, isIntersecting }) as unknown as IntersectionObserverEntry), {} as IntersectionObserver);
   });
 }
-const nearAll = () => seen('400px', true);
-const farAll = () => seen('1600px', false);
+const nearAll = () => seen('240px', true);
+const farAll = () => seen('1200px', false);
 
 /** The list's answers held until `release` (a read that is out while something else happens). */
 let holdList: Promise<void> | null = null;
@@ -298,11 +298,11 @@ test.skipIf(!hasDom)('Now holds what waits on the person, never cut; Recent is o
   // Now: every waiting plan, newest first, never cut: one row of large cards saying "Your move" (4 before the page is
   // measured), the rest as rows in the same section.
   expect(ids(section(host, 'now'))).toEqual([...waiting].reverse());
-  expect([...section(host, 'now')!.querySelectorAll('.fc-large')].map((el) => el.closest('[data-space]')!.getAttribute('data-space'))).toEqual([...waiting].reverse().slice(0, 4));
-  expect([...section(host, 'now')!.querySelectorAll('[data-card-row]')].map((el) => el.closest('[data-space]')!.getAttribute('data-space'))).toEqual([...waiting].reverse().slice(4));
-  expect(text(section(host, 'now')!.querySelector('.fc-fact'))).toBe('Your move');
+  expect([...section(host, 'now')!.querySelectorAll('[data-frame-card-size="large"]')].map((el) => el.closest('[data-space]')!.getAttribute('data-space'))).toEqual([...waiting].reverse().slice(0, 4));
+  expect([...section(host, 'now')!.querySelectorAll('[data-frame-card-row]')].map((el) => el.closest('[data-space]')!.getAttribute('data-space'))).toEqual([...waiting].reverse().slice(4));
+  expect(text(section(host, 'now')!.querySelector('[data-frame-card-line]'))).toBe('Your move');
   // "Your move" in the accent (the card's factTone 'action'); every other fact grey.
-  expect(section(host, 'now')!.querySelector('.fc-fact')!.classList.contains('fc-act')).toBe(true);
+  expect(section(host, 'now')!.querySelector('[data-frame-card-line]')!.getAttribute('data-frame-card-fact-tone')).toBe('action');
   // Recent: one row of cards (4 before the page is measured), newest first.
   expect(ids(section(host, 'recent'))).toEqual([...done].reverse().slice(0, 4));
   // Nothing says an agent is working: no session is live.
@@ -315,8 +315,8 @@ test.skipIf(!hasDom)('Now holds what waits on the person, never cut; Recent is o
   expect(ids(section(host, 'now'))).toHaveLength(6);
   expect(ids(section(host, 'recent'))).toEqual([...done].reverse().slice(0, 8));
   // In the list every row says its project, in Now and in Recent.
-  expect(text(section(host, 'now')!.querySelector('.fc-rsec'))).toBe('harbor-api');
-  expect([...section(host, 'recent')!.querySelectorAll('[data-space]')].every((row) => !!text(row.querySelector('.fc-rsec')))).toBe(true);
+  expect(text(section(host, 'now')!.querySelector('[data-frame-card-secondary]'))).toBe('harbor-api');
+  expect([...section(host, 'recent')!.querySelectorAll('[data-space]')].every((row) => !!text(row.querySelector('[data-frame-card-secondary]')))).toBe(true);
 
   // Another window (a fresh read) opens on the person's view.
   host = redraw();
@@ -389,7 +389,7 @@ test.skipIf(!hasDom)('nothing moves while the person looks: an arrival\'s dot an
   await settle();
   expect(ids(section(host, 'recent'))).toEqual([newest, middle, older]);
   const card = () => host.querySelector(`[data-space="${older}"]`)!;
-  expect(card().querySelector('.fc-dot')).toBeNull();
+  expect(card().querySelector('[data-frame-card-dot]')).toBeNull();
 
   // The pointer is over the page: the person is looking.
   await act(async () => card().dispatchEvent(new Event('pointermove', { bubbles: true })));
@@ -398,31 +398,31 @@ test.skipIf(!hasDom)('nothing moves while the person looks: an arrival\'s dot an
   await settle();
   // In place: the dot and "Your move" at once; the order as it was; the pill beside "Now" (its heading shows for
   // it), and said politely.
-  expect(card().querySelector('.fc-dot')).not.toBeNull();
-  expect(text(card().querySelector('.fc-fact'))).toBe('Your move');
+  expect(card().querySelector('[data-frame-card-dot]')).not.toBeNull();
+  expect(text(card().querySelector('[data-frame-card-line]'))).toBe('Your move');
   expect(ids(section(host, 'now'))).toEqual([]);
   expect(ids(section(host, 'recent'))).toEqual([newest, middle, older]);
-  const pill = host.querySelector('[data-card-updates]')!;
+  const pill = host.querySelector('[data-frame-card-updates]')!;
   expect(text(pill)).toBe('1 update · Show');
   expect(text(pill.closest('h2'))).toContain('Now');
-  expect(text(host.querySelector('[data-spaces-updates-said]'))).toBe('1 update');
-  expect(host.querySelector('[data-spaces-updates-said]')?.getAttribute('aria-live')).toBe('polite');
+  expect(text(host.querySelector('[data-frame-card-updates-live]'))).toBe('1 update');
+  expect(host.querySelector('[data-frame-card-updates-live]')?.getAttribute('aria-live')).toBe('polite');
 
   await click(pill);
   expect(ids(section(host, 'now'))).toEqual([older]);
   expect(ids(section(host, 'recent'))).toEqual([newest, middle]);
-  expect(host.querySelector('[data-card-updates]')).toBeNull();
+  expect(host.querySelector('[data-frame-card-updates]')).toBeNull();
 
   // Another arrives while still looking: held again; then the pointer leaves the window and it settles by itself.
   arrive(middle);
   await act(async () => await readPlans());
   await settle();
   expect(ids(section(host, 'recent'))).toEqual([newest, middle]);
-  expect(text(host.querySelector('[data-card-updates]'))).toBe('1 update · Show');
+  expect(text(host.querySelector('[data-frame-card-updates]'))).toBe('1 update · Show');
   await act(async () => document.documentElement.dispatchEvent(new Event('pointerleave')));
   await settle();
   expect(ids(section(host, 'now'))).toEqual([middle, older]);
-  expect(host.querySelector('[data-card-updates]')).toBeNull();
+  expect(host.querySelector('[data-frame-card-updates]')).toBeNull();
   // A plan that arrives while no one looks takes its place at once.
   const fresh = plan('A fresh plan', 'harbor-api');
   await act(async () => await readPlans());
@@ -444,9 +444,9 @@ test.skipIf(!hasDom)('pinning: the card\'s pin keeps a space in the sidebar, in 
   expect(store.pins()).toEqual([b, a, c]);
   // The card says so: its pin is now Unpin (naming the plan), and its link's name says "pinned".
   expect(host.querySelector(`[data-space-pin-toggle="${a}"]`)?.getAttribute('aria-label')).toBe('Unpin Alpha plan');
-  expect(text(host.querySelector(`[data-space="${a}"] [data-card-link]`))).toContain('pinned');
+  expect(host.querySelector(`[data-space="${a}"] a`)?.getAttribute('aria-label')).toContain('pinned');
   // The action is beside the link, never in it.
-  expect(host.querySelector(`[data-space="${a}"] [data-card-link] [data-space-pin-toggle]`)).toBeNull();
+  expect(host.querySelector(`[data-space="${a}"] a [data-space-pin-toggle]`)).toBeNull();
 
   const menu = async (id: string, action: 'up' | 'down' | 'unpin') => {
     await press(host.querySelector(`[data-space-pin-more="${id}"]`));
@@ -473,7 +473,7 @@ test.skipIf(!hasDom)('a face: drawn only near the screen, the plan\'s own top wi
   window.location.hash = '#plans';
   const host = draw();
   await settle();
-  const face = (id: string) => host.querySelector(`[data-space="${id}"] [data-card-face]`)!;
+  const face = (id: string) => host.querySelector(`[data-space="${id}"] [data-frame-card-well]`)!;
   expect(face(doc).getAttribute('aria-hidden')).toBe('true');
   expect(face(doc).hasAttribute('inert')).toBe(true);
   // Not near yet: the quiet ground only.
@@ -486,17 +486,18 @@ test.skipIf(!hasDom)('a face: drawn only near the screen, the plan\'s own top wi
   expect(text(drawn)).toBe('Retire keys after 14 days.');
   // The card says the title; the face does not say it again.
   expect(drawn.textContent).not.toContain('Rotate refresh tokens');
-  expect(text(host.querySelector(`[data-space="${doc}"] .fc-title`))).toBe('New. Rotate refresh tokens');
+  expect(text(host.querySelector(`[data-space="${doc}"] [data-frame-card-title]`))).toBe('Rotate refresh tokens');
+  expect(host.querySelector(`[data-space="${doc}"] a`)?.getAttribute('aria-label')).toBe('Rotate refresh tokens, Your move, new');
   // The page is a frame that runs nothing, is never focusable, under the plan page's own policy.
   const frame = face(page).querySelector('iframe')!;
   expect(frame.getAttribute('sandbox')).toBe('');
   expect(frame.getAttribute('tabindex')).toBe('-1');
   expect(frame.getAttribute('srcdoc')).toContain("default-src 'none'");
-  expect(host.querySelector(`[data-space="${page}"]`)?.querySelector('[data-card-kind="page"]')).not.toBeNull();
+  expect(host.querySelector(`[data-space="${page}"]`)?.querySelector('[data-frame-card-kind="page"]')).not.toBeNull();
   // One link per card, named by its title and fact; the face beside it, never inside it.
   expect(host.querySelectorAll(`[data-space="${doc}"] a`)).toHaveLength(1);
-  expect(host.querySelector(`[data-space="${doc}"] [data-card-link] [data-card-face]`)).toBeNull();
-  expect(host.querySelector(`[data-space="${page}"] [data-card-link] iframe`)).toBeNull();
+  expect(host.querySelector(`[data-space="${doc}"] a [data-frame-card-well]`)).toBeNull();
+  expect(host.querySelector(`[data-space="${page}"] a iframe`)).toBeNull();
   // Far from the screen, a face is let go (the ground stays); near again, it is drawn again.
   farAll();
   await settle();
@@ -513,17 +514,17 @@ test.skipIf(!hasDom)('focus in the page is looking (a keyboard or screen reader\
   window.location.hash = '#plans';
   const host = draw();
   await settle();
-  const link = host.querySelector(`[data-space="${older}"] [data-card-link]`) as HTMLElement;
+  const link = host.querySelector(`[data-space="${older}"] a`) as HTMLElement;
   await act(async () => link.focus());
   arrive(older);
   await act(async () => await readPlans());
   await settle();
   expect(ids(section(host, 'recent'))).toEqual([newest, older]);
-  expect(text(host.querySelector('[data-card-updates]'))).toBe('1 update · Show');
+  expect(text(host.querySelector('[data-frame-card-updates]'))).toBe('1 update · Show');
   await act(async () => link.blur());
   await settle();
   expect(ids(section(host, 'now'))).toEqual([older]);
-  expect(host.querySelector('[data-card-updates]')).toBeNull();
+  expect(host.querySelector('[data-frame-card-updates]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('a read that brings nothing new draws nothing again: 304 to the last tag, and an equal answer is not passed on', async () => {
@@ -565,15 +566,15 @@ test.skipIf(!hasDom)('the pill counts only what this scope or search shows', asy
   arrive(elsewhere);
   await act(async () => await readPlans());
   await settle();
-  expect(host.querySelector('[data-card-updates]')).toBeNull();
+  expect(host.querySelector('[data-frame-card-updates]')).toBeNull();
   arrive(mine);
   await act(async () => await readPlans());
   await settle();
-  expect(text(host.querySelector('[data-card-updates]'))).toBe('1 update · Show');
+  expect(text(host.querySelector('[data-frame-card-updates]'))).toBe('1 update · Show');
   // A search shows every title: both arrivals are updates there.
   await type(host, 'plan');
   await settle();
-  expect(text(host.querySelector('[data-card-updates]'))).toBe('2 updates · Show');
+  expect(text(host.querySelector('[data-frame-card-updates]'))).toBe('2 updates · Show');
 });
 
 test.skipIf(!hasDom)('a read that began before a pin does not put the old pins back; a failed pin says so and puts the order back', async () => {
@@ -606,8 +607,9 @@ test.skipIf(!hasDom)('a read that began before a pin does not put the old pins b
   expect(pinned()).toEqual([a]);
   expect(host.querySelector(`[data-space-pin-toggle="${b}"]`)?.getAttribute('aria-label')).toBe('Pin Beta plan to sidebar');
   expect(toasts).toEqual([{ icon: 'warn', lead: 'The pins could not be saved.', wrap: true } as never]);
-  // Cards and rows are a list.
-  expect(host.querySelectorAll('[role="list"] [role="listitem"][data-space]')).toHaveLength(2);
+  // Cards are a list: the card's grid, one item each (no second listitem inside it).
+  expect(host.querySelectorAll('ul[data-frame-card-grid] > li > [data-space]')).toHaveLength(2);
+  expect(host.querySelectorAll('[data-frame-card-grid] [role="listitem"]')).toHaveLength(0);
 });
 
 test.skipIf(!hasDom)('faces: plans that all open with "## Context" each start with their own words; a newer version replaces a face only once it came', async () => {
@@ -639,7 +641,7 @@ test.skipIf(!hasDom)('an HTML face runs, moves and tells nothing: no animation, 
   const moving = btoa('GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00;');
   const still = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
   const html = [
-    '<link rel="dns-prefetch" href="//hints.example"><link rel="preconnect" href="https://hints.example"><link rel="prefetch" href="https://hints.example/x">',
+    '<link rel="dns-prefetch" href="//hints.example"><link rel="preconnect" href="https://hints.example"><link rel="prefetch" href="https://hints.example/x"><meta http-equiv=" Refresh " content="0;url=https://hints.example/go">',
     '<style>.spin { animation: spin 1s infinite !important; transition: all 1s; } @keyframes spin { to { transform: rotate(1turn); } } .bg { background: url("data:image/gif;base64,' + moving + '"); }</style>',
     '<div class="spin" style="color: red; animation: spin 2s infinite; transition: opacity 1s">Spinning</div>',
     '<marquee class="m">Scrolling news</marquee>',
@@ -658,6 +660,10 @@ test.skipIf(!hasDom)('an HTML face runs, moves and tells nothing: no animation, 
   // Nothing tells another host the home was opened.
   expect(srcdoc).not.toContain('hints.example');
   expect(doc.querySelector('meta[http-equiv="x-dns-prefetch-control"]')?.getAttribute('content')).toBe('off');
+  // The plan page's own HTML document drops the same: no hint, no refresh.
+  const opened = planHtmlSrcdoc(html);
+  expect(opened).not.toContain('hints.example');
+  expect(new DOMParser().parseFromString(opened, 'text/html').querySelector('meta[http-equiv~="refresh" i], meta[http-equiv=" Refresh "]')).toBeNull();
   // Nothing moves: the first layer (its name random, so the page cannot write into it) turns motion off over every rule,
   // and hides what loops forever (a loading ring is not drawn stopped mid-turn); inline motion is gone, the rest kept.
   const layer = doc.querySelector('style')?.textContent ?? '';
@@ -703,8 +709,10 @@ test.skipIf(!hasDom)('an HTML face runs, moves and tells nothing: no animation, 
   await settle();
   nearAll();
   await settle();
-  expect(host.querySelector('[data-card-row] iframe')).toBeNull();
-  expect(host.querySelector('[data-card-row] [data-space-face]')).toBeNull();
+  expect(host.querySelector('[data-frame-card-row] iframe')).toBeNull();
+  expect(host.querySelector('[data-frame-card-row] [data-space-face]')).toBeNull();
+  // The home hands the row no thumbnail: the card draws the page kind's own glyph.
+  expect(host.querySelector(`[data-space="${page}"] [data-frame-card-thumb]`)?.getAttribute('data-frame-card-thumb')).toBe('glyph');
 });
 
 test.skipIf(!hasDom)('a page cannot dodge the still face: comments, escapes, !important, a known layer name, a nested document, image-set or an escaped url()', () => {
@@ -741,7 +749,7 @@ test.skipIf(!hasDom)('a document row\'s thumbnail is its own face, small and sta
   await settle();
   nearAll();
   await settle();
-  const thumb = host.querySelector(`[data-space="${id}"] .fc-thumb`);
+  const thumb = host.querySelector(`[data-space="${id}"] [data-frame-card-thumb]`);
   expect(text(thumb?.querySelector('.ib-spc-lede') ?? null)).toBe('One noisy key can starve every other customer.');
   expect(text(thumb)).toContain('A token bucket.');
   expect(thumb?.textContent).not.toContain('Context');
@@ -758,15 +766,16 @@ test.skipIf(!hasDom)('"<agent> is working", with its mark, only while the sessio
   setInboxAgents([{ agents: [listed(agent.session, true), listed('ses_01JD0000000000000000000002', false)], total: 2, ended_today: 1 }]);
   const host = draw();
   await settle();
-  const fact = (id: string) => text(host.querySelector(`[data-space="${id}"] .fc-fact`));
+  const fact = (id: string) => text(host.querySelector(`[data-space="${id}"] [data-frame-card-line]`));
   expect(fact(worked)).toBe('Codex is working');
-  expect(host.querySelector(`[data-space="${worked}"] .fc-fact .fc-mark`)).not.toBeNull();
+  // Its mark breathes (the card's `working`).
+  expect(host.querySelector(`[data-space="${worked}"] [data-frame-card-line] [data-frame-card-mark]`)?.hasAttribute('data-frame-card-working')).toBe(true);
   // Grey: only "Your move" takes the accent.
-  expect(host.querySelector(`[data-space="${worked}"] .fc-fact`)!.classList.contains('fc-act')).toBe(false);
+  expect(host.querySelector(`[data-space="${worked}"] [data-frame-card-line]`)!.hasAttribute('data-frame-card-fact-tone')).toBe(false);
   // A plan it works on is in Now, whatever its age; one whose session is not live is not, and says its date.
   expect(ids(section(host, 'now'))).toEqual([worked]);
   expect(fact(other)).not.toContain('is working');
-  expect(host.querySelector(`[data-space="${other}"] .fc-mark`)).toBeNull();
+  expect(host.querySelector(`[data-space="${other}"] [data-frame-card-mark]`)).toBeNull();
   // No read of its own: the home adds no second poll of the live sessions.
   expect(sessionReads).toBe(0);
   // The agent ends: its plan is no longer worked on.
@@ -785,14 +794,26 @@ test.skipIf(!hasDom)('a change landing in a face tints the block it landed in, o
   nearAll();
   await settle();
   const face = () => host.querySelector(`[data-space="${id}"] [data-space-face="document"]`)!;
-  expect(face().querySelector('.fc-landed')).toBeNull();
-  arrive(id, opening('Watch the error rate and the p99.'));
-  await act(async () => await readPlans());
-  await settle();
-  // The lede and the line after it are the same: the list item is where it landed.
-  const landed = face().querySelector('.fc-landed');
+  expect(face().querySelector('[data-face-landed]')).toBeNull();
+  // The card's `arrive` animates the block it is given: record which.
+  const animated: Element[] = [];
+  const animate = HTMLElement.prototype.animate;
+  HTMLElement.prototype.animate = function (this: HTMLElement, ...args: Parameters<HTMLElement['animate']>) {
+    animated.push(this);
+    return typeof animate === 'function' ? animate.apply(this, args) : ({ finished: Promise.resolve(), cancel() {} } as unknown as Animation);
+  };
+  try {
+    arrive(id, opening('Watch the error rate and the p99.'));
+    await act(async () => await readPlans());
+    await settle();
+  } finally {
+    HTMLElement.prototype.animate = animate;
+  }
+  // The lede and the line after it are the same: the list item is where it landed, and it is what arrived.
+  const landed = face().querySelector('[data-face-landed]');
   expect(landed?.getAttribute('data-face-block')).toBe('1');
   expect(text(landed)).toContain('the p99');
+  expect(animated).toContain(landed!);
 });
 
 test.skipIf(!hasDom)('a picture page\'s face is the picture; a data page\'s face is its first rows as cells', async () => {
@@ -832,6 +853,9 @@ test.skipIf(!hasDom)('a Mermaid plan whose source could load something is never 
     await settle();
     expect(rendered).toContain(plain);
     expect(rendered.some((source) => source.includes('tracker.example'))).toBe(false);
+    // Its row has no thumbnail of its own (the kind's glyph); the plain one's row draws its own.
+    expect(host.querySelector(`[data-space="${hostile}"] [data-frame-card-thumb]`)?.getAttribute('data-frame-card-thumb')).toBe('glyph');
+    expect(host.querySelector(`[data-space="${hostile}"] [data-frame-card-thumb] [data-space-face]`)).toBeNull();
   } finally {
     mermaid!.__setMermaidRuntimeLoaderForTests(undefined);
     restoreParser();
@@ -860,7 +884,7 @@ test.skipIf(!hasDom)('back from a plan: the home it was opened from, scrolled wh
   const host = draw();
   await settle();
   (host.querySelector('[data-spaces-home]') as HTMLElement).scrollTop = 240;
-  await click(host.querySelector(`[data-space="${mine}"] [data-card-link]`));
+  await click(host.querySelector(`[data-space="${mine}"] a`));
   expect(window.location.hash).toBe(`#plans=${mine}`);
   await settle();
   await click(host.querySelector('[data-plans-back]'));

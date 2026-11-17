@@ -73,7 +73,7 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
     const now = home.locator('[data-spaces-section="now"] [data-space]');
     await expect(now).toHaveCount(2);
     await expect(now.first()).toHaveAttribute('data-space', waiting);
-    await expect(now.first().locator('.fc-fact')).toHaveText('Your move');
+    await expect(now.first().locator('[data-frame-card-line]')).toHaveText('Your move');
     await expect(home.locator('[data-spaces-section="recent"] [data-space]')).toHaveCount(done.length);
     // The face is the plan's own top, its title not said twice.
     await expect(now.first().locator('[data-space-face="document"]')).toContainText('Why rate limits per api key now.');
@@ -104,7 +104,7 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
     await page.screenshot({ path: join(proofDir, 'pinned-light.png') });
 
     // A card opens its plan page; its crumbs say Spaces.
-    await page.locator(`[data-space="${waiting}"] [data-card-link]`).click();
+    await page.locator(`[data-space="${waiting}"] a`).click();
     await expect(page.locator(`[data-plan-page="${waiting}"]`)).toBeVisible();
     await expect(page.locator('[data-page-header] [data-breadcrumb-root]')).toHaveText('Spaces');
     expect(errors).toEqual([]);

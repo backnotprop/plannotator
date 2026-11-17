@@ -1094,7 +1094,7 @@ test.skipIf(!hasDom)('only the main page counts as looking: a link to another pa
   window.location.hash = '#plans';
   await settle();
   expect(host.querySelector(`[data-space="${id}"]`)).not.toBeNull();
-  expect(host.querySelector(`[data-space="${id}"] .fc-dot`)).not.toBeNull();
+  expect(host.querySelector(`[data-space="${id}"] [data-frame-card-dot]`)).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on the get-started screen; Try again reads again with ?retry=1', async () => {

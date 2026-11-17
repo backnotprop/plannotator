@@ -12,15 +12,16 @@
  * - data (CSV, TSV): its first rows as cells.
  * A page above 512 KB, a picture above 2 MB: the card's ground for its kind.
  *
- * A new version replaces the face in place once it has come (the old one stays meanwhile): a document tints, for a
- * moment, the block where the change landed (the first that differs from the face before); anything else cross-fades
- * (the stand-in's `arrive`). Nothing moves otherwise, and nothing at all under reduced motion.
+ * A new version replaces the face in place once it has come (the old one stays meanwhile): in a document the block
+ * where the change landed (the first that differs from the face before) takes the card's `arrive` (it opens in place,
+ * tinted for a moment); anything else cross-fades. Nothing moves otherwise, and nothing at all under reduced motion.
+ * Every face is laid out at the card's `CARD_FACE_WIDTH` (plans.css reads it as `--ib-spc-face-w`).
  *
  * `SpaceThumb` is a row's 36x27 thumbnail of the same face, static and cheap: a document's top as plain words (no
  * Markdown renderer), data as a few cells, a picture or a diagram as the same still drawing; an HTML page keeps its
  * kind's shape (no frame in a row).
  */
-import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { PlanSummary } from '@plannotator/core/plans';
 import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
@@ -29,11 +30,17 @@ import { renderDiagram } from '@plannotator/ui/utils/diagram-render';
 import { PlanContentRules, acceptPlanDiagramSvg, isMovingDataImage, mermaidMayLoad, planFaceSrcdoc, resolvePlanImage, resolvePlanLink } from './planContent';
 import { faceParts, type FaceParts } from './spacesModel';
 import { useFaceText } from './store';
-import { arrive } from './frameCardStandIn';
+import { CARD_FACE_WIDTH, arrive } from '@plannotator/ui/components/frame';
 import { tableRows } from '../wallFaceText';
 
-/** The width an HTML page is laid out at before the card scales it (the face's own width is 420). */
+/** The width an HTML page is laid out at before the face scales it to the card's face width. */
 const PAGE_WIDTH = 1024;
+
+/**
+ * A row's thumbnail is the same face drawn at the thumbnail's size: the card's small sheet (72% of 36 px) for a
+ * document, its small panel (80%) for data.
+ */
+const THUMB_SCALE = { document: (36 * 0.72) / CARD_FACE_WIDTH, data: (36 * 0.8) / CARD_FACE_WIDTH };
 
 const headOf = (plan: PlanSummary) => (plan.head_version_number >= 1 ? plan.head_version_number : null);
 
@@ -68,14 +75,15 @@ export const SpaceThumb = memo(function SpaceThumb({ plan }: { plan: PlanSummary
   return <DocumentThumb text={face.text} title={plan.name} />;
 });
 
-/** A face whose content changed in place: the arrival's short cross-fade on its well (not on the first draw). */
+/** A face whose content changed in place: a short cross-fade of the face (not on the first draw; none if reduced). */
 function useArrival(key: string) {
   const box = useRef<HTMLDivElement>(null);
   const was = useRef(key);
   useEffect(() => {
     if (was.current === key) return;
     was.current = key;
-    arrive(box.current?.closest('[data-card-face]') ?? null);
+    const el = box.current;
+    if (el && !reducedMotion() && typeof el.animate === 'function') el.animate([{ opacity: 0.25 }, { opacity: 1 }], { duration: 240, easing: 'ease-out' });
   }, [key]);
   return box;
 }
@@ -97,24 +105,29 @@ function DocumentFace({ text, title }: { text: string; title: string }) {
   const parts = useMemo(() => faceParts(text, title), [text, title]);
   const was = useRef<FaceParts | null>(null);
   const [landed, setLanded] = useState<{ at: number; n: number } | null>(null);
+  const box = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const at = landedBlock(was.current, parts);
     was.current = parts;
     if (at !== null && !reducedMotion()) setLanded((l) => ({ at, n: (l?.n ?? 0) + 1 }));
   }, [parts]);
-  const tint = (i: number) => (landed && landed.at === i ? ` fc-landed fc-landed-${landed.n % 2}` : '');
+  // The card's `arrive` on the block where it landed, once per arrival.
+  useLayoutEffect(() => {
+    if (landed) arrive(box.current?.querySelector<HTMLElement>(`[data-face-block="${landed.at === -1 ? 'lede' : landed.at}"]`));
+  }, [landed]);
+  const mark = (i: number) => (landed && landed.at === i ? { 'data-face-landed': '' } : {});
   return (
-    <div className="ib-spc-face" data-space-face="document">
+    <div className="ib-spc-face" data-space-face="document" ref={box}>
       <PlanContentRules>
         <ImageResolverContext.Provider value={resolveFaceImage}>
           {parts.heading && <h3 className="ib-spc-fh" dir="auto">{parts.heading}</h3>}
           {parts.lede && (
-            <p className={`ib-spc-lede${tint(-1)}`} dir="auto" data-face-block="lede">
+            <p className="ib-spc-lede" dir="auto" data-face-block="lede" {...mark(-1)}>
               {parts.lede}
             </p>
           )}
           {parts.blocks.map((block, i) => (
-            <div key={i} className={`ib-spc-fb${tint(i)}`} data-face-block={i}>
+            <div key={i} className="ib-spc-fb" data-face-block={i} {...mark(i)}>
               <RenderedMarkdown markdown={block} resolveLocalLink={resolvePlanLink} resolveImage={resolveFaceImage} />
             </div>
           ))}
@@ -129,7 +142,7 @@ function DocumentThumb({ text, title }: { text: string; title: string }) {
   const parts = useMemo(() => faceParts(text, title), [text, title]);
   const lines = parts.blocks.slice(0, 4).flatMap((block) => block.split('\n').slice(0, 3));
   return (
-    <div className="ib-spc-face ib-spc-thumbface" aria-hidden="true">
+    <div className="ib-spc-face ib-spc-thumbface" aria-hidden="true" style={{ transform: `scale(${THUMB_SCALE.document})` }}>
       {parts.heading && <b className="ib-spc-fh">{parts.heading}</b>}
       {parts.lede && <p className="ib-spc-lede">{parts.lede}</p>}
       {lines.map((line, i) => {
@@ -172,7 +185,7 @@ function PageFace({ html, keyOf }: { html: string; keyOf: string }) {
   if (srcDoc === null) return null;
   return (
     <div className="ib-spc-pageface" data-space-face="page" ref={box}>
-      <iframe title="" srcDoc={srcDoc} sandbox="" referrerPolicy="no-referrer" tabIndex={-1} aria-hidden="true" loading="lazy" style={{ width: PAGE_WIDTH, height: PAGE_WIDTH * 0.75, transform: `scale(${420 / PAGE_WIDTH})` }} />
+      <iframe title="" srcDoc={srcDoc} sandbox="" referrerPolicy="no-referrer" tabIndex={-1} aria-hidden="true" loading="lazy" style={{ width: PAGE_WIDTH, height: PAGE_WIDTH * 0.75, transform: `scale(${CARD_FACE_WIDTH / PAGE_WIDTH})` }} />
     </div>
   );
 }
@@ -371,7 +384,7 @@ function DataFace({ text, small = false }: { text: string; small?: boolean }) {
     </table>
   );
   return (
-    <div className={small ? 'ib-spc-dataface ib-spc-thumbface' : 'ib-spc-dataface'} data-space-face="data" ref={box}>
+    <div className={small ? 'ib-spc-dataface ib-spc-thumbface' : 'ib-spc-dataface'} data-space-face="data" ref={box} style={small ? ({ transform: `scale(${THUMB_SCALE.data})` } as CSSProperties) : undefined}>
       {cells}
     </div>
   );

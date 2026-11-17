@@ -11,32 +11,34 @@
  * Nothing moves under the person: an arrival redraws its face, dot and fact in place at once, but while they are
  * looking (the pointer over the page, focus in it, or a scroll or a key in the last 4 s) its new place waits behind a
  * quiet "N updates · Show" pill beside "Now" (counting only what this scope or search shows; said politely to a
- * screen reader); not looking, the page settles by itself, every card moving to its place in one move and a newcomer
- * in "Now" fading in (reduced motion: a cut). The clock and the live sessions the layout was placed with are frozen
+ * screen reader); not looking, the page settles by itself, every card moving to its place in one move (the card's
+ * `settleBatch`, on each grid) and a newcomer in "Now" fading in (reduced motion: a cut). The clock and the live sessions the layout was placed with are frozen
  * with it: a plan passing Now's 3 days, or an agent starting or stopping, waits like an arrival. Opening a card grows its face into the plan page, and going back
  * shrinks it into its card on the home as it was left (spacesMotion.ts).
  *
- * The card, the row, the pill and their motions are the frame's (packages/ui/components/frame), built by the sister
- * team; until they land they come from the one stand-in file (frameCardStandIn.tsx).
+ * The card, the row, the pill and their motions are the frame's (`@plannotator/ui/components/frame`: Card, CardRow,
+ * CardGrid, CardUpdatesPill, settleBatch, arrive). The card grids are the card's `CardGrid`, each given its row gap
+ * (28 px for Now's large cards, 44 for the rest; never its default), and Now's one row of large cards is counted with
+ * the same column minimum the grid draws (280 px, 230 for regular, 24 between). Rows are the home's own list.
  */
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
 import type { PlanSummary, SpacesView } from '@plannotator/core/plans';
-import { fullTime } from '@plannotator/core/inbox-format';
 import { SidebarTrigger } from '../shell/sidebar';
 import { HostMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { writeRoute } from '../app/writeRoute';
 import { startStillField, reducedMotion } from './dither';
 import { useInboxAgents } from '../agentsList';
-import { Card, CardRow, CardStyles, CardUpdatesPill, settleBatch, type CardLinkProps } from './frameCardStandIn';
+import { CARD_FACE_WIDTH, Card, CardGrid, CardRow, CardUpdatesPill, settleBatch, type CardLinkProps } from '@plannotator/ui/components/frame';
+import { mermaidMayLoad } from './planContent';
 import { SpaceFace, SpaceThumb } from './SpaceFace';
-import { readPlans, setPlanPin, setSpacesView } from './store';
+import { readPlans, setPlanPin, setSpacesView, useFaceText } from './store';
 import { ImportErrorNote } from './parts';
 import { openSpace, spacesHomeShown, takeHomeScroll } from './spacesMotion';
-import { ALL_PLANS_ROWS, RECENT_ROWS, factWords, heldLayout, homeSections, inProject, nextNowCrossing, projectGroups, searchPlans, spaceFact, spaceKind, spaceUnread, spaceWorks, updatesWords, type SpaceWork, type SpaceWorks, type SpacesScopeProject } from './spacesModel';
+import { ALL_PLANS_ROWS, RECENT_ROWS, factWords, heldLayout, homeSections, inProject, nextNowCrossing, projectGroups, searchPlans, spaceFact, spaceKind, spaceUnread, spaceWorks, type SpaceWork, type SpaceWorks, type SpacesScopeProject } from './spacesModel';
 
 /** How long a scroll or a key keeps the person "looking" (approval "plans-home"). */
 export const LOOK_MS = 4000;
@@ -92,16 +94,19 @@ export function SpacesHome(props: SpacesHomeProps) {
   const looking = useLooking(root);
   const settle = useCallback((next: readonly PlanSummary[]) => {
     const before = new Set(placedNow.current.map((p) => p.id));
-    settleBatch(body.current, () =>
+    const mutate = () =>
       flushSync(() => {
         setPlaced(next);
         setPlacedWith({ work: worksNow.current, at: Date.now() });
-      }),
-    );
-    // A newcomer in "Now" fades in where it lands (home-5's settle); nothing else does.
+      });
+    // The card's settleBatch moves a list's own children, so each grid gets one, nested: each measures its cards,
+    // the one mutate runs once inside them all, and each slides its cards from where they were.
+    const grids = [...(body.current?.querySelectorAll<HTMLElement>('[data-frame-card-grid], [data-spaces-list]') ?? [])];
+    grids.reduce<() => void>((inner, grid) => () => settleBatch(grid, inner), mutate)();
+    // A newcomer in "Now" fades in where it lands (home-5's settle; settleBatch brings it down from just above).
     if (reducedMotion()) return;
     for (const el of body.current?.querySelectorAll<HTMLElement>('[data-spaces-section="now"] [data-card-key]') ?? []) {
-      if (!before.has(el.dataset.cardKey!) && typeof el.animate === 'function') el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+      if (!before.has(el.dataset.cardKey!) && typeof el.animate === 'function') el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
     }
   }, []);
   const stale = placed !== props.plans || placedWith.work !== works || placedWith.at < clock;
@@ -159,13 +164,19 @@ export function SpacesHome(props: SpacesHomeProps) {
       portal={portal}
     />
   );
-  const items = (plans: readonly PlanSummary[], size: 'large' | 'regular', withProject = false, row = list) => (
-    <div className={row ? 'ib-spc-rows' : size === 'large' ? 'ib-spc-grid ib-spc-now' : 'ib-spc-grid'} role="list">
-      {plans.map((p) => item(p, size, withProject, row))}
-    </div>
-  );
+  const items = (plans: readonly PlanSummary[], size: 'large' | 'regular', withProject = false, row = list) =>
+    row ? (
+      <div className="ib-spc-rows" role="list" data-spaces-list="">
+        {plans.map((p) => item(p, size, withProject, row))}
+      </div>
+    ) : (
+      <CardGrid size={size} gap={size === 'large' ? 28 : 44}>
+        {plans.map((p) => item(p, size, withProject, row))}
+      </CardGrid>
+    );
   const held = pending > 0 && looking;
-  const pill = held ? <CardUpdatesPill count={pending} onShow={() => settle(props.plans)} /> : null;
+  // Always drawn by the first heading (its polite count is said when it changes); its button only while updates wait.
+  const pill = <CardUpdatesPill count={held ? pending : 0} onShow={() => settle(props.plans)} />;
   // The pill sits by the first heading on the page ("Now" when there is one).
   let pillShown = false;
   const takePill = () => {
@@ -258,12 +269,8 @@ export function SpacesHome(props: SpacesHomeProps) {
     ) : null;
 
   return (
-    <section className={`ib-dpage ib-spaces${list ? ' ib-spc-list' : ''}`} ref={root} aria-label="Spaces" data-spaces-home="" data-spaces-view={props.view} data-spaces-scope={mode}>
-      <CardStyles />
+    <section className={`ib-dpage ib-spaces${list ? ' ib-spc-list' : ''}`} ref={root} aria-label="Spaces" data-spaces-home="" data-spaces-view={props.view} data-spaces-scope={mode} style={FACE_WIDTH_STYLE}>
       <Hearth headId={`${headId}-h`} query={query} onQuery={setQuery} view={props.view} scope={project} />
-      <p className="sr-only" role="status" aria-live="polite" data-spaces-updates-said="">
-        {held ? updatesWords(pending) : ''}
-      </p>
       <div className="ib-spc-body" ref={body}>
         {props.importing && (
           <p className="ib-plans-note" role="status">
@@ -290,6 +297,9 @@ export function SpacesHome(props: SpacesHomeProps) {
     </section>
   );
 }
+
+/** The width the card lays every face out at (the faces' CSS reads it: plans.css `--ib-spc-face-w`). */
+const FACE_WIDTH_STYLE = { '--ib-spc-face-w': `${CARD_FACE_WIDTH}px` } as CSSProperties;
 
 function readFolds(): ReadonlySet<string> {
   try {
@@ -388,7 +398,10 @@ function ViewSwitch({ view }: { view: SpacesView }) {
 const SpaceItem = memo(function SpaceItem({ plan, work, size, list, secondary, pinned, portal }: { plan: PlanSummary; work: SpaceWork | null; size: 'large' | 'regular'; list: boolean; secondary?: string; pinned: boolean; portal: HTMLElement | null }) {
   const fact = spaceFact(plan, work);
   const words = factWords(fact);
-  const time = fact.kind === 'date' ? fullTime(plan.updated_at) : undefined;
+  // A date's full time is the card's tooltip (the words stay the home's: "Today", "Yesterday", "Nov 15").
+  const time = fact.kind === 'date' ? plan.updated_at : undefined;
+  const kind = spaceKind(plan);
+  const thumb = useThumbDraws(plan, list) ? <SpaceThumb plan={plan} /> : undefined;
   // A failed write puts the pin back and the window's toast says so (the store).
   const pin = () => void setPlanPin(plan.id, !pinned);
   const action = (
@@ -400,12 +413,12 @@ const SpaceItem = memo(function SpaceItem({ plan, work, size, list, secondary, p
   );
   // While its agent works on it, the agent's mark breathes beside the fact (the frame's `breathe`).
   const factMark = fact.kind === 'working' ? <HostMark host={fact.host} /> : undefined;
-  const common = { kind: spaceKind(plan), title: plan.name, href: `#plans=${encodeURIComponent(plan.id)}`, linkComponent: SpaceLink, fact: words, factMark, factTone: fact.kind === 'move' ? ('action' as const) : ('default' as const), unread: spaceUnread(plan), time, action, pinned };
+  const common = { kind, title: plan.name, href: `#plans=${encodeURIComponent(plan.id)}`, linkComponent: SpaceLink, fact: words, factMark, factTone: fact.kind === 'move' ? ('action' as const) : ('default' as const), working: fact.kind === 'working', unread: spaceUnread(plan), time, action, pinned };
   const face = plan.head_version_number >= 1 ? <SpaceFace plan={plan} /> : null;
   const box = (
-    <div className={list ? 'ib-spc-item ib-spc-rowitem' : 'ib-spc-item'} role="listitem" data-card-key={plan.id} data-space={plan.id}>
+    <div className={list ? 'ib-spc-item ib-spc-rowitem' : 'ib-spc-item'} role={list ? 'listitem' : undefined} data-card-key={plan.id} data-space={plan.id}>
       <div className="ib-spc-in">
-        {list ? <CardRow {...common} secondary={secondary} face={face} thumb={plan.head_version_number >= 1 ? <SpaceThumb plan={plan} /> : undefined} /> : <Card {...common} face={face} size={size} />}
+        {list ? <CardRow {...common} secondary={secondary} thumb={thumb} /> : <Card {...common} face={face} size={size} />}
       </div>
     </div>
   );
@@ -426,6 +439,23 @@ const SpaceItem = memo(function SpaceItem({ plan, work, size, list, secondary, p
   );
 });
 
+/**
+ * Whether a row's thumbnail draws the plan's own face (`SpaceThumb`); when it would not, the row is given none and the
+ * card draws its kind's glyph. An HTML page never (no frame in a row); a picture or a diagram once its face is read
+ * and is one that draws (a picture the list draws; a diagram not cut, and a Mermaid one that could load nothing).
+ */
+function useThumbDraws(plan: PlanSummary, list: boolean): boolean {
+  const kind = plan.primary_kind ?? 'markdown';
+  const head = plan.head_version_number >= 1 ? plan.head_version_number : null;
+  const drawn = kind === 'image' || kind === 'mermaid' || kind === 'graphviz';
+  const face = useFaceText(plan.id, list && drawn ? head : null);
+  if (!list || head === null || kind === 'html') return false;
+  if (!drawn) return true;
+  if (!face) return false;
+  if (kind === 'image') return !!face.picture;
+  return face.text !== null && !face.cut && !(kind === 'mermaid' && mermaidMayLoad(face.text));
+}
+
 /** A card's link: the plan's address; a plain click opens it with the face growing into the page. */
 function SpaceLink({ href, className, children, ...rest }: CardLinkProps) {
   const open = (e: MouseEvent<HTMLAnchorElement>) => {
@@ -433,7 +463,7 @@ function SpaceLink({ href, className, children, ...rest }: CardLinkProps) {
     const card = e.currentTarget.closest<HTMLElement>('[data-card-key]');
     if (!card?.dataset.cardKey) return;
     e.preventDefault();
-    openSpace(card.dataset.cardKey, card.querySelector<HTMLElement>('[data-card-face]'));
+    openSpace(card.dataset.cardKey, card.querySelector<HTMLElement>('[data-frame-card-well]'));
   };
   return (
     <a href={href} className={className} {...rest} onClick={open}>
