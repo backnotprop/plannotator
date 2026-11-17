@@ -298,6 +298,8 @@ describe('card layout rules in frame.css', () => {
     expect(block('[data-frame-card-row]')).toContain('height: 44px;');
     expect(block('[data-frame-card-row]', phone)).toContain('height: 52px;');
     expect(block('[data-frame-card-row] [data-frame-card-secondary]', phone)).toContain('display: none;');
+    expect(block('  [data-frame-card-row]', phone)).toContain('grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);');
+    expect(block('  [data-frame-card-row][data-frame-card-columns~="secondary"]', phone)).toContain('grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);');
     expect(css).not.toMatch(/max-width: 639px|max-width: 640px/);
   });
 
@@ -328,7 +330,7 @@ describe('card layout rules in frame.css', () => {
     expect(css).toMatch(ring);
     expect(css).not.toMatch(/\[data-frame-card\]:has\(:focus-visible\)/);
     expect(motionsCss).not.toMatch(/:has\(:focus-visible\)/);
-    expect(motionsCss).toMatch(/:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\)\) \.frame-card-fan/);
+    expect(motionsCss).toContain('\n[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) .frame-card-fan {');
   });
 
   test('the updates pill shows a pointer and is 20 px tall, the heading line, with a 24 px hit area that takes no room', () => {
@@ -377,11 +379,15 @@ describe('card layout rules in frame.css', () => {
     expect(block('[data-frame-card-trail] > [data-frame-card-action]')).toContain('position: absolute;');
     expect(block('[data-frame-card-trail] > [data-frame-card-action]')).toContain('right: calc(100% + 6px);');
     expect(css).not.toMatch(/\[data-frame-card-(line|end|trail)\][^{]*\{[^}]*opacity: 0;/);
-    expect(block('[data-frame-card-row]:is(:hover, :has(:focus-visible)) [data-frame-card-action]')).toContain('opacity: 1;');
+    expect(block('[data-frame-card-row]:has(:focus-visible) [data-frame-card-action]')).toContain('opacity: 1;');
+    const hoverOnly = [...css.matchAll(/@media \(hover: hover\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!).join('\n');
+    expect(block('  [data-frame-card]:hover [data-frame-card-action],\n  [data-frame-card-row]:hover [data-frame-card-action]', hoverOnly)).toContain('opacity: 1;');
     const actionRules = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map(([, selector]) => selector!).filter((selector) => selector.includes('[data-frame-card-action]') && selector.includes('[data-frame-card-row]'));
     for (const selector of actionRules) expect(selector).not.toContain(':focus-within');
-    const noHover = css.slice(css.indexOf('@media (hover: none) {\n  [data-frame-card-row]'));
-    expect(noHover).toContain('padding-inline-end: 20px;');
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"] [data-frame-card-secondary],\n[data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-columns~="secondary"]) > :nth-child(2)')).toContain('padding-inline-end: 20px;');
+    expect(block('  [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2)', phone)).toContain('padding-inline-end: 20px;');
+    const clearance = [...css.matchAll(/([^{}]+)\{[^{}]*padding-inline-end: 20px[^{}]*\}/g)].map(([, selector]) => selector!);
+    for (const selector of clearance) expect(selector).not.toMatch(/hover|focus|pinned|action-rest/);
   });
 
   test('a host focus outline of ordinary weight does not draw a second ring on a card or row link', () => {
@@ -425,22 +431,26 @@ describe('card layout rules in frame.css', () => {
     expect(title).toContain('text-decoration: underline;');
     expect(title).toContain('text-underline-offset: 3px;');
     expect(title).not.toContain('color:');
-    expect(block('[data-frame-card-row]:hover')).toBe('[data-frame-card-row]:hover {\n  background: var(--frame-surface-hover);\n');
+    expect(css).toContain('@media (hover: hover) {\n  [data-frame-card-row]:hover {\n    background: var(--frame-surface-hover);\n  }\n}');
   });
 
-  test('no row ever draws an edge: no shadow, border, outline, gradient or drawn pseudo-element in frame.css or motions.css, and no such classes on a row in Card.tsx', () => {
+  test('no row ever draws an edge: no shadow but the thumbnail ring, no border, outline, gradient or drawn pseudo-element on any part of a row, in frame.css, motions.css or the row code', () => {
     const rules = (source: string) => [...source.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => [selector!.trim(), body!] as const);
-    const rowish = /\[data-frame-card-(row|rows|trail|end|line|title|secondary|dot)\]/;
-    const checked = [...rules(frameCss), ...rules(motionsCss)].filter(([selector]) => rowish.test(selector) && !selector.includes('[data-frame-card]:') && !/^\[data-frame-card\] /.test(selector));
-    expect(checked.length).toBeGreaterThan(15);
+    const rowish = /\[data-frame-card-(row|rows|trail|end|line|title|secondary|dot|thumb|pinned-mark|action)\]/;
+    const checked = [...rules(frameCss), ...rules(motionsCss)].filter(([selector]) => rowish.test(selector) && !/(^|,\s*)\[data-frame-card\]/.test(selector));
+    expect(checked.length).toBeGreaterThan(20);
     for (const [selector, body] of checked) {
-      expect(body).not.toMatch(/\bbox-shadow:/);
-      expect(body).not.toMatch(/\b(border|outline)(-[a-z]+)?:(?!\s*none;)/);
+      for (const [, shadow] of body.matchAll(/\bbox-shadow:\s*([^;]*);/g)) {
+        let flat = shadow!;
+        while (/\([^()]*\)/.test(flat)) flat = flat.replace(/\([^()]*\)/g, '');
+        expect(flat).toMatch(/^inset 0 0 0 1px [^,]+$/);
+      }
+      expect(body).not.toMatch(/\b(border(?![a-z-]*radius)|outline)(-[a-z]+)?:(?!\s*none;)/);
       expect(body).not.toMatch(/gradient\(/);
-      expect(selector).not.toMatch(/\[data-frame-card-row\][^,]*::?(before|after)/);
+      expect(selector).not.toMatch(/::?(before|after)/);
     }
     const tsx = readFileSync(join(folder, 'card', 'Card.tsx'), 'utf8');
-    const rowSource = ['export function CardRow(', 'export function CardRows(', 'function GreyLine(', 'function Dot('].map((start) => {
+    const rowSource = ['export function CardRow(', 'export function CardRows(', 'function GreyLine(', 'function Dot(', 'function Thumb(', 'function Glyph(', 'function PinnedMark(', 'function Blank('].map((start) => {
       const at = tsx.indexOf(start);
       expect(at).toBeGreaterThan(-1);
       return tsx.slice(at, tsx.indexOf('\n}\n', at));
@@ -449,13 +459,43 @@ describe('card layout rules in frame.css', () => {
     for (const source of rowSource) {
       const literals = [...source.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map(([, plain, template]) => plain ?? template ?? '');
       for (const classes of literals) {
-        const words = classes.split(/\s+/);
-        for (const word of words) {
-          expect(word).not.toMatch(/^(?:[a-z-]+:)*(border|ring|shadow|inset-shadow|outline-(?!none)|bg-(linear|radial|conic|gradient)|from-|via-|to-)/);
-          expect(word).not.toMatch(/^(?:[a-z-]+:)*after:/);
-          expect(word).not.toMatch(/^(?:[a-z-]+:)*before:(bg|border|shadow|ring|from|via|to|w-|h-|inset-y|left-|right-)/);
+        for (const word of classes.split(/\s+/)) {
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*(border|ring|shadow|inset-shadow|outline-(?!none)|bg-(linear|radial|conic|gradient)|from-|via-|to-)/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*bg-\[[^\]]*gradient/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*\[(box-shadow|border|outline|background)/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*after:/);
+          expect(word).not.toMatch(/^(?:[a-z0-9-]+:)*before:(bg|border|shadow|ring|from|via|to|w-|h-|inset-y|left-|right-|\[)/);
         }
       }
     }
+  });
+
+  test('hover styles of cards, rows and the pill apply only on screens with hover, so a tap leaves none behind', () => {
+    const outside = (source: string) => source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/@media \((hover: hover|prefers-reduced-motion: reduce)\) \{[\s\S]*?\n\}/g, '');
+    for (const source of [frameCss, motionsCss]) {
+      const hovered = [...outside(source).matchAll(/([^{}]+)\{/g)].map(([, selector]) => selector!.trim()).filter((selector) => selector.includes(':hover') && selector.includes('[data-frame-card'));
+      expect(hovered).toEqual([]);
+    }
+    expect(css).toContain('@media (hover: hover) {\n  [data-frame-card]:hover {');
+    expect(css).toContain('@media (hover: hover) {\n  [data-frame-card-updates]:hover {');
+    expect(motionsCss).toContain('@media (hover: hover) {\n  [data-frame-card]:hover .frame-card-fan {');
+  });
+
+  test('a row shows one pin at a time: the card\'s mark is hidden whenever the action shows, with hover or without', () => {
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]:has(:focus-visible) [data-frame-card-pinned-mark]')).toContain('visibility: hidden;');
+    const hoverOnly = [...css.matchAll(/@media \(hover: hover\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!).join('\n');
+    expect(block('  [data-frame-card-row][data-frame-card-columns~="action"]:hover [data-frame-card-pinned-mark]', hoverOnly)).toContain('visibility: hidden;');
+    const noHover = css.slice(css.indexOf('@media (hover: none) {\n  [data-frame-card-row]'));
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-rows][data-frame-card-action-rest=\"never\"] *) [data-frame-card-pinned-mark]', noHover)).toContain('visibility: hidden;');
+  });
+
+  test('without hover, actionAtRest touch (the default) shows each row action at rest with 20 px clear before it; never shows none until keyboard focus and keeps the pin', () => {
+    const never = '[data-frame-card-rows][data-frame-card-action-rest=\"never\"] *';
+    const noHover = [...css.matchAll(/@media \(hover: none\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!).join('\n');
+    expect(block(`  [data-frame-card] [data-frame-card-action],\n  [data-frame-card-row]:not(${never}) [data-frame-card-action]`, noHover)).toContain('opacity: 1;');
+    expect(block(`[data-frame-card-row]:is(${never}):not(:has(:focus-visible)) [data-frame-card-action]`, noHover)).toContain('pointer-events: none;');
+    expect(noHover).not.toMatch(/\[data-frame-card-row\]:is\(\[data-frame-card-rows\]\[data-frame-card-action-rest="never"\] \*\)[^{]*\{[^}]*(opacity: 1|visibility: hidden)/);
+    expect(block('\n[data-frame-card-action]')).toContain('opacity: 0;');
+    expect(block('[data-frame-card-row]:has(:focus-visible) [data-frame-card-action]')).toContain('opacity: 1;');
   });
 });

@@ -605,6 +605,23 @@ describe.skipIf(!hasDom)('CardRow', () => {
     }
   });
 
+  test('CardRows tells its rows what to show at rest without hover: the action by default, or nothing with never', () => {
+    const { CardRow, CardRows } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRows label="Default">
+          <CardRow kind="document" title="One" href="/1" />
+        </CardRows>
+        <CardRows label="Menu" actionAtRest="never">
+          <CardRow kind="document" title="Two" href="/2" />
+        </CardRows>
+      </>,
+    );
+    const [plain, never] = [...frame.querySelectorAll('ul')];
+    expect(plain!.getAttribute('data-frame-card-action-rest')).toBe('touch');
+    expect(never!.getAttribute('data-frame-card-action-rest')).toBe('never');
+  });
+
   test('CardRows passes the host its class name, data attributes and other list props', () => {
     const { CardRow, CardRows } = cardModule!;
     const frame = mount(

@@ -206,8 +206,10 @@
 [data-frame-card] {
   box-shadow: 0 0 0 1px var(--frame-card-ring);
 }
-[data-frame-card]:hover {
-  box-shadow: 0 0 0 1px var(--frame-card-ring-hover), 0 10px 24px -14px color-mix(in oklch, var(--frame-shadow-ink) 30%, transparent);
+@media (hover: hover) {
+  [data-frame-card]:hover {
+    box-shadow: 0 0 0 1px var(--frame-card-ring-hover), 0 10px 24px -14px color-mix(in oklch, var(--frame-shadow-ink) 30%, transparent);
+  }
 }
 [data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) {
   box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--primary);
@@ -385,10 +387,13 @@
 /*
  * Rows. Nothing in a row moves when a row is pinned, unpinned or hovered:
  * every row's trailing text ends 10 px from its edge. The host's action
- * shows just before the trailing text, over the room the grey line leaves,
- * on hover or keyboard focus; on screens without hover it always shows
- * there, and the text before it keeps 20 px clear. A pinned row's resting
- * mark is the card's own pin after the title.
+ * (28 px wide) shows just before the trailing text, over the room the grey
+ * line leaves, on hover or keyboard focus, and the text before it always
+ * keeps 20 px clear for it. On a screen without hover a CardRows with
+ * actionAtRest "touch" (the default, and any row outside a CardRows) also
+ * shows it at rest; with "never" it shows only on keyboard focus. Hover
+ * styles apply only where the screen has hover, so a tap leaves none behind. A pinned row's resting mark
+ * is the card's pin after the title, never drawn while the action shows.
  */
 [data-frame-card-row] {
   height: 44px;
@@ -406,12 +411,24 @@
   [data-frame-card-row]:not(:hover, :has(:focus-visible)) [data-frame-card-action] {
     pointer-events: none;
   }
+  [data-frame-card-row][data-frame-card-columns~="action"]:hover [data-frame-card-pinned-mark] {
+    visibility: hidden;
+  }
+}
+[data-frame-card-row][data-frame-card-columns~="action"]:has(:focus-visible) [data-frame-card-pinned-mark] {
+  visibility: hidden;
 }
 @media (hover: none) {
-  [data-frame-card-row][data-frame-card-columns~="action"] [data-frame-card-secondary],
-  [data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-columns~="secondary"]) > :nth-child(2) {
-    padding-inline-end: 20px;
+  [data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-rows][data-frame-card-action-rest="never"] *) [data-frame-card-pinned-mark] {
+    visibility: hidden;
   }
+  [data-frame-card-row]:is([data-frame-card-rows][data-frame-card-action-rest="never"] *):not(:has(:focus-visible)) [data-frame-card-action] {
+    pointer-events: none;
+  }
+}
+[data-frame-card-row][data-frame-card-columns~="action"] [data-frame-card-secondary],
+[data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-columns~="secondary"]) > :nth-child(2) {
+  padding-inline-end: 20px;
 }
 [data-frame-card-row] [data-frame-card-title] {
   font-size: 14px;
@@ -424,16 +441,16 @@
 @media (max-width: 767px) {
   [data-frame-card-row] {
     height: 52px;
-    grid-template-columns: 36px minmax(0, 1fr) auto;
+    grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);
   }
   [data-frame-card-row][data-frame-card-columns~="secondary"] {
-    grid-template-columns: 36px minmax(0, 1fr) auto;
+    grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);
   }
   [data-frame-card-row] [data-frame-card-secondary] {
     display: none;
   }
 }
-@media (max-width: 767px) and (hover: none) {
+@media (max-width: 767px) {
   [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2) {
     padding-inline-end: 20px;
   }
@@ -456,16 +473,20 @@
   position: absolute;
   inset: -2px 0;
 }
-[data-frame-card-updates]:hover {
-  background: color-mix(in oklch, var(--primary) 16%, transparent);
+@media (hover: hover) {
+  [data-frame-card-updates]:hover {
+    background: color-mix(in oklch, var(--primary) 16%, transparent);
+  }
 }
 [data-frame-card-updates]:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
-[data-frame-card-row]:hover {
-  background: var(--frame-surface-hover);
+@media (hover: hover) {
+  [data-frame-card-row]:hover {
+    background: var(--frame-surface-hover);
+  }
 }
 [data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) {
   background: color-mix(in oklch, var(--primary) 16%, transparent);
@@ -480,12 +501,19 @@
 [data-frame-card-action] {
   opacity: 0;
 }
-[data-frame-card]:is(:hover, :has(:focus-visible), [data-frame-card-pinned]) [data-frame-card-action],
-[data-frame-card-row]:is(:hover, :has(:focus-visible)) [data-frame-card-action] {
+[data-frame-card]:is(:has(:focus-visible), [data-frame-card-pinned]) [data-frame-card-action],
+[data-frame-card-row]:has(:focus-visible) [data-frame-card-action] {
   opacity: 1;
 }
+@media (hover: hover) {
+  [data-frame-card]:hover [data-frame-card-action],
+  [data-frame-card-row]:hover [data-frame-card-action] {
+    opacity: 1;
+  }
+}
 @media (hover: none) {
-  [data-frame-card-action] {
+  [data-frame-card] [data-frame-card-action],
+  [data-frame-card-row]:not([data-frame-card-rows][data-frame-card-action-rest="never"] *) [data-frame-card-action] {
     opacity: 1;
   }
 }

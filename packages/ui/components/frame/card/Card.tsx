@@ -58,7 +58,8 @@ interface CardCommonProps {
   readonly time?: Date | string;
   /**
    * The host's own control (for example a pin button), beside the link and never inside it: top right of the
-   * card's preview, the right end of a row. Shown on hover and focus, always on touch and while `pinned`.
+   * card's preview, the right end of a row. Shown on hover and keyboard focus; on a card also while `pinned` and
+   * always on touch; on a row on touch as its `CardRows`' `actionAtRest` says.
    */
   readonly action?: ReactNode;
   /** Visual state only: keeps `action` shown and adds "pinned" to the spoken name. The host owns the click. */
@@ -673,23 +674,27 @@ const GridColumns = createContext<number | null>(null);
 const CARD_GRID_ROW_GAP: Record<CardSize, number> = { large: 28, regular: 44 };
 
 /**
- * A list of `CardRow`s. While no row in it is pinned, a row's action shows
- * over the end of its grey line on hover and focus, so every date ends at the
- * row's edge; once any row is pinned, every row keeps a column for it, so the
- * dates still line up.
+ * A list of `CardRow`s. No row keeps room for its action: every fact or date
+ * ends at the row's edge, and a row's action shows just before it on hover or
+ * keyboard focus, where the text before it always keeps 20 px clear. `actionAtRest` says what a screen without hover shows at
+ * rest: `"touch"` (the default) shows each row's action, so touch can reach
+ * it; `"never"` shows none, for a host that gives touch another way in, such
+ * as a long-press menu, and pinned rows then keep the card's pin.
  */
 export function CardRows({
   children,
   label,
+  actionAtRest = "touch",
   ref,
   ...rest
 }: Omit<ComponentPropsWithoutRef<"ul">, "children" | "aria-label" | "dangerouslySetInnerHTML"> & {
   readonly children: ReactNode;
   readonly label?: string;
+  readonly actionAtRest?: "touch" | "never";
   readonly ref?: Ref<HTMLUListElement>;
 }) {
   return (
-    <ul {...rest} ref={ref} aria-label={label} data-frame-card-rows="">
+    <ul {...rest} ref={ref} aria-label={label} data-frame-card-rows="" data-frame-card-action-rest={actionAtRest}>
       {Children.map(children, (child) => (present(child) ? <li className="min-w-0">{child}</li> : null))}
     </ul>
   );
