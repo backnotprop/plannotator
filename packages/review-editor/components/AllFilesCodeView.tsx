@@ -1070,6 +1070,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // (a path can own several items when a diff renders it twice), so the path
   // alone cannot answer "did we move down?".
   const visibleItemIdRef = useRef<string | null>(null);
+  const visibleOffsetRef = useRef(0);
   // The item the reader has left but whose pass geometry has not resolved yet.
   const passCandidateItemRef = useRef<string | null>(null);
   // Whether a REAL scroll has happened on the current file set. The at-bottom
@@ -1276,7 +1277,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // Stable identity of the current diff. Changes whenever the file set or any
   // file's patch CONTENT changes (diff type / base / whitespace / PR switch),
   // and is used as the CodeView `key` to force a remount + fresh seed.
-  const fileSetKey = useMemo(
+  const contentKey = useMemo(
     // prUrl/prDiffScope are part of the key so a pure scope switch (layer ↔
     // full-stack, same file set) remounts and re-seeds annotations through the
     // current scope filter — the incremental sync bails on an unchanged
@@ -1294,6 +1295,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => `${fileOrder ?? 'tree'}:${seedCollapsed ? 'c' : 'e'}:g${generatedKey ? hashString(generatedKey) : ''}:${prUrl ?? ''}:${prDiffScope ?? ''}:${reviewSnapshotId ?? ''}:${files.length}:${files.map((f, i) => `${f.path}#${patchHashes[i]}`).join('|')}`,
     [files, patchHashes, prUrl, prDiffScope, reviewSnapshotId, fileOrder, seedCollapsed, generatedKey],
   );
+  const fileSetKey = `${contentKey}:${semDiffClient ? 'sem' : 'plain'}`;
+  const restoredContentKeyRef = useRef(contentKey);
 
   // CodeView seeds its items once per mount (keyed on fileSetKey): a new mount
   // starts previewed files hunkless. An identity rebuilt without a remount
@@ -1537,11 +1540,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // to it (rAF lets the seed render settle first). Matters most for the
     // staleness-refresh flow — "Refresh" must not dump the user at the top.
     const previousVisible = visibleFileRef.current;
+    const offset = restoredContentKeyRef.current === contentKey ? -visibleOffsetRef.current : 0;
+    restoredContentKeyRef.current = contentKey;
     if (previousVisible) {
       const restoreId = filePathToItemId.get(previousVisible);
       if (restoreId != null) {
         requestAnimationFrame(() => {
-          viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start' });
+          viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start', offset });
         });
       }
     }
@@ -3183,6 +3188,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       bestId = rendered[rendered.length - 1].id;
     }
     const path = itemIdToFilePath.get(bestId) ?? null;
+    visibleOffsetRef.current = Math.max(0, scrollTop - (viewer.getTopForItem(bestId) ?? scrollTop));
     if (path !== visibleFileRef.current) {
       // Auto-mark-viewed (Rule 1): the file the reader just left becomes a
       // PASS CANDIDATE. It is not marked yet — the geometry still has to say
