@@ -111,6 +111,13 @@ describe("the agent door", () => {
     expect((await w.door(phoneToken, "read_thread", {})).code).toBe("device_not_an_agent");
   });
 
+  test("a routine (the person's /create-routine in its thread) is refused with why: it would run an agent on the person's computer", async () => {
+    const w = await world();
+    const { pairing } = await w.pair();
+    const refused = await w.door(pairing.token, "routine", { op: "create", name: "Dependency check", prompt: "Check.", schedule: null });
+    expect(refused.error).toBe("tool_not_allowed: routine: a routine runs an agent on the person's computer, and you run elsewhere, so nothing was written. Tell the person to make it in Routines in the Inbox, or to ask an agent on their computer.");
+  });
+
   test("it cannot set its identity or name a folder; a path is refused and uploaded bytes are attached", async () => {
     const w = await world();
     const { agent, pairing } = await w.pair("claude-routine", "Fixer");

@@ -638,6 +638,7 @@ packages/inbox/broRevealApp.test.tsx
 packages/inbox/grillMeTip.test.tsx
 packages/inbox/personalAgentsIntro.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
+packages/inbox/routinesIntro.test.tsx
 packages/inbox/tabIconChoice.test.tsx
 packages/inbox/themeChooser.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
@@ -818,6 +819,7 @@ packages/inbox/scheduled/scheduledRows.test.tsx
 packages/inbox/scheduled/scheduledActions.test.tsx
 packages/inbox/scheduled/routineAutosave.test.tsx
 packages/inbox/scheduled/routineTabs.test.tsx
+packages/inbox/createRoutineWindow.test.tsx
 packages/inbox/plans/plansSidebar.test.tsx
 packages/inbox/plans/plansPage.test.tsx
 packages/inbox/plans/spacesHome.test.tsx

@@ -212,6 +212,7 @@ import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-r
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
+import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
 import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
 import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
@@ -310,6 +311,7 @@ import {
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
+import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
@@ -1180,6 +1182,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `toWindow`), with the device that asked: a paired phone answers a permission prompt as a window does; a linked
   // machine does for a press in a window there (`window`), and may start, stop or trust for one (remote launch).
   const fromDeviceDoor = new WeakMap<Request, InboxDoorCaller>();
+  // The person's Send of /create-routine: a one-time grant on its thread, so the routine it asks for is made on
+  // (inbox-routine-grants.ts). Only the person's own call mints one, by the bar a permission prompt's answer has: a
+  // window's (its Origin, this Host and serverSession), a paired phone's, or a linked machine's for a press in a window
+  // there. An agent's bare call to the same Send routes writes as the person but never mints. Only a session the Send
+  // went to takes it, read when the create comes: its owner by the store's rule, a session it tags, and a launched
+  // thread's agent (its session is known only once it started).
+  const routineGrants = createRoutineGrants(sendRecipients(store));
+  const noteSend = (req: Request, body: Record<string, unknown>, message: InboxMessage) => {
+    const door = fromDeviceDoor.get(req);
+    if (door ? door.platform !== MACHINE_PLATFORM || door.window : isWindowRequest(req, body, serverSession)) routineGrants.noteSend(message);
+  };
   // A PR's close, reopen or merge through the door: only a linked machine's, sent with its window's mark (mark `pulls`).
   // The mark stops a bare call there, not a program there that imitates the window (inbox-launch.md "Accepted, not defended").
   const pullWriteFromWindow = (req: Request): boolean => {
@@ -1636,6 +1649,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Routines: the routine tool is listed and served only while the person has them on.
     scheduledOn: () => scheduledCap.on(),
     scheduled: () => scheduled,
+    routineGrants: () => routineGrants,
     // A thread's PRs: the reader's live checks, and a read of the PRs an agent just added.
     pulls: threadPullStates,
     projectHost: projectRepoHost,
@@ -3341,9 +3355,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return starAskOpen(readStarAskRecord(config), (config as { starAsk?: unknown }).starAsk);
   };
   const starAsk = createStarAsk({ store: configStarAskStore, run: runGh, enabled: () => starAskEnabled(), returning: () => true });
-  const lineOffers: Partial<Record<RevealId, () => boolean>> = {
+  const lineOffers: Partial<Record<RevealId, (state?: RevealState, now?: Date) => boolean>> = {
     code_review: codeReviewUndecided,
     board: boardUndecided,
+    // Routines (shared/inbox/routines-intro.ts): offered here and never decided, no routine made, launches on, and three
+    // good days of sends. Read once the routines module exists (`routinesIntroUndecided`), on a release build only.
+    // Inside the line's state (`state`, `now`), the walk waits while the line would refuse it anyway (its tenure).
+    routines: (state, now) => routinesIntroUndecided(state && now ? () => routinesIntroWaits(state, now) : undefined),
     steps: stepsUndecided,
     agent_rules: agentRulesUnset,
     personal_agents: noPersonalAgent,
@@ -3410,6 +3428,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   /** Voice's who (inbox-voice.ts), read once the voice module exists. */
   let voiceIntroOpen: () => boolean = () => false;
+  /** The Routines intro's who (shared/inbox/routines-intro.ts), read once the routines switch and launch exist. */
+  let routinesIntroUndecided: (waits?: () => boolean) => boolean = () => false;
+  /** The times of the person's own sends in this store, thread by thread in the store's order, oldest first (the intro's walk). */
+  const personSends = function* (): Generator<string> {
+    for (const threadId of store.threadIds())
+      for (const id of store.threadMessageIds(threadId)) {
+        const message = store.message(id);
+        if (message && routinesIntroSend(message)) yield message.created_at;
+      }
+  };
+  /** The intro's three good days: walked until found, then kept. */
+  const routinesGoodDays = routinesIntroGoodDaysOnce(personSends);
   const revealState = (now: Date, load: string | null = null): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
@@ -3417,7 +3447,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
     const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
     // Version 1 of the list dialog, kept under `before` when version 2 became due (inbox-list-intro.ts).
-    const offers = Object.fromEntries(Object.entries(lineOffers).map(([id, undecided]) => [id, !lineOfferSaved(id as RevealId)?.shownAt && undecided!()]));
     const open: RevealState["open"] = {
       // The update-day dialogs: who they are for was decided at a release start (and is kept until claimed).
       sound: soundState().dialog_due,
@@ -3427,7 +3456,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
       // dialog before the Board was a switch: the reveal offers it to them too (`claimReveal`). The Checklist
       // (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board need not be on.
-      ...offers,
+      // The offers are read below, once the line's stamps are known.
     };
     const state: RevealState = {
       release: snoozeIntroRelease,
@@ -3436,8 +3465,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxListIntro?.before), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
       dayShownAt: reveals?.dayShownAt ?? null,
       notNowAt: reveals?.notNowAt ?? null,
-      // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
-      heavy: snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now),
+      // Read below, once the offers are known.
+      heavy: false,
       // Roots in the store. The onboarding tour's threads live in the window only (tour/content), never here.
       threads: store.threadIds().length,
       open,
@@ -3448,6 +3477,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
       tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
     };
+    // The offers, each one's "undecided" while unshown. They read the state above (Routines' walk waits while the line
+    // would refuse it anyway), so they come after it.
+    for (const [id, undecided] of Object.entries(lineOffers)) open[id as RevealId] = !lineOfferSaved(id as RevealId)?.shownAt && undecided!(state, now);
+    // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
+    state.heavy = snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
     if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now) && revealGrillMeGap(grillMeUse());
@@ -4498,6 +4532,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session), ...antigravityWake.uncertainItems(session)],
     // A session that is an agent with a face (its conversation's earlier id, its launch): its threads show that face too.
     firstSeen: agentFirstSeen,
+    onSent: noteSend,
     onPoll: (session, continues) =>
       agentFacesFile.link(session, () => [
         ...continues,
@@ -4811,6 +4846,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   scheduled.sync();
   if (scheduledCap.on()) void scheduledCap.syncLogin();
+  routinesIntroUndecided = (waits) =>
+    snoozeIntroRelease &&
+    routinesIntroOpen({
+      supported: scheduledCap.wire().scheduled_threads !== undefined,
+      saved: () => options.scheduled ?? loadConfig().inboxScheduledThreads,
+      routineMade: () => store.scheduledEverMade(),
+      launchOn: () => launch.settingsState().enabled,
+      waits,
+      goodDays: routinesGoodDays,
+    });
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
   // Compose: a new thread the person starts with a live agent, drafts and uploads (packages/server/inbox-compose.ts).
@@ -4857,6 +4902,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
+    onSent: noteSend,
   });
   compose.sweep();
   const liveReview = createInboxLiveReview({
@@ -6624,7 +6670,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const searched = await search.handle(req, url);
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on() });
       if (skills) return skills;
 
       // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).
@@ -7296,6 +7342,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               }
               throw error;
             }
+            // A /create-routine Send's grant, before its session (a new one too) can read the reply.
+            if (!result.replayed) noteSend(req, body, result.reply);
             // Written: the new session starts before anything else this Send tidies, so nothing after can leave it unstarted.
             replyLaunch.settle(launching, { message: result.reply, replayed: result.replayed });
             // The Send that carried the reply box's draft: its words go (a replay too, since the first one sent them)
