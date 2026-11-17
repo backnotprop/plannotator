@@ -417,14 +417,21 @@ describe('card layout rules in frame.css', () => {
     expect(weight(rule)).toBe(300);
   });
 
-  test('a focused row keeps the 12% tint and gains a 3 px primary bar at its leading edge, drawn as a shadow; no outline or border', () => {
+  test('keyboard focus on a row fills it more than hover and underlines its title; hover is unchanged; no row draws an edge, outline or border in any state', () => {
     const focused = '[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *))';
-    expect(block(focused)).toContain('background: color-mix(in oklch, var(--primary) 12%, transparent);');
-    expect(block(focused)).toContain('box-shadow: inset 3px 0 0 var(--primary);');
-    expect(block(`${focused}:dir(rtl)`)).toContain('box-shadow: inset -3px 0 0 var(--primary);');
+    expect(block(focused)).toContain('background: color-mix(in oklch, var(--primary) 20%, transparent);');
+    const title = block(`${focused} [data-frame-card-title]`);
+    expect(title).toContain('text-decoration: underline;');
+    expect(title).toContain('text-underline-offset: 3px;');
+    expect(title).not.toContain('color:');
+    expect(block('[data-frame-card-row]:hover')).toContain('background: var(--frame-surface-hover);');
+    expect(block('[data-frame-card-row]:hover')).not.toContain('text-decoration');
+    const rowRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([selector]) => selector!.includes('[data-frame-card-row]'));
+    expect(rowRules.length).toBeGreaterThan(10);
+    for (const [, , body] of rowRules) {
+      expect(body).not.toMatch(/\bbox-shadow:/);
+      expect(body).not.toMatch(/\b(border|outline)(-[a-z]+)?:(?!\s*none;)/);
+    }
     expect(css).not.toContain('var(--primary-foreground)');
-    const rowRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => selector!.includes('[data-frame-card-row]'));
-    expect(rowRules.length).toBeGreaterThan(5);
-    for (const [, , body] of rowRules) expect(body).not.toMatch(/\b(border|outline)(-[a-z]+)?:(?!\s*none;)/);
   });
 });

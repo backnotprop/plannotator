@@ -492,11 +492,12 @@
   background: var(--frame-surface-hover);
 }
 [data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) {
-  background: color-mix(in oklch, var(--primary) 12%, transparent);
-  box-shadow: inset 3px 0 0 var(--primary);
+  background: color-mix(in oklch, var(--primary) 20%, transparent);
 }
-[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)):dir(rtl) {
-  box-shadow: inset -3px 0 0 var(--primary);
+[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) [data-frame-card-title] {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
 /* The host's action: shown on hover and focus, always on touch and while pinned */
