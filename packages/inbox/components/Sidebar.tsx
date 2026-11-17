@@ -564,7 +564,7 @@ export function Sidebar(props: SidebarProps) {
         </button>
         );
       case 'plans':
-        return <PlansNav on={props.page === 'plans'} onClick={pick(() => props.onPlans?.())} />;
+        return <PlansNav on={props.page === 'plans' && !props.projectId} onClick={pick(() => props.onPlans?.())} pick={pick} phone={phone} />;
       case 'scheduled':
         return <ScheduledNav on={props.page === 'scheduled'} onClick={pick(() => props.onScheduled?.())} />;
       case 'shape':
@@ -863,7 +863,7 @@ export function Sidebar(props: SidebarProps) {
           ) : (
             shown.map((project) => {
               const n = props.projectCounts.get(project.id) ?? 0;
-              const on = props.page === 'inbox' && props.projectId === project.id;
+              const on = (props.page === 'inbox' || props.page === 'plans') && props.projectId === project.id;
               if (projectsClosed && !on) return null;
               if (!props.onProjectAction) {
                 return (

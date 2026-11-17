@@ -16,7 +16,7 @@
 import { createPlanStore, type PlanStore } from "@plannotator/shared/plans/store";
 import { importPlanLibraryInSteps, type PlanImportReport } from "@plannotator/shared/plans/import";
 import { handlePlanRoute, PLANS_ROUTE_PREFIX } from "@plannotator/shared/plans/routes";
-import { plansOn, setPlansSwitch } from "@plannotator/shared/plans/switch";
+import { plansOn, setPlansSwitch, setSpacesView, spacesView } from "@plannotator/shared/plans/switch";
 import type { InboxCapability, InboxCore } from "./inbox-capability";
 
 const NO_STORE = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } as const;
@@ -120,7 +120,7 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
       }
       const answer = await handlePlanRoute(
         { method: req.method, pathname: url.pathname, params: url.searchParams, json: () => req.json() },
-        { store: storeOf(), importing: () => running !== null && !caughtUp, importError: () => importError },
+        { store: storeOf(), importing: () => running !== null && !caughtUp, importError: () => importError, view: { read: spacesView, save: setSpacesView } },
       );
       if (!answer) return null;
       if ("file" in answer) {

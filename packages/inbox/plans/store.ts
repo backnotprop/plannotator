@@ -6,7 +6,7 @@
  * pick up what plan review wrote since (packages/server/plans-capability.ts).
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import type { PlanSummary, PlanVersion } from '@plannotator/core/plans';
+import { planPinsWith, type PlanSummary, type PlanVersion, type SpacesView } from '@plannotator/core/plans';
 import type { SettingsModel } from '../api';
 import { InboxApiError } from '../apiError';
 import { plansApi, type PlanDiffTexts, type PlanRead } from './client';
@@ -22,9 +22,13 @@ export interface PlansSnapshot {
   off: boolean;
   /** The Inbox could not read the plan history (its message): the list holds what it read before. */
   importError: string | null;
+  /** The person's pinned plans, in their order. */
+  pins: readonly string[];
+  /** The Spaces home's view, the person's; null until the first read (an Inbox before Spaces: cards). */
+  view: SpacesView | null;
 }
 
-const EMPTY: PlansSnapshot = { plans: null, importing: false, error: null, off: false, importError: null };
+const EMPTY: PlansSnapshot = { plans: null, importing: false, error: null, off: false, importError: null, pins: [], view: null };
 let on = false;
 let snap = EMPTY;
 let reading: Promise<void> | null = null;
@@ -44,7 +48,8 @@ export function readPlans(retry = false): Promise<void> {
   if (!on) return Promise.resolve();
   if (reading) return reading;
   reading = plansApi.list(retry).then(
-    (answer) => emit({ plans: answer.plans, importing: answer.importing, error: null, off: false, importError: answer.import_error ?? null }),
+    // A pin or view written while this read was out wins: the read does not put back what it held before.
+    (answer) => emit({ plans: answer.plans, importing: answer.importing, error: null, off: false, importError: answer.import_error ?? null, ...(pinWrites > 0 ? {} : { pins: answer.pins ?? [] }), ...(viewWrites > 0 ? {} : { view: answer.view ?? 'cards' }) }),
     (error: unknown) => emit(isOff(error) ? { off: true, error: null } : { error: messageOf(error) }),
   );
   return reading.finally(() => {
@@ -78,7 +83,13 @@ export function usePlans(): PlansSnapshot {
   return useSyncExternalStore(subscribe, current, current);
 }
 
-/** The home page: reads again when it opens and when the window comes back into view. */
+/**
+ * How often the home reads the list again while it is shown and in view, so what an agent sends (plan review's next
+ * version, which a read also picks up) arrives on the open home (approval "plans-home": in place, its place held).
+ */
+export const PLANS_HOME_POLL_MS = 5000;
+
+/** The home page: reads again when it opens, every few seconds while in view, and when the window comes back into view. */
 export function usePlansPage(): PlansSnapshot {
   useEffect(() => {
     void readPlans();
@@ -86,7 +97,11 @@ export function usePlansPage(): PlansSnapshot {
       if (document.visibilityState === 'visible') void readPlans();
     };
     document.addEventListener('visibilitychange', back);
-    return () => document.removeEventListener('visibilitychange', back);
+    const timer = setInterval(back, PLANS_HOME_POLL_MS);
+    return () => {
+      document.removeEventListener('visibilitychange', back);
+      clearInterval(timer);
+    };
   }, []);
   return usePlans();
 }
@@ -96,6 +111,41 @@ export function usePlansOn(settings: Pick<SettingsModel, 'plans'> | null): boole
   const value = settings?.plans?.on === true;
   useEffect(() => setPlansOn(value), [value]);
   return value;
+}
+
+let pinWrites = 0;
+let viewWrites = 0;
+
+/**
+ * Pin a plan (at `index`, else last), move it, or unpin it: shown at once, then the Inbox's order. A failed write puts
+ * the order back and says why (the caller's toast or line).
+ */
+export async function setPlanPin(id: string, pinned: boolean, index: number | null = null): Promise<void> {
+  const before = snap.pins;
+  emit({ pins: planPinsWith(before, id, pinned, index) });
+  pinWrites++;
+  try {
+    const answer = await plansApi.pin(id, pinned, index);
+    emit({ pins: answer.pins });
+  } catch (error) {
+    emit({ pins: before });
+    throw error;
+  } finally {
+    pinWrites--;
+  }
+}
+
+/** The Spaces home's view: shown at once, kept for the person; a failed save keeps it for this window. */
+export async function setSpacesView(view: SpacesView): Promise<void> {
+  emit({ view });
+  viewWrites++;
+  try {
+    await plansApi.saveView(view);
+  } catch {
+    // config.json could not be written: the view holds for this window.
+  } finally {
+    viewWrites--;
+  }
 }
 
 /** A look was recorded: the plan is no longer "changed" in the list, before the next read says so. */
@@ -232,5 +282,7 @@ export function resetPlansForTests(plans: readonly PlanSummary[] | null = null, 
   if (pollTimer) clearTimeout(pollTimer);
   pollTimer = null;
   texts.clear();
+  pinWrites = 0;
+  viewWrites = 0;
   snap = { ...EMPTY, plans };
 }

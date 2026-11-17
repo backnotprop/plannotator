@@ -76,6 +76,7 @@ test.skipIf(!hasDom)('off: no Plans row, and nothing of it in the menu or Custom
   let host = sidebar(undefined);
   expect(host.querySelector('[data-plans-nav]')).toBeNull();
   expect(host.textContent).not.toContain('Plans');
+  expect(host.textContent).not.toContain('Spaces');
   expect(drawnSidebarItems({ board: true, reviews: true, shape: true, usage: true, phone: false }).has('plans')).toBe(false);
   expect(drawnSidebarItems({ board: true, plans: false, reviews: true, shape: true, usage: true, phone: false }).has('plans')).toBe(false);
   act(() => root?.unmount());
@@ -166,6 +167,7 @@ test.skipIf(!hasDom)('a window already open follows `plannotator plans` live: on
   expect(host.querySelector('[data-plans-nav]')).toBeNull();
   expect(window.location.hash).toBe('');
   expect(host.textContent).not.toContain('Plans');
+  expect(host.textContent).not.toContain('Spaces');
 });
 
 test.skipIf(!hasDom)('`plannotator plans` with a window open: the show frame names the Plans page for that window, never a thread', () => {

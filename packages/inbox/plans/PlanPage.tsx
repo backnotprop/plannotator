@@ -80,7 +80,7 @@ export function PlanPage(props: PlanPageProps) {
   useEffect(() => {
     void flushQueuedPlanSent().then((landed) => landed > 0 && onChanged());
   }, [props.id, onChanged]);
-  if (state.missing) return <PlansMessage title="This plan is not here" body="It may have been removed, or Plans was turned off." onBack={toList} />;
+  if (state.missing) return <PlansMessage title="This plan is not here" body="It may have been removed, or Spaces was turned off." onBack={toList} />;
   if (state.error) return <PlansMessage title="This plan could not be read" body={state.error} onRetry={() => setRetry((n) => n + 1)} onBack={toList} />;
   if (!state.read || !state.versions) return <PlansMessage busy title="Plan" body="Loading the plan…" onBack={toList} />;
   if (state.versions.length === 0) return <PlansMessage title={state.read.plan.name} body="This plan has no version yet." onBack={toList} />;
@@ -202,11 +202,11 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
       <PageHeader
         identity={
           onMain && project ? (
-            <Breadcrumbs root={{ label: 'Plans', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
+            <Breadcrumbs root={{ label: 'Spaces', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
           ) : onMain ? (
-            <Breadcrumbs collectionName="Plans" collectionLink={routeLink(plansRoute, { 'data-plans-back': '' })} path={read.plan.name} />
+            <Breadcrumbs collectionName="Spaces" collectionLink={routeLink(plansRoute, { 'data-plans-back': '' })} path={read.plan.name} />
           ) : (
-            <Breadcrumbs root={{ label: 'Plans', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
+            <Breadcrumbs root={{ label: 'Spaces', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
           )
         }
         actions={null}

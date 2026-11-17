@@ -29,16 +29,16 @@ export function PlansGetStarted({ onBack, importing, note }: { onBack?: () => vo
         {onBack && (
           <button type="button" className="ib-plans-back" onClick={onBack} data-plans-back="">
             <Icon name="chevL" />
-            Plans
+            Spaces
           </button>
         )}
       </div>
       <div className="ib-plans-words" ref={words}>
-        <p className="ib-plans-eyebrow">Plannotator Plans</p>
+        <p className="ib-plans-eyebrow">Plannotator Spaces</p>
         <h1 id={`${stepsId}-h`} tabIndex={-1}>
           What do you want to plan?
         </h1>
-        <p className="ib-plans-lede">Plan in your agent as usual. Every plan you review is kept here by itself, with each version and your decision.</p>
+        <p className="ib-plans-lede">Plan in your agent as usual. Every plan you review is kept here, on this computer, with each version, its files and your decision.</p>
         <button type="button" className="ib-plans-primary" aria-expanded={open} aria-controls={stepsId} onClick={() => setOpen((v) => !v)} data-plans-how="">
           <Icon name="arrowRight" />
           Start a plan

@@ -229,6 +229,51 @@ export interface PlanIndexLine {
   /** Where the main page's approval stands on its newest version (`planApprovalState`); absent from an older line. */
   approval?: PlanApprovalState;
   counts: { documents: number; versions: number; comments: number; artifacts: number; events: number };
+  /** The main page's kind (its face on the Spaces home); absent from an older line: read as Markdown. */
+  primary_kind?: PlanDocumentKind;
+  /** Who wrote the main page's newest version (`person`: the person's own edit or Restore); absent from an older line. */
+  head_source?: PlanVersionSource | null;
+  /** The main page's version numbers that hold a decision of the person's (approved or changes asked), oldest first. */
+  decided_versions?: number[];
+}
+
+/** The person's pinned plans, in their order (`pins.json`, written whole), and the Spaces home's view. */
+export interface PlanPins {
+  v: 1;
+  ids: string[];
+}
+
+/** The Spaces home's two views (config.json `inboxSpacesView`, the person's): cards, or a list of rows. */
+export type SpacesView = "cards" | "list";
+export const SPACES_VIEWS: readonly SpacesView[] = ["cards", "list"];
+
+/** `POST /api/plans/pins`: pin a plan (at `index`, else last), move it, or unpin it. */
+export function checkPlanPinInput(input: unknown): { ok: true; id: string; pinned: boolean; index: number | null } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { id, pinned, index? }" };
+  const unknown = Object.keys(input).find((key) => !["id", "pinned", "index", "serverSession"].includes(key));
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  if (!isPlanId("pln", input.id)) return { ok: false, error: "id is a plan id (pln_…)" };
+  if (typeof input.pinned !== "boolean") return { ok: false, error: "pinned is true or false" };
+  if (input.index !== undefined && input.index !== null && !(typeof input.index === "number" && Number.isSafeInteger(input.index) && input.index >= 0)) return { ok: false, error: "index is a place from 0" };
+  return { ok: true, id: input.id, pinned: input.pinned, index: typeof input.index === "number" ? input.index : null };
+}
+
+/** `POST /api/plans/view`: the Spaces home's view. */
+export function checkSpacesViewInput(input: unknown): { ok: true; view: SpacesView } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { view }" };
+  const unknown = Object.keys(input).find((key) => key !== "view" && key !== "serverSession");
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  if (!SPACES_VIEWS.includes(input.view as SpacesView)) return { ok: false, error: "view is cards or list" };
+  return { ok: true, view: input.view as SpacesView };
+}
+
+/** A pin list with `id` put at `index` (else last; already pinned, where it is), or taken out; every other id keeps its order. */
+export function planPinsWith(ids: readonly string[], id: string, pinned: boolean, index: number | null): string[] {
+  const rest = ids.filter((one) => one !== id);
+  if (!pinned) return rest;
+  if (index === null && rest.length < ids.length) return [...ids];
+  const at = index === null ? rest.length : Math.min(index, rest.length);
+  return [...rest.slice(0, at), id, ...rest.slice(at)];
 }
 
 /** A plan in the list: its index line and the person's look. */

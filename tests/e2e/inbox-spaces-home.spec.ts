@@ -1,0 +1,98 @@
+/**
+ * The Spaces home (approval "plans-home"): with Plans on, the sidebar's Spaces row opens the home; "Now" holds the
+ * plan that waits on the person, "Recent" the rest; the list view is kept for the person (config.json, so a reload
+ * opens on it); a card's pin lists the space in the sidebar; a card opens its plan page, whose crumbs say Spaces.
+ * Real browser, compiled binary, temp PLANNOTATOR_DATA_DIR and HOME; the plan library is seeded with the store before
+ * the Inbox starts (Plans on in config.json).
+ *
+ * Build the binary first (see inbox.spec.ts), then
+ * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-spaces-home.spec.ts`.
+ * PNGs land in .local/proof/spaces-home/.
+ */
+
+import { expect, test } from './inbox-test';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { NO_ACTOR } from '../../packages/core/plans';
+import { createPlanStore } from '../../packages/shared/plans/store';
+import { inboxScratch, removeInboxScratch } from './inbox-scratch';
+import { NO_BROWSER } from '../helpers/no-browser';
+
+const repo = resolve(__dirname, '../..');
+const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
+const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'spaces-home');
+
+test.afterAll(async () => {
+  await removeInboxScratch();
+});
+
+test('the Spaces home: Now and Recent, the list kept for the person, a pin in the sidebar, a card opens its plan', async ({ browser }) => {
+  expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
+  rmSync(proofDir, { recursive: true, force: true });
+  mkdirSync(proofDir, { recursive: true });
+  const root = inboxScratch('plannotator-inbox-spaces-home-e2e-');
+  const dataDir = join(root, 'data');
+  const configFile = join(dataDir, 'config.json');
+  writeFileSync(configFile, JSON.stringify({ ...JSON.parse(readFileSync(configFile, 'utf8')), inboxPlans: true }));
+  const store = createPlanStore({ dataDir });
+  const seed = (name: string, project: string, day: number, decided: boolean) => {
+    const { plan, document } = store.createPlan({ name, project_name: project, created_at: `2026-11-${day}T09:00:00.000Z`, document: { title: name } });
+    const v1 = store.addVersion(plan.id, document.id, { bytes: new TextEncoder().encode(`# ${name}\n\n## Context\n\nWhy ${name.toLowerCase()} now.\n`), committed_at: `2026-11-${day}T09:00:00.000Z`, source: 'plan-review', author_via: 'plan-review' });
+    if (decided) store.addEvent(plan.id, { ...NO_ACTOR, author_via: 'person', kind: 'decision', at: `2026-11-${day}T10:00:00.000Z`, subject: { document_id: document.id, version_number: 1 }, decision: { document_id: document.id, version: v1.version, version_number: 1, decision: 'approved', at: `2026-11-${day}T10:00:00.000Z`, feedback: null, feedback_record: null, snapshot: null }, legacy: null });
+    return plan.id;
+  };
+  const waiting = seed('Rate limits per API key', 'ledger', 14, false);
+  const done = ['Nightly export in batches', 'Checkout on one page', 'Sessions in Redis', 'Offline drafts'].map((name, i) => seed(name, i % 2 ? 'ledger' : 'field-notes', 10 + i, true));
+
+  const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
+  const started = spawnSync(binary, ['inbox', '--background'], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(started.status, started.stderr).toBe(0);
+  const url = started.stdout.trim();
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  try {
+    const page = await context.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto(url);
+    const nav = page.locator('[data-plans-nav]');
+    await expect(nav).toContainText('Spaces');
+    await nav.click();
+    const home = page.locator('[data-spaces-home]');
+    await expect(home.locator('h1')).toHaveText('What do you want to plan?');
+    await expect(home.locator('[data-spaces-local]')).toHaveText('On this computer');
+    const now = home.locator('[data-spaces-section="now"] [data-space]');
+    await expect(now).toHaveCount(1);
+    await expect(now.first()).toHaveAttribute('data-space', waiting);
+    await expect(now.first().locator('.fc-fact')).toHaveText('Your move');
+    await expect(home.locator('[data-spaces-section="recent"] [data-space]')).toHaveCount(done.length);
+    // The face is the plan's own top, its title not said twice.
+    await expect(now.first().locator('[data-space-face="document"]')).toContainText('Why rate limits per api key now.');
+    await expect(now.first().locator('[data-space-face="document"]')).not.toContainText('Rate limits per API key');
+    await page.screenshot({ path: join(proofDir, 'cards-light.png') });
+
+    // The list view, kept for the person: config.json says so and a reload opens on it.
+    await home.locator('[data-spaces-view-pick="list"]').click();
+    await expect(home).toHaveAttribute('data-spaces-view', 'list');
+    await expect.poll(() => JSON.parse(readFileSync(configFile, 'utf8')).inboxSpacesView).toBe('list');
+    await page.reload();
+    await expect(page.locator('[data-spaces-home]')).toHaveAttribute('data-spaces-view', 'list');
+    await page.screenshot({ path: join(proofDir, 'list-light.png') });
+
+    // A pin: the space is listed under Spaces in the sidebar, and kept in the library.
+    const card = page.locator(`[data-space="${done[0]}"]`);
+    await card.hover();
+    await card.locator('[data-space-pin-toggle]').click();
+    await expect(page.locator(`[data-space-pins] [data-pinned-space="${done[0]}"]`)).toBeVisible();
+    await expect.poll(() => createPlanStore({ dataDir }).pins()).toEqual([done[0]]);
+    await page.screenshot({ path: join(proofDir, 'pinned-light.png') });
+
+    // A card opens its plan page; its crumbs say Spaces.
+    await page.locator(`[data-space="${waiting}"] [data-card-link]`).click();
+    await expect(page.locator(`[data-plan-page="${waiting}"]`)).toBeVisible();
+    await expect(page.locator('[data-page-header] [data-breadcrumb-root]')).toHaveText('Spaces');
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});

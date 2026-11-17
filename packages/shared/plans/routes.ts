@@ -4,7 +4,11 @@
  * the Inbox's unknown-route 404, as if absent. The caller owns the guards (the owner's window on this computer,
  * same-origin, the page's server session on the one write).
  *
- *   GET  /api/plans                          every plan, newest change first, with the person's look
+ *   GET  /api/plans                          every plan, newest change first, with the person's look; the person's
+ *                                            pins in their order (`pins`) and the Spaces home's view (`view`)
+ *   POST /api/plans/pins                     { id, pinned, index? }: pin a plan (at `index`, else last), move it, or
+ *                                            unpin it; answers the order (`pins`)
+ *   POST /api/plans/view                     { view }: the Spaces home's view, "cards" or "list" (config.json)
  *   GET  /api/plans/:id                      one plan: its record, documents, artifacts, decisions and activity, look
  *   GET  /api/plans/:id/files/<asset_path>   an artifact's bytes (a raster picture as itself, other text as plain
  *                                            text, anything else as a download: `artifactServedType`)
@@ -32,6 +36,7 @@
  * the newest?") and the write it allows see the same library, whatever wrote while the body was arriving (another
  * tab, the import's pickup of the agent's next version).
  */
+import { checkPlanPinInput, checkSpacesViewInput, type SpacesView } from "@plannotator/core/plans";
 import { checkPlanApproveInput, checkPlanCommentInput, checkPlanLookInput, checkPlanSentInput, checkPlanVersionInput, isPlanAnnotationId, isPlanId, isPlanPictureType, isPlanVersionNumber, planApprovalsOn, planDocumentFileName, planMediaType, planTextLines, PLAN_PERSON, type PlanVersion } from "@plannotator/core/plans";
 import { buildDirectEditsSection } from "../direct-edits";
 import type { PlanStore } from "./store";
@@ -59,6 +64,8 @@ export interface PlanRouteDeps {
   importing?: () => boolean;
   /** The last import failed: its message (`import_error`), else null; the list holds what was read before. */
   importError?: () => string | null;
+  /** The Spaces home's view (config.json `inboxSpacesView`); absent: "cards", and `POST /view` refused. */
+  view?: { read: () => SpacesView; save: (view: SpacesView) => boolean };
 }
 
 const CONTENT_TYPE: Record<string, string> = {
@@ -115,7 +122,28 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
 
   if (parts.length === 0) {
     if (method !== "GET") return bad("method not allowed", 405);
-    return { status: 200, body: { plans: store.list(), importing: deps.importing?.() ?? false, import_error: deps.importError?.() ?? null } };
+    return { status: 200, body: { plans: store.list(), importing: deps.importing?.() ?? false, import_error: deps.importError?.() ?? null, pins: store.pins(), view: deps.view?.read() ?? "cards" } };
+  }
+
+  if (parts.length === 1 && parts[0] === "pins") {
+    if (method !== "POST") return bad("method not allowed", 405);
+    const posted = await bodyOf(req);
+    if (!posted) return bad("the body must be JSON");
+    const input = checkPlanPinInput(posted.value);
+    if (!input.ok) return bad(input.error);
+    if (input.pinned && !store.get(input.id)) return bad(`No plan ${input.id}.`, 404);
+    return { status: 200, body: { pins: store.setPin(input.id, input.pinned, input.index) } };
+  }
+
+  if (parts.length === 1 && parts[0] === "view") {
+    if (method !== "POST") return bad("method not allowed", 405);
+    const posted = await bodyOf(req);
+    if (!posted) return bad("the body must be JSON");
+    const input = checkSpacesViewInput(posted.value);
+    if (!input.ok) return bad(input.error);
+    if (!deps.view) return bad("the view is not kept here", 404);
+    if (!deps.view.save(input.view)) return bad("config.json could not be saved; the view holds for this window.", 500);
+    return { status: 200, body: { view: input.view } };
   }
 
   const id = parts[0]!;

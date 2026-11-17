@@ -4,7 +4,7 @@
  * route, so a phone's door or a linked machine gets the unknown-route 404. Every write (a look, a comment kept or
  * taken away) carries the page's `serverSession`.
  */
-import type { PlanApprovalCleared, PlanApprovalMoved, PlanArtifact, PlanComment, PlanDecision, PlanDocument, PlanEvent, PlanLook, PlanRecord, PlanSummary, PlanVersion } from '@plannotator/core/plans';
+import type { PlanApprovalCleared, PlanApprovalMoved, PlanArtifact, PlanComment, PlanDecision, PlanDocument, PlanEvent, PlanLook, PlanRecord, PlanSummary, PlanVersion, SpacesView } from '@plannotator/core/plans';
 import { pageServerSession } from '../api';
 import { readJson } from '../apiError';
 
@@ -21,6 +21,10 @@ export interface PlansList {
   importing: boolean;
   /** The Inbox's last read of the plan history failed (its message); absent from an Inbox before this answer. */
   import_error?: string | null;
+  /** The person's pinned plans, in their order; absent from an Inbox before Spaces. */
+  pins?: string[];
+  /** The Spaces home's view, the person's (config.json); absent from an Inbox before Spaces. */
+  view?: SpacesView;
 }
 
 export interface PlanRead {
@@ -107,6 +111,10 @@ export const plansApi = {
    * A Send went out (`thread_id`, the message that carried it; null: held for another machine, whose thread is not
    * known here): its comments are sent, the plan has that thread, and `told` is the version a Direct Edits section carried.
    */
+  /** Pin a plan (at `index`, else last), move it, or unpin it: the order after. */
+  pin: (id: string, pinned: boolean, index: number | null = null) => post<{ pins: string[] }>(`${BASE}/pins`, index === null ? { id, pinned } : { id, pinned, index }),
+  /** Keep the Spaces home's view for the person (config.json). */
+  saveView: (view: SpacesView) => post<{ view: SpacesView }>(`${BASE}/view`, { view }),
   sent: (id: string, sent: { thread_id: string | null; message_id: string; to: { host: string; session: string } | null; comments: string[]; told?: { doc: string; version: number } | null }) => post<{ plan: PlanRecord; comments: PlanComment[] }>(one(id, '/sent'), sent),
 };
 

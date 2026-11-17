@@ -26,7 +26,7 @@ export function DecisionMark({ tone }: { tone: PlanDecisionTone }) {
   );
 }
 
-export function PlansMessage({ title, body, busy, onRetry, onBack, backLabel = 'Plans' }: { title: string; body: string; busy?: boolean; onRetry?: () => void; onBack?: () => void; backLabel?: string }) {
+export function PlansMessage({ title, body, busy, onRetry, onBack, backLabel = 'Spaces' }: { title: string; body: string; busy?: boolean; onRetry?: () => void; onBack?: () => void; backLabel?: string }) {
   return (
     <section className="ib-dpage ib-plans ib-plans-msg" aria-busy={busy || undefined} data-plans-message="">
       <div className="ib-dh">
