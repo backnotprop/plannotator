@@ -2,8 +2,8 @@
  * Who the Routines intro is for (reveals.ts `routines`; the owner, 2026-11-17: "Once we have at least like three days
  * of good usage from a user, we should introduce routines, or if they've already been here for three days, show them
  * the routines dialogue"). Pure, so a test can hand it any history; the Inbox server (packages/server/inbox.ts) reads it
- * live on every settings read, while the dialog is unshown on a release build. The walk of the store runs only on a day
- * the intro could show (`routinesIntroWaits`), and once it finds three good days it is never walked again.
+ * live on every settings read, while the dialog is unshown on a release build. The walk of the store runs only once the
+ * intro's tenure is over (`routinesIntroWaits`), and once it finds three good days it is never walked again.
  *
  * "Three days of good use": the person sent something on `ROUTINES_INTRO_GOOD_DAYS` different local calendar days,
  * with `ROUTINES_INTRO_SENDS_PER_DAY` sends or more on each, any time in their history. A send is one of the person's
@@ -13,7 +13,7 @@
  * Someone who was already here when it shipped qualifies from their history.
  */
 import { isInboxNote } from "@plannotator/core/inbox-types";
-import { INBOX_REVEALS, revealDay, revealShownToday, type RevealState } from "./reveals";
+import { INBOX_REVEALS, revealDay, type RevealState } from "./reveals";
 
 /** Different local days with enough sends. */
 export const ROUTINES_INTRO_GOOD_DAYS = 3;
@@ -65,16 +65,14 @@ export function routinesIntroGoodDaysOnce(sends: () => Iterable<string>): () => 
 }
 
 /**
- * The walk can wait: today the line refuses the intro whatever the walk would find (reveals.ts `revealQualifies`):
- * first use unknown or under its tenure (its first two days), or something else was shown this local day (its day of
- * its own). Meanwhile it is reported open without the walk, so the line still names the moment it could go
- * (`revealAgainAt`: the end of its tenure, the next local day), and the walk decides then.
+ * The walk can wait: the line refuses the intro whatever the walk would find (reveals.ts `revealQualifies`): first use
+ * unknown or under its tenure (its first two days). Meanwhile it is reported open without the walk, so the line still
+ * names the moment it could go (`revealAgainAt`: the end of its tenure), and the walk decides then.
  */
-export function routinesIntroWaits(state: Pick<RevealState, "firstUseAt" | "lastShownAt" | "dayShownAt" | "asideShownAt" | "tipShownAt" | "ownDayShownAt">, now: Date): boolean {
+export function routinesIntroWaits(state: Pick<RevealState, "firstUseAt">, now: Date): boolean {
   const tenure = INBOX_REVEALS.find((entry) => entry.id === "routines")?.tenureMs ?? 0;
   const first = state.firstUseAt ? Date.parse(state.firstUseAt) : Number.NaN;
-  if (Number.isNaN(first) || now.getTime() - first < tenure) return true;
-  return revealShownToday(state, now);
+  return Number.isNaN(first) || now.getTime() - first < tenure;
 }
 
 /** What the server knows, each read lazily and in this order (the walk of the store last). */
@@ -87,7 +85,7 @@ export interface RoutinesIntroFacts {
   routineMade: () => boolean;
   /** "Start agents from New message" is on: a run is a launch, and someone who turned launches off said no to that. */
   launchOn: () => boolean;
-  /** The line would refuse it today anyway (`routinesIntroWaits`): open without the walk. Absent: always walk. */
+  /** The line would refuse it anyway, under its tenure (`routinesIntroWaits`): open without the walk. Absent: always walk. */
   waits?: () => boolean;
   /** Three good days of the person's own sends (`routinesIntroGoodDaysOnce` over `routinesIntroSend`): the walk. */
   goodDays: () => boolean;

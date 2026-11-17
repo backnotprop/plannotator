@@ -20,8 +20,8 @@ export interface RoutinesRevealInput<S extends Settings> extends Omit<RevealTurn
 }
 
 /**
- * The Routines intro on the page (shared/inbox/routines-intro.ts names who; reveals.ts `routines` its place and its
- * day of its own): the shared calm moment (a thread read 5 s and left, or the page idle, 60 s into the page), held
+ * The Routines intro on the page (shared/inbox/routines-intro.ts names who; reveals.ts `routines` its place, the
+ * line's gap from any other dialog): the shared calm moment (a thread read 5 s and left, or the page idle, 60 s into the page), held
  * while Routines are on or not offered. "Turn on" turns them on as Settings does and opens `#routines`; "No thanks",
  * Escape and a click outside are the line's Not now and change nothing else.
  */

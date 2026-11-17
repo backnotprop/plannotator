@@ -1,16 +1,17 @@
 /**
- * Who the Routines intro is for, and its day of its own (shared/inbox/routines-intro.ts, reveals.ts `routines`).
+ * Who the Routines intro is for, and its spacing (shared/inbox/routines-intro.ts, reveals.ts `routines`).
  *
  * What regresses: counting days in UTC instead of the person's local day; a day with one send counting; Inbox notes
  * (an ack, a skip line), a routine's run dividers or an agent's words counting as sends; someone already here not
  * qualifying from their history; any skip condition (Windows, Routines decided on or off, a routine made, launches
- * off) letting it through; the store walked when a cheaper fact already said no, on a day the line would refuse it
- * anyway, or again after three good days were found; it sharing a local day with another one-time dialog or letting
- * anything else (a dialog, the agent note, a tip, the star ask) follow it that day; the line not asking again the next
- * day; first run; a 23- or 25-hour day around a daylight-saving change.
+ * off) letting it through; the store walked when a cheaper fact already said no, under its tenure, or again after three
+ * good days were found; it showing inside the line's gap after another dialog (a dialog, the agent note, a tip, the
+ * star ask) or anything else showing inside the gap after it; a day of its own coming back (the owner, 2026-11-17:
+ * "just separate them 20min or so"), so it or the next one waits for another local day once the gap is over; first
+ * run; a 23- or 25-hour day around a daylight-saving change.
  */
 import { describe, expect, test } from "bun:test";
-import { revealAgainAt, revealAsideNow, revealLineFree, revealMayClaim, revealNext, type RevealState } from "./reveals";
+import { REVEAL_SPACING_MS, revealAgainAt, revealAsideNow, revealDay, revealLineFree, revealMayClaim, revealNext, type RevealState } from "./reveals";
 import { routinesIntroGoodDays, routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits, type RoutinesIntroFacts } from "./routines-intro";
 
 const HOUR = 3_600_000;
@@ -126,17 +127,17 @@ describe("when the walk waits", () => {
     expect(routinesIntroWaits({ firstUseAt: at(30 * DAY) }, NOW)).toBe(false);
   });
 
-  test("on a local day something else was shown; not when that was yesterday", () => {
+  test("not because something else showed earlier today: the intro may follow it once the gap is over", () => {
     const first = at(30 * DAY);
     for (const stamp of ["lastShownAt", "dayShownAt", "asideShownAt", "tipShownAt"] as const) {
-      expect(routinesIntroWaits({ firstUseAt: first, [stamp]: at(5 * HOUR) }, NOW)).toBe(true);
-      expect(routinesIntroWaits({ firstUseAt: first, [stamp]: new Date(2026, 10, 9, 23, 0).toISOString() }, NOW)).toBe(false);
+      const state: RevealState = { release: true, threads: 20, open: { routines: true }, firstUseAt: first, [stamp]: at(REVEAL_SPACING_MS) };
+      expect(routinesIntroWaits(state, NOW)).toBe(false);
+      expect(revealMayClaim("routines", state, NOW)).toBe(true);
     }
   });
 
   test("it waits exactly while the line refuses it, so the answer it skips could never have shown it", () => {
-    const first = at(30 * DAY);
-    for (const over of [{ firstUseAt: null }, { firstUseAt: at(DAY) }, { firstUseAt: first, lastShownAt: at(5 * HOUR) }, { firstUseAt: first, tipShownAt: at(3 * HOUR) }]) {
+    for (const over of [{ firstUseAt: null }, { firstUseAt: at(DAY) }, { firstUseAt: at(2 * DAY - HOUR) }]) {
       const state: RevealState = { release: true, threads: 20, open: { routines: true }, ...over };
       expect(routinesIntroWaits(state, NOW)).toBe(true);
       expect(revealMayClaim("routines", state, NOW)).toBe(false);
@@ -174,32 +175,16 @@ describe("daylight saving: the person's local day, 23 or 25 hours long", () => {
       expect(routinesIntroGoodDays([mar(8, 23, 30), mar(9, 0, 30), mar(10, 9), mar(10, 10), mar(11, 9), mar(11, 10)])).toBe(false);
     });
   });
-
-  test("its day of its own ends at the next local midnight, across the change", () => {
-    inNewYork(() => {
-      // Shown at 00:30, before the clocks go back at 02:00: the day still has 24.5 hours to run.
-      const shown = new Date(2026, 10, 1, 0, 30);
-      const midnight = new Date(2026, 10, 2).getTime();
-      const state: RevealState = { release: true, firstUseAt: new Date(2026, 9, 1).toISOString(), threads: 20, open: { routines: false, steps: true }, ownDayShownAt: shown.toISOString(), lastShownAt: shown.toISOString() };
-      expect(revealAgainAt(state, new Date(2026, 10, 1, 11, 0))).toBe(midnight);
-      expect(new Date(midnight).getHours()).toBe(0);
-      expect(midnight - shown.getTime()).toBe(24.5 * HOUR);
-      // 24 hours after the show, still its day.
-      expect(revealNext(state, new Date(2026, 10, 1, 23, 30))).toBeNull();
-      expect(revealNext(state, new Date(2026, 10, 2, 0, 30))).toBe("steps");
-    });
-  });
 });
 
-describe("a day of its own", () => {
+describe("the line's gap, both ways, never a day of its own", () => {
   const NOW = new Date(2026, 10, 10, 15, 0);
   const state = (over: Partial<RevealState> = {}): RevealState => ({ release: true, firstUseAt: new Date(NOW.getTime() - 10 * DAY).toISOString(), threads: 20, open: { routines: true }, ...over });
   const earlier = (h: number) => new Date(NOW.getTime() - h * HOUR).toISOString();
-  const yesterday = new Date(2026, 10, 9, 20, 0).toISOString();
+  const later = (ms: number) => new Date(NOW.getTime() + ms);
 
-  test("next on a day nothing else showed, also right after yesterday's dialog", () => {
+  test("next when nothing showed recently", () => {
     expect(revealNext(state(), NOW)).toBe("routines");
-    expect(revealNext(state({ lastShownAt: yesterday, dayShownAt: yesterday, asideShownAt: yesterday, tipShownAt: yesterday }), NOW)).toBe("routines");
   });
 
   for (const [name, stamp] of [
@@ -208,25 +193,33 @@ describe("a day of its own", () => {
     ["the star ask or the grill-me tip", "asideShownAt"],
     ["the Sidebar or Launch tip", "tipShownAt"],
   ] as const) {
-    test(`never on a local day ${name} took, even hours later; the Checklist behind it may go`, () => {
-      expect(revealNext(state({ [stamp]: earlier(5) }), NOW)).toBeNull();
-      expect(revealMayClaim("routines", state({ [stamp]: earlier(5) }), NOW)).toBe(false);
-      expect(revealNext(state({ [stamp]: earlier(5), open: { routines: true, steps: true } }), NOW)).toBe("steps");
-      // The line asks again at midnight.
-      expect(revealAgainAt(state({ [stamp]: earlier(5) }), NOW)).toBe(new Date(2026, 10, 11).getTime());
+    test(`after ${name}: never inside the gap, then the same local day once it is over`, () => {
+      const after = state({ [stamp]: NOW.toISOString() });
+      const inside = later(REVEAL_SPACING_MS - 1);
+      expect(revealNext(after, inside)).toBeNull();
+      expect(revealMayClaim("routines", after, inside)).toBe(false);
+      // The line asks again at the gap's end, not at midnight.
+      expect(revealAgainAt(after, NOW)).toBe(NOW.getTime() + REVEAL_SPACING_MS);
+      const over = later(REVEAL_SPACING_MS);
+      expect(revealDay(over.getTime())).toBe(revealDay(NOW.getTime()));
+      expect(revealNext(after, over)).toBe("routines");
+      expect(revealMayClaim("routines", after, over)).toBe(true);
     });
   }
 
-  test("once shown, nothing else that local day: no dialog, no agent note or tip, no star ask; the next day the line goes on", () => {
-    const shown = { lastShownAt: earlier(5), dayShownAt: earlier(5), ownDayShownAt: earlier(5) };
-    const rest = { routines: false, steps: true, star: true };
-    expect(revealNext(state({ ...shown, open: rest }), NOW)).toBeNull();
-    expect(revealLineFree("setup", state({ ...shown, open: rest }), NOW)).toBe(false);
-    expect(revealAsideNow(state({ ...shown, open: rest }), NOW)).toEqual([]);
-    expect(revealAgainAt(state({ ...shown, open: rest }), NOW)).toBe(new Date(2026, 10, 11).getTime());
-    const tomorrow = new Date(2026, 10, 11, 9, 0);
-    expect(revealNext(state({ ...shown, open: rest }), tomorrow)).toBe("steps");
-    expect(revealLineFree("setup", state({ ...shown, open: rest }), tomorrow)).toBe(true);
+  test("once shown, the next dialog, the agent note and the star ask wait the gap, then go the same local day", () => {
+    // Its claim stamps the line as any offer's does (`revealStamp`, spaced): the clock and the day.
+    const shown = state({ lastShownAt: NOW.toISOString(), dayShownAt: NOW.toISOString(), open: { routines: false, steps: true, star: true } });
+    const inside = later(REVEAL_SPACING_MS - 1);
+    expect(revealNext(shown, inside)).toBeNull();
+    expect(revealLineFree("setup", shown, inside)).toBe(false);
+    expect(revealAsideNow(shown, inside)).toEqual([]);
+    expect(revealAgainAt(shown, NOW)).toBe(NOW.getTime() + REVEAL_SPACING_MS);
+    const over = later(REVEAL_SPACING_MS);
+    expect(revealDay(over.getTime())).toBe(revealDay(NOW.getTime()));
+    expect(revealNext(shown, over)).toBe("steps");
+    expect(revealLineFree("setup", shown, over)).toBe(true);
+    expect(revealAsideNow({ ...shown, open: { star: true } }, over)).toEqual(["star"]);
   });
 
   test("never on first run (no tenure yet), and a dev build keeps no line", () => {

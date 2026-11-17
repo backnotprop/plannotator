@@ -88,13 +88,6 @@ export interface RevealEntry {
    * claim stamps only its own record, so no other dialog's day can move.
    */
   lastResort?: boolean;
-  /**
-   * A local calendar day of its own (Routines, the strategic cadence): it qualifies only on a day when nothing else was
-   * shown on this machine (no line dialog, agent note, aside card or tip: `revealShownToday`), and once it was shown
-   * the line is closed for the rest of that day (`ownDayShownAt`, `revealLineFree`). So it never shares a visit with
-   * another one-time dialog.
-   */
-  ownDay?: boolean;
   /** Off: never next and never claimed. */
   enabled: boolean;
 }
@@ -160,9 +153,11 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // introduce routines, or if they've already been here for three days, show them the routines dialogue"). Open while
   // the person sent messages on 3 different local days with 2 or more sends on each, Routines are offered on this
   // computer and never decided, and no routine exists (shared/inbox/routines-intro.ts; the server reads it live). Three
-  // good days need two days of tenure, which `tenureMs` restates. A day of its own (`ownDay`). Opt-in, as the Board:
-  // the claim only stamps it, `RoutinesIntro` opens, and only its "Turn on" writes inboxScheduledThreads.
-  { id: "routines", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, ownDay: true, enabled: true },
+  // good days need two days of tenure, which `tenureMs` restates. Spaced from the other dialogs only by the line's gap
+  // (`REVEAL_SPACING_MS`), both ways (the owner, 2026-11-17: "Feel like this shouldn't be huge blocker, just separate
+  // them 20min or so"; it had a local day of its own). Opt-in, as the Board: the claim only stamps it, `RoutinesIntro`
+  // opens, and only its "Turn on" writes inboxScheduledThreads.
+  { id: "routines", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
   // 11. The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and
   // the Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro`
   // opens, and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
@@ -229,8 +224,6 @@ export interface RevealState {
   tipShownAt?: string | null;
   /** When an `aside` entry was last shown (config.json `inboxReveals.star.shownAt`, `grill_me_tip.shownAt`): the gap counts from it too, and a `lastResort` entry never goes on its day. */
   asideShownAt?: string | null;
-  /** When an `ownDay` entry was last shown (config.json `inboxReveals.routines.shownAt`): nothing else goes on its local day. */
-  ownDayShownAt?: string | null;
 }
 
 const time = (iso: string | null | undefined): number | null => {
@@ -243,27 +236,6 @@ const time = (iso: string | null | undefined): number | null => {
 export function revealDay(at: number): string {
   const d = new Date(at);
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
-}
-
-/** Midnight that starts the local calendar day after `at`. */
-function nextLocalDay(at: number): number {
-  const d = new Date(at);
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime();
-}
-
-/** Something was shown on this machine on today's local day: a line dialog, the agent note, an aside card or a tip. */
-export function revealShownToday(state: Pick<RevealState, "lastShownAt" | "dayShownAt" | "asideShownAt" | "tipShownAt" | "ownDayShownAt">, now: Date): boolean {
-  const today = revealDay(now.getTime());
-  return [state.lastShownAt, state.dayShownAt, state.asideShownAt, state.tipShownAt, state.ownDayShownAt].some((stamp) => {
-    const at = time(stamp);
-    return at !== null && revealDay(at) === today;
-  });
-}
-
-/** An `ownDay` entry (Routines) was shown today: the line keeps the rest of the day for it. */
-function ownDayToday(state: Pick<RevealState, "ownDayShownAt">, now: Date): boolean {
-  const at = time(state.ownDayShownAt);
-  return at !== null && revealDay(at) === revealDay(now.getTime());
 }
 
 /** The spacing holds: `REVEAL_SPACING_MS` since the last dialog that stamps the clock, three days since an offer's Not now. */
@@ -292,8 +264,6 @@ export function revealGapFree(state: Pick<RevealState, "lastShownAt" | "dayShown
 export function revealLineFree(kind: "setup" | "spaced", state: RevealState, now: Date): boolean {
   if (!state.release) return true;
   if (!revealGapFree(state, now)) return false;
-  // Routines' day of its own: nothing else (a dialog, the agent note, a tip, an aside card) for the rest of it.
-  if (ownDayToday(state, now)) return false;
   return kind === "setup" || revealSpaced(state.lastShownAt, now, state.notNowAt);
 }
 
@@ -316,7 +286,6 @@ export function revealQualifies(entry: RevealEntry, state: RevealState, now: Dat
     if (entry.kind !== "update" && entry.tenureMs > 0) return false;
   } else if (now.getTime() - first < entry.tenureMs) return false;
   if (entry.laterDay && (first === null || revealDay(first) === revealDay(now.getTime()))) return false;
-  if (entry.ownDay && revealShownToday(state, now)) return false;
   return state.threads >= entry.minThreads;
 }
 
@@ -426,9 +395,6 @@ export function revealAgainAt(state: RevealState, now: Date, table: readonly Rev
   };
   for (const stamp of [state.lastShownAt, state.dayShownAt, state.asideShownAt, state.tipShownAt]) after(stamp, REVEAL_SPACING_MS);
   after(state.notNowAt, REVEAL_NOT_NOW_SPACING_MS);
-  // The day after Routines' own day: the line opens again.
-  const ownDayAt = time(state.ownDayShownAt);
-  if (ownDayAt !== null) moments.push(nextLocalDay(ownDayAt));
   const first = time(state.firstUseAt);
   for (const entry of table) {
     if (!entry.enabled || state.open[entry.id] !== true) continue;
@@ -441,8 +407,6 @@ export function revealAgainAt(state: RevealState, now: Date, table: readonly Rev
     }
     after(state.waitingSince?.[entry.id], REVEAL_PATIENCE_MS);
     if (entry.kind === "offer") after(state.waitingSince?.[entry.id], REVEAL_RETIRE_MS);
-    // A day of its own that something else took today: the next local day.
-    if (entry.ownDay && revealShownToday(state, now)) moments.push(nextLocalDay(now.getTime()));
   }
   const ahead = moments.filter((at): at is number => at !== null && at > now.getTime());
   return ahead.length === 0 ? null : Math.min(...ahead);

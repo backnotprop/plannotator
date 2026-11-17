@@ -3989,7 +3989,7 @@ function Inbox() {
     holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
   });
   const openCapabilities = () => void (window.location.hash = '#settings/capabilities');
-  // The Routines intro (components/useRoutinesReveal.tsx): three good days of sends, on a day of its own.
+  // The Routines intro (components/useRoutinesReveal.tsx): three good days of sends, the line's gap from any other dialog.
   const { reveal: routinesReveal, dialog: routinesDialog } = useRoutinesReveal({ due: lineLatch?.next === 'routines', revealAt, idle: pageIdle, listLoaded: lineLatch !== null, firstRun, phone, settings: () => settingsRef.current, setSettings, showToast, dismissToast, refreshSettings, openSettings: openCapabilities });
   // Personal agents (core/inbox-personal-agents.ts): the Inbox names it only while none is connected. Its banner is
   // loaded before the claim, so the dialog opens with it or, offline, without it, and never changes while open.

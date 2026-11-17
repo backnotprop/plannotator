@@ -751,26 +751,30 @@ describe("Routines: after three good days of sends, once, opt-in", () => {
     expect((await w.claim("routines", "rt-key-2")).show).toBe(false);
   });
 
-  test("shown earlier today: the Checklist behind it waits for tomorrow, though the 40-minute gap is over", async () => {
+  // The owner, 2026-11-17, on the day of its own it first had: "Feel like this shouldn't be huge blocker, just separate
+  // them 20min or so". Only the line's gap (40 minutes), both ways.
+  /** Ten minutes ago: inside the 40-minute gap. */
+  const insideGap = () => new Date(Date.now() - HOUR / 6).toISOString();
+
+  test("shown inside the gap: the Checklist behind it waits; shown earlier today, past the gap: the Checklist goes today", async () => {
     middayZone();
-    const shown = earlierToday();
-    const reveals = { ...decided.inboxReveals, lastShownAt: shown, routines: { shownAt: shown } };
-    const w = await world({ config: { ...decided, inboxSteps: undefined, inboxReveals: reveals }, days: 6 });
+    const at = (shown: string) => ({ ...decided.inboxReveals, lastShownAt: shown, dayShownAt: shown, routines: { shownAt: shown } });
+    const w = await world({ config: { ...decided, inboxSteps: undefined, inboxReveals: at(insideGap()) }, days: 6 });
     expect(await w.next()).toBeNull();
     expect((await w.claim("steps")).show).toBe(false);
-    // The same stamps without Routines' day: the Checklist goes, so it was Routines' day that held it.
-    const other = await world({ config: { ...decided, inboxSteps: undefined, inboxReveals: { ...reveals, routines: undefined } }, days: 6 });
-    expect(await other.next()).toBe("steps");
+    const later = await world({ config: { ...decided, inboxSteps: undefined, inboxReveals: at(earlierToday()) }, days: 6 });
+    expect(await later.next()).toBe("steps");
   });
 
-  test("something else shown earlier today (past the gap): not Routines, though everything else holds; the Checklist behind it may go", async () => {
+  test("something else shown inside the gap: not Routines yet; shown earlier today, past the gap: Routines goes today", async () => {
     middayZone();
-    const reveals = { ...decided.inboxReveals, lastShownAt: earlierToday() };
-    const w = await world({ config: { ...decided, inboxSteps: undefined, inboxReveals: reveals }, sends: goodDays(), days: 6 });
-    // The gap is over and the line is free: the Checklist is next, Routines is not (its day of its own).
-    expect(await w.next()).toBe("steps");
+    const w = await world({ config: { ...decided, inboxReveals: { ...decided.inboxReveals, lastShownAt: insideGap() } }, sends: goodDays() });
+    expect(await w.next()).toBeNull();
     expect((await w.claim("routines")).show).toBe(false);
     expect(w.saved().inboxReveals?.routines).toBeUndefined();
+    const later = await world({ config: { ...decided, inboxReveals: { ...decided.inboxReveals, lastShownAt: earlierToday() } }, sends: goodDays() });
+    expect(await later.next()).toBe("routines");
+    expect((await later.claim("routines", "rt-key-1")).show).toBe(true);
   });
 
   for (const [name, options] of [

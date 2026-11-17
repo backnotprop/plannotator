@@ -3360,7 +3360,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     board: boardUndecided,
     // Routines (shared/inbox/routines-intro.ts): offered here and never decided, no routine made, launches on, and three
     // good days of sends. Read once the routines module exists (`routinesIntroUndecided`), on a release build only.
-    // Inside the line's state (`state`, `now`), the walk waits on a day the line would refuse it anyway.
+    // Inside the line's state (`state`, `now`), the walk waits while the line would refuse it anyway (its tenure).
     routines: (state, now) => routinesIntroUndecided(state && now ? () => routinesIntroWaits(state, now) : undefined),
     steps: stepsUndecided,
     agent_rules: agentRulesUnset,
@@ -3476,11 +3476,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       asideShownAt: revealLastShown([reveals?.star?.shownAt, reveals?.grill_me_tip?.shownAt]),
       // The tips outside the line (the Sidebar tip, the Launch tip): they start the gap too.
       tipShownAt: revealLastShown([reveals?.sidebar_tip?.shownAt, reveals?.launch_tip?.shownAt]),
-      // Routines' day of its own (reveals.ts `ownDay`): nothing else on the local day it was shown.
-      ownDayShownAt: reveals?.routines?.shownAt ?? null,
     };
-    // The offers, each one's "undecided" while unshown. They read the stamps above (Routines' walk waits on a day the
-    // line would refuse it anyway), so they come after them.
+    // The offers, each one's "undecided" while unshown. They read the state above (Routines' walk waits while the line
+    // would refuse it anyway), so they come after it.
     for (const [id, undecided] of Object.entries(lineOffers)) open[id as RevealId] = !lineOfferSaved(id as RevealId)?.shownAt && undecided!(state, now);
     // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
     state.heavy = snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);

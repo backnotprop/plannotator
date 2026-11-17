@@ -136,8 +136,6 @@ function simulate(user: User, days = 30): Shown[] {
   let loadCount = 0;
   /** The last `aside` card shown (the star ask's `inboxReveals.star.shownAt`). */
   let asideShownAt: string | null = null;
-  /** Routines' show (`inboxReveals.routines.shownAt`): its day is its own. */
-  let ownDayShownAt: string | null = null;
   for (let day = 0; day < days; day++) {
     for (const hour of user.loads(day)) {
       const now = at(day, hour);
@@ -159,12 +157,10 @@ function simulate(user: User, days = 30): Shown[] {
         ),
         waitingSince: saved.waitingSince,
         asideShownAt: asideShownAt,
-        ownDayShownAt,
       });
       const show = (id: Dialog, spaced: boolean) => {
         saved = revealStamp(saved, now.toISOString(), { spaced, load });
         if (id !== "agent_note" && user.notNow?.includes(id)) saved = revealStampNotNow(saved, now.toISOString());
-        if (TABLE.some((entry) => entry.id === id && entry.ownDay)) ownDayShownAt = now.toISOString();
         done.add(id);
         shown.push({ id, day, at: now });
       };
@@ -697,40 +693,34 @@ describe("the line's rules", () => {
   });
 });
 
-describe("Routines: three good days, then a day of its own", () => {
-  test("registered after the Board and before the Checklist: an offer, two days' tenure, no thread minimum, a day of its own", () => {
+describe("Routines: three good days, then only the line's gap", () => {
+  test("registered after the Board and before the Checklist: an offer, two days' tenure, no thread minimum, no day of its own", () => {
     const place = INBOX_REVEALS.findIndex((entry) => entry.id === "routines");
     expect(INBOX_REVEALS[place - 1]!.id).toBe("board");
     expect(INBOX_REVEALS[place + 1]!.id).toBe("steps");
-    expect(INBOX_REVEALS[place]).toEqual({ id: "routines", kind: "offer", tenureMs: 2 * DAY, minThreads: 0, ownDay: true, enabled: true });
+    expect(INBOX_REVEALS[place]).toEqual({ id: "routines", kind: "offer", tenureMs: 2 * DAY, minThreads: 0, enabled: true });
   });
 
-  /** Routines' day, and every dialog shown on it. */
-  const aroundRoutines = (shown: Shown[]) => {
-    const day = shown.find((s) => s.id === "routines")!.day;
-    return { day, sameDay: shown.filter((s) => s.day === day).map((s) => s.id) };
-  };
-
-  test("a heavy user whose third good day ends on day 3: Routines alone on day 4 (day 3 already showed the Board), nothing else that day, every other card once", () => {
+  // The owner, 2026-11-17, on the day of its own it first had: "Feel like this shouldn't be huge blocker, just separate
+  // them 20min or so". So it shares a day with other dialogs, the gap apart (these loads are two hours apart).
+  test("a heavy user whose third good day ends on day 3: Routines the load after the Board that same day, every other card once and in its order", () => {
     const shown = simulate({ ...HEAVY, goodDays: 3 });
-    expect(aroundRoutines(shown)).toEqual({ day: 4, sameDay: ["routines"] });
-    expect(when(shown).filter(([id]) => id === "routines")).toEqual([["routines", 4, 9]]);
+    expect(when(shown).filter(([, day]) => day === 3)).toEqual([["board", 3, 9], ["routines", 3, 11]]);
     expect(when(shown).filter(([id]) => id !== "routines").map(([id]) => id)).toEqual(when(simulate(HEAVY)).map(([id]) => id));
     expectSpaced(shown);
   });
 
-  test("never on a day another one-time dialog took, even 40 minutes and more later: open from day 2, it waits for the first day nothing else showed", () => {
+  test("open from day 2: it goes that day, between Snooze and Bro mode, a load after each", () => {
     const shown = simulate({ ...HEAVY, goodDays: 2 });
-    // Day 2 had Snooze and Bro mode, day 3 the Board.
-    expect(aroundRoutines(shown)).toEqual({ day: 4, sameDay: ["routines"] });
+    expect(when(shown).filter(([, day]) => day === 2)).toEqual([["snooze", 2, 9], ["routines", 2, 11], ["bro", 2, 13]]);
+    expectSpaced(shown);
   });
 
-  test("someone already here when it ships (three good days in their history) updates on day 0: the update day's dialogs first, Routines on a later day, alone", () => {
+  test("someone already here when it ships (three good days in their history) updates on day 0: the update day's dialogs take every load, Routines the first load of day 1, Bro mode the next, once", () => {
     const shown = simulate({ ...UPGRADER, goodDays: 0 });
-    const { day, sameDay } = aroundRoutines(shown);
-    expect(day).toBeGreaterThanOrEqual(1);
-    expect(sameDay).toEqual(["routines"]);
+    expect(when(shown).filter(([, day]) => day === 1).slice(0, 2)).toEqual([["routines", 1, 9], ["bro", 1, 11]]);
     expect(shown.filter((s) => s.id === "routines")).toHaveLength(1);
+    expectSpaced(shown);
   });
 
   test("never for someone without three good days", () => {
