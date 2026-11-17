@@ -87,6 +87,7 @@
     "./shape-skill": "./shape-skill.ts",
     "./canvas-board": "./canvas-board.ts",
     "./canvas-scene": "./canvas-scene.ts",
+    "./canvas-elements": "./canvas-elements.ts",
     "./canvas-skill": "./canvas-skill.ts",
     "./create-routine-skill": "./create-routine-skill.ts",
     "./shape-kit.mjs": "./shape-kit.mjs",
