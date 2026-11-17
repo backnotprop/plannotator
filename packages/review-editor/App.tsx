@@ -1233,6 +1233,19 @@ const ReviewApp: React.FC = () => {
         }
       }
       const sideOf = options.side ? dockApi.activePanel : undefined;
+      const diff = options.side ? undefined : dockApi.getPanel(REVIEW_DIFF_PANEL_ID);
+      if (diff && getReviewDiffPanelFilePath(diff.params) === filePath) {
+        diff.api.setActive();
+        dockApi.addPanel({
+          id: makeReviewFilePanelId(filePath),
+          component: REVIEW_PANEL_TYPES.FILE,
+          title,
+          params: { filePath } satisfies ReviewFilePanelParams,
+          position: { referencePanel: diff.id, direction: 'within' },
+        });
+        diff.api.close();
+        return;
+      }
       dockApi.addPanel({
         id: makeReviewFilePanelId(filePath),
         component: REVIEW_PANEL_TYPES.FILE,
