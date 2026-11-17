@@ -192,7 +192,7 @@ test('the journey: T3 Code in the repository only, one `t3 thread start` in a ne
   expect(world.errors).toEqual([]);
 });
 
-test("T3 Code not running: the line gives T3's own reason and keeps the message; Try again starts it", async () => {
+test("T3 Code not running: the line says so in plain words, with no path, and keeps the message; Try again starts it", async () => {
   test.setTimeout(120_000);
   const { page, t3 } = world;
   t3.setState('down');
@@ -202,7 +202,8 @@ test("T3 Code not running: the line gives T3's own reason and keeps the message;
     const p = pane(page);
     const line = p.locator('[data-run="failed"]');
     await expect(line).toContainText("T3 Code didn't start.", { timeout: 30_000 });
-    await expect(line).toContainText('Start T3 Code, then retry.');
+    await expect(line).toContainText("T3 Code isn't open on this computer. Open it, then try again.");
+    await expect(line).not.toContainText('/');
     await expect(line).toContainText('Your message is kept.');
     expect(t3.starts()).toHaveLength(before);
     t3.setState('up');

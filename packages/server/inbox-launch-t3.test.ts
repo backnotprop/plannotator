@@ -18,7 +18,7 @@ import { stubBridge } from "../../tests/helpers/stub-bridge";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { codexQueueMessage } from "./inbox-codex-wake";
 import { createInboxLaunch } from "./inbox-launch";
-import { createT3LaunchHost, gitRepoOf, t3BaseOf, t3StartCause, t3StartedThreadOf } from "./inbox-launch-t3";
+import { createT3LaunchHost, gitRepoOf, T3_LAUNCH_NOT_OPEN, t3BaseOf, t3StartCause, t3StartedThreadOf, t3StartFailure } from "./inbox-launch-t3";
 import type { LaunchHostContext } from "./inbox-launch-host";
 import { createT3Local } from "./inbox-t3-local";
 import { createInboxT3Wake } from "./inbox-t3-wake";
@@ -184,13 +184,16 @@ describe("T3 Code through the launch engine, against a fake t3", () => {
     expect(t.t3!.calls()).toEqual([]);
   });
 
-  test("when T3 refuses, the run line says why in T3's words, or in plain words for a folder T3 doesn't know", async () => {
-    const down = setup();
-    down.t3!.setState("down");
-    const one = await down.send("Tighten the checkout copy.");
-    const error = await until("the start failed", () => down.store.message(one.id)!.launch!.error);
-    expect(error).toMatchObject({ code: "failed", text: `No running T3 Code server uses ${join(down.home, ".t3")}. Start T3 Code, then retry.` });
-    expect(down.store.message(one.id)!.delivery).toBeUndefined();
+  test("when T3 refuses, the run line says why in plain words: T3 Code not open (no server, or one not answering), a folder T3 doesn't know; never a path", async () => {
+    for (const state of ["down", "stale"] as const) {
+      const down = setup();
+      down.t3!.setState(state);
+      const one = await down.send("Tighten the checkout copy.");
+      const error = await until("the start failed", () => down.store.message(one.id)!.launch!.error);
+      expect(error).toMatchObject({ code: "failed", text: T3_LAUNCH_NOT_OPEN });
+      expect(error.text).not.toContain("/");
+      expect(down.store.message(one.id)!.delivery).toBeUndefined();
+    }
 
     const unknown = setup({ known: false });
     const two = await unknown.send("Tighten the checkout copy.");
@@ -243,13 +246,31 @@ describe("T3 launch pieces", () => {
     expect(t3BaseOf(plain)).toBeNull();
   });
 
-  test("the thread is read from --json's last line; T3's refusal is its last line, one line, never empty", () => {
+  test("the thread is read from --json's last line", () => {
     const thread = "thread:project:5b1d2c3e-0f1a-4b2c-8d3e-4f5a6b7c8d9e:7c6d5e4f-3a2b-4c1d-9e0f-1a2b3c4d5e6f";
     expect(t3StartedThreadOf(`warming up\n${JSON.stringify({ threadId: thread, projectId: "p", runId: "r" })}\n`)).toBe(thread);
     expect(t3StartedThreadOf(JSON.stringify({ projectId: "p" }))).toBeNull();
     expect(t3StartedThreadOf("not json")).toBeNull();
-    expect(t3StartCause('noise\nBase ref "nope" does not resolve to a commit in project "shop" (/w/shop).\n', "shop")).toBe('Base ref "nope" does not resolve to a commit in project "shop" (/w/shop).');
-    expect(t3StartCause("No T3 Code project matches '.'. Pass a project id or a path inside a project.", "shop")).toBe("shop isn't a project in T3 Code yet. Add its folder in T3 Code, then try again.");
+  });
+
+  test("a failed start's cause: the host's own sentence for each case it recognises, never T3's path or server words", () => {
+    const failed = (stderr: string) => t3StartFailure({ exitCode: 1, stdout: "", stderr }, "shop");
+    // T3 Code not open: no server for its home, or a runtime file whose server does not answer.
+    expect(failed("No running T3 Code server uses /Users/me/.t3. Start T3 Code, then retry.")).toBe("T3 Code isn't open on this computer. Open it, then try again.");
+    expect(failed("Could not reach the T3 Code server at http://127.0.0.1:3773. connect ECONNREFUSED")).toBe("T3 Code isn't open on this computer. Open it, then try again.");
+    // The folder is in no project T3 knows.
+    expect(failed("No T3 Code project matches '.'. Pass a project id or a path inside a project.")).toBe("shop isn't a project in T3 Code yet. Add its folder in T3 Code, then try again.");
+    // No answer in time; an answer with no thread in it.
+    expect(t3StartFailure({ timedOut: true, exitCode: null, stdout: "", stderr: "" }, "shop")).toBe("T3 Code didn't answer within 30 seconds. It may have started the thread, so look in T3 Code before you try again.");
+    expect(t3StartFailure({ exitCode: 0, stdout: "{}", stderr: "" }, "shop")).toBe("T3 Code started a thread but didn't say which. Look in T3 Code before you try again.");
+  });
+
+  test("a failure it does not recognise: T3's last line, one line, 300 characters at most, each absolute path cut to its last name", () => {
+    expect(t3StartCause('noise\nBase ref "nope" does not resolve to a commit in project "shop" (/Users/me/code/shop).\n', "shop")).toBe('Base ref "nope" does not resolve to a commit in project "shop" (shop).');
+    expect(t3StartCause("Worktree folder /Users/me/.t3/worktrees/shop/t3-1a2b3c4d is in use.", "shop")).toBe("Worktree folder t3-1a2b3c4d is in use.");
+    expect(t3StartCause("Cannot write ~/.t3/userdata/state.json, C:\\Users\\me\\.t3\\x.db or '/var/tmp/t3' now", "shop")).toBe("Cannot write state.json, x.db or 't3' now.");
+    // A URL is not a path.
+    expect(t3StartCause("Fetch https://example.com/a/b failed", "shop")).toBe("Fetch https://example.com/a/b failed.");
     expect(t3StartCause("", "shop")).toBe("T3 Code did not say why.");
     expect(t3StartCause(`${"x".repeat(400)}`, "shop").length).toBeLessThanOrEqual(301);
   });

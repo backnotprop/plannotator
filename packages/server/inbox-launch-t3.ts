@@ -38,6 +38,10 @@ import { INBOX_T3_SEND_TIMEOUT_MS, t3ChildEnv, t3CommandOf } from "./inbox-t3-lo
 
 /** T3's words for a folder in no project it knows (cli/thread.ts `ThreadProjectNotFoundError`). */
 const T3_NO_PROJECT = /^No T3 Code project matches /;
+/** T3's words when its app is not running: no server for this home, or a runtime file whose server does not answer. */
+const T3_NOT_RUNNING = /^(No running T3 Code server uses |Could not reach the T3 Code server)/;
+/** What the person reads when T3 Code is not open (never T3's path or "server"). */
+export const T3_LAUNCH_NOT_OPEN = "T3 Code isn't open on this computer. Open it, then try again.";
 /** The most of T3's own words a failed start's line quotes. */
 const CAUSE_MAX = 300;
 
@@ -95,11 +99,25 @@ export function t3StartedThreadOf(stdout: string): string | null {
   return null;
 }
 
-/** T3's words for a start it refused, as the run line says them: its last line, one line, 300 characters at most. */
+/** Each absolute path in T3's words cut to its last name (`/Users/me/code/shop` → `shop`): the person never reads a path. */
+export function t3WithoutPaths(text: string): string {
+  return text.replace(/(^|[\s('"`=,])(~?\/[^\s'"`()<>,]*|[A-Za-z]:\\[^\s'"`()<>,]*)/g, (_all, lead: string, path: string) => {
+    const name = path.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).pop() ?? "";
+    return `${lead}${name.replace(/[.,;:]+$/, "") || "a folder"}${/[.,;:]$/.test(path) ? path.slice(-1) : ""}`;
+  });
+}
+
+/**
+ * Why a start failed, as the run line says it after "T3 Code didn't start.": the host's own plain sentence for what
+ * it recognises (T3 not open, a folder T3 doesn't know), else T3's last line, one line, 300 characters at most, with
+ * no path in it.
+ */
 export function t3StartCause(text: string, project: string): string {
   const last = text.split("\n").map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean).pop() ?? "";
   if (T3_NO_PROJECT.test(last)) return `${project} isn't a project in T3 Code yet. Add its folder in T3 Code, then try again.`;
-  const said = last.length > CAUSE_MAX ? `${last.slice(0, CAUSE_MAX - 1).trimEnd()}…` : last;
+  if (T3_NOT_RUNNING.test(last)) return T3_LAUNCH_NOT_OPEN;
+  const plain = t3WithoutPaths(last);
+  const said = plain.length > CAUSE_MAX ? `${plain.slice(0, CAUSE_MAX - 1).trimEnd()}…` : plain;
   if (!said) return "T3 Code did not say why.";
   return /[.!?…]$/.test(said) ? said : `${said}.`;
 }
@@ -112,6 +130,13 @@ function t3For(e: AgentEnvironment): string | null {
   const command = t3CommandOf(e);
   if (!command || !agentHomeAllowed(e)) return null;
   return agentHomeAllowed({ homeDir: command, env: e.env }) ? command : null;
+}
+
+/** The run line's cause for a `t3 thread start` that gave no thread: it timed out, said nothing usable, or refused. */
+export function t3StartFailure(result: { timedOut?: boolean; exitCode: number | null; stdout: string; stderr: string }, project: string): string {
+  if (result.timedOut) return `T3 Code didn't answer within ${Math.round(INBOX_T3_SEND_TIMEOUT_MS / 1000)} seconds. It may have started the thread, so look in T3 Code before you try again.`;
+  if (result.exitCode === 0) return "T3 Code started a thread but didn't say which. Look in T3 Code before you try again.";
+  return t3StartCause(`${result.stdout}\n${result.stderr}`, project);
 }
 
 export function createT3LaunchHost(ctx: LaunchHostContext) {
@@ -156,14 +181,8 @@ export function createT3LaunchHost(ctx: LaunchHostContext) {
       const result = await e.run(argv, { timeoutMs: INBOX_T3_SEND_TIMEOUT_MS, cwd: launch.folder, env, cleanEnv: true, stdin: message });
       // The message is never written down here: only the command and what T3 said.
       ctx.startLog(launch.id, `${["t3", ...argv.slice(1)].map((arg) => (/^[\w./:@=-]+$/.test(arg) ? arg : shellQuote(arg))).join(" ")} (in ${launch.folder}, the message on stdin)\nexit ${result.timedOut ? "timed out" : result.exitCode}\n${`${result.stdout}\n${result.stderr}`.trim().slice(-2000)}`);
-      if (result.timedOut) {
-        return { ok: false as const, code: "failed" as const, text: `T3 Code didn't answer within ${Math.round(INBOX_T3_SEND_TIMEOUT_MS / 1000)} s. It may have started the thread: look in T3 Code before you try again.` };
-      }
-      const thread = result.exitCode === 0 ? t3StartedThreadOf(result.stdout) : null;
-      if (!thread) {
-        const said = result.exitCode === 0 ? "T3 Code started a thread but didn't say which: look in T3 Code before you try again." : t3StartCause(`${result.stdout}\n${result.stderr}`, project);
-        return { ok: false as const, code: "failed" as const, text: said };
-      }
+      const thread = !result.timedOut && result.exitCode === 0 ? t3StartedThreadOf(result.stdout) : null;
+      if (!thread) return { ok: false as const, code: "failed" as const, text: t3StartFailure(result, project) };
       ctx.startLog(launch.id, `T3 thread ${thread}, in a new worktree from ${base}`);
       return { ok: true as const, session: thread, ref: thread };
     },
