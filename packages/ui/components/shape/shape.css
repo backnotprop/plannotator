@@ -188,11 +188,13 @@
    card, and the boxes bounded by it) ends left of the panel, and the drawing fits what is left (ShapeDrawn `aside`).
    Nothing of the board is under the panel. */
 .shp-root.panel-open:not(.panel-sheet) .shp-surface { margin-right: calc(var(--pw) + 12px); }
+/* In step with the panel's own slide (`.shp-sidep`): the dock and the status, centred in the surface, slide with it, and
+   the drawing refits as it goes (ShapeDrawn reads the surface's margin as its `aside`, so its layout never flips). */
+.shp-surface { transition: margin-right .32s cubic-bezier(.2,.8,.2,1); }
 /* As a sheet (a phone, a narrow pane: ShapeSurface `usePanelSheet`) the dock stays over it, whole and in reach; the
    sheet's list ends above the dock. */
 .shp-root.panel-open.panel-sheet .shp-dock { z-index: 32; }
 .shp-sidep.sheet .shp-sidep-body { padding-bottom: 72px; }
-.shp-dock, .shp-pill { transition: left .32s cubic-bezier(.2,.8,.2,1); }
 
 /* ── reference bubbles and the References list ── */
 .shp-rb { appearance: none; border: 0; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 0 0 5px; border-radius: 999px; vertical-align: 2px;
@@ -240,7 +242,7 @@
   .shp-rb.flash { animation: none; background: var(--primary); color: var(--primary-foreground); }
   .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
   .shp-sidep, .shp-sidep.open { transition: opacity .16s; }
-  .shp-dock, .shp-pill, .shp-pin-hover { transition: none; }
+  .shp-dock, .shp-pill, .shp-pin-hover, .shp-surface { transition: none; }
 }
 
 /* ── the grid: Shape's landing (approved "shape-landing-grid") ── */
@@ -319,7 +321,7 @@
 .shp-ex-card.leaving { pointer-events: none; }
 /* The board's status stays in view while an example is followed: it rides above the card, on the card's curve. */
 /* It keeps sliding with the dock when a panel opens. */
-.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: left .32s cubic-bezier(.2,.8,.2,1), translate .26s cubic-bezier(.22, 1, .36, 1); }
+.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: translate .26s cubic-bezier(.22, 1, .36, 1); }
 .shp-root.follow-sheet .shp-pill { z-index: 26; }
 .shp-ex-skin { position: absolute; inset: 0 0 var(--ex-cut, 0px); z-index: -1; border-radius: 14px; transform-origin: 0 0; background: var(--popover); pointer-events: none;
   box-shadow: 0 0 0 1px var(--ex-edge), 0 12px 32px -14px rgb(0 0 0 / .3), 0 2px 6px -2px rgb(0 0 0 / .06); }

@@ -323,7 +323,7 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
       act(() => root!.unmount());
       root = null;
       container!.remove();
-      const beside = await draw({ html: '<p>x</p>', drawn: canvas, pan: true, aside: 1000 });
+      const beside = await draw({ html: '<p>x</p>', drawn: canvas, pan: true, aside: () => 1000 });
       expect(beside.board.querySelector('[data-mark="wide"]')).not.toBeNull();
       expect(container!.querySelector('.shp-drawn')!.classList.contains('pan')).toBe(false);
       expect(beside.board.style.transform).toBe('scale(0.2)');
