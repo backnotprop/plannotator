@@ -3701,17 +3701,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ]) as Record<InboxReminderHost, boolean>;
     return inboxPromptsModel(config, on, promptWakes());
   };
-  // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line. Nor can Gemini CLI, Amp or Kiro.
-  const promptWakes = () => ({
-    "claude-code": true,
-    pi: true,
-    opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1",
-    qwen: inboxHookReminderWakes("qwen"),
-    gemini: inboxHookReminderWakes("gemini"),
-    amp: inboxHookReminderWakes("amp"),
-    kiro: inboxHookReminderWakes("kiro"),
-    codex: inboxHookReminderWakes("codex"),
-  });
+  // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line. The agents whose reminder comes
+  // from a hook get the wording that hook prints (inboxHookReminderWakes): Qwen Code's wake line only while the Inbox
+  // holds its trusted-sender token; Codex, Gemini CLI, Amp and Kiro the no-wake line.
+  const promptWakes = () => {
+    const canWake = (agent: string) => agent === "qwen" && qwenWake.canWake();
+    return {
+      "claude-code": true,
+      pi: true,
+      opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1",
+      qwen: inboxHookReminderWakes("qwen", canWake),
+      gemini: inboxHookReminderWakes("gemini", canWake),
+      amp: inboxHookReminderWakes("amp", canWake),
+      kiro: inboxHookReminderWakes("kiro", canWake),
+      codex: inboxHookReminderWakes("codex", canWake),
+    };
+  };
 
   /**
    * What Settings and the connect snippets read. `withStore`: the

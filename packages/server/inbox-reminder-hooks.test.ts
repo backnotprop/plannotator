@@ -138,12 +138,62 @@ test("Kiro: a file of our own with SessionStart and PostCompact; one that is not
   expect(readInboxReminderHooks(dataDir).failures?.kiro).toContain("is not Plannotator's");
 });
 
+test("Kiro: a hook the person adds to our file keeps ours counted as there (it still runs); removal takes only ours", () => {
+  reached("kiro");
+  expect(sync()).toEqual(["kiro"]);
+  const parsed = JSON.parse(read(where("kiro"))) as { hooks: unknown[] };
+  parsed.hooks.push({ name: "mine", trigger: "SessionStart", action: { type: "command", command: "mine.sh" } });
+  put(where("kiro"), `${JSON.stringify(parsed, null, 2)}\n`);
+  expect(sync()).toEqual([]);
+  expect(readInboxReminderHooks(dataDir).hooks.kiro?.removed_outside_at).toBeUndefined();
+  expect(removeRecordedInboxReminderHook("kiro", options())).toBeNull();
+  const left = JSON.parse(read(where("kiro"))) as { version: string; hooks: { name: string }[] };
+  expect(left).toEqual({ version: "v1", hooks: [{ name: "mine", trigger: "SessionStart", action: { type: "command", command: "mine.sh" } }] });
+});
+
+test("a moved CLI: our recorded hook whose program is gone runs this one from the next pass; the person's, or one still there, never changes", () => {
+  reached("codex", "kiro");
+  put(where("codex"), CODEX_MINE);
+  const gone = [join(fake.root, "old bin", "plannotator")];
+  const here = join(fake.root, "new-bin", "plannotator");
+  put(here, "#!/bin/sh\n");
+  expect(syncInboxReminderHooks({ ...options(), selfCommand: gone })).toEqual(["kiro", "codex"]);
+  const oldCodex = inboxReminderHookCommand(gone, "codex", "linux");
+  expect(read(where("codex"))).toContain(JSON.stringify(oldCodex));
+  expect(syncInboxReminderHooks({ ...options(), selfCommand: [here] })).toEqual([]);
+  const now = (agent: InboxReminderHookAgent) => inboxReminderHookCommand([here], agent, "linux");
+  expect(readInboxReminderHooks(dataDir).hooks.codex?.command).toBe(now("codex"));
+  expect((JSON.parse(read(where("codex"))) as { hooks: { SessionStart: { hooks: { command: string }[] }[] } }).hooks.SessionStart.map((entry) => entry.hooks[0]!.command)).toEqual(["my-start.sh", now("codex")]);
+  expect((JSON.parse(read(where("kiro"))) as { hooks: { action: { command: string } }[] }).hooks.map((hook) => hook.action.command)).toEqual([now("kiro"), now("kiro")]);
+  // Its program is there: a later CLI elsewhere leaves it alone.
+  const after = read(where("codex"));
+  expect(syncInboxReminderHooks({ ...options(), selfCommand: [join(fake.root, "third", "plannotator")] })).toEqual([]);
+  expect(read(where("codex"))).toBe(after);
+  // Removal still gives the person's file back byte for byte.
+  expect(removeRecordedInboxReminderHook("codex", options())).toBeNull();
+  expect(read(where("codex"))).toBe(CODEX_MINE);
+  // An entry of the same shape that Plannotator never recorded is the person's: never rewritten.
+  const theirs = JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: "command", command: oldCodex }] }] } });
+  put(where("codex"), theirs);
+  const fresh = join(fake.root, "data3");
+  mkdirSync(join(fresh, "inbox"), { recursive: true });
+  writeFileSync(join(fresh, "inbox", "agents.json"), read(join(dataDir, "inbox", "agents.json")));
+  expect(syncInboxReminderHooks({ ...options(), dataDir: fresh, selfCommand: [here] })).toEqual([]);
+  expect(syncInboxReminderHooks({ ...options(), dataDir: fresh, selfCommand: [here] })).toEqual([]);
+  expect(read(where("codex"))).toBe(theirs);
+});
+
 test("taken out by the person: noted, and never written again by itself", () => {
   reached("codex");
   put(where("codex"), CODEX_MINE);
   expect(sync()).toEqual(["codex"]);
   put(where("codex"), CODEX_MINE);
   expect(sync()).toEqual([]);
+  expect(readInboxReminderHooks(dataDir).hooks.codex?.removed_outside_at).toBeString();
+  expect(sync()).toEqual([]);
+  expect(read(where("codex"))).toBe(CODEX_MINE);
+  // Codex turned off and on again in Settings: the record of the person's removal stays, so it still never comes back.
+  expect(removeRecordedInboxReminderHook("codex", options())).toBeNull();
   expect(readInboxReminderHooks(dataDir).hooks.codex?.removed_outside_at).toBeString();
   expect(sync()).toEqual([]);
   expect(read(where("codex"))).toBe(CODEX_MINE);

@@ -290,7 +290,7 @@ import {
   STRICT_GATE_ERROR_EXIT_CODE,
 } from "./strict-annotate-result";
 import path from "path";
-import { tmpdir } from "os";
+import { homedir, tmpdir } from "os";
 import { createInterface } from "node:readline/promises";
 import { buildLocalWorkspaceReview, type WorkspaceDiffType } from "@plannotator/server/review-workspace";
 import {
@@ -486,13 +486,27 @@ if (isReviewDrawCommand(rawArgs, () => {
   }
 }
 // `plannotator inbox reminder --agent <id>`: the Inbox reminder for an agent's own hook (Qwen Code, Gemini CLI,
-// Amp, Kiro, Codex) at session start and after a compaction (packages/shared/inbox/reminder-hook.ts). Reads three
-// small files, never starts the Inbox; prints nothing and exits 0 when the reminder is off or anything fails.
+// Amp, Kiro, Codex) at session start and after a compaction (packages/shared/inbox/reminder-hook.ts). Reads a
+// few small files, never starts the Inbox; prints nothing and exits 0 when the reminder is off or anything fails.
 if (rawArgs[0] === "inbox" && rawArgs[1] === "reminder" && !hasHelpFlag(rawArgs.slice(2))) {
-  const { runInboxHookReminder } = await import("@plannotator/shared/inbox/reminder-hook");
-  // The agents pipe their hook event on stdin: read and set aside, bounded, so a writer never sees a closed pipe.
-  if (!process.stdin.isTTY) await Promise.race([Bun.stdin.text().catch(() => ""), Bun.sleep(500)]);
-  process.stdout.write(runInboxHookReminder(rawArgs.slice(2), { dataDir: getPlannotatorDataDir(), env: process.env }));
+  const reminderDataDir = getPlannotatorDataDir();
+  let reminder = "";
+  try {
+    const { runInboxHookReminder } = await import("@plannotator/shared/inbox/reminder-hook");
+    const { qwenCanWake } = await import("@plannotator/server/inbox-qwen-trust");
+    // The agents pipe their hook event on stdin: read and set aside, bounded, so a writer never sees a closed pipe.
+    if (!process.stdin.isTTY) await Promise.race([Bun.stdin.text().catch(() => ""), Bun.sleep(500)]);
+    reminder = runInboxHookReminder(rawArgs.slice(2), {
+      dataDir: reminderDataDir,
+      env: process.env,
+      // Qwen Code is woken only while Plannotator holds its trusted-sender token (the Inbox's own check).
+      canWake: (agent) => agent === "qwen" && qwenCanWake(reminderDataDir, { env: process.env, homeDir: homedir(), platform: process.platform }),
+    });
+  } catch {
+    reminder = "";
+  }
+  // The whole text before the exit: a JSON line cut short is a failed hook (writeWholeToStdout).
+  if (reminder) await writeWholeToStdout(reminder);
   process.exit(0);
 }
 // `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).

@@ -11,9 +11,10 @@ import { afterEach, beforeEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { INBOX_HOOK_REMINDER_HOSTS, type PlannotatorConfig } from "../config";
+import { INBOX_PROMPT_HOSTS } from "@plannotator/core/inbox-types";
+import { INBOX_HOOK_REMINDER_HOSTS, INBOX_REMINDER_HOSTS, type PlannotatorConfig } from "../config";
 import { inboxReminderText, inboxReminderWithRules } from "./connection";
-import { INBOX_HOOK_REMINDER_TOOL_NAME, inboxHookReminderText, runInboxHookReminder } from "./reminder-hook";
+import { INBOX_HOOK_REMINDER_FORMATS, INBOX_HOOK_REMINDER_TOOL_NAME, inboxHookReminderText, inboxHookReminderWakes, runInboxHookReminder } from "./reminder-hook";
 
 let dataDir: string;
 let savedDataDir: string | undefined;
@@ -39,28 +40,41 @@ const run = (agent: string, env: NodeJS.ProcessEnv = {}) => runInboxHookReminder
 const WAKE = inboxReminderText(INBOX_HOOK_REMINDER_TOOL_NAME);
 const NO_WAKE = inboxReminderText(INBOX_HOOK_REMINDER_TOOL_NAME, { wakes: false });
 
-test("on: each agent gets the shared reminder in the form its hook reads, with the wording for whether its reply comes back", () => {
+test("on: each agent gets the shared reminder in the form its hook reads; the no-wake wording unless the Inbox can really wake it", () => {
   setUp();
   // Codex and Gemini CLI: one JSON object, the text as SessionStart's additionalContext.
-  for (const [agent, text] of [["codex", WAKE], ["gemini", NO_WAKE]] as const) {
+  for (const agent of ["codex", "gemini"] as const) {
     const out = run(agent);
     expect(out.endsWith("\n")).toBe(true);
-    expect(JSON.parse(out)).toEqual({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: text } });
+    expect(JSON.parse(out)).toEqual({ hookSpecificOutput: { hookEventName: "SessionStart", additionalContext: NO_WAKE } });
   }
   // Qwen Code, Kiro, Amp: the text itself.
-  expect(run("qwen")).toBe(`${WAKE}\n`);
-  expect(run("kiro")).toBe(`${NO_WAKE}\n`);
-  expect(run("amp")).toBe(`${NO_WAKE}\n`);
+  for (const agent of ["qwen", "kiro", "amp"]) expect(run(agent)).toBe(`${NO_WAKE}\n`);
   // `--agent=<id>` reads the same.
-  expect(runInboxHookReminder(["--agent=qwen"], { dataDir, env: {} })).toBe(`${WAKE}\n`);
+  expect(runInboxHookReminder(["--agent=qwen"], { dataDir, env: {} })).toBe(`${NO_WAKE}\n`);
   // The name the agent knows the Inbox by stands where the tool is named.
-  expect(WAKE).toContain(`${INBOX_HOOK_REMINDER_TOOL_NAME} send_message`);
+  expect(NO_WAKE).toContain(`${INBOX_HOOK_REMINDER_TOOL_NAME} send_message`);
+});
+
+test("the wake wording: Qwen Code only when the Inbox can wake it now; never Codex (not known without its CLI), Gemini CLI, Amp or Kiro", () => {
+  setUp();
+  const asked: string[] = [];
+  const canWake = (agent: string) => {
+    asked.push(agent);
+    return true;
+  };
+  expect(runInboxHookReminder(["--agent", "qwen"], { dataDir, env: {}, canWake })).toBe(`${WAKE}\n`);
+  expect(JSON.parse(runInboxHookReminder(["--agent", "codex"], { dataDir, env: {}, canWake })).hookSpecificOutput.additionalContext).toBe(NO_WAKE);
+  for (const agent of ["gemini", "amp", "kiro"] as const) expect(inboxHookReminderWakes(agent, canWake)).toBe(false);
+  expect(asked).toEqual(["qwen"]);
+  // A check that fails reads as "cannot".
+  expect(runInboxHookReminder(["--agent", "qwen"], { dataDir, env: {}, canWake: () => { throw new Error("no"); } })).toBe(`${NO_WAKE}\n`);
 });
 
 test("the person's rules: under the shared lead, an agent's own winning over the ones for all agents; their own reminder text too", () => {
   setUp();
   config({ prompts: { inbox: { rules: "Keep it short.\nUse plannotator_inbox for decisions.", runtimes: { kiro: { rules: "Only for Kiro." }, codex: { reminder: "My own Codex line." } } } } });
-  expect(run("qwen")).toBe(`${inboxReminderWithRules(WAKE, "Keep it short.\nUse plannotator_inbox for decisions.", INBOX_HOOK_REMINDER_TOOL_NAME)}\n`);
+  expect(run("qwen")).toBe(`${inboxReminderWithRules(NO_WAKE, "Keep it short.\nUse plannotator_inbox for decisions.", INBOX_HOOK_REMINDER_TOOL_NAME)}\n`);
   expect(run("qwen")).toContain(`Use ${INBOX_HOOK_REMINDER_TOOL_NAME} for decisions.`);
   expect(run("kiro")).toBe(`${inboxReminderWithRules(NO_WAKE, "Only for Kiro.")}\n`);
   expect(JSON.parse(run("codex")).hookSpecificOutput.additionalContext).toBe(inboxReminderWithRules("My own Codex line.", "Keep it short.\nUse plannotator_inbox for decisions.", INBOX_HOOK_REMINDER_TOOL_NAME));
@@ -74,7 +88,7 @@ test("off: an agent's switch, or the one for every agent, prints nothing; the In
   config({ inboxReminder: false });
   for (const agent of INBOX_HOOK_REMINDER_HOSTS) expect(run(agent)).toBe("");
   config({});
-  expect(run("qwen", { PLANNOTATOR_INBOX_TOOL: "0" })).toBe(`${WAKE}\n`);
+  expect(run("qwen", { PLANNOTATOR_INBOX_TOOL: "0" })).toBe(`${NO_WAKE}\n`);
 });
 
 test("not set up: no Inbox here, no record, a record that is not MCP or was removed outside, prints nothing", () => {
@@ -93,4 +107,20 @@ test("failure: damaged records, a data dir that is a file, an unknown or missing
   expect(runInboxHookReminder(["--agent", "codex"], { dataDir: file, env: {} })).toBe("");
   setUp();
   for (const args of [[], ["--agent"], ["--agent", "cursor"], ["--agent", "claude-code"]]) expect(runInboxHookReminder(args, { dataDir, env: {} })).toBe("");
+});
+
+test("a damaged config.json on its own (it may hold the person's off): nothing; an empty one reads as no settings", () => {
+  setUp();
+  for (const damaged of ["{ nope", "[1, 2]", "\"text\""]) {
+    writeFileSync(join(dataDir, "config.json"), damaged);
+    for (const agent of INBOX_HOOK_REMINDER_HOSTS) expect(run(agent)).toBe("");
+  }
+  writeFileSync(join(dataDir, "config.json"), "  \n");
+  expect(run("kiro")).toBe(`${NO_WAKE}\n`);
+});
+
+test("every agent with a reminder has its row in Settings → Prompts, and the hooks' agents are among them", () => {
+  expect([...INBOX_PROMPT_HOSTS]).toEqual([...INBOX_REMINDER_HOSTS]);
+  for (const agent of INBOX_HOOK_REMINDER_HOSTS) expect(INBOX_REMINDER_HOSTS).toContain(agent);
+  expect(Object.keys(INBOX_HOOK_REMINDER_FORMATS).sort()).toEqual([...INBOX_HOOK_REMINDER_HOSTS].sort());
 });

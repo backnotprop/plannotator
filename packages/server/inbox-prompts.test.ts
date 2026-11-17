@@ -19,8 +19,8 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 /** One value per agent with a reminder (INBOX_PROMPT_HOSTS), some set apart. */
 const hosts = <T,>(value: T, over: Record<string, T> = {}) => ({ "claude-code": value, pi: value, opencode: value, qwen: value, gemini: value, amp: value, kiro: value, codex: value, ...over });
-/** Gemini CLI, Amp and Kiro: a reply never comes back by itself. */
-const WAKES = hosts(true, { gemini: false, amp: false, kiro: false });
+/** The hooks' agents get the no-wake line: Gemini CLI, Amp and Kiro are never woken, Codex's wake is not claimed, and Qwen Code has no trusted-sender token here. */
+const WAKES = hosts(true, { qwen: false, gemini: false, amp: false, kiro: false, codex: false });
 let previousDataDir: string | undefined;
 
 afterEach(() => {

@@ -49,7 +49,8 @@
     "./inbox-agents": "./inbox-agents.ts",
     "./test-home-guard": "./test-home-guard.ts",
     "./inbox-codex-wake": "./inbox-codex-wake.ts",
-    "./inbox-agent-notes": "./inbox-agent-notes.ts"
+    "./inbox-agent-notes": "./inbox-agent-notes.ts",
+    "./inbox-qwen-trust": "./inbox-qwen-trust.ts"
   },
   "files": [
     "*.ts",

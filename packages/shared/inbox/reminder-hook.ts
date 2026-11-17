@@ -47,9 +47,24 @@ export const INBOX_HOOK_REMINDER_FORMATS: Readonly<Record<InboxHookReminderHost,
   codex: "additional-context",
 };
 
-/** Whether a reply can come back into the agent's session by itself (an MCP connection alone wakes Codex and Qwen Code): the reminder's wording follows. */
-export function inboxHookReminderWakes(agent: InboxHookReminderHost): boolean {
-  return INBOX_MCP_WAKING_HOSTS.includes(agent);
+/**
+ * Whether the reminder says a reply comes back into the session by itself (the wake line) or to read the thread
+ * later (the no-wake line). Only an agent the Inbox can wake through its MCP connection (INBOX_MCP_WAKING_HOSTS)
+ * and only when `canWake` says the Inbox really can now:
+ *  - Qwen Code: Plannotator holds its trusted-sender token (`qwenCanWake` in packages/server/inbox-qwen-trust.ts,
+ *    the check the Inbox's wake makes, read from disk).
+ *  - Codex: the Inbox wakes it only through a Codex CLI with `codex queue`, which takes running `codex --version`
+ *    to know (the Inbox's probe, up to 10 s): too slow for a session start, so the hook never claims it and gives
+ *    the no-wake line. send_message's result says per call when a reply does come back.
+ * Gemini CLI, Amp and Kiro are never woken.
+ */
+export function inboxHookReminderWakes(agent: InboxHookReminderHost, canWake: (agent: InboxHookReminderHost) => boolean = () => false): boolean {
+  if (agent === "codex" || !INBOX_MCP_WAKING_HOSTS.includes(agent)) return false;
+  try {
+    return canWake(agent) === true;
+  } catch {
+    return false;
+  }
 }
 
 /** The agent's record in `inbox/agents.json` says it reaches the Inbox through MCP (added or found, not removed since). */
@@ -64,6 +79,30 @@ export function inboxAgentReachedByRecord(dataDir: string, agent: string): boole
   }
 }
 
+/** config.json is missing, empty, or a JSON object (what loadConfig reads); not a file it would read as `{}` after a failure. */
+function configReadable(path: string): boolean {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8").replace(/^﻿/, "");
+  } catch (error) {
+    return (error as NodeJS.ErrnoException)?.code === "ENOENT";
+  }
+  if (raw.trim() === "") return true;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed);
+  } catch {
+    return false;
+  }
+}
+
+export interface InboxHookReminderOptions {
+  dataDir: string;
+  env?: NodeJS.ProcessEnv;
+  /** Whether the Inbox can wake this agent now (inboxHookReminderWakes). Absent: it cannot. */
+  canWake?: (agent: InboxHookReminderHost) => boolean;
+}
+
 /**
  * The reminder text for `agent`, or null when it gets none. `config`: the
  * parsed config.json (read here when absent). The single place a hook host's
@@ -71,13 +110,15 @@ export function inboxAgentReachedByRecord(dataDir: string, agent: string): boole
  */
 export function inboxHookReminderText(
   agent: InboxHookReminderHost,
-  options: { dataDir: string; env?: NodeJS.ProcessEnv; config?: PlannotatorConfig },
+  options: InboxHookReminderOptions & { config?: PlannotatorConfig },
 ): string | null {
   if (!existsSync(join(options.dataDir, "inbox", "inbox.json"))) return null;
   if (!inboxAgentReachedByRecord(options.dataDir, agent)) return null;
+  // A config.json that is there but unreadable may hold the person's "off": nothing is said then.
+  if (!options.config && !configReadable(join(options.dataDir, "config.json"))) return null;
   const config = options.config ?? loadConfig({ quiet: true });
   if (!resolveInboxReminder(config, options.env ?? process.env, agent)) return null;
-  const text = resolveInboxReminderText(config, agent, { toolName: INBOX_HOOK_REMINDER_TOOL_NAME, wakes: inboxHookReminderWakes(agent) });
+  const text = resolveInboxReminderText(config, agent, { toolName: INBOX_HOOK_REMINDER_TOOL_NAME, wakes: inboxHookReminderWakes(agent, options.canWake) });
   return text.trim() ? text : null;
 }
 
@@ -100,7 +141,7 @@ export function inboxHookReminderAgentArg(args: readonly string[]): InboxHookRem
 }
 
 /** The whole command: what to print for these arguments (never throws; "" on any failure). */
-export function runInboxHookReminder(args: readonly string[], options: { dataDir: string; env?: NodeJS.ProcessEnv }): string {
+export function runInboxHookReminder(args: readonly string[], options: InboxHookReminderOptions): string {
   try {
     const agent = inboxHookReminderAgentArg(args);
     if (!agent) return "";

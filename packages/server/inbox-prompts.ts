@@ -89,7 +89,7 @@ function overCap(value: unknown): number | null {
 export function inboxPromptsModel(
   config: PlannotatorConfig,
   on: Record<InboxPromptHost, boolean>,
-  wakes: Record<InboxPromptHost, boolean> = { "claude-code": true, pi: true, opencode: true, qwen: true, gemini: false, amp: false, kiro: false, codex: true },
+  wakes: Record<InboxPromptHost, boolean> = { "claude-code": true, pi: true, opencode: true, qwen: false, gemini: false, amp: false, kiro: false, codex: false },
 ): InboxPromptsSettings {
   const inbox = record(record(config.prompts)?.inbox);
   const prompts = record(config.prompts);

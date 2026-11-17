@@ -137,6 +137,15 @@ export function qwenWakeToken(dataDir: string, home: string): string | null {
   return file?.token && samePlace(file.home, home) ? file.token : null;
 }
 
+/**
+ * Whether the Inbox can put a reply into a Qwen Code session of this computer's Qwen home: not on Windows (no
+ * socket), and Plannotator holds the trusted-sender token minted for that home. What `InboxQwenWake.canWake()`
+ * answers (inbox-qwen-wake.ts), read from disk once, with no CLI: the reminder hook's wording reads it too.
+ */
+export function qwenCanWake(dataDir: string, e: Pick<AgentEnvironment, "env" | "homeDir" | "platform">): boolean {
+  return e.platform !== "win32" && qwenWakeToken(dataDir, qwenTrustHome(e)) !== null;
+}
+
 /** `0.26.2` (also `0.27.0-nightly.20261020.abc`) as [major, minor, patch]; null for anything else. */
 export function parseQwenVersion(text: string): [number, number, number] | null {
   const match = /^(\d+)\.(\d+)\.(\d+)(?:-[\w.]+)?$/m.exec(text.trim());

@@ -709,7 +709,7 @@ function removeInboxReminderHooks(request: UninstallRequest, environment: Uninst
       continue;
     }
     const problem = item.apply();
-    if (problem) state.warnings.push(`Could not remove ${item.describe}: ${problem}.`);
+    if (problem) state.warnings.push(`Could not remove Plannotator's Inbox reminder hook: ${problem}.`);
     else state.removed.push(item.describe);
   }
 }

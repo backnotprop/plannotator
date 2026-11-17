@@ -25,7 +25,7 @@
  * `inbox/reminder-hooks.json`.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, isAbsolute, join } from "node:path";
 import { loadConfig, resolveInboxReminder } from "@plannotator/shared/config";
 import { inboxAgentReachedByRecord } from "@plannotator/shared/inbox/reminder-hook";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
@@ -172,15 +172,21 @@ function ourEntries(parsed: unknown, agent: InboxReminderHookAgent, written?: st
   return out;
 }
 
-/** Kiro's file holds only hooks of ours. */
-function kiroFileIsOurs(text: string, written?: string): boolean {
+/** In Kiro's file: the indexes of our hooks and how many it holds; null when it is not a hook file. */
+function kiroHooksOf(text: string, written?: string): { mine: number[]; total: number } | null {
   try {
-    const parsed = asRecord(JSON.parse(text));
-    const hooks = parsed?.hooks;
-    return Array.isArray(hooks) && hooks.length > 0 && hooks.every((hook) => isInboxReminderHookCommand(asRecord(asRecord(hook)?.action)?.command, "kiro", written));
+    const hooks = asRecord(JSON.parse(text))?.hooks;
+    if (!Array.isArray(hooks)) return null;
+    const mine = hooks.flatMap((hook, index) => (isInboxReminderHookCommand(asRecord(asRecord(hook)?.action)?.command, "kiro", written) ? [index] : []));
+    return { mine, total: hooks.length };
   } catch {
-    return false;
+    return null;
   }
+}
+
+/** Kiro's file holds a hook of ours (it runs while it is there, whatever else the person added). */
+function kiroFileHasOurs(text: string, written?: string): boolean {
+  return (kiroHooksOf(text, written)?.mine.length ?? 0) > 0;
 }
 
 /** Why a file Plannotator did not create may not be written: read-only, or other hard links (the rename would split them). Null: it may. */
@@ -216,9 +222,11 @@ export function addInboxReminderHook(agent: InboxReminderHookAgent, command: str
   if (agent === "kiro") {
     const next = kiroReminderHookFile(command);
     if (read.kind === "file") {
-      if (kiroFileIsOurs(read.text, command)) return { ok: true, action: "present", path: shown };
+      if (kiroFileHasOurs(read.text, command)) return { ok: true, action: "present", path: shown };
       return { ok: false, reason: `${shown} is not Plannotator's, so Plannotator left it as it was`, path: shown };
     }
+    // Still missing right before the write: a file the person put there meanwhile is never written over.
+    if (existsSync(read.target)) return { ok: false, reason: `${shown} changed while the hook was being added; Plannotator tries again later`, path: shown };
     try {
       writeAgentFileAtomic(read.target, next, 0o644);
     } catch (error) {
@@ -245,7 +253,7 @@ export function addInboxReminderHook(agent: InboxReminderHookAgent, command: str
   if (!edit.ok) return { ok: false, reason: `${shown} can't be edited without reshaping it (${edit.reason}), so Plannotator left it as it was`, path: shown };
   const bom = read.kind === "file" && read.bom;
   if (read.kind === "file" ? !stillReads(read.target, original, bom) : existsSync(read.target)) {
-    return { ok: false, reason: `${shown} changed while the hook was being added; tried again later`, path: shown };
+    return { ok: false, reason: `${shown} changed while the hook was being added; Plannotator tries again later`, path: shown };
   }
   try {
     writeAgentFileAtomic(read.target, withBom(edit.text, bom), read.kind === "file" ? read.mode : 0o644);
@@ -269,11 +277,30 @@ export function removeInboxReminderHook(agent: InboxReminderHookAgent, e: AgentE
   if (read.kind === "missing") return { ok: true, action: "absent", path: shown };
   if (read.kind === "refused") return { ok: false, reason: `${shown} can't be edited (${read.reason})`, path: shown };
   if (agent === "kiro") {
-    if (!kiroFileIsOurs(read.text, record?.command)) return { ok: true, action: "absent", path: shown };
+    const kiro = kiroHooksOf(read.text, record?.command);
+    if (!kiro || kiro.mine.length === 0) return { ok: true, action: "absent", path: shown };
+    if (kiro.mine.length === kiro.total) {
+      try {
+        rmSync(read.target, { force: true });
+      } catch (error) {
+        return { ok: false, reason: `${shown} can't be removed (${describeFsError(error)})`, path: shown };
+      }
+      return { ok: true, action: "removed", path: shown };
+    }
+    // The person added hooks of their own to our file: only ours go, theirs and the file stay.
+    let text = read.text;
+    for (const index of [...kiro.mine].reverse()) {
+      const cut = removeJsonArrayItem(text, [], "hooks", index);
+      if (!cut.ok) return { ok: false, reason: `${shown} can't be edited without reshaping it (${cut.reason}), so Plannotator left it as it was`, path: shown };
+      text = cut.text;
+    }
+    const refusal = writeRefusal(read.target, read.mode, shown);
+    if (refusal) return { ok: false, reason: refusal, path: shown };
+    if (!stillReads(read.target, read.text, read.bom)) return { ok: false, reason: `${shown} changed while the hook was being removed; try again`, path: shown };
     try {
-      rmSync(read.target, { force: true });
+      writeAgentFileAtomic(read.target, withBom(text, read.bom), read.mode);
     } catch (error) {
-      return { ok: false, reason: `${shown} can't be removed (${describeFsError(error)})`, path: shown };
+      return { ok: false, reason: `${shown} can't be written (${describeFsError(error)})`, path: shown };
     }
     return { ok: true, action: "removed", path: shown };
   }
@@ -335,6 +362,65 @@ export function removeInboxReminderHook(agent: InboxReminderHookAgent, e: AgentE
   return { ok: true, action: "removed", path: shown };
 }
 
+/** The program a hook command of ours runs is gone: an absolute path (the CLI, or the script `bun` runs) that no longer exists. A bare name is looked up on PATH: never gone. */
+function hookProgramGone(command: string): boolean {
+  const match = /^(?:"([^"]+)"|'([^']+)'|(\S+))(?:\s+([\s\S]*))?$/.exec(command.trim());
+  if (!match) return false;
+  const executable = match[1] ?? match[2] ?? match[3] ?? "";
+  const name = basename(executable.replace(/\\/g, "/")).toLowerCase();
+  const program = name === "bun" || name === "bun.exe" ? (simpleShellCommandWords(match[4] ?? "")?.[0] ?? "") : executable;
+  return isAbsolute(program) && !existsSync(program);
+}
+
+/**
+ * Our recorded hook runs a CLI that is gone (moved, or installed elsewhere): the same hook with `command`, this
+ * CLI, in its place. Only a recorded hook of ours whose program no longer exists; only the command's text changes
+ * (checked: the file parses to the same value with ours renamed), with every write guard. Returns the record to
+ * keep, or null when nothing changed.
+ */
+function refreshInboxReminderHookCommand(agent: InboxReminderHookAgent, record: InboxReminderHookRecord, command: string): InboxReminderHookRecord | null {
+  const read = readAgentFile(record.path);
+  if (read.kind !== "file") return null;
+  const comments = agent === "gemini";
+  const parse = (text: string): unknown => JSON.parse(comments ? stripJsonComments(text) : text);
+  let parsed: unknown;
+  try {
+    parsed = parse(read.text);
+  } catch {
+    return null;
+  }
+  // Our hooks' commands as they stand: one each, all the same, all gone, none already this one.
+  const commands = new Set<string>();
+  const ours = (hook: unknown, get: (hook: Record<string, unknown>) => unknown) => {
+    const value = get(asRecord(hook) ?? {});
+    if (isInboxReminderHookCommand(value, agent, record.command)) commands.add(value as string);
+  };
+  if (agent === "kiro") for (const hook of (asRecord(parsed)?.hooks as unknown[] | undefined) ?? []) ours(hook, (h) => asRecord(h.action)?.command);
+  else for (const entry of (asRecord(asRecord(parsed)?.hooks)?.SessionStart as unknown[] | undefined) ?? []) for (const hook of (asRecord(entry)?.hooks as unknown[] | undefined) ?? []) ours(hook, (h) => h.command);
+  if (commands.size !== 1) return null;
+  const old = [...commands][0]!;
+  if (old === command || !hookProgramGone(old)) return null;
+  const before = JSON.stringify(old);
+  const after = JSON.stringify(command);
+  const next = read.text.split(before).join(after);
+  // Exactly our commands renamed: the person's values (a matcher, a hook of theirs) are untouched.
+  const rename = (value: unknown): unknown =>
+    Array.isArray(value) ? value.map(rename) : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, key === "command" && item === old ? command : rename(item)])) : value;
+  try {
+    if (JSON.stringify(parse(next)) !== JSON.stringify(rename(parsed))) return null;
+  } catch {
+    return null;
+  }
+  if (writeRefusal(read.target, read.mode, read.target) || !stillReads(read.target, read.text, read.bom)) return null;
+  try {
+    writeAgentFileAtomic(read.target, withBom(next, read.bom), read.mode);
+  } catch {
+    return null;
+  }
+  const undo = record.undo ? { ...record.undo, after: record.undo.after.split(before).join(after) } : undefined;
+  return { ...record, command, ...(undo ? { undo } : {}) };
+}
+
 /** Nothing left but `{}` or `{ "hooks": {} }`. */
 function isOnlyEmptyHooks(text: string, comments: boolean): boolean {
   if (!text.trim()) return true;
@@ -370,7 +456,7 @@ export function syncInboxReminderHooks(options: ConnectOptions): InboxReminderHo
       const there =
         read.kind === "file" &&
         (agent === "kiro"
-          ? kiroFileIsOurs(read.text, record.command)
+          ? kiroFileHasOurs(read.text, record.command)
           : (() => {
               try {
                 return ourEntries(JSON.parse(agent === "gemini" ? stripJsonComments(read.text) : read.text), agent, record.command).length > 0;
@@ -381,6 +467,14 @@ export function syncInboxReminderHooks(options: ConnectOptions): InboxReminderHo
       if (!there && read.kind !== "refused") {
         file.hooks[agent] = { ...record, removed_outside_at: at };
         changed = true;
+      } else if (there) {
+        // The CLI it runs moved (an install elsewhere): ours runs this one now, so it never fails at every start.
+        const command = inboxReminderHookCommand(options.selfCommand, agent, e.platform);
+        const moved = refreshInboxReminderHookCommand(agent, record, command);
+        if (moved) {
+          file.hooks[agent] = moved;
+          changed = true;
+        }
       }
       continue;
     }
@@ -416,11 +510,10 @@ export function removeRecordedInboxReminderHook(agent: string, options: Pick<Con
   const id = agent as InboxReminderHookAgent;
   const file = readInboxReminderHooks(options.dataDir);
   const record = file.hooks[id];
-  if (!record) return null;
-  if (!record.removed_outside_at) {
-    const change = removeInboxReminderHook(id, options.environment, record);
-    if (!change.ok) return `Plannotator's reminder hook in ${change.path} could not be removed (${change.reason})`;
-  }
+  // The person took it out themselves: the record stays, so turning the agent on again never brings it back.
+  if (!record || record.removed_outside_at) return null;
+  const change = removeInboxReminderHook(id, options.environment, record);
+  if (!change.ok) return `Plannotator's reminder hook could not be removed: ${change.reason}`;
   delete file.hooks[id];
   writeInboxReminderHooks(options.dataDir, file);
   return null;
@@ -444,7 +537,7 @@ export function planInboxReminderHookRemoval(dataDir: string, e: AgentEnvironmen
     if (read.kind !== "file") continue;
     const present =
       agent === "kiro"
-        ? kiroFileIsOurs(read.text, record?.command)
+        ? kiroFileHasOurs(read.text, record?.command)
         : (() => {
             try {
               return ourEntries(JSON.parse(agent === "gemini" ? stripJsonComments(read.text) : read.text), agent, record?.command).length > 0;
