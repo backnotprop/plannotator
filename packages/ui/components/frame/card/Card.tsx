@@ -650,7 +650,7 @@ export function CardFaceDocument({ title, children }: { readonly title: string; 
 
 const GridColumns = createContext<number | null>(null);
 
-const CARD_GRID_ROW_GAP: Record<CardSize, number> = { large: 28, regular: 24 };
+const CARD_GRID_ROW_GAP: Record<CardSize, number> = { large: 28, regular: 44 };
 
 /**
  * Cards of one size in fluid columns: each card fills its column. `large`
@@ -666,7 +666,7 @@ export function CardGrid({
 }: {
   readonly children: ReactNode;
   readonly size: CardSize;
-  /** The space between rows of cards, in CSS pixels. Default 28 for large cards and 24 for regular ones, so a group on its own matches a shared group. */
+  /** The space between rows of cards, in CSS pixels. Default 28 for large cards and 44 for regular ones; a group on its own passes 24. */
   readonly gap?: number;
   readonly label?: string;
   readonly ref?: Ref<HTMLUListElement>;
@@ -683,7 +683,16 @@ export function CardGrid({
  * `CardGroups` it takes as many of the shared columns as it has cards (up
  * to a full row), so every card lines up whatever its group.
  */
-export function CardGroup({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+export function CardGroup({
+  label,
+  children,
+  gap = 24,
+}: {
+  readonly label: string;
+  readonly children: ReactNode;
+  /** The space between its rows of cards, in CSS pixels. Default 24. */
+  readonly gap?: number;
+}) {
   const columns = useContext(GridColumns);
   const count = Children.toArray(children).filter(present).length;
   const shared = columns !== null;
@@ -697,11 +706,13 @@ export function CardGroup({ label, children }: { readonly label: string; readonl
         {label}
       </h3>
       {shared ? (
-        <ul data-frame-card-grid="group">
+        <ul data-frame-card-grid="group" style={{ rowGap: gap }}>
           {Children.map(children, (child) => (present(child) ? <li className="flex min-w-0">{child}</li> : null))}
         </ul>
       ) : (
-        <CardGrid size="regular">{children}</CardGrid>
+        <CardGrid size="regular" gap={gap}>
+          {children}
+        </CardGrid>
       )}
     </section>
   );
