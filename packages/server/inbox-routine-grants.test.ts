@@ -5,7 +5,9 @@
  *  - a message that is not the person's Send of the BUILT-IN /create-routine minting a grant: an agent's message with
  *    the same block, a skill of the person's own by that name, another built-in, a block that is not the message's
  *    end, a routine run's divider (its prompt is an agent's to edit);
- *  - a grant used twice, by another thread, after its hour, or lost when the create it was taken for is refused;
+ *  - a grant used twice, by another thread, by a session the Send did not go to (another agent in the thread, a
+ *    shell that names none), after its hour; lost when the create is refused before anything is saved, or given back
+ *    after the routine was saved;
  *  - a granted create arriving off, or its result not saying on and its next run; an ungranted one arriving on, or
  *    its result not saying why it is off.
  */
@@ -15,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
 import { INBOX_BUILTIN_SKILL_ROOT } from "@plannotator/core/inbox-review";
@@ -23,8 +26,8 @@ import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { builtinSkillContent, composeInboxSkillsBlock, withSkillsBlock } from "../inbox/skills";
 import { createInboxLaunch } from "./inbox-launch";
 import { registerInboxScheduledTool } from "./inbox-mcp-scheduled";
-import { createInboxScheduled } from "./inbox-scheduled";
-import { createRoutineGrants, mintsRoutineGrant, ROUTINE_GRANT_MS } from "./inbox-routine-grants";
+import { createInboxScheduled, type InboxScheduled } from "./inbox-scheduled";
+import { createRoutineGrants, mintsRoutineGrant, ROUTINE_GRANT_MS, sendRecipients } from "./inbox-routine-grants";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -80,41 +83,56 @@ describe("what mints a grant", () => {
 describe("a grant", () => {
   const send = (id: string, thread: string, at: number): InboxMessage =>
     ({ id, thread_id: thread, project_id: "prj_x", reply_to: thread, author: { kind: "person" }, subject: null, body: PERSON_SEND, created_at: new Date(at).toISOString(), resolved_at: null }) as InboxMessage;
+  /** Who each Send went to, as the store would say. */
+  const to: Record<string, string[]> = { msg_send: ["ses_maya"], msg_a: ["ses_maya"], msg_two: ["ses_maya", "ses_tagged"], msg_nobody: [] };
+  const grantsAt = (clock: { now: number }) => createRoutineGrants((id) => to[id] ?? [], () => clock.now);
 
-  test("is taken once, only by its own thread, and the same Send never mints a second", () => {
+  test("is taken once, only in its own thread by a session it went to, and the same Send never mints a second", () => {
     const clock = { now: Date.parse("2026-11-17T12:00:00.000Z") };
-    const grants = createRoutineGrants(() => clock.now);
+    const grants = grantsAt(clock);
     grants.noteSend(send("msg_send", "msg_thread", clock.now));
     grants.noteSend(send("msg_send", "msg_thread", clock.now));
-    expect(grants.take("msg_other")).toBeNull();
-    expect(grants.take(null)).toBeNull();
-    expect(grants.take("msg_thread")).toMatchObject({ thread_id: "msg_thread", message_id: "msg_send" });
-    expect(grants.take("msg_thread")).toBeNull();
+    expect(grants.take("msg_other", "ses_maya")).toEqual({ grant: null, for_another: false });
+    expect(grants.take(null, "ses_maya")).toEqual({ grant: null, for_another: false });
+    // Another agent in the thread, and a caller that names no session: none, and the thread holds one for another.
+    expect(grants.take("msg_thread", "ses_other")).toEqual({ grant: null, for_another: true });
+    expect(grants.take("msg_thread", "")).toEqual({ grant: null, for_another: true });
+    expect(grants.take("msg_thread", "ses_maya").grant).toMatchObject({ thread_id: "msg_thread", message_id: "msg_send" });
+    expect(grants.take("msg_thread", "ses_maya")).toEqual({ grant: null, for_another: false });
     // Written again (delivered, seen): still none.
     grants.noteSend(send("msg_send", "msg_thread", clock.now));
-    expect(grants.take("msg_thread")).toBeNull();
+    expect(grants.take("msg_thread", "ses_maya").grant).toBeNull();
+  });
+
+  test("a session the Send tags takes it too; a Send that went to no session is taken by nobody", () => {
+    const clock = { now: Date.parse("2026-11-17T12:00:00.000Z") };
+    const grants = grantsAt(clock);
+    grants.noteSend(send("msg_two", "msg_thread", clock.now));
+    expect(grants.take("msg_thread", "ses_tagged").grant).toMatchObject({ message_id: "msg_two" });
+    grants.noteSend(send("msg_nobody", "msg_lone", clock.now));
+    for (const session of ["ses_maya", "ses_other", ""]) expect(grants.take("msg_lone", session).grant).toBeNull();
   });
 
   test("lasts an hour from the Send", () => {
     const clock = { now: Date.parse("2026-11-17T12:00:00.000Z") };
-    const grants = createRoutineGrants(() => clock.now);
+    const grants = grantsAt(clock);
     grants.noteSend(send("msg_a", "msg_thread", clock.now));
     clock.now += ROUTINE_GRANT_MS - 1;
     expect(grants.open()).toHaveLength(1);
     clock.now += 1;
-    expect(grants.take("msg_thread")).toBeNull();
+    expect(grants.take("msg_thread", "ses_maya")).toEqual({ grant: null, for_another: false });
     expect(ROUTINE_GRANT_MS).toBe(60 * 60_000);
   });
 
   test("given back after a refused create, while its hour lasts", () => {
     const clock = { now: Date.parse("2026-11-17T12:00:00.000Z") };
-    const grants = createRoutineGrants(() => clock.now);
+    const grants = grantsAt(clock);
     grants.noteSend(send("msg_a", "msg_thread", clock.now));
-    const taken = grants.take("msg_thread")!;
+    const taken = grants.take("msg_thread", "ses_maya").grant!;
     grants.restore(taken);
     grants.restore(taken);
     expect(grants.open()).toHaveLength(1);
-    expect(grants.take("msg_thread")).toBe(taken);
+    expect(grants.take("msg_thread", "ses_maya").grant).toBe(taken);
     clock.now += ROUTINE_GRANT_MS;
     grants.restore(taken);
     expect(grants.open()).toHaveLength(0);
@@ -167,7 +185,7 @@ function world() {
     now: () => clock.now,
   });
   restore.push(() => scheduled.stop());
-  const grants = createRoutineGrants(() => clock.now);
+  const grants = createRoutineGrants(sendRecipients(store), () => clock.now);
   const tools: Record<string, Tool> = {};
   const server = { registerTool: (name: string, _config: unknown, handler: Tool) => void (tools[name] = handler) } as unknown as McpServer;
   registerInboxScheduledTool(server, { scheduledOn: () => true, scheduled: () => scheduled, routineGrants: () => grants });
@@ -203,7 +221,7 @@ describe("routine create with the person's /create-routine", () => {
     // One Send, one routine: the next create there arrives off and says why.
     const again = await w.create({ name: "Second", thread_id: threadId });
     expect(again.content[0]!.text).toContain(`: off, `);
-    expect(again.content[0]!.text).toContain(`No unused /create-routine request from the person in thread ${threadId} in the last hour`);
+    expect(again.content[0]!.text).toContain(`No /create-routine request from the person in thread ${threadId} that this Inbox still holds (one lasts an hour and makes one routine, and an Inbox restart forgets it), so it is off until the person turns it on in Routines in the Inbox.`);
     expect(again.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false, approved_at: null } });
   });
 
@@ -214,10 +232,10 @@ describe("routine create with the person's /create-routine", () => {
 
     const none = await w.create();
     expect(none.content[0]!.text).toContain(", not yet turned on by the person");
-    expect(none.content[0]!.text).toContain(" It is off until the person turns it on in Routines in the Inbox. A create starts on only with --thread naming the thread where the person asked for it with /create-routine.");
+    expect(none.content[0]!.text).toContain(" It is off until the person turns it on in Routines in the Inbox. A create starts on only with thread_id (--thread from a shell) naming the thread where the person asked for it with /create-routine.");
 
     const elsewhere = await w.create({ thread_id: other });
-    expect(elsewhere.content[0]!.text).toContain(`No unused /create-routine request from the person in thread ${other} in the last hour, so it is off until the person turns it on in Routines in the Inbox.`);
+    expect(elsewhere.content[0]!.text).toContain(`No /create-routine request from the person in thread ${other} that this Inbox still holds`);
 
     w.clock.now += ROUTINE_GRANT_MS;
     const late = await w.create({ thread_id: asked });
@@ -238,6 +256,18 @@ describe("routine create with the person's /create-routine", () => {
     expect(made.structuredContent).toMatchObject({ asked_with_create_routine: true, scheduled: { enabled: true } });
   });
 
+  test("another agent session in the thread, or one that names none, does not take it: off, saying it was for another agent; the one asked then takes it", async () => {
+    const w = world();
+    const threadId = w.thread(WORDS, blockOf(BUILTIN));
+    for (const agent_session of ["ses_other", ""]) {
+      const theirs = await w.create({ thread_id: threadId, agent_session, name: `Not mine ${agent_session || "none"}` });
+      expect(theirs.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false, approved_at: null } });
+      expect(theirs.content[0]!.text).toContain(` The /create-routine request from the person in thread ${threadId} was for another agent session, not yours, so it is off until the person turns it on in Routines in the Inbox.`);
+    }
+    const mine = await w.create({ thread_id: threadId });
+    expect(mine.structuredContent).toMatchObject({ asked_with_create_routine: true, scheduled: { enabled: true } });
+  });
+
   test("an agent's message carrying the same block grants nothing", async () => {
     const w = world();
     const agentMessage = w.store.sendMessage({ project_id: w.project.id, author: { kind: "agent", host: FAKE, session: "ses_other", name: "Other" }, body: PERSON_SEND }).message;
@@ -245,5 +275,40 @@ describe("routine create with the person's /create-routine", () => {
     expect(w.grants.open()).toHaveLength(0);
     const made = await w.create({ thread_id: agentMessage.thread_id });
     expect(made.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false } });
+  });
+});
+
+describe("the grant after a create that fails", () => {
+  /** The tool over a stand-in routines engine whose create fails before or after its fields pass (`checked`). */
+  function failing(after: boolean) {
+    const clock = { now: Date.parse("2026-11-17T12:00:00.000Z") };
+    const grants = createRoutineGrants(() => ["ses_maya"], () => clock.now);
+    grants.noteSend({ id: "msg_send", thread_id: "msg_thread", project_id: "prj_x", reply_to: "msg_thread", author: { kind: "person" }, subject: null, body: PERSON_SEND, created_at: new Date(clock.now).toISOString(), resolved_at: null } as InboxMessage);
+    const scheduled = {
+      create: async (_input: unknown, _by: unknown, _key: unknown, _asked: unknown, checked?: () => void) => {
+        if (after) {
+          checked?.();
+          throw new InboxError("internal_error", "the line for the person could not be written");
+        }
+        throw new InboxError("validation_error", "name: required.", { field: "name" });
+      },
+    } as unknown as InboxScheduled;
+    const tools: Record<string, Tool> = {};
+    const server = { registerTool: (name: string, _config: unknown, handler: Tool) => void (tools[name] = handler) } as unknown as McpServer;
+    registerInboxScheduledTool(server, { scheduledOn: () => true, scheduled: () => scheduled, routineGrants: () => grants });
+    const create = () => tools.routine!({ op: "create", name: "x", prompt: "p", folder: { scratch: true }, agent_host: FAKE, agent_session: "ses_maya", thread_id: "msg_thread" });
+    return { grants, create };
+  }
+
+  test("refused before anything is saved: given back", async () => {
+    const w = failing(false);
+    expect((await w.create()).isError).toBe(true);
+    expect(w.grants.open()).toHaveLength(1);
+  });
+
+  test("failed after its fields passed (the routine may be saved): it stays used", async () => {
+    const w = failing(true);
+    expect((await w.create()).isError).toBe(true);
+    expect(w.grants.open()).toHaveLength(0);
   });
 });

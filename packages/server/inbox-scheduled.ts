@@ -472,10 +472,12 @@ export function createInboxScheduled(deps: {
     /**
      * `createKey`: the window's key, kept on the record (inbox-scheduled-once.ts). `asked`: an agent's create the
      * person asked for with `/create-routine` (a grant it took, inbox-routine-grants.ts): made approved and on, as
-     * the person's own would be. Every field is checked the same either way.
+     * the person's own would be. Every field is checked the same either way. `checked`: called once every field passed,
+     * just before the routine is saved: a throw after it may have left the routine written.
      */
-    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string, asked = false): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string, asked = false, checked?: () => void): Promise<{ record: InboxScheduledThread; told: string | null }> {
       const fields = await fieldsOf(input, null);
+      checked?.();
       const on = (by.kind === "person" && input.enabled === true) || (by.kind === "agent" && asked);
       const at = iso();
       const record = store.putScheduledThread({

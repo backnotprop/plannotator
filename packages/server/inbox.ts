@@ -212,7 +212,7 @@ import { classifyForgeHost, normalizeForgeHost } from "@plannotator/core/forge-r
 import { systemSetupRoute } from "./inbox-system-setup";
 import { SYSTEM_READ_PATHS, systemFilesCache, systemReadRoute, systemSwitch } from "./inbox-system";
 import { createInboxScheduled, INBOX_SCHEDULED_ERROR_STATUS, INBOX_SCHEDULED_OFF_TEXT, type InboxScheduled } from "./inbox-scheduled";
-import { createRoutineGrants } from "./inbox-routine-grants";
+import { createRoutineGrants, sendRecipients } from "./inbox-routine-grants";
 import { scheduledRoute, scheduledSwitch } from "./inbox-scheduled-routes";
 import { execLoginCommand, inboxLoginItem, type InboxLoginItem } from "./inbox-scheduled-login";
 import { bitbucketRefReader, createRefCards, readSignedInHosts, refCliRunner, type BitbucketRefReader, type RefRunner } from "./ref-cards";
@@ -1182,8 +1182,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The person's Send of /create-routine: a one-time grant on its thread, so the routine it asks for is made on
   // (inbox-routine-grants.ts). Only the person's own call mints one, by the bar a permission prompt's answer has: a
   // window's (its Origin, this Host and serverSession), a paired phone's, or a linked machine's for a press in a window
-  // there. An agent's bare call to the same Send routes writes as the person but never mints.
-  const routineGrants = createRoutineGrants();
+  // there. An agent's bare call to the same Send routes writes as the person but never mints. Only a session the Send
+  // went to takes it, read when the create comes: its owner by the store's rule, a session it tags, and a launched
+  // thread's agent (its session is known only once it started).
+  const routineGrants = createRoutineGrants(sendRecipients(store));
   const noteSend = (req: Request, body: Record<string, unknown>, message: InboxMessage) => {
     const door = fromDeviceDoor.get(req);
     if (door ? door.platform !== MACHINE_PLATFORM || door.window : isWindowRequest(req, body, serverSession)) routineGrants.noteSend(message);

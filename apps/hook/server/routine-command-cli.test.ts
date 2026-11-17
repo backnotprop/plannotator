@@ -5,8 +5,9 @@
  * the server refuses, the only ones on (asked for with /create-routine) run once in 2099, and the fake agent records
  * that it never started.
  *
- * What can regress: a routine made from the shell arriving on (unless the person asked for it with /create-routine in
- * the thread --thread names: then on, and its line and --json say so), or the shell turning on or running one the person
+ * What can regress: a routine made from the shell arriving on (unless the person asked this session for it with
+ * /create-routine in the thread --thread names: then on, and its line and --json say so; a shell calling as another
+ * session gets it off, told why), or the shell turning on or running one the person
  * never turned on; a refused schedule, agent or folder writing anything; the shell's lines or --json not saying
  * what the server holds; an update changing fields it was not given; delete doing more (or less) than the
  * window's; and the command writing while the person has routines off.
@@ -163,8 +164,14 @@ describe("what an agent can do from the shell is what the routine tool lets it",
     expect(made).toMatchObject({ code: 0, stderr: "" });
     expect(made.stdout).toMatch(/^Made sch_\S+ "Dependency check": on, .+, next 2099-01-05T14:00:00\.000Z\. It is on: the person asked for it with \/create-routine in thread msg_\w+\./);
     expect(made.stdout).not.toContain("not yet turned on");
-    // Another Send, another one: --json carries on, approved and the next run.
+    // Another Send, another one. A shell calling as another agent session does not take it (the reply went to
+    // ses_maya): off, and its line says why.
     await send("k-cli-2");
+    const theirs = await w.cli(["create", "--name", "Not theirs", "--thread", thread, "--session", "claude-code:ses_other", ...at]);
+    expect(theirs).toMatchObject({ code: 0, stderr: "" });
+    expect(theirs.stdout).toMatch(/^Made sch_\S+ "Not theirs": off, /);
+    expect(theirs.stdout).toContain(`The /create-routine request from the person in thread ${thread} was for another agent session, not yours`);
+    // The one it went to: --json carries on, approved and the next run.
     const json = await w.cli(["create", "--name", "Weekly digest", "--thread", thread, "--json", ...at]);
     expect(json).toMatchObject({ code: 0, stderr: "" });
     const row = JSON.parse(json.stdout);
