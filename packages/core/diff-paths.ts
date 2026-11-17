@@ -211,39 +211,6 @@ export function isOversizedReviewStubPatch(patch: string): boolean {
 }
 
 /**
- * Extended-header line of the stub for an untracked file the review listed but
- * did not read, because the review had already read as many untracked files,
- * or as many of their bytes, as it takes (`MAX_UNTRACKED_REVIEW_FILES` and
- * `MAX_UNTRACKED_REVIEW_TOTAL_BYTES` in review-core). Same `#` rule as the
- * oversized marker above.
- */
-export const UNTRACKED_CAP_STUB_MARKER = "#plannotator-untracked-left-out";
-
-/**
- * Human-readable form of the untracked caps for UI copy. The authoritative
- * values are in review-core; a review-core test asserts they never drift.
- */
-export const UNTRACKED_CAP_FILES_LABEL = "1,000";
-export const UNTRACKED_CAP_BYTES_LABEL = "50 MB";
-
-/** True when `patch` is a stub for an untracked file left out by the caps above. */
-export function isUntrackedCapStubPatch(patch: string): boolean {
-  return patch.split("\n").some((line) => line === UNTRACKED_CAP_STUB_MARKER);
-}
-
-/** Why the review core stubbed this file's patch, or null for a real patch. */
-export type ReviewStubReason = "oversized" | "untracked-left-out";
-
-export function reviewStubReason(patch: string): ReviewStubReason | null {
-  for (const line of patch.split("\n")) {
-    if (line === OVERSIZED_REVIEW_STUB_MARKER) return "oversized";
-    if (line === UNTRACKED_CAP_STUB_MARKER) return "untracked-left-out";
-    if (line.startsWith("@@ ")) return null;
-  }
-  return null;
-}
-
-/**
  * True when a single file's patch chunk carries a binary marker and no hunks,
  * so a diff renderer has literally nothing to draw for it.
  *

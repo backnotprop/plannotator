@@ -205,7 +205,6 @@ import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
 import { ReviewLoadError } from './components/ReviewLoadError';
-import { reviewStubReason, UNTRACKED_CAP_BYTES_LABEL, UNTRACKED_CAP_FILES_LABEL } from '@plannotator/shared/diff-paths';
 import { diffLoadFailureFromResponse, diffLoadFailureMessage, diffLoadUnreachable } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
 import { parseDiffToFiles } from './utils/diffParser';
@@ -489,12 +488,6 @@ const ReviewApp: React.FC = () => {
   const { resolvedMode } = useTheme();
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
-  // Untracked files the server listed without reading (past its untracked
-  // file or byte caps, review-core). One line in the page says how many.
-  const untrackedLeftOutCount = useMemo(
-    () => files.reduce((count, file) => count + (reviewStubReason(file.patch) === 'untracked-left-out' ? 1 : 0), 0),
-    [files],
-  );
   const [activeFileIndex, setActiveFileIndex] = useState(0);
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
   const annotationsRef = useRef(annotations);
@@ -6466,14 +6459,6 @@ const ReviewApp: React.FC = () => {
             />
           </div>
         </header>
-
-        {untrackedLeftOutCount > 0 && (
-          <div role="status" data-untracked-left-out={untrackedLeftOutCount} className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
-            {untrackedLeftOutCount.toLocaleString('en-US')} untracked {untrackedLeftOutCount === 1 ? 'file was' : 'files were'} left out of the diff:
-            a review reads at most {UNTRACKED_CAP_FILES_LABEL} untracked files and {UNTRACKED_CAP_BYTES_LABEL} of their contents.
-            {untrackedLeftOutCount === 1 ? ' It is' : ' They are'} still listed, without contents. Add generated folders to .gitignore to keep them out.
-          </div>
-        )}
 
         {draftTargetChanged && (
           <div role="status" className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">

@@ -8,8 +8,7 @@
  *  - a failed load shows the load error state with the server's reason, and
  *    no demo file;
  *  - Retry loads the diff again and the review opens on the real files;
- *  - feedback and Close still reach the server from the error state;
- *  - untracked files the server left out are counted in one visible line.
+ *  - feedback and Close still reach the server from the error state.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
@@ -20,7 +19,6 @@ import {
   type StorageBackend,
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
-import { UNTRACKED_CAP_STUB_MARKER } from "@plannotator/shared/diff-paths";
 import { DEMO_DIFF } from "./demoData";
 
 // Vite-only virtual module (`?worker&inline`), stubbed like App.panelView.test.tsx.
@@ -53,16 +51,6 @@ const PATCH = [
   "+b",
   "",
 ].join("\n");
-
-function leftOutStub(path: string): string {
-  return [
-    `diff --git a/${path} b/${path}`,
-    UNTRACKED_CAP_STUB_MARKER,
-    "new file mode 100644",
-    `Binary files /dev/null and b/${path} differ`,
-    "",
-  ].join("\n");
-}
 
 /** The first file path of the demo diff: what the old fallback showed. */
 const DEMO_PATH = /^diff --git a\/(\S+)/m.exec(DEMO_DIFF)?.[1] ?? "";
@@ -227,21 +215,5 @@ describe.if(hasDom)("review: the diff fails to load", () => {
     await act(async () => button("Close review").click());
     await waitFor(() => posted.length === 1, "the exit post");
     expect(posted[0].path).toBe("/api/exit");
-  });
-});
-
-describe.if(hasDom)("review: untracked files the server left out", () => {
-  test("one line counts them", async () => {
-    await mount([serving(PATCH + leftOutStub("dist/a.js") + leftOutStub("dist/b.js"))]);
-    await waitFor(() => document.body.textContent?.includes("add-refund-flow") ?? false, "the review to load");
-    const line = document.querySelector("[data-untracked-left-out]");
-    expect(line?.getAttribute("data-untracked-left-out")).toBe("2");
-    expect(line?.textContent).toContain("2 untracked files");
-  });
-
-  test("no line when nothing was left out", async () => {
-    await mount([serving(PATCH)]);
-    await waitFor(() => document.body.textContent?.includes("add-refund-flow") ?? false, "the review to load");
-    expect(document.querySelector("[data-untracked-left-out]")).toBeNull();
   });
 });
