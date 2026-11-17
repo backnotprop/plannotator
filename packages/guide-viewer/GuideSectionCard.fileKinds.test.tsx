@@ -42,7 +42,7 @@ afterEach(async () => {
   mounts = [];
 });
 
-async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<string>, collapseAll?: GuideHostValue<Record<string, unknown>>['collapseAll']) {
+async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<string>, collapseAll?: GuideHostValue<Record<string, unknown>>['collapseAll'], keepsFileOrder?: boolean) {
   const files = paths.map(makeFile);
   const section: GuideSection = { title: 'Chapter', overview: '', diffs: paths.map((file) => ({ file })) };
   const value: GuideHostValue<Record<string, unknown>> = {
@@ -51,6 +51,7 @@ async function renderChapter(paths: string[], generatedFiles?: ReadonlySet<strin
     getDiffRendererProps: () => ({}),
     generatedFiles,
     collapseAll,
+    keepsFileOrder,
   };
   if (!host) {
     host = document.createElement('div');
@@ -108,6 +109,12 @@ describe('GuideSectionCard file kinds', () => {
     expect(subheads(el)).toEqual(['Tests2', 'Generated1']);
     expect(chipNames(el)).toEqual(expected);
     expect(cardOrder(el)).toEqual(expected);
+  });
+
+  test.skipIf(!hasDom)('a host that keeps the file order (the PR page, whose rail lists them) draws the cards in the order given', async () => {
+    const paths = ['docs/rtl.md', 'src/Layout.tsx', 'src/Profile.test.tsx', 'src/Profile.tsx'];
+    const el = await renderChapter(paths, undefined, undefined, true);
+    expect(cardOrder(el)).toEqual(paths);
   });
 
   test.skipIf(!hasDom)('test cards open, generated cards start folded', async () => {

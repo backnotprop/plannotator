@@ -2101,14 +2101,14 @@ test('the row after the last hunk (approval pr-view-one-surface, 11-07 19:08): n
           shells.map((shell) => {
             const path = (shell as HTMLElement).dataset.guideFileShell;
             const row = shell.querySelector('diffs-container')?.shadowRoot?.querySelector<HTMLElement>('[data-separator-last]');
-            return [path, row && row.checkVisibility() ? row.innerText.trim() : null];
+            return [path, row && row.checkVisibility({ visibilityProperty: true }) ? row.innerText.trim() : null];
           }),
         ),
       );
     await expect.poll(() => seams(review)).toEqual([0]);
     await expect.poll(rows).toEqual({ 'more.ts': null, 'ends.ts': null });
     expect(reads).toEqual([]);
-    expect(await review.evaluate((root) => [...root.querySelectorAll('diffs-container')].some((host) => (host.shadowRoot?.textContent ?? '').includes('More unchanged context') && [...host.shadowRoot!.querySelectorAll<HTMLElement>('[data-separator-last]')].some((row) => row.checkVisibility())))).toBe(false);
+    expect(await review.evaluate((root) => [...root.querySelectorAll('diffs-container')].some((host) => (host.shadowRoot?.textContent ?? '').includes('More unchanged context') && [...host.shadowRoot!.querySelectorAll<HTMLElement>('[data-separator-last]')].some((row) => row.checkVisibility({ visibilityProperty: true }))))).toBe(false);
   } finally {
     await context.close();
   }
