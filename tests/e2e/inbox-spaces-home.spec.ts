@@ -121,7 +121,9 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
         await expect(pin).toHaveCount(1);
         expect(await pin.evaluate((el) => { const box = el.closest('[data-frame-card-action]') ?? el; return [getComputedStyle(box).opacity, getComputedStyle(box).pointerEvents]; })).toEqual(['0', 'none']);
       }
-      const title = await loose.locator('[data-frame-card-title]').boundingBox();
+      const titleEl = loose.locator('[data-frame-card-title]');
+      await titleEl.scrollIntoViewIfNeeded({ timeout: 15_000 });
+      const title = await titleEl.boundingBox({ timeout: 15_000 });
       const cdp = await touchContext.newCDPSession(touchPage);
       await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: title!.x + 20, y: title!.y + title!.height / 2 }] });
       await touchPage.waitForTimeout(700);
@@ -129,7 +131,7 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
       const item = touchPage.locator(`[data-space-menu="${done[1]}"] [data-space-menu-pin="pin"]`);
       await expect(item).toBeVisible();
       await touchPage.screenshot({ path: join(proofDir, 'touch-menu-light.png') });
-      await item.tap();
+      await item.tap({ timeout: 15_000 });
       await expect.poll(() => createPlanStore({ dataDir }).pins()).toEqual([done[0], done[1]]);
       await expect(loose.locator('a [data-frame-card-pinned-mark]')).toBeVisible();
       expect(await touchPage.evaluate(() => location.hash)).toBe('#plans');
