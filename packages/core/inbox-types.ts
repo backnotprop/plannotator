@@ -59,6 +59,8 @@ export * from "./inbox-pulls";
 export * from "./inbox-pull-risk";
 // Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
 export * from "./inbox-reviews";
+// Branch reviews (inbox-branch-reports.ts): an agent reports its branch ready for review.
+export * from "./inbox-branch-reports";
 // A thread's PRs (approval "inbox-pr-binding"), the same way.
 export * from "./inbox-thread-pulls";
 // Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
@@ -3384,7 +3386,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
  * it lists is kept there ("Changed since you looked").
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**

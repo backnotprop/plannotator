@@ -1,0 +1,177 @@
+/**
+ * Branch reviews in the Inbox server (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): the agents' side
+ * (send_message's `branch`, inbox-mcp-branch.ts), the rows Reviews lists, the PRs a report's thread owns, and the routes
+ * `GET /api/inbox/reviews/branches` and `GET /api/inbox/reviews/branches/unreported`. Off (config.json
+ * `inboxBranchReviews`, or Code review): no field, no rows, and the routes answer `409 branch_reviews_off` before any git.
+ *
+ * Nothing here runs by itself: a report is read when it arrives, judged for risk then (once, and only with the
+ * person's switch on), and the list of branches nobody reported is read when the person opens it.
+ */
+import {
+  inboxBranchReportOwners,
+  inboxBranchRiskKey,
+  type InboxBranchReport,
+  type InboxBranchReportRow,
+  type InboxUnreportedBranchesAnswer,
+} from "@plannotator/core/inbox-branch-reports";
+import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
+import { inboxRowArchived, type InboxProject, type InboxPull, type InboxReviewStart } from "@plannotator/core/inbox-types";
+import type { InboxStore } from "@plannotator/shared/inbox/store";
+import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
+import { branchHeadHere, createInboxBranchReports, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
+import type { InboxBranchMcp } from "./inbox-mcp-branch";
+import type { PullRisk } from "./inbox-pull-risk";
+
+/** A head not found here is looked for again no sooner than this (a fetch may bring it). */
+const UNREACHABLE_RECHECK_MS = 60_000;
+
+export interface InboxBranchServiceOptions {
+  store: InboxStore;
+  dataDir: string;
+  runtime: ReviewGitRuntime;
+  on: () => boolean;
+  risk: Pick<PullRisk, "assessBranch" | "branchJudgment">;
+  /** The origin a project's folder has, as the repo cache last read it (`host/owner/repo`, lowercased), never a git call. */
+  originOf: (root: string) => string | null;
+  now?: () => number;
+}
+
+export function createInboxBranchService(options: InboxBranchServiceOptions) {
+  const { store, runtime } = options;
+  const now = options.now ?? Date.now;
+  const reports = createInboxBranchReports(options.dataDir);
+  /** Whether a report's head is a commit here: true is kept, false is read again after a while. */
+  const reach = new Map<string, { here: boolean; at: number }>();
+
+  const rootOf = (projectId: string): string | null => store.project(projectId)?.root ?? null;
+  /** Where a report's git is read: the folder it was read in when reported, else its project's. */
+  const folderOf = (report: InboxBranchReport): string | null => report.folder ?? rootOf(report.project_id);
+
+  const judge = (report: InboxBranchReport) => {
+    const root = folderOf(report);
+    if (!root || !report.head || !report.base) return;
+    const { head, base } = report;
+    options.risk.assessBranch({
+      key: inboxBranchRiskKey(report.project_id, report.branch),
+      head_sha: head,
+      base,
+      title: report.summary ? `${report.branch}: ${report.summary}` : report.branch,
+      read: () => readBranchDiff(runtime, root, base, head),
+    });
+  };
+
+  const mcp: InboxBranchMcp = {
+    on: options.on,
+    get: (projectId, branch) => reports.get(projectId, branch),
+    // The agent's own folder first (a worktree, a checkout inside a folder of checkouts), else the project's.
+    read: async (project, field, workingFolder) => {
+      for (const folder of [workingFolder, project.root]) {
+        if (!folder) continue;
+        const read = await readReportedBranch(runtime, folder, field);
+        if (read.reachable || folder === project.root) return { ...read, folder };
+      }
+      return { ...(await readReportedBranch(runtime, null, field)), folder: null };
+    },
+    projectOfRemote: (remoteUrl) => {
+      const key = inboxGitRemoteKey(remoteUrl);
+      if (!key) return null;
+      const found = new Map<string, InboxProject>();
+      for (const project of store.allProjects()) {
+        if (options.originOf(project.root) !== key) continue;
+        const id = store.canonicalProjectId(project.id);
+        found.set(id, store.project(id) ?? project);
+      }
+      return found.size === 1 ? [...found.values()][0]! : null;
+    },
+    recorded: (report, reachable) => {
+      reports.put(report);
+      if (report.head) reach.set(report.head, { here: reachable, at: now() });
+      // Risk once per reported head, never for a head this computer can't read.
+      if (reachable) judge(report);
+    },
+    canonicalId: (projectId) => store.canonicalProjectId(projectId),
+  };
+
+  /** The reports whose thread is listed and not archived: a deleted or archived thread's report has no row. */
+  const listed = (): { report: InboxBranchReport; name: string | null }[] =>
+    reports.list().flatMap((report) => {
+      const row = store.listRow(report.thread_id);
+      return row && !inboxRowArchived(row) ? [{ report, name: row.thread_name ?? row.subject }] : [];
+    });
+
+  const reachable = async (report: InboxBranchReport): Promise<boolean> => {
+    if (!report.head) return false;
+    const seen = reach.get(report.head);
+    if (seen && (seen.here || now() - seen.at < UNREACHABLE_RECHECK_MS)) return seen.here;
+    const here = await branchHeadHere(runtime, folderOf(report), report.head);
+    reach.set(report.head, { here, at: now() });
+    return here;
+  };
+
+  const rowOf = async (report: InboxBranchReport): Promise<InboxBranchReportRow> => {
+    const { judgment, failed } = options.risk.branchJudgment(inboxBranchRiskKey(report.project_id, report.branch), report.head, report.base);
+    return {
+      thread_id: report.thread_id,
+      project_id: report.project_id,
+      branch: report.branch,
+      base: report.base,
+      head: report.head,
+      place: report.place,
+      remote_url: report.remote_url,
+      summary: report.summary,
+      at: report.at,
+      reports: report.reports,
+      agent: report.agent,
+      reachable: await reachable(report),
+      risk: judgment,
+      risk_failed: failed,
+    };
+  };
+
+  return {
+    mcp,
+    /** This computer's reported branches as rows (for Reviews and for a linked machine's door read). */
+    async rows(): Promise<InboxBranchReportRow[]> {
+      if (!options.on()) return [];
+      return Promise.all(listed().map(({ report }) => rowOf(report)));
+    },
+    /** The Reviews rows' starts: a reported branch's thread is a review thread from its first report. */
+    async started(): Promise<Map<string, InboxReviewStart>> {
+      const out = new Map<string, InboxReviewStart>();
+      if (!options.on()) return out;
+      for (const { report, name } of listed()) {
+        out.set(report.thread_id, {
+          kind: "branch",
+          changes: "branch",
+          branch: report.branch,
+          base: report.base,
+          ask: "guide",
+          host: report.agent?.host ?? "",
+          project_id: report.project_id,
+          at: report.at,
+          name,
+          report: await rowOf(report),
+        });
+      }
+      return out;
+    },
+    /** The PRs the reported branches' threads own (the person's own PR on that branch): one thread from report to PR. */
+    owners(pulls: readonly InboxPull[], projectsByRepo: ReadonlyMap<string, readonly string[]>): Map<string, { thread_id: string }> {
+      if (!options.on()) return new Map();
+      return inboxBranchReportOwners(
+        listed().map(({ report }) => report),
+        pulls,
+        projectsByRepo,
+      );
+    },
+    /** The safety net, for one project: read only when the person asks. `openHeads`: the branches with an open PR. */
+    async unreported(project: InboxProject, openHeads: ReadonlySet<string>): Promise<InboxUnreportedBranchesAnswer> {
+      const id = store.canonicalProjectId(project.id);
+      const reported = new Set(reports.list().filter((report) => report.project_id === id).map((report) => report.branch));
+      const read = await readUnreportedBranches(runtime, project.root, id, (branch) => reported.has(branch) || openHeads.has(branch), now());
+      return { project_id: id, ...read };
+    },
+  };
+}
+
+export type InboxBranchService = ReturnType<typeof createInboxBranchService>;

@@ -40,6 +40,7 @@ import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_RO
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
+import { createMachineBranches } from "./inbox-machine-branches";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
@@ -445,6 +446,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
   const outbox = InboxOutbox.open(context.dataDir, context.now);
   const peers = new Map<string, PeerLink>();
   const machinePulls = createMachinePulls({ peers: () => peers.values() });
+  // Branch reviews: each linked machine's reported branches, read when Reviews is (inbox-machine-branches.ts).
+  const machineBranches = createMachineBranches({ peers: () => peers.values() });
   /** Each linked machine's last good launch read, so a window opened while it sleeps still lists its projects. */
   const launchReads = createMachineLaunchReads();
   const listeners = new Set<(frame: MachineFrame) => void>();
@@ -581,6 +584,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     peers.get(id)?.stop();
     peers.delete(id);
     machinePulls.forget(id);
+    machineBranches.forget(id);
     launchReads.forget(id);
     const link = links.remove(id);
     if (link?.device_id) context.door.revokeDevice(link.device_id, { oweRefusal: closeDoor === "after_refusal" });
@@ -1340,6 +1344,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       const snapshot = machinePulls.start(refresh);
       return () => snapshot().map((entry) => ({ ...entry, name: links.get(entry.machine)?.name }));
     },
+    /** Each linked machine's reported branches (mark `branches`), for Reviews (inbox-machine-branches.ts). */
+    branchLists: () => machineBranches.start((machine) => links.get(machine)?.name ?? null),
     farCard,
     snoozeThread,
     /** The linked machine a device on this Inbox's door belongs to (a launch it starts here records it), or null. */

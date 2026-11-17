@@ -95,6 +95,8 @@ export function createInboxAgentDoor(context: InboxAgentDoorContext) {
       );
     },
     walkthroughThread: () => false,
+    // Branch reviews: a cloud agent's report is a branch that lives wherever it pushed it (inbox-mcp-branch.ts).
+    cloudAgent: { homeRoot: agents.homeRoot(agent) },
     // A routine runs an agent on the person's computer: kept to the agents on it.
     scheduledOn: () => false,
     sessionWakes: async (_host, session) => session === agent.session && hasCloudWake(agent),

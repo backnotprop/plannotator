@@ -25,6 +25,8 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   const [list, setList] = useState<InboxPullRiskModels | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Branch reviews (present only while it is on): rank the branches agents report too. Off until the person ticks it.
+  const [branches, setBranches] = useState(answer.branches === true);
   const field = useRef<HTMLTextAreaElement>(null);
   // The words come first: the box takes the focus, not Save.
   useEffect(() => field.current?.focus(), []);
@@ -49,7 +51,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
     setSaving(true);
     setError(null);
     try {
-      onSaved(await inboxApi.savePullRisk({ rules, provider, model }));
+      onSaved(await inboxApi.savePullRisk({ rules, provider, model, ...(answer.branches !== undefined ? { branches } : {}) }));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'The rules could not be saved.');
       setSaving(false);
@@ -103,6 +105,17 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
                 The last ranking didn&rsquo;t finish. {answer.last_failure}
               </p>
             )}
+          </>
+        )}
+        {answer.branches !== undefined && (
+          <>
+            <label className="ib-opt" data-pull-risk-branches="">
+              <input type="checkbox" checked={branches} onChange={(event) => setBranches(event.target.checked)} />
+              <span>Also rank branches agents report ready</span>
+            </label>
+            <p className="ib-quietline" data-pull-risk-branches-words="">
+              Each time an agent reports a branch ready for review, that branch&rsquo;s whole diff on this computer, pushed or not, goes once to the risk agent above and its provider. Branches nobody reported are never sent.
+            </p>
           </>
         )}
         {error && (

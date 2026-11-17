@@ -21,6 +21,7 @@
  * teammate or the forge is Waiting on others.
  */
 
+import type { InboxBranchReportRow } from "./inbox-branch-reports";
 import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
@@ -171,7 +172,9 @@ export type InboxReviewReason =
   | "forge_review"
   | "others"
   | "assigned"
-  | "not_reviewed";
+  | "not_reviewed"
+  /** An agent reported its branch ready for review (inbox-branch-reports.ts); no review yet. */
+  | "branch_ready";
 
 /**
  * A PR a review thread owned that merged or closed, recorded once the Inbox has seen it (`inbox/pull-links.json`):
@@ -236,7 +239,8 @@ export interface InboxReviewLinkPull {
 
 /** New review on local changes or a link: what the box asked for, so its row shows "Curating…" before any review arrives. */
 export interface InboxReviewStart {
-  kind: "local" | "link" | "walkthrough";
+  /** `branch`: an agent's report that its branch is ready (inbox-branch-reports.ts), kept in its own file, never in pull-links.json. */
+  kind: "local" | "link" | "walkthrough" | "branch";
   /** Local changes only. */
   changes: InboxReviewChanges | null;
   /** A link only. */
@@ -251,6 +255,8 @@ export interface InboxReviewStart {
   at: string;
   /** The thread's name now, for its row. On a row, not stored. */
   name?: string | null;
+  /** A branch report's row (`kind: "branch"`): what the agent reported, where, and its risk. On a row, not stored. */
+  report?: InboxBranchReportRow;
 }
 
 /** A `review` field from a Send, checked; null when it isn't one. */
@@ -374,6 +380,10 @@ export interface InboxReviewsAnswer {
   rows: InboxReviewRow[];
   /** `host/repo` (lowercased) → the Inbox projects on it. */
   projects: Record<string, string[]>;
+  /** Branch reviews is on (config.json `inboxBranchReviews`): absent while off, so a window off draws nothing new. */
+  branch_reviews?: true;
+  /** A linked machine's reported branches are still being read: the window asks again soon. */
+  branches_pending?: true;
 }
 
 /**
@@ -595,10 +605,12 @@ export function inboxReviewRows(input: {
     if (review?.resolved_at && review.reviewed_at <= review.resolved_at && open.length === 0) return;
     const stacks = stacksOf(open);
     for (const stack of stacks) attached.add(stack.id);
+    // A reported branch with no review yet waits on the person: they start the review (the owner, 2026-11-16).
+    const reported = !review && input.started?.get(threadId)?.kind === "branch";
     rows.push({
       id: threadId,
       reviewed: true,
-      ...inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)),
+      ...(reported ? { move: "on_you" as const, reason: "branch_ready" as const } : inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at))),
       thread_id: threadId,
       review,
       stacks,
@@ -613,8 +625,9 @@ export function inboxReviewRows(input: {
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
   // Curating only while someone can: with the agent ended the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
   // A thread archived before its review drops out earlier, as the PR's owner (the server's `pullOwnersNow`).
-  for (const [threadId, own] of owned) if (!byThread.has(threadId) && own.link.agent?.ended !== true) push(threadId, null, own);
-  for (const threadId of input.started?.keys() ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && !input.ended?.(threadId)) push(threadId, null, undefined);
+  for (const [threadId, own] of owned) if (!byThread.has(threadId) && (own.link.agent?.ended !== true || input.started?.get(threadId)?.kind === "branch")) push(threadId, null, own);
+  // A reported branch keeps its row with its agent ended: the person starts the review, with any agent.
+  for (const [threadId, start] of input.started ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && (start.kind === "branch" || !input.ended?.(threadId))) push(threadId, null, undefined);
   for (const stack of input.stacks) {
     if (attached.has(stack.id)) continue;
     // The agent's own thread, when its message names one of the layers (topmost open first): shown, never a review.
