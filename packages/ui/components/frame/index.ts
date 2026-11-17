@@ -64,6 +64,7 @@ export {
   Card,
   CardFaceDocument,
   CardRow,
+  CardRows,
   CardGrid,
   CardGroup,
   CardGroups,

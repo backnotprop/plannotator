@@ -206,11 +206,16 @@
 [data-frame-card] {
   box-shadow: 0 0 0 1px var(--frame-card-ring);
 }
-[data-frame-card]:hover {
-  box-shadow: 0 0 0 1px var(--frame-card-ring-hover), 0 10px 24px -14px color-mix(in oklch, var(--frame-shadow-ink) 30%, transparent);
+@media (hover: hover) {
+  [data-frame-card]:hover {
+    box-shadow: 0 0 0 1px var(--frame-card-ring-hover), 0 10px 24px -14px color-mix(in oklch, var(--frame-shadow-ink) 30%, transparent);
+  }
 }
 [data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) {
   box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--primary);
+}
+:is([data-frame-card], [data-frame-card-row]) :focus-visible:not([data-frame-card-action] *) {
+  outline: none;
 }
 
 [data-frame-card-well] {
@@ -293,12 +298,6 @@
 }
 [data-frame-card-thumb] {
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
-}
-[data-frame-card-thumb] .frame-card-sheet {
-  inset: 14% 14% -2px;
-}
-[data-frame-card-thumb] :is(.frame-card-window, .frame-card-panel) {
-  inset: 12% 10%;
 }
 [data-frame-card-thumb] .frame-card-sheet {
   bottom: -2px;
@@ -385,22 +384,56 @@
   line-height: 20px;
 }
 
+/*
+ * Rows. Nothing in a row moves when a row is pinned, unpinned or hovered:
+ * every row's trailing text ends 10 px from its edge. The host's action
+ * (28 px wide) shows just before the trailing text, over the room the grey
+ * line leaves, on hover or keyboard focus, and the text before it always
+ * keeps 20 px clear for it. On a screen without hover a CardRows with
+ * actionAtRest "touch" (the default, and any row outside a CardRows) also
+ * shows it at rest; with "never" it shows only on keyboard focus. Hover
+ * styles apply only where the screen has hover, so a tap leaves none behind. A pinned row's resting mark
+ * is the card's pin after the title, never drawn while the action shows.
+ */
 [data-frame-card-row] {
   height: 44px;
   grid-template-columns: 36px minmax(0, 1fr) 180px;
 }
-[data-frame-card-row][data-frame-card-columns="secondary"] {
+[data-frame-card-row][data-frame-card-columns~="secondary"] {
   grid-template-columns: 36px minmax(0, 1fr) 160px 180px;
 }
-[data-frame-card-row][data-frame-card-columns="action"] {
-  grid-template-columns: 36px minmax(0, 1fr) 180px 28px;
+[data-frame-card-trail] > [data-frame-card-action] {
+  position: absolute;
+  inset-block: 0;
+  right: calc(100% + 6px);
 }
-[data-frame-card-row][data-frame-card-columns="secondary action"] {
-  grid-template-columns: 36px minmax(0, 1fr) 160px 180px 28px;
+@media (hover: hover) {
+  [data-frame-card-row]:not(:hover, :has(:focus-visible)) [data-frame-card-action] {
+    pointer-events: none;
+  }
+  [data-frame-card-row][data-frame-card-columns~="action"]:hover [data-frame-card-pinned-mark] {
+    visibility: hidden;
+  }
+}
+[data-frame-card-row][data-frame-card-columns~="action"]:has(:focus-visible) [data-frame-card-pinned-mark] {
+  visibility: hidden;
+}
+@media (hover: none) {
+  [data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-rows][data-frame-card-action-rest="never"] *) [data-frame-card-pinned-mark] {
+    visibility: hidden;
+  }
+  [data-frame-card-row]:is([data-frame-card-rows][data-frame-card-action-rest="never"] *):not(:has(:focus-visible)) [data-frame-card-action] {
+    pointer-events: none;
+  }
+}
+[data-frame-card-row][data-frame-card-columns~="action"] [data-frame-card-secondary],
+[data-frame-card-row][data-frame-card-columns~="action"]:not([data-frame-card-columns~="secondary"]) > :nth-child(2) {
+  padding-inline-end: 20px;
 }
 [data-frame-card-row] [data-frame-card-title] {
   font-size: 14px;
   line-height: 20px;
+  font-weight: 400;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -408,20 +441,26 @@
 @media (max-width: 767px) {
   [data-frame-card-row] {
     height: 52px;
-    grid-template-columns: 36px minmax(0, 1fr) auto;
+    grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);
   }
-  [data-frame-card-row]:is([data-frame-card-columns="action"], [data-frame-card-columns="secondary action"]) {
-    grid-template-columns: 36px minmax(0, 1fr) auto 28px;
+  [data-frame-card-row][data-frame-card-columns~="secondary"] {
+    grid-template-columns: 36px minmax(0, 1fr) fit-content(50%);
   }
   [data-frame-card-row] [data-frame-card-secondary] {
     display: none;
   }
 }
+@media (max-width: 767px) {
+  [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2) {
+    padding-inline-end: 20px;
+  }
+}
 
 /* "3 updates · Show" */
 [data-frame-card-updates] {
+  position: relative;
   cursor: pointer;
-  height: 24px;
+  height: 20px;
   padding: 0 10px;
   border-radius: 999px;
   font-size: 12px;
@@ -429,30 +468,52 @@
   color: var(--primary);
   background: color-mix(in oklch, var(--primary) 10%, transparent);
 }
-[data-frame-card-updates]:hover {
-  background: color-mix(in oklch, var(--primary) 16%, transparent);
+[data-frame-card-updates]::after {
+  content: "";
+  position: absolute;
+  inset: -2px 0;
+}
+@media (hover: hover) {
+  [data-frame-card-updates]:hover {
+    background: color-mix(in oklch, var(--primary) 16%, transparent);
+  }
 }
 [data-frame-card-updates]:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
 
-[data-frame-card-row]:hover {
-  background: var(--frame-surface-hover);
+@media (hover: hover) {
+  [data-frame-card-row]:hover {
+    background: var(--frame-surface-hover);
+  }
 }
 [data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) {
-  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  background: color-mix(in oklch, var(--primary) 16%, transparent);
+}
+[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) [data-frame-card-title] {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
 }
 
-/* The host's action: shown on hover and focus, always on touch and while pinned */
+/* The host's action: shown on hover and keyboard focus, always on touch; on a card also while pinned */
 [data-frame-card-action] {
   opacity: 0;
 }
-:is([data-frame-card], [data-frame-card-row]):is(:hover, :focus-within, [data-frame-card-pinned]) [data-frame-card-action] {
+[data-frame-card]:is(:has(:focus-visible), [data-frame-card-pinned]) [data-frame-card-action],
+[data-frame-card-row]:has(:focus-visible) [data-frame-card-action] {
   opacity: 1;
 }
+@media (hover: hover) {
+  [data-frame-card]:hover [data-frame-card-action],
+  [data-frame-card-row]:hover [data-frame-card-action] {
+    opacity: 1;
+  }
+}
 @media (hover: none) {
-  [data-frame-card-action] {
+  [data-frame-card] [data-frame-card-action],
+  [data-frame-card-row]:not([data-frame-card-rows][data-frame-card-action-rest="never"] *) [data-frame-card-action] {
     opacity: 1;
   }
 }

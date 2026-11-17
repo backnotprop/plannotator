@@ -9,6 +9,7 @@ import {
   CardGroups,
   CardGrid,
   CardRow,
+  CardRows,
   CardUpdatesPill,
   settleBatch,
   type CardImageFace,
@@ -386,6 +387,7 @@ export function PlansHomeCardsExample() {
       unread={plan.unread}
       time={plan.time}
       thumb={plan.thumb}
+      empty={plan.face === undefined}
       secondary={plan.project}
       pinned={pinned(plan)}
       action={action(plan)}
@@ -408,13 +410,7 @@ export function PlansHomeCardsExample() {
       </CardGroups>
       <section className="flex flex-col gap-1">
         <h2 className="px-2 text-[13px] font-medium leading-7 text-frame-muted-fg">The same plans as a list</h2>
-        <div role="list" aria-label="All plans" className="flex flex-col">
-          {[...NOW, ...RECENT, ...EARLIER].map((plan) => (
-            <div role="listitem" key={plan.id}>
-              {row(plan)}
-            </div>
-          ))}
-        </div>
+        <CardRows label="All plans">{[...NOW, ...RECENT, ...EARLIER].map((plan) => row(plan))}</CardRows>
       </section>
     </div>
   );
