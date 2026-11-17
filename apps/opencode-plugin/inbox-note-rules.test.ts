@@ -7,10 +7,10 @@
  * scratch config folder only; no Inbox, no OpenCode.
  */
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { inboxReminderRulesWatch } from "@plannotator/shared/config";
+import { inboxConfigWatch, inboxReminderRulesWatch, type PlannotatorConfig } from "@plannotator/shared/config";
 import { INBOX_RULES_LEAD, inboxReminderText } from "@plannotator/shared/inbox/connection";
 import { inboxNoteBlockWith } from "../../packages/server/inbox-agent-notes";
 import { openCode2InboxReminder } from "./server";
@@ -50,4 +50,38 @@ test("each request: the rules go while AGENTS.md lacks them and stop once the no
 test("no rules: nothing is looked at, the reminder is today's", () => {
   expect(inboxReminderRulesWatch({}, "opencode", place)()).toBeNull();
   expect(openCode2InboxReminder({}, {}, null)).toBe(inboxReminderText(undefined, { wakes: false }));
+});
+
+test("rules saved while OpenCode runs: the note is compared with the new rules, so R2 arrives once and R1 never again", () => {
+  const R2 = "Only message me when you are blocked.";
+  const configPath = join(root, "config.json");
+  const saveRules = (rules: string, seconds: number) => {
+    writeFileSync(configPath, JSON.stringify({ prompts: { inbox: { rules } } }));
+    utimesSync(configPath, seconds, seconds);
+  };
+  saveRules(RULES, 1_000);
+  writeAt(`Mine.\n\n${inboxNoteBlockWith(RULES)}\n`, 1_000);
+  const read = () => JSON.parse(readFileSync(configPath, "utf8")) as PlannotatorConfig;
+  const rulesNow = inboxReminderRulesWatch(inboxConfigWatch(read(), configPath, read), "opencode", place);
+  expect(rulesNow()).toBeNull();
+  // Saved; the note still holds R1 (not rewritten yet): R2 goes in the reminder.
+  saveRules(R2, 2_000);
+  expect(rulesNow()).toBe(R2);
+  // The Inbox rewrote the note with R2: none in the reminder, on every later request.
+  writeAt(`Mine.\n\n${inboxNoteBlockWith(R2)}\n`, 2_000);
+  expect(rulesNow()).toBeNull();
+  expect(rulesNow()).toBeNull();
+});
+
+test("config.json unreadable for a moment (a save half done): the last good rules stay, and the next good save is read", () => {
+  const configPath = join(root, "config.json");
+  writeFileSync(configPath, JSON.stringify(config));
+  utimesSync(configPath, 1_000, 1_000);
+  let next: PlannotatorConfig | null = null;
+  const configNow = inboxConfigWatch(config, configPath, () => next);
+  writeFileSync(configPath, "{");
+  utimesSync(configPath, 2_000, 2_000);
+  expect(configNow()).toBe(config);
+  next = { prompts: { inbox: { rules: "Later." } } };
+  expect(configNow()).toBe(next);
 });

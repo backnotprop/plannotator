@@ -112,7 +112,7 @@ import {
   HOST_PLAN_CARD_ENV,
   HOST_PLAN_CARD_MARKER,
 } from './enabled'
-import { claudeNoteFile, reminderRulesWithNote } from './inbox-note-rules'
+import { claudeNoteFile, currentRules, reminderRulesWithNote } from './inbox-note-rules'
 import { submitOrThrow, type Host, type LoadedPluginInfo } from './host'
 import {
   claudeTranscriptPaths,
@@ -328,7 +328,7 @@ interface Allowed {
   inboxReminder: boolean
   /** The person's own reminder text (config.json `prompts.inbox`), or null: the built-in line. */
   inboxReminderCustom: string | null
-  /** The person's rules (config.json, read at session start), before the note check. */
+  /** The person's rules (config.json, read at session start and again with the note: freshReminderRules), before the note check. */
   inboxRulesSet: string | null
   /** The rules the reminder carries now: `inboxRulesSet`, or null while Claude Code's rules file holds them (freshReminderRules). */
   inboxReminderRules: string | null
@@ -783,8 +783,13 @@ async function reminderRulesOf($: Engine, rules: string | null): Promise<string 
   return reminderRulesWithNote(rules, claudeNoteFile(await $.env.get('CLAUDE_CONFIG_DIR'), await homeOf($)), (path) => $.fs.read(path))
 }
 
-/** Read the note file again (a conversation's first prompt, a compaction: Claude Code reads its memory files again then) and keep the answer. */
+/**
+ * Read the rules and the note file again (a conversation's first prompt, a compaction: Claude Code reads its
+ * memory files again then) and keep the answer: the current rules against the note, since the Inbox rewrites
+ * the note when the person saves new rules.
+ */
 async function freshReminderRules($: Engine, settings: Allowed): Promise<string | null> {
+  settings.inboxRulesSet = await currentRules(settings.inboxRulesSet, `${settings.dataDir}/config.json`, (path) => $.fs.read(path), (path) => $.fs.exists(path))
   settings.inboxReminderRules = await reminderRulesOf($, settings.inboxRulesSet).catch(() => settings.inboxReminderRules)
   return settings.inboxReminderRules
 }

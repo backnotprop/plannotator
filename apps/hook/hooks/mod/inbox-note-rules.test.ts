@@ -6,7 +6,7 @@
 import { describe, expect, test } from 'bun:test'
 import { inboxReminderEnvValue } from './inbox'
 import { INBOX_RULES_LEAD, inboxReminderText } from './inbox-contract'
-import { claudeNoteFile, reminderRulesWithNote } from './inbox-note-rules'
+import { claudeNoteFile, currentRules, reminderRulesWithNote } from './inbox-note-rules'
 
 const TOOL = 'mcp__plugin_plannotator_tools__plannotator_inbox'
 const RULES = 'Ask me before you delete any file.'
@@ -62,5 +62,46 @@ describe('the rules the reminder carries', () => {
     }
     expect(await reminderRulesWithNote(null, file, read)).toBeNull()
     expect(await reminderRulesWithNote(RULES, null, read)).toBe(RULES)
+  })
+})
+
+describe('the rules of the moment, not of the session start', () => {
+  const file = '/home/ann/.claude/rules/plannotator-inbox.md'
+  const configPath = '/data/config.json'
+  const configWith = (rules: string) => JSON.stringify({ prompts: { inbox: { rules } } })
+  const noteWith = (rules: string) => NOTE.replace(RULES, rules)
+
+  test('R1 at the start, the person saves R2 and the Inbox rewrites the note: the compaction carries neither twice', async () => {
+    const R2 = 'Only message me when you are blocked.'
+    let config = configWith(RULES)
+    let note = noteWith(RULES)
+    const at = async (before: string | null) => {
+      const rules = await currentRules(before, configPath, () => config, () => true)
+      return { rules, reminder: await reminderRulesWithNote(rules, file, () => note) }
+    }
+    const start = await at(null)
+    expect(start).toEqual({ rules: RULES, reminder: null })
+    // Saved, the note not rewritten yet (or it could not be): the reminder carries R2, once.
+    config = configWith(R2)
+    const saved = await at(start.rules)
+    expect(saved).toEqual({ rules: R2, reminder: R2 })
+    // The Inbox rewrote the note: R2 is in the file, so none in the reminder (never R1 again).
+    note = noteWith(R2)
+    expect(await at(saved.rules)).toEqual({ rules: R2, reminder: null })
+    // Rules cleared: none anywhere.
+    config = JSON.stringify({})
+    expect(await at(R2)).toEqual({ rules: null, reminder: null })
+  })
+
+  test('a read that fails, or a file that is not a JSON object, keeps the last rules; a file gone or blank holds none', async () => {
+    const never = () => {
+      throw new Error('EACCES')
+    }
+    expect(await currentRules(RULES, configPath, never, () => true)).toBe(RULES)
+    expect(await currentRules(RULES, configPath, () => Promise.reject(new Error('EIO')), () => true)).toBe(RULES)
+    expect(await currentRules(RULES, configPath, () => '{"prompts": {"inbox": ', () => true)).toBe(RULES)
+    expect(await currentRules(RULES, configPath, () => '[1]', () => true)).toBe(RULES)
+    expect(await currentRules(RULES, configPath, () => null, () => false)).toBeNull()
+    expect(await currentRules(RULES, configPath, () => ' \n', () => true)).toBeNull()
   })
 })

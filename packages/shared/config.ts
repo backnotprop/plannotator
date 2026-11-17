@@ -2333,35 +2333,68 @@ export function inboxReminderRulesFor(
   return rules;
 }
 
+/** A file's size, time and inode (a key that changes when the file does), or `none`. */
+function statKey(path: string | null): string {
+  try {
+    if (path) {
+      const stat = statSync(path);
+      return `${path}:${stat.size}:${stat.mtimeMs}:${stat.ino}`;
+    }
+  } catch {
+    // No file.
+  }
+  return `${path}:none`;
+}
+
+/**
+ * config.json as it is now, for a process that runs for long: read again only
+ * when the file's size, time or inode changed (one stat per call), so a save in
+ * Settings reaches it. `initial` is the config the process just loaded. A read
+ * that fails (loadConfigOrNull: the file there but unreadable, a save half
+ * done) keeps the last good one, and is tried again at the next change.
+ */
+export function inboxConfigWatch(initial: PlannotatorConfig, path: string = getConfigPath(), read: () => PlannotatorConfig | null = loadConfigOrNull): () => PlannotatorConfig {
+  let seen = statKey(path);
+  let current = initial;
+  return () => {
+    const key = statKey(path);
+    if (key !== seen) {
+      const next = read();
+      if (next !== null) {
+        seen = key;
+        current = next;
+      }
+    }
+    return current;
+  };
+}
+
 /**
  * inboxReminderRulesFor asked again on every request, for a host that builds
  * its system prompt per request (OpenCode reads its AGENTS.md then): the note
  * file is stat'ed each time and read again only when its path, size or
- * modification time changed, so the answer follows the note as it changes
- * (the Inbox writes new rules, the note is turned off) and costs one stat.
+ * modification time changed, or the rules did, so the answer follows the note
+ * and the rules as they change (the person saves new rules, the Inbox writes
+ * them into the note, the note is turned off) and costs one stat. `config`: a
+ * getter (inboxConfigWatch) for the rules as config.json holds them now, so
+ * the note is compared with the current rules, never the ones of the start.
  */
 export function inboxReminderRulesWatch(
-  config: PlannotatorConfig,
+  config: PlannotatorConfig | (() => PlannotatorConfig),
   host: InboxToolHost,
   place: { env: Readonly<Record<string, string | undefined>>; homeDir: string } = { env: process.env, homeDir: homedir() },
 ): () => string | null {
+  const configNow = typeof config === "function" ? config : () => config;
   let seen: string | null = null;
   let answer: string | null = null;
   return () => {
-    if (inboxReminderRulesText(config, host) === null) return null;
-    const file = inboxNoteFileOf(host, place.env, place.homeDir);
-    let key = `${file}:none`;
-    try {
-      if (file) {
-        const stat = statSync(file);
-        key = `${file}:${stat.size}:${stat.mtimeMs}:${stat.ino}`;
-      }
-    } catch {
-      // No file: the reminder carries them.
-    }
+    const now = configNow();
+    const rules = inboxReminderRulesText(now, host);
+    if (rules === null) return null;
+    const key = `${statKey(inboxNoteFileOf(host, place.env, place.homeDir))}\0${rules}`;
     if (key !== seen) {
       seen = key;
-      answer = inboxReminderRulesFor(config, host, place);
+      answer = inboxReminderRulesFor(now, host, place);
     }
     return answer;
   };

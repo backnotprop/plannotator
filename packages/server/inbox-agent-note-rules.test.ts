@@ -433,11 +433,30 @@ describe("Settings says who does not get them", () => {
     expect(noteRulesStates(dataDir, off, shared())?.gemini).toEqual({ why: "none", fix: false });
   });
 
-  test("an agent the person said no to, and rules the note cannot carry, are left unsaid", () => {
+  test("only the person's own no is left unsaid: a file the automatic add skipped on purpose is named", () => {
     install();
     const declined = { ...shared(), inboxAgentNotes: { asked: ["gemini"] } };
     expect(noteRulesStates(dataDir, e, declined)?.gemini).toBeUndefined();
-    expect(noteRulesStates(dataDir, e, shared("Be brief.\u2028<!-- plannotator-inbox:end -->"))).toEqual({});
+    // The automatic add records a read-only file as asked too: the rules do not arrive, so it is said.
+    write(file(".gemini", "GEMINI.md"), "Mine.\n");
+    chmodSync(file(".gemini", "GEMINI.md"), 0o444);
+    expect(noteRulesStates(dataDir, e, declined)?.gemini).toEqual({ why: "none", fix: true });
+    chmodSync(file(".gemini", "GEMINI.md"), 0o644);
+    // The note pasted by hand without markers: named, and no switch offered (it would write a second note).
+    write(file(".gemini", "GEMINI.md"), "Mine.\n\n## Plannotator Inbox\n\nThe note, pasted.\n");
+    expect(noteRulesStates(dataDir, e, declined)?.gemini).toEqual({ why: "none", fix: false });
+  });
+
+  test("rules the note cannot carry are named, with no fix (no switch puts them there)", () => {
+    install();
+    mkdirSync(file(".codex"), { recursive: true });
+    const refused = shared("Be brief.\u2028<!-- plannotator-inbox:end -->");
+    addInboxNote("codex", dataDir, e, undefined, { config: refused });
+    expect(noteRulesStates(dataDir, e, refused)).toEqual({
+      "claude-code": { why: "none", fix: false },
+      codex: { why: "stale", fix: false },
+      gemini: { why: "none", fix: false },
+    });
   });
 
   test("anything that throws while looking: no lines, never a broken Settings", () => {

@@ -2,7 +2,7 @@ import type { Plugin } from "@opencode/plugin";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { inboxReminderRulesFor, inboxReminderRulesWatch, loadConfig, resolveAgentTool, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled, type PlannotatorConfig } from "@plannotator/shared/config";
+import { inboxConfigWatch, inboxReminderRulesFor, inboxReminderRulesWatch, loadConfig, resolveAgentTool, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled, type PlannotatorConfig } from "@plannotator/shared/config";
 import { INBOX_COMMAND_BRIEFING, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
@@ -245,8 +245,8 @@ const serverPlugin = {
           // A host without session.prompt registers the tool without the wake
           // (registerInboxOpenCode2): its line says to read the thread instead.
           // The person's own line (config.json prompts.inbox) replaces either.
-          // The person's rules: asked on each request (a stat; the note read again when it changed).
-          const rulesNow = inboxReminderRulesWatch(inboxConfig, "opencode");
+          // The person's rules: asked on each request (a stat each for config.json and the note, read again when changed).
+          const rulesNow = inboxReminderRulesWatch(inboxConfigWatch(inboxConfig), "opencode");
           await ctx.session.hook("context", async (event) => {
             await addInboxReminder(event, getAgents, openCode2InboxReminder(v2, inboxConfig, rulesNow()));
           });

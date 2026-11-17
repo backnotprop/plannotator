@@ -1251,10 +1251,12 @@ export function noteHolderIds(options: Pick<ConnectOptions, "dataDir" | "environ
  * rules (read-only, other hard links, changed while written,
  * PLANNOTATOR_INBOX_NOTES=0, damaged). `fix`: Settings → Agents can put it
  * right (the note can be added there: not with PLANNOTATOR_INBOX_NOTES=0, not
- * where there is no file to put it in). Left out, so Settings says nothing it
- * cannot stand behind: agents with no rules; Cursor (its copy by hand cannot
- * be seen); rules the note cannot carry (noteSafe); an agent the person said
- * no to (asked, and no note: "Don't add a note", or turned off). Null when
+ * where there is no file to put it in, not over a note pasted by hand, never
+ * for rules the note cannot carry, noteSafe). Left out, so Settings says
+ * nothing it cannot stand behind: agents with no rules; Cursor (its copy by
+ * hand cannot be seen); an agent the person said no to (asked, and no note:
+ * "Don't add a note", or turned off), but never a file the automatic add left
+ * alone on purpose, which `asked` records too (skippedOnPurpose). Null when
  * anything throws: Settings then shows no line rather than failing.
  */
 export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: unknown): Partial<Record<InboxNoteAgentId, InboxNoteRulesState>> | null {
@@ -1271,12 +1273,17 @@ export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: un
         out[id] = "held";
         continue;
       }
-      if (inboxNoteRules(id, config) === null) continue;
+      // Rules the note cannot carry (noteSafe): no switch puts them there.
+      const carried = inboxNoteRules(id, config) !== null;
       const state = noteStatus(id, dataDir, e, config).state;
       if (state === "absent" || state === "unavailable") {
-        if (!declined(id)) out[id] = { why: "none", fix: state === "absent" && !notesOff };
+        // Silent only for the person's own no. `asked` also holds the files the automatic add left
+        // alone on purpose; those are told apart by the file itself, so a skipped one is never hidden.
+        const skipped = skippedOnPurpose(id, e);
+        if (declined(id) && skipped === null) continue;
+        out[id] = { why: "none", fix: carried && state === "absent" && !notesOff && skipped !== "pasted" };
       } else {
-        out[id] = { why: state === "edited" ? "edited" : "stale", fix: !notesOff };
+        out[id] = { why: state === "edited" ? "edited" : "stale", fix: carried && !notesOff };
       }
     }
     return out;
@@ -1292,6 +1299,25 @@ export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: un
  * instructions, which can leave the rules out for a client whose agent has
  * them here (not used there yet).
  */
+/**
+ * Why the automatic add would leave this agent's file alone (`addInboxNote` with `auto`), or null:
+ * `read-only` (no owner write bit), `hard-linked` (other hard links), `pasted` (the note pasted by
+ * hand without markers). Settings uses it to tell such a skip, which config.json records as asked
+ * too, from the person's own no.
+ */
+function skippedOnPurpose(agent: InboxNoteAgentId, e: AgentEnvironment): "read-only" | "hard-linked" | "pasted" | null {
+  const path = noteTarget(agent, e).path;
+  const read = path ? readAgentFile(path) : null;
+  if (read?.kind !== "file" || findBlock(read.text).kind !== "none") return null;
+  if (UNMARKED_NOTE.test(read.text)) return "pasted";
+  if ((read.mode & 0o200) === 0) return "read-only";
+  try {
+    return statSync(read.target).nlink > 1 ? "hard-linked" : null;
+  } catch {
+    return null;
+  }
+}
+
 export function inboxNoteHoldsAgentRules(agent: InboxNoteAgentId, e: AgentEnvironment, config: unknown): boolean {
   const rules = agentRulesText(agent, config);
   const path = rules === null ? null : noteTarget(agent, e).path;
