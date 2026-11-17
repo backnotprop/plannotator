@@ -110,8 +110,10 @@ export function inboxMcpReminderOn(config: unknown): boolean {
  *   person's own Claude Code, and Claude Code names itself `claude-code` with
  *   its version.
  * - `claude_code_old`: Claude Code before 2.1.296 ("Before v2.1.296, the
- *   shorter limit was 2,048 characters"), and any client that does not say
- *   who it is or which version: the cap that was true for every Claude Code.
+ *   shorter limit was 2,048 characters"), any other client whose name
+ *   contains "claude" (Claude Desktop, Claude apps whose names we do not
+ *   know, Claude Code without a readable version), and any client that does
+ *   not say who it is: the cap that was true for every Claude Code.
  * - `other`: every other client that names itself (Codex's
  *   `codex-mcp-client`, Cursor, Gemini, Qwen …). None documents a cut that we
  *   know of (Codex's MCP doc: "Keep the first 512 characters
@@ -137,14 +139,21 @@ export function inboxMcpInitializeClient(body: unknown): InboxMcpClient | undefi
   return info && typeof info === "object" && !Array.isArray(info) ? (info as InboxMcpClient) : null;
 }
 
-/** The MCP client name Claude Code gives in `initialize`, and the first version that keeps 4,096 characters. */
-const CLAUDE_CODE_CLIENT = "claude-code";
+/** The first Claude Code version that keeps 4,096 characters. */
 const CLAUDE_CODE_4096 = [2, 1, 296] as const;
 
+/**
+ * The tier, forgiving on the safe side: the name is trimmed and compared
+ * without case; any name with "claude" in it is the Claude family, and only
+ * Claude Code itself (`claude-code`, also written with a space or an
+ * underscore) with a readable version of 2.1.296 or later gets 4,096.
+ */
 export function inboxMcpTierOf(client: InboxMcpClient): InboxMcpTier {
-  const name = client && typeof client === "object" ? client.name : undefined;
-  if (typeof name !== "string" || name.trim() === "") return "claude_code_old";
-  if (name !== CLAUDE_CODE_CLIENT) return "other";
+  const raw = client && typeof client === "object" ? client.name : undefined;
+  const name = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  if (name === "") return "claude_code_old";
+  if (!name.includes("claude")) return "other";
+  if (name.replace(/[\s_-]+/g, "-") !== "claude-code") return "claude_code_old";
   const version = typeof client!.version === "string" ? /^(\d+)\.(\d+)\.(\d+)/.exec(client!.version.trim()) : null;
   if (!version) return "claude_code_old";
   const parts = version.slice(1, 4).map(Number);

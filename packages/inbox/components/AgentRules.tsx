@@ -84,15 +84,16 @@ const chars = (n: number) => n.toLocaleString('en-US');
 
 /**
  * Agents connected through MCP read the rules in the MCP server's instructions, whose room depends on
- * the client (InboxMcpTier): Claude Code keeps 4,096 characters of them (2,048 before 2.1.296), other
- * agents no known limit. The note names who misses the rules, widest first.
+ * the client (InboxMcpTier): Claude Code keeps 4,096 characters of them; before 2.1.296, other Claude
+ * apps and unnamed clients are given 2,048; other agents no known limit. The note names who misses the
+ * rules, widest first.
  */
 function McpDroppedNote({ mcp }: { mcp: Mcp }) {
   const text = mcp.dropped.includes('other')
     ? `Not sent to agents connected through MCP (T3 Code, Codex and others): they take rules up to ${chars(mcp.rooms.other)} characters.`
     : mcp.dropped.includes('claude_code')
-      ? `Not sent to Claude Code when it connects through MCP (T3 Code's Claude threads too): it takes rules up to ${chars(mcp.rooms.claude_code)} characters there (${chars(mcp.rooms.claude_code_old)} before 2.1.296). Codex and other agents get them.`
-      : `Not sent to Claude Code before 2.1.296 when it connects through MCP: it takes rules up to ${chars(mcp.rooms.claude_code_old)} characters there.`;
+      ? `Not sent to Claude Code or other Claude apps when they connect through MCP (T3 Code's Claude threads too): Claude Code 2.1.296 and later takes rules up to ${chars(mcp.rooms.claude_code)} characters there, the others ${chars(mcp.rooms.claude_code_old)}. Codex and other agents get them.`
+      : `Not sent to older Claude Code (before 2.1.296), other Claude apps, or clients that do not name themselves, when they connect through MCP: they take rules up to ${chars(mcp.rooms.claude_code_old)} characters there.`;
   return (
     <p className="pm-over" data-rules-dropped="mcp">
       {text}
@@ -103,7 +104,14 @@ function McpDroppedNote({ mcp }: { mcp: Mcp }) {
 /** Who a list of MCP tiers is, for the reminder's note. */
 export function mcpWho(tiers: readonly InboxMcpTier[]): string {
   if (INBOX_MCP_TIER_LIST.every((tier) => tiers.includes(tier))) return 'agents connected through MCP (T3 Code, Codex and others)';
-  const claude = tiers.includes('claude_code_old') && tiers.includes('claude_code') ? 'Claude Code' : tiers.includes('claude_code_old') ? 'Claude Code before 2.1.296' : tiers.includes('claude_code') ? 'Claude Code 2.1.296 and later' : null;
+  const claude =
+    tiers.includes('claude_code_old') && tiers.includes('claude_code')
+      ? 'Claude Code and other Claude apps'
+      : tiers.includes('claude_code_old')
+        ? 'older Claude Code (before 2.1.296) and other Claude apps'
+        : tiers.includes('claude_code')
+          ? 'Claude Code 2.1.296 and later'
+          : null;
   return [claude, tiers.includes('other') ? 'agents other than Claude Code' : null].filter(Boolean).join(' and ') + ' through MCP';
 }
 const INBOX_MCP_TIER_LIST: readonly InboxMcpTier[] = ['claude_code_old', 'claude_code', 'other'];

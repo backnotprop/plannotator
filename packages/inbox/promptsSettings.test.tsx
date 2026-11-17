@@ -410,9 +410,11 @@ test.skipIf(!hasDom)('agents connected through MCP: the note names who misses th
     return q(el, '[data-rules-dropped="mcp"]')?.textContent ?? null;
   };
   expect(note([])).toBeNull();
-  expect(note(['claude_code_old'])).toBe('Not sent to Claude Code before 2.1.296 when it connects through MCP: it takes rules up to 397 characters there.');
+  expect(note(['claude_code_old'])).toBe(
+    'Not sent to older Claude Code (before 2.1.296), other Claude apps, or clients that do not name themselves, when they connect through MCP: they take rules up to 397 characters there.',
+  );
   expect(note(['claude_code_old', 'claude_code'])).toBe(
-    "Not sent to Claude Code when it connects through MCP (T3 Code's Claude threads too): it takes rules up to 1,913 characters there (397 before 2.1.296). Codex and other agents get them.",
+    "Not sent to Claude Code or other Claude apps when they connect through MCP (T3 Code's Claude threads too): Claude Code 2.1.296 and later takes rules up to 1,913 characters there, the others 397. Codex and other agents get them.",
   );
   expect(note(['claude_code_old', 'claude_code', 'other'])).toBe('Not sent to agents connected through MCP (T3 Code, Codex and others): they take rules up to 8,827 characters.');
 });
@@ -422,5 +424,5 @@ test.skipIf(!hasDom)('agents connected through MCP: a reminder left out names th
   withReminder.reminder = { ...withReminder.reminder, shared: 'Ping me when you are done.' };
   const el = mount(withReminder);
   expect(q(el, '[data-rules-dropped="mcp"]')).toBeNull();
-  expect(q(el, '[data-prompt-over="mcp"]')?.textContent).toBe('Not sent to Claude Code before 2.1.296 through MCP: it does not fit in the room there.');
+  expect(q(el, '[data-prompt-over="mcp"]')?.textContent).toBe('Not sent to older Claude Code (before 2.1.296) and other Claude apps through MCP: it does not fit in the room there.');
 });

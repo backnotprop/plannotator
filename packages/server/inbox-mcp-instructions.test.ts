@@ -48,6 +48,13 @@ const CLIENTS: Record<string, { client: InboxMcpClient; tier: InboxMcpTier }> = 
   "Claude Code 1.9.999": { client: { name: "claude-code", version: "1.9.999" }, tier: "claude_code_old" },
   "Claude Code, no version": { client: { name: "claude-code" }, tier: "claude_code_old" },
   "Claude Code, unreadable version": { client: { name: "claude-code", version: "dev" }, tier: "claude_code_old" },
+  "Claude Code, other casing and spaces": { client: { name: "  Claude-Code ", version: "2.1.323" }, tier: "claude_code" },
+  "Claude Code, written with a space": { client: { name: "Claude Code", version: "2.1.300" }, tier: "claude_code" },
+  "Claude Code, written with a space, old": { client: { name: "claude code", version: "2.1.200" }, tier: "claude_code_old" },
+  "Claude Desktop": { client: { name: "claude-ai", version: "0.1.0" }, tier: "claude_code_old" },
+  "an unknown Claude app with a high version": { client: { name: "Claude Something", version: "9.9.9" }, tier: "claude_code_old" },
+  "a name that only contains claude-code": { client: { name: "my-claude-code-wrapper", version: "2.1.323" }, tier: "claude_code_old" },
+  "a blank name": { client: { name: "   ", version: "1.0.0" }, tier: "claude_code_old" },
   Codex: { client: { name: "codex-mcp-client", version: "0.130.0" }, tier: "other" },
   Cursor: { client: { name: "cursor-vscode", version: "1.0.0" }, tier: "other" },
   "a client with no name": { client: { version: "1.0.0" }, tier: "claude_code_old" },
@@ -286,6 +293,8 @@ describe("over MCP: each initialize is sized to its client and reads config.json
     expect(await instructions({ name: "claude-code", version: "2.1.295" })).toBe(INBOX_MCP_INSTRUCTIONS);
     // A client that does not say who it is (the protocol needs clientInfo, so a blank name).
     expect(await instructions({ name: "", version: "1.0.0" })).toBe(INBOX_MCP_INSTRUCTIONS);
+    // Claude Desktop, or any Claude app we do not know: the safe 2,048 tier.
+    expect(await instructions({ name: "claude-ai", version: "0.1.0" })).toBe(INBOX_MCP_INSTRUCTIONS);
     const current = await instructions({ name: "claude-code", version: "2.1.323" });
     expect(current).toContain(rules);
     expect(current.length).toBeLessThan(4096);
