@@ -204,6 +204,9 @@ import { needsAutoViewedNotice, markAutoViewedNoticeSeen, turnOffAutoViewed, tog
 import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
+import { ReviewLoadError } from './components/ReviewLoadError';
+import { reviewStubReason, UNTRACKED_CAP_BYTES_LABEL, UNTRACKED_CAP_FILES_LABEL } from '@plannotator/shared/diff-paths';
+import { diffLoadFailureFromResponse, diffLoadFailureMessage, diffLoadUnreachable } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
 import { parseDiffToFiles } from './utils/diffParser';
 import {
@@ -486,6 +489,12 @@ const ReviewApp: React.FC = () => {
   const { resolvedMode } = useTheme();
   const [diffData, setDiffData] = useState<DiffData | null>(null);
   const [files, setFiles] = useState<DiffFile[]>([]);
+  // Untracked files the server listed without reading (past its untracked
+  // file or byte caps, review-core). One line in the page says how many.
+  const untrackedLeftOutCount = useMemo(
+    () => files.reduce((count, file) => count + (reviewStubReason(file.patch) === 'untracked-left-out' ? 1 : 0), 0),
+    [files],
+  );
   const [activeFileIndex, setActiveFileIndex] = useState(0);
   const [annotations, setAnnotations] = useState<CodeAnnotation[]>([]);
   const annotationsRef = useRef(annotations);
@@ -570,6 +579,11 @@ const ReviewApp: React.FC = () => {
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // A real session whose first /api/diff failed: the load error state, never
+  // the demo diff (ReviewLoadError). Retry bumps the attempt to load again.
+  const [diffLoadFailure, setDiffLoadFailure] = useState<string | null>(null);
+  const [diffLoadAttempt, setDiffLoadAttempt] = useState(0);
+  const [isRetryingDiffLoad, setIsRetryingDiffLoad] = useState(false);
   const diffStyle = useConfigValue('diffStyle');
   const [compactDiffStyle, setCompactDiffStyle] = useState<'split' | 'unified'>('unified');
   const effectiveDiffStyle = isCompactTouchLayout ? compactDiffStyle : diffStyle;
@@ -2872,11 +2886,14 @@ const ReviewApp: React.FC = () => {
   }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator]);
 
 
-  // Load diff content - try API first, fall back to demo
+  // Load diff content from the review server. Only the standalone dev page
+  // (`bun run dev:review`, no server behind it) falls back to the demo diff;
+  // a real session that fails shows the load error state with a Retry.
   useEffect(() => {
     fetch('/api/diff')
-      .then(res => {
-        if (!res.ok) throw new Error('Not in API mode');
+      .catch(() => { throw diffLoadUnreachable(); })
+      .then(async res => {
+        if (!res.ok) throw await diffLoadFailureFromResponse(res);
         return res.json();
       })
       .then((data: {
@@ -3021,9 +3038,18 @@ const ReviewApp: React.FC = () => {
         setGeneratedFiles(new Set(data.generatedFiles ?? []));
         setBaseBehindRemote(data.baseBehindRemote === true);
         setOpenStatePinned(data.openStatePinned === true);
+        setDiffLoadFailure(null);
+        setIsLoading(false);
       })
-      .catch(() => {
-        // Not in API mode - use demo content
+      .catch((error: unknown) => {
+        if (!import.meta.env.DEV) {
+          // isLoading stays true: the review mounts for the first time only
+          // once a Retry loads the diff, so nothing latches on this state.
+          console.error('Failed to load the diff:', error);
+          setDiffLoadFailure(diffLoadFailureMessage(error));
+          return;
+        }
+        // Standalone dev page: no server, so show the demo content.
         setAiEnabled(true);
         const demoFiles = parseDiffToFiles(DEMO_DIFF);
         setDiffData({
@@ -3042,9 +3068,10 @@ const ReviewApp: React.FC = () => {
           reason: 'demo-mode',
           message: 'Call flow requires a live Git review session.',
         });
+        setIsLoading(false);
       })
-      .finally(() => setIsLoading(false));
-  }, []);
+      .finally(() => setIsRetryingDiffLoad(false));
+  }, [diffLoadAttempt]);
 
   // Handle line selection from diff viewer
   const handleLineSelection = useCallback((range: SelectedLineRange | null) => {
@@ -5894,6 +5921,23 @@ const ReviewApp: React.FC = () => {
     searching: hasSearchableFiles && !!searchQuery.trim(),
   };
 
+  if (diffLoadFailure !== null) {
+    return (
+      <ThemeProvider defaultTheme="dark" manageFavicon>
+        <ReviewLoadError
+          message={diffLoadFailure}
+          retrying={isRetryingDiffLoad}
+          onRetry={() => {
+            setIsRetryingDiffLoad(true);
+            setDiffLoadAttempt((attempt) => attempt + 1);
+          }}
+          feedbackUrl={feedbackUrl}
+          exitUrl={exitUrl}
+        />
+      </ThemeProvider>
+    );
+  }
+
   if (isLoading) {
     return (
       <ThemeProvider defaultTheme="dark" manageFavicon>
@@ -6422,6 +6466,14 @@ const ReviewApp: React.FC = () => {
             />
           </div>
         </header>
+
+        {untrackedLeftOutCount > 0 && (
+          <div role="status" data-untracked-left-out={untrackedLeftOutCount} className="shrink-0 border-b border-warning/20 bg-warning/10 px-3 py-1.5 text-xs text-warning">
+            {untrackedLeftOutCount.toLocaleString('en-US')} untracked {untrackedLeftOutCount === 1 ? 'file was' : 'files were'} left out of the diff:
+            a review reads at most {UNTRACKED_CAP_FILES_LABEL} untracked files and {UNTRACKED_CAP_BYTES_LABEL} of their contents.
+            {untrackedLeftOutCount === 1 ? ' It is' : ' They are'} still listed, without contents. Add generated folders to .gitignore to keep them out.
+          </div>
+        )}
 
         {draftTargetChanged && (
           <div role="status" className="shrink-0 flex items-center justify-between gap-3 border-b border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
