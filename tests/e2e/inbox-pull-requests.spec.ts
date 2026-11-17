@@ -1951,10 +1951,10 @@ test("the rail: Changes | All files, the repository at the head read; a file the
     await expect(rail.locator('[data-tree-scope="all"]')).toHaveText('All files');
     // All files: the repository at the head the patch was read at, a file the PR does not change among them.
     await rail.locator('[data-tree-scope="all"]').click();
-    await expect(rail.locator('[data-repo-file="package.json"]')).toBeVisible();
+    await expect(rail.locator('[data-repo-file-tree] [data-item-path="package.json"]')).toBeVisible();
     expect(forgeCalls()).toContain(`gh read repos/northwind/web-app/git/trees/${head}?recursive=1`);
     // Picked, it shows whole in place of the diff, in the review app's file view.
-    await rail.locator('[data-repo-file="package.json"]').click();
+    await rail.locator('[data-repo-file-tree] [data-item-path="package.json"]').click();
     const shown = review.locator('[data-pull-repo-file="package.json"]');
     await expect(shown.locator('[data-not-in-review]')).toBeVisible();
     await expect(shown).toContainText('web-app-settings');
@@ -2639,8 +2639,8 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     expect(sheet.inner).toBe(sheet.card);
     await review.getByRole('button', { name: 'Close the comments' }).click();
 
-    // The file's header keeps its 33 px.
-    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
+    // The file's header keeps its 32 px.
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(32);
   } finally {
     await context.close();
   }
@@ -2921,7 +2921,7 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   // The old side's line 45 quotes the old text, not the new file's line 45.
   await box.evaluate((el) => el.scrollIntoView({ block: 'end' }));
   await shell.locator('[data-expand-up]:visible').last().click();
-  const oldSide = shell.locator('[data-column-number="45"]').first();
+  const oldSide = shell.locator('[data-deletions] [data-column-number="45"]').first();
   await expect(oldSide).toBeVisible({ timeout: 10_000 });
   await oldSide.click();
   await page.getByPlaceholder('Leave feedback...').fill('Why is this one kept?');
@@ -2935,7 +2935,7 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await expect(shell.locator('[data-column-number="20"]').last()).toBeInViewport({ timeout: 10_000 });
   // The old side numbers apart from the new: its comment opens the line it was written on.
   await review.locator('.ib-gpanel').getByText('Why is this one kept?').first().click();
-  await expect(shell.locator('[data-column-number="45"]').first()).toBeInViewport({ timeout: 10_000 });
+  await expect(shell.locator('[data-deletions] [data-column-number="45"]').first()).toBeInViewport({ timeout: 10_000 });
   await expect(shell.getByText(TOKENS[44]!).first()).toBeInViewport();
   await review.locator('[data-review-posts] [data-decision-primary]').click();
   const dialog = page.getByRole('dialog');
