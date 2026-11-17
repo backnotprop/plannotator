@@ -229,7 +229,11 @@ test("a routine's Runs tab is in the address: a reload lands on it, and a switch
 
   // Words typed, then Runs at once, inside the typing pause: the words save, and the header says so on Runs.
   const MORE = ' Skip the dev dependencies.';
-  const before = await promptBox(page).inputValue();
+  // The saved words, and the box showing them before typing: opened by its link, the editor draws (tabs and all)
+  // before the routine is read, with the box empty until then.
+  const before = (await savedPrompt(id)) ?? '';
+  expect(before, 'the routine has a prompt').not.toBe('');
+  await expect(promptBox(page)).toHaveValue(before, { timeout: 10_000 });
   await promptBox(page).click();
   await promptBox(page).press('End');
   await promptBox(page).pressSequentially(MORE);
