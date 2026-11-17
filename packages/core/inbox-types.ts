@@ -2684,7 +2684,8 @@ export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code",
  * 2026-11-17, for every agent whose docs verify a global rules file it loads
  * by itself: "Just add it, with the quiet line"). Claude Code, Codex, Gemini
  * CLI, Pi and OpenCode are proven by a live check too; the others by their
- * docs only until checked (handoff "notes-live-checks"). Cline is still
+ * docs only until checked live (the check per agent: "Where" in
+ * docs/agent-guides/inbox-foundation.md). Cline is still
  * offered (its docs do not say whether a new rule file starts switched on),
  * and Cursor's note is copied by hand where its editor is not found.
  */

@@ -712,6 +712,28 @@ export function openCodeGeneration(e: AgentEnvironment): "1" | "2" | undefined {
   return undefined;
 }
 
+/**
+ * Every sign of each OpenCode version here, not just the first (openCodeGeneration stops at one): the
+ * global config's V2 `plugins` and V1 `plugin` keys, `opencode2` (V2) and `opencode` (V1, or V2's own
+ * copy: read as V1, the side that can lose something) on PATH.
+ */
+export function openCodeVersionsSeen(e: AgentEnvironment): { v1: boolean; v2: boolean } {
+  const seen = { v1: !!e.which("opencode"), v2: !!e.which("opencode2") };
+  const dir = openCodeConfigDir(e);
+  for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) {
+    const read = readAgentFile(join(dir, name));
+    if (read.kind !== "file") continue;
+    try {
+      const parsed = JSON.parse(stripJsonComments(read.text)) as { plugin?: unknown; plugins?: unknown };
+      if (Array.isArray(parsed.plugins)) seen.v2 = true;
+      if (Array.isArray(parsed.plugin)) seen.v1 = true;
+    } catch {
+      // Unreadable: no evidence here.
+    }
+  }
+  return seen;
+}
+
 /** Whether Plannotator's OpenCode plugin is listed in the global opencode config: `plugin` (OpenCode 1) or `plugins` (OpenCode 2, strings or `{ package }`). */
 export function openCodePluginInstalled(e: AgentEnvironment): boolean {
   const dir = openCodeConfigDir(e);

@@ -24,9 +24,9 @@
  *  - Codex: `AGENTS.override.md` when Codex reads it (a file with text other than
  *    whitespace), else `AGENTS.md` (created when missing). An empty override is
  *    skipped by Codex; writing into it would hide the person's AGENTS.md.
- *  - OpenCode: `~/.config/opencode/AGENTS.md`; created only for OpenCode 2
- *    (`openCodeGeneration`), which has no CLAUDE.md fallback: creating it
- *    would stop OpenCode 1 reading the person's `~/.claude/CLAUDE.md`.
+ *  - OpenCode: `~/.config/opencode/AGENTS.md`; created only with OpenCode 2
+ *    here (no CLAUDE.md fallback), no sign of OpenCode 1 (`openCodeVersionsSeen`)
+ *    and no `~/.claude/CLAUDE.md`: creating it would stop OpenCode 1 reading it.
  *  - Pi: the first that exists of `AGENTS.override.md`, `AGENTS.md`,
  *    `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` (Pi reads only one); `AGENTS.md`
  *    created only when none does.
@@ -45,7 +45,7 @@
  *    (a custom agent loads steering only when its `resources` list it).
  *  - Windsurf / Devin: `~/.devin/rules/plannotator-inbox.md`, Plannotator's own, with `trigger: always_on`.
  *  - Cline: `$CLINE_DIR/rules/plannotator-inbox.md` (default `~/.cline`), Plannotator's own (no front matter: always active).
- *  - Amp: `~/.config/amp/AGENTS.md`, created only when no `AGENT.md` or `CLAUDE.md` sits there (Amp reads one of those when AGENTS.md is missing).
+ *  - Amp: `$XDG_CONFIG_HOME/amp/AGENTS.md` (default `~/.config`, as for its settings.json), created only when no `AGENT.md` or `CLAUDE.md` sits there (Amp reads one of those when AGENTS.md is missing).
  *  - Antigravity: `~/.gemini/GEMINI.md`, the same file and block as Gemini CLI's when Gemini's is that file (or `~/.gemini/AGENTS.md`, which Antigravity also reads).
  *  - DeepSeek Harness: `$DSH_HOME/AGENTS.md` (default `~/.dsh`).
  *
@@ -92,7 +92,7 @@ import {
   geminiDir,
   qwenDir,
   openCodeConfigDir,
-  openCodeGeneration,
+  openCodeVersionsSeen,
   xdgConfigHome,
   inboxAgentReach,
   piAgentDir,
@@ -487,8 +487,11 @@ function claudeRulesFile(e: AgentEnvironment): string {
 /**
  * A file Plannotator owns whole: it holds only the note, after the front matter its tool's format needs
  * (`header`, taken from that tool's docs; not words an agent acts on). Created with the note, deleted with
- * it (removal gives the folder back as it was: `extras` Plannotator wrote beside it go too while they are
- * byte for byte its own, then the folders in `prune`, deepest first, while empty).
+ * it: `extras` Plannotator wrote beside it go too while they are byte for byte its own, then the folders in
+ * `prune` (Cursor's plugin folders, named for Plannotator), deepest first, while empty. The folder an own
+ * file sits in (`~/.kiro/steering`, `~/.devin/rules`, ...) stays, empty or not. With front matter
+ * (`header`), an own file that is there but blank and was not created by Plannotator is the person's: no
+ * note goes in it (a block without its front matter may never load).
  */
 interface OwnFile {
   agent: InboxNoteAgentId;
@@ -567,7 +570,12 @@ function removeOwnExtras(own: OwnFile): void {
       // Gone, or not ours to read.
     }
   }
-  for (const dir of own.prune) {
+  pruneOwnFolders(own);
+}
+
+/** An own file's `prune` folders (Cursor's plugin folders), deepest first, while empty. */
+function pruneOwnFolders(own: OwnFile | null): void {
+  for (const dir of own?.prune ?? []) {
     try {
       rmdirSync(dir);
     } catch {
@@ -576,11 +584,35 @@ function removeOwnExtras(own: OwnFile): void {
   }
 }
 
-/** Plannotator's files beside an own file (Cursor's plugin manifest), written when missing; one already there is left as it is. */
-function writeOwnExtras(own: OwnFile | null): void {
+/**
+ * Plannotator's files beside an own file (Cursor's plugin manifest), written when missing (one already
+ * there is left as it is), after the own file itself. Returns the ones written, so a failure can take them back.
+ */
+function writeOwnExtras(own: OwnFile | null, written: string[]): void {
   for (const extra of own?.extras ?? []) {
-    if (!existsSync(extra.path)) writeAgentFileAtomic(extra.path, extra.text, 0o644);
+    if (existsSync(extra.path)) continue;
+    writeAgentFileAtomic(extra.path, extra.text, 0o644);
+    written.push(extra.path);
   }
+}
+
+/** An own file with front matter that is there but blank, and not one Plannotator created (its record): the person's. */
+function blankNotOurs(path: string, e: AgentEnvironment, record: InboxAgentNoteRecord | undefined): boolean {
+  const own = ownFileAt(path, e);
+  if (!own?.header) return false;
+  const read = readAgentFile(path);
+  return read.kind === "file" && !read.text.trim() && !(record?.created === true && record.path === resolved(path));
+}
+
+/**
+ * The note pasted by hand without markers in a file the agent reads beside its note's own file (Qwen
+ * Code's context file, QWEN.md, where the note went before its own rules file): its path, or null.
+ */
+function pastedBeside(agent: InboxNoteAgentId, e: AgentEnvironment): string | null {
+  if (agent !== "qwen") return null;
+  const context = qwenContextFile(e);
+  const read = readAgentFile(context);
+  return read.kind === "file" && findBlock(read.text).kind === "none" && UNMARKED_NOTE.test(read.text) ? context : null;
 }
 
 /** Where Amp falls back when its AGENTS.md is missing (https://ampcode.com/docs/customize/agents-md). */
@@ -626,7 +658,8 @@ export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTa
   const own = (path: string): NoteTarget => ({ path, create: !exists(path), reason: null });
   switch (agent) {
     case "cursor":
-      return cursorEditorFound(e) ? own(ownPath("cursor", e)) : { path: null, create: false, reason: CURSOR_NOTE_REASON };
+      // The plugin once written stays Cursor's note (so its switch can turn it off) when the editor is gone.
+      return cursorEditorFound(e) || existsSync(ownPath("cursor", e)) ? own(ownPath("cursor", e)) : { path: null, create: false, reason: CURSOR_NOTE_REASON };
     case "claude-code":
       return own(claudeRulesFile(e));
     case "kiro":
@@ -637,7 +670,8 @@ export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTa
       return own(ownPath("cline", e));
     case "amp": {
       // https://ampcode.com/docs/customize/agents-md: "$HOME/.config/amp/AGENTS.md ... always included if they exist".
-      const dir = join(e.homeDir, ".config", "amp");
+      // Under XDG_CONFIG_HOME when set, as Amp's own settings.json is read (AGENT_SPECS).
+      const dir = join(xdgConfigHome(e), "amp");
       const file = join(dir, "AGENTS.md");
       if (exists(file)) return { path: file, create: false, reason: null };
       if (AMP_FALLBACK_FILES.some((name) => exists(join(dir, name)))) {
@@ -665,8 +699,12 @@ export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTa
     case "opencode": {
       const file = join(openCodeConfigDir(e), "AGENTS.md");
       if (exists(file)) return { path: file, create: false, reason: null };
-      // https://opencode.ai/v2/docs/instructions/: "OpenCode V2 recognizes `AGENTS.md` only. It does not use `CLAUDE.md` as a fallback."
-      if (openCodeGeneration(e) === "2") return { path: file, create: true, reason: null };
+      // https://opencode.ai/v2/docs/instructions/: "OpenCode V2 recognizes `AGENTS.md` only. It does not use `CLAUDE.md` as a
+      // fallback." Created only where that hides nothing: OpenCode 2 here, no sign of OpenCode 1 at all, and no CLAUDE.md
+      // OpenCode 1 would stop reading.
+      const seen = openCodeVersionsSeen(e);
+      const claudeMd = [join(e.homeDir, ".claude", "CLAUDE.md"), join(claudeConfigDir(e), "CLAUDE.md")];
+      if (seen.v2 && !seen.v1 && !claudeMd.some(exists)) return { path: file, create: true, reason: null };
       return { path: file, create: false, reason: "Creating this file would stop OpenCode 1 from reading your ~/.claude/CLAUDE.md, so Plannotator adds the note only to an AGENTS.md you already have." };
     }
     case "pi": {
@@ -961,12 +999,17 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
       return { ok: true, agent, action: "kept-edited", path: shown! };
     }
   } else {
-    if (options.auto && UNMARKED_NOTE.test(original)) {
-      return { ok: false, agent, reason: `${shown} already has the note, pasted without markers`, path: shown, skipped: true };
+    const pasted = UNMARKED_NOTE.test(original) ? shown : displayPath(pastedBeside(agent, e), e);
+    if (options.auto && pasted) {
+      return { ok: false, agent, reason: `${pasted} already has the note, pasted without markers`, path: shown, skipped: true };
     }
-    // A file Plannotator owns whole starts with the front matter its tool reads first (Kiro: "no blank lines or content before it").
+    if (blankNotOurs(target.path, e, notes[agent])) {
+      return { ok: false, agent, reason: `${shown} is empty and Plannotator did not create it, so it is left as it is`, path: shown, skipped: options.auto ? true : undefined };
+    }
+    // A file Plannotator owns whole starts with the front matter its tool reads first (Kiro: "no blank lines or content before it"):
+    // when it creates the file, or the file it created was emptied.
     const own = ownFileAt(target.path, e);
-    next = read.kind === "missing" && own ? `${own.header}${block}\n` : insertBlock(original, block, nl);
+    next = own && !original.trim() ? `${own.header}${block}\n` : insertBlock(original, block, nl);
     action = read.kind === "missing" ? "created" : "added";
   }
   if (read.kind !== "file" || next !== original) {
@@ -982,9 +1025,25 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
     options.beforeWrite?.(read.target);
     if (!unchangedSince(read)) return { ok: false, agent, reason: `${shown} changed while the note was being added; try again`, path: shown };
     try {
-      writeOwnExtras(ownFileAt(read.target, e));
       writeAgentFileAtomic(read.target, withBom(next, read.kind === "file" && read.bom), read.kind === "file" ? read.mode : 0o644);
     } catch (error) {
+      return { ok: false, agent, reason: `${shown} can't be written (${describeFsError(error)})`, path: shown };
+    }
+    // The own file first, then what sits beside it (Cursor's manifest): a failure here leaves nothing behind.
+    const extras: string[] = [];
+    const besides = ownFileAt(read.target, e);
+    try {
+      writeOwnExtras(besides, extras);
+    } catch (error) {
+      try {
+        for (const path of extras) rmSync(path, { force: true });
+        if (read.kind === "missing") {
+          rmSync(read.target, { force: true });
+          pruneOwnFolders(besides);
+        } else writeAgentFileAtomic(read.target, withBom(original, read.bom), read.mode);
+      } catch {
+        // Best effort: the next add or Off finds the file as it is.
+      }
       return { ok: false, agent, reason: `${shown} can't be written (${describeFsError(error)})`, path: shown };
     }
   }
@@ -1463,9 +1522,9 @@ export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: un
       if (state === "absent" || state === "unavailable") {
         // Silent only for the person's own no. `asked` also holds the files the automatic add left
         // alone on purpose; those are told apart by the file itself, so a skipped one is never hidden.
-        const skipped = skippedOnPurpose(id, e);
+        const skipped = skippedOnPurpose(id, e, readInboxAgentNotes(dataDir).notes[id]);
         if (declined(id) && skipped === null) continue;
-        out[id] = { why: "none", fix: carried && state === "absent" && !notesOff && skipped !== "pasted" };
+        out[id] = { why: "none", fix: carried && state === "absent" && !notesOff && skipped !== "pasted" && skipped !== "blank" };
       } else {
         out[id] = { why: state === "edited" ? "edited" : "stale", fix: carried && !notesOff };
       }
@@ -1486,11 +1545,14 @@ export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: un
 /**
  * Why the automatic add would leave this agent's file alone (`addInboxNote` with `auto`), or null:
  * `read-only` (no owner write bit), `hard-linked` (other hard links), `pasted` (the note pasted by
- * hand without markers). Settings uses it to tell such a skip, which config.json records as asked
+ * hand without markers, there or beside it: pastedBeside), `blank` (an own file with front matter that
+ * is there but blank, not created by Plannotator). Settings uses it to tell such a skip, which config.json records as asked
  * too, from the person's own no.
  */
-function skippedOnPurpose(agent: InboxNoteAgentId, e: AgentEnvironment): "read-only" | "hard-linked" | "pasted" | null {
+function skippedOnPurpose(agent: InboxNoteAgentId, e: AgentEnvironment, record?: InboxAgentNoteRecord): "read-only" | "hard-linked" | "pasted" | "blank" | null {
   const path = noteTarget(agent, e).path;
+  if (path && pastedBeside(agent, e) && !existsSync(path)) return "pasted";
+  if (path && blankNotOurs(path, e, record)) return "blank";
   const read = path ? readAgentFile(path) : null;
   if (read?.kind !== "file" || findBlock(read.text).kind !== "none") return null;
   if (UNMARKED_NOTE.test(read.text)) return "pasted";
@@ -1599,7 +1661,7 @@ export async function autoAddInboxNotes(options: ConnectOptions): Promise<InboxN
       INBOX_NOTE_AGENT_IDS.some((other) => {
         if (other === id || !asked.has(other) || records[other] || !agentSpec(other).detect(e)) return false;
         const theirs = noteTarget(other, e).path;
-        return theirs !== null && resolved(theirs) === resolved(path) && skippedOnPurpose(other, e) === null;
+        return theirs !== null && resolved(theirs) === resolved(path) && skippedOnPurpose(other, e, records[other]) === null;
       })
     );
   };

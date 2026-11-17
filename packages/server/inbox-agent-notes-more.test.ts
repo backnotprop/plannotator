@@ -285,14 +285,115 @@ describe("Amp and OpenCode: created only where that hides nothing", () => {
     }
   });
 
-  test("OpenCode 2 (no CLAUDE.md fallback): AGENTS.md created; OpenCode 1: only one that exists", () => {
-    write(file(".config", "opencode", "opencode.json"), JSON.stringify({ plugins: [] }));
-    expect(noteTarget("opencode", env())).toEqual({ path: file(".config", "opencode", "AGENTS.md"), create: true, reason: null });
+  test("OpenCode 2 (no CLAUDE.md fallback): AGENTS.md created only with no sign of OpenCode 1 and no ~/.claude/CLAUDE.md", () => {
+    const agents = file(".config", "opencode", "AGENTS.md");
+    const config = (value: unknown) => write(file(".config", "opencode", "opencode.json"), JSON.stringify(value));
+    const creates = () => noteTarget("opencode", env()).create;
+    // V2 only, by its config key: created, and removed whole.
+    config({ plugins: [] });
+    expect(noteTarget("opencode", env())).toEqual({ path: agents, create: true, reason: null });
     expect(addInboxNote("opencode", dataDir, env(), undefined, { config: {} })).toMatchObject({ ok: true, action: "created" });
     expect(removeInboxNote("opencode", dataDir, env())).toMatchObject({ ok: true, action: "deleted" });
-    expect(existsSync(file(".config", "opencode", "AGENTS.md"))).toBe(false);
-    write(file(".config", "opencode", "opencode.json"), JSON.stringify({ plugin: [] }));
+    expect(existsSync(agents)).toBe(false);
+    // Both versions in one config (V1's `plugin` beside V2's `plugins`): creating it would hide CLAUDE.md from V1.
+    config({ plugins: [], plugin: [] });
+    expect(creates()).toBe(false);
+    expect(addInboxNote("opencode", dataDir, env()).ok).toBe(false);
+    expect(existsSync(agents)).toBe(false);
+    // V1 only.
+    config({ plugin: [] });
+    expect(creates()).toBe(false);
     expect(noteStatus("opencode", dataDir, env()).state).toBe("unavailable");
+    // V2 only by `opencode2` on PATH; with V1's `opencode` there too, not.
+    rmSync(file(".config", "opencode", "opencode.json"));
+    writeFileSync(join(fake.bin, "opencode2"), "#!/bin/sh\n");
+    chmodSync(join(fake.bin, "opencode2"), 0o755);
+    expect(creates()).toBe(true);
+    fake.install("opencode");
+    expect(creates()).toBe(false);
+    rmSync(join(fake.bin, "opencode"));
+    // V2 only, but the person has a ~/.claude/CLAUDE.md (or one in CLAUDE_CONFIG_DIR): not created.
+    write(file(".claude", "CLAUDE.md"), "Mine.\n");
+    expect(creates()).toBe(false);
+    rmSync(file(".claude", "CLAUDE.md"));
+    write(join(fake.root, "claude-config", "CLAUDE.md"), "Mine.\n");
+    expect(noteTarget("opencode", env({ CLAUDE_CONFIG_DIR: join(fake.root, "claude-config") })).create).toBe(false);
+    expect(creates()).toBe(true);
+    // An AGENTS.md the person already has gets the note with either version.
+    config({ plugins: [], plugin: [] });
+    write(agents, "Mine.\n");
+    expect(addInboxNote("opencode", dataDir, env(), undefined, { config: {} })).toMatchObject({ ok: true, action: "added" });
+    expect(removeInboxNote("opencode", dataDir, env())).toMatchObject({ ok: true, action: "removed" });
+    expect(read(agents)).toBe("Mine.\n");
+  });
+
+  test("Amp under XDG_CONFIG_HOME: the folder Amp's settings.json is read from", () => {
+    const xdg = join(fake.root, "xdg");
+    const e = env({ XDG_CONFIG_HOME: xdg });
+    expect(noteTarget("amp", e).path).toBe(join(xdg, "amp", "AGENTS.md"));
+    expect(addInboxNote("amp", dataDir, e, undefined, { config: {} })).toMatchObject({ ok: true, action: "created" });
+    expect(read(join(xdg, "amp", "AGENTS.md"))).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    expect(existsSync(file(".config", "amp", "AGENTS.md"))).toBe(false);
+  });
+});
+
+describe("never twice, never half written, never a rule that may not load", () => {
+  test("Qwen Code: the note pasted by hand into QWEN.md without markers is the note; no rules file is made by itself", async () => {
+    fake.install("qwen");
+    await connect();
+    write(file(".qwen", "QWEN.md"), "Mine.\n\n## Plannotator Inbox\n\nPasted.\n");
+    expect(await autoAddInboxNotes(options())).toEqual([]);
+    expect(existsSync(file(".qwen", "rules", "plannotator-inbox.md"))).toBe(false);
+    expect(read(file(".qwen", "QWEN.md"))).toBe("Mine.\n\n## Plannotator Inbox\n\nPasted.\n");
+    expect(loadConfig().inboxAgentNotes?.asked).toEqual(["qwen"]);
+  });
+
+  test("Cursor: the rule file is written before the manifest, and a failed write leaves neither", () => {
+    mkdirSync(file(".config", "Cursor"), { recursive: true });
+    const e = env();
+    // The rule file can't be written (a file where its folder goes): no manifest is made.
+    write(file(PLUGIN, "rules"), "Mine.\n");
+    expect(addInboxNote("cursor", dataDir, e, undefined, { config: {} }).ok).toBe(false);
+    expect(existsSync(file(PLUGIN, ".cursor-plugin"))).toBe(false);
+    rmSync(file(PLUGIN, "rules"));
+    // The manifest can't be written: the rule file just made goes again, with its folder; no record.
+    write(file(PLUGIN, ".cursor-plugin"), "Mine.\n");
+    expect(addInboxNote("cursor", dataDir, e, undefined, { config: {} }).ok).toBe(false);
+    expect(readdirSync(file(PLUGIN))).toEqual([".cursor-plugin"]);
+    expect(readInboxAgentNotes(dataDir).notes.cursor).toBeUndefined();
+  });
+
+  test("Cursor: the switch still turns the note off once the editor is no longer found", () => {
+    mkdirSync(file(".config", "Cursor"), { recursive: true });
+    expect(addInboxNote("cursor", dataDir, env(), undefined, { config: {} })).toMatchObject({ ok: true, action: "created" });
+    rmSync(file(".config", "Cursor"), { recursive: true });
+    const e = env();
+    expect(noteCopiedByHand("cursor", e)).toBe(false);
+    expect(noteStatus("cursor", dataDir, e, {}).state).toBe("added");
+    expect(removeInboxNote("cursor", dataDir, e)).toMatchObject({ ok: true, action: "deleted" });
+    expect(existsSync(file(PLUGIN))).toBe(false);
+    // Then, with no editor and no plugin: copied by hand again.
+    expect(noteCopiedByHand("cursor", env())).toBe(true);
+  });
+
+  test("an own file with front matter that is there but empty: the person's unless Plannotator created it", async () => {
+    const at = file(".devin", "rules", "plannotator-inbox.md");
+    write(at, "");
+    const e = env();
+    expect(addInboxNote("windsurf", dataDir, e, undefined, { config: {} }).ok).toBe(false);
+    expect(read(at)).toBe("");
+    // The automatic add leaves it too, and does not try again.
+    fake.install("devin");
+    await connect();
+    expect(await autoAddInboxNotes(options())).toEqual([]);
+    expect(read(at)).toBe("");
+    expect(loadConfig().inboxAgentNotes?.asked).toEqual(["windsurf"]);
+    // One Plannotator created and that was emptied since: the note goes back with its front matter.
+    rmSync(at);
+    expect(addInboxNote("windsurf", dataDir, env(), undefined, { config: {} })).toMatchObject({ ok: true, action: "created" });
+    writeFileSync(at, "");
+    expect(addInboxNote("windsurf", dataDir, env(), undefined, { config: {} })).toMatchObject({ ok: true });
+    expect(read(at)).toBe(`${DEVIN}${INBOX_NOTE_BLOCK}\n`);
   });
 });
 

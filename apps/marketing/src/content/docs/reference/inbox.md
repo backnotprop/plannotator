@@ -97,19 +97,25 @@ Each entry runs `<your plannotator binary> inbox mcp`. The agent uses it from it
 
 ### A note in each agent's instructions
 
-When the Inbox starts, and each time `plannotator inbox` connects an agent, Plannotator adds a short note about the Inbox to the instructions of each connected agent that is known to read that file (Claude Code, Codex, Gemini CLI, Pi and OpenCode), so agents send you decisions and finished work there while you are away. Each agent gets it once. One quiet line above the list says so, for example "Added the Inbox note to Claude Code's instructions." (hover the name for the file), together with the agents `plannotator inbox` just connected. Nothing asks you first. Turn a note off in Settings → Agents and it stays off; an agent you answered **Not now** for in an older version keeps that answer. Qwen Code is not added by itself: a one-time dialog offers its note, and Cursor's note is copied by hand. `PLANNOTATOR_INBOX_NOTES=0` turns all of this off. The files:
+When the Inbox starts, and each time `plannotator inbox` connects an agent, Plannotator adds a short note about the Inbox to the instructions of each connected agent that is known to read that file (Claude Code, Codex, Gemini CLI, Pi, OpenCode, Qwen Code, Cursor, Kiro, Windsurf / Devin, Amp, Antigravity and DeepSeek Harness), so agents send you decisions and finished work there while you are away. Each agent gets it once. One quiet line above the list says so, for example "Added the Inbox note to Claude Code's instructions." (hover the name for the file), together with the agents `plannotator inbox` just connected. Nothing asks you first. Turn a note off in Settings → Agents and it stays off; an agent you answered **Not now** for in an older version keeps that answer. Cline is not added by itself: a one-time dialog offers its note. Cursor's note is added only when Cursor's editor is on this computer; with only the Cursor CLI it is copied by hand. `PLANNOTATOR_INBOX_NOTES=0` turns all of this off. The files:
 
 | Agent | File |
 |-------|------|
 | Claude Code | `~/.claude/rules/plannotator-inbox.md` (a file of its own) |
 | Codex | `~/.codex/AGENTS.override.md` when it has text in it (Codex skips an empty one), else `~/.codex/AGENTS.md` |
 | Gemini CLI | `~/.gemini/GEMINI.md` (or your `context.fileName`) |
-| Qwen Code | `~/.qwen/QWEN.md` (or your `context.fileName`; in `$QWEN_HOME` when set) |
+| Qwen Code | `~/.qwen/rules/plannotator-inbox.md` (a file of its own; in `$QWEN_HOME` when set). A note an older version put in `~/.qwen/QWEN.md` (or your `context.fileName`) stays there |
 | Pi | the one instructions file Pi reads in `~/.pi/agent/` |
-| OpenCode | `~/.config/opencode/AGENTS.md`, only when you already have it: creating it would stop OpenCode 1 reading your `~/.claude/CLAUDE.md` |
-| Cursor | Customize → Rules in the Cursor app (you copy it by hand; Cursor has no global rules file) |
+| OpenCode | `~/.config/opencode/AGENTS.md`. Created only for OpenCode 2 when there is no sign of OpenCode 1 and no `~/.claude/CLAUDE.md`; otherwise only when you already have it: creating it would stop OpenCode 1 reading your `~/.claude/CLAUDE.md` |
+| Cursor | `~/.cursor/plugins/local/plannotator-inbox/` (a local plugin of its own) when Cursor's editor is on this computer; with only the Cursor CLI, Customize → Rules in the Cursor app (you copy it by hand) |
+| Kiro | `~/.kiro/steering/plannotator-inbox.md` (a file of its own) |
+| Windsurf / Devin | `~/.devin/rules/plannotator-inbox.md` (a file of its own) |
+| Cline | `~/.cline/rules/plannotator-inbox.md` (a file of its own; in `$CLINE_DIR` when set) |
+| Amp | `~/.config/amp/AGENTS.md` (in `$XDG_CONFIG_HOME` when set), created only when no `AGENT.md` or `CLAUDE.md` sits there |
+| Antigravity | `~/.gemini/GEMINI.md`; one note shared with Gemini CLI when Gemini CLI's file is `~/.gemini/GEMINI.md` or `~/.gemini/AGENTS.md` |
+| DeepSeek Harness | `~/.dsh/AGENTS.md` (in `$DSH_HOME` when set) |
 
-Managed notes sit between two marker lines at the end of the file, or just above Gemini CLI's or Qwen Code's "Added Memories" section, so a fact those agents remember never lands inside the note. Plannotator never overwrites a note you edited, and removing it removes only that section. `plannotator inbox --notes codex,gemini` adds managed notes from the terminal (the agent install prompt runs this only after you say yes). For Cursor, nothing is written: Settings (and the one-time dialog) show the note (without the marker lines) to copy into Customize → Rules in Cursor, and `plannotator inbox --notes cursor` prints it. Plannotator cannot see whether it was pasted, update it or remove it; a copied Cursor rule is never shown as added. `plannotator inbox --help` lists exact files and manual steps.
+Managed notes sit between two marker lines at the end of the file, or just above Gemini CLI's or Qwen Code's "Added Memories" section, so a fact those agents remember never lands inside the note. Plannotator never overwrites a note you edited, and removing it removes only that section. `plannotator inbox --notes codex,gemini` adds managed notes from the terminal (the agent install prompt runs this only after you say yes). With Cursor's editor on this computer, the note is a local plugin Plannotator owns; restart Cursor (or run Developer: Reload Window) to load it. With only the Cursor CLI, nothing is written: Settings (and the one-time dialog) show the note (without the marker lines) to copy into Customize → Rules in Cursor, and `plannotator inbox --notes cursor` prints it. Plannotator cannot see whether that copy was pasted, update it or remove it; a copied Cursor rule is never shown as added. `plannotator inbox --help` lists exact files and manual steps.
 
 ### Settings → Agents
 
