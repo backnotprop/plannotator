@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_LABELS, INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings, type InboxRulesUnsent } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { RULES_COUNT_WITHIN, takeRulesEditorWish } from '../agentRules';
 import { HostMark, Icon } from '../icons';
@@ -60,6 +60,7 @@ export function AgentRulesSection({
               </p>
               {slot !== 'shared' && rules.dropped.includes(slot) && <DroppedNote hosts={[slot]} />}
               {slot === 'shared' && <DroppedNote hosts={rules.dropped.filter((host) => rules.runtimes[host] === null)} />}
+              <UnsentNotes unsent={(rules.unsent ?? []).filter((entry) => entry.slot === slot)} />
             </div>
           ))
         )}
@@ -76,6 +77,27 @@ function DroppedNote({ hosts }: { hosts: InboxPromptHost[] }) {
       Not sent to {hosts.map((host) => AGENT_NAME[host]).join(', ')}: with the reminder they are too long. Shorten one.
     </p>
   );
+}
+
+/** Why an agent found here does not get these rules: one line per reason, every agent it holds for named. */
+const UNSENT_WHY: Record<InboxRulesUnsent['why'], (one: boolean) => string> = {
+  none: (one) => `no note in ${one ? 'its' : 'their'} instructions. Turn it on in Settings → Agents.`,
+  edited: (one) => `you edited ${one ? 'its note' : 'their notes'}, so Plannotator leaves ${one ? 'it' : 'them'} as you wrote ${one ? 'it' : 'them'}. Turn the note off and on in Settings → Agents to replace ${one ? 'it' : 'them'}.`,
+  stale: (one) => `Plannotator could not update ${one ? 'its note' : 'their notes'}. Settings → Agents says why.`,
+  // Cursor alone: its note lives in the app.
+  manual: () => 'its note is copied by hand. Copy it again from Settings → Agents.',
+};
+
+function UnsentNotes({ unsent }: { unsent: InboxRulesUnsent[] }) {
+  const reasons = (Object.keys(UNSENT_WHY) as InboxRulesUnsent['why'][]).filter((why) => unsent.some((entry) => entry.why === why));
+  return reasons.map((why) => {
+    const names = unsent.filter((entry) => entry.why === why).map((entry) => INBOX_AGENT_LABELS[entry.agent]);
+    return (
+      <p className="pm-over" data-rules-unsent={why} key={why}>
+        Not sent to {names.join(', ')}: {UNSENT_WHY[why](names.length === 1)}
+      </p>
+    );
+  });
 }
 
 function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first: Slot; onClose: () => void; onPrompts?: (next: InboxPromptsSettings) => void }) {

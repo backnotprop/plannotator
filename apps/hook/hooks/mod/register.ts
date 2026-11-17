@@ -103,6 +103,7 @@ import {
   resolveClaudeModEnabled,
   resolveInboxReminderCustom,
   resolveInboxReminderEnabled,
+  inboxReminderRulesAfterNote,
   resolveInboxReminderRules,
   resolveInboxToolEnabled,
   resolvePlanReviewEnabled,
@@ -770,6 +771,20 @@ async function startSelfHeal($: Engine): Promise<void> {
 }
 
 /**
+ * The person's rules for this session's reminder (every place it goes: the first prompt, a launched
+ * session's first wake, the compact hook), unless Claude Code's own rules file already holds them in the
+ * Inbox's note: the file is read only when there are rules.
+ */
+async function reminderRulesOf($: Engine, configText: string | null): Promise<string | null> {
+  const rules = resolveInboxReminderRules(configText)
+  if (rules === null) return null
+  const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await homeOf($)) ?? ''}/.claude`
+  const readNote = () => $.fs.read(`${configDir}/rules/plannotator-inbox.md`)
+  const note = isAbsolutePath(configDir) ? await Promise.resolve().then(readNote).catch(() => null) : null
+  return inboxReminderRulesAfterNote(rules, typeof note === 'string' ? note : null)
+}
+
+/**
  * The user's home folder, as the CLI's `homedir()` finds it: `USERPROFILE` on
  * Windows (where `HOME`, when set at all, may name another folder), else `HOME`.
  */
@@ -931,7 +946,7 @@ async function resolveAllowed($: Engine, e: { isInteractive?: unknown }): Promis
     inboxTool: features.inboxTool && resolveInboxToolEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminder: features.wake && features.inboxTool && resolveInboxReminderEnabled(await $.env.get('PLANNOTATOR_INBOX_TOOL'), configText),
     inboxReminderCustom: resolveInboxReminderCustom(configText),
-    inboxReminderRules: resolveInboxReminderRules(configText),
+    inboxReminderRules: await reminderRulesOf($, configText),
     panel: host.panel,
     hostPlanMode: host.hostPlanMode,
     planSwitch,

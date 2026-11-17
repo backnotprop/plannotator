@@ -13,7 +13,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxPromptHost, InboxPromptsSettings } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_LABELS, type InboxPromptHost, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import { tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
@@ -376,4 +376,31 @@ test.skipIf(!hasDom)("Rules for one agent: For picks the agent's own box; Save w
   expect(sent.at(-1)).toEqual({ inbox: { runtimes: { pi: { rules: 'Never send from reviewer sessions.' } } } });
   expect(q(el, '[data-rules-text="pi"]')?.textContent).toBe('Never send from reviewer sessions.');
   expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Keep messages short.');
+});
+
+test.skipIf(!hasDom)('an agent the rules do not reach is named under the box they come from, one line per reason', () => {
+  const el = mount(
+    withRules({
+      shared: 'Keep messages short.',
+      runtimes: { 'claude-code': 'Never send from reviewer sessions.', pi: null, opencode: null },
+      unsent: [
+        { agent: 'gemini', slot: 'shared', why: 'none' },
+        { agent: 'qwen', slot: 'shared', why: 'none' },
+        { agent: 'codex', slot: 'shared', why: 'edited' },
+        { agent: 'cursor', slot: 'shared', why: 'manual' },
+        { agent: 'claude-code', slot: 'claude-code', why: 'stale' },
+      ],
+    }),
+    false,
+  );
+  const lines = (slot: string) => [...el.querySelectorAll(`[data-rules-slot="${slot}"] [data-rules-unsent]`)].map((line) => line.textContent);
+  expect(lines('shared')).toEqual([
+    `Not sent to ${INBOX_AGENT_LABELS.gemini}, ${INBOX_AGENT_LABELS.qwen}: no note in their instructions. Turn it on in Settings → Agents.`,
+    `Not sent to ${INBOX_AGENT_LABELS.codex}: you edited its note, so Plannotator leaves it as you wrote it. Turn the note off and on in Settings → Agents to replace it.`,
+    `Not sent to ${INBOX_AGENT_LABELS.cursor}: its note is copied by hand. Copy it again from Settings → Agents.`,
+  ]);
+  expect(lines('claude-code')).toEqual([`Not sent to ${INBOX_AGENT_LABELS['claude-code']}: Plannotator could not update its note. Settings → Agents says why.`]);
+  // Everyone reached: no line.
+  const all = mount(withRules({ shared: 'Keep messages short.', unsent: [] }), false);
+  expect(all.querySelector('[data-rules-unsent]')).toBeNull();
 });

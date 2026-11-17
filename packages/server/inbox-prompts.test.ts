@@ -14,6 +14,7 @@ import { INBOX_REMINDER_MAX_CHARS, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_W
 import { DEFAULT_PLAN_APPROVED_PROMPT, DEFAULT_REVIEW_DENIED_SUFFIX } from "@plannotator/shared/prompts";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createAgentEnvironmentFor } from "./inbox-agents";
+import { addInboxNote, INBOX_NOTE_BLOCK, inboxNoteBlockWith } from "./inbox-agent-notes";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -260,5 +261,31 @@ describe("Settings → Prompts", () => {
     expect(onDisk()).toEqual({ displayName: "Ann" });
     const fits = await post(server, { serverSession: server.serverSession, prompts: { inbox: { rules: "r".repeat(room) } } });
     expect(fits.status).toBe(200);
+  });
+
+  test("saving rules rewrites the note Plannotator wrote in each agent's instructions; Back to default puts today's block back", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-prompts-note-")));
+    roots.push(root);
+    const home = join(root, "home");
+    mkdirSync(join(home, ".claude"), { recursive: true });
+    const dataDir = join(root, "data");
+    mkdirSync(dataDir, { recursive: true });
+    previousDataDir = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    const agentEnvironment = createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "", CLAUDE_CONFIG_DIR: join(home, ".claude") } });
+    expect(addInboxNote("claude-code", dataDir, agentEnvironment, undefined, { config: {} }).ok).toBe(true);
+    const note = join(home, ".claude", "rules", "plannotator-inbox.md");
+    const server = await startInboxServer({ dataDir, agentEnvironment });
+    servers.push(server);
+    const save = async (inbox: unknown) => expect((await post(server, { serverSession: server.serverSession, prompts: { inbox } })).status).toBe(200);
+    await save({ rules: "Ask me before you delete any file." });
+    expect(readFileSync(note, "utf8")).toBe(`${inboxNoteBlockWith("Ask me before you delete any file.")}\n`);
+    await save({ runtimes: { "claude-code": { rules: "Never send from reviewer sessions." } } });
+    expect(readFileSync(note, "utf8")).toBe(`${inboxNoteBlockWith("Never send from reviewer sessions.")}\n`);
+    await save({ rules: null, runtimes: { "claude-code": { rules: null } } });
+    expect(readFileSync(note, "utf8")).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    // The reminder's own text is no rules change: the note is not touched.
+    await save({ reminder: "Shared line." });
+    expect(readFileSync(note, "utf8")).toBe(`${INBOX_NOTE_BLOCK}\n`);
   });
 });

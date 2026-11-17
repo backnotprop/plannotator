@@ -2,7 +2,7 @@ import type { Plugin } from "@opencode/plugin";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { loadConfig, resolveAgentTool, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled, type PlannotatorConfig } from "@plannotator/shared/config";
+import { inboxReminderRulesFor, loadConfig, resolveAgentTool, resolveInboxReminder, resolveInboxReminderText, resolveSharingEnabled, type PlannotatorConfig } from "@plannotator/shared/config";
 import { INBOX_COMMAND_BRIEFING, INBOX_REMINDER_TEXT, INBOX_REMINDER_TEXT_NO_WAKE, INBOX_TOOL_NAME } from "@plannotator/shared/inbox/connection";
 import { readImprovementHook } from "@plannotator/shared/improvement-hooks";
 import { composeImproveContext } from "@plannotator/shared/pfm-reminder";
@@ -700,7 +700,8 @@ export function pushComposedSystemReminder(
  * as `registerInboxOpenCode2` registers the tool `wakes: false` there.
  */
 export function openCode2InboxReminder(v2: { session?: { prompt?: unknown } }, config: PlannotatorConfig = {}): string {
-  return resolveInboxReminderText(config, "opencode", { toolName: INBOX_TOOL_NAME, wakes: typeof v2.session?.prompt === "function" });
+  // The person's rules ride along unless OpenCode's AGENTS.md already holds them (the Inbox's note).
+  return resolveInboxReminderText(config, "opencode", { toolName: INBOX_TOOL_NAME, wakes: typeof v2.session?.prompt === "function", rules: inboxReminderRulesFor(config, "opencode") });
 }
 
 /**

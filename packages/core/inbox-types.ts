@@ -2868,8 +2868,10 @@ export interface InboxAgentsModel {
   notes_offered: boolean;
   /** The agents the note question was asked about: each is asked once (absent from an Inbox of 0.28.18 or older, which asked once in all). */
   notes_asked?: InboxNoteAgentId[];
-  /** The exact block a note writes, markers included. */
+  /** The exact block a note writes, markers included (with the person's rules for all agents: Cursor's copy too). */
   note_text: string;
+  /** An agent whose block differs (its own rules): that block. Absent from an older Inbox. */
+  note_texts?: Partial<Record<InboxNoteAgentId, string>>;
   /** Notes Plannotator wrote by itself that the window has not said yet (one quiet line; POST /api/inbox/agents/seen clears it). Absent from older Inboxes. */
   notes_auto?: InboxNoteAutoAdd[];
   /** A switch's refusal, after POST /api/inbox/agents. */
@@ -3760,7 +3762,20 @@ export interface InboxPromptsSettings {
     runtimes: Record<InboxPromptHost, string | null>;
     room: { shared: number; runtimes: Record<InboxPromptHost, number> };
     dropped: InboxPromptHost[];
+    /**
+     * The agents found here that do not get their rules (Settings says "Not sent to …"), under the box
+     * they come from (`slot`): `none`, no note in its instructions (for Claude Code, Pi and OpenCode:
+     * and its reminder off); `edited`, a note the person edited (left as it is); `stale`, a note
+     * Plannotator could not bring up to date; `manual`, Cursor's copy by hand. Absent from an older Inbox.
+     */
+    unsent?: InboxRulesUnsent[];
   };
+}
+
+export interface InboxRulesUnsent {
+  agent: InboxNoteAgentId;
+  slot: "shared" | InboxPromptHost;
+  why: "none" | "edited" | "stale" | "manual";
 }
 
 /**
