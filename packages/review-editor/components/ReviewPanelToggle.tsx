@@ -42,7 +42,7 @@ export const ReviewPanelToggle: React.FC<{
         </span>
       )}
       {dot && (
-        <span className={`absolute w-1.5 h-1.5 rounded-full bg-primary ${commentCount > 0 ? '-bottom-0.5 -right-0.5 ring-2 ring-background' : 'top-0.5 right-0.5'}`} aria-hidden="true" data-review-panel-activity="" />
+        <span className={`absolute w-1.5 h-1.5 rounded-full bg-primary ${commentCount > 0 ? 'bottom-0.5 right-0.5 ring-2 ring-background' : 'top-0.5 right-0.5'}`} aria-hidden="true" data-review-panel-activity="" />
       )}
     </button>
   );
