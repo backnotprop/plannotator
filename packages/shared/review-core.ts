@@ -14,6 +14,7 @@ import {
   parseDiffGitHeader,
   parseDiffMetadataPathLines,
   OVERSIZED_REVIEW_STUB_MARKER,
+  UNTRACKED_CAP_STUB_MARKER,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
@@ -51,6 +52,19 @@ export type { DiffType };
 export const MAX_REVIEW_FILE_CONTENT_BYTES = 5 * 1024 * 1024;
 
 const MAX_UNTRACKED_DIFF_CONCURRENCY = 4;
+
+/**
+ * Bounds on the untracked files whose contents one review diff reads. Each
+ * file was already capped at MAX_REVIEW_FILE_CONTENT_BYTES, but not their
+ * number or total, so an unignored build or dependency folder (tens of
+ * thousands of files) built a patch that ran the server out of memory
+ * (#940). Past either bound, an untracked file is still listed, as a stub
+ * carrying UNTRACKED_CAP_STUB_MARKER, without its contents. Files are taken in
+ * `git ls-files` order (by path); a file over the byte budget is left out and
+ * smaller later ones may still fit. The labels in diff-paths.ts must match.
+ */
+export const MAX_UNTRACKED_REVIEW_FILES = 1000;
+export const MAX_UNTRACKED_REVIEW_TOTAL_BYTES = 50 * 1024 * 1024;
 // Fingerprints run every few seconds, so use a deliberately lower read ceiling
 // than one-shot diff generation. Larger files use size + mtime metadata.
 const MAX_UNTRACKED_FINGERPRINT_CONTENT_BYTES = 1024 * 1024;
@@ -1484,20 +1498,66 @@ async function getUntrackedFileDiffs(
     return results;
   };
 
-  const diffs = await mapWithConcurrency(
-    files,
+  // Stat the files the count bound lets through (the rest are never read),
+  // then spend the byte budget in path order, so the same tree always leaves
+  // out the same files whatever order the stats finish in.
+  // A full-payload patch (includeBinaryPayloads) is applied elsewhere, so it
+  // must carry every byte: no bounds there, and no stats either.
+  const capped = !includeBinaryPayloads;
+  const statCount = capped ? Math.min(files.length, MAX_UNTRACKED_REVIEW_FILES) : 0;
+  const fileInfos = await mapWithConcurrency(
+    files.slice(0, statCount),
     MAX_UNTRACKED_DIFF_CONCURRENCY,
-    async (file) => {
-      // Avoid asking Git to inspect arbitrarily large untracked payloads. They
-      // remain visible in the review as binary additions, but their bytes never
-      // enter Git's diff machinery or the server's buffered stdout.
-      let fileInfo: ReviewFileInfo | null = null;
+    async (file): Promise<ReviewFileInfo | null> => {
       try {
-        fileInfo = await runtime.getFileInfo(rootCwd, file);
+        return await runtime.getFileInfo(rootCwd, file);
       } catch {
         // Preserve the existing best-effort/strict behavior below: Git reports
         // the authoritative read error for files that disappear mid-snapshot.
+        return null;
       }
+    },
+  );
+  const leftOut = new Set<number>();
+  if (capped) {
+    let budget = MAX_UNTRACKED_REVIEW_TOTAL_BYTES;
+    for (let index = 0; index < files.length; index++) {
+      if (index >= statCount) {
+        leftOut.add(index);
+        continue;
+      }
+      const info = fileInfos[index];
+      // An oversized file is stubbed by the per-file cap below and reads nothing.
+      if (!info || (info.isFile && info.size > MAX_REVIEW_FILE_CONTENT_BYTES)) continue;
+      if (info.size > budget) {
+        leftOut.add(index);
+        continue;
+      }
+      budget -= info.size;
+    }
+  }
+
+  const diffs = await mapWithConcurrency(
+    files.map((file, index) => ({ file, index })),
+    MAX_UNTRACKED_DIFF_CONCURRENCY,
+    async ({ file, index }) => {
+      const fileInfo = fileInfos[index] ?? null;
+      if (leftOut.has(index)) {
+        // Listed so the review still names it, never read.
+        const mode = fileInfo?.isExecutable ? "100755" : "100644";
+        const oldToken = formatPatchPathToken("a", file);
+        const newToken = formatPatchPathToken("b", file);
+        return [
+          `diff --git ${oldToken} ${newToken}`,
+          UNTRACKED_CAP_STUB_MARKER,
+          `new file mode ${mode}`,
+          `Binary files /dev/null and ${newToken} differ`,
+          "",
+        ].join("\n");
+      }
+      // Avoid asking Git to inspect arbitrarily large untracked payloads. They
+      // remain visible in the review as binary additions, but their bytes never
+      // enter Git's diff machinery or the server's buffered stdout.
       if (
         !includeBinaryPayloads
         && fileInfo?.isFile

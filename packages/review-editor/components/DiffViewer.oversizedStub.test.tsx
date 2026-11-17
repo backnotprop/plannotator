@@ -17,7 +17,7 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React from 'react';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { OVERSIZED_REVIEW_STUB_MARKER } from '@plannotator/shared/diff-paths';
+import { OVERSIZED_REVIEW_STUB_MARKER, UNTRACKED_CAP_STUB_MARKER } from '@plannotator/shared/diff-paths';
 
 const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
 
@@ -47,6 +47,16 @@ const OVERSIZED_STUB = [
   OVERSIZED_REVIEW_STUB_MARKER,
   'index 1111111111aa..2222222222bb 100644',
   'Binary files a/assets/blob.pack and b/assets/blob.pack differ',
+  '',
+].join('\n');
+
+// An untracked file the review listed but did not read (past the untracked
+// file or byte caps): it must say it was left out, not that it is too big.
+const UNTRACKED_LEFT_OUT_STUB = [
+  'diff --git a/dist/bundle.js b/dist/bundle.js',
+  UNTRACKED_CAP_STUB_MARKER,
+  'new file mode 100644',
+  'Binary files /dev/null and b/dist/bundle.js differ',
   '',
 ].join('\n');
 
@@ -134,6 +144,15 @@ describe.if(hasDom)('oversized-file stub presentation (DOM)', () => {
     expect(notice!.textContent).toContain(NOTICE_COPY);
     // The raw marker is plumbing, never user-facing copy.
     expect(el.textContent).not.toContain(OVERSIZED_REVIEW_STUB_MARKER);
+  });
+
+  test('an untracked file left out by the untracked caps says so, not that it is too large', async () => {
+    const el = await render(UNTRACKED_LEFT_OUT_STUB, 'dist/bundle.js');
+    const notice = el.querySelector(NOTICE_SELECTOR);
+    expect(notice?.getAttribute('data-oversized-file-notice')).toBe('untracked-left-out');
+    expect(notice!.textContent).not.toContain(NOTICE_COPY);
+    expect(el.querySelector('[data-binary-file-notice]')).toBeNull();
+    expect(el.textContent).not.toContain(UNTRACKED_CAP_STUB_MARKER);
   });
 
   test('a genuine binary file is left alone', async () => {

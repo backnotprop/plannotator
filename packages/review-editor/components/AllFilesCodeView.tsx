@@ -54,7 +54,7 @@ import {
   type ChangePlacement,
   type DiffChange,
 } from '../utils/changeNavigation';
-import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, reviewStubReason } from '@plannotator/shared/diff-paths';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
 import type { DiffSelectionActions } from './SelectionChooser';
@@ -3377,16 +3377,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const allFileComments = fileCommentsByPath.get(filePath) ?? [];
     // Comments made in the preview are highlighted in it.
     const fileComments = previewed ? allFileComments.filter((comment) => !comment.markdownPreview) : allFileComments;
-    const isOversizedStub = isOversizedReviewStubPatch(file.patch);
+    const stubReason = reviewStubReason(file.patch);
+    const isOversizedStub = stubReason !== null;
     const isBinaryNotice = !isOversizedStub && isContentlessBinaryPatch(file.patch);
     const remeasure = () => refreshItem(item.id);
     const imagePreview = !collapsed && renderImagePreview && isImagePreviewCandidate(file.patch, file.path, file.oldPath)
       ? renderImagePreview({
           file,
-          fallback: isOversizedStub
-            ? <OversizedFileNotice onHeightChange={remeasure} />
+          fallback: stubReason
+            ? <OversizedFileNotice reason={stubReason} onHeightChange={remeasure} />
             : isBinaryNotice ? <BinaryFileNotice onHeightChange={remeasure} /> : null,
-          tooLargeFallback: isOversizedStub ? <OversizedFileNotice onHeightChange={remeasure} /> : undefined,
+          tooLargeFallback: stubReason ? <OversizedFileNotice reason={stubReason} onHeightChange={remeasure} /> : undefined,
           onHeightChange: remeasure,
         })
       : null;
@@ -3495,8 +3496,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         {/* Files over the review size cap arrive as a contents-free stub, so
             Pierre renders nothing below the header. Explain why rather than
             leaving a bare header that reads as a broken diff. */}
-        {!collapsed && !imagePreview && isOversizedStub && (
-          <OversizedFileNotice onHeightChange={() => refreshItem(item.id)} />
+        {!collapsed && !imagePreview && stubReason && (
+          <OversizedFileNotice reason={stubReason} onHeightChange={() => refreshItem(item.id)} />
         )}
         {/* The general fallback under that specific case: any OTHER hunkless
             binary chunk draws nothing either. Gated on the marker so a

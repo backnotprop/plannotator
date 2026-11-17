@@ -26,7 +26,7 @@ import { BinaryFileNotice } from './BinaryFileNotice';
 import { FileCommentBanner } from './FileCommentBanner';
 import { DiffBottomBar } from './DiffBottomBar';
 import { OversizedFileNotice } from './OversizedFileNotice';
-import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
+import { isContentlessBinaryPatch, isImagePreviewCandidate, reviewStubReason } from '@plannotator/shared/diff-paths';
 import { ImageDiffPreview } from './ImageDiffPreview';
 import { PackageChangesCard } from './PackageChangesCard';
 import { isPackageChangePath } from '@plannotator/core/package-changes';
@@ -1063,9 +1063,11 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
     [fileComments],
   );
 
-  // Files over the review size cap arrive as a contents-free stub, which
-  // renders as an empty body. Say so instead of showing a bare header.
-  const isOversizedStub = useMemo(() => isOversizedReviewStubPatch(patch), [patch]);
+  // Files over the review size cap (or untracked files past the untracked
+  // caps) arrive as a contents-free stub, which renders as an empty body. Say
+  // so instead of showing a bare header.
+  const stubReason = useMemo(() => reviewStubReason(patch), [patch]);
+  const isOversizedStub = stubReason !== null;
 
   // The general fallback under that specific case: any OTHER hunkless binary
   // chunk (a genuine binary file, or a stub shape the marker does not cover)
@@ -1205,12 +1207,12 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
                   snapshotId={imageSnapshotId ?? reviewSnapshotId}
                   variant="single"
                   compact={compactTouchLayout}
-                  fallback={isOversizedStub ? <OversizedFileNotice /> : isContentlessBinary ? <BinaryFileNotice /> : null}
-                  tooLargeFallback={isOversizedStub ? <OversizedFileNotice /> : undefined}
+                  fallback={stubReason ? <OversizedFileNotice reason={stubReason} /> : isContentlessBinary ? <BinaryFileNotice /> : null}
+                  tooLargeFallback={stubReason ? <OversizedFileNotice reason={stubReason} /> : undefined}
                 />
               ) : (
                 <>
-                  {isOversizedStub && <OversizedFileNotice />}
+                  {stubReason && <OversizedFileNotice reason={stubReason} />}
                   {isContentlessBinary && <BinaryFileNotice />}
                 </>
               )}
