@@ -360,4 +360,17 @@ describe("send_message's branch", () => {
     expect(w.service.mcp.get(w.project.id, "retry-jitter")).toMatchObject({ thread_id: thread, head: next, reports: 1 });
     expect(w.store.threadMessageIds(landedThread)).toHaveLength(1);
   });
+
+  test("a first report keeps the agent's own thread name and subject; the branch is only the fallback title", async () => {
+    const w = world();
+    const named = await w.send({ body: "Ready.", thread: "retry jitter", branch: { name: "retry-jitter" } });
+    expect(named.error).toBe(false);
+    expect(named.structured.thread_name).toBe("retry jitter");
+    git(w.repo, ["checkout", "--quiet", "-b", "second-branch"]);
+    commit(w.repo, "second.txt");
+    // Detached (its reply_to is another report's thread): the subject it gave titles the new thread.
+    const detached = await w.send({ body: "Ready.", subject: "Second piece of work", reply_to: String(named.structured.message_id), branch: { name: "second-branch" } });
+    expect(detached.structured.thread_id).not.toBe(named.structured.thread_id);
+    expect(w.store.threadSubject(String(detached.structured.thread_id))).toBe("Second piece of work");
+  });
 });
