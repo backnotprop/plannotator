@@ -215,6 +215,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // `messages`). Those four run only with the window's mark (`window`), which stops a bare call, the relay and a phone
   // (no PR board), not a program on that machine that imitates its window (inbox-launch.md "Accepted, not defended").
   { method: "GET", route: /^pulls$/, window: () => "/api/inbox/pulls", machineOnly: true },
+  // Branch reviews (mark `branches`): a linked machine's Reviews lists the branches agents reported here.
+  { method: "GET", route: /^reviews\/branches$/, window: () => "/api/inbox/reviews/branches", machineOnly: true },
   { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   // "Changed since you looked" (approval "inbox-pr-dashboard"): the look at a PR lives on the machine that lists it.

@@ -198,17 +198,23 @@ export function TagColourList({ tag, colours, onBack }: { tag: ListTag; colours:
           ref={field}
           value={typed}
           placeholder="#rrggbb"
-          maxLength={7}
           spellCheck={false}
           autoComplete="off"
           aria-label="Hex color"
           data-tag-colour-hex=""
           onChange={(event) => {
-            setTyped(event.target.value);
+            // Trimmed first, then held to a code's length (with or without "#"): a pasted "  #00FF88  " is kept whole. A
+            // key typed into a whole code is refused, as a length limit would (it never pushes the last letter out).
+            const value = event.target.value.trim();
+            const limit = value.startsWith('#') ? 7 : 6;
+            const full = typed.length >= (typed.startsWith('#') ? 7 : 6);
+            if (value.length > limit && full) return;
+            const code = value.slice(0, limit);
+            setTyped(code);
             typedOpen.current = true;
             // A part-typed code does nothing; a whole one shows at once.
-            const hex = inboxTagHex(event.target.value);
-            if (hex && /^#?[0-9a-f]{6}$/i.test(event.target.value.trim())) {
+            const hex = inboxTagHex(code);
+            if (hex && /^#?[0-9a-f]{6}$/i.test(code)) {
               colours.preview(tag, hex);
               setHsv((was) => hsvOf(hex, was.h));
             }

@@ -295,6 +295,7 @@ test("a part's comment bubble takes its own press: one click opens it beside Ref
   const id = store('bubble-press');
   const { context, page, problems } = await openBoard(browser, id, { viewport: { width: 1800, height: 900 } });
   await crosshair(page).click();
+  // Save, at the board's right edge: References beside the board must leave it (and its bubble) in reach.
   const s = await at(page, 'save', 0.5, 0.5);
   await drag(page, s, { x: s.x + 2, y: s.y + 1 }, 2);
   await composer(page).locator('textarea').fill('Make it green.');
@@ -306,7 +307,20 @@ test("a part's comment bubble takes its own press: one click opens it beside Ref
   // References open beside the board: a click on the board only closes it, but one click on the bubble opens its box.
   await page.locator('.shp-dock').getByRole('button', { name: /References/ }).click();
   await expect(page.locator('.shp-sidep.open:not(.sheet)')).toBeVisible();
-  await bubble.click();
+  // The panel slides in (0.32 s) and the drawing refits into the room left of it: the bubble ends clear of the panel.
+  await page.waitForTimeout(400);
+  const clearOfPanel = (what: ReturnType<Page['locator']>) => async () => {
+    const panel = (await page.locator('.shp-sidep.open').boundingBox())!;
+    const shown = (await what.boundingBox())!;
+    return shown.x + shown.width <= panel.x;
+  };
+  await expect.poll(clearOfPanel(bubble), { message: 'the bubble is clear of the References panel' }).toBe(true);
+  // The title and its line wrap in the same room: none of them under the panel either.
+  for (const head of ['.shp-head h1', '.shp-claim', '.shp-head-side']) {
+    await expect.poll(clearOfPanel(page.locator(head).first()), { message: `${head} is clear of the References panel` }).toBe(true);
+  }
+  // Bounded: a click on a covered bubble would wait for it until the test's own timeout.
+  await bubble.click({ timeout: 10_000 });
   await expect(composer(page)).toContainText('Make it green.');
   await page.keyboard.press('Escape');
   await expect(composer(page)).toHaveCount(0);
