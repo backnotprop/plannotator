@@ -159,6 +159,21 @@ import { readHostMessages, takeHostMessagesPath } from "./host-messages";
 import { exitOnPortInUse } from "./port-in-use";
 import { exitWhenParentGone } from "./orphan-plan-review";
 import { parseModPlanInput, readModPlanRevision, writeModPlanRevisionAck } from "./claude-mod-plan";
+import { INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv } from "./inbox-mcp-shim";
+import { isInboxSessionId } from "@plannotator/core/inbox-types";
+import { plansOn } from "@plannotator/shared/plans/switch";
+
+/**
+ * The agent session a plan review is for, recorded with its history version (the Spaces home's "<agent> is working"),
+ * only while Plans is on (off, plan review writes nothing new): the session this process runs in (its session tag or
+ * host marker), else Claude Code's own `session_id` from the hook's event; null when neither is known (never guessed).
+ */
+function planHistoryAgent(claudeSession?: unknown): { host: string; session: string; name: string | null } | null {
+  if (!plansOn()) return null;
+  const own = inboxHostSessionFromEnv(process.env);
+  if (own) return own;
+  return isInboxSessionId(claudeSession) ? { host: "claude-code", session: claudeSession, name: INBOX_SESSION_HOST_NAMES["claude-code"] ?? null } : null;
+}
 import { LIVE_APP_REMOTE_MESSAGE, LIVE_APP_REQUIRES_URL_MESSAGE } from "@plannotator/shared/live-probe";
 // Bridge sources for live app sessions: the CLI supplies them so
 // @plannotator/server never imports @plannotator/ui (mirrors the existing
@@ -2583,6 +2598,7 @@ if (args[0] === "sessions") {
   const bridgePasteApiUrl = getBridgePasteApiUrl(input);
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(),
     origin: "opencode",
     // The plugin's submit_plan executor turns an approval's feedback into the
     // approved-with-notes prompt (every plugin version that calls this).
@@ -2662,6 +2678,7 @@ if (args[0] === "sessions") {
   const planProject = (await detectProjectName()) ?? "_unknown";
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(),
     origin: "dsh",
     // The plugin steers the approved-with-notes message dsh-plan composes
     // into the agent after approving.
@@ -3076,6 +3093,7 @@ if (args[0] === "sessions") {
 
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(),
     origin: "copilot-cli",
     sharingEnabled,
     shareBaseUrl,
@@ -3265,6 +3283,7 @@ if (args[0] === "sessions") {
   setServerReadyTarget(input.planFilePath);
   const server = await startPlannotatorServer({
     plan: input.plan,
+    historyAgent: planHistoryAgent(),
     origin: "claude-code",
     planFilePath: input.planFilePath,
     permissionMode: input.permissionMode,
@@ -3404,6 +3423,7 @@ if (args[0] === "sessions") {
     const planProject = (await detectProjectName()) ?? "_unknown";
     const server = await startPlannotatorServer({
       plan: latestPlan.text,
+      historyAgent: planHistoryAgent(),
       origin: "codex",
       sharingEnabled,
       shareBaseUrl,
@@ -3474,6 +3494,7 @@ if (args[0] === "sessions") {
     const vibePlanProject = (await detectProjectName()) ?? "_unknown";
     const vibeServer = await startPlannotatorServer({
       plan: vibePlanContent,
+      historyAgent: planHistoryAgent(),
       origin: "mistral-vibe",
       sharingEnabled,
       shareBaseUrl,
@@ -3578,6 +3599,7 @@ if (args[0] === "sessions") {
   // Start the plan review server
   const server = await startPlannotatorServer({
     plan: planContent,
+    historyAgent: planHistoryAgent(!isQwen && !isGemini && detectedOrigin === "claude-code" ? event.session_id : undefined),
     origin: isQwen ? "qwen-code" : isGemini ? "gemini-cli" : detectedOrigin,
     // No approvalNotesSupported: Claude Code's PermissionRequest allow carries
     // no message, Gemini CLI shows a systemMessage to the person, not the

@@ -436,7 +436,7 @@ describe.skipIf(!hasDom)('CardGrid and CardGroups', () => {
   test('a group on its own lays out its cards in its own grid, 24 px between rows', () => {
     const { Card, CardGroup } = cardModule!;
     const frame = mount(
-      <CardGroup label="tidepool-api">
+      <CardGroup label="payments">
         <Card kind="document" size="regular" title="One" href="/1" />
       </CardGroup>,
     );
@@ -491,13 +491,13 @@ describe.skipIf(!hasDom)('action and pinned', () => {
     const frame = mount(
       <>
         <Card kind="document" size="regular" title="Plan" href="/p" fact="Your move" unread pinned />
-        <CardRow kind="document" title="Plan" href="/p" fact="Your move" pinned secondary="tidepool-api" />
+        <CardRow kind="document" title="Plan" href="/p" fact="Your move" pinned secondary="payments" />
         <CardRow kind="document" title="Other" href="/o" fact="Your move" />
       </>,
     );
     const [card, row, other] = [...frame.querySelectorAll('a')];
     expect(card!.getAttribute('aria-label')).toBe('Plan, Your move, new, pinned');
-    expect(row!.getAttribute('aria-label')).toBe('Plan, tidepool-api, Your move, pinned');
+    expect(row!.getAttribute('aria-label')).toBe('Plan, payments, Your move, pinned');
     expect(other!.getAttribute('aria-label')).toBe('Other, Your move');
     expect(frame.querySelectorAll('[data-frame-card-pinned]').length).toBe(2);
   });
@@ -507,13 +507,13 @@ describe.skipIf(!hasDom)('CardRow', () => {
   test('one link named by the title, the secondary text and the grey line; the date is a tooltip on the link', () => {
     const { CardRow, cardDateWords } = cardModule!;
     const at = '2026-11-15T10:00:00Z';
-    const frame = mount(<CardRow kind="page" title="Rebuild checkout as one page" href="/c" secondary="kestrel-web" time={at} unread />);
+    const frame = mount(<CardRow kind="page" title="Rebuild checkout as one page" href="/c" secondary="web-app" time={at} unread />);
     const row = frame.querySelector<HTMLElement>('[data-frame-card-row]')!;
     const links = row.querySelectorAll('a');
     expect(links.length).toBe(1);
-    expect(links[0]!.getAttribute('aria-label')).toBe(`Rebuild checkout as one page, kestrel-web, ${cardDateWords(new Date(at))}, new`);
+    expect(links[0]!.getAttribute('aria-label')).toBe(`Rebuild checkout as one page, web-app, ${cardDateWords(new Date(at))}, new`);
     expect(links[0]!.getAttribute('title')).toBeTruthy();
-    expect(row.querySelector('[data-frame-card-secondary]')!.textContent).toBe('kestrel-web');
+    expect(row.querySelector('[data-frame-card-secondary]')!.textContent).toBe('web-app');
     expect(row.getAttribute('data-frame-card-columns')).toBe('secondary');
     expect(row.querySelector('time')!.getAttribute('dateTime')).toBe(new Date(at).toISOString());
   });
@@ -539,6 +539,121 @@ describe.skipIf(!hasDom)('CardRow', () => {
       expect(thumb!.hasAttribute('inert')).toBe(true);
       expect(thumb!.querySelector('[data-frame-card-stage]')).toBeNull();
       expect(thumb!.querySelector('[data-frame-card-back]')).toBeNull();
+    }
+  });
+
+  test('a page row shows a small window, a bar over lines, while a page card keeps its full window with three dots', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="page" title="Row" href="/r" />
+        <Card kind="page" size="regular" title="Card" href="/c" face={<b>face</b>} />
+      </>,
+    );
+    const row = frame.querySelector('[data-frame-card-row] [data-frame-card-window]')!;
+    expect(row.querySelector('[data-frame-card-window-bar]')).not.toBeNull();
+    expect(row.querySelectorAll('.frame-card-window-body > i').length).toBe(3);
+    expect(row.textContent).toBe('');
+    nearScreen();
+    const card = frame.querySelector('[data-frame-card] [data-frame-card-window]')!;
+    expect(card.querySelectorAll('[data-frame-card-window-bar] > i').length).toBe(3);
+    expect(card.closest('[data-frame-card-thumb]')).toBeNull();
+  });
+
+  test('an empty row shows the empty face in small on the neutral ground, like a card with no face, whatever its kind', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="document" title="New plan" href="/n" empty thumb={<b data-testid="thumb">t</b>} />
+        <CardRow kind="document" title="Plan" href="/p" />
+        <Card kind="document" size="regular" title="New plan" href="/n" />
+      </>,
+    );
+    nearScreen();
+    const [empty, glyph] = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-thumb]')];
+    expect(empty!.getAttribute('data-frame-card-thumb')).toBe('empty');
+    expect(empty!.getAttribute('data-frame-card-face')).toBe('empty');
+    expect(empty!.querySelector('[data-frame-card-sheet]')!.hasAttribute('data-frame-card-blank')).toBe(true);
+    expect(empty!.querySelector('[data-testid="thumb"]')).toBeNull();
+    expect(glyph!.getAttribute('data-frame-card-face')).toBe('ready');
+    expect(glyph!.querySelector('[data-frame-card-blank]')).toBeNull();
+    const well = frame.querySelector('[data-frame-card] [data-frame-card-well]')!;
+    expect(well.getAttribute('data-frame-card-face')).toBe('empty');
+  });
+
+  test('CardRows holds each row as a list item under its name, and marks the list so a pin anywhere keeps every date in line', () => {
+    const { CardRow, CardRows } = cardModule!;
+    const frame = mount(
+      <CardRows label="All plans">
+        <CardRow kind="document" title="One" href="/1" action={<button type="button">Pin</button>} />
+        {null}
+        <CardRow kind="page" title="Two" href="/2" pinned action={<button type="button">Unpin</button>} />
+      </CardRows>,
+    );
+    const list = frame.querySelector('ul')!;
+    expect(list.getAttribute('aria-label')).toBe('All plans');
+    expect(list.hasAttribute('data-frame-card-rows')).toBe(true);
+    expect([...list.children].map((item) => item.tagName)).toEqual(['LI', 'LI']);
+    const rows = [...list.querySelectorAll<HTMLElement>('[data-frame-card-row]')];
+    expect(rows.map((row) => row.getAttribute('data-frame-card-columns'))).toEqual(['action', 'action']);
+    for (const row of rows) {
+      const end = [...row.children].at(-1)!;
+      expect(end.hasAttribute('data-frame-card-end')).toBe(true);
+      const trail = end.querySelector('[data-frame-card-trail]')!;
+      expect(trail.lastElementChild!.hasAttribute('data-frame-card-action')).toBe(true);
+      expect(row.querySelector('a')!.contains(trail)).toBe(false);
+    }
+  });
+
+  test('CardRows tells its rows what to show at rest without hover: the action by default, or nothing with never', () => {
+    const { CardRow, CardRows } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRows label="Default">
+          <CardRow kind="document" title="One" href="/1" />
+        </CardRows>
+        <CardRows label="Menu" actionAtRest="never">
+          <CardRow kind="document" title="Two" href="/2" />
+        </CardRows>
+      </>,
+    );
+    const [plain, never] = [...frame.querySelectorAll('ul')];
+    expect(plain!.getAttribute('data-frame-card-action-rest')).toBe('touch');
+    expect(never!.getAttribute('data-frame-card-action-rest')).toBe('never');
+  });
+
+  test('CardRows passes the host its class name, data attributes and other list props', () => {
+    const { CardRow, CardRows } = cardModule!;
+    const frame = mount(
+      <CardRows label="Plans" className="host-list" data-testid="plans" id="plans-list" style={{ marginTop: 4 }}>
+        <CardRow kind="document" title="One" href="/1" />
+      </CardRows>,
+    );
+    const list = frame.querySelector('ul')!;
+    expect(list.className).toBe('host-list');
+    expect(list.getAttribute('data-testid')).toBe('plans');
+    expect(list.id).toBe('plans-list');
+    expect(list.style.marginTop).toBe('4px');
+    expect(list.getAttribute('aria-label')).toBe('Plans');
+    expect(list.hasAttribute('data-frame-card-rows')).toBe(true);
+  });
+
+  test('a pinned row rests with a plain pin after its title, drawn by the card; the host action stays its own, after the trailing text in the DOM', () => {
+    const { CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="document" title="Pinned" href="/p" fact="Your move" pinned action={<button type="button">Unpin</button>} />
+        <CardRow kind="document" title="Loose" href="/l" fact="Your move" action={<button type="button">Pin</button>} />
+      </>,
+    );
+    const [pinned, loose] = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-row]')];
+    const mark = pinned!.querySelector('a [data-frame-card-pinned-mark]')!;
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(mark.previousElementSibling!.hasAttribute('data-frame-card-title')).toBe(true);
+    expect(loose!.querySelector('[data-frame-card-pinned-mark]')).toBeNull();
+    for (const row of [pinned!, loose!]) {
+      expect(row.getAttribute('data-frame-card-columns')).toBe('action');
+      expect(row.querySelector('[data-frame-card-trail] > [data-frame-card-line]')!.nextElementSibling!.hasAttribute('data-frame-card-action')).toBe(true);
     }
   });
 });

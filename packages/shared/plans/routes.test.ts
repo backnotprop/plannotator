@@ -17,13 +17,19 @@
  *   is saved, a second tab's Done replaces the first, an approval lands on an older version, a second first Send
  *   replaces the plan's thread;
  * - a save that only changes line endings makes a version; the agent's diff skips an edit it was never sent, or
- *   names the wrong file.
+ *   names the wrong file;
+ * - the Spaces home (approval "plans-home"): pins lose their order, keep a plan that is gone, or pin one that never
+ *   was; the view is not the person's (config.json) or a bad one is kept; the list loses what the home's facts read
+ *   (the main page's kind, who made the newest version and when, the versions the person decided on); the list is
+ *   read and sent whole to a poll when nothing changed (its ETag's 304), or answers 304 when something did (a version,
+ *   a look, a pin, the view); a face reads more than its top (a document's first 16 KB, cut at a line's end) or an
+ *   HTML page above 512 KB.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { PLAN_PERSON, PLAN_PICTURE_TYPES, planApprovalState, planId } from "@plannotator/core/plans";
+import { dirname, join } from "node:path";
+import { PLAN_FACE_HTML_MAX, PLAN_FACE_TEXT_BYTES, PLAN_PERSON, PLAN_PICTURE_TYPES, planApprovalState, planId, type SpacesView } from "@plannotator/core/plans";
 import { createPlanStore } from "./store";
 import { artifactServedType, handlePlanRoute, isPlansPath, type PlanRouteResult } from "./routes";
 
@@ -332,5 +338,153 @@ describe("Plans' routes", () => {
     expect(store.artifactPath(plan.id, "../plan.jsonl")).toBeNull();
     expect(() => store.addArtifact(plan.id, { asset_path: "../x", bytes: new Uint8Array(), content_type: "text/plain", created_at: at })).toThrow();
     expect((await call("POST", `/api/plans/${plan.id}/files/mockup.html`))?.status).toBe(405);
+  });
+
+  test("pins: in the person's order, moved and unpinned in place, kept across a reopen; a plan that is gone drops out, one never here is refused", async () => {
+    const { store, plan, call } = world();
+    const two = store.createPlan({ name: "Ledger", created_at: "2026-11-05T09:00:00.000Z", document: { title: "Ledger" } }).plan;
+    const three = store.createPlan({ name: "Checkout", created_at: "2026-11-06T09:00:00.000Z", document: { title: "Checkout" } }).plan;
+    expect(body(await call("GET", "/api/plans"))!.pins).toEqual([]);
+    for (const id of [plan.id, two.id, three.id]) expect((await call("POST", "/api/plans/pins", { id, pinned: true }))?.status).toBe(200);
+    expect(body(await call("GET", "/api/plans"))!.pins).toEqual([plan.id, two.id, three.id]);
+    // Move up (index one less), Move down (one more), and Unpin.
+    expect(body(await call("POST", "/api/plans/pins", { id: three.id, pinned: true, index: 1 }))!.pins).toEqual([plan.id, three.id, two.id]);
+    expect(body(await call("POST", "/api/plans/pins", { id: plan.id, pinned: true, index: 1 }))!.pins).toEqual([three.id, plan.id, two.id]);
+    expect(body(await call("POST", "/api/plans/pins", { id: three.id, pinned: false }))!.pins).toEqual([plan.id, two.id]);
+    // Pinning a pinned plan again keeps its place; unpinning what is not pinned changes nothing.
+    expect(body(await call("POST", "/api/plans/pins", { id: plan.id, pinned: true }))!.pins).toEqual([plan.id, two.id]);
+    expect(body(await call("POST", "/api/plans/pins", { id: three.id, pinned: false }))!.pins).toEqual([plan.id, two.id]);
+    expect(body(await call("POST", "/api/plans/pins", { id: plan.id, pinned: true, index: 5 }))!.pins).toEqual([two.id, plan.id]);
+    // The order is the library's: a store opened again reads it.
+    expect(createPlanStore({ dataDir: dirname(store.root) }).pins()).toEqual([two.id, plan.id]);
+    // A plan never here is refused; a malformed body too.
+    expect((await call("POST", "/api/plans/pins", { id: planId("pln"), pinned: true }))?.status).toBe(404);
+    expect((await call("POST", "/api/plans/pins", { id: "nope", pinned: true }))?.status).toBe(400);
+    expect((await call("POST", "/api/plans/pins", { id: plan.id, pinned: "yes" }))?.status).toBe(400);
+    expect((await call("POST", "/api/plans/pins", { id: plan.id, pinned: true, index: -1 }))?.status).toBe(400);
+    expect((await call("GET", "/api/plans/pins"))?.status).toBe(405);
+    // A pinned plan that is gone is left out of the order.
+    const pinsFile = join(store.root, "pins.json");
+    const kept = JSON.parse(readFileSync(pinsFile, "utf8"));
+    expect(kept).toEqual({ v: 1, ids: [two.id, plan.id] });
+    writeFileSync(pinsFile, JSON.stringify({ v: 1, ids: [planId("pln"), two.id] }));
+    expect(body(await call("GET", "/api/plans"))!.pins).toEqual([two.id]);
+  });
+
+  test("the Spaces view is the person's: read and kept through the host's config, a bad one refused, cards when the host keeps none", async () => {
+    const { store } = world();
+    let kept: SpacesView = "cards";
+    let saves = 0;
+    let canSave = true;
+    const view = { read: () => kept, save: (next: SpacesView) => (canSave ? ((kept = next), saves++, true) : false) };
+    const go = (method: string, path: string, posted?: unknown, withView = true) =>
+      handlePlanRoute({ method, pathname: path, params: new URLSearchParams(), json: async () => posted }, withView ? { store, view } : { store });
+    expect(body(await go("GET", "/api/plans"))!.view).toBe("cards");
+    expect(body(await go("POST", "/api/plans/view", { view: "list" }))).toEqual({ view: "list" });
+    expect([kept, saves]).toEqual(["list", 1]);
+    expect(body(await go("GET", "/api/plans"))!.view).toBe("list");
+    expect((await go("POST", "/api/plans/view", { view: "grid" }))?.status).toBe(400);
+    expect(kept).toBe("list");
+    canSave = false;
+    expect((await go("POST", "/api/plans/view", { view: "cards" }))?.status).toBe(500);
+    expect(kept).toBe("list");
+    // A host that keeps no view: cards, and a save is not taken.
+    expect(body(await go("GET", "/api/plans", undefined, false))!.view).toBe("cards");
+    expect((await go("POST", "/api/plans/view", { view: "list" }, false))?.status).toBe(404);
+  });
+
+  test("the list carries what the home's facts read: the main page's kind, who made the newest version, the versions the person decided on", async () => {
+    const { store, plan, doc, call } = world();
+    let line = body(await call("GET", "/api/plans"))!.plans[0];
+    expect(line).toMatchObject({ primary_kind: "markdown", head_source: "plan-review", decided_versions: [] });
+    await call("POST", `/api/plans/${plan.id}/approve`, { version: 3 });
+    line = body(await call("GET", "/api/plans"))!.plans[0];
+    expect(line.decided_versions).toEqual([3]);
+    await call("POST", `/api/plans/${plan.id}/versions`, { base: 3, text: "# Auth refactor\n\nby hand\n", serverSession: "s" });
+    line = body(await call("GET", "/api/plans"))!.plans[0];
+    // The person's own edit carries their approval to v4 (approval "plans-editing"): v4 holds it too.
+    expect(line).toMatchObject({ head_version_number: 4, head_source: "person", decided_versions: [3, 4] });
+    // An HTML main page is said so.
+    const page = store.createPlan({ name: "Mockup", created_at: "2026-11-07T09:00:00.000Z", document: { title: "Mockup", kind: "html" } });
+    store.addVersion(page.plan.id, page.document.id, { bytes: new TextEncoder().encode("<h1>Hi</h1>"), committed_at: "2026-11-07T10:00:00.000Z", source: "agent-tool" });
+    const lines = body(await call("GET", "/api/plans"))!.plans as { id: string; primary_kind: string }[];
+    expect(lines.find((p) => p.id === page.plan.id)!.primary_kind).toBe("html");
+    expect(doc).toBeTruthy();
+  });
+
+  test("the list's ETag: 304 while nothing changed; a version, a look, a pin or the view is a new answer", async () => {
+    const { store, plan, doc } = world();
+    let view: SpacesView = "cards";
+    const get = (ifNoneMatch: string | null) => handlePlanRoute({ method: "GET", pathname: "/api/plans", params: new URLSearchParams(), json: async () => null, ifNoneMatch }, { store, view: { read: () => view, save: () => true } });
+    const first = (await get(null)) as { status: number; etag?: string; body: unknown };
+    expect(first.status).toBe(200);
+    expect(first.etag).toMatch(/^"[0-9a-f]{8}"$/);
+    const same = (await get(first.etag!)) as { status: number; body: unknown };
+    expect([same.status, same.body]).toEqual([304, null]);
+    const changes: (() => unknown)[] = [
+      () => store.addVersion(plan.id, doc, { bytes: new TextEncoder().encode("# Auth refactor\n\nv4\n"), committed_at: "2026-11-05T09:00:00.000Z", source: "plan-review" }),
+      () => store.recordLook(plan.id, { seen: 4 }),
+      () => store.setPin(plan.id, true),
+      () => (view = "list"),
+    ];
+    let tag = first.etag!;
+    for (const change of changes) {
+      change();
+      const next = (await get(tag)) as { status: number; etag?: string };
+      expect(next.status).toBe(200);
+      expect(next.etag).not.toBe(tag);
+      tag = next.etag!;
+    }
+    // The newest version's time is on the line ("Now" reads it).
+    expect((body(await get(null))!.plans[0] as { head_at: string }).head_at).toBe("2026-11-05T09:00:00.000Z");
+  });
+
+  test("a face reads only its top: a document's first 16 KB cut at a line's end; an HTML page whole, or nothing above 512 KB", async () => {
+    const { store, plan, doc, call } = world();
+    expect(body(await call("GET", `/api/plans/${plan.id}/versions/1?face=1`))).toEqual({ text: "# Auth refactor\n\nv1\n", cut: false });
+    const line = "A line of the plan that goes on for a while to fill the page.\n";
+    const long = line.repeat(Math.ceil((PLAN_FACE_TEXT_BYTES * 2) / line.length));
+    store.addVersion(plan.id, doc, { bytes: new TextEncoder().encode(long), committed_at: "2026-11-05T09:00:00.000Z", source: "plan-review" });
+    const top = body(await call("GET", `/api/plans/${plan.id}/versions/4?face=1`))!;
+    expect(top.cut).toBe(true);
+    expect(new TextEncoder().encode(top.text).length).toBeLessThanOrEqual(PLAN_FACE_TEXT_BYTES);
+    expect(long.startsWith(top.text)).toBe(true);
+    expect(top.text.endsWith("for a while to fill the page.")).toBe(true);
+    const page = store.createPlan({ name: "Mockup", created_at: "2026-11-06T09:00:00.000Z", document: { title: "Mockup", kind: "html" } });
+    store.addVersion(page.plan.id, page.document.id, { bytes: new TextEncoder().encode("<p>Small</p>"), committed_at: "2026-11-06T10:00:00.000Z", source: "plan-review" });
+    store.addVersion(page.plan.id, page.document.id, { bytes: new TextEncoder().encode(`<p>${"x".repeat(PLAN_FACE_HTML_MAX)}</p>`), committed_at: "2026-11-06T11:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/1?face=1`))).toEqual({ text: "<p>Small</p>", cut: false });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/2?face=1`))).toEqual({ text: null, cut: false });
+    expect((await call("GET", `/api/plans/${plan.id}/versions/9?face=1`))?.status).toBe(404);
+  });
+
+  test("a picture page's face is the picture, typed by its bytes; it is served as itself, an SVG as text (it runs nothing)", async () => {
+    const { store, call } = world();
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const page = store.createPlan({ name: "Chart", created_at: "2026-11-06T09:00:00.000Z", document: { title: "Chart", kind: "image" } });
+    store.addVersion(page.plan.id, page.document.id, { bytes: png, committed_at: "2026-11-06T10:00:00.000Z", source: "plan-review" });
+    store.addVersion(page.plan.id, page.document.id, { bytes: svg, committed_at: "2026-11-06T11:00:00.000Z", source: "plan-review" });
+    store.addVersion(page.plan.id, page.document.id, { bytes: new TextEncoder().encode("not a picture"), committed_at: "2026-11-06T12:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/1?face=1`))).toEqual({ text: null, cut: false, picture: `data:image/png;base64,${btoa(String.fromCharCode(...png))}` });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/2?face=1`))!.picture).toStartWith("data:image/svg+xml;base64,");
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/3?face=1`))).toEqual({ text: null, cut: false, picture: null });
+    // Small in bytes, huge once decoded (a 20000 x 20000 PNG header): no picture in the face, the kind's ground.
+    const huge = Uint8Array.from([0x89, ...[..."PNG\r\n\x1a\n"].map((c) => c.charCodeAt(0)), 0, 0, 0, 13, ...[..."IHDR"].map((c) => c.charCodeAt(0)), 0, 0, 0x4e, 0x20, 0, 0, 0x4e, 0x20, 8, 6, 0, 0, 0]);
+    store.addVersion(page.plan.id, page.document.id, { bytes: huge, committed_at: "2026-11-06T13:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/4?face=1`))).toEqual({ text: null, cut: false, picture: null });
+    const served = async (n: number) => {
+      const answer = await call("GET", `/api/plans/${page.plan.id}/versions/${n}`);
+      return answer && "file" in answer ? answer.file.contentType : null;
+    };
+    expect(await served(1)).toBe("image/png");
+    expect(await served(2)).toStartWith("text/plain");
+    expect(await served(3)).toBe("application/octet-stream");
+    // A data page is text.
+    const data = store.createPlan({ name: "Tiers", created_at: "2026-11-06T09:00:00.000Z", document: { title: "Tiers", kind: "data" } });
+    store.addVersion(data.plan.id, data.document.id, { bytes: new TextEncoder().encode("tier,rate\nfree,60\n"), committed_at: "2026-11-06T10:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${data.plan.id}/versions/1?face=1`))).toEqual({ text: "tier,rate\nfree,60\n", cut: false });
+    const csv = await call("GET", `/api/plans/${data.plan.id}/versions/1`);
+    expect(csv && "file" in csv ? csv.file.contentType : null).toBe("text/plain; charset=utf-8");
   });
 });

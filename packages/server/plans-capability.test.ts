@@ -17,7 +17,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, u
 import { tmpdir } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { answerInboxCapabilities, capabilitiesFrame, capabilitiesWire, checkInboxCapabilities, namesInboxCapability, routeInboxCapabilities, startInboxCapabilities, type InboxCapabilityGuard } from "./inbox-capability";
-import { createPlansCapability } from "./plans-capability";
+import { createPlansCapability, PLAN_HISTORY_WATCH_FOLDERS } from "./plans-capability";
 import { createPlanStore, type PlanStore } from "@plannotator/shared/plans/store";
 import { saveFinalSnapshot, saveToHistory } from "@plannotator/shared/storage";
 import { appendFeedbackRecord } from "@plannotator/shared/feedback-archive";
@@ -201,6 +201,74 @@ describe("Plans on", () => {
     expect(second.importing).toBe(false);
     await capability.importing();
   });
+
+  test("the home's poll: 304 with no body while nothing changed, and it picks up plan history at most once per pollPickUpMs", async () => {
+    historyFixture();
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const get = (path: string, etag?: string) => routeInboxCapabilities(list, new Request(`http://127.0.0.1:1${path}`, etag ? { headers: { "If-None-Match": etag } } : {}), new URL(`http://127.0.0.1:1${path}`), owner);
+    // An ordinary read picks up (and the whole import runs once).
+    await get("/api/plans");
+    await capability.importing();
+    const answer = (await get("/api/plans?poll=1"))!;
+    // A poll right after: no pickup (the last one was under a minute ago).
+    expect(capability.importing()).toBeNull();
+    const etag = answer.headers.get("ETag")!;
+    expect(etag).toBeTruthy();
+    const unchanged = (await get("/api/plans?poll=1", etag))!;
+    expect(unchanged.status).toBe(304);
+    expect(await unchanged.text()).toBe("");
+    expect(capability.importing()).toBeNull();
+    // An ordinary read still picks up at once.
+    await get("/api/plans");
+    expect(capability.importing()).not.toBeNull();
+    await capability.importing();
+  });
+
+  test("plan review's write into history is heard: the next poll picks it up and answers with it, past the slow pickup", async () => {
+    historyFixture();
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, settleMs: 0, openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const poll = async () => (await (await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans?poll=1"), new URL("http://127.0.0.1:1/api/plans?poll=1"), owner))!.json()) as { plans: { name: string }[] };
+    await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans"), new URL("http://127.0.0.1:1/api/plans"), owner);
+    await capability.importing();
+    expect((await poll()).plans.map((p) => p.name)).toEqual(["Auth refactor"]);
+    // Plan review writes a new plan (settled: an hour old); within the minute the slow pickup would wait.
+    const dir = join(dataDir, "history", "api", "rate-limits-2026-11-02");
+    mkdirSync(dir, { recursive: true });
+    const when = new Date(Date.now() - 3_600_000);
+    writeFileSync(join(dir, "001.md"), "# Rate limits\n\nv1\n");
+    utimesSync(join(dir, "001.md"), when, when);
+    let names: string[] = [];
+    for (let i = 0; i < 200 && !names.includes("Rate limits"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      names = (await poll()).plans.map((p) => p.name);
+    }
+    expect(names.sort()).toEqual(["Auth refactor", "Rate limits"]);
+    // Heard once: the poll after it waits again.
+    await poll();
+    expect(capability.importing()).toBeNull();
+  }, 15_000);
+
+  test("on Linux a history of more folders than PLAN_HISTORY_WATCH_FOLDERS is not watched (inotify is shared): the slow pickup alone finds it", async () => {
+    historyFixture();
+    for (let i = 0; i <= PLAN_HISTORY_WATCH_FOLDERS; i++) mkdirSync(join(dataDir, "history", "bulk", `plan-${i}`), { recursive: true });
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, settleMs: 0, platform: "linux", openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const poll = async () => (await (await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans?poll=1"), new URL("http://127.0.0.1:1/api/plans?poll=1"), owner))!.json()) as { plans: { name: string }[] };
+    await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans"), new URL("http://127.0.0.1:1/api/plans"), owner);
+    await capability.importing();
+    const dir = join(dataDir, "history", "api", "rate-limits-2026-11-02");
+    mkdirSync(dir, { recursive: true });
+    const when = new Date(Date.now() - 3_600_000);
+    writeFileSync(join(dir, "001.md"), "# Rate limits\n\nv1\n");
+    utimesSync(join(dir, "001.md"), when, when);
+    // Long past the time a heard write is picked up here (under a second): nothing was heard, so the poll waits.
+    for (let i = 0; i < 30; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect((await poll()).plans.map((p) => p.name)).toEqual(["Auth refactor"]);
+    }
+  }, 15_000);
 
   test("an import that keeps failing waits longer each time, is logged once, says so in the list, and Try again runs it now", async () => {
     historyFixture();

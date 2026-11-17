@@ -4,7 +4,7 @@
  * regresses if this fails: opening a plan tells a third party you read it, or a click in a diagram takes the tab.
  */
 import { expect, test } from 'bun:test';
-import { mermaidMayLoad, mermaidMayReachAnotherHost, planBlocks } from './planContent';
+import { isMovingDataImage, mermaidMayLoad, mermaidMayReachAnotherHost, planBlocks } from './planContent';
 import type { Block } from '@plannotator/ui/types';
 
 const reachesAnotherHost = [
@@ -95,4 +95,32 @@ test('only a Mermaid fence that could load something is shown as its source; oth
   ];
   expect(planBlocks(blocks).map((b) => b.language)).toEqual(['text', 'mermaid', 'ts']);
   expect(planBlocks(blocks)[0]!.content).toBe(blocks[0]!.content);
+});
+
+test('a moving picture is caught however it is written; a still one is not', () => {
+  const svg = (body: string) => `data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100%'>${body}</svg>`;
+  // A bare "%" in a utf8 SVG (its width) does not make it read as still.
+  expect(isMovingDataImage(svg("<circle r='4'><animate attributeName='r' values='4;8' dur='1s'/></circle>"))).toBe(true);
+  expect(isMovingDataImage(svg("<circle r='4'/>"))).toBe(false);
+  // CSS motion inside it, by any of its names: `animation-name`, a vendor's keyframes, a transition.
+  expect(isMovingDataImage(svg('<style>circle{animation-name:x}</style><circle r="4"/>'))).toBe(true);
+  expect(isMovingDataImage(svg('<style>@-webkit-keyframes x{to{opacity:0}}</style>'))).toBe(true);
+  expect(isMovingDataImage(svg('<style>circle{transition-duration:1s}</style>'))).toBe(true);
+  // Written with XML references or CSS escapes.
+  expect(isMovingDataImage(svg('<style>circle{&#97;nimation:x 1s}</style>'))).toBe(true);
+  expect(isMovingDataImage(svg('<style>circle{\\61nimation:x 1s}</style>'))).toBe(true);
+  // An entity could add one; a picture inside it that moves.
+  expect(isMovingDataImage(svg('<!ENTITY a "b">'))).toBe(true);
+  // Percent-encoded, and base64.
+  expect(isMovingDataImage(`data:image/svg+xml,${encodeURIComponent("<svg><set attributeName='x' to='1'/></svg>")}`)).toBe(true);
+  expect(isMovingDataImage(`data:image/svg+xml;base64,${btoa("<svg><animateTransform attributeName='transform'/></svg>")}`)).toBe(true);
+  expect(isMovingDataImage('data:image/svg+xml;base64,@@not base64@@')).toBe(true);
+  // A GIF of two frames moves; one frame does not. An APNG moves; a type it does not know counts as moving.
+  const still = 'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+  expect(isMovingDataImage(`data:image/gif;base64,${still}`)).toBe(false);
+  const two = atob(still).replace(/;$/, '') + atob(still).slice(atob(still).indexOf(',')) ;
+  expect(isMovingDataImage(`data:image/gif;base64,${btoa(two)}`)).toBe(true);
+  expect(isMovingDataImage(`data:image/png;base64,${btoa('\x89PNG\r\n\x1a\n....acTL')}`)).toBe(true);
+  expect(isMovingDataImage('data:image/jxl;base64,AAAA')).toBe(true);
+  expect(isMovingDataImage('data:image/jpeg;base64,/9j/4AAQ')).toBe(false);
 });

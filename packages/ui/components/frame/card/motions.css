@@ -41,11 +41,19 @@
 [data-frame-card-hero] {
   transition: transform var(--frame-card-fan-duration) var(--frame-card-ease);
 }
-[data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) .frame-card-fan {
+[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) .frame-card-fan {
   transform: var(--frame-card-back-fan);
 }
-[data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) [data-frame-card-hero] {
+[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *)) [data-frame-card-hero] {
   transform: var(--frame-card-lift);
+}
+@media (hover: hover) {
+  [data-frame-card]:hover .frame-card-fan {
+    transform: var(--frame-card-back-fan);
+  }
+  [data-frame-card]:hover [data-frame-card-hero] {
+    transform: var(--frame-card-lift);
+  }
 }
 [data-frame-card]:active [data-frame-card-hero] {
   transform: var(--frame-card-press);
