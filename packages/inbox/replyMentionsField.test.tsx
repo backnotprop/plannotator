@@ -396,6 +396,51 @@ describe.skipIf(!hasDom)('undo, redo and the caret never lose a mention silently
     expect(tokens()).toEqual([]);
   });
 
+  test('words retyped by hand after Backspace took the mention stay words when undo or redo comes back to them', () => {
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    const withIt = words;
+    const end = withIt.indexOf(FLAKY.title) + FLAKY.title.length;
+    act(() => {
+      field().focus();
+      field().setSelectionRange(end, end);
+      field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+    });
+    expect(tokens()).toEqual([]);
+    // The same title, typed by hand: the same words as when they held the mention.
+    type(withIt);
+    type(`${withIt}ok`);
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    history(`${withIt}ok`, 'historyRedo');
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    expect(replyWordsWithMentions(HERE, words.trim())).not.toContain(FLAKY.id);
+  });
+
+  test('two threads with the same label, one after the other at the same place: undo to those words brings back neither, never the wrong one', () => {
+    const TWIN: MentionRef = { id: idOf('01JD5TW1N'), title: FLAKY.title, project: null };
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    const withIt = words;
+    const end = withIt.indexOf(FLAKY.title) + FLAKY.title.length;
+    act(() => {
+      field().focus();
+      field().setSelectionRange(end, end);
+      field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+    });
+    const without = words;
+    act(() => requestMention(HERE, [TWIN]));
+    expect(words).toBe(withIt);
+    expect(tokens()).toEqual([[`ib-mention:${TWIN.id}`, TWIN.title]]);
+    // Back past the twin to the first mention's words: they held two threads, so neither comes back.
+    history(without, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    expect(replyWordsWithMentions(HERE, words.trim())).not.toContain(TWIN.id);
+  });
+
   test('a caret put inside a mention goes to its nearer edge, and from an edge a step in goes across it; typing then lands beside it', () => {
     draw(<Box initial="See " />);
     act(() => requestMention(HERE, [FLAKY]));

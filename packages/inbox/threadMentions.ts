@@ -60,16 +60,28 @@ const boxes = new Map<string, Held>();
 /** The draft's words and mentions as the Inbox last answered, per reply. */
 const drafts = new Map<string, Held>();
 /**
- * The words each reply's box has had and the mentions they held, newest last (at most `UNDO_KEPT`): the browser's own
- * undo and redo put earlier words back, and with them the mentions those words had.
+ * The words each reply's box has had and the mentions they last held, newest last (at most `UNDO_KEPT`): the browser's
+ * own undo and redo put earlier words back, and with them those mentions. `sets`: every set of mentions (threads and
+ * places) those exact words have held; with more than one, an undo to them cannot tell which, and brings back none.
  */
-const undoable = new Map<string, Held[]>();
+type Remembered = Held & { sets: Set<string> };
+const undoable = new Map<string, Remembered[]>();
 const UNDO_KEPT = 100;
+const setOf = (mentions: readonly InboxReplyMention[]) => mentions.map((m) => `${m.thread_id}@${m.at}`).join(',');
 function remember(threadId: string, held: Held): void {
-  const list = (undoable.get(threadId) ?? []).filter((h) => h.text !== held.text);
-  list.push(held);
-  if (list.length > UNDO_KEPT) list.shift();
-  undoable.set(threadId, list);
+  const list = undoable.get(threadId) ?? [];
+  const was = list.find((h) => h.text === held.text);
+  const sets = new Set(was?.sets ?? []);
+  if (held.mentions.length > 0) sets.add(setOf(held.mentions));
+  const next = list.filter((h) => h !== was);
+  next.push({ ...held, sets });
+  if (next.length > UNDO_KEPT) next.shift();
+  undoable.set(threadId, next);
+}
+/** What an undo or redo to `text` brings back: its last mentions, unless those words held others too (or none since). */
+function restorable(threadId: string, text: string): readonly InboxReplyMention[] | null {
+  const held = undoable.get(threadId)?.find((h) => h.text === text);
+  return held && held.mentions.length > 0 && held.sets.size === 1 ? held.mentions : null;
 }
 const listeners = new Set<() => void>();
 let version = 0;
@@ -148,14 +160,16 @@ export function commitReplyEdit(threadId: string, from: string, to: string, care
   const before = mentionsFor(threadId, from);
   const box = boxes.get(threadId);
   if (before.length > 0) remember(threadId, { text: from, mentions: before });
-  const back = undo ? undoable.get(threadId)?.find((h) => h.text === to) : undefined;
-  if (back && back.mentions.length > 0) {
-    boxes.set(threadId, { text: to, mentions: standingReplyMentions(to, back.mentions) });
+  const back = undo ? restorable(threadId, to) : null;
+  if (back) {
+    boxes.set(threadId, { text: to, mentions: standingReplyMentions(to, back) });
     changed();
     return;
   }
   if (before.length === 0 && (!box || box.mentions.length === 0)) {
     if (box) boxes.set(threadId, { text: to, mentions: NONE });
+    // Words typed by hand: the newest truth for them is no mention, so a later undo to them brings none back.
+    if (!undo && undoable.has(threadId)) remember(threadId, { text: to, mentions: NONE });
     return;
   }
   const mentions = remapReplyMentions(before, from, to, caret);

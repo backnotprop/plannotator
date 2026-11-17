@@ -167,10 +167,16 @@ export function linearErrorOf(status: number, body: unknown): ForgeRefCardError 
 }
 
 /**
- * Whether Linear took the key at its last answer: `none` without a key, `refused` on a 401/403 or an auth error,
- * `accepted` on any other answer Linear gave, `unknown` before one (or when Linear could not be reached).
+ * Whether Linear took the key, from the teams read: `none` without a key, `refused` on a 401 or an authentication
+ * error, `accepted` on any other answer Linear gave, `unknown` before one (or when Linear could not be reached).
  */
 export type LinearKeyVerdict = "accepted" | "refused" | "unknown" | "none";
+
+/** Linear refused the key itself: a 401 or an authentication error (a 403 or FORBIDDEN is one thing the key may not read). */
+function keyRefused(status: number, body: unknown): boolean {
+  const errors = Array.isArray(obj(body).errors) ? (obj(body).errors as unknown[]).map(obj) : [];
+  return status === 401 || errors.some((e) => str(obj(e.extensions).code) === "AUTHENTICATION_ERROR");
+}
 
 export interface LinearCards {
   /** The card for a Linear issue link, or null when the link is not one. */
@@ -200,17 +206,20 @@ export function createLinearCards(options: {
   let generation = 0;
   let verdict: LinearKeyVerdict = "unknown";
 
-  /** One read-only query with the key; "no_key" without one; null when it failed. Each answer sets the verdict. */
-  const ask = async (query: string, variables: Record<string, string>): Promise<{ res: Response; body: unknown } | "no_key" | null> => {
+  /**
+   * One read-only query with the key; "no_key" without one; null when it failed. `judge`: the teams read, whose answer
+   * sets the verdict (an issue's answer never does: a key may read the teams and still be refused one team's issue).
+   */
+  const ask = async (query: string, variables: Record<string, string>, judgeKey = false): Promise<{ res: Response; body: unknown } | "no_key" | null> => {
     const asked = generation;
     const key = (await apiKey())?.trim();
     if (!key) {
-      if (asked === generation) verdict = "none";
+      if (judgeKey && asked === generation) verdict = "none";
       return "no_key";
     }
     const judge = (answer: { res: Response; body: unknown }) => {
-      if (asked !== generation) return answer;
-      if (linearErrorOf(answer.res.status, answer.body) === "signed_out") verdict = "refused";
+      if (!judgeKey || asked !== generation) return answer;
+      if (keyRefused(answer.res.status, answer.body)) verdict = "refused";
       else if (answer.res.ok) verdict = "accepted";
       return answer;
     };
@@ -290,7 +299,7 @@ export function createLinearCards(options: {
 
   const issueRefs = (): Promise<LinearIssueRefs | null> => {
     if (teams && now() - teams.at < teams.ttl) return teams.refs;
-    const refs = ask(LINEAR_TEAMS_QUERY, {}).then((a) => (a && a !== "no_key" && a.res.ok ? parseLinearTeamsAnswer(a.body) : null));
+    const refs = ask(LINEAR_TEAMS_QUERY, {}, true).then((a) => (a && a !== "no_key" && a.res.ok ? parseLinearTeamsAnswer(a.body) : null));
     const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, refs };
     teams = entry;
     void refs.then((r) => {

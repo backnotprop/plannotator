@@ -418,6 +418,10 @@ test.skipIf(!hasDom)('a sidebar tag wears its colour; its menu has Highlight row
   expect(hex.value).toBe('1a2b3c');
   await key(hex, 'Enter');
   expect(picks.at(-1)).toBe('#1a2b3c');
+  // A key typed into the middle of a whole code is refused: it never pushes the last letter out.
+  expect(hex.value).toBe('#1a2b3c');
+  await typeHex('#1a2b93c');
+  expect(hex.value).toBe('#1a2b3c');
   // Back: the menu again, focus on Color.
   await press(list.querySelector('[data-tag-colour-back]'));
   await until(() => document.activeElement === tagMenu()?.querySelector('[data-tag-action="colour"]'), 'focus back on Color');

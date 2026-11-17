@@ -180,6 +180,12 @@ test("the route says whether Linear took the key: refused on a 401 or an auth er
   expect(await refsOf(createLinearCards({ apiKey: () => null, fetch: refused.fetchImpl }))).toMatchObject({ key: "none" });
   const down = createLinearCards({ apiKey: () => "k", fetch: (async () => { throw new Error("offline"); }) as unknown as typeof fetch });
   expect(await refsOf(down)).toMatchObject({ key: "unknown" });
+  // A key that reads the teams but is refused one team's issue (403 / FORBIDDEN) is still accepted.
+  const partial = stub((body) => (body.query.includes("organization") ? { body: { data: { organization: { urlKey: "acme" }, teams: { nodes: [{ key: "ENG" }] } } } } : { status: 403, body: { errors: [{ message: "Forbidden", extensions: { code: "FORBIDDEN" } }] } }));
+  const scoped = createLinearCards({ apiKey: () => "k", fetch: partial.fetchImpl, avatar: async () => null });
+  expect(await refsOf(scoped)).toMatchObject({ key: "accepted" });
+  expect(await scoped.get(LINK)).toMatchObject({ ok: false });
+  expect(await refsOf(scoped)).toMatchObject({ key: "accepted", teams: ["ENG"] });
   // A new key starts over: the old key's refusal is not the new one's.
   let key = "bad";
   let ok = false;
