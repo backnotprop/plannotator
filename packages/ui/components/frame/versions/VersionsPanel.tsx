@@ -313,6 +313,7 @@ function FoldRow({
   readonly onToggle: () => void;
 }) {
   const listId = useId();
+  const comparedKeys = useContext(ComparedKeys);
   const newest = entries[0]!;
   const onScreen = entries.find((entry) => entry.viewing);
   const hidden = holdsViewing && !open && onScreen !== undefined;
@@ -323,6 +324,7 @@ function FoldRow({
     who === "" ? `${entries.length} saves` : `${who}, ${entries.length} saves`,
     whenWords(newest.createdAt),
     hidden && onScreen !== undefined ? `${versionTitle(onScreen)} on screen` : null,
+    ...(open ? [] : entries.filter((entry) => comparedKeys.has(entry.key)).map((entry) => `${versionTitle(entry)} compared`)),
   ]
     .filter((part): part is string => part !== null)
     .join(", ");

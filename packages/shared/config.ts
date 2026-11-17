@@ -607,8 +607,9 @@ export interface PlannotatorConfig {
    * each new pull request against them. Empty or unset `rules`: nothing runs.
    * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
    * The rules are the person's own words: never logged, never sent in telemetry.
+   * `branches` (Branch reviews): rank the branches agents report too; off unless `true`.
    */
-  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
+  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null; branches?: boolean };
   /**
    * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
    * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
@@ -644,6 +645,14 @@ export interface PlannotatorConfig {
    * Settings row; the settings read carries `split_view` only while on. Read on every request.
    */
   inboxSplitView?: boolean;
+  /**
+   * Branch reviews in the Inbox (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): agents report a branch
+   * ready for review (`send_message`'s `branch`), each report one review thread per project and branch in Reviews, and
+   * the by-hand list of branches nobody reported. Off unless `true`, and only while Code review is on. Config only, no
+   * Settings row; the Reviews read (`GET /api/inbox/reviews`) carries `branch_reviews` only while on. Read on every
+   * request.
+   */
+  inboxBranchReviews?: boolean;
   /**
    * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser";
    * packages/shared/inbox/theme-chooser.ts). Written only by the Inbox server,

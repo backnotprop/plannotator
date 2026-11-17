@@ -148,6 +148,24 @@ export interface RiskRun {
  * prompt was past the model's context (an error code, not words).
  */
 export type RiskRunResult = { text: string } | { failed: string; tooLong?: true };
+
+/** A reported branch to judge: its risk key (`inboxBranchRiskKey`), head, base, title for the prompt, and its diff's read. */
+export interface RiskBranch {
+  key: string;
+  head_sha: string;
+  base: string;
+  title: string;
+  read: (signal: AbortSignal) => Promise<string>;
+}
+
+/** What a judgment reads: the diff, and how whole it is. */
+interface RiskDiff {
+  head_sha: string | null;
+  patch: string;
+  partial: boolean;
+  held_back?: string | null;
+  per_file?: boolean;
+}
 export type RiskRunner = (run: RiskRun) => Promise<RiskRunResult>;
 
 /** Ask a provider that reads its models only on request (Pi, OpenCode). */
@@ -228,6 +246,8 @@ export interface PullRiskSettings {
   rules: string;
   provider: string | null;
   model: string | null;
+  /** Rank the branches agents report too (Branch reviews): off unless the person turned it on. */
+  branches: boolean;
 }
 
 interface Kept extends InboxPullRiskJudgment {
@@ -243,6 +263,17 @@ export interface PullRisk {
   answer(): InboxPullRiskAnswer;
   /** Start judging what has none yet. Never waits, never throws. */
   assess(pulls: readonly InboxPull[]): void;
+  /**
+   * A branch an agent just reported (Branch reviews): judged once at that head, only while the person's `branches`
+   * switch is on. Never waits, never throws. Nothing else ever queues a branch.
+   */
+  assessBranch(branch: RiskBranch): void;
+  /** A reported branch's judgment at that head and base under the current rules, or why it failed; nulls when none. */
+  branchJudgment(key: string, head: string | null, base: string | null): { judgment: InboxPullRiskJudgment | null; failed: string | null };
+  /** A reported branch's judgment at that head and base under the current rules is waiting or running. */
+  branchPending(key: string, head: string | null, base: string | null): boolean;
+  /** A branch may be judged now: the person's `branches` switch, rules, an agent that is here, Code review and Branch reviews on. */
+  branchRankable(): boolean;
   /** Save the dialog. Throws InboxError on a bad input or a config that can't be written. */
   save(input: unknown): void;
   models(provider: string): Promise<InboxPullRiskModels>;
@@ -258,6 +289,8 @@ export interface PullRiskOptions {
   roots?: (key: string) => Promise<readonly string[]>;
   /** Code review is on: checked again before each run. */
   isOn: () => boolean;
+  /** Branch reviews is on (config.json `inboxBranchReviews`): the answer carries `branches`, and a branch may run. Absent: off. */
+  branchesOn?: () => boolean;
   /** Tests: stand-ins for the agent, the CLIs found and the clock. */
   run?: RiskRunner;
   agents?: () => InboxPullRiskAgent[];
@@ -271,6 +304,7 @@ function settingsOf(value: unknown): PullRiskSettings {
     rules: typeof raw.rules === "string" ? raw.rules.trim() : "",
     provider: typeof raw.provider === "string" && raw.provider ? raw.provider : null,
     model: typeof raw.model === "string" && raw.model ? raw.model : null,
+    branches: raw.branches === true,
   };
 }
 
@@ -328,8 +362,18 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     renameSync(temp, file);
   };
 
+  const branchRankable = (): boolean => {
+    try {
+      const { rules, provider, branches } = settings();
+      return !stopping.signal.aborted && branches && !!options.branchesOn?.() && !!rules && !!provider && options.isOn() && agents().some((a) => a.id === provider);
+    } catch {
+      return false;
+    }
+  };
+
   let listed: readonly InboxPull[] = [];
-  const queue: { job: string; pull: InboxPull & { head_sha: string }; rules: string }[] = [];
+  /** A PR's layer or a reported branch: what the prompt and the store need, and how its diff is read. */
+  const queue: { job: string; pull: { key: string; head_sha: string; base: string; title: string }; rules: string; read: (signal: AbortSignal) => Promise<RiskDiff> }[] = [];
   const queued = new Set<string>();
   /** When a job that failed may run again. */
   const waits = new Map<string, number>();
@@ -364,7 +408,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     });
 
   const judge = async (entry: (typeof queue)[number]) => {
-    const { job, pull, rules } = entry;
+    const { job, pull, rules, read } = entry;
     if (now() < agentPausedUntil) return;
     const current = settings();
     // The rules changed, or the switch went off, while this waited.
@@ -382,8 +426,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     // only then are a high judgment's places kept, so "See the N places" counts places the diff can show.
     let onScreen: boolean;
     try {
-      const roots = options.roots ? await options.roots(pull.key).catch(() => []) : [];
-      const diff = await options.pulls.wholeDiff(pull.key, stopping.signal, roots);
+      const diff = await read(stopping.signal);
       // The diff read is the head judged: a push since the list waits for the next list's head.
       if (diff.head_sha !== pull.head_sha) {
         waits.set(job, now() + RISK_RETRY_MS);
@@ -396,8 +439,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     } catch (cause) {
       const { code, message } = cause as { code?: string; message?: string };
       waits.set(job, now() + RISK_RETRY_MS);
-      // A forge's words only come with its code; anything else is no sentence for a person.
-      failed((code && message) || "The diff could not be read.");
+      // A forge's words only come with its code; anything else is no sentence for a person. A branch's read says its own.
+      failed((code && message) || (pull.key.startsWith("branch:") && message) || "The diff could not be read.");
       return;
     }
     // The Inbox stopped during that read: no agent starts now.
@@ -486,7 +529,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           if (failure && failure.head === pull.head_sha && failure.base === pull.base && failure.rules === hash) failed[pull.key] = failure.reason;
         }
       }
-      return { ...current, agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure };
+      const { branches, ...shown } = current;
+      return { ...shown, ...(options.branchesOn?.() ? { branches } : {}), agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure };
     },
     assess(pulls) {
       listed = pulls;
@@ -500,15 +544,66 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
           if (!inboxPullIsOpen(pull) || !pull.head_sha) continue;
           const one = all.get(pull.key);
           if (one && one.head === pull.head_sha && one.base === pull.base && one.rules === hash) continue;
+          // A branch reported and judged at this very head against this base: the PR opened on it is that diff (no places:
+          // a branch's judgment keeps none).
+          const reported = [...all.entries()].find(([key, kept]) => key.startsWith("branch:") && kept.head === pull.head_sha && kept.base === pull.base && kept.rules === hash)?.[1];
+          if (reported) {
+            const { where: _where, ...same } = reported;
+            keep(pull.key, same);
+            continue;
+          }
           const job = `${pull.key}\u0000${pull.head_sha}\u0000${pull.base}\u0000${hash}`;
           if (queued.has(job) || now() < (waits.get(job) ?? 0)) continue;
           queued.add(job);
-          queue.push({ job, pull: pull as InboxPull & { head_sha: string }, rules: hash });
+          const layer = pull as InboxPull & { head_sha: string };
+          queue.push({
+            job,
+            pull: layer,
+            rules: hash,
+            read: async (signal) => options.pulls.wholeDiff(layer.key, signal, options.roots ? await options.roots(layer.key).catch(() => []) : []),
+          });
         }
         pump();
       } catch {
         // The list answers whatever happened here.
       }
+    },
+    assessBranch(branch) {
+      if (stopping.signal.aborted || now() < agentPausedUntil) return;
+      try {
+        const { rules } = settings();
+        if (!branchRankable()) return;
+        const hash = hashOf(rules);
+        const one = load().get(branch.key);
+        if (one && one.head === branch.head_sha && one.base === branch.base && one.rules === hash) return;
+        const job = `${branch.key}\u0000${branch.head_sha}\u0000${branch.base}\u0000${hash}`;
+        if (queued.has(job)) return;
+        queued.add(job);
+        queue.push({
+          job,
+          pull: { key: branch.key, head_sha: branch.head_sha, base: branch.base, title: branch.title },
+          rules: hash,
+          // The branch's diff as git here gives it: whole, and never the one a PR's page draws, so no places.
+          read: async (signal) => ({ head_sha: branch.head_sha, patch: await branch.read(signal), partial: false, per_file: true }),
+        });
+        pump();
+      } catch {
+        // The report answers whatever happened here.
+      }
+    },
+    branchPending(key, head, base) {
+      const { rules } = settings();
+      return !!rules && !!head && !!base && queued.has(`${key}\u0000${head}\u0000${base}\u0000${hashOf(rules)}`);
+    },
+    branchRankable: () => branchRankable(),
+    branchJudgment(key, head, base) {
+      const current = settings();
+      if (!current.rules || !head || !base) return { judgment: null, failed: null };
+      const hash = hashOf(current.rules);
+      const one = load().get(key);
+      if (one && one.head === head && one.base === base && one.rules === hash) return { judgment: { level: one.level, why: one.why }, failed: null };
+      const failure = failures.get(key);
+      return { judgment: null, failed: failure && failure.head === head && failure.base === base && failure.rules === hash ? failure.reason : null };
     },
     save(input) {
       const body = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
@@ -516,7 +611,10 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       if (body.provider !== null && typeof body.provider !== "string") throw new InboxError("validation_error", "provider: an agent from the list, or null.", { field: "provider" });
       if (typeof body.provider === "string" && !RISK_AGENTS.some((a) => a.id === body.provider)) throw new InboxError("validation_error", "provider: an agent from the list, or null.", { field: "provider" });
       if (body.model !== null && typeof body.model !== "string") throw new InboxError("validation_error", "model: a model from the list, or null.", { field: "model" });
-      const next: PullRiskSettings = { rules: body.rules.trim(), provider: (body.provider as string | null) || null, model: (body.model as string | null) || null };
+      if (body.branches !== undefined && typeof body.branches !== "boolean") throw new InboxError("validation_error", "branches: true or false.", { field: "branches" });
+      // Absent (a window from before Branch reviews, or with it off): what the person chose stays.
+      const branches = typeof body.branches === "boolean" ? body.branches : settings().branches;
+      const next = { rules: body.rules.trim(), provider: (body.provider as string | null) || null, model: (body.model as string | null) || null, ...(branches ? { branches: true } : {}) };
       if (!saveConfig({ inboxPullRisk: next })) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
       // The person just looked at this: start over, with whatever they changed.
       lastFailure = null;

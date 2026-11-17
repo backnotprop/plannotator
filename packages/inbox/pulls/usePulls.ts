@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { InboxPullsAnswer, InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
+import { rememberFarBranches } from './branchReviews';
 
 /** The window got its focus back: the list is read again, at most this often. */
 export const PULLS_FOCUS_MS = 20_000;
@@ -65,10 +66,13 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
         .then(([answer, rows]) => {
           if (controller.signal.aborted) return;
           setModel(answer);
+          // A linked machine's reported branch: its thread opens there (Branch reviews).
+          rememberFarBranches(rows);
           setReviews(rows);
           setError(null);
-          // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call).
-          if (answer.hosts.some((h) => h.others_pending)) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
+          // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call). The
+          // same for a linked machine's reported branches, read in the background too.
+          if (answer.hosts.some((h) => h.others_pending) || rows.branches_pending) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
         })
         .catch((cause: unknown) => {
           if (controller.signal.aborted) return;
@@ -146,7 +150,9 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
     inboxApi.reviewsCached(controller.signal).then(
       (rows) => {
         // Nothing read since the Inbox started (`cold`): the next read of the list brings them.
-        if (!controller.signal.aborted && !('cold' in rows)) setReviews(rows);
+        if (controller.signal.aborted || 'cold' in rows) return;
+        rememberFarBranches(rows);
+        setReviews(rows);
       },
       () => {
         // The next read of the list says what is wrong.

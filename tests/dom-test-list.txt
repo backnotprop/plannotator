@@ -366,6 +366,8 @@ packages/review-editor/components/ReviewPanelToggle.test.tsx
 packages/review-editor/App.commitsJj.test.tsx
 packages/review-editor/App.emptyDiffSwitch.test.tsx
 packages/review-editor/App.sessionTitle.test.tsx
+packages/review-editor/App.diffLoadFailure.test.tsx
+packages/review-editor/App.planLookTwoTabs.test.tsx
 packages/review-editor/components/AnnotationToolbar.placement.test.tsx
 packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
 packages/review-editor/components/FileHeader.edit.test.tsx
@@ -824,4 +826,6 @@ packages/inbox/replyMentionsField.test.tsx
 packages/inbox/components/listDrops.test.tsx
 packages/inbox/agents/projectFaceMarks.test.tsx
 packages/ui/components/frame/frame.dom.test.tsx
+packages/ui/components/frame/card/card.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
+packages/inbox/pulls/branchReviews.test.tsx

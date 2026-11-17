@@ -55,7 +55,7 @@ import { HoldingChips, SnippetText } from '../parts/FoldLine';
 import { atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard } from './ReviewCard';
-import { reviewOpenPlan } from '../pulls/reviewsModel';
+import { ReviewViewNote, reviewOpenPlan } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
@@ -5464,7 +5464,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           );
           return before;
         })}
-        {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
+        {reviewView && <ReviewViewNote view={reviewView} />}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />

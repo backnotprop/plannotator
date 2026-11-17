@@ -484,8 +484,8 @@ describe.if(hasDom)('the side panel and the answers', () => {
   test("a part's box stays inside the board's own box, not only the window", async () => {
     const r = rig();
     await mount(r.host);
-    // The board in a pane from x 400 to 1000; the part at its left edge.
-    const board = document.querySelector<HTMLElement>('.shp-root')!;
+    // The board's surface in a pane from x 400 to 1000 (beside References it ends left of the panel); the part at its left edge.
+    const board = document.querySelector<HTMLElement>('.shp-surface')!;
     board.getBoundingClientRect = () => ({ left: 400, top: 0, right: 1000, bottom: 760, width: 600, height: 760, x: 400, y: 0, toJSON: () => ({}) }) as DOMRect;
     const part = inDrawing<HTMLElement>('[data-mark="whistle"]')!;
     part.getBoundingClientRect = () => ({ left: 410, top: 100, right: 430, bottom: 120, width: 20, height: 20, x: 410, y: 100, toJSON: () => ({}) }) as DOMRect;
