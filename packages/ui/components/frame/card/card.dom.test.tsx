@@ -597,9 +597,46 @@ describe.skipIf(!hasDom)('CardRow', () => {
     const rows = [...list.querySelectorAll<HTMLElement>('[data-frame-card-row]')];
     expect(rows.map((row) => row.getAttribute('data-frame-card-columns'))).toEqual(['action', 'action']);
     for (const row of rows) {
-      const cells = [...row.children];
-      expect(cells.at(-2)!.hasAttribute('data-frame-card-end')).toBe(true);
-      expect(cells.at(-1)!.hasAttribute('data-frame-card-action')).toBe(true);
+      const end = [...row.children].at(-1)!;
+      expect(end.hasAttribute('data-frame-card-end')).toBe(true);
+      const trail = end.querySelector('[data-frame-card-trail]')!;
+      expect(trail.lastElementChild!.hasAttribute('data-frame-card-action')).toBe(true);
+      expect(row.querySelector('a')!.contains(trail)).toBe(false);
+    }
+  });
+
+  test('CardRows passes the host its class name, data attributes and other list props', () => {
+    const { CardRow, CardRows } = cardModule!;
+    const frame = mount(
+      <CardRows label="Plans" className="host-list" data-testid="plans" id="plans-list" style={{ marginTop: 4 }}>
+        <CardRow kind="document" title="One" href="/1" />
+      </CardRows>,
+    );
+    const list = frame.querySelector('ul')!;
+    expect(list.className).toBe('host-list');
+    expect(list.getAttribute('data-testid')).toBe('plans');
+    expect(list.id).toBe('plans-list');
+    expect(list.style.marginTop).toBe('4px');
+    expect(list.getAttribute('aria-label')).toBe('Plans');
+    expect(list.hasAttribute('data-frame-card-rows')).toBe(true);
+  });
+
+  test('a pinned row rests with a plain pin after its title, drawn by the card; the host action stays its own, after the trailing text in the DOM', () => {
+    const { CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="document" title="Pinned" href="/p" fact="Your move" pinned action={<button type="button">Unpin</button>} />
+        <CardRow kind="document" title="Loose" href="/l" fact="Your move" action={<button type="button">Pin</button>} />
+      </>,
+    );
+    const [pinned, loose] = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-row]')];
+    const mark = pinned!.querySelector('a [data-frame-card-pinned-mark]')!;
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(mark.previousElementSibling!.hasAttribute('data-frame-card-title')).toBe(true);
+    expect(loose!.querySelector('[data-frame-card-pinned-mark]')).toBeNull();
+    for (const row of [pinned!, loose!]) {
+      expect(row.getAttribute('data-frame-card-columns')).toBe('action');
+      expect(row.querySelector('[data-frame-card-trail] > [data-frame-card-line]')!.nextElementSibling!.hasAttribute('data-frame-card-action')).toBe(true);
     }
   });
 });

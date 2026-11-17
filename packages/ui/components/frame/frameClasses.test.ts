@@ -366,21 +366,22 @@ describe('card layout rules in frame.css', () => {
     expect(block('[data-frame-card-thumb] .frame-card-window-bar > i')).toContain('display: none;');
   });
 
-  test('a row action takes a column only while a row in its list is pinned, or with no hover; otherwise it shows over the end of the grey line on hover or its own focus, and focus on the link leaves the line in view', () => {
-    const reserved = ':is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *)';
+  test('a row never moves: no rule changes its columns for a pin, and the action shows just before the trailing text on hover or keyboard focus only', () => {
     expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(0, 1fr) 180px;');
-    expect(block('[data-frame-card-row] > [data-frame-card-action]')).toContain('position: absolute;');
-    expect(block('[data-frame-card-row] > [data-frame-card-action]')).toContain('right: 10px;');
-    const hover = css.slice(css.indexOf('@media (hover: hover) {'));
-    const hidden = block(`[data-frame-card-row]:not(${reserved}):not(:hover, :has(> [data-frame-card-action]:focus-within)) > [data-frame-card-action]`, hover);
-    expect(hidden).toContain('opacity: 0;');
-    expect(hidden).toContain('pointer-events: none;');
-    expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]:not(${reserved}):is(:hover, :has(> [data-frame-card-action]:focus-within)) > [data-frame-card-end]`, hover)).toContain('opacity: 0;');
-    expect(css).not.toMatch(/:focus-within\) > \[data-frame-card-end\]/);
-    expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]${reserved}`)).toContain('grid-template-columns: 36px minmax(0, 1fr) 180px 28px;');
-    expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]${reserved} > [data-frame-card-action]`)).toContain('position: relative;');
+    expect(block('[data-frame-card-row][data-frame-card-columns~="secondary"]')).toContain('grid-template-columns: 36px minmax(0, 1fr) 160px 180px;');
+    const columnRules = [...css.matchAll(/([^{}]+)\{([^{}]*grid-template-columns[^{}]*)\}/g)].map(([, selector]) => selector!).filter((selector) => selector.includes('[data-frame-card-row]'));
+    for (const selector of columnRules) {
+      expect(selector).not.toContain('pinned');
+      expect(selector).not.toContain('data-frame-card-columns~="action"');
+    }
+    expect(block('[data-frame-card-trail] > [data-frame-card-action]')).toContain('position: absolute;');
+    expect(block('[data-frame-card-trail] > [data-frame-card-action]')).toContain('right: calc(100% + 6px);');
+    expect(css).not.toMatch(/\[data-frame-card-(line|end|trail)\][^{]*\{[^}]*opacity: 0;/);
+    expect(block('[data-frame-card-row]:is(:hover, :has(:focus-visible)) [data-frame-card-action]')).toContain('opacity: 1;');
+    const actionRules = [...css.matchAll(/([^{}]+)\{[^{}]*\}/g)].map(([, selector]) => selector!).filter((selector) => selector.includes('[data-frame-card-action]') && selector.includes('[data-frame-card-row]'));
+    for (const selector of actionRules) expect(selector).not.toContain(':focus-within');
     const noHover = css.slice(css.indexOf('@media (hover: none) {\n  [data-frame-card-row]'));
-    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]', noHover)).toContain('180px 28px;');
+    expect(noHover).toContain('padding-inline-end: 20px;');
   });
 
   test('a host focus outline of ordinary weight does not draw a second ring on a card or row link', () => {
@@ -417,21 +418,44 @@ describe('card layout rules in frame.css', () => {
     expect(weight(rule)).toBe(300);
   });
 
-  test('keyboard focus on a row fills it more than hover and underlines its title; hover is unchanged; no row draws an edge, outline or border in any state', () => {
+  test('keyboard focus on a row fills it more than hover and underlines its title; hover is unchanged', () => {
     const focused = '[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *))';
-    expect(block(focused)).toContain('background: color-mix(in oklch, var(--primary) 20%, transparent);');
+    expect(block(focused)).toContain('background: color-mix(in oklch, var(--primary) 16%, transparent);');
     const title = block(`${focused} [data-frame-card-title]`);
     expect(title).toContain('text-decoration: underline;');
     expect(title).toContain('text-underline-offset: 3px;');
     expect(title).not.toContain('color:');
-    expect(block('[data-frame-card-row]:hover')).toContain('background: var(--frame-surface-hover);');
-    expect(block('[data-frame-card-row]:hover')).not.toContain('text-decoration');
-    const rowRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([selector]) => selector!.includes('[data-frame-card-row]'));
-    expect(rowRules.length).toBeGreaterThan(10);
-    for (const [, , body] of rowRules) {
+    expect(block('[data-frame-card-row]:hover')).toBe('[data-frame-card-row]:hover {\n  background: var(--frame-surface-hover);\n');
+  });
+
+  test('no row ever draws an edge: no shadow, border, outline, gradient or drawn pseudo-element in frame.css or motions.css, and no such classes on a row in Card.tsx', () => {
+    const rules = (source: string) => [...source.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/([^{}]+)\{([^{}]*)\}/g)].map(([, selector, body]) => [selector!.trim(), body!] as const);
+    const rowish = /\[data-frame-card-(row|rows|trail|end|line|title|secondary|dot)\]/;
+    const checked = [...rules(frameCss), ...rules(motionsCss)].filter(([selector]) => rowish.test(selector) && !selector.includes('[data-frame-card]:') && !/^\[data-frame-card\] /.test(selector));
+    expect(checked.length).toBeGreaterThan(15);
+    for (const [selector, body] of checked) {
       expect(body).not.toMatch(/\bbox-shadow:/);
       expect(body).not.toMatch(/\b(border|outline)(-[a-z]+)?:(?!\s*none;)/);
+      expect(body).not.toMatch(/gradient\(/);
+      expect(selector).not.toMatch(/\[data-frame-card-row\][^,]*::?(before|after)/);
     }
-    expect(css).not.toContain('var(--primary-foreground)');
+    const tsx = readFileSync(join(folder, 'card', 'Card.tsx'), 'utf8');
+    const rowSource = ['export function CardRow(', 'export function CardRows(', 'function GreyLine(', 'function Dot('].map((start) => {
+      const at = tsx.indexOf(start);
+      expect(at).toBeGreaterThan(-1);
+      return tsx.slice(at, tsx.indexOf('\n}\n', at));
+    });
+    expect(rowSource.join('\n')).toContain('before:absolute');
+    for (const source of rowSource) {
+      const literals = [...source.matchAll(/"([^"\n]*)"|`([^`]*)`/g)].map(([, plain, template]) => plain ?? template ?? '');
+      for (const classes of literals) {
+        const words = classes.split(/\s+/);
+        for (const word of words) {
+          expect(word).not.toMatch(/^(?:[a-z-]+:)*(border|ring|shadow|inset-shadow|outline-(?!none)|bg-(linear|radial|conic|gradient)|from-|via-|to-)/);
+          expect(word).not.toMatch(/^(?:[a-z-]+:)*after:/);
+          expect(word).not.toMatch(/^(?:[a-z-]+:)*before:(bg|border|shadow|ring|from|via|to|w-|h-|inset-y|left-|right-)/);
+        }
+      }
+    }
   });
 });

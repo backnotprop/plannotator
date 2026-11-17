@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentPropsWithoutRef,
   type CSSProperties,
   type ElementType,
   type ReactNode,
@@ -470,6 +471,15 @@ function GreyLine({
   );
 }
 
+/** A pinned row's resting mark, after its title: a plain pin. */
+function PinnedMark() {
+  return (
+    <svg data-frame-card-pinned-mark="" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" className="ml-1.5 shrink-0 text-muted-foreground">
+      <path d="M6 2h4l-.5 4 2.5 2.5V10H4V8.5L6.5 6 6 2Zm2 8v4" fill="currentColor" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
 function Dot() {
   return <span data-frame-card-dot="" aria-hidden="true" className="mr-[7px] inline-block size-[7px] shrink-0 rounded-full bg-primary align-[1px]" />;
 }
@@ -579,20 +589,23 @@ export function CardRow({
         <span data-frame-card-title="" dir="auto">
           {title}
         </span>
+        {pinned && <PinnedMark />}
       </Link>
       {secondary !== undefined && (
         <span data-frame-card-secondary="" aria-hidden="true" className="truncate text-[13px] text-muted-foreground">
           {secondary}
         </span>
       )}
-      <span data-frame-card-end="" className="flex min-w-0 justify-end">
-        <GreyLine fact={fact} factMark={factMark} factTone={factTone} working={working} date={date} />
-      </span>
-      {present(action) && (
-        <span data-frame-card-action="" className="z-20 flex items-center justify-end">
-          {action}
+      <span data-frame-card-end="" className="flex min-w-0 items-center justify-end">
+        <span data-frame-card-trail="" className="relative flex min-w-0 items-center">
+          <GreyLine fact={fact} factMark={factMark} factTone={factTone} working={working} date={date} />
+          {present(action) && (
+            <span data-frame-card-action="" className="z-20 flex items-center justify-end">
+              {action}
+            </span>
+          )}
         </span>
-      )}
+      </span>
     </div>
   );
 }
@@ -665,9 +678,18 @@ const CARD_GRID_ROW_GAP: Record<CardSize, number> = { large: 28, regular: 44 };
  * row's edge; once any row is pinned, every row keeps a column for it, so the
  * dates still line up.
  */
-export function CardRows({ children, label, ref }: { readonly children: ReactNode; readonly label?: string; readonly ref?: Ref<HTMLUListElement> }) {
+export function CardRows({
+  children,
+  label,
+  ref,
+  ...rest
+}: Omit<ComponentPropsWithoutRef<"ul">, "children" | "aria-label" | "dangerouslySetInnerHTML"> & {
+  readonly children: ReactNode;
+  readonly label?: string;
+  readonly ref?: Ref<HTMLUListElement>;
+}) {
   return (
-    <ul ref={ref} aria-label={label} data-frame-card-rows="">
+    <ul {...rest} ref={ref} aria-label={label} data-frame-card-rows="">
       {Children.map(children, (child) => (present(child) ? <li className="min-w-0">{child}</li> : null))}
     </ul>
   );
