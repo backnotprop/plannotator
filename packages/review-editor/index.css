@@ -2535,7 +2535,7 @@ diffs-container {
 }
 
 .review-sidebar [data-panel-search-field] {
-  --panel-header-h: 28px;
+  height: 28px !important;
   margin-top: 4px;
   padding-inline: 0;
   border-bottom: 0;
