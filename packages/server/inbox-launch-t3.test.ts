@@ -169,13 +169,14 @@ function setup(options: { t3?: boolean; known?: boolean; used?: FakeT3UsedThread
   };
   /** What compose sends: To's agent and project, and the pick (none for Default). */
   /** `name` null: no thread name, so T3's title is the thread's subject (its first line). */
-  const prepare = async (body: string, at = project, pick: { model?: string; effort?: string } = {}, name: string | null = "Checkout copy") => {
+  /** `from`: sent from another linked machine's window (the machine door), as compose passes it. */
+  const prepare = async (body: string, at = project, pick: { model?: string; effort?: string } = {}, name: string | null = "Checkout copy", from: { machine: string; name: string } | null = null) => {
     const target = launch.target({ launch: { agent: "t3", project_id: at.id, ...pick } })!;
-    const prepared = await launch.prepare(target, { ...(name !== null ? { name } : {}), body, resolveProject: async () => at });
+    const prepared = await launch.prepare(target, { ...(name !== null ? { name } : {}), body, resolveProject: async () => at, from });
     return store.startPersonThread({ project_id: at.id, body, to: prepared.to, idempotency_key: `send-${body}`, ...(name !== null ? { thread_name: name } : {}), launch: prepared.launch }).message;
   };
-  const send = async (body: string, at = project, pick: { model?: string; effort?: string } = {}, name: string | null = "Checkout copy") => {
-    const message = await prepare(body, at, pick, name);
+  const send = async (body: string, at = project, pick: { model?: string; effort?: string } = {}, name: string | null = "Checkout copy", from: { machine: string; name: string } | null = null) => {
+    const message = await prepare(body, at, pick, name, from);
     launch.begin(message);
     return message;
   };
@@ -542,9 +543,10 @@ describe("T3 Code through the launch engine, against a fake t3", () => {
     expect((await dots.launch.composeBlock())!.agents.find((a) => a.agent === "t3")?.starts_in).toEqual([dots.project.id]);
   });
 
-  test("when T3 refuses, the run line says why in plain words: T3 Code not open (named for linked machines), a folder T3 doesn't know; never a path", async () => {
+  test("when T3 refuses, the run line says why in plain words: T3 Code not open (this computer here; named only for a launch another machine sent), a folder T3 doesn't know; never a path", async () => {
     for (const state of ["down", "stale"] as const) {
-      const down = setup();
+      // This machine has a name linked machines know it by, but a launch started here reads "this computer".
+      const down = setup({ machine: "Mini" });
       down.t3!.setState(state);
       const one = await down.send("Tighten the checkout copy.");
       const error = await until("the start failed", () => down.store.message(one.id)!.launch!.error);
@@ -553,10 +555,10 @@ describe("T3 Code through the launch engine, against a fake t3", () => {
       expect(down.store.message(one.id)!.delivery).toBeUndefined();
     }
 
-    // Read in every linked machine's window: it names the computer.
+    // Sent from another linked machine's window: it names this computer, as linked machines know it.
     const named = setup({ machine: "Mini" });
     named.t3!.setState("down");
-    const there = await named.send("Tighten the checkout copy.");
+    const there = await named.send("Tighten the checkout copy.", named.project, {}, "Checkout copy", { machine: "ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV", name: "MacBook" });
     expect((await until("the start failed", () => named.store.message(there.id)!.launch!.error)).text).toBe("T3 Code isn't open on Mini. Open it there, then try again.");
 
     const unknown = setup({ known: false });

@@ -67,7 +67,7 @@ const T3_NO_PROJECT = /^No T3 Code project matches /;
 const T3_NOT_RUNNING = /^(No running T3 Code server uses |Could not reach the T3 Code server)/;
 /** What the person reads when T3 Code is not open on this computer (never T3's path or "server"). */
 export const T3_LAUNCH_NOT_OPEN = "T3 Code isn't open on this computer. Open it, then try again.";
-/** The same, named for a computer linked machines know by name: every window shows it, so each reads which one. */
+/** The same, for a launch another linked machine sent here: named as linked machines know this one, so that window reads which computer. */
 export const t3NotOpenWords = (machine: string | null | undefined): string => (machine ? `T3 Code isn't open on ${machine}. Open it there, then try again.` : T3_LAUNCH_NOT_OPEN);
 /** The run line's cause for a start the Inbox closed during: its Try again takes a thread that start made. */
 export const T3_LAUNCH_INTERRUPTED = "The Inbox closed while T3 Code was starting. Try again: if T3 Code made the thread, the Inbox picks it up.";
@@ -467,6 +467,9 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
     trusts: () => true,
 
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; firstTurn?: string }) {
+      // This machine is named only for a launch another machine sent here (its window reads which computer); one
+      // started here reads "this computer", as the engine's own not-ready line does.
+      const machine = launch.from ? (ctx.machineName?.() ?? null) : null;
       const found = await command();
       if (!found) return { ok: false as const, code: "missing" as const, text: `${T3_LAUNCH_MISSING}.` };
       const project = basename(launch.folder);
@@ -505,7 +508,7 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
       const thread = !result.timedOut && result.exitCode === 0 ? t3StartedThreadOf(result.stdout) : null;
       // How it ended decides whether a later Try again may take a thread it made: only when T3 didn't say.
       writeAttempt(launch.id, { title, before: (listed ?? []).map((t) => t.threadId), at: startedAt, outcome: !listed ? "unlisted" : thread ? "started" : result.timedOut || result.exitCode === 0 ? "uncertain" : "refused" });
-      if (!thread) return { ok: false as const, code: "failed" as const, text: t3StartFailure(result, project, ctx.machineName?.() ?? null, startTimeoutMs) };
+      if (!thread) return { ok: false as const, code: "failed" as const, text: t3StartFailure(result, project, machine, startTimeoutMs) };
       ctx.startLog(launch.id, `T3 thread ${thread}, in a new worktree from ${base}`);
       return { ok: true as const, session: thread, ref: thread };
     },
