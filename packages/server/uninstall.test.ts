@@ -3278,9 +3278,9 @@ describe("the Inbox reminder hooks (inbox-reminder-hooks.ts)", () => {
     expect(readFileSync(join(fixture.homeDir, ".gemini", "settings.json"), "utf8")).toBe(geminiMine);
     expect(existsSync(join(fixture.homeDir, ".kiro", "hooks", "plannotator-inbox.json"))).toBe(false);
     expect(result.removed.filter((line) => line.startsWith("Plannotator's Inbox reminder hook in "))).toEqual([
-      "Plannotator's Inbox reminder hook in ~/.gemini/settings.json",
-      "Plannotator's Inbox reminder hook in ~/.kiro/hooks/plannotator-inbox.json",
-      "Plannotator's Inbox reminder hook in ~/.codex/hooks.json",
+      `Plannotator's Inbox reminder hook in ${join("~", ".gemini", "settings.json")}`,
+      `Plannotator's Inbox reminder hook in ${join("~", ".kiro", "hooks", "plannotator-inbox.json")}`,
+      `Plannotator's Inbox reminder hook in ${join("~", ".codex", "hooks.json")}`,
     ]);
   });
 
