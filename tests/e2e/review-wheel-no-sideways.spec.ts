@@ -206,7 +206,7 @@ test('after scrolling, a tree click opens the far-right file with its change in 
   try {
     const { context, page } = await open(browser, session.url);
     await scrollOnce(page);
-    await page.getByText('z-routes.ts', { exact: true }).first().click();
+    await page.locator('[data-changes-tree] [data-type="item"][data-item-path$="z-routes.ts"]').first().click();
     await expect.poll(async () => (await shownColumns(page)).filter((c) => c.long && c.left > 0).map((c) => c.side).sort(), { timeout: 15_000 }).toEqual(['new', 'old']);
     await page.getByRole('tab', { name: 'All changes' }).click();
     await page.waitForTimeout(1_000);
