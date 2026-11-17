@@ -317,6 +317,23 @@ test("the Inbox list's Hide: one write naming the threads, one toast, and Undo s
   expect(sent[1]!.body).toMatchObject({ hide: [], threads: [], show: [key(7), WEB20] });
 });
 
+test("the Inbox list's Hide with nothing left to hide says so; one that takes threads out says that too", async () => {
+  if (!hasDom) return;
+  const none = hidden.hideThreadsWithUndo(['thr_a'], (toast, ms) => toasts.push({ toast, ms }));
+  await settle();
+  sent[0]!.answer(200, { hidden: [], hid: [], threads_left: [] });
+  expect(await none).toBe(false);
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]!.toast.onUndo).toBeUndefined();
+  const two = hidden.hideThreadsWithUndo(['thr_a', 'thr_b'], (toast, ms) => toasts.push({ toast, ms }));
+  await settle();
+  sent[1]!.answer(200, { hidden: [], hid: [key(7), key(8)], threads_left: ['thr_a', 'thr_b'] });
+  expect(await two).toBe(true);
+  expect(toasts[1]!.toast.lead).not.toBe(toasts[0]!.toast.lead);
+  expect(toasts[1]!.toast.lead).toContain('2 threads');
+  expect(toasts[1]!.toast.onUndo).toBeDefined();
+});
+
 test("a hidden PR keeps its review thread in a thread's PR list", () => {
   if (!hasDom) return;
   const model = { ...MODEL, pulls: MODEL.pulls.filter((p) => p.key !== key(7)), hidden: [{ key: key(7), title: 'Change 7', url: pull(7).url, at: '2026-11-17T12:00:00.000Z', thread_id: 'thr_review' }] };

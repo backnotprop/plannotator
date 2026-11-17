@@ -11,7 +11,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPull, InboxReviewRow } from "@plannotator/core/inbox-types";
-import { createInboxPullHidden, INBOX_PULL_HIDDEN_FILE, PULL_HIDDEN_KEPT, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, type PullToHide } from "./inbox-pull-hidden";
+import { createInboxPullHidden, INBOX_PULL_HIDDEN_FILE, PULL_HIDDEN_KEPT, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -127,18 +127,40 @@ describe("Reviews' rows with hidden PRs", () => {
 describe("the Inbox list's threads with hidden PRs", () => {
   const inPlay = (threads: Record<string, number[]>) =>
     new Map(Object.entries(threads).map(([id, numbers]) => [id, new Map<string, PullToHide>(numbers.map((n) => [pull(n).key, { ...hide(n), thread_id: id }]))]));
+  const T1 = "2026-11-17T10:00:00.000Z";
+  const T2 = "2026-11-17T11:00:00.000Z";
 
-  test("a thread whose PRs in play are all hidden leaves; one with a PR still shown stays and offers that one", () => {
-    const hiddenKeys = new Set([pull(7).key, pull(8).key]);
-    const { gone, hideable } = threadPullsHidden(inPlay({ thr_a: [7], thr_b: [8, 9], thr_c: [10], thr_d: [] }), (key) => hiddenKeys.has(key));
-    expect([...gone]).toEqual(["thr_a"]);
+  test("a thread whose PRs in play are all hidden leaves, with its newest hide; one with a PR still shown stays and offers that one", () => {
+    const at: Record<string, string> = { [pull(7).key]: T1, [pull(8).key]: T1, [pull(11).key]: T2 };
+    const { gone, hideable } = threadPullsHidden(inPlay({ thr_a: [7], thr_b: [8, 9], thr_c: [10], thr_d: [], thr_e: [7, 11] }), (key) => at[key] ?? null);
+    expect([...gone]).toEqual([["thr_a", T1], ["thr_e", T2]]);
     expect(hideable.get("thr_b")!.map((p) => p.key)).toEqual([pull(9).key]);
     expect(hideable.get("thr_c")!.map((p) => p.key)).toEqual([pull(10).key]);
     // A thread with no PR in play is neither.
     expect(hideable.has("thr_d")).toBe(false);
+    expect(threadPullsHidden(inPlay({ thr_a: [7] }), () => null).gone.size).toBe(0);
   });
 
-  test("nothing hidden: no thread leaves", () => {
-    expect(threadPullsHidden(inPlay({ thr_a: [7] }), () => false).gone.size).toBe(0);
+  test("it stays out until something newer than the hide happens in it; never while pinned or snoozed", () => {
+    const quiet = { pinned: false, snoozed: false, activity: ["2026-11-17T09:00:00.000Z", null] };
+    expect(threadStaysHidden(T1, quiet)).toBe(true);
+    // An agent message (or a question, a prompt, a stop, the person's own send, a snooze come due) after the hide.
+    expect(threadStaysHidden(T1, { ...quiet, activity: ["2026-11-17T09:00:00.000Z", "2026-11-17T10:00:01.000Z"] })).toBe(false);
+    // A newer hide takes it out again.
+    expect(threadStaysHidden(T2, { ...quiet, activity: ["2026-11-17T10:00:01.000Z"] })).toBe(true);
+    expect(threadStaysHidden(T1, { ...quiet, pinned: true })).toBe(false);
+    expect(threadStaysHidden(T1, { ...quiet, snoozed: true })).toBe(false);
+  });
+
+  test("a thread that came back stays back across a restart, until a newer return replaces it", () => {
+    const dataDir = scratch();
+    const hidden = createInboxPullHidden(dataDir);
+    hidden.change({ hide: [hide(7)], show: [] }, new Date(T1));
+    hidden.markBack([{ thread_id: "thr_a", at: T2 }]);
+    hidden.markBack([{ thread_id: "thr_a", at: T1 }]);
+    const again = createInboxPullHidden(dataDir);
+    expect(again.backOf("thr_a")).toBe(T2);
+    expect(again.atOf(pull(7).key)).toBe(T1);
+    expect(again.atOf(pull(8).key)).toBeNull();
   });
 });

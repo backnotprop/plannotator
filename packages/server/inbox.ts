@@ -330,7 +330,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
-import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, type PullToHide } from "./inbox-pull-hidden";
+import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
@@ -1442,10 +1442,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   // The thread each open PR's review or hand-off links it to, as the lists last read it (`linkInboxPulls`): with the
   // threads' own PR lists, how the Inbox list knows a thread whose PRs are all hidden. In memory; a hidden PR keeps
-  // its thread in its record.
+  // its thread in its record. `pullThreadsRead`: a pulls or reviews read filled it since this Inbox started.
   const pullThreads = new Map<string, { thread_id: string; title: string; url: string }>();
+  let pullThreadsRead = false;
   const notePullThreads = (listed: readonly InboxPull[], links: Readonly<Record<string, { thread_id: string }>>) => {
-    let touched = false;
+    let touched = !pullThreadsRead && pullHidden.list().length > 0;
+    pullThreadsRead = true;
     for (const pull of listed) {
       const thread = inboxPullIsOpen(pull) ? links[pull.key]?.thread_id : undefined;
       const was = pullThreads.get(pull.key)?.thread_id;
@@ -1455,19 +1457,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     if (touched) pullHiddenChanged();
   };
-  /** The thread a PR belongs to now: its review's or hand-off's, else a thread whose own PR list has it. */
-  const pullThreadOf = (key: string): string | null =>
-    pullThreads.get(key)?.thread_id ?? pullOwners.all().get(key)?.thread_id ?? store.allThreadPulls().find((pull) => pull.pull === key)?.thread_id ?? null;
+  /** The thread a PR belongs to now (its review's or hand-off's, else a thread whose own PR list has it): built once per call. */
+  const pullThreadLookup = (): ((key: string) => string | null) => {
+    const owners = pullOwners.all();
+    const coupled = new Map<string, string>();
+    for (const record of store.allThreadPulls()) if (!coupled.has(record.pull)) coupled.set(record.pull, record.thread_id);
+    return (key) => pullThreads.get(key)?.thread_id ?? owners.get(key)?.thread_id ?? coupled.get(key) ?? null;
+  };
   /** The hidden PRs, each with its thread (as hidden, else as now). */
-  const hiddenList = () =>
-    pullHidden.list().map((hidden) => {
-      if (hidden.thread_id) return hidden;
-      const thread = pullThreadOf(hidden.key);
-      return thread ? { ...hidden, thread_id: thread } : hidden;
+  const hiddenList = () => {
+    const list = pullHidden.list();
+    const threadOf = list.some((hidden) => !hidden.thread_id) ? pullThreadLookup() : null;
+    return list.map((hidden) => {
+      const thread = hidden.thread_id ?? threadOf?.(hidden.key);
+      return thread && !hidden.thread_id ? { ...hidden, thread_id: thread } : hidden;
     });
+  };
   /**
    * Each thread's PRs still in play, for the Inbox list's Hide: its own PR list's (not merged or closed), its review's
    * and hand-off's open PRs, and the hidden PRs that belong to it. A thread PR seen merged or closed forgets its hide.
+   * Until a pulls or reviews read has filled the links since start, its own PR list alone: a thread is never left out
+   * on what is not known yet.
    */
   const threadPullsInPlay = (records: readonly InboxThreadPull[]) => {
     if (pullHidden.settle(records.map((record) => ({ key: record.pull, state: record.state === "unknown" ? "open" : record.state })))) pullHiddenChanged();
@@ -1480,6 +1490,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     for (const record of records) {
       if (record.state !== "merged" && record.state !== "closed") add(record.thread_id, { key: record.pull, title: record.title ?? record.url, url: record.url, thread_id: record.thread_id });
     }
+    if (!pullThreadsRead) return out;
     for (const [key, link] of pullThreads) add(link.thread_id, { key, ...link });
     for (const owner of pullOwners.all()) {
       const pull = pulls.find(owner[0]);
@@ -1487,6 +1498,45 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     for (const hidden of pullHidden.list()) if (hidden.thread_id) add(hidden.thread_id, hidden);
     return out;
+  };
+  /**
+   * The Inbox list's Hide now (inbox-pull-hidden.ts), or null while Code review is off (nothing left out, no Hide
+   * offered): each thread's PRs to hide, and whether a thread stays out (`threadStaysHidden`: never pinned or snoozed,
+   * and only until something newer than its newest hide happens in it). `rows` are as the list draws them (a snooze
+   * already applied). A thread that came back is kept back (`markBack`, on `keep`).
+   */
+  const listHiding = (records: readonly InboxThreadPull[], now: Date) => {
+    if (!codeReviewOn()) return null;
+    const { gone, hideable } = threadPullsHidden(threadPullsInPlay(records), (key) => pullHidden.atOf(key));
+    const pinned = new Set(store.pins().map((pin) => pin.thread_id));
+    const attention = gone.size > 0 ? launch.attentionSince() : () => null;
+    const back: { thread_id: string; at: string }[] = [];
+    const out = (row: InboxListRow): boolean => {
+      const hiddenAt = gone.get(row.thread_id);
+      if (hiddenAt === undefined) return false;
+      const activity = [row.last_at, row.snooze_back, attention(row.thread_id), pullHidden.backOf(row.thread_id)];
+      const stays = threadStaysHidden(hiddenAt, { pinned: pinned.has(row.thread_id), snoozed: inboxRowSnoozed(row, now), activity });
+      if (!stays && !pinned.has(row.thread_id) && !inboxRowSnoozed(row, now)) {
+        const newest = activity.reduce<string>((max, at) => (at && at > max ? at : max), "");
+        if (newest > hiddenAt) back.push({ thread_id: row.thread_id, at: newest });
+      }
+      return stays;
+    };
+    return { out, hideable, keep: () => back.length > 0 && pullHidden.markBack(back) };
+  };
+  /** The threads (not archived) the Inbox list leaves out for their hidden PRs now, by id: a Hide's toast counts the change. */
+  const threadsHiddenNow = (): Set<string> => {
+    const hiding = listHiding(store.allThreadPulls(), new Date());
+    if (!hiding) return new Set();
+    const byThread = snoozesById();
+    const now = new Date();
+    return new Set(
+      store
+        .listRows()
+        .map((row) => withSnooze(row, byThread, now))
+        .filter((row) => !inboxRowArchived(row) && hiding.out(row))
+        .map((row) => row.thread_id),
+    );
   };
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
   const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), ...options.pullRisk });
@@ -1865,9 +1915,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * its `machine`, plus the `machines` block. Without it, this Inbox's own.
    */
   /**
-   * `hidePulls` (the window's and the phone's reads, never a linked machine's): a thread whose PRs still in play are all
-   * hidden (inbox-pull-hidden.ts) is left out, from the sections, the folders' counts, the pins and the agents' counts
-   * alike, and each row carries `hide_pulls`, its open PRs not hidden. Nothing is written to the thread.
+   * `hidePulls` (the window's and the phone's reads, never a linked machine's; only while Code review is on): a thread
+   * whose PRs still in play are all hidden (inbox-pull-hidden.ts) is left out, from the sections, the folders' counts
+   * and the agents' counts alike, until something newer than its newest hide happens in it; never a pinned or a
+   * snoozed one (`listHiding`). Each row carries `hide_pulls`, its open PRs not hidden. Nothing is written to the thread.
    */
   const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include", hidePulls = false) => {
     // One pass over the store feeds both the folders' counts and the sections.
@@ -1898,7 +1949,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // a changed state lands as a `thread_pull` line and the window reads the list again.
     const pullsByThread = new Map<string, InboxThreadPull[]>();
     const threadPulls = store.allThreadPulls();
-    const hiddenPulls = hidePulls ? threadPullsHidden(threadPullsInPlay(threadPulls), (key) => pullHidden.has(key)) : null;
+    const hiddenPulls = hidePulls ? listHiding(threadPulls, now) : null;
     const withHidePulls = (row: InboxListRow): InboxListRow => {
       const left = hiddenPulls?.hideable.get(row.thread_id);
       return left ? { ...row, hide_pulls: left.map((pull) => pull.key) } : row;
@@ -1922,7 +1973,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const allOwn = store
       .listRows()
       .map((row) => withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))))));
-    const own = hiddenPulls && hiddenPulls.gone.size > 0 ? allOwn.filter((row) => !hiddenPulls.gone.has(row.thread_id)) : allOwn;
+    const own = hiddenPulls ? allOwn.filter((row) => !hiddenPulls.out(row)) : allOwn;
+    hiddenPulls?.keep();
     if (pullsByThread.size > 0) {
       // A thread left out for its hidden PRs is read too: a merge or close seen there brings it back.
       const onView = allOwn.filter((row) => row.pulls && !inboxRowArchived(row)).flatMap((row) => pullsByThread.get(row.thread_id) ?? []);
@@ -5739,10 +5791,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const input = pullHiddenBodyOf(body);
         const inPlay = input.threads.length > 0 ? threadPullsInPlay(store.allThreadPulls()) : null;
         const fromThreads = input.threads.flatMap((id) => [...(inPlay?.get(store.message(id)?.thread_id ?? id)?.values() ?? [])]);
-        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: pullThreadOf(pull.key) })), ...fromThreads].filter((pull, i, all) => !pullHidden.has(pull.key) && all.findIndex((other) => other.key === pull.key) === i);
+        const threadOf = input.hide.length > 0 ? pullThreadLookup() : () => null;
+        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].filter((pull, i, all) => !pullHidden.has(pull.key) && all.findIndex((other) => other.key === pull.key) === i);
+        // `threads_left`: the threads this write takes out of the Inbox list (the toast says so; Undo brings them back).
+        const before = hide.length > 0 ? threadsHiddenNow() : new Set<string>();
         pullHidden.change({ hide, show: input.show }, new Date());
+        const left = hide.length > 0 ? [...threadsHiddenNow()].filter((id) => !before.has(id)) : [];
         pullHiddenChanged();
-        return json({ serverSession, hidden: hiddenList(), hid: hide.map((pull) => pull.key) });
+        return json({ serverSession, hidden: hiddenList(), hid: hide.map((pull) => pull.key), threads_left: left });
       }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);

@@ -559,17 +559,34 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
     const pr = board.pulls.find((p) => p.key === KEY)!;
     expect(pr).toBeDefined();
     expect((await call(w.base, { hide: [{ key: KEY, title: pr.title, url: pr.url }] })).status).toBe(200);
-    // Every search now lists nothing (cut short, another account, a repository no longer a project): still hidden.
-    for (const name of SEARCHES) answer.data[name] = { issueCount: 0, nodes: [] };
-    const empty = await listed(w, "?everywhere=1&refresh=1");
-    expect(empty.pulls.some((p) => p.key === KEY)).toBe(false);
-    expect(empty.hidden?.map((h) => h.key)).toEqual([KEY]);
-    expect((await listed(w, "?everywhere=1&machines=1")).hidden?.map((h) => h.key)).toEqual([KEY]);
-    expect((await reviews(w.base)).hidden?.map((h) => h.key)).toEqual([KEY]);
-    // Seen merged: its record goes.
-    answer.data.merged = { nodes: [ghPull(412, { state: "MERGED", headRefName: "retry/schedule", mergedAt: "2026-11-04T10:00:00Z" })] };
-    answer.data.everyMerged = structuredClone(answer.data.merged);
-    expect((await listed(w, "?refresh=1")).hidden ?? []).toEqual([]);
+    // Each re-read below is past the list's fresh window, so the forge is really asked again.
+    let now = Date.now();
+    const later = () => {
+      now += INBOX_PULLS_FRESH_MS + 1_000;
+      setSystemTime(new Date(now));
+    };
+    try {
+      // Every search now lists nothing (cut short, another account, a repository no longer a project): still hidden.
+      for (const name of SEARCHES) answer.data[name] = { issueCount: 0, nodes: [] };
+      later();
+      const asked = w.forge.graphql().length;
+      const empty = await listed(w, "?everywhere=1&refresh=1");
+      expect(w.forge.graphql().length).toBeGreaterThan(asked);
+      expect(empty.pulls.some((p) => p.key === KEY)).toBe(false);
+      expect(empty.hidden?.map((h) => h.key)).toEqual([KEY]);
+      expect((await listed(w, "?everywhere=1&machines=1")).hidden?.map((h) => h.key)).toEqual([KEY]);
+      expect((await reviews(w.base)).hidden?.map((h) => h.key)).toEqual([KEY]);
+      // Seen merged: its record goes.
+      answer.data.merged = { nodes: [ghPull(412, { state: "MERGED", headRefName: "retry/schedule", mergedAt: "2026-11-04T10:00:00Z" })] };
+      answer.data.everyMerged = structuredClone(answer.data.merged);
+      later();
+      const before = w.forge.graphql().length;
+      const merged = await listed(w, "?refresh=1");
+      expect(w.forge.graphql().length).toBeGreaterThan(before);
+      expect(merged.hidden ?? []).toEqual([]);
+    } finally {
+      setSystemTime();
+    }
   });
 
   test("the Inbox list: a thread whose PRs are all hidden leaves it (and its counts); Show again brings it back", async () => {
@@ -590,6 +607,52 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
     expect((await fetch(`${w.base}/api/inbox/threads/${handed}`)).status).toBe(200);
     expect((await call(w.base, { show: hid.hid })).status).toBe(200);
     expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+  });
+
+  /** A thread handed #412, then hidden from the Inbox list by its row's Hide. */
+  const handedAndHidden = async () => {
+    const w = await world({ codeReview: true, answer: everywhere() });
+    const handed = await w.send("Ready for review.", "handed");
+    await w.pulls();
+    expect((await w.own([KEY], handed)).status).toBe(200);
+    const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; threads_left: string[] };
+    // The toast's "with its thread": this write took it out of the list.
+    expect(res.threads_left).toEqual([handed]);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    return { w, handed };
+  };
+
+  test("the Inbox list: a new agent message brings the thread back; the PR stays hidden", async () => {
+    const { w, handed } = await handedAndHidden();
+    // Nothing new: it stays out, read after read.
+    await w.pulls();
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    await Bun.sleep(5);
+    await w.send("I pushed a fix; have another look?", "handed");
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+    expect((await reviews(w.base)).hidden?.map((h) => h.key)).toContain(KEY);
+    // It stays back once that message is old news.
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+  });
+
+  test("the Inbox list: Code review off leaves nothing out and offers no Hide", async () => {
+    const { w, handed } = await handedAndHidden();
+    expect((await w.setCodeReview(false)).status).toBe(200);
+    const row = (await threadRows(w.base)).find((r) => r.thread_id === handed);
+    expect(row).toBeDefined();
+    expect(row!.hide_pulls).toBeUndefined();
+    expect((await threadRows(w.base)).every((r) => r.hide_pulls === undefined)).toBe(true);
+    expect((await w.setCodeReview(true)).status).toBe(200);
+    expect((await threadRows(w.base)).some((r) => r.thread_id === handed)).toBe(false);
+  });
+
+  test("the Inbox list: a pinned thread is never left out", async () => {
+    const { w, handed } = await handedAndHidden();
+    const pin = await fetch(`${w.base}/api/inbox/threads/${handed}/pin`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: true }) });
+    expect(pin.status).toBe(200);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+    const pins = ((await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { pins: { thread_id: string }[] }).pins;
+    expect(pins.map((p) => p.thread_id)).toContain(handed);
   });
 
   test("refuses another site, a link that is not https and an empty write", async () => {

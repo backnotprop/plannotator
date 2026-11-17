@@ -2016,7 +2016,7 @@ export const inboxApi = {
   pullClose: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close', undefined, machine), { key }),
   /** Hide PRs from Reviews, the board and their counts, or show them again (`POST /api/inbox/pulls/hidden`): kept on this machine, nothing goes to the forge. */
   pullsHidden: (change: { hide?: readonly { key: string; title: string; url: string }[]; threads?: readonly string[]; show?: readonly string[] }) =>
-    post<{ hidden: InboxPullHidden[]; hid?: string[] }>(inboxUrl('/pulls/hidden'), { hide: [...(change.hide ?? [])], threads: [...(change.threads ?? [])], show: [...(change.show ?? [])] }),
+    post<{ hidden: InboxPullHidden[]; hid?: string[]; threads_left?: string[] }>(inboxUrl('/pulls/hidden'), { hide: [...(change.hide ?? [])], threads: [...(change.threads ?? [])], show: [...(change.show ?? [])] }),
   /** Close's Undo: taken only on the machine that closed it, in the last few minutes, so it goes to the same `machine`. */
   pullReopen: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen', undefined, machine), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string, machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], project_id: projectId, validate_only: true }),

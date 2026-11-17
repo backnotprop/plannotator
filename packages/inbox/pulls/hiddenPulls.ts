@@ -153,20 +153,28 @@ function putBack(keys: readonly string[], was: HiddenChanges) {
 
 type HidePick = Pick<InboxPull, 'key' | 'title' | 'url'>;
 
-/** Hide these PRs: gone from the lists at once; a refused write puts them back and throws. */
-export async function hidePulls(pulls: readonly HidePick[], now = new Date()): Promise<void> {
-  if (pulls.length === 0) return;
+/**
+ * Hide these PRs: gone from the lists at once; a refused write puts them back and throws. Resolves how many Inbox
+ * threads left the list with them (a thread whose PRs are now all hidden).
+ */
+export async function hidePulls(pulls: readonly HidePick[], now = new Date()): Promise<number> {
+  if (pulls.length === 0) return 0;
   const at = now.toISOString();
   const keys = pulls.map((pull) => pull.key);
   const byKey = new Map(pulls.map((pull) => [pull.key, pull]));
   const was = change(keys, (key) => ({ hide: true, record: { key, title: byKey.get(key)!.title, url: byKey.get(key)!.url, at }, since: now.getTime() }));
+  const left = new Set<string>();
   try {
-    for (const part of inParts(pulls)) await inboxApi.pullsHidden({ hide: part.map(({ key, title, url }) => ({ key, title, url })) });
+    for (const part of inParts(pulls)) {
+      const answer = await inboxApi.pullsHidden({ hide: part.map(({ key, title, url }) => ({ key, title, url })) });
+      for (const id of answer.threads_left ?? []) left.add(id);
+    }
   } catch (cause) {
     putBack(keys, was);
     throw cause;
   }
   written();
+  return left.size;
 }
 
 /** Show these PRs again: back on the next read. A refused write puts them back in Hidden and throws. */
@@ -186,17 +194,24 @@ export async function showPulls(keys: readonly string[]): Promise<void> {
  * Hide the open PRs of these Inbox threads (the list's row menu and picks): the server names them (`hid`), and the
  * lists drop them at once. Resolves the keys it hid; a refused write throws.
  */
-export async function hideThreadPulls(threadIds: readonly string[], now = new Date()): Promise<string[]> {
+export async function hideThreadPulls(threadIds: readonly string[], now = new Date()): Promise<{ hid: string[]; left: number }> {
   const hid: string[] = [];
+  const left = new Set<string>();
   const records = new Map<string, InboxPullHidden>();
   for (const part of inParts(threadIds)) {
     const answer = await inboxApi.pullsHidden({ threads: part });
     hid.push(...(answer.hid ?? []));
+    for (const id of answer.threads_left ?? []) left.add(id);
     for (const record of answer.hidden) records.set(record.key, record);
   }
   if (hid.length > 0) change(hid, (key) => ({ hide: true, record: records.get(key) ?? { key, title: key, url: '', at: now.toISOString() }, since: now.getTime() }));
   written();
-  return hid;
+  return { hid, left: left.size };
+}
+
+/** A Hide's lead: "Hid #12", and the threads it took out of the Inbox list with it ("Hid #12, with its thread"). */
+export function hidLead(what: string, threads: number): string {
+  return threads === 0 ? what : threads === 1 ? `${what}, with its thread` : `${what}, with ${formatCount(threads)} threads`;
 }
 
 /** "Hid #12" for one, "Hid 3 pull requests" for several. */
@@ -237,8 +252,9 @@ export const HIDE_UNDO_MS = 8_000;
  * is a warning toast in the server's words. Resolves true when they were hidden.
  */
 export async function hideWithUndo(pulls: readonly InboxPull[], toast: Toast | undefined): Promise<boolean> {
+  let threads: number;
   try {
-    await hidePulls(pulls);
+    threads = await hidePulls(pulls);
   } catch (cause) {
     toast?.({ icon: 'warn', lead: 'Couldn’t hide', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS);
     return false;
@@ -248,7 +264,7 @@ export async function hideWithUndo(pulls: readonly InboxPull[], toast: Toast | u
   toast?.(
     {
       icon: 'check',
-      lead: hidToast(pulls),
+      lead: hidLead(hidToast(pulls), threads),
       detail: `Still open on ${new Set(pulls.map((pull) => pull.platform)).size === 1 ? forgeName(pulls[0]!) : 'GitHub and GitLab'}`,
       onUndo: () => void showWithToast(keys, labels, toast),
       noKey: true,
@@ -270,18 +286,23 @@ function stillOpenOn(keys: readonly string[]): string {
  */
 export async function hideThreadsWithUndo(threadIds: readonly string[], toast: Toast | undefined): Promise<boolean> {
   let hid: string[];
+  let threads: number;
   try {
-    hid = await hideThreadPulls(threadIds);
+    ({ hid, left: threads } = await hideThreadPulls(threadIds));
   } catch (cause) {
     toast?.({ icon: 'warn', lead: 'Couldn’t hide', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS);
     return false;
   }
-  if (hid.length === 0) return false;
+  if (hid.length === 0) {
+    // Hidden elsewhere meanwhile (another window, a phone): say so, rather than nothing at all.
+    toast?.({ icon: 'check', lead: 'Already hidden', detail: 'Its pull requests were hidden already.' }, HIDE_UNDO_MS);
+    return false;
+  }
   const labels = hid.map((key) => hiddenLabel({ key }));
   toast?.(
     {
       icon: 'check',
-      lead: hid.length === 1 ? `Hid ${labels[0]}` : `Hid ${formatCount(hid.length)} pull requests`,
+      lead: hidLead(hid.length === 1 ? `Hid ${labels[0]}` : `Hid ${formatCount(hid.length)} pull requests`, threads),
       detail: `Still open on ${stillOpenOn(hid)}`,
       onUndo: () => void showWithToast(hid, labels, toast),
       noKey: true,

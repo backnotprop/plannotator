@@ -2096,6 +2096,20 @@ ${result.text}`);
     },
 
     /**
+     * When each launched thread's agent last asked something of the person through its run line: a prompt in the
+     * window or Terminal, a stop or a failure (`since`). The Inbox list's Hide (inbox-pull-hidden.ts) reads it as new
+     * activity, which brings a thread hidden for its PRs back. One pass over the launches per list read.
+     */
+    attentionSince(): (threadId: string) => string | null {
+      const latest = new Map(roots().map((m) => [m.thread_id, m]));
+      return (threadId) => {
+        const root = latest.get(threadId);
+        const run = root ? runOfRoot(root) : null;
+        return run && (run.state === "waiting_answer" || run.state === "waiting_terminal" || run.state === "stopped" || run.state === "failed") ? run.since : null;
+      };
+    },
+
+    /**
      * Whether a reply to this session starts it again: the session this thread's launch started, and an agent that is
      * neither gone nor without a host here. It has not ended, whatever its liveness says (the window's `launchResumes`).
      */

@@ -6,7 +6,11 @@
  * machine asleep, a search cut short, another account), so absence forgets nothing. New activity on it does not bring
  * it back.
  *
- *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id? } } }
+ *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id? } }, back?: { [thread id]: at } }
+ *
+ * `back`: a thread the Inbox list left out for its hidden PRs and that came back on new activity after the hide (an
+ * agent message, a question, a prompt, a stop or failure, the person's own send, a snooze coming due), with that
+ * activity's time, so it stays back once that activity is read or over; a newer hide takes it out again.
  *
  * Kept on the machine whose window hid it (a window's lists are filtered by its own machine's records, a linked
  * machine's PRs included). The newest `PULL_HIDDEN_KEPT` are kept. Written whole to a temp file, then renamed, 0600; a
@@ -19,7 +23,7 @@ import type { InboxPull, InboxPullHidden, InboxReviewRow } from "@plannotator/co
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_HIDDEN_FILE = "pull-hidden.json";
-/** The newest this many hidden PRs are kept. */
+/** The newest this many hidden PRs are kept (and as many threads' returns). */
 export const PULL_HIDDEN_KEPT = 500;
 /** One write names at most this many PRs or threads (the window sends more in parts). */
 export const PULL_HIDDEN_MAX = 200;
@@ -82,6 +86,12 @@ export interface InboxPullHiddenStore {
   /** The hidden PRs, newest first. */
   list(): InboxPullHidden[];
   has(key: string): boolean;
+  /** When it was hidden, or null when it is not. */
+  atOf(key: string): string | null;
+  /** When the thread came back on activity newer than its hides, or null. */
+  backOf(threadId: string): string | null;
+  /** Threads that came back, each with its activity's time (a later time replaces an earlier one). */
+  markBack(back: readonly { thread_id: string; at: string }[]): void;
   /** Hides and shows again; answers the list now. Hiding a hidden PR keeps its first time. */
   change(input: { hide: readonly PullToHide[]; show: readonly string[] }, now: Date): InboxPullHidden[];
   /**
@@ -97,15 +107,17 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
   const dir = inboxDir(dataDir);
   const file = join(dir, INBOX_PULL_HIDDEN_FILE);
   let hidden: Map<string, Kept> | null = null;
+  const back = new Map<string, string>();
 
   const load = (): Map<string, Kept> => {
     if (hidden) return hidden;
     hidden = new Map();
     if (!existsSync(file)) return hidden;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; hidden?: Record<string, unknown> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; hidden?: Record<string, unknown>; back?: Record<string, unknown> };
       if (parsed.v !== 1 || !parsed.hidden || typeof parsed.hidden !== "object") throw new Error("not a pull hidden file");
       for (const [key, value] of Object.entries(parsed.hidden)) if (isKept(value)) hidden.set(key, keptOf(value));
+      for (const [thread, at] of Object.entries(parsed.back && typeof parsed.back === "object" ? parsed.back : {})) if (typeof at === "string" && Number.isFinite(Date.parse(at))) back.set(thread, at);
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -113,6 +125,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
         // Left where it is: the next write replaces nothing it could not move.
       }
       hidden = new Map();
+      back.clear();
     }
     return hidden;
   };
@@ -121,7 +134,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
     try {
       mkdirSync(dir, { recursive: true });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, hidden: Object.fromEntries(map) })}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify({ v: 1, hidden: Object.fromEntries(map), ...(back.size > 0 ? { back: Object.fromEntries(back) } : {}) })}\n`, { mode: 0o600 });
       renameSync(temp, file);
     } catch {
       // A read-only folder: the records stay in memory.
@@ -134,6 +147,25 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
   return {
     list,
     has: (key) => load().has(key),
+    atOf: (key) => load().get(key)?.at ?? null,
+    backOf: (threadId) => {
+      load();
+      return back.get(threadId) ?? null;
+    },
+    markBack(entries) {
+      const map = load();
+      let changed = false;
+      for (const { thread_id, at } of entries) {
+        if ((back.get(thread_id) ?? "") >= at) continue;
+        back.set(thread_id, at);
+        changed = true;
+      }
+      if (!changed) return;
+      if (back.size > PULL_HIDDEN_KEPT) {
+        for (const [thread] of [...back].sort((a, b) => (a[1] < b[1] ? -1 : 1)).slice(0, back.size - PULL_HIDDEN_KEPT)) back.delete(thread);
+      }
+      save(map);
+    },
     change({ hide, show }, now) {
       const map = load();
       let changed = false;
@@ -170,19 +202,37 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
  * The Inbox list's side of Hide (the owner's ask: "hide them from my inbox list as well"). `inPlay`: each thread's PRs
  * still in play (open, a draft, or not read yet: its own PR list, its review's or hand-off's PRs, and the hidden PRs
  * that belong to it), by key. Answers, per thread, the ones not hidden (the row menu's and the picks' Hide), and the
- * threads whose PRs are all hidden: they leave the list, its counts and the phone's, and stay in search. Nothing is
- * written to the thread: it is back as soon as one of its PRs is shown again, or a hidden one's record goes.
+ * threads whose PRs are all hidden, each with its newest hide: they leave the list, its counts and the phone's
+ * (`threadStaysHidden` says for how long), and stay in search. Nothing is written to the thread: it is back as soon as
+ * one of its PRs is shown again, a hidden one's record goes, or something new happens in it.
  */
-export function threadPullsHidden(inPlay: ReadonlyMap<string, ReadonlyMap<string, PullToHide>>, isHidden: (key: string) => boolean): { gone: Set<string>; hideable: Map<string, PullToHide[]> } {
-  const gone = new Set<string>();
+export function threadPullsHidden(inPlay: ReadonlyMap<string, ReadonlyMap<string, PullToHide>>, hiddenAt: (key: string) => string | null): { gone: Map<string, string>; hideable: Map<string, PullToHide[]> } {
+  const gone = new Map<string, string>();
   const hideable = new Map<string, PullToHide[]>();
   for (const [threadId, pulls] of inPlay) {
     if (pulls.size === 0) continue;
-    const left = [...pulls.values()].filter((pull) => !isHidden(pull.key));
-    if (left.length === 0) gone.add(threadId);
+    let newest = "";
+    const left: PullToHide[] = [];
+    for (const pull of pulls.values()) {
+      const at = hiddenAt(pull.key);
+      if (at === null) left.push(pull);
+      else if (at > newest) newest = at;
+    }
+    if (left.length === 0) gone.set(threadId, newest);
     else hideable.set(threadId, left);
   }
   return { gone, hideable };
+}
+
+/**
+ * Whether a thread whose PRs are all hidden (`hiddenAt`, the newest hide among them) stays out of the Inbox list: not
+ * while pinned (the person chose to keep it in sight), not while snoozed (the Snoozed view lists it as it is), and not
+ * once anything newer than that hide happened in it (`activity`: its last message, a question and the person's own
+ * send included, a snooze that came due, its agent's prompt, stop or failure, or an earlier return). The PR stays hidden.
+ */
+export function threadStaysHidden(hiddenAt: string, thread: { pinned: boolean; snoozed: boolean; activity: readonly (string | null | undefined)[] }): boolean {
+  if (thread.pinned || thread.snoozed) return false;
+  return thread.activity.every((at) => !at || at <= hiddenAt);
 }
 
 /**
