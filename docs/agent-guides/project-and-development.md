@@ -78,7 +78,8 @@ plannotator/
 │       │   ├── plannotator-review/    # Lightweight: opens review UI
 │       │   ├── plannotator-annotate/  # Lightweight: opens annotate UI
 │       │   ├── plannotator-last/      # Lightweight: annotates last message
-│       │   └── plannotator-inbox/     # Lightweight: opens the Inbox (plannotator inbox --open), says its address and briefs the agent on the Inbox; also the Kiro and Vibe copy
+│       │   ├── plannotator-inbox/     # Lightweight: opens the Inbox (plannotator inbox --open), says its address and briefs the agent on the Inbox; also the Kiro and Vibe copy
+│       │   └── plannotator-routine/   # Making an Inbox routine with `plannotator routine` (inbox-routines.md); one copy for Claude, ~/.agents, Kiro and Vibe, from install.sh only (no routines on Windows)
 │       └── extra/                 # EXTRA skills — NOT default-installed (except Kiro); add via `npx skills add backnotprop/plannotator/apps/skills/extra --global`
 │           ├── plannotator-compound/        # Research analysis agent (map-reduce over denied plans)
 │           ├── plannotator-setup-goal/      # Goal package scaffolder for /goal workflows

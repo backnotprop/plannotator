@@ -79,6 +79,11 @@ const KNOWLEDGE_SKILLS = [
 // legacy ~/.claude/commands file or a Codex-home era.
 const INBOX_SKILL = "plannotator-inbox";
 
+// The routine skill (apps/skills/core/plannotator-routine): install.sh copies it
+// to the Claude and shared-agent scopes, ~/.kiro/skills and $VIBE_HOME/skills,
+// like the knowledge skill. Never a command file, so never in LEGACY_COMMAND_NAMES.
+const ROUTINE_SKILL = "plannotator-routine";
+
 const EXTRA_SKILLS = [
   "plannotator-compound",
   "plannotator-setup-goal",
@@ -94,6 +99,7 @@ const KIRO_SKILLS = [
   "plannotator-review",
   "plannotator-annotate",
   INBOX_SKILL,
+  ROUTINE_SKILL,
   // The knowledge skill installs into ~/.kiro/skills like the action skills.
   // Safe to name here: this list only ever removes ~/.kiro/skills/<name>
   // directories, never a command file a user may own.
@@ -111,6 +117,7 @@ const VIBE_SKILLS = [
   "plannotator-annotate",
   "plannotator-last",
   INBOX_SKILL,
+  ROUTINE_SKILL,
   "plannotator",
 ] as const;
 
@@ -1024,7 +1031,7 @@ function removeInstalledFiles(
   paths: ReturnType<typeof resolveOwnedPaths>,
   state: MutableUninstallResult,
 ): void {
-  for (const skill of [...CORE_SKILLS, INBOX_SKILL, ...KNOWLEDGE_SKILLS]) {
+  for (const skill of [...CORE_SKILLS, INBOX_SKILL, ROUTINE_SKILL, ...KNOWLEDGE_SKILLS]) {
     removePath(
       join(paths.claudeDir, "skills", skill),
       request,

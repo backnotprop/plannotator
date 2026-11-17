@@ -36,7 +36,7 @@ The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it
 | --- | --- |
 | MCP tool | `routine`, title "Make or change a routine" |
 | `plannotator_inbox` action | `routine` |
-| Shell | `plannotator routine <op> ['<json>'] [--session <id>]`, the same as `plannotator inbox call routine '{"op":"<op>",…}'` |
+| Shell | `plannotator routine <op> [options]` (below), or `plannotator routine <op> '<json>'` with the tool's fields, both `plannotator inbox call routine '{"op":"<op>",…}'` underneath |
 | Link | `#routine=<id>` opens that routine's editor; `#routines` the list (`#routine=new` a new one) |
 
 - A routine an agent creates arrives off. The person turns it on the first time, in the Inbox (`approved_at` on the record); before that the agent's `on` and `run` answer `routine_not_approved` and change nothing. After that the agent may update, turn it on or off, run it and delete it.
@@ -44,6 +44,19 @@ The `routine` tool (also `plannotator_inbox` action `routine`; the shim fills it
 - An agent's change of the folder or the agent turns it off and clears the approval; the line says so. Prompt and schedule edits apply at once.
 - Runs start in the person's own permission mode, exactly as New message does.
 - `update` changes only the fields passed. A schedule without `tz` takes this computer's zone. `thread_id` is only where the change lines go: runs reply in the routine's own thread, made at its first run. With no `thread_id` the line goes in the routine's own thread (made for it when the routine has none yet); there it is a note, not anyone's words: it wakes no run and takes no reply (`threadOwner`, `wordsMessage`, the run outcome), and the list row says the change (`last_change`, "Changed by Codex") while it is the thread's latest.
+
+### From a shell: `plannotator routine`
+
+`apps/hook/server/routine-command.ts`, for an agent the person asked to make or change one, and the `plannotator-routine` skill that teaches it. Sugar over `plannotator inbox call routine` (who is calling, `--session`, the session's project, starting a stopped Inbox, the refusals and the exit codes are that command's), so it is the agent's `routine` tool exactly: one it makes arrives off, `on` and `run` answer `routine_not_approved` until the person turned it on once, and every value is checked by the server's own rules (`fieldsOf` in `inbox-scheduled.ts`: the 15-minute rule, the schedule's words, the folder refusals, the agents a run can start, which leaves out T3 Code). The command only says which field a flag fills; no rule is copied into it.
+
+- Commands: the tool's ops, `create`, `list`, `get <id>`, `update <id>`, `on <id>`, `off <id>`, `run <id>`, `delete <id>` (the window's Delete: a run under way is stopped, its thread and past runs stay).
+- The editor's fields as flags: `--name`, `--prompt <text>` or `--prompt -` (stdin), `--cron '<cron>'` or `--at <YYYY-MM-DDTHH:MM>` with `--tz` (else this computer's zone; `update --tz` alone is bad usage, as the tool takes the whole schedule), `--if-missed run_once|skip`, `--folder <path>` (relative to the shell's folder, `~` its home) or `--scratch`, `--agent`, `--model`, `--effort`, `--file <path>` (repeat; made whole the same way), and `--thread` (the tool's `thread_id`: where the change line goes). `update` also takes `--no-schedule` and `--no-files`; an empty `--model ''` or `--effort ''` clears it. With no schedule flag a create has none (it runs only when run).
+- In place of flags, the tool's fields as one JSON object (`plannotator routine update '{"id":"sch_1","name":"…"}'`); both at once is bad usage.
+- stdout: the tool's lines (what `rowLine` says), or with `--json` its structured result as one JSON value (`CallCommandDeps.text`). A refusal is `<code>: <message>` on stderr, exit 1; bad usage `usage: …` and the command's help to read, exit 2, before anything is sent.
+- Help: `plannotator routine --help` is the overview (what a routine is, the approval rule, every command's usage line) and `plannotator routine <command> --help` that command's options and examples (`ROUTINE_COMMAND_USAGE`, `ROUTINE_OP_USAGE` in `cli.ts`); both answer with no Inbox, routines on or off. While routines are on, `plannotator inbox --help` names it in the routine section and its Commands block, and `plannotator --help` has one line for it; off, neither says anything of it.
+- The skill (`apps/skills/core/plannotator-routine`): user-invoked like the other core skills (`disable-model-invocation: true`; `--model-invocable plannotator-routine` at install unlocks it), installed by `install.sh` to the Claude Code and `~/.agents/skills` scopes, Kiro and Vibe, and removed by `plannotator uninstall`. Not by the Windows installers: routines are not offered there. The `plannotator` skill's command table points to it.
+
+Tests: `routine-command.test.ts` (parsing, the help lineage, output and exit codes against a stand-in `/mcp`) and `routine-command-cli.test.ts` (the command against a sandboxed Inbox; nothing there is ever turned on or run).
 
 ### The editor
 

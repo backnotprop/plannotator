@@ -212,6 +212,7 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "- Every change posts one line for the person, with a link to the routine and, for an edit, what it was and what it is now: in `thread_id`, the thread you are working in, when you pass it, else in the routine's own thread. Runs never reply in `thread_id`.",
       "- Each run starts the agent the way New message in the Inbox does, in the person's own permission mode. Starting agents from the Inbox must be on (Settings → Agents).",
       "- The person turns routines on and off (Settings → Capabilities in the Inbox). Off, the Inbox lists no `routine`, and a call answers `routines_off` and writes nothing.",
+      "- From a shell: `plannotator routine --help`, then `plannotator routine <command> --help` for each command's options and examples (`plannotator routine create --name … --cron … --prompt …`).",
     ],
   },
 };
@@ -579,6 +580,8 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     INBOX_COMMAND_USAGE,
     // Thread steps from a shell, only while the person has them on.
     ...(steps ? ["", "  plannotator inbox steps [--session <id>] <thread> --json '<list>'", "                                  Your steps in a thread (see steps); '-' reads the list from stdin."] : []),
+    // Routines from a shell, only while the person has them on.
+    ...(scheduled ? ["", "  plannotator routine <create|list|get|update|on|off|run|delete> ...", "                                  Routines from a shell (see routine): plannotator routine --help."] : []),
     "```",
     "",
     "`--tailscale` is the person's choice: never add it to a start you run. The MCP server and the agent tools answer only on this computer.",

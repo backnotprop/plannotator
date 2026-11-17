@@ -109,6 +109,16 @@ describe("install.sh", () => {
     expect(script).toContain("Install git, then run this installer again.");
   });
 
+  test("ships the routine skill to every scope the knowledge skill reaches, and only from install.sh", () => {
+    // What regresses: a scope dropped (the skill is then missing for that agent), or the Windows installers shipping a
+    // skill for routines, which the Inbox does not offer on Windows.
+    for (const scope of ["$CLAUDE_SKILLS_DIR", "$AGENTS_SKILLS_DIR", "$KIRO_SKILLS_DIR", "$VIBE_SKILLS_DIR"]) {
+      expect(script).toContain(`copy_skill_if_present apps/skills/core/plannotator-routine "${scope}"`);
+    }
+    expect(readScript("install.ps1")).not.toContain("plannotator-routine");
+    expect(readScript("install.cmd")).not.toContain("plannotator-routine");
+  });
+
   test("legacy Claude command cleanup is guarded on the replacement skill", () => {
     // A command file may only be removed once its same-name skill exists on
     // disk, and the cleanup must run AFTER the skill install — so a failed

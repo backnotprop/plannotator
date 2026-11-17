@@ -195,8 +195,9 @@ export function isInteractiveNoArgInvocation(
  * `plannotator --help`. `board`: the person turned the Inbox's Board on
  * (config.json `inboxBoard`, read by the caller); off (the default), the
  * `card` line is left out, so a person without the Board sees nothing of it.
+ * `scheduled`: the person turned routines on (config.json `inboxScheduledThreads`); off, the `routine` line is left out.
  */
-export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
+export function formatTopLevelHelp(options: { board?: boolean; scheduled?: boolean } = {}): string {
   return [
     "Usage:",
     "  plannotator --help",
@@ -224,6 +225,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
   "  plannotator inbox connection --host <host> [--plugin-version <v>] [--no-wake]",
     "  plannotator t3 login | logout --url <T3 MCP URL>",
     ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
+    ...(options.scheduled === true ? ["  plannotator routine <create|list|get|update|on|off|run|delete> ...      (plannotator routine --help)"] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
@@ -287,6 +289,194 @@ export const CARD_COMMAND_USAGE = [
   "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
 ].join("\n");
+
+/**
+ * `plannotator routine …` (routine-command.ts): the Inbox's routines from a shell, a thin client over the `routine`
+ * tool (packages/server/inbox-mcp-scheduled.ts), whose ops these are. `plannotator routine --help` is the overview;
+ * each command's own --help (ROUTINE_OP_USAGE) has its options and examples. Listed in `plannotator --help` and
+ * `plannotator inbox --help` while the person has routines on; its own help answers either way.
+ */
+export const ROUTINE_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
+export type RoutineOp = (typeof ROUTINE_OPS)[number];
+
+const ROUTINE_OP_FOOTER = "Every command also takes --json and --session <id>: see 'plannotator routine --help'.";
+
+export const ROUTINE_COMMAND_USAGE = [
+  "Usage:",
+  "  plannotator routine create --name <name> --prompt <text | -> [--cron '<cron>' | --at <time>] [options]",
+  "  plannotator routine list",
+  "  plannotator routine get <routine id>",
+  "  plannotator routine update <routine id> [options]",
+  "  plannotator routine on <routine id>",
+  "  plannotator routine off <routine id>",
+  "  plannotator routine run <routine id>",
+  "  plannotator routine delete <routine id>",
+  "",
+  "A routine is a saved prompt that an agent on this computer runs on a schedule. The",
+  "Plannotator Inbox starts each run and keeps every run in the routine's own thread,",
+  "where the person reads it and replies.",
+  "",
+  "- Make one only when the person asks for work that runs on its own, on a schedule.",
+  "  Use the schedule they asked for; never make one up.",
+  "- One you create arrives off. The person turns it on the first time, in the Inbox.",
+  "  Until then, on and run answer routine_not_approved and change nothing.",
+  "- After that you may update it, turn it on or off, run it and delete it. A new",
+  "  --folder, --scratch or --agent turns it off again until the person turns it back on.",
+  "- Run one only when the person asks you to.",
+  "",
+  "Run 'plannotator routine <command> --help' for its options and examples.",
+  "",
+  "Every command also takes:",
+  "  --json          Print the result as one JSON value instead of lines of text.",
+  "  --session <id>  Who is calling, as for 'plannotator inbox call'.",
+  "In place of options, a command takes the routine tool's fields as one JSON object:",
+  "  plannotator routine update '{\"id\":\"sch_1a2b\",\"name\":\"Nightly check\"}'",
+  "",
+  "Works only while the person has Routines on (Inbox Settings → Capabilities), on macOS",
+  "and Linux. Off, it exits 1 with routines_off and writes nothing: tell the person, and",
+  "leave their settings as they are.",
+  "Exit 0 done, 1 refused or no Inbox (<code>: <message> on stderr), 2 bad usage.",
+].join("\n");
+
+const ROUTINE_CREATE_OPTIONS = [
+  "  --name <name>       A few words the person knows it by: \"Dependency check\".",
+  "  --prompt <text>     What each run is asked, whole. Quote it.",
+  "  --prompt -          Read the prompt from stdin: a quoted heredoc (<<'EOF')",
+  "                      keeps it exactly as written.",
+  "",
+  "When it runs (with none of these it runs only when someone runs it):",
+  "  --cron '<cron>'     A 5-field cron, in quotes: minute hour day-of-month month",
+  "                      day-of-week. '0 9 * * 1-5' is every weekday at 9:00 AM,",
+  "                      '0 18 * * *' every day at 6:00 PM, '0 8 * * 1' Mondays at 8:00 AM.",
+  "  --at <time>         Once, at a local date and time: 2026-11-20T17:00.",
+  "  --tz <zone>         The time zone of --cron or --at, such as America/New_York.",
+  "                      Default: this computer's zone.",
+  "Scheduled times are at least 15 minutes apart; a closer schedule is refused",
+  "(schedule_too_frequent).",
+  "",
+  "Options:",
+  "  --if-missed <rule>  A run that was due while the computer slept or the Inbox was",
+  "                      not running: run_once (the default: one run when it is back)",
+  "                      or skip.",
+  "  --folder <path>     Where each run works: that folder itself (a repo, a worktree,",
+  "                      a subfolder). Default: your session's project, else this",
+  "                      folder. Never home, / or a hidden folder.",
+  "  --scratch           A new empty folder, made at the first run, instead.",
+  "  --agent <agent>     Who runs it: claude-code, codex, opencode or pi.",
+  "                      Default: the agent you are.",
+  "  --model <model>     The model it runs with. Default: the agent's own.",
+  "  --effort <effort>   The reasoning effort it runs with. Default: the agent's own.",
+  "  --file <path>       A file each run gets with its prompt. Repeat for more.",
+  "  --thread <id>       The Inbox thread you work in: the line that tells the person",
+  "                      about your change goes there. Default: the routine's own",
+  "                      thread. Runs never reply there.",
+];
+
+const ROUTINE_ON_OFF_USAGE = [
+  "Usage:",
+  "  plannotator routine on <routine id> [--thread <id>]",
+  "  plannotator routine off <routine id> [--thread <id>]",
+  "",
+  "Turns it on or off. The person turns a routine on the first time, in the Inbox:",
+  "until then, on answers routine_not_approved and changes nothing. off always works.",
+  "--thread: where the line that tells the person goes, as for create.",
+  "",
+  ROUTINE_OP_FOOTER,
+].join("\n");
+
+export const ROUTINE_OP_USAGE: Record<RoutineOp, string> = {
+  create: [
+    "Usage:",
+    "  plannotator routine create --name <name> --prompt <text | -> [options]",
+    "",
+    "Makes a routine, off: the person turns it on in the Inbox. The result gives its id",
+    "(sch_…), its schedule in words and the thread where the person sees it.",
+    "",
+    ...ROUTINE_CREATE_OPTIONS,
+    "",
+    "Examples:",
+    "  plannotator routine create --name \"Dependency check\" --cron '0 9 * * 1-5' \\",
+    "    --prompt 'Check this repo for outdated dependencies and list what to update.'",
+    "",
+    "  plannotator routine create --name \"Weekly notes\" --cron '0 16 * * 5' --tz Europe/Paris \\",
+    "    --folder ~/code/api --prompt - <<'EOF'",
+    "  Draft release notes from the pull requests merged this week.",
+    "  EOF",
+    "",
+    "  plannotator routine create --name \"Deploy check\" --at 2026-11-20T17:00 \\",
+    "    --prompt 'Check that the staging deploy finished and say how it went.'",
+    "",
+    ROUTINE_OP_FOOTER,
+  ].join("\n"),
+  list: [
+    "Usage:",
+    "  plannotator routine list",
+    "",
+    "Every routine on this computer, one per line: its id, its name, whether it is on,",
+    "its schedule in words, its agent and folder, its next run, whether the person has",
+    "turned it on yet, and its thread.",
+    "",
+    ROUTINE_OP_FOOTER,
+  ].join("\n"),
+  get: [
+    "Usage:",
+    "  plannotator routine get <routine id>",
+    "",
+    "One routine: its line from list, its prompt, and its newest 20 runs (when each",
+    "started, and how it went: running, replied, didn't finish or didn't start).",
+    "",
+    "Example:",
+    "  plannotator routine get sch_1a2b",
+    "",
+    ROUTINE_OP_FOOTER,
+  ].join("\n"),
+  update: [
+    "Usage:",
+    "  plannotator routine update <routine id> [options]",
+    "",
+    "Changes only what you pass; the rest stays as it is. It takes the options of",
+    "'plannotator routine create --help', and:",
+    "  --no-schedule       No schedule: it runs only when someone runs it.",
+    "  --no-files          Takes off every file.",
+    "  --model ''          Back to the agent's own model (--effort '' the same).",
+    "",
+    "A new --cron or --at without --tz takes this computer's zone. A new prompt or",
+    "schedule applies at once. A new --folder, --scratch or --agent turns it off until",
+    "the person turns it back on in the Inbox. The person sees each change, what it was",
+    "and what it is now, as one line in --thread, else in the routine's own thread.",
+    "",
+    "Examples:",
+    "  plannotator routine update sch_1a2b --cron '0 7 * * 1-5'",
+    "  plannotator routine update sch_1a2b --prompt - <<'EOF'",
+    "  Check for outdated dependencies and open one pull request with the safe updates.",
+    "  EOF",
+    "",
+    ROUTINE_OP_FOOTER,
+  ].join("\n"),
+  on: ROUTINE_ON_OFF_USAGE,
+  off: ROUTINE_ON_OFF_USAGE,
+  run: [
+    "Usage:",
+    "  plannotator routine run <routine id> [--thread <id>]",
+    "",
+    "Starts one run now, outside its schedule. Only when the person asks you to. The run",
+    "starts its agent the way New message in the Inbox does, in the person's own",
+    "permission mode, and replies in the routine's own thread. Until the person has",
+    "turned the routine on once, it answers routine_not_approved; while a run is going,",
+    "routine_running.",
+    "",
+    ROUTINE_OP_FOOTER,
+  ].join("\n"),
+  delete: [
+    "Usage:",
+    "  plannotator routine delete <routine id> [--thread <id>]",
+    "",
+    "Deletes it, as Delete in the Inbox does: a run under way is stopped first, and its",
+    "thread and past runs stay. Only when the person asks you to.",
+    "",
+    ROUTINE_OP_FOOTER,
+  ].join("\n"),
+};
 
 /** `plannotator plans …` (plans-command.ts): Plans' switch and list. Unreleased (HIDDEN_SUBCOMMANDS): the usage line only. */
 export const PLANS_COMMAND_USAGE = ["Usage:", "  plannotator plans [off | list]"].join("\n");
@@ -905,6 +1095,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
+  routine: ROUTINE_COMMAND_USAGE,
   shape: SHAPE_COMMAND_USAGE,
   plans: PLANS_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,

@@ -163,25 +163,6 @@ export function parseCallCommand(argv: readonly string[], actions: readonly stri
   return { ok: true, action, json: json === "-" ? null : (json ?? null), stdin: json === "-", session };
 }
 
-/**
- * `plannotator routine <op> [<json>] [--session <id>]`: `inbox call routine` with the op as its first word, so
- * `plannotator routine list` is `plannotator inbox call routine '{"op":"list"}'`. Answers the `inbox call` words.
- */
-export function routineCallArgs(argv: readonly string[]): string[] | { code: string; error: string } {
-  const words = argv.filter((arg, i) => arg !== "--session" && argv[i - 1] !== "--session");
-  const session = argv.includes("--session") ? ["--session", argv[argv.indexOf("--session") + 1] ?? ""] : [];
-  const [op, json, ...more] = words;
-  if (!op || op.startsWith("-") || more.length > 0) return { code: "usage", error: "Usage: plannotator routine <op> ['<json>'] (op: create, list, get, update, on, off, run or delete)." };
-  let fields: unknown = {};
-  try {
-    fields = json === undefined ? {} : JSON.parse(json);
-  } catch (error) {
-    return { code: "invalid_json", error: `The arguments are not JSON: ${error instanceof Error ? error.message : String(error)}` };
-  }
-  if (!fields || typeof fields !== "object" || Array.isArray(fields)) return { code: "invalid_json", error: "The arguments must be one JSON object." };
-  return [...session, "routine", JSON.stringify({ ...(fields as Record<string, unknown>), op })];
-}
-
 /** The tool's arguments from the JSON text, or why they are not. PowerShell's pipe may start with a BOM. */
 function argumentsOf(text: string, cwd: string): { args: Record<string, unknown> } | { code: string; error: string } {
   let value: unknown;
@@ -212,6 +193,8 @@ export interface CallCommandDeps {
   err?: (text: string) => void;
   /** Tests: how long one request may take. */
   timeoutMs?: number;
+  /** Print the tool's lines of text instead of its structured result (`plannotator routine` without --json). */
+  text?: boolean;
 }
 
 /** Run `plannotator inbox call …`; resolves to the exit code. */
@@ -271,7 +254,7 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
   }
   if (!answer) return refused("inbox_no_answer", "Plannotator Inbox gave no answer.");
   if (answer.error) return refused("inbox_error", answer.error.message ?? "The Inbox refused the call.");
-  return printResult(answer.result as CallResult | undefined, out, err);
+  return printResult(answer.result as CallResult | undefined, out, err, deps.text === true);
 }
 
 type CallResult = { content?: { text?: string }[]; structuredContent?: Record<string, unknown>; isError?: boolean };
@@ -378,7 +361,7 @@ function loopbackDoor(value: string | undefined): string | null {
   }
 }
 
-async function printResult(result: CallResult | undefined, out: (text: string) => void | Promise<void>, err: (text: string) => void): Promise<number> {
+async function printResult(result: CallResult | undefined, out: (text: string) => void | Promise<void>, err: (text: string) => void, text = false): Promise<number> {
   const words = (result?.content ?? []).map((part) => part.text ?? "").join("\n");
   if (result?.isError) {
     // The Inbox's refusals are `<code>: <message>`; the MCP layer's (a field the schema does not take) are plain words.
@@ -414,6 +397,6 @@ async function printResult(result: CallResult | undefined, out: (text: string) =
   // A quiet hint (send_message's `hint`): the result text's last line, on stderr too.
   const hint = result?.structuredContent?.hint;
   if (typeof hint === "string" && hint) err(`${hint}\n`);
-  await out(`${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
+  await out(text ? `${words}\n` : `${JSON.stringify(result?.structuredContent ?? { text: words })}\n`);
   return 0;
 }

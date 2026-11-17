@@ -272,7 +272,8 @@ import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runShapeFrame } from "./shape-frame";
 import { isShapeAnimateHelp, SHAPE_ANIMATE_HELP } from "@plannotator/core/shape-animate";
-import { routineCallArgs, runInboxCallCommand } from "./inbox-call-command";
+import { runInboxCallCommand } from "./inbox-call-command";
+import { runRoutineCommand } from "./routine-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runInboxPullsCommand } from "./inbox-pulls-command";
 import { runInboxExportDecisionsCommand } from "./inbox-export-decisions-command";
@@ -509,16 +510,11 @@ if (isReviewDrawCommand(rawArgs, () => {
     process.exit(await runInboxAntigravityCommand(args.slice(2), { env: process.env, dataDir: getPlannotatorDataDir() }));
   }
 }
-// `plannotator routine <op> ['<json>']`: sugar over `inbox call routine` (inbox-call-command.ts).
+// `plannotator routine <command> [options]`: sugar over `inbox call routine` (routine-command.ts). Its --help needs no Inbox.
 if (rawArgs[0] === "routine") {
-  const routineArgs = routineCallArgs(rawArgs.slice(1));
-  if (!Array.isArray(routineArgs)) {
-    process.stderr.write(`${routineArgs.code}: ${routineArgs.error}\n`);
-    process.exit(2);
-  }
   const routineDataDir = getPlannotatorDataDir();
   process.exit(
-    await runInboxCallCommand(routineArgs, {
+    await runRoutineCommand(rawArgs.slice(1), {
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       env: process.env,
       askAiChild: isAskAiChild(process.env),
@@ -958,11 +954,13 @@ if (isVersionInvocation(args)) {
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
 // Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
 const stepsOnForHelp = () => loadConfig().inboxSteps === true;
+/** The person turned routines on (config.json `inboxScheduledThreads`; never on Windows): only then does either help name them. */
+const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig().inboxScheduledThreads === true;
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
 if (isTopLevelHelpInvocation(args)) {
-  console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
+  console.log(formatTopLevelHelp({ board: boardOnForHelp(), scheduled: scheduledOnForHelp() }));
   process.exit(0);
 }
 
@@ -975,7 +973,7 @@ if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   const help =
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: process.platform !== "win32" && loadConfig().inboxScheduledThreads === true, codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), scheduled: scheduledOnForHelp(), codeReview: codeReviewOnForHelp(), branchReviews: codeReviewOnForHelp() && loadConfig().inboxBranchReviews === true })
       : formatSubcommandHelp(helpSubcommand);
   await writeWholeToStdout(`${help}\n`);
   process.exit(0);
