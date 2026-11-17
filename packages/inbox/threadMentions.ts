@@ -59,6 +59,18 @@ type Held = { text: string; mentions: readonly InboxReplyMention[] };
 const boxes = new Map<string, Held>();
 /** The draft's words and mentions as the Inbox last answered, per reply. */
 const drafts = new Map<string, Held>();
+/**
+ * The words each reply's box has had and the mentions they held, newest last (at most `UNDO_KEPT`): the browser's own
+ * undo and redo put earlier words back, and with them the mentions those words had.
+ */
+const undoable = new Map<string, Held[]>();
+const UNDO_KEPT = 100;
+function remember(threadId: string, held: Held): void {
+  const list = (undoable.get(threadId) ?? []).filter((h) => h.text !== held.text);
+  list.push(held);
+  if (list.length > UNDO_KEPT) list.shift();
+  undoable.set(threadId, list);
+}
 const listeners = new Set<() => void>();
 let version = 0;
 const changed = () => {
@@ -126,27 +138,43 @@ export function replyMentionsSave(threadId: string, text: string): { mentions?: 
   return boxes.has(threadId) || drafts.has(threadId) ? { mentions: mentionsFor(threadId, text) } : {};
 }
 
-/** The person changed the words from `from` to `to` (`caret`: where the caret is after it): the mentions move with them. */
-export function commitReplyEdit(threadId: string, from: string, to: string, caret?: number | null): void {
+/**
+ * The person changed the words from `from` to `to` (`caret`: where the caret is after it): the mentions move with them.
+ * `undo`: the browser's undo or redo did it (`historyUndo`, `historyRedo`), so words the box had before come back with
+ * the mentions they held then (⌘Z after Backspace took a mention brings the mention back, not only its words).
+ */
+export function commitReplyEdit(threadId: string, from: string, to: string, caret?: number | null, undo = false): void {
   if (from === to && boxes.get(threadId)?.text === to) return;
   const before = mentionsFor(threadId, from);
   const box = boxes.get(threadId);
+  if (before.length > 0) remember(threadId, { text: from, mentions: before });
+  const back = undo ? undoable.get(threadId)?.find((h) => h.text === to) : undefined;
+  if (back && back.mentions.length > 0) {
+    boxes.set(threadId, { text: to, mentions: standingReplyMentions(to, back.mentions) });
+    changed();
+    return;
+  }
   if (before.length === 0 && (!box || box.mentions.length === 0)) {
     if (box) boxes.set(threadId, { text: to, mentions: NONE });
     return;
   }
-  boxes.set(threadId, { text: to, mentions: remapReplyMentions(before, from, to, caret) });
+  const mentions = remapReplyMentions(before, from, to, caret);
+  boxes.set(threadId, { text: to, mentions });
+  remember(threadId, { text: to, mentions });
   changed();
 }
 
 /** New mentions in the words `text` (just typed in): beside those already standing, one per range. */
 export function addReplyMentions(threadId: string, text: string, added: readonly InboxReplyMention[]): void {
-  boxes.set(threadId, { text, mentions: standingReplyMentions(text, [...mentionsFor(threadId, text), ...added]) });
+  const held = { text, mentions: standingReplyMentions(text, [...mentionsFor(threadId, text), ...added]) };
+  boxes.set(threadId, held);
+  remember(threadId, held);
   changed();
 }
 
 /** The reply was sent or discarded: its mentions go with its words (the draft's, as the Inbox answers next, stay apart). */
 export function clearReplyMentions(threadId: string, opts: { draft?: boolean } = {}): void {
+  undoable.delete(threadId);
   const had = boxes.delete(threadId);
   const hadDraft = opts.draft ? drafts.delete(threadId) : false;
   if (had || hadDraft) changed();
@@ -155,6 +183,7 @@ export function clearReplyMentions(threadId: string, opts: { draft?: boolean } =
 /** For a test: forget every reply's mentions and the last reply. */
 export function resetReplyMentionsForTests(): void {
   boxes.clear();
+  undoable.clear();
   drafts.clear();
   lastReply = undefined;
   try {

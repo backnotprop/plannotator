@@ -726,9 +726,12 @@ describe.skipIf(!hasDom)('the empty thread panel takes a carried thread', () => 
     pickUp(RATE.thread_id);
     expect(pane.getAttribute('data-thread-drop')).toBe('target');
     expect(pane.querySelector('.ib-topen')!.textContent).toBe('Open here');
+    expect(pane.querySelector('.ib-topen')!.hasAttribute('data-ghost-says')).toBe(false);
     move(1200, 300);
     expect(pane.getAttribute('data-thread-drop')).toBe('over');
     expect(ghostWord()).toBe('Open here');
+    // One label: under the pointer the ghost says it, so the pane's own steps out of sight (inbox.css).
+    expect(pane.querySelector('.ib-topen')!.hasAttribute('data-ghost-says')).toBe(true);
     release(1200, 300);
     expect(opened).toEqual([RATE.thread_id]);
     expect(actions).toEqual([]);

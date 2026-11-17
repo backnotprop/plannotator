@@ -4,12 +4,13 @@
  * forge links; `withLinearCards` puts Linear in front of it, so the Inbox's
  * `GET /api/inbox/ref?url=` answers a Linear issue link too (one hook line in
  * inbox.ts), and `linearRefsRoute` serves `GET /api/inbox/linear-refs`
- * (`{ serverSession, workspace, teams }`: which bare identifiers the window
- * links; one more hook in inbox.ts).
+ * (`{ serverSession, workspace, teams, key }`: which bare identifiers the window
+ * links, and whether Linear took the key; one more hook in inbox.ts).
  *
  * The fetch: one read-only GraphQL `query` POSTed to api.linear.app with the
  * API key as is (never logged, never sent anywhere else), read per fetch. No
- * key: the card says to set one (`signed_out`), and no teams link. Per issue:
+ * key, or one Linear refuses: the card answers `signed_out` (the window tells
+ * the two apart by the route's `key`), and no teams link. Per issue:
  * fresh 60 s, a failure 30 s, a stale answer served while one refresh runs (up
  * to 15 min), one request shared by hovers, at most 500 kept; a rate-limit
  * answer pauses Linear for 60 s. Avatars are inlined as data URIs (the window's
@@ -165,11 +166,19 @@ export function linearErrorOf(status: number, body: unknown): ForgeRefCardError 
   return "unavailable";
 }
 
+/**
+ * Whether Linear took the key at its last answer: `none` without a key, `refused` on a 401/403 or an auth error,
+ * `accepted` on any other answer Linear gave, `unknown` before one (or when Linear could not be reached).
+ */
+export type LinearKeyVerdict = "accepted" | "refused" | "unknown" | "none";
+
 export interface LinearCards {
   /** The card for a Linear issue link, or null when the link is not one. */
   get(href: string): Promise<ForgeRefCardResult | null>;
   /** The workspace and team keys bare identifiers link with; null with no key or on a failure. */
   issueRefs(): Promise<LinearIssueRefs | null>;
+  /** The key's verdict after the teams read (cached with it). */
+  keyVerdict(): Promise<LinearKeyVerdict>;
   forget(): void;
 }
 
@@ -189,11 +198,22 @@ export function createLinearCards(options: {
   let pausedUntil = 0;
   /** Bumped by `forget()` (the key changed): an answer asked for under an older key is never kept or shown. */
   let generation = 0;
+  let verdict: LinearKeyVerdict = "unknown";
 
-  /** One read-only query with the key; "no_key" without one; null when it failed. */
+  /** One read-only query with the key; "no_key" without one; null when it failed. Each answer sets the verdict. */
   const ask = async (query: string, variables: Record<string, string>): Promise<{ res: Response; body: unknown } | "no_key" | null> => {
+    const asked = generation;
     const key = (await apiKey())?.trim();
-    if (!key) return "no_key";
+    if (!key) {
+      if (asked === generation) verdict = "none";
+      return "no_key";
+    }
+    const judge = (answer: { res: Response; body: unknown }) => {
+      if (asked !== generation) return answer;
+      if (linearErrorOf(answer.res.status, answer.body) === "signed_out") verdict = "refused";
+      else if (answer.res.ok) verdict = "accepted";
+      return answer;
+    };
     try {
       const res = await (options.fetch ?? fetch)(LINEAR_API_URL, {
         method: "POST",
@@ -203,7 +223,7 @@ export function createLinearCards(options: {
         signal: AbortSignal.timeout(REF_TIMEOUT_MS),
         redirect: "error",
       });
-      return { res, body: await res.json().catch(() => null) };
+      return judge({ res, body: await res.json().catch(() => null) });
     } catch {
       return null;
     }
@@ -268,6 +288,17 @@ export function createLinearCards(options: {
 
   let teams: { at: number; ttl: number; refs: Promise<LinearIssueRefs | null> } | null = null;
 
+  const issueRefs = (): Promise<LinearIssueRefs | null> => {
+    if (teams && now() - teams.at < teams.ttl) return teams.refs;
+    const refs = ask(LINEAR_TEAMS_QUERY, {}).then((a) => (a && a !== "no_key" && a.res.ok ? parseLinearTeamsAnswer(a.body) : null));
+    const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, refs };
+    teams = entry;
+    void refs.then((r) => {
+      if (!r) entry.ttl = REF_FAILURE_MS;
+    });
+    return refs;
+  };
+
   return {
     async get(href) {
       const ref = parseLinearRefUrl(href);
@@ -286,18 +317,14 @@ export function createLinearCards(options: {
       }
       return refresh(key, ref);
     },
-    issueRefs() {
-      if (teams && now() - teams.at < teams.ttl) return teams.refs;
-      const refs = ask(LINEAR_TEAMS_QUERY, {}).then((a) => (a && a !== "no_key" && a.res.ok ? parseLinearTeamsAnswer(a.body) : null));
-      const entry = { at: now(), ttl: REF_AUTH_HOSTS_MS, refs };
-      teams = entry;
-      void refs.then((r) => {
-        if (!r) entry.ttl = REF_FAILURE_MS;
-      });
-      return refs;
+    issueRefs,
+    async keyVerdict() {
+      await issueRefs();
+      return verdict;
     },
     forget() {
       generation++;
+      verdict = "unknown";
       cache.clear();
       pending.clear();
       teams = null;
@@ -313,8 +340,8 @@ export function withLinearCards<T extends RefCards>(cards: T, linear: LinearCard
 }
 
 /**
- * `GET /api/inbox/linear-refs`: `{ serverSession, workspace, teams }`, `{ workspace: null, teams: [] }` without a
- * key. The window's read guard (another site's request `403 cross_origin`); not on the device door (not in its
+ * `GET /api/inbox/linear-refs`: `{ serverSession, workspace, teams, key }` (`key`: the `LinearKeyVerdict`),
+ * `{ workspace: null, teams: [], key: "none" }` without a key. The window's read guard (another site's request `403 cross_origin`); not on the device door (not in its
  * allowlist). Null for any other path.
  */
 export async function linearRefsRoute(
@@ -330,5 +357,6 @@ export async function linearRefsRoute(
     return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
   }
   const refs = linear ? await linear.issueRefs() : null;
-  return json({ serverSession, workspace: refs?.workspace ?? null, teams: refs?.teams ?? [] });
+  const key = linear ? await linear.keyVerdict() : "none";
+  return json({ serverSession, workspace: refs?.workspace ?? null, teams: refs?.teams ?? [], key });
 }

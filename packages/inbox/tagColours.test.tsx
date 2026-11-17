@@ -404,6 +404,20 @@ test.skipIf(!hasDom)('a sidebar tag wears its colour; its menu has Highlight row
   expect(picks).toHaveLength(2);
   await until(() => picks.length === 3, 'the swipe kept');
   expect(picks.at(-1)).toMatch(/^#[0-9a-f]{6}$/);
+  // A code pasted with spaces around it is trimmed (never cut short to "  #00FF") and kept; one without "#" too.
+  const typeHex = (text: string) =>
+    act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(hex, text);
+      hex.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  await typeHex('  #00FF88  ');
+  expect(hex.value).toBe('#00FF88');
+  await key(hex, 'Enter');
+  expect(picks.at(-1)).toBe('#00ff88');
+  await typeHex(' 1a2b3c ');
+  expect(hex.value).toBe('1a2b3c');
+  await key(hex, 'Enter');
+  expect(picks.at(-1)).toBe('#1a2b3c');
   // Back: the menu again, focus on Color.
   await press(list.querySelector('[data-tag-colour-back]'));
   await until(() => document.activeElement === tagMenu()?.querySelector('[data-tag-action="colour"]'), 'focus back on Color');

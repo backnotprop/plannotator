@@ -161,8 +161,8 @@ export function InboxComposerField({
   const threadMentions = useReplyMentions({ threadId: mentionThread ?? '', text: value, fieldRef: innerRef, wrapRef, voiceLive, off: mentionThread === undefined });
   const commitMentions = threadMentions.commit;
   const setText = useCallback(
-    (next: string, caret?: number | null) => {
-      commitMentions(next, caret);
+    (next: string, caret?: number | null, undo = false) => {
+      commitMentions(next, caret, undo);
       onChange(next);
     },
     [commitMentions, onChange],
@@ -307,7 +307,9 @@ export function InboxComposerField({
         textareaRef={attach}
         value={value}
         onChange={(event) => {
-          setText(event.target.value, event.target.selectionEnd);
+          // The browser's undo and redo bring back the thread mentions the words had (threadMentions.ts).
+          const kind = (event.nativeEvent as InputEvent).inputType;
+          setText(event.target.value, event.target.selectionEnd, kind === 'historyUndo' || kind === 'historyRedo');
           skills.onSelect();
           mention.onSelect();
           hash.onSelect();
@@ -325,6 +327,7 @@ export function InboxComposerField({
           onKeyDown?.(event);
         }}
         onSelectCaret={() => {
+          threadMentions.onSelect();
           skills.onSelect();
           mention.onSelect();
           hash.onSelect();

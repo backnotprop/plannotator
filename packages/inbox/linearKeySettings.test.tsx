@@ -57,3 +57,41 @@ test.skipIf(!hasDom)('after Remove, leaving Settings and coming back shows no ke
   // A fresh read of the settings says saved again: it wins.
   expect(mount({ source: 'saved', last4: '1111' })).toBe('saved');
 });
+
+test.skipIf(!hasDom)('a saved key says whether Linear took it: refused after a bad key, accepted after a good one (a key saves either way)', async () => {
+  const { installLinearCards } = await import('./linearCards');
+  let verdict = 'refused';
+  const uninstall = installLinearCards(async () => Response.json({ workspace: null, teams: [], key: verdict }));
+  try {
+    globalThis.fetch = (async () => Response.json({ key: { source: 'saved', last4: '9999' } })) as unknown as typeof fetch;
+    const said = () => host!.querySelector('[data-linear-key-verdict]');
+    mount({ source: 'saved', last4: '-key' });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(said()?.getAttribute('data-linear-key-verdict')).toBe('refused');
+    expect(said()?.textContent).toContain('Linear refused it');
+    expect(host!.querySelector('[data-linear-key="saved"] svg')).toBeNull();
+    // Replace it with a key Linear takes.
+    await act(async () => {
+      (host!.querySelector('[data-linear-key-replace]') as HTMLButtonElement).click();
+    });
+    const input = host!.querySelector('#ib-linear-key') as HTMLInputElement;
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'lin_api_good');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    verdict = 'accepted';
+    await act(async () => {
+      (host!.querySelector('form[data-linear-key]') as HTMLFormElement).requestSubmit();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(host!.querySelector('[data-linear-key]')?.getAttribute('data-linear-key')).toBe('saved');
+    expect(said()?.textContent).toContain('Linear accepted it.');
+    expect(host!.querySelector('[data-linear-key="saved"] svg')).not.toBeNull();
+  } finally {
+    act(() => uninstall());
+  }
+});
