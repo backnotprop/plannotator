@@ -260,7 +260,11 @@ describe("/create-routine: the person's own Send turns on the routine it asks fo
     const id = made.structuredContent!.scheduled.id as string;
     expect(w.server.store.scheduledThread(id)).toMatchObject({ enabled: true, made_by: { session: "ses_maya", thread_id: w.thread } });
     expect(w.server.store.scheduledThread(id)!.approved_at).not.toBeNull();
-    expect(w.lines().map((m) => m.body)).toEqual([`Made the routine [Dependency check](#routine=${id}). It is on, as you asked with /create-routine.`]);
+    // The other session's line first (off), then this one's (on).
+    expect(w.lines().map((m) => m.body)).toEqual([
+      `Made the routine [Not theirs](#routine=${theirs.structuredContent!.scheduled.id}). It is off until you turn it on.`,
+      `Made the routine [Dependency check](#routine=${id}). It is on, as you asked with /create-routine.`,
+    ]);
     // Routines, as the window reads it: on.
     const listed = (await (await fetch(`${w.base}/api/inbox/scheduled`)).json()) as { scheduled: { id: string; enabled: boolean; state: string; next_run: string | null }[] };
     expect(listed.scheduled.find((row) => row.id === id)).toMatchObject({ enabled: true, next_run: "2099-01-05T14:00:00.000Z" });

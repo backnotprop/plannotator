@@ -90,10 +90,10 @@ async function world(options: { scheduled?: boolean } = {}) {
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
   };
-  const cli = async (args: string[], opts: { stdin?: string; cwd?: string } = {}) => {
+  const cli = async (args: string[], opts: { stdin?: string; cwd?: string; env?: Record<string, string> } = {}) => {
     const proc = Bun.spawn([process.execPath, "run", entry, "routine", ...args], {
       cwd: opts.cwd ?? project,
-      env,
+      env: { ...env, ...opts.env },
       stdin: opts.stdin === undefined ? "ignore" : new TextEncoder().encode(opts.stdin),
       stdout: "pipe",
       stderr: "pipe",
@@ -164,10 +164,10 @@ describe("what an agent can do from the shell is what the routine tool lets it",
     expect(made).toMatchObject({ code: 0, stderr: "" });
     expect(made.stdout).toMatch(/^Made sch_\S+ "Dependency check": on, .+, next 2099-01-05T14:00:00\.000Z\. It is on: the person asked for it with \/create-routine in thread msg_\w+\./);
     expect(made.stdout).not.toContain("not yet turned on");
-    // Another Send, another one. A shell calling as another agent session does not take it (the reply went to
-    // ses_maya): off, and its line says why.
+    // Another Send, another one. Another agent session's shell (its own PLANNOTATOR_SESSION_TAG) does not take it (the
+    // reply went to ses_maya): off, and its line says why.
     await send("k-cli-2");
-    const theirs = await w.cli(["create", "--name", "Not theirs", "--thread", thread, "--session", "claude-code:ses_other", ...at]);
+    const theirs = await w.cli(["create", "--name", "Not theirs", "--thread", thread, ...at], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses_other" } });
     expect(theirs).toMatchObject({ code: 0, stderr: "" });
     expect(theirs.stdout).toMatch(/^Made sch_\S+ "Not theirs": off, /);
     expect(theirs.stdout).toContain(`The /create-routine request from the person in thread ${thread} was for another agent session, not yours`);

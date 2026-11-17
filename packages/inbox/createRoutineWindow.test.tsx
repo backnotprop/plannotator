@@ -257,13 +257,17 @@ test.skipIf(!hasDom)(
     await until(() => el.querySelector('[data-skill-ref-token="create-routine"]') !== null, 'the painted token');
     act(() => button(el, 'Send').click());
     await until(() => textarea(el) === null, 'the Send');
-    // The Send reached the server with the built-in's block.
+    // The Send reached the server with the built-in's block; the agent it answers is the one the person asked.
+    type Stored = { id: string; reply_to?: string | null; author: { kind: string; session?: string }; body: string };
+    let asked = '';
     await until(async () => {
-      const thread = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: { author: { kind: string }; body: string }[] } };
-      return thread.thread.messages.some((m) => m.author.kind === 'person' && m.body.includes('--- BEGIN SKILL INSTRUCTIONS: create-routine ---'));
+      const thread = JSON.parse((await loopback(`/api/inbox/threads/${world.waiting}`)).text) as { thread: { messages: Stored[] } };
+      const sent = thread.thread.messages.find((m) => m.author.kind === 'person' && m.body.includes('--- BEGIN SKILL INSTRUCTIONS: create-routine ---'));
+      asked = thread.thread.messages.find((m) => m.id === sent?.reply_to)?.author.session ?? '';
+      return asked !== '';
     }, 'the Send on the server');
 
-    // The agent, through the Inbox's own MCP: `routine create` naming this thread.
+    // That agent, through the Inbox's own MCP: `routine create` naming this thread (only the agent the person wrote to takes it).
     const call = await loopback(
       '/mcp',
       'POST',
@@ -281,7 +285,7 @@ test.skipIf(!hasDom)(
             folder: { scratch: true },
             agent: 'claude-code',
             agent_host: 'claude-code',
-            agent_session: 'ses_routine_dom',
+            agent_session: asked,
             agent_name: 'Claude Code',
             thread_id: world.waiting,
           },
