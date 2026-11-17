@@ -1,30 +1,35 @@
 /**
  * Shape in the Inbox window (approval "shape-inbox-placement"): the thread
- * header's Pebble, the grid page the sidebar's Shape row opens, the board laid
- * over the thread, and the board's Thread tab. No keys of its own: ⌘K and Esc
- * are the window's.
+ * header's Pebble, the grid page the sidebar's Shape row opens, the board (in
+ * its thread's pane, or over the grid). No keys of its own: ⌘K and Esc are the
+ * window's.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
-import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost, ShapeReviewAt } from '@plannotator/ui/components/shape';
 import type { ShapeBoardPlace, ShapeBoardProps } from './types';
 import { inboxApi, type InboxShapeSummary } from '../api';
-import { agentName, whenTime } from '../format';
+import { readRoute } from '../app/route';
+import { writeRoute } from '../app/writeRoute';
 import { Icon } from '../icons';
-import { MessageBody } from '../components/Thread';
 import { Tip } from '../components/Tip';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { shapeReview, shapeReviewMessage } from './review';
 
 const ShapeBoard = ShapeBoardPart.Part;
-const NO_ANSWERS: ReadonlyMap<string, QuestionAnswer> = new Map();
-const noop = () => {};
-const noFooter = () => null;
+
+/**
+ * A board's reference to a message of its thread: the thread, landed on that message (`msg=`, as a search result
+ * lands), the board closed. From the thread's own board the rest of the address stays (Back reopens the board).
+ */
+function showMessage(threadId: string, messageId: string) {
+  const now = readRoute();
+  writeRoute(now.page === 'inbox' && now.thread === threadId ? { ...now, shape: null, guide: null, guideAt: null, msg: messageId } : { page: 'inbox', project: null, thread: threadId, msg: messageId });
+}
 
 /** The grid's card for a board. */
 export function shapeGridItem(s: InboxShapeSummary): ShapeGridItem {
@@ -65,14 +70,17 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
 }
 
 /**
- * The board, over the thread or the grid: its ×, Esc or Back closes it. It covers the page's head, so the sidebar
- * toggle every full page's head has sits at its title's left: the board can take the window's width.
+ * The board, in its thread or over the grid: its ×, Esc or Back closes it (and the thread header's Pebble, in a
+ * thread). Over the grid it covers the page's head, so the sidebar toggle every full page's head has sits at its
+ * title's left: the board can take the window's width. `inThread` (the owner, 2026-11-16: "It should just fit within
+ * the thread view"): it takes the messages' and the reply's place in the thread's own pane, under the thread's header,
+ * on the thread's background, as the Artifacts view does; `sidebarToggle` false there while the list, with its own
+ * toggle, is beside the thread.
  *
  * `onOpenReview`: a place in code on the board (a drawn part's `data-code`) opens the thread's review there; with Code
- * review on the board rides along as its corner card (ReviewPane). `covered`: a review (the guide pane) is open over
- * it. The board is inert meanwhile, so Esc and Tab go to the review, not to the board's panel, bubble or Show more
- * under it. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the
- * person goes on it. `back` and `headSide`: the way back to the board it came from, at the title's left, and the
+ * review on the board rides along as its corner card (ReviewPane), and the review open draws its own board, never this
+ * one. `place` and `onNavigate`: where it starts (the place a link left it, back from the review) and where the person
+ * goes on it. `back` and `headSide`: the way back to the board it came from, at the title's left, and the
  * thread's other boards at its right (Show me from a board, `ThreadShapeLayer`).
  */
 export function ShapeLayer({
@@ -81,27 +89,30 @@ export function ShapeLayer({
   onClose,
   thread,
   onOpenReview,
-  covered = false,
   onAddToReply,
   place = null,
   onNavigate,
   back = null,
   headSide,
+  inThread = false,
+  sidebarToggle = true,
 }: {
   host: ShapeHost;
   id: string;
   onClose: () => void;
   thread: InboxThread | null;
   onOpenReview?: (messageId: string, at: ShapeReviewAt | null) => void;
-  covered?: boolean;
   onAddToReply?: ShapeBoardProps['onAddToReply'];
   place?: ShapeBoardPlace | null;
   onNavigate?: ShapeBoardProps['onNavigate'];
   back?: ReactNode;
   headSide?: ReactNode;
+  inThread?: boolean;
+  sidebarToggle?: boolean;
 }) {
-  // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
+  // A phone has none: there the sidebar is a sheet.
   const { isMobile } = useSidebar();
+  const toggle = sidebarToggle && !isMobile;
   const reviewMessage = shapeReviewMessage(thread);
   const openReview = useRef(onOpenReview);
   openReview.current = onOpenReview;
@@ -118,17 +129,17 @@ export function ShapeLayer({
       onClose={onClose}
       thread={thread}
       review={review}
-      covered={covered}
       onAddToReply={onAddToReply}
       place={place}
       onNavigate={onNavigate}
-      headStart={isMobile && !back ? undefined : (
+      headStart={!toggle && !back ? undefined : (
         <>
-          {!isMobile && <SidebarTrigger />}
+          {toggle && <SidebarTrigger />}
           {back}
         </>
       )}
       headSide={headSide}
+      inThread={inThread}
     />
   );
 }
@@ -146,21 +157,21 @@ export function ShapeBoardLayer({
   hidden,
   onCode,
   review = null,
-  covered = false,
   onAddToReply,
   headStart,
   headSide,
   place = null,
   onNavigate,
+  inThread = false,
 }: {
   host: ShapeHost;
   id: string;
   onClose: () => void;
   thread: InboxThread | null;
+  inThread?: boolean;
   hidden?: boolean;
   onCode?: ShapeBoardProps['onCode'];
   review?: ShapeBoardProps['review'];
-  covered?: boolean;
   onAddToReply?: ShapeBoardProps['onAddToReply'];
   headStart?: ReactNode;
   headSide?: ReactNode;
@@ -179,8 +190,19 @@ export function ShapeBoardLayer({
     ShapeBoardPart.retry();
     setFailedOn(id);
   }, [id]);
+  const layerRef = useRef<HTMLElement>(null);
+  useFocusBackToPebble(layerRef, inThread);
   return (
-    <section className="ib-shape-layer ib-wlayer pn-shape" data-shape-layer={id} aria-label="Shape" hidden={hidden} inert={covered || undefined}>
+    <section
+      ref={layerRef}
+      className={`ib-shape-layer pn-shape ${inThread ? 'ib-shape-inthread' : 'ib-wlayer'}`}
+      data-shape-layer={id}
+      data-shape-in-thread={inThread ? '' : undefined}
+      // Open over the page, for the idle clock (idleClock.ts); over the grid `main` says so. Only once it is drawn.
+      data-shape-open={inThread ? '' : undefined}
+      aria-label="Shape"
+      hidden={hidden}
+    >
       <PanePart key={attempt} loading={<div className="ib-shape-loading" aria-busy="true" />} onFailed={failed}>
         <ShapeBoard
           host={host}
@@ -188,7 +210,7 @@ export function ShapeBoardLayer({
           onClose={onClose}
           onCode={onCode}
           review={review}
-          renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} openInFiles={!!host.fileAction} /> : undefined}
+          onMessage={thread ? (messageId) => showMessage(thread.thread_id, messageId) : undefined}
           headStart={headStart}
           headSide={headSide}
           crosshair
@@ -201,21 +223,26 @@ export function ShapeBoardLayer({
   );
 }
 
-/** The board's Thread tab: the thread's messages, read-only, each marked for the board's "jump to the message". */
-export function ShapeThreadTab({ thread, flash, openInFiles = false }: { thread: InboxThread; flash: string | null; openInFiles?: boolean }) {
-  return (
-    <div className="ib-shape-thread">
-      {thread.messages.map((m) => (
-        <article key={m.id} className={`ib-shape-msg${flash === m.id ? ' shp-flash' : ''}`} data-shape-message={m.id}>
-          <div className="ib-shape-who">
-            <b>{m.author.kind === 'person' ? 'You' : agentName(m.author)}</b>
-            <span>{whenTime(m.created_at)}</span>
-          </div>
-          <MessageBody message={m} projectRoot={thread.project.root} openInFiles={openInFiles} repo={thread.project.repo ?? null} readOnly answers={NO_ANSWERS} onPick={noop} footerFor={noFooter} onOpenAttachment={noop} />
-        </article>
-      ))}
-    </div>
-  );
+/**
+ * A board in its thread closed with the focus in it, or on nothing (its ×, Esc, Back): the focus goes to the thread
+ * header's Pebble that opens it again, as leaving the Artifacts view gives it back to the Artifacts button. A board
+ * closed some other way (the thread closed, a press elsewhere) leaves the focus where it went.
+ */
+function useFocusBackToPebble(layerRef: RefObject<HTMLElement | null>, on: boolean) {
+  useLayoutEffect(() => {
+    const layer = layerRef.current;
+    if (!on || !layer) return;
+    return () => {
+      const was = document.activeElement;
+      if (was && was !== document.body && !layer.contains(was)) return;
+      const pane = layer.closest('.ib-pane');
+      requestAnimationFrame(() => {
+        const now = document.activeElement;
+        if (!pane?.isConnected || (now && now !== document.body && now.isConnected)) return;
+        pane.querySelector<HTMLElement>('[data-shape-pebble]')?.focus();
+      });
+    };
+  }, [layerRef, on]);
 }
 
 /** The grid page (the sidebar's Shape row): "Shape", Find, and every board newest first. */

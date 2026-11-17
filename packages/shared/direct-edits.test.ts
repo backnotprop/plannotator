@@ -8,7 +8,7 @@ import {
   composeFeedbackWithDirectEdits,
   computeEditStats,
   normalizeEditedMarkdown,
-} from './directEdits';
+} from './direct-edits';
 
 describe('direct edit feedback helpers', () => {
   test('normalizes unchanged edits to no direct edit', () => {

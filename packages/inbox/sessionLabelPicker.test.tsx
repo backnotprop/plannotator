@@ -157,3 +157,16 @@ test.skipIf(!hasDom)("the Board's New card shares the picker, and its To line sa
   expect(to().getAttribute('aria-label')).toBe('To: Claude Code in ai-collab. Change');
   expect(document.querySelector('[data-compose-detail] [data-session-label]')).toBeNull();
 });
+
+test.skipIf(!hasDom)('two folders of the same name: the part of the path that is never cut keeps their parents, so the rows tell them apart', () => {
+  const twins: InboxComposeProject[] = [
+    { project: { id: null, name: 'trailhead-api', root: '/home/me/clients/acme/work/trailhead-api' }, sessions: [session('ses_work', 'claude-code')] },
+    { project: { id: null, name: 'trailhead-api', root: '/home/me/clients/acme/oss/trailhead-api' }, sessions: [session('ses_oss', 'codex')] },
+    { project: PROJECT, sessions: [session('ses_plain', 'claude-code')] },
+  ];
+  render(<ToPicker groups={composeGroups(twins, null)} selected={null} home="/home/me" phone={false} onPick={() => {}} onClose={() => {}} />);
+  expect(words(row('ses_work')!, '.ib-cp-oft')).toBe('/work/trailhead-api');
+  expect(words(row('ses_oss')!, '.ib-cp-oft')).toBe('/oss/trailhead-api');
+  // A folder whose name is its own keeps only that name whole, as before.
+  expect(words(row('ses_plain')!, '.ib-cp-oft')).toBe('/ai-collab');
+});

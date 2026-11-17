@@ -66,6 +66,18 @@ export function ToPicker({
   const typing = query.trim() !== '';
   const many = all.length > 1;
   const items = useMemo(() => toItems({ machines: all, chosen, query, expanded, current: start?.current ?? null }), [all, chosen, query, expanded, start?.current]);
+  // Folders of the same name in different places ("~/work/api", "~/oss/api"): their parent stays whole too, so the
+  // rows tell them apart where the path is cut.
+  const twins = useMemo(() => {
+    const roots = new Map<string, Set<string>>();
+    for (const item of items) {
+      if (item.type !== 'session') continue;
+      const root = item.row.target.project.root;
+      const name = lastFolderName(root);
+      roots.set(name, (roots.get(name) ?? new Set()).add(root));
+    }
+    return new Set([...roots].filter(([, all]) => all.size > 1).map(([name]) => name));
+  }, [items]);
   const options = useMemo(() => items.filter(pickable), [items]);
   // Parts and states at the row's end only where something can start or there is a switch: the Board's New card keeps its plain rows.
   const parts = inParts(all);
@@ -295,7 +307,7 @@ export function ToPicker({
                   {target.project.name}
                 </span>
               )}
-              <FolderPath path={folder} />
+              <FolderPath path={folder} names={twins.has(lastFolderName(target.project.root)) ? 2 : 1} />
               <Tip content={started ? `Started ${started}` : null}>
                 <span className="ib-cp-os" data-compose-started={started ?? undefined}>
                   {started ? `· ${started}` : null}
@@ -353,8 +365,21 @@ function detailCut(trigger: Element): boolean {
   return [...trigger.querySelectorAll('[data-cut]')].some((part) => isTextCut(part) || part.getBoundingClientRect().top >= bottom - 1);
 }
 
-/** A project folder on one line, cut in the middle: the leading folders shrink with "…", the last name stays; the whole path in a tooltip while it is cut. */
-export function FolderPath({ path, drive }: { path: string; drive?: { name: string; folders: readonly string[] } | null }) {
+const lastFolderName = (root: string) => root.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? root;
+
+/** The path cut before its last `names` folder names (the tail that stays whole), or as `splitPath` cuts it. */
+export function splitFolderTail(path: string, names: number): { head: string; tail: string } {
+  if (names < 2) return splitPath(path);
+  let cut = path.length;
+  for (let n = 0; n < names && cut > 0; n++) cut = path.lastIndexOf('/', cut - 1);
+  return cut > 0 && path.length - cut <= 48 ? { head: path.slice(0, cut + 1), tail: path.slice(cut + 1) } : splitPath(path);
+}
+
+/**
+ * A project folder on one line, cut in the middle: the leading folders shrink with "…", the last name stays (the last
+ * `names` names: To keeps a parent when two folders share a name); the whole path in a tooltip while it is cut.
+ */
+export function FolderPath({ path, drive, names = 1 }: { path: string; drive?: { name: string; folders: readonly string[] } | null; names?: number }) {
   if (drive) {
     // A folder on a drive: "Studio SSD › footage-tools". The drive's name and the last folder stay whole; the folders
     // between are cut first.
@@ -387,7 +412,7 @@ export function FolderPath({ path, drive }: { path: string; drive?: { name: stri
       </Tip>
     );
   }
-  const split = splitPath(path);
+  const split = splitFolderTail(path, names);
   // The slash before the last name stays with it, so a cut reads "~/pando/proj…/main".
   const moveSlash = split.head.endsWith('/') && split.head.length > 1;
   const head = moveSlash ? split.head.slice(0, -1) : split.head;

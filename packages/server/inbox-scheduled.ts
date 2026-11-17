@@ -141,7 +141,7 @@ export function createInboxScheduled(deps: {
     return null;
   };
 
-  const rowOf = (record: InboxScheduledThread): InboxScheduledRow => {
+  const rowOf = ({ create_key: _key, ...record }: InboxScheduledThread): InboxScheduledRow => {
     const last = lastDividerOf(record);
     const lastRun = last ? summaryOf(last) : null;
     const running = lastRun?.outcome === "running";
@@ -462,12 +462,15 @@ export function createInboxScheduled(deps: {
           const rank = (row: InboxScheduledRow) => (row.state === "done" ? 2 : row.enabled || row.state === "running" ? 0 : 1);
           return rank(a) - rank(b) || (a.next_run ?? "~").localeCompare(b.next_run ?? "~") || a.created_at.localeCompare(b.created_at);
         }),
+    /** The window's routine made with this create key, if it is still there. */
+    withCreateKey: (key: string): InboxScheduledThread | null => store.scheduledThreads().find((record) => record.create_key === key) ?? null,
     get: (id: string) => {
       const record = found(id);
       return { scheduled: rowOf(record), runs: dividersOf(record).slice(-20).reverse().map(summaryOf) };
     },
 
-    async create(input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    /** `createKey`: the window's key, kept on the record (inbox-scheduled-once.ts). */
+    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string): Promise<{ record: InboxScheduledThread; told: string | null }> {
       const fields = await fieldsOf(input, null);
       const on = by.kind === "person" && input.enabled === true;
       const at = iso();
@@ -486,6 +489,7 @@ export function createInboxScheduled(deps: {
         ...(fields.effort ? { effort: fields.effort } : {}),
         attachments: fields.attachments ?? [],
         thread_id: null,
+        ...(createKey ? { create_key: createKey } : {}),
         ...(by.kind === "agent" ? { made_by: { host: by.host, session: by.session, thread_id: by.thread_id ?? "" } } : {}),
         handled_through: on ? at : null,
         created_at: at,
