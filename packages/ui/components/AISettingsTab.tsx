@@ -157,7 +157,7 @@ export const AISettingsTab: React.FC<AISettingsTabProps> = ({
                   <ModelSourceHint
                     tool={modelSourceToolForProvider(p.name)}
                     info={p}
-                    className="mt-1.5 text-[10px] text-muted-foreground/60"
+                    className="mt-1.5 text-xs text-muted-foreground"
                   />
                 </div>
               )}

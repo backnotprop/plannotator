@@ -103,10 +103,13 @@
     "./workspace-status-types": "./workspace-status-types.ts",
     "./ai-context": "./ai-context.ts",
     "./model-catalog": "./model-catalog.ts",
+    "./model-fallbacks": "./model-fallbacks.ts",
     "./types": "./types.ts",
     ".": "./index.ts",
     "./guide-format-fixtures": "./guide-format-fixtures.ts",
-    "./guide-viewer-manifest": "./guide-viewer-manifest.ts"
+    "./guide-viewer-manifest": "./guide-viewer-manifest.ts",
+    "./line-anchor": "./line-anchor.ts",
+    "./review-threads": "./review-threads.ts"
   },
   "files": [
     "**/*.ts",

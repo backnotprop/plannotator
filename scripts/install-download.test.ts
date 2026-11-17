@@ -220,7 +220,6 @@ async function runInstallSh(server: ReleaseServer, env: Record<string, string> =
         PLANNOTATOR_BROWSER: NO_BROWSER,
         PLANNOTATOR_TEST_SANDBOX: "1",
         PLANNOTATOR_INSTALL_NOTIFY: "0",
-        PLANNOTATOR_SKIP_SEM_INSTALL: "1",
         PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
         PLANNOTATOR_DOWNLOAD_RETRY_DELAY: "0",
         STUB_CURL_LOG: log,

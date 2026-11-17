@@ -19,6 +19,7 @@ import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DiffFile } from '../types';
+import { HUNK_SEPARATOR_HEIGHT } from '../utils/diffChromeMetrics';
 
 let lastCodeViewProps: Record<string, unknown> | null = null;
 const updatedItemIds: string[] = [];
@@ -262,7 +263,7 @@ describe.if(hasDom)('all-files image previews keep their real height in the virt
     expect(setMetrics).toHaveBeenCalledTimes(1);
     expect(setMetrics.mock.calls[0][0]?.diffHeaderHeight).toBe(420);
     // The rest of the item's metrics stay the shared ones.
-    expect(setMetrics.mock.calls[0][0]?.hunkSeparatorHeight).toBe(32);
+    expect(setMetrics.mock.calls[0][0]?.hunkSeparatorHeight).toBe(HUNK_SEPARATOR_HEIGHT);
     expect(updatedItemIds).toContain(imageFile.path);
 
     // The re-layout renders the item again; with nothing changed that render

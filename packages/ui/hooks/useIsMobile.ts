@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
 
 /** Maximum CSS viewport width that can enter Plannotator's compact touch shell. */
 export const COMPACT_TOUCH_LAYOUT_MAX_WIDTH = 1024;
@@ -11,6 +11,12 @@ export const COMPACT_TOUCH_LAYOUT_MAX_WIDTH = 1024;
  */
 export const COMPACT_TOUCH_LAYOUT_MEDIA_QUERY =
   `(max-width: ${COMPACT_TOUCH_LAYOUT_MAX_WIDTH}px) and (pointer: coarse)`;
+
+export const PHONE_REVIEW_LAYOUT_MEDIA_QUERY =
+  `(max-width: 639px), (max-width: ${COMPACT_TOUCH_LAYOUT_MAX_WIDTH}px) and (max-height: 500px) and (pointer: coarse)`;
+
+const CompactLayoutQuery = createContext(COMPACT_TOUCH_LAYOUT_MEDIA_QUERY);
+export const CompactLayoutQueryProvider = CompactLayoutQuery.Provider;
 
 export function useIsMobile(breakpoint = 768): boolean {
   const [isMobile, setIsMobile] = useState(
@@ -30,17 +36,16 @@ export function useIsMobile(breakpoint = 768): boolean {
 
 /**
  * Reports whether the current viewport needs Plannotator's compact touch shell.
- * Plan and Code Review must share this decision so responsive chrome and scroll
- * ownership cannot diverge on hybrid devices.
  */
-export function useCompactTouchLayout(): boolean {
+export function useCompactTouchLayout(override?: string): boolean {
+  const inherited = useContext(CompactLayoutQuery);
+  const query = override ?? inherited;
   const [isCompactTouchLayout, setIsCompactTouchLayout] = useState(
-    () => typeof window !== 'undefined'
-      && window.matchMedia(COMPACT_TOUCH_LAYOUT_MEDIA_QUERY).matches,
+    () => typeof window !== 'undefined' && window.matchMedia(query).matches,
   );
 
   useEffect(() => {
-    const mediaQuery = window.matchMedia(COMPACT_TOUCH_LAYOUT_MEDIA_QUERY);
+    const mediaQuery = window.matchMedia(query);
     const onChange = (event: MediaQueryListEvent) => {
       setIsCompactTouchLayout(event.matches);
     };
@@ -48,7 +53,7 @@ export function useCompactTouchLayout(): boolean {
     mediaQuery.addEventListener('change', onChange);
     setIsCompactTouchLayout(mediaQuery.matches);
     return () => mediaQuery.removeEventListener('change', onChange);
-  }, []);
+  }, [query]);
 
   return isCompactTouchLayout;
 }

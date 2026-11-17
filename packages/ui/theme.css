@@ -937,6 +937,20 @@ body:has([data-pn-document-scroll="true"]) > #root {
 /* The navigator reuses information-dense desktop browser content, but its
  * interactive rows become physical controls on touch. Scope both the 44px
  * target and the TOC's legible type lift to the compact stage only. */
+.pn-hit-target {
+  position: relative;
+}
+
+.pn-hit-target::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, 24px);
+  height: max(100%, 24px);
+  transform: translate(-50%, -50%);
+}
+
 [data-pn-plan-navigator="true"] button {
   min-block-size: var(--pn-touch-target);
   touch-action: manipulation;
