@@ -27,13 +27,20 @@ export interface InboxScheduledMcpContext {
   routineGrants?: () => InboxRoutineGrants | null;
 }
 
-/** Why a create arrived off, for the agent to act on (it is told the truth, then tells the person). */
-const offBecause = (threadId: string | undefined, forAnother: boolean) =>
+/**
+ * Why a create arrived off, for the agent to act on (it is told the truth, then tells the person). `session` is the
+ * caller's own word, as everywhere in the Inbox: a call that names none (a shell with no session of its own) is told
+ * that, never that the request was for someone else, since the request may well be its; the grant stays held for its
+ * retry through its Inbox tool, which names the session.
+ */
+const offBecause = (threadId: string | undefined, forAnother: boolean, session: string) =>
   !threadId
     ? " It is off until the person turns it on in Routines in the Inbox. A create starts on only with thread_id (--thread from a shell) naming the thread where the person asked for it with /create-routine."
-    : forAnother
-      ? ` The /create-routine request from the person in thread ${threadId} was for another agent session, not yours, so it is off until the person turns it on in Routines in the Inbox.`
-      : ` No /create-routine request from the person in thread ${threadId} that this Inbox still holds (one lasts an hour and makes one routine, and an Inbox restart forgets it), so it is off until the person turns it on in Routines in the Inbox.`;
+    : forAnother && !session
+      ? ` This call names no agent session, so it could not be matched to the person's /create-routine request in thread ${threadId}, and it is off until the person turns it on in Routines in the Inbox. To have it on, delete it and make it again with your Inbox tool's routine action, or from the shell with --session and your session id.`
+      : forAnother
+        ? ` The /create-routine request from the person in thread ${threadId} was for another agent session, not yours, so it is off until the person turns it on in Routines in the Inbox.`
+        : ` No /create-routine request from the person in thread ${threadId} that this Inbox still holds (one lasts an hour and makes one routine, and an Inbox restart forgets it), so it is off until the person turns it on in Routines in the Inbox.`;
 
 const rowLine = (row: InboxScheduledRow) =>
   `${row.id} "${row.name}": ${row.state}, ${row.schedule ? row.schedule_words : "runs only when run"}${row.tz_short ? ` (${row.tz_short})` : ""}, ${row.agent} in ${row.folder_shown}${row.next_run ? `, next ${row.next_run}` : ""}${row.approved_at ? "" : ", not yet turned on by the person"}${row.thread_id ? `, thread ${row.thread_id}` : ""}.`;
@@ -109,7 +116,7 @@ export function registerInboxScheduledTool(server: McpServer, context: InboxSche
             throw error;
           }
           const row = scheduled.rowOf(made.record);
-          const said = grant ? ` It is on: the person asked for it with /create-routine in thread ${grant.thread_id}.` : offBecause(input.thread_id?.trim() || undefined, taken.for_another);
+          const said = grant ? ` It is on: the person asked for it with /create-routine in thread ${grant.thread_id}.` : offBecause(input.thread_id?.trim() || undefined, taken.for_another, by.session);
           return okComplete(`Made ${rowLine(row)}${said}${told(made.told)}`, { scheduled: row, asked_with_create_routine: grant !== null });
         }
         if (!input.id) throw new InboxError("validation_error", `id: required for ${input.op}.`, { field: "id" });

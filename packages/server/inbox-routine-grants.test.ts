@@ -256,16 +256,29 @@ describe("routine create with the person's /create-routine", () => {
     expect(made.structuredContent).toMatchObject({ asked_with_create_routine: true, scheduled: { enabled: true } });
   });
 
-  test("another agent session in the thread, or one that names none, does not take it: off, saying it was for another agent; the one asked then takes it", async () => {
+  test("another agent session in the thread does not take it: off, saying it was for another agent; the one asked then takes it", async () => {
     const w = world();
     const threadId = w.thread(WORDS, blockOf(BUILTIN));
-    for (const agent_session of ["ses_other", ""]) {
-      const theirs = await w.create({ thread_id: threadId, agent_session, name: `Not mine ${agent_session || "none"}` });
-      expect(theirs.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false, approved_at: null } });
-      expect(theirs.content[0]!.text).toContain(` The /create-routine request from the person in thread ${threadId} was for another agent session, not yours, so it is off until the person turns it on in Routines in the Inbox.`);
-    }
+    const theirs = await w.create({ thread_id: threadId, agent_session: "ses_other", name: "Not mine" });
+    expect(theirs.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false, approved_at: null } });
+    expect(theirs.content[0]!.text).toContain(` The /create-routine request from the person in thread ${threadId} was for another agent session, not yours, so it is off until the person turns it on in Routines in the Inbox.`);
+    expect(theirs.content[0]!.text).not.toContain("names no agent session");
     const mine = await w.create({ thread_id: threadId });
     expect(mine.structuredContent).toMatchObject({ asked_with_create_routine: true, scheduled: { enabled: true } });
+  });
+
+  test("a call that names no session (a shell with none) is told so, never that it was for another; its Inbox tool, naming the session, then makes it on", async () => {
+    const w = world();
+    const threadId = w.thread(WORDS, blockOf(BUILTIN));
+    const shell = await w.create({ thread_id: threadId, agent_session: "", name: "From a bare shell" });
+    expect(shell.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false, approved_at: null } });
+    const text = shell.content[0]!.text;
+    expect(text).toContain(` This call names no agent session, so it could not be matched to the person's /create-routine request in thread ${threadId}, and it is off until the person turns it on in Routines in the Inbox. To have it on, delete it and make it again with your Inbox tool's routine action, or from the shell with --session and your session id.`);
+    expect(text).not.toContain("another agent session");
+    // The tool call, with the session the connection fills (agent_session ses_…), takes the grant the bare shell left.
+    const tool = await w.create({ thread_id: threadId });
+    expect(tool.content[0]!.text).toContain(` It is on: the person asked for it with /create-routine in thread ${threadId}.`);
+    expect(tool.structuredContent).toMatchObject({ asked_with_create_routine: true, scheduled: { enabled: true } });
   });
 
   test("an agent's message carrying the same block grants nothing", async () => {

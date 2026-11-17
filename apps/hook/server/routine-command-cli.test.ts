@@ -171,6 +171,12 @@ describe("what an agent can do from the shell is what the routine tool lets it",
     expect(theirs).toMatchObject({ code: 0, stderr: "" });
     expect(theirs.stdout).toMatch(/^Made sch_\S+ "Not theirs": off, /);
     expect(theirs.stdout).toContain(`The /create-routine request from the person in thread ${thread} was for another agent session, not yours`);
+    // A shell that names no session at all is told that, not that the request was another's, and the grant stays.
+    const bare = await w.cli(["create", "--name", "From a bare shell", "--thread", thread, ...at], { env: { PLANNOTATOR_SESSION_TAG: "" } });
+    expect(bare).toMatchObject({ code: 0, stderr: "" });
+    expect(bare.stdout).toMatch(/^Made sch_\S+ "From a bare shell": off, /);
+    expect(bare.stdout).toContain(`This call names no agent session, so it could not be matched to the person's /create-routine request in thread ${thread}`);
+    expect(bare.stdout).not.toContain("another agent session");
     // The one it went to: --json carries on, approved and the next run.
     const json = await w.cli(["create", "--name", "Weekly digest", "--thread", thread, "--json", ...at]);
     expect(json).toMatchObject({ code: 0, stderr: "" });
