@@ -20,12 +20,6 @@ import { markImageComposer } from '../pageMarks';
 import { AudioScrub, useAudioPeaks } from './AudioPlayer';
 import { PlaybackSpeed, readPlaybackRate, writePlaybackRate } from './PlaybackSpeed';
 
-/**
- * Safari and every WebKit view on Apple's systems draw the native player's controls as a floating bar with the
- * scrubber across it, not Chrome's row of buttons over a thin scrubber: the speed button sits above that bar there.
- */
-const APPLE_WEBKIT = typeof navigator !== 'undefined' && navigator.vendor === 'Apple Computer, Inc.';
-
 /** A fresh annotation id. */
 function newId(): string {
   return typeof crypto.randomUUID === 'function' ? `ann-vid-${crypto.randomUUID()}` : `ann-vid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -530,11 +524,15 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
     },
   };
 
+  // The film's speed: in a line the Inbox draws, never over the browser's own controls (each browser lays those out its
+  // own way, and moves and hides them). The recording's sits in its own player row below.
+  const filmSpeed = !audio && <PlaybackSpeed rate={rate} onRate={pickRate} side="top" className="ib-speed-vid" phone={phone} />;
   const phoneMeta = phone && (
     <div className="ib-vmeta" data-video-meta="">
       <span>{meta}</span>
       <span className="ib-sp" />
       <span>{plural(sorted.length, 'comment')}</span>
+      {filmSpeed}
     </div>
   );
 
@@ -612,28 +610,32 @@ export const VideoAttachmentView = forwardRef<VideoAttachmentViewHandle, {
           {formatInboxVideoTime(current)}
           {span !== null && <span className="ib-mut"> / {formatInboxVideoTime(span)}</span>}
         </span>
-        <PlaybackSpeed rate={rate} onRate={pickRate} side="bottom" className="ib-speed-aud" />
+        <PlaybackSpeed rate={rate} onRate={pickRate} side="bottom" className="ib-speed-aud" phone={phone} />
       </div>
       {phoneMeta}
     </div>
   ) : (
     <div className="ib-vidbox" style={{ '--ib-ar': String(ratio) } as CSSProperties}>
-      {/* The film and its speed pill, laid over the native control bar (a native player takes no buttons of its own). */}
-      <div className="ib-vidwrap" data-playing={playing ? '' : undefined} data-native-bar={APPLE_WEBKIT ? 'webkit' : undefined}>
-        <video
-          ref={videoRef as RefObject<HTMLVideoElement>}
-          className="ib-video"
-          {...mediaProps}
-          controls
-          poster={poster}
-          playsInline
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-        />
-        <PlaybackSpeed rate={rate} onRate={pickRate} side="top" className="ib-speed-vid" />
-      </div>
+      <video
+        ref={videoRef as RefObject<HTMLVideoElement>}
+        className="ib-video"
+        {...mediaProps}
+        controls
+        poster={poster}
+        playsInline
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+      />
       {phoneMeta}
-      {rail}
+      {phone ? (
+        rail
+      ) : (
+        // The line under the film: its comments' rail, and the speed at its right end.
+        <div className="ib-vidunder" data-video-foot="">
+          {rail}
+          {filmSpeed}
+        </div>
+      )}
     </div>
   );
 

@@ -318,6 +318,26 @@ test.skipIf(!hasDom)('a recording has the same speed button after its time; a pi
   expect(button().textContent).toBe('1.7x');
 });
 
+test.skipIf(!hasDom)("a recording's speed list opens below its button; on a phone it is the Inbox's bottom sheet, drawn in the window's root", async () => {
+  globalThis.fetch = notFound;
+  restores.push(() => window.sessionStorage.removeItem(PLAYBACK_RATE_KEY));
+  window.sessionStorage.removeItem(PLAYBACK_RATE_KEY);
+  await render(<div className="pn-inbox">{pane([])}</div>);
+  act(() => host!.querySelector<HTMLButtonElement>('.ib-audrow [data-playback-speed]')!.click());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  const positioner = () => document.querySelector<HTMLElement>('[data-playback-speed-menu]')!.closest<HTMLElement>('.ib-pm-pos')!;
+  expect(positioner().getAttribute('data-side')).toBe('bottom');
+  expect(positioner().hasAttribute('data-phone')).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+  await render(<div className="pn-inbox">{pane([], { phone: true })}</div>);
+  act(() => host!.querySelector<HTMLButtonElement>('.ib-audrow [data-playback-speed]')!.click());
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+  expect(positioner().hasAttribute('data-phone')).toBe(true);
+  expect(positioner().closest('.pn-inbox')).not.toBeNull();
+  expect(document.querySelector('.pn-inbox .ib-pm-scrim')).not.toBeNull();
+});
+
 test.skipIf(!hasDom)('a recording the browser cannot play shows the Download card', async () => {
   globalThis.fetch = notFound;
   stub(HTMLMediaElement.prototype, 'error', { get: () => ({ code: 4, message: 'unsupported' }) });
