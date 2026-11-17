@@ -9,7 +9,7 @@ import {
 import { inboxApi } from '../api';
 import { tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
-import { AgentRulesSection } from './AgentRules';
+import { AgentRulesSection, MCP_AGENTS } from './AgentRules';
 import { Tip } from './Tip';
 
 /**
@@ -247,6 +247,11 @@ export function PromptsSection({
             {sharedText}
           </p>
           {!sharedCustom && overShared !== null && overNote(overShared, 'shared')}
+          {sharedCustom && prompts.rules?.mcp?.reminder_dropped && (
+            <p className="pm-over" data-prompt-over="mcp">
+              Not sent to {MCP_AGENTS}: {prompts.rules.shared !== null && !prompts.rules.mcp.dropped ? 'with your rules it is too long for them.' : 'it is too long for them.'}
+            </p>
+          )}
           {sharedCustom && (
             <>
               <button type="button" className="pm-disc" aria-expanded={showDefault} aria-controls={defaultId} onClick={() => setShowDefault((open) => !open)} data-prompt-show-default="">

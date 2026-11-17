@@ -3760,6 +3760,14 @@ export interface InboxPromptsSettings {
     runtimes: Record<InboxPromptHost, string | null>;
     room: { shared: number; runtimes: Record<InboxPromptHost, number> };
     dropped: InboxPromptHost[];
+    /**
+     * Agents that reach the Inbox over MCP (T3 Code, Codex, any MCP client): they get the shared
+     * ("All agents") rules and reminder in the MCP server's instructions, whose room is far smaller.
+     * `room`: the most characters the shared rules may hold there; `dropped`: the shared rules are set
+     * and left out there; `reminder_dropped`: the shared reminder is set and left out there. Absent
+     * from an older Inbox.
+     */
+    mcp?: { room: number; dropped: boolean; reminder_dropped: boolean };
   };
 }
 

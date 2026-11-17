@@ -635,6 +635,9 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
       expect(firstInstructions).toContain("Always ask before deleting.");
       expect(firstInstructions).toContain("Ping me when done.");
       expect(firstInstructions).not.toContain("A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.");
+      // The two summary lines no tool repeats stay beside the person's text.
+      expect(firstInstructions).toContain("(an id from the Inbox, never from memory)");
+      expect(firstInstructions).toContain("pictures go in the body, `![alt](path)`.");
       // A change applies at the next session, with no restart.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ prompts: { inbox: { rules: "Never delete anything." } } }));
       const second = await mcpClient(server);

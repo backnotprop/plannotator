@@ -7,6 +7,7 @@ import {
   inboxReminderWithRules,
   inboxRulesRoom,
 } from "@plannotator/shared/inbox/connection";
+import { INBOX_MCP_RULES_ROOM, inboxMcpSent, resolveInboxMcpReminder } from "./inbox-mcp-instructions";
 
 const LONGEST_TOOL_NAME = "mcp__plannotator__plannotator_inbox";
 
@@ -43,7 +44,11 @@ export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes): NonNul
     const reminder = reminderOf(config, host, wakes);
     return inboxReminderWithRules(reminder, rules, LONGEST_TOOL_NAME) === reminder;
   });
-  return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped };
+  // Agents over MCP: the shared text only, in the server instructions' smaller room (inbox-mcp-instructions.ts).
+  const mcpText = resolveInboxMcpReminder(config);
+  const mcpSent = inboxMcpSent(mcpText);
+  const mcp = { room: INBOX_MCP_RULES_ROOM, dropped: mcpText?.rules != null && !mcpSent.rules, reminder_dropped: mcpText?.custom != null && !mcpSent.reminder };
+  return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, mcp };
 }
 
 export function inboxRulesFitError(change: InboxPromptsChange, config: PlannotatorConfig, wakes: Wakes): { field: string; message: string } | null {

@@ -24,8 +24,9 @@ import { questionsToCheckText } from "@plannotator/shared/inbox/questions-to-che
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { inboxBodyWithBro, inboxReminderCustomText, inboxReminderRulesText, inboxStopNoticeReply, INBOX_AGENT_RULES, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_RULES_LEAD, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
+import { inboxMcpInstructions, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
@@ -82,107 +83,16 @@ export function inboxServedTools(switches: { board: boolean; steps: boolean; sch
 }
 
 
-/**
- * Under Claude Code's 2,048-character cap on server instructions. Room for
- * INBOX_THREAD_RULE (in INBOX_AGENT_RULES) came from the attachments line's
- * examples, which the field's own description gives. Room for the pictures
- * clause of INBOX_USE_RULE and the attachments line's "pictures go in the
- * body" (2026-11-02) came from the first line's "without blocking your
- * session" and the result line's "with your work".
- */
-const INBOX_MCP_INSTRUCTIONS_INTRO =
-  "Plannotator Inbox: a local window where the person reads what you send and answers later; nothing blocks.";
-
-/**
- * The five summary lines: each says in one line what a tool's own field
- * description says in full, so a session with the person's own rules
- * configured reads the rules instead (inboxMcpInstructions) and still finds
- * the detail in the tools.
- */
-const INBOX_MCP_INSTRUCTIONS_SUMMARY = [
-  "- send_message posts markdown. With no reply_to or thread, a message starts a new thread; to add to a thread, reply_to its latest message (an id from the Inbox, never from memory) or use the same `thread` name. Question syntax: send_message's description.",
-  "- attachments: files to open beside the thread (link one: `[the mock](mock.html)`); pictures go in the body, `![alt](path)`.",
-  "- send_message's result says whether the reply arrives in this session by itself. When it does not, go on and read the thread later.",
-  "- read_thread reads one thread (thread_id); without an id it lists yours (asked_by \"anyone\": all), and `unread` marks a thread the person wrote in. search finds older messages by words. resolve_message archives the thread, only when nothing in it is left for the person to read or answer.",
-  "- A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
-];
-
-const INBOX_MCP_INSTRUCTIONS_ATTRIBUTION =
-  "A reply is the person's own: their words, then \"Answers to your questions\"; no tool answers or approves for them.";
-
-export const INBOX_MCP_INSTRUCTIONS = [
-  INBOX_MCP_INSTRUCTIONS_INTRO,
-  "",
-  INBOX_AGENT_RULES,
-  "",
-  ...INBOX_MCP_INSTRUCTIONS_SUMMARY,
-  "",
-  INBOX_MCP_INSTRUCTIONS_ATTRIBUTION,
-].join("\n");
-
-/** Claude Code's cap on server instructions: the built instructions stay under it, never at it. */
-export const INBOX_MCP_INSTRUCTIONS_MAX_CHARS = 2048;
-
-/** The person's own Inbox rules and reminder for an MCP session, or null when neither is configured. */
-export interface InboxMcpReminder {
-  custom: string | null;
-  rules: string | null;
-}
-
-/**
- * The person's own Inbox rules and reminder from config.json
- * (`prompts.inbox.rules` / `prompts.inbox.reminder`, or the per-host
- * `prompts.inbox.runtimes.<host>` ones): host "mcp", so the shared text
- * governs, there being no "mcp" runtime in Settings. Null when neither is
- * set: the built-in instructions then stand unchanged. The text is the
- * person's own, served verbatim: the terminal path renames
- * `plannotator_inbox` in it to the host's tool name, but an MCP session has
- * no single tool name to rename to.
- */
-export function resolveInboxMcpReminder(config: unknown): InboxMcpReminder | null {
-  const custom = inboxReminderCustomText(config, "mcp");
-  const rules = inboxReminderRulesText(config, "mcp");
-  return custom === null && rules === null ? null : { custom, rules };
-}
-
-const INBOX_MCP_INSTRUCTIONS_TRUNCATED = "… [truncated]";
-
-/**
- * The server instructions for a session: the built-in ones when the person
- * configured nothing, else the same intro, agent rules and attribution with
- * the person's own rules and reminder in place of the five summary lines
- * (each duplicated in the tools' own field descriptions). The person's text
- * comes first, then the rules, as on the terminal path; the rules win the
- * room when both do not fit, and over-long text is cut with "… [truncated]"
- * so the model sees the cut. The result is always under the 2,048 cap.
- */
-export function inboxMcpInstructions(reminder: InboxMcpReminder | null): string {
-  if (reminder === null) return INBOX_MCP_INSTRUCTIONS;
-  const head = [INBOX_MCP_INSTRUCTIONS_INTRO, "", INBOX_AGENT_RULES, ""].join("\n");
-  const tail = ["", INBOX_MCP_INSTRUCTIONS_ATTRIBUTION].join("\n");
-  const withoutBlock = [head, "", tail].join("\n").length;
-  const room = INBOX_MCP_INSTRUCTIONS_MAX_CHARS - 1 - withoutBlock;
-  const rulesBlock = (rules: string) => `${INBOX_RULES_LEAD}\n${rules}`;
-  const cut = (text: string, length: number) => text.slice(0, Math.max(0, length)) + INBOX_MCP_INSTRUCTIONS_TRUNCATED;
-  let block =
-    reminder.custom !== null && reminder.rules !== null
-      ? `${reminder.custom}\n\n${rulesBlock(reminder.rules)}`
-      : reminder.rules !== null
-        ? rulesBlock(reminder.rules)
-        : reminder.custom ?? "";
-  if (block.length > room) {
-    if (reminder.rules !== null) {
-      const rules = rulesBlock(reminder.rules);
-      block =
-        rules.length <= room
-          ? rules
-          : rulesBlock(cut(reminder.rules, room - INBOX_RULES_LEAD.length - 1 - INBOX_MCP_INSTRUCTIONS_TRUNCATED.length));
-    } else if (reminder.custom !== null) {
-      block = cut(reminder.custom, room - INBOX_MCP_INSTRUCTIONS_TRUNCATED.length);
-    }
-  }
-  return [head, block, tail].join("\n");
-}
+export {
+  INBOX_MCP_INSTRUCTIONS,
+  INBOX_MCP_INSTRUCTIONS_MAX_CHARS,
+  INBOX_MCP_RULES_ROOM,
+  inboxMcpInstructions,
+  inboxMcpSent,
+  resolveInboxMcpReminder,
+  type InboxMcpReminder,
+  type InboxMcpSent,
+} from "./inbox-mcp-instructions";
 
 /**
  * Claude Code passes an MCP description to the model up to its first 2,048
@@ -445,7 +355,7 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    */
   codeReviewOn?: () => boolean;
   /**
-   * The person's own Inbox rules and reminder (config.json
+   * The person's shared Inbox rules and reminder (config.json
    * `prompts.inbox.rules` / `prompts.inbox.reminder`, read on every
    * connection, so a change applies at the next session). Null when neither
    * is configured: the built-in instructions stand unchanged. Absent: the

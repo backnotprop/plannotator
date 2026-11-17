@@ -377,3 +377,32 @@ test.skipIf(!hasDom)("Rules for one agent: For picks the agent's own box; Save w
   expect(q(el, '[data-rules-text="pi"]')?.textContent).toBe('Never send from reviewer sessions.');
   expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Keep messages short.');
 });
+
+test.skipIf(!hasDom)('agents connected through MCP: the rules for all agents show their much smaller room, and Save is never refused for it', async () => {
+  const start = withRules({ mcp: { room: 397, dropped: false, reminder_dropped: false } });
+  server(start);
+  const el = mount(start, false);
+  await click(q(el, '[data-rules-add]'));
+  expect(q(document.body, '[data-rules-count="mcp"]')?.textContent?.trim()).toBe('0 / 397 through MCP');
+  type(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!, 'a'.repeat(500));
+  expect(q(document.body, '[data-rules-count="mcp"]')?.textContent?.trim()).toBe('500 / 397 through MCP');
+  expect(q(document.body, '[data-rules-count="mcp"]')?.hasAttribute('data-over')).toBe(true);
+  expect(q<HTMLButtonElement>(document.body, '[data-rules-save]')!.disabled).toBe(false);
+  // One agent's own rules never reach an MCP session: no MCP count there.
+  await click(q(document.body, '[data-rules-for="pi"]'));
+  expect(q(document.body, '[data-rules-count="mcp"]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('agents connected through MCP: rules or a reminder left out there say so, with the room', () => {
+  const start = withRules({ shared: 'r'.repeat(500), mcp: { room: 397, dropped: true, reminder_dropped: false } });
+  const el = mount(start, false);
+  expect(q(el, '[data-rules-dropped="mcp"]')?.textContent).toBe('Not sent to agents connected through MCP (T3 Code, Codex and others): they take rules up to 397 characters.');
+  expect(q(el, '[data-rules-dropped=""]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  const withReminder: InboxPromptsSettings = { ...withRules({ shared: 'Ask first.', mcp: { room: 397, dropped: false, reminder_dropped: true } }) };
+  withReminder.reminder = { ...withReminder.reminder, shared: 'Ping me when you are done.' };
+  const again = mount(withReminder);
+  expect(q(again, '[data-rules-dropped="mcp"]')).toBeNull();
+  expect(q(again, '[data-prompt-over="mcp"]')?.textContent).toBe('Not sent to agents connected through MCP (T3 Code, Codex and others): with your rules it is too long for them.');
+});

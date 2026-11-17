@@ -60,6 +60,7 @@ export function AgentRulesSection({
               </p>
               {slot !== 'shared' && rules.dropped.includes(slot) && <DroppedNote hosts={[slot]} />}
               {slot === 'shared' && <DroppedNote hosts={rules.dropped.filter((host) => rules.runtimes[host] === null)} />}
+              {slot === 'shared' && rules.mcp?.dropped && <McpDroppedNote room={rules.mcp.room} />}
             </div>
           ))
         )}
@@ -78,6 +79,17 @@ function DroppedNote({ hosts }: { hosts: InboxPromptHost[] }) {
   );
 }
 
+/** Agents connected through MCP read the rules in the MCP server's instructions, which hold far fewer characters. */
+export const MCP_AGENTS = 'agents connected through MCP (T3 Code, Codex and others)';
+
+function McpDroppedNote({ room }: { room: number }) {
+  return (
+    <p className="pm-over" data-rules-dropped="mcp">
+      Not sent to {MCP_AGENTS}: they take rules up to {room.toLocaleString('en-US')} characters.
+    </p>
+  );
+}
+
 function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first: Slot; onClose: () => void; onPrompts?: (next: InboxPromptsSettings) => void }) {
   const phone = usePhone();
   const [slot, setSlot] = useState<Slot>(first);
@@ -89,6 +101,8 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
   const room = slot === 'shared' ? rules.room.shared : rules.room.runtimes[slot];
   const length = draft.trim().length;
   const over = length > room;
+  // Agents connected through MCP get the rules for all agents, in a much smaller room: shown from the start, never a reason to refuse Save.
+  const mcpRoom = slot === 'shared' ? (rules.mcp?.room ?? null) : null;
   const own = saved(slot) !== '';
   const can = !saving && !over && draft.trim() !== saved(slot).trim() && draft.trim() !== '';
 
@@ -141,6 +155,12 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
             <span className="pm-count" data-over={over || undefined} data-rules-count="">
               {' '}
               {length.toLocaleString('en-US')} / {room.toLocaleString('en-US')}
+            </span>
+          )}
+          {mcpRoom !== null && length >= mcpRoom - RULES_COUNT_WITHIN && (
+            <span className="pm-count" data-over={length > mcpRoom || undefined} data-rules-count="mcp">
+              {' '}
+              {length.toLocaleString('en-US')} / {mcpRoom.toLocaleString('en-US')} through MCP
             </span>
           )}
         </p>
