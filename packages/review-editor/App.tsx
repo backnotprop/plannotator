@@ -1204,6 +1204,22 @@ const ReviewApp: React.FC = () => {
     if (!dockApi) return;
     const changed = files.some((file) => file.path === filePath);
     const kept = findFilePanel((params) => !params.preview && params.filePath === filePath);
+    const besideKept = options.side && kept && dockApi.activePanel && kept.group.element === dockApi.activePanel.group.element ? dockApi.activePanel : undefined;
+    if (kept && besideKept) {
+      let id = '';
+      do {
+        previewPanelSeq.current += 1;
+        id = `${REVIEW_FILE_PREVIEW_PANEL_ID}:${previewPanelSeq.current}`;
+      } while (dockApi.getPanel(id));
+      dockApi.addPanel({
+        id,
+        component: REVIEW_PANEL_TYPES.FILE,
+        title: getFileTabTitle(filePath),
+        params: { filePath } satisfies ReviewFilePanelParams,
+        position: { referencePanel: besideKept.id, direction: 'right' },
+      });
+      return;
+    }
     if (kept) {
       kept.api.setActive();
       return;
