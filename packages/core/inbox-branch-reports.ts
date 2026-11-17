@@ -139,31 +139,41 @@ export function sameCommit(a: string, b: string): boolean {
 }
 
 /**
- * The PRs a reported branch's thread owns: the person's own open (or merged) PR from the repository itself (not a fork) whose head
+ * The PRs a reported branch's thread owns: the person's own open PR, or the merged one that is this report's work, from the repository itself (not a fork) whose head
  * branch is the reported branch, in a repository that is the report's project, never a long-lived branch. So a branch
  * reviewed before its PR and its PR stay one thread (the same rule `inboxReviewIsOf` reads from a review's source).
  * `projectsByRepo`: `host/repo` (lowercased) → the projects on it.
  */
 export function inboxBranchReportOwners(
-  reports: Iterable<Pick<InboxBranchReport, "project_id" | "branch" | "thread_id">>,
+  reports: Iterable<Pick<InboxBranchReport, "project_id" | "branch" | "thread_id" | "head" | "at">>,
   pulls: Iterable<InboxPull>,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
 ): Map<string, { thread_id: string }> {
-  const byBranch = new Map<string, Pick<InboxBranchReport, "project_id" | "branch" | "thread_id">[]>();
+  const byBranch = new Map<string, Pick<InboxBranchReport, "project_id" | "branch" | "thread_id" | "head" | "at">[]>();
   for (const report of reports) {
     if (inboxPullLongLived(report.branch)) continue;
     byBranch.set(report.branch, [...(byBranch.get(report.branch) ?? []), report]);
   }
   const owners = new Map<string, { thread_id: string }>();
   for (const pull of pulls) {
-    // A merged one too: the thread then reads as merged and leaves Reviews (a landing), never "Ready for review" again.
     if (!(inboxPullIsOpen(pull) || pull.state === "merged") || !pull.mine) continue;
     if (pull.head_repo !== null && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase()) continue;
     const projects = projectsByRepo.get(inboxPullRepoKey(pull.host, pull.repo)) ?? [];
     const report = byBranch.get(pull.head)?.find((one) => projects.includes(one.project_id));
+    // A merged one only when it is this report's work (the thread then lands and leaves Reviews): its head is the
+    // commit reported, or it merged after the latest report. A name reused for new work, or work reported after the
+    // merge, is not that PR's.
+    if (report && pull.state === "merged" && !inboxBranchReportMerged(report, pull)) continue;
     if (report) owners.set(pull.key, { thread_id: report.thread_id });
   }
   return owners;
+}
+
+/** A merged PR is the report's own work: it merged at the reported commit, or after the latest report. */
+export function inboxBranchReportMerged(report: Pick<InboxBranchReport, "head" | "at">, pull: Pick<InboxPull, "head_sha" | "merged_at">): boolean {
+  if (report.head && pull.head_sha && sameCommit(pull.head_sha, report.head)) return true;
+  const merged = pull.merged_at ? Date.parse(pull.merged_at) : NaN;
+  return !Number.isNaN(merged) && merged > Date.parse(report.at);
 }
 
 /** A reported branch as Reviews shows it: on a row and in its thread. */

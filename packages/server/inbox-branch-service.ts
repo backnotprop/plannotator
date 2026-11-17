@@ -37,6 +37,8 @@ export interface InboxBranchServiceOptions {
   risk: Pick<PullRisk, "assessBranch" | "branchJudgment" | "branchPending" | "branchRankable">;
   /** The origin a project's folder has, as the repo cache last read it (`host/owner/repo`, lowercased), never a git call. */
   originOf: (root: string) => string | null;
+  /** The thread landed: a PR it owned merged (`inbox/pull-links.json`'s landings). */
+  landed?: (threadId: string) => boolean;
   now?: () => number;
 }
 
@@ -96,6 +98,7 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
     on: options.on,
     get: (projectId, branch) => reports.get(projectId, branch),
     ofThread: (threadId) => reports.ofThread(threadId),
+    landed: (threadId) => options.landed?.(threadId) === true,
     // The agent's own folder first (a worktree of the project), else the project's.
     read: async (project, field, workingFolder, readOptions) => {
       for (const folder of [workingFolder, project.root]) {
@@ -145,15 +148,24 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
     return !!key && store.allProjects().some((project) => options.originOf(project.root) === key);
   };
 
-  /** `riskOn`: a branch may be judged now (`branchRankable`), read once per list. */
-  const rowOf = async (report: InboxBranchReport, riskOn: boolean): Promise<InboxBranchReportRow> => {
+  /**
+   * The code is here to open and review: a cloud agent's only when pushed to the remote it named (a commit that is
+   * here only as local work is not what it reported), anyone else's when the commit is in the checkout.
+   */
+  const codeHere = (report: InboxBranchReport): Promise<boolean> => (report.place === "cloud" ? judgeable(report) : reachable(report));
+
+  /**
+   * `riskOn`: a branch may be judged now (`branchRankable`), read once per list. `retry`: the person's own Reviews read,
+   * the only read that tries a failed judgment once more (never a linked machine's read of this list).
+   */
+  const rowOf = async (report: InboxBranchReport, riskOn: boolean, retry: boolean): Promise<InboxBranchReportRow> => {
     const key = inboxBranchRiskKey(report.project_id, report.branch);
     const { judgment, failed } = options.risk.branchJudgment(key, report.head, report.base);
     const pending = options.risk.branchPending(key, report.head, report.base);
     const canRun = !judgment && !pending && riskOn && (await judgeable(report));
     // Tried once more after a failure, on this read (no timer); after that the person ranks it by hand.
     const once = `${key}\u0000${report.head}`;
-    const retrying = !!failed && canRun && !retried.has(once);
+    const retrying = retry && !!failed && canRun && !retried.has(once);
     if (retrying) {
       retried.add(once);
       void judge(report).catch(() => {});
@@ -170,24 +182,27 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
       at: report.at,
       reports: report.reports,
       agent: report.agent,
-      reachable: await reachable(report),
+      reachable: await codeHere(report),
       ...(report.place === "cloud" ? { remote_known: remoteKnown(report.remote_url) } : {}),
       risk: judgment,
       risk_failed: failed,
-      ...(canRun && !retrying ? { rankable: true } : {}),
+      ...(canRun && !retrying && (!failed || retried.has(once)) ? { rankable: true } : {}),
     };
   };
 
   return {
     mcp,
-    /** This computer's reported branches as rows (for Reviews and for a linked machine's door read). */
+    /** This computer's reported branches as rows (a linked machine's door read): never retries anything. */
     async rows(): Promise<InboxBranchReportRow[]> {
       if (!options.on()) return [];
       const riskOn = options.risk.branchRankable();
-      return Promise.all(listed().map(({ report }) => rowOf(report, riskOn)));
+      return Promise.all(listed().map(({ report }) => rowOf(report, riskOn, false)));
     },
-    /** The Reviews rows' starts: a reported branch's thread is a review thread from its first report. */
-    async started(): Promise<Map<string, InboxReviewStart>> {
+    /**
+     * The Reviews rows' starts: a reported branch's thread is a review thread from its first report. `retry`: this is
+     * the person's own Reviews read (not a linked machine's), so a failed judgment is tried once more.
+     */
+    async started(retry = false): Promise<Map<string, InboxReviewStart>> {
       const out = new Map<string, InboxReviewStart>();
       if (!options.on()) return out;
       const riskOn = options.risk.branchRankable();
@@ -202,7 +217,7 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
           project_id: report.project_id,
           at: report.at,
           name,
-          report: await rowOf(report, riskOn),
+          report: await rowOf(report, riskOn, retry),
         });
       }
       return out;

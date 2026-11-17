@@ -585,8 +585,14 @@ export function inboxReviewRows(input: {
     const named = review?.source?.pr ? inboxPullRefOfUrl(review.source.pr.url)?.key : null;
     return [...(ownersOf.get(threadId) ?? []), ...(owned.get(threadId)?.pulls.map((pull) => pull.key) ?? []), ...(named ? [named] : [])];
   };
+  // A reported branch's thread: a landing from before its latest report is earlier work (a report after a merge is new
+  // work, and brings the row back).
+  const reportedAt = (threadId: string): number => {
+    const start = input.started?.get(threadId);
+    return start?.kind === "branch" && start.report ? Date.parse(start.report.at) : NaN;
+  };
   const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => [
-    ...recorded.filter((landing) => landing.thread_id === threadId),
+    ...recorded.filter((landing) => landing.thread_id === threadId && !(landing.at && Date.parse(landing.at) < reportedAt(threadId))),
     ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key && landing.thread_id === threadId)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
   ];
   const stacksOf = (pulls: readonly InboxPull[]) => input.stacks.filter((stack) => stack.layers.some((layer) => inboxPullIsOpen(layer) && pulls.some((p) => p.key === layer.key)));

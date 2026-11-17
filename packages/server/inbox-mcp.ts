@@ -1251,7 +1251,10 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         const { steps: _steps, pulls: _pulls, branch: _branch, ...message } = input as typeof input & { steps?: unknown; branch?: unknown };
         // A report goes in its branch's thread, or (detached) starts its own: the agent's reply_to and thread then go.
         const placed = branchPlan && (branchPlan.replyTo || branchPlan.detach) ? { reply_to: branchPlan.replyTo ?? undefined, thread: undefined } : {};
-        const sent = await sendAgentMessage(context, project, { ...message, ...placed, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        // A report's own new thread with no subject (a detached reply, say) is titled with its branch.
+        const startsThread = !!branchPlan && !branchPlan.replyTo && (branchPlan.detach || (!input.reply_to && !input.thread?.trim()));
+        const titled = startsThread && !input.subject?.trim() ? { subject: branchPlan!.field.name } : {};
+        const sent = await sendAgentMessage(context, project, { ...message, ...placed, ...titled, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
         // The report is kept once it is in its thread (a replay keeps the first one's record).
         let branchLine = "";
         if (branchPlan && context.branches && !sent.replayed) {

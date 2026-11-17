@@ -7,7 +7,8 @@
  *  - the safety net listing an old branch, the default branch, a reported one or one with no commits of its own, or
  *    losing a real branch behind branches with nothing of their own;
  *  - any read running anything but the exact local read-only commands, or without the guards that keep git off the
- *    network (no transport, no lazy fetch), from asking, and short.
+ *    network (no transport, no lazy fetch), from asking, and short;
+ *  - a git too old to take those guards running a read anyway, unguarded.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -15,7 +16,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { BRANCH_GIT_TIMEOUT_MS, createInboxBranchReports, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
+import { BRANCH_GIT_TIMEOUT_MS, createInboxBranchReports, OFFLINE_GIT_TOO_OLD, offlineGit, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
 import { runtime } from "./git";
 
 const DAY = 86_400;
@@ -72,6 +73,7 @@ function watched(): { runtime: ReviewGitRuntime; commands: string[][]; options: 
 
 /** The exact read-only commands these reads may run: anything else (a fetch, a checkout, a write) fails. */
 const READ_SHAPES: RegExp[] = [
+  /^--version$/,
   /^rev-parse --is-inside-work-tree$/,
   /^rev-parse --verify --quiet --end-of-options \S+\^\{commit\}$/,
   /^symbolic-ref refs\/remotes\/origin\/HEAD$/,
@@ -193,5 +195,23 @@ describe("the safety net: branches nobody reported", () => {
   test("a folder that is no repository says so and lists nothing", async () => {
     const read = await readUnreportedBranches(runtime, mkdtempSync(join(tmpdir(), "not-a-repo-")), "prj_1", () => false);
     expect(read).toEqual({ git: false, branches: [] });
+  });
+});
+
+describe("a git too old for the guards", () => {
+  test("runs nothing but its version check: every read fails closed", async () => {
+    const asked: string[][] = [];
+    const old: ReviewGitRuntime = {
+      ...runtime,
+      runGit: async (args) => {
+        asked.push(args);
+        return args[0] === "--version" ? { stdout: "git version 2.30.9\n", stderr: "", exitCode: 0 } : { stdout: "should not run", stderr: "", exitCode: 0 };
+      },
+    };
+    const answer = await offlineGit(old).runGit(["rev-parse", "--is-inside-work-tree"], { cwd: "/tmp" });
+    expect(answer).toMatchObject({ exitCode: 1, stderr: OFFLINE_GIT_TOO_OLD });
+    expect(await readReportedBranch(old, "/tmp", { name: "retry-jitter" })).toMatchObject({ head: null, reachable: false });
+    await expect(readUnreportedBranches(old, "/tmp", "prj_1", () => false)).rejects.toThrow(OFFLINE_GIT_TOO_OLD);
+    expect(asked.every((args) => args[0] === "--version")).toBe(true);
   });
 });

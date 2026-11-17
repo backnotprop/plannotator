@@ -105,20 +105,55 @@ function isReport(value: unknown): value is InboxBranchReport {
 }
 
 /**
+ * The oldest git whose guards hold: `GIT_CONFIG_COUNT` (how `protocol.allow=never` is given) is read from git 2.31.
+ * `GIT_NO_LAZY_FETCH` needs 2.44, but below it `protocol.allow=never` already stops a partial clone's lazy fetch.
+ */
+export const OFFLINE_GIT_MIN: readonly [number, number] = [2, 31];
+/** What a read answers when this git would ignore the guards: it fails, and nothing ran that could reach a host. */
+export const OFFLINE_GIT_TOO_OLD = `git ${OFFLINE_GIT_MIN.join(".")} or newer is needed for Branch reviews to read git without any network.`;
+
+/** `git version 2.39.5 (Apple Git-154)` → whether its guards hold; false when it can't be read. */
+export function offlineGitVersionOk(text: string): boolean {
+  const m = /git version (\d+)\.(\d+)/.exec(text);
+  if (!m) return false;
+  const [major, minor] = [Number(m[1]), Number(m[2])];
+  return major > OFFLINE_GIT_MIN[0] || (major === OFFLINE_GIT_MIN[0] && minor >= OFFLINE_GIT_MIN[1]);
+}
+
+/** Each runtime's git, checked once it passes (`git --version`, guarded too); a failed check is made again next time. */
+const versionChecks = new WeakMap<ReviewGitRuntime, Promise<boolean>>();
+
+/**
  * The runtime every read here goes through, the shared helpers' too (`getDefaultBranch`, `getWorktrees`): no prompt, a
- * kill after `BRANCH_GIT_TIMEOUT_MS` unless the caller gives its own, and no way to reach a host.
+ * kill after `BRANCH_GIT_TIMEOUT_MS` unless the caller gives its own, and no way to reach a host. A git too old to take
+ * the guards (checked once) runs nothing: every read fails closed, never unguarded.
  */
 export function offlineGit(runtime: ReviewGitRuntime): ReviewGitRuntime {
+  const guarded: ReviewGitRuntime["runGit"] = (args, options) =>
+    runtime.runGit(args, {
+      timeoutMs: BRANCH_GIT_TIMEOUT_MS,
+      ...options,
+      interaction: "forbid",
+      config: { ...options?.config, "protocol.allow": "never" },
+      env: { ...options?.env, GIT_NO_LAZY_FETCH: "1" },
+    });
   return {
     ...runtime,
-    runGit: (args, options) =>
-      runtime.runGit(args, {
-        timeoutMs: BRANCH_GIT_TIMEOUT_MS,
-        ...options,
-        interaction: "forbid",
-        config: { ...options?.config, "protocol.allow": "never" },
-        env: { ...options?.env, GIT_NO_LAZY_FETCH: "1" },
-      }),
+    runGit: async (args, options) => {
+      let check = versionChecks.get(runtime);
+      if (!check) {
+        check = guarded(["--version"], { cwd: options?.cwd }).then(
+          (answer) => answer.exitCode === 0 && offlineGitVersionOk(answer.stdout),
+          () => false,
+        );
+        versionChecks.set(runtime, check);
+      }
+      if (!(await check)) {
+        versionChecks.delete(runtime);
+        return { stdout: "", stderr: OFFLINE_GIT_TOO_OLD, exitCode: 1 };
+      }
+      return guarded(args, options);
+    },
   };
 }
 
@@ -235,6 +270,7 @@ export async function readUnreportedBranches(
   now: number = Date.now(),
 ): Promise<{ git: boolean; branches: InboxUnreportedBranch[] }> {
   const inside = await git(runtime, root, ["rev-parse", "--is-inside-work-tree"]).catch(() => null);
+  if (inside?.stderr === OFFLINE_GIT_TOO_OLD) throw new Error(OFFLINE_GIT_TOO_OLD);
   if (!inside || inside.exitCode !== 0) return { git: false, branches: [] };
   const baseRefName = await getDefaultBranch(offlineGit(runtime), root);
   const base = branchBaseName(baseRefName);

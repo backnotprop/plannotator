@@ -13,7 +13,12 @@
  *  - a report filed under the named project but read from a working folder in another repository;
  *  - a report of HEAD or of the default branch;
  *  - an archived report thread staying archived when a new head comes;
- *  - a failed judgment never tried again, or tried again and again; one lost or under old rules never offered to rank.
+ *  - a failed judgment never tried again, tried again and again, or tried by a linked machine's read; one lost or under
+ *    old rules never offered to rank;
+ *  - a project made for a folder a client names;
+ *  - a cloud agent's local-only commit offered for a review as if it were what it pushed;
+ *  - new work on a branch whose PR merged going into the landed (hidden) thread;
+ *  - a report's own new thread left untitled.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -77,6 +82,8 @@ function world(options: { on?: boolean; cloud?: boolean } = {}) {
   const judged: RiskBranch[] = [];
   /** The risk store as the service sees it: what failed, and whether a branch may run now. */
   const risk = { failed: null as string | null, rankable: true };
+  /** Threads whose PR merged. */
+  const landed = new Set<string>();
   const service = createInboxBranchService({
     store,
     dataDir: join(root, "data"),
@@ -89,14 +96,22 @@ function world(options: { on?: boolean; cloud?: boolean } = {}) {
       branchRankable: () => risk.rankable,
     },
     originOf: (folder) => (folder === repo ? "github.com/northwind/billing-svc" : null),
+    landed: (threadId) => landed.has(threadId),
   });
   const sender = options.cloud ? home : project;
+  // A third repository the Inbox has no project for.
+  const stranger = join(root, "stranger");
+  mkdirSync(stranger);
+  git(stranger, ["init", "--quiet", "-b", "main"]);
+  commit(stranger, "s.txt");
+  git(stranger, ["checkout", "--quiet", "-b", "stranger-work"]);
+  commit(stranger, "sw.txt");
   const projectOf = (path: string) => (path.startsWith(other) ? otherProject : path.startsWith(repo) ? project : sender);
   const context = {
     store,
     baseUrl: () => "http://localhost:1/",
     resolveProject: async (path: string) => projectOf(path),
-    projectRootOf: async (path: string) => ({ root: projectOf(path).root }),
+    projectRootOf: async (path: string) => ({ root: path.startsWith(stranger) ? stranger : projectOf(path).root }),
     branches: service.mcp,
     ...(options.cloud ? { cloudAgent: { homeRoot: home.root } } : {}),
   } as unknown as InboxMcpContext;
@@ -107,7 +122,7 @@ function world(options: { on?: boolean; cloud?: boolean } = {}) {
     return { error: result.isError === true, text: result.content.map((c) => c.text).join("\n"), structured: result.structuredContent ?? {} };
   };
   const messages = () => store.allProjects().flatMap((p) => store.threadsOf(p.id)).reduce((n, t) => n + store.threadMessageIds(t.thread_id).length, 0);
-  return { store, repo, head, project, home, other, otherProject, gate, judged, risk, service, tools, send, messages };
+  return { store, repo, head, project, home, other, otherProject, stranger, gate, judged, risk, landed, service, tools, send, messages };
 }
 
 describe("send_message's branch", () => {
@@ -204,6 +219,8 @@ describe("send_message's branch", () => {
     expect(w.judged).toHaveLength(0);
     const thread = String(sent.structured.thread_id);
     expect(await w.service.rank(thread)).toBe(false);
+    // Here only as local work: not the code it pushed, so no review is offered for it.
+    expect((await w.service.rows())[0]).toMatchObject({ reachable: false });
     expect((await w.service.rows())[0]).not.toHaveProperty("rankable");
     // A remote of another repository holding it changes nothing.
     git(w.repo, ["remote", "add", "fork", "https://github.com/someone/billing-svc.git"]);
@@ -246,6 +263,8 @@ describe("send_message's branch", () => {
     expect(byReply.error).toBe(false);
     expect(byReply.structured.thread_id).not.toBe(firstThread);
     expect(w.service.mcp.get(w.project.id, "second-branch")?.thread_id).toBe(String(byReply.structured.thread_id));
+    // A reply has no subject of its own: the report's new thread is titled with its branch.
+    expect(w.store.threadSubject(String(byReply.structured.thread_id))).toBe("second-branch");
     git(w.repo, ["checkout", "--quiet", "-b", "third-branch"]);
     commit(w.repo, "third.txt");
     const byName = await w.send({ body: "third ready.", subject: "third", thread: "my work", branch: { name: "third-branch" } });
@@ -265,6 +284,12 @@ describe("send_message's branch", () => {
     const here = await w.send({ body: "retry-jitter ready.", subject: "retry-jitter", branch: { name: "retry-jitter" } }, w.other);
     expect(here.error).toBe(false);
     expect(w.service.mcp.get(w.project.id, "retry-jitter")).toMatchObject({ folder: w.repo, head: w.head });
+    // A repository the Inbox has no project for: no project is made for it, and its branch is never read.
+    const projects = w.store.allProjects().length;
+    const stranger = await w.send({ body: "stranger-work ready.", subject: "stranger-work", branch: { name: "stranger-work" } }, w.stranger);
+    expect(stranger.error).toBe(false);
+    expect(w.store.allProjects()).toHaveLength(projects);
+    expect(w.service.mcp.get(w.project.id, "stranger-work")).toMatchObject({ folder: w.repo, head: null });
   });
 
   test("HEAD and the default branch are no report's name", async () => {
@@ -297,11 +322,17 @@ describe("send_message's branch", () => {
     await quiet();
     expect(w.judged).toHaveLength(1);
     w.risk.failed = "The agent did not answer.";
-    const [once] = await w.service.rows();
+    const own = async () => [...(await w.service.started(true)).values()].map((start) => start.report!);
+    // A linked machine's read of the list tries nothing.
+    await w.service.rows();
+    await w.service.started(false);
+    await quiet();
+    expect(w.judged).toHaveLength(1);
+    const [once] = await own();
     await quiet();
     expect(w.judged).toHaveLength(2);
     expect(once).not.toHaveProperty("rankable");
-    const [after] = await w.service.rows();
+    const [after] = await own();
     await quiet();
     expect(w.judged).toHaveLength(2);
     expect(after).toMatchObject({ rankable: true, risk_failed: "The agent did not answer." });
@@ -312,5 +343,21 @@ describe("send_message's branch", () => {
     expect((await w.service.rows())[0]).toMatchObject({ rankable: true, risk: null });
     w.risk.rankable = false;
     expect((await w.service.rows())[0]).not.toHaveProperty("rankable");
+  });
+
+  test("new work on a branch whose PR merged starts a new thread; the merged commit again sends nothing", async () => {
+    const w = world();
+    const first = await w.send({ body: "Ready.", subject: "retry-jitter", branch: { name: "retry-jitter" } });
+    const landedThread = String(first.structured.thread_id);
+    w.landed.add(landedThread);
+    const same = await w.send({ body: "Ready.", subject: "retry-jitter", branch: { name: "retry-jitter" } });
+    expect(same.structured).toMatchObject({ thread_id: landedThread, reported: false });
+    const next = commit(w.repo, "after-merge.txt");
+    const update = await w.send({ body: "More work.", reply_to: String(first.structured.message_id), branch: { name: "retry-jitter" } });
+    expect(update.error).toBe(false);
+    const thread = String(update.structured.thread_id);
+    expect(thread).not.toBe(landedThread);
+    expect(w.service.mcp.get(w.project.id, "retry-jitter")).toMatchObject({ thread_id: thread, head: next, reports: 1 });
+    expect(w.store.threadMessageIds(landedThread)).toHaveLength(1);
   });
 });

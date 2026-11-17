@@ -45,6 +45,8 @@ export interface InboxBranchMcp {
   get: (projectId: string, branch: string) => InboxBranchReport | null;
   /** The report whose thread this is, if any. */
   ofThread: (threadId: string) => InboxBranchReport | null;
+  /** The thread landed: a PR it owned merged (a later report of new work starts a new thread). */
+  landed?: (threadId: string) => boolean;
   /**
    * Git here for the report: its head, its base, whether the commit is in the project's checkout, and the repository's
    * default branch. `localTip: false` (a cloud agent's): never the branch's tip here.
@@ -70,8 +72,6 @@ export interface InboxBranchMcpContext {
   branches?: InboxBranchMcp;
   /** The call came through the agent door from a paired cloud agent (inbox-agent-door.ts). */
   cloudAgent?: { homeRoot: string };
-  /** The project a folder files under (created on first use), as for any send from it. */
-  resolveProject?: (path: string) => Promise<InboxProject>;
   /** The project root a folder resolves to, without making a project. */
   projectRootOf?: (path: string) => Promise<{ root: string }>;
 }
@@ -112,8 +112,10 @@ export interface BranchSendPlan {
  *   (what branches and commits this computer has is none of its business). Its report of a pushed branch files under
  *   the project whose origin it is, unless it named one.
  * - An agent here working in another repository than the project it named: the report files under its working
- *   folder's project when the branch is there (the code, its diff and its review are that project's); otherwise the
- *   named project is read, never the working folder.
+ *   folder's project when that project is already in the Inbox and the branch is there (the code, its diff and its
+ *   review are that project's); otherwise the named project is read, never the working folder. No project is ever
+ *   made for a folder a client names.
+ * - A report of new work (a new head) on a branch whose thread landed (its PR merged) starts a new thread.
  */
 export async function planBranchSend(
   context: InboxBranchMcpContext,
@@ -134,10 +136,10 @@ export async function planBranchSend(
     const root = await context.projectRootOf(folder).then((found) => found.root, () => null);
     const same = root !== null && (root === project.root || sameProject(context, branches, root, project));
     if (!same) {
-      const there = root && context.resolveProject ? await branches.read({ ...project, root }, field, folder, options) : null;
-      const own = there?.reachable && context.resolveProject ? await context.resolveProject(folder).catch(() => null) : null;
-      if (own && there) {
-        target = own;
+      const own = root ? context.store.projectByRoot(root) : null;
+      const there = own ? await branches.read(own, field, folder, options) : null;
+      if (own && there?.reachable) {
+        target = context.store.project(branches.canonicalId(own.id)) ?? own;
         read = there;
       } else folder = undefined;
     }
@@ -148,13 +150,15 @@ export async function planBranchSend(
   const head = cloud ? field.head! : read.head;
   const projectId = branches.canonicalId(target.id);
   const found = branches.get(projectId, field.name);
-  // A thread deleted since is no thread: the next report starts a new one.
-  const thread = found ? context.store.thread(found.thread_id) : null;
+  // A thread deleted since is no thread: the next report starts a new one. So is a landed one, for new work.
+  let thread = found ? context.store.thread(found.thread_id) : null;
+  if (thread && found && branches.landed?.(found.thread_id) && inboxBranchReportStep(found, head) !== "same") thread = null;
   const existing = thread ? found : null;
   const replyTo = thread ? (thread.messages[thread.messages.length - 1]?.id ?? null) : null;
   const elsewhere = branches.canonicalId(target.id) !== branches.canonicalId(project.id);
   const otherReport = agentThread ? branches.ofThread(agentThread) : null;
-  const detach = !replyTo && (elsewhere || (!!otherReport && !(otherReport.project_id === projectId && otherReport.branch === field.name)));
+  const landedBefore = !!found && !existing;
+  const detach = !replyTo && (elsewhere || landedBefore || (!!otherReport && !(otherReport.project_id === projectId && otherReport.branch === field.name)));
   return { project: target, field, step: inboxBranchReportStep(existing, head), existing, head, base: read.base, reachable: read.reachable, folder: read.folder, place: cloud ? "cloud" : "here", replyTo, detach };
 }
 

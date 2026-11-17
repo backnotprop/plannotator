@@ -1431,6 +1431,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const repo = repos.peek(root);
       return repo?.host ? `${repo.host}/${repo.display}`.toLowerCase() : null;
     },
+    // A report thread whose PR merged: new work reported on that branch starts a new thread.
+    landed: (threadId) => pullOwners.landings().some((landing) => landing.thread_id === threadId && landing.state === "merged"),
   });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
@@ -5763,7 +5765,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!cached) pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
         // A New review's row shows until its thread is archived or gone.
         // A reported branch's thread is a review thread from its first report (Branch reviews, while on).
-        const started = new Map<string, InboxReviewStart>(await branchService.started());
+        // Only the person's own read (not a linked machine's) tries a failed branch judgment once more.
+        const started = new Map<string, InboxReviewStart>(await branchService.started(fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
         for (const [threadId, start] of pullOwners.started()) {
           const row = store.listRow(threadId);
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });

@@ -9,7 +9,9 @@
  *  - a linked machine's report listed under the wrong project;
  *  - a remote URL kept as typed (a password, a query, a fragment) or shown as anything but host and repository;
  *  - HEAD taken as a branch's name;
- *  - a reported branch whose PR merged read as "Ready for review" again.
+ *  - a reported branch whose PR merged read as "Ready for review" again;
+ *  - a merged PR claimed by a report of other work (a reused branch name, work reported after the merge), hiding it;
+ *  - a closed, unmerged PR taking a reported branch out of Reviews.
  */
 import { describe, expect, test } from "bun:test";
 import { checkInboxBranchField, INBOX_BRANCH_NAME_NOT_BASE, inboxBranchPlaceWords, inboxBranchReachWords, inboxBranchReportOwners, inboxBranchReportStep, inboxFarBranchReviewRow, type InboxBranchReportRow } from "./inbox-branch-reports";
@@ -133,7 +135,7 @@ describe("one thread from report to PR", () => {
 
   test("once its PR merged, a reported branch's thread reads as merged and leaves Reviews, even after the list stops reading the PR", () => {
     const row = reportRow();
-    const merged = pr({ number: 412, state: "merged", merged_at: "2026-11-16T11:00:00.000Z" });
+    const merged = pr({ number: 412, state: "merged", merged_at: "2026-11-16T11:00:00.000Z", head_sha: row.head });
     const projects = new Map([[`github.com/${REPO}`, ["prj_billing"]]]);
     const owners = inboxBranchReportOwners([row], [merged], projects);
     expect([...owners.keys()]).toEqual([merged.key]);
@@ -144,6 +146,41 @@ describe("one thread from report to PR", () => {
     expect(inboxReviewRows({ threads: [], stacks: [], links: { [merged.key]: link }, pulls: [merged], owners, landed: record, started })).toEqual([]);
     // Later the list no longer reads the merged PR: the record still keeps the thread out.
     expect(inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [], landed: record, started })).toEqual([]);
+  });
+
+  test("a merged PR of other work is never claimed: a reused name, or work reported after the merge, stays Ready for review", () => {
+    const projects = new Map([[`github.com/${REPO}`, ["prj_billing"]]]);
+    // fix-tests merged as #412 last week, at another commit; this report is new work on a new fix-tests.
+    const row = reportRow({ branch: "fix-tests", at: "2026-11-16T10:00:00.000Z", head: "b".repeat(40) });
+    const old = pr({ number: 412, head: "fix-tests", state: "merged", merged_at: "2026-11-09T10:00:00.000Z", head_sha: "a".repeat(40) });
+    expect(inboxBranchReportOwners([row], [old], projects).size).toBe(0);
+    const started = new Map([[row.thread_id, startOf(row)]]);
+    expect(inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [old], owners: new Map(), started }).map((r) => r.reason)).toEqual(["branch_ready"]);
+    // Merged after the latest report, or at the very commit reported: this report's work.
+    expect(inboxBranchReportOwners([row], [{ ...old, merged_at: "2026-11-16T12:00:00.000Z" }], projects).size).toBe(1);
+    expect(inboxBranchReportOwners([row], [{ ...old, head_sha: row.head!.slice(0, 12) }], projects).size).toBe(1);
+  });
+
+  test("a closed, unmerged PR is not claimed: the reported branch stays Ready for review", () => {
+    const row = reportRow();
+    const closed = pr({ number: 413, state: "closed", head_sha: row.head });
+    const projects = new Map([[`github.com/${REPO}`, ["prj_billing"]]]);
+    expect(inboxBranchReportOwners([row], [closed], projects).size).toBe(0);
+    const rows = inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [closed], owners: new Map(), started: new Map([[row.thread_id, startOf(row)]]) });
+    expect(rows.map((r) => [r.id, r.reason])).toEqual([[row.thread_id, "branch_ready"]]);
+  });
+
+  test("a report after a landing brings the row back: the landing was earlier work", () => {
+    const row = reportRow();
+    const merged = pr({ number: 412, state: "merged", merged_at: "2026-11-16T09:00:00.000Z", head_sha: "a".repeat(40) });
+    const link: InboxPullLink = { via: "owner", thread_id: row.thread_id, thread_subject: null, project_id: "prj_billing", agent: null, last: null, guide: null };
+    const { record } = inboxReviewLandingChanges({ threads: [], pulls: [merged], links: { [merged.key]: link }, landed: [] });
+    // Landed before this report (10:00): the row is back, Ready for review.
+    const rows = inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [], landed: record, started: new Map([[row.thread_id, startOf(row)]]) });
+    expect(rows.map((r) => [r.id, r.reason])).toEqual([[row.thread_id, "branch_ready"]]);
+    // A report from before the landing stays out.
+    const earlier = reportRow({ at: "2026-11-16T08:00:00.000Z" });
+    expect(inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [], landed: record, started: new Map([[earlier.thread_id, startOf(earlier)]]) })).toEqual([]);
   });
 
   test("a reported branch with no review and no PR is On you, and keeps its row with its agent ended", () => {
