@@ -6,7 +6,10 @@
  * is a drop target while a thread is dragged (threadDrag.ts, layer `reply`): a tint over the box, a pill that says
  * what a drop does, and a caret where the mention will land, snapped to the end of a word.
  *
- * What goes in is typed in as if by the person (one undo step, the host's onChange runs), so ⌘Z takes it back.
+ * What goes in is typed in as if by the person (one undo step, the host's onChange runs), so ⌘Z takes it back; the
+ * browser's undo and redo also bring back the mentions the words had then (threadMentions.ts `commitReplyEdit`). A
+ * token is one piece for the caret: a click or key that would put the caret inside one puts it at its nearer edge
+ * (from an edge, a step in goes across it), so typing and pasting land beside it.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
@@ -184,16 +187,37 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
   const seen = useRef(text);
   seen.current = text;
 
-  /** The person changed the words (`caret`: where the caret is after it, when known): the mentions move with them. */
+  /**
+   * The person changed the words (`caret`: where the caret is after it, when known): the mentions move with them.
+   * `undo`: the browser's undo or redo, which brings back the mentions those words had.
+   */
   const commit = useCallback(
-    (next: string, caret?: number | null) => {
+    (next: string, caret?: number | null, undo = false) => {
       if (off) return;
       const from = seen.current;
       seen.current = next;
-      commitReplyEdit(threadId, from, next, caret);
+      commitReplyEdit(threadId, from, next, caret, undo);
     },
     [off, threadId],
   );
+
+  /** Where the caret was last seen: a step in from a token's edge goes across it. */
+  const lastCaret = useRef<number | null>(null);
+  /** A caret inside a token moves to its nearer edge (across it, when it stepped in from one). */
+  const onSelect = useCallback(() => {
+    const field = fieldRef.current;
+    if (off || !field) return;
+    const at = field.selectionStart;
+    const was = lastCaret.current;
+    lastCaret.current = at;
+    if (at !== field.selectionEnd) return;
+    const inside = mentionsFor(threadId, field.value).find((m) => at > m.at && at < m.at + m.label.length);
+    if (!inside) return;
+    const end = inside.at + inside.label.length;
+    const to = was === inside.at ? end : was === end ? inside.at : at - inside.at < end - at ? inside.at : end;
+    field.setSelectionRange(to, to);
+    lastCaret.current = to;
+  }, [fieldRef, threadId, off]);
 
   /** A mention already in the words lights up instead of going in twice. */
   const flash = useCallback(
@@ -231,7 +255,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
       const labels = fresh.map((ref) => mentionLabel(ref, replyProject));
       const focused = field.ownerDocument.activeElement === field;
       const spot = live.current.voiceLive ? now.length : where ?? (focused ? field.selectionEnd : now.length);
-      const put = withMentionsAt(now, snapToWordEnd(now, spot), labels);
+      const put = withMentionsAt(now, besideMentions(now, snapToWordEnd(now, spot), mentionsFor(threadId, now)), labels);
       // Typed in first (the field's onChange moves the mentions already there), then the new ones join at their ranges.
       typeIn(field, put.at, put.insert, put.caret);
       if (field.value === put.text) addReplyMentions(threadId, field.value, fresh.map((ref, i) => mentionAt(ref, labels[i]!, put.starts[i]!)));
@@ -285,7 +309,7 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
           }
           const field = fieldRef.current;
           const raw = live.current.voiceLive ? (field?.value.length ?? 0) : offsetAtPoint(wrap, point.x, point.y);
-          const caret = raw === null || !field ? null : caretBox(wrap, snapToWordEnd(field.value, raw));
+          const caret = raw === null || !field ? null : caretBox(wrap, besideMentions(field.value, snapToWordEnd(field.value, raw), mentionsFor(threadId, field.value)));
           setLook((l) => (l.over && sameCaret(l.caret, caret) ? l : { ...l, over: true, caret }));
         },
         drop: (ids, point) => {
@@ -378,7 +402,16 @@ export function useReplyMentions({ threadId, text, fieldRef, wrapRef, voiceLive,
     </>
   );
   const describedBy = [standing.length > 0 ? describedId : null, unreadable.length > 0 ? noteId : null].filter(Boolean).join(' ') || undefined;
-  return { tokens, commit, onKeyDown, onPaste, overlay, describedBy };
+  return { tokens, commit, onSelect, onKeyDown, onPaste, overlay, describedBy };
+}
+
+/** A spot inside a mention's label moves to the label's nearer edge: nothing goes in inside a token. */
+export function besideMentions(text: string, offset: number, mentions: readonly InboxReplyMention[]): number {
+  const at = Math.max(0, Math.min(offset, text.length));
+  const inside = mentions.find((m) => at > m.at && at < m.at + m.label.length);
+  if (!inside) return at;
+  const end = inside.at + inside.label.length;
+  return at - inside.at < end - at ? inside.at : end;
 }
 
 /**

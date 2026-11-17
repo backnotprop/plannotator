@@ -6,7 +6,9 @@ import { registerThreadDropTarget, THREAD_DROP_LAYER, type DropAnswer } from '..
  *
  * While a list row is carried (threadDrag.ts, approval "inbox-drag-threads") the empty pane is a place for it: a tint
  * and "Open here", and a drop opens that thread as a click on its row does (`onOpen`), with the free layout's switch
- * on or off. Several picked rows open nothing: the label says to bring one.
+ * on or off. Several picked rows open nothing: the label says to bring one. Under the pointer the carried thread's ghost
+ * says "Open here" beside it, so the pane's own label steps out of sight (`data-ghost-says`): one label, never two on
+ * top of each other. A refusal's reason stays, as the ghost says none.
  */
 export function EmptyThreadPanel({ onOpen }: { onOpen?: (threadId: string) => void }) {
   const line = useRef<HTMLParagraphElement>(null);
@@ -37,7 +39,7 @@ export function EmptyThreadPanel({ onOpen }: { onOpen?: (threadId: string) => vo
     <>
       <p ref={line} hidden={drop !== null}>No thread selected</p>
       {drop && (
-        <span className="ib-topen" data-thread-drop-label={drop.answer === 'refuse' ? 'refuse' : undefined} aria-hidden="true">
+        <span className="ib-topen" data-thread-drop-label={drop.answer === 'refuse' ? 'refuse' : undefined} data-ghost-says={drop.over && drop.answer === 'take' ? '' : undefined} aria-hidden="true">
           {drop.answer === 'refuse' ? 'Open one thread at a time' : 'Open here'}
         </span>
       )}
