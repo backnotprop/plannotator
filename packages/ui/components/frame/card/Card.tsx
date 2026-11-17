@@ -650,6 +650,8 @@ export function CardFaceDocument({ title, children }: { readonly title: string; 
 
 const GridColumns = createContext<number | null>(null);
 
+const CARD_GRID_ROW_GAP: Record<CardSize, number> = { large: 28, regular: 24 };
+
 /**
  * Cards of one size in fluid columns: each card fills its column. `large`
  * gives three across a 1440 px layout's content column, `regular` four;
@@ -658,13 +660,13 @@ const GridColumns = createContext<number | null>(null);
 export function CardGrid({
   children,
   size,
-  gap = 44,
+  gap = CARD_GRID_ROW_GAP[size],
   label,
   ref,
 }: {
   readonly children: ReactNode;
   readonly size: CardSize;
-  /** The space between rows of cards, in CSS pixels. Default 44, as on the home. */
+  /** The space between rows of cards, in CSS pixels. Default 28 for large cards and 24 for regular ones, so a group on its own matches a shared group. */
   readonly gap?: number;
   readonly label?: string;
   readonly ref?: Ref<HTMLUListElement>;

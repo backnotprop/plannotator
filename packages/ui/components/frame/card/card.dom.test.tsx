@@ -384,7 +384,7 @@ describe.skipIf(!hasDom)('CardGrid and CardGroups', () => {
     expect(six!.querySelectorAll('li').length).toBe(6);
   });
 
-  test('groups of 2, 4 and 1 cards in 4 columns span 2, 4 and 1, in reading order', () => {
+  test('groups of 2, 4 and 1 cards in 4 columns span 2, 4 and 1 and stay in reading order, so a later group never fills a gap above and what you see matches the Tab order', () => {
     const { Card, CardGroup, CardGroups } = cardModule!;
     const cards = (n: number, at: string) => Array.from({ length: n }, (_, i) => <Card key={i} kind="document" size="regular" title={`${at}${i}`} href={`/${at}${i}`} />);
     const frame = mount(
@@ -399,24 +399,41 @@ describe.skipIf(!hasDom)('CardGrid and CardGroups', () => {
     expect([...frame.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['/a0', '/a1', '/b0', '/b1', '/b2', '/b3', '/c0']);
   });
 
-  test('a grid puts 44 px between rows unless told otherwise', () => {
+  test('a grid puts 28 px between rows of large cards and 24 px between rows of regular ones', () => {
     const { Card, CardGrid } = cardModule!;
     const frame = mount(
       <>
         <CardGrid size="large">
           <Card kind="document" size="large" title="One" href="/1" />
         </CardGrid>
-        <CardGrid size="regular" gap={28}>
+        <CardGrid size="regular">
           <Card kind="document" size="regular" title="Two" href="/2" />
         </CardGrid>
       </>,
     );
-    const [home, tight] = [...frame.querySelectorAll<HTMLElement>('ul')];
-    expect(home!.style.rowGap).toBe('44px');
-    expect(tight!.style.rowGap).toBe('28px');
+    const [large, regular] = [...frame.querySelectorAll<HTMLElement>('ul')];
+    expect(large!.style.rowGap).toBe('28px');
+    expect(regular!.style.rowGap).toBe('24px');
   });
 
-  test('a group on its own lays out its cards in its own grid', () => {
+  test('a gap the caller passes wins over the default, for either size', () => {
+    const { Card, CardGrid } = cardModule!;
+    const frame = mount(
+      <>
+        <CardGrid size="large" gap={44}>
+          <Card kind="document" size="large" title="One" href="/1" />
+        </CardGrid>
+        <CardGrid size="regular" gap={12}>
+          <Card kind="document" size="regular" title="Two" href="/2" />
+        </CardGrid>
+      </>,
+    );
+    const [large, regular] = [...frame.querySelectorAll<HTMLElement>('ul')];
+    expect(large!.style.rowGap).toBe('44px');
+    expect(regular!.style.rowGap).toBe('12px');
+  });
+
+  test('a group on its own lays out its cards in its own grid, 24 px between rows like a shared group', () => {
     const { Card, CardGroup } = cardModule!;
     const frame = mount(
       <CardGroup label="tidepool-api">
@@ -425,6 +442,7 @@ describe.skipIf(!hasDom)('CardGrid and CardGroups', () => {
     );
     expect(frame.querySelector('section')!.style.gridColumn).toBe('');
     expect(frame.querySelector('ul')!.getAttribute('data-frame-card-grid')).toBe('regular');
+    expect(frame.querySelector('ul')!.style.rowGap).toBe('24px');
   });
 });
 
