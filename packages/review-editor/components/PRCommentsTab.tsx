@@ -504,7 +504,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                   onClick={(e) => { e.stopPropagation(); toggleCollapsed(id); }}
                 >
                   <Avatar src={getEntryAvatar(entry)} name={entry.data.author} />
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 flex-1">
                     <span className="text-[13px] font-semibold text-foreground truncate">
                       {entry.data.author || 'unknown'}
                     </span>
@@ -610,7 +610,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
         onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
       >
         <Avatar src={first.avatarUrl} name={first.author} />
-        <div className="flex items-center gap-1.5 min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 flex-1">
           <span className={`text-[13px] font-semibold truncate ${thread.isResolved ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
             {first.author || 'unknown'}
           </span>
