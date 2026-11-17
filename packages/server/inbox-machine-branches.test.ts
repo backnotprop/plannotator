@@ -2,7 +2,8 @@
  * Branch reviews across linked machines (inbox-machine-branches.ts). What regresses:
  *  - a linked machine's report listed under another project or machine than its own;
  *  - a machine that doesn't take `branches` asked anyway, or one with Branch reviews off still listed;
- *  - a far answer's malformed row taken as a report;
+ *  - a far answer's malformed row taken as a report, or its remote kept as typed (a password, a query, another
+ *    scheme) where the words here would show it;
  *  - the read repeated on every list read (it is never on a timer, and a fresh read is reused).
  */
 import { describe, expect, test } from "bun:test";
@@ -65,5 +66,15 @@ describe("a linked machine's reported branches", () => {
     expect(farBranchRow({ ...far, place: "elsewhere" })).toBeNull();
     expect(farBranchRow({ ...far, thread_id: "../x" })).toBeNull();
     expect(farBranchRow({ ...far, risk: { level: "critical", why: "x" } })).toMatchObject({ risk: null });
+    expect(farBranchRow({ ...far, branch: "--upload-pack=x" })).toBeNull();
+    expect(farBranchRow({ ...far, base: "main;rm" })).toBeNull();
+    expect(farBranchRow({ ...far, head: "not-a-commit" })).toBeNull();
+  });
+
+  test("a far row's remote is read by the same rules as a report here: rebuilt, or none", () => {
+    expect(farBranchRow({ ...far, place: "cloud", remote_url: "https://bot:s3cret@github.com/acme/app.git?token=x#f" })?.remote_url).toBe("https://github.com/acme/app.git");
+    for (const remote_url of ["ext::sh -c x", "file:///etc", "javascript:alert(1)", "http://github.com/acme/app.git"]) {
+      expect(farBranchRow({ ...far, place: "cloud", remote_url })?.remote_url).toBeNull();
+    }
   });
 });

@@ -1237,7 +1237,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         // A branch report: its own project and thread, and a head already reported sends nothing.
         let branchPlan: BranchSendPlan | null = null;
         if (branchField) {
-          branchPlan = await planBranchSend(context, project, branchField, callerWorkingFolder(ctx));
+          // The thread the agent's own reply_to or thread name points at: a first report never lands in another report's.
+          const agentThread = input.reply_to ? (context.store.message(ownMessageId(context.store, input.reply_to))?.thread_id ?? null) : input.thread?.trim() ? context.store.threadRoutedBy(project.id, input.thread) : null;
+          branchPlan = await planBranchSend(context, project, branchField, callerWorkingFolder(ctx), agentThread);
           if (branchPlan.step === "same") {
             const kept = branchPlan.existing!;
             return ok(inboxBranchSameLine(kept.branch, kept.head, kept.thread_id), { thread_id: kept.thread_id, message_id: kept.message_id, branch: kept.branch, head: kept.head, reported: false });
@@ -1247,7 +1249,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         if (pullRefs.length > 0) pullRefs = await checkProjectPullRefs(context, input.pulls, "pulls", project.id);
         const wakes = await senderWakes(context, ctx, input);
         const { steps: _steps, pulls: _pulls, branch: _branch, ...message } = input as typeof input & { steps?: unknown; branch?: unknown };
-        const sent = await sendAgentMessage(context, project, { ...message, ...(branchPlan?.replyTo ? { reply_to: branchPlan.replyTo } : {}), working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        // A report goes in its branch's thread, or (detached) starts its own: the agent's reply_to and thread then go.
+        const placed = branchPlan && (branchPlan.replyTo || branchPlan.detach) ? { reply_to: branchPlan.replyTo ?? undefined, thread: undefined } : {};
+        const sent = await sendAgentMessage(context, project, { ...message, ...placed, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
         // The report is kept once it is in its thread (a replay keeps the first one's record).
         let branchLine = "";
         if (branchPlan && context.branches && !sent.replayed) {

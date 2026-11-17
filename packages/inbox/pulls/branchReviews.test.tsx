@@ -5,7 +5,9 @@
  *    mark with no judgment;
  *  - the safety net read before the person opens it, or its "Start a review" starting anything by itself;
  *  - the thread's "Ask for a guided review" going anywhere but a reply in the same thread, or offered for code that
- *    can't be opened.
+ *    can't be opened;
+ *  - a cloud agent's remote drawn as a link, or with anything but its host and repository;
+ *  - Rank offered for a branch that can't be ranked, or going anywhere but the rank route with its thread.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -21,6 +23,7 @@ const { inboxApi } = (hasDom ? await import('../api') : {}) as typeof import('..
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { ReviewViewNote } = (hasDom ? await import('./ReviewViewNote') : {}) as typeof import('./ReviewViewNote');
+const { branchNoteOf } = (hasDom ? await import('./branchReviews') : {}) as typeof import('./branchReviews');
 
 const LIST = { fetched_at: '2026-11-16T10:00:00.000Z', hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }], pulls: [], links: {}, projects: {}, cards: {} } as unknown as InboxPullsAnswer;
 const RISK: InboxPullRiskAnswer = { rules: 'Anything in billing.', provider: 'pi-sdk', model: null, agents: [{ id: 'pi-sdk', label: 'Pi' }], pending: 0, last_failure: null, failed: {}, judgments: {} };
@@ -143,7 +146,7 @@ test.skipIf(!hasDom)("the thread's ask is a reply in the same thread, and is not
     return { reply: null, questions: [], replayed: false };
   }) as never);
   restores.push(() => restore.mockRestore());
-  await mount(<ReviewViewNote view={view({ report: report(), reach: null, canAsk: true, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' })} />);
+  await mount(<ReviewViewNote view={view({ report: report(), reach: null, canAsk: true, canRank: false, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' })} />);
   await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!.click());
   await settle();
   expect(replies).toHaveLength(1);
@@ -153,8 +156,37 @@ test.skipIf(!hasDom)("the thread's ask is a reply in the same thread, and is not
   if (root) await act(async () => root!.unmount());
   document.body.innerHTML = '';
 
-  const cloud = report({ place: 'cloud', reachable: false, remote_url: 'https://github.com/n/b.git' });
-  await mount(<ReviewViewNote view={view({ report: cloud, reach: "This computer doesn't have retry-jitter yet.", canAsk: false, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' })} />);
-  expect(document.querySelector('[data-review-branch-reach]')?.textContent).toContain("doesn't have");
+  // The server keeps only the rebuilt URL; the words name host and repository, as text.
+  const cloud = report({ place: 'cloud', reachable: false, remote_url: 'https://github.com/acme/app.git', remote_known: false });
+  await mount(<ReviewViewNote view={view({ ...branchNoteOf(cloud), projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' })} />);
+  expect(document.querySelector('[data-review-branch-reach]')?.textContent).toBe(
+    "The agent says it pushed it to github.com/acme/app (not the origin of any project here). If that is your repository, fetch retry-jitter into the project's checkout here.",
+  );
+  expect(document.querySelector('[data-review-branch] a')).toBeNull();
   expect(document.querySelector('[data-review-branch-ask]')).toBeNull();
+  expect(document.querySelector('[data-review-branch-rank]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Rank is offered only for a branch that can be ranked, and asks the rank route for its thread', async () => {
+  const sent: { url: string; body: unknown }[] = [];
+  const made = spyOn(globalThis, 'fetch').mockImplementation((async (input: RequestInfo | URL, init?: RequestInit) => {
+    sent.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : null });
+    return Response.json({ started: true });
+  }) as typeof fetch);
+  restores.push(() => made.mockRestore());
+  // A linked machine's row is ranked there, never from here.
+  const far = report({ rankable: true, machine: { id: 'ibx_01JD000000000000000000000B', name: 'Mac mini' } });
+  await mount(<ReviewViewNote view={view({ ...branchNoteOf(far), projectName: 'billing', replyTo: null })} />);
+  expect(document.querySelector('[data-review-branch-rank]')).toBeNull();
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  await mount(<ReviewViewNote view={view({ ...branchNoteOf(report({ rankable: true })), projectName: 'billing', replyTo: null })} />);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-rank-button]')!.click());
+  await settle();
+  expect(sent).toHaveLength(1);
+  expect(sent[0]!.url).toContain('/reviews/branches/rank');
+  expect(sent[0]!.body).toMatchObject({ thread_id: 'msg_01JD0000000000000000000001' });
+  expect(document.querySelector('[data-review-branch-ranking]')).not.toBeNull();
+  expect(document.querySelector('[data-review-branch-rank]')).toBeNull();
 });

@@ -6,12 +6,15 @@
  *  - a reported branch and its later PR listed as two rows, or a teammate's PR (a fork, another project, a long-lived
  *    branch) claimed into the person's reported branch;
  *  - a reported branch's thread with no review left out of Reviews, or put anywhere but On you;
- *  - a linked machine's report listed under the wrong project.
+ *  - a linked machine's report listed under the wrong project;
+ *  - a remote URL kept as typed (a password, a query, a fragment) or shown as anything but host and repository;
+ *  - HEAD taken as a branch's name;
+ *  - a reported branch whose PR merged read as "Ready for review" again.
  */
 import { describe, expect, test } from "bun:test";
-import { checkInboxBranchField, inboxBranchPlaceWords, inboxBranchReachWords, inboxBranchReportOwners, inboxBranchReportStep, inboxFarBranchReviewRow, type InboxBranchReportRow } from "./inbox-branch-reports";
+import { checkInboxBranchField, INBOX_BRANCH_NAME_NOT_BASE, inboxBranchPlaceWords, inboxBranchReachWords, inboxBranchReportOwners, inboxBranchReportStep, inboxFarBranchReviewRow, type InboxBranchReportRow } from "./inbox-branch-reports";
 import { inboxPullStacks, type InboxPull, type InboxPullLink } from "./inbox-pulls";
-import { inboxReviewRows, type InboxReviewStart } from "./inbox-reviews";
+import { inboxReviewLandingChanges, inboxReviewRows, type InboxReviewStart } from "./inbox-reviews";
 
 const REPO = "northwind/billing-svc";
 
@@ -75,6 +78,20 @@ describe("checkInboxBranchField", () => {
     expect(checkInboxBranchField({ name: "retry-jitter", remote_url: "file:///tmp/x" })).toStartWith("branch.remote_url:");
     expect(checkInboxBranchField({ name: "retry-jitter", folder: "/tmp" })).toStartWith("branch.folder:");
     expect(checkInboxBranchField("retry-jitter")).toStartWith("branch:");
+    expect(checkInboxBranchField({ name: "HEAD" })).toBe(INBOX_BRANCH_NAME_NOT_BASE);
+  });
+
+  test("a remote is kept as rebuilt from its parts, never as typed", () => {
+    const kept = (remote_url: string) => {
+      const field = checkInboxBranchField({ name: "retry-jitter", remote_url });
+      return typeof field === "string" ? field : field.remote_url;
+    };
+    expect(kept("https://bot:s3cret@github.com/northwind/billing-svc.git?token=abc#frag")).toBe("https://github.com/northwind/billing-svc.git");
+    expect(kept("https://github.com/northwind/billing-svc")).toBe("https://github.com/northwind/billing-svc.git");
+    expect(kept("ssh://git@github.com:22/northwind/billing-svc.git")).toBe("ssh://git@github.com:22/northwind/billing-svc.git");
+    for (const hostile of ["ext::sh -c touch% /tmp/x", "file:///etc/passwd", "http://github.com/a/b.git", "git://github.com/a/b.git", "--upload-pack=x", "https://github.com/a/b.git\nmore", "javascript:alert(1)"]) {
+      expect(kept(hostile)).toStartWith("branch.remote_url:");
+    }
   });
 });
 
@@ -114,6 +131,21 @@ describe("one thread from report to PR", () => {
     expect(inboxBranchReportOwners([reportRow({ project_id: "prj_other" })], [pr({ number: 5 })], projects).size).toBe(0);
   });
 
+  test("once its PR merged, a reported branch's thread reads as merged and leaves Reviews, even after the list stops reading the PR", () => {
+    const row = reportRow();
+    const merged = pr({ number: 412, state: "merged", merged_at: "2026-11-16T11:00:00.000Z" });
+    const projects = new Map([[`github.com/${REPO}`, ["prj_billing"]]]);
+    const owners = inboxBranchReportOwners([row], [merged], projects);
+    expect([...owners.keys()]).toEqual([merged.key]);
+    const link: InboxPullLink = { via: "owner", thread_id: row.thread_id, thread_subject: null, project_id: "prj_billing", agent: null, last: null, guide: null };
+    const started = new Map([[row.thread_id, startOf(row)]]);
+    const { record } = inboxReviewLandingChanges({ threads: [], pulls: [merged], links: { [merged.key]: link }, landed: [] });
+    expect(record.map((landing) => [landing.thread_id, landing.state])).toEqual([[row.thread_id, "merged"]]);
+    expect(inboxReviewRows({ threads: [], stacks: [], links: { [merged.key]: link }, pulls: [merged], owners, landed: record, started })).toEqual([]);
+    // Later the list no longer reads the merged PR: the record still keeps the thread out.
+    expect(inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [], landed: record, started })).toEqual([]);
+  });
+
   test("a reported branch with no review and no PR is On you, and keeps its row with its agent ended", () => {
     const row = reportRow();
     const rows = inboxReviewRows({ threads: [], stacks: [], links: {}, started: new Map([[row.thread_id, startOf(row)]]), ended: () => true });
@@ -133,6 +165,12 @@ describe("a linked machine's report", () => {
   test("a local branch the checkout has reads as nothing needed; a cloud agent's not fetched says so", () => {
     expect(inboxBranchReachWords(reportRow())).toBeNull();
     expect(inboxBranchPlaceWords(reportRow({ place: "cloud" }))).toBe("Cloud agent’s branch");
-    expect(inboxBranchReachWords(reportRow({ place: "cloud", reachable: false, remote_url: "https://github.com/northwind/billing-svc.git" }))).toContain("Fetch it from https://github.com/northwind/billing-svc.git");
+    const cloud = reportRow({ place: "cloud", reachable: false, remote_url: "https://github.com/northwind/billing-svc.git" });
+    expect(inboxBranchReachWords(cloud)).toBe("The agent says it pushed it to github.com/northwind/billing-svc. If that is your repository, fetch retry-jitter into the project's checkout here.");
+    expect(inboxBranchReachWords({ ...cloud, remote_known: false })).toBe(
+      "The agent says it pushed it to github.com/northwind/billing-svc (not the origin of any project here). If that is your repository, fetch retry-jitter into the project's checkout here.",
+    );
+    // A remote that is no repository's URL (an older or far record) is never shown.
+    expect(inboxBranchReachWords({ ...cloud, remote_url: "https://bot:pw@evil.example" })).toBe("This computer doesn't have retry-jitter. Ask the agent to push it, then fetch it here.");
   });
 });

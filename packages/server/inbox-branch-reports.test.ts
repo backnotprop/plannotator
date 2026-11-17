@@ -2,8 +2,12 @@
  * Branch reviews' store and git reads (inbox-branch-reports.ts), on a scratch repository. What regresses:
  *  - the latest report per project and branch lost across a restart, or an unreadable file that breaks the Inbox;
  *  - a reported head read as in the checkout when it is not (the thread would offer a review it can't open);
- *  - the safety net listing an old branch, the default branch, a reported one or one with no commits of its own;
- *  - the safety net running anything but local reads (no fetch, no checkout, nothing that writes).
+ *  - a cloud agent's report reading a branch's tip here, or its commit counted as pushed when no remote-tracking ref of
+ *    the remote it named holds it (its risk would read local, unpushed work);
+ *  - the safety net listing an old branch, the default branch, a reported one or one with no commits of its own, or
+ *    losing a real branch behind branches with nothing of their own;
+ *  - any read running anything but the exact local read-only commands, or without the guards that keep git off the
+ *    network (no transport, no lazy fetch), from asking, and short.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -11,7 +15,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { createInboxBranchReports, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
+import { BRANCH_GIT_TIMEOUT_MS, createInboxBranchReports, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
 import { runtime } from "./git";
 
 const DAY = 86_400;
@@ -48,19 +52,46 @@ function scratchRepo(now: number) {
   return { repo, head };
 }
 
-/** The real runtime, with every git command it is asked to run written down. */
-function watched(): { runtime: ReviewGitRuntime; commands: string[][] } {
+/** The real runtime, with every git command it is asked to run (and how) written down. */
+function watched(): { runtime: ReviewGitRuntime; commands: string[][]; options: Parameters<ReviewGitRuntime["runGit"]>[1][] } {
   const commands: string[][] = [];
+  const options: Parameters<ReviewGitRuntime["runGit"]>[1][] = [];
   return {
     commands,
+    options,
     runtime: {
       ...runtime,
-      runGit: (args, options) => {
+      runGit: (args, given) => {
         commands.push(args);
-        return runtime.runGit(args, options);
+        options.push(given);
+        return runtime.runGit(args, given);
       },
     },
   };
+}
+
+/** The exact read-only commands these reads may run: anything else (a fetch, a checkout, a write) fails. */
+const READ_SHAPES: RegExp[] = [
+  /^rev-parse --is-inside-work-tree$/,
+  /^rev-parse --verify --quiet --end-of-options \S+\^\{commit\}$/,
+  /^symbolic-ref refs\/remotes\/origin\/HEAD$/,
+  /^show-ref --verify( --quiet)? refs\/(heads|remotes\/origin)\/[\w./-]+$/,
+  /^for-each-ref --sort=-committerdate --format=%\(refname\)%00%\(committerdate:unix\) refs\/heads\/$/,
+  /^rev-list --count --end-of-options \S+\.\.refs\/heads\/[\w./-]+$/,
+  /^worktree list --porcelain$/,
+  /^config --get-regexp -- \^remote\\\.\.\*\\\.url\$$/,
+  /^for-each-ref --count=1 --format=%\(refname\) --contains=[0-9a-f]+ refs\/remotes\/[\w.-]+\/$/,
+];
+function onlyGuardedReads(seen: ReturnType<typeof watched>) {
+  expect(seen.commands.length).toBeGreaterThan(0);
+  seen.commands.forEach((args, i) => {
+    expect(READ_SHAPES.some((shape) => shape.test(args.join(" ")))).toBe(true);
+    const given = seen.options[i];
+    expect(given?.interaction).toBe("forbid");
+    expect(given?.config?.["protocol.allow"]).toBe("never");
+    expect(given?.env?.GIT_NO_LAZY_FETCH).toBe("1");
+    expect(given?.timeoutMs).toBeLessThanOrEqual(BRANCH_GIT_TIMEOUT_MS);
+  });
 }
 
 describe("the reports store", () => {
@@ -91,12 +122,41 @@ describe("git for a report", () => {
   test("a branch's tip and the default branch are read when the agent names neither; a head not here is not reachable", async () => {
     const now = Math.floor(Date.now() / 1000);
     const { repo, head } = scratchRepo(now);
-    expect(await readReportedBranch(runtime, repo, { name: "retry-jitter" })).toEqual({ head, base: "main", reachable: true });
-    expect(await readReportedBranch(runtime, repo, { name: "retry-jitter", head: head.slice(0, 7) })).toEqual({ head, base: "main", reachable: true });
+    const seen = watched();
+    expect(await readReportedBranch(seen.runtime, repo, { name: "retry-jitter" })).toEqual({ head, base: "main", reachable: true, defaultBranch: "main" });
+    onlyGuardedReads(seen);
+    expect(await readReportedBranch(runtime, repo, { name: "retry-jitter", head: head.slice(0, 7) })).toEqual({ head, base: "main", reachable: true, defaultBranch: "main" });
     const elsewhere = "c".repeat(40);
-    expect(await readReportedBranch(runtime, repo, { name: "pushed-elsewhere", head: elsewhere, base: "develop" })).toEqual({ head: elsewhere, base: "develop", reachable: false });
-    expect(await readReportedBranch(runtime, mkdtempSync(join(tmpdir(), "not-a-repo-")), { name: "x", head: elsewhere })).toEqual({ head: elsewhere, base: null, reachable: false });
+    expect(await readReportedBranch(runtime, repo, { name: "pushed-elsewhere", head: elsewhere, base: "develop" })).toEqual({ head: elsewhere, base: "develop", reachable: false, defaultBranch: "main" });
+    expect(await readReportedBranch(runtime, mkdtempSync(join(tmpdir(), "not-a-repo-")), { name: "x", head: elsewhere })).toEqual({ head: elsewhere, base: null, reachable: false, defaultBranch: null });
     expect(await readBranchDiff(runtime, repo, "main", head)).toContain("jitter.txt");
+  });
+
+  test("a cloud agent's report never reads a branch's tip here", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { repo } = scratchRepo(now);
+    const seen = watched();
+    expect(await readReportedBranch(seen.runtime, repo, { name: "retry-jitter" }, { localTip: false })).toEqual({ head: null, base: "main", reachable: false, defaultBranch: "main" });
+    expect(seen.commands.some((args) => args.some((arg) => arg.includes("retry-jitter")))).toBe(false);
+  });
+
+  test("a commit counts as pushed only when a remote-tracking ref of the remote it named holds it", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { repo, head } = scratchRepo(now);
+    git(repo, ["remote", "add", "origin", "git@github.com:acme/app.git"]);
+    git(repo, ["remote", "add", "fork", "https://github.com/someone/app.git"]);
+    // Only on this computer: no remote-tracking ref holds it.
+    expect(await pushedHere(runtime, repo, head, "https://github.com/acme/app.git")).toBe(false);
+    git(repo, ["update-ref", "refs/remotes/fork/retry-jitter", head]);
+    // Held by another remote's ref: not the one the agent named.
+    expect(await pushedHere(runtime, repo, head, "https://github.com/acme/app.git")).toBe(false);
+    git(repo, ["update-ref", "refs/remotes/origin/retry-jitter", head]);
+    const seen = watched();
+    // The same repository in another form (https for an ssh remote), and a short id.
+    expect(await pushedHere(seen.runtime, repo, head.slice(0, 12), "https://github.com/acme/app.git")).toBe(true);
+    onlyGuardedReads(seen);
+    expect(await pushedHere(runtime, repo, head, null)).toBe(false);
+    expect(await pushedHere(runtime, repo, head, "https://evil.example/acme/app.git")).toBe(false);
   });
 });
 
@@ -109,21 +169,25 @@ describe("the safety net: branches nobody reported", () => {
     expect(read.branches.map((b) => [b.branch, b.base, b.ahead])).toEqual([["retry-jitter", "main", 1]]);
   });
 
-  test("runs only local reads: nothing that fetches, checks out or writes", async () => {
+  test("runs only the exact local read-only commands, each kept off the network and short", async () => {
     const now = Math.floor(Date.now() / 1000);
     const { repo } = scratchRepo(now);
     const before = git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"]);
-    const { runtime: seen, commands } = watched();
-    await readUnreportedBranches(seen, repo, "prj_1", () => false, now * 1000);
-    expect(commands.length).toBeGreaterThan(0);
-    const READS = new Set(["rev-parse", "symbolic-ref", "show-ref", "for-each-ref", "rev-list", "worktree", "branch", "config"]);
-    for (const args of commands) {
-      expect(READS.has(args[0]!)).toBe(true);
-      if (args[0] === "worktree") expect(args[1]).toBe("list");
-      if (args[0] === "branch") expect(args.every((arg) => !/^-(d|D|m|M|c|C|f)$|^--(delete|move|copy|force|set-upstream)/.test(arg))).toBe(true);
-    }
+    const seen = watched();
+    await readUnreportedBranches(seen.runtime, repo, "prj_1", () => false, now * 1000);
+    onlyGuardedReads(seen);
     expect(git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"])).toBe(before);
     expect(git(repo, ["status", "--porcelain"])).toBe("");
+  });
+
+  test("counts its 30 after dropping branches with nothing of their own", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { repo } = scratchRepo(now);
+    // Newer than every real branch, and with nothing of their own: once they filled the list.
+    commitAt(repo, "fresh.txt", now - 3600);
+    for (let i = 0; i < 35; i++) git(repo, ["branch", `empty-${i}`]);
+    const read = await readUnreportedBranches(runtime, repo, "prj_1", () => false, now * 1000);
+    expect(read.branches.map((b) => b.branch)).toEqual(["reported-one", "retry-jitter"]);
   });
 
   test("a folder that is no repository says so and lists nothing", async () => {

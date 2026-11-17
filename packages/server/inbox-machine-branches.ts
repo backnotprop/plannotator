@@ -6,8 +6,8 @@
  * `machine`. Never a timer: a read starts when this machine's Reviews is read, and is never waited for.
  */
 
-import type { InboxBranchReportRow } from "@plannotator/core/inbox-branch-reports";
-import { isInboxId, type InboxPullRiskJudgment } from "@plannotator/core/inbox-types";
+import { inboxBranchRemoteUrl, type InboxBranchReportRow } from "@plannotator/core/inbox-branch-reports";
+import { inboxPullSafeBranch, isInboxId, type InboxPullRiskJudgment } from "@plannotator/core/inbox-types";
 import { readCapped, type PeerLink } from "./inbox-peer-link";
 
 const FAR_BRANCHES_MAX_BYTES = 2 * 1024 * 1024;
@@ -21,11 +21,19 @@ const text = (value: unknown, max: number): value is string => typeof value === 
 const orNull = (value: unknown, max: number): string | null => (text(value, max) ? value : null);
 const LEVELS = new Set(["low", "medium", "high"]);
 
-/** One far row, picked by its shape: a machine's answer is another program's words. */
+const HEAD = /^[0-9a-f]{7,64}$/i;
+
+/**
+ * One far row, picked by its shape and read by the same rules as a report here: a machine's answer is another
+ * program's words. Its branch and base are plain branch names, its head a commit id, and its remote the URL rebuilt
+ * from its parts (no password, query or fragment), else none.
+ */
 export function farBranchRow(value: unknown): Omit<InboxBranchReportRow, "machine"> | null {
   const row = value && typeof value === "object" && !Array.isArray(value) ? (value as Json) : null;
   if (!row || !text(row.thread_id, 200) || !isInboxId("msg", row.thread_id) || !text(row.project_id, 200) || !text(row.branch, 250) || !text(row.at, 64)) return null;
   if (row.place !== "here" && row.place !== "cloud") return null;
+  if (!inboxPullSafeBranch(row.branch) || (row.base != null && !(text(row.base, 250) && inboxPullSafeBranch(row.base))) || (row.head != null && !(text(row.head, 64) && HEAD.test(row.head)))) return null;
+  const remote = text(row.remote_url, 2000) ? inboxBranchRemoteUrl(row.remote_url) : null;
   const risk = row.risk && typeof row.risk === "object" ? (row.risk as Json) : null;
   const judged: InboxPullRiskJudgment | null = risk && LEVELS.has(String(risk.level)) && text(risk.why, 2000) ? { level: risk.level as InboxPullRiskJudgment["level"], why: risk.why } : null;
   const agent = row.agent && typeof row.agent === "object" ? (row.agent as Json) : null;
@@ -36,7 +44,8 @@ export function farBranchRow(value: unknown): Omit<InboxBranchReportRow, "machin
     base: orNull(row.base, 250),
     head: orNull(row.head, 64),
     place: row.place,
-    remote_url: orNull(row.remote_url, 2000),
+    remote_url: remote,
+    ...(typeof row.remote_known === "boolean" ? { remote_known: row.remote_known } : {}),
     summary: orNull(row.summary, 400),
     at: row.at,
     reports: Number.isSafeInteger(row.reports) ? (row.reports as number) : 1,

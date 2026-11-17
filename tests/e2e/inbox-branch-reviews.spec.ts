@@ -35,6 +35,8 @@ interface World {
   project: string;
   git: (...args: string[]) => string;
   claude: SimAgent;
+  /** A new agent connection: one made after the switch lists the tools as they are then, as a real agent would. */
+  connect: () => Promise<SimAgent>;
   context: BrowserContext;
   page: Page;
 }
@@ -119,7 +121,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const page = await context.newPage();
   const { project, git, commit } = billingProject(join(root, 'src'));
   commitMore = commit;
-  world = { dataDir, url: started.stdout.trim(), project, git, claude: await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' }), context, page };
+  const connect = () => SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
+  world = { dataDir, url: started.stdout.trim(), project, git, claude: await connect(), connect, context, page };
 });
 
 test.afterAll(async () => {
@@ -145,6 +148,9 @@ test('off: the field is refused and Reviews has no safety net', async () => {
 
 test('on: a report is one review thread, a local branch On you, with the person\'s own ask', async () => {
   setBranchReviews(true);
+  // The agent connects after the switch (an agent host may keep the tool list it was first given).
+  await world.claude.close().catch(() => {});
+  world.claude = await world.connect();
   const sent = await report('retry-jitter is ready for review: retries back off with jitter.');
   threadId = String(sent.thread_id);
   const { page } = world;
@@ -208,6 +214,6 @@ test('the risk rules dialog shows the branch switch and says what is sent where'
   await page.locator('[data-pulls-risk-rules]').click();
   const dialog = page.locator('[data-dialog="pull-risk-rules"]');
   await expect(dialog.locator('[data-pull-risk-branches] input')).not.toBeChecked();
-  await expect(dialog.locator('[data-pull-risk-branches-words]')).toContainText('goes once to the risk agent above');
+  await expect(dialog.locator('[data-pull-risk-branches-words]')).toContainText('once per commit, and only when that commit is on this computer');
   await shot(page, '4-risk-switch');
 });

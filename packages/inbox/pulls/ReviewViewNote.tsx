@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { inboxApi } from '../api';
 import { localReviewMessage } from '../compose/reviewBox';
 import { INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { rankBranch } from './branchReviews';
 import type { ReviewView } from './reviewsModel';
 
 const newKey = () => (typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `branch-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`);
@@ -25,8 +26,18 @@ export function ReviewViewNote({ view }: { view: ReviewView }) {
 
 function BranchAsk({ note }: { note: NonNullable<ReviewView['branch']> }) {
   const [state, setState] = useState<{ asked: string | null; sending: boolean; error: string | null }>({ asked: null, sending: false, error: null });
+  const [ranking, setRanking] = useState<'idle' | 'asking' | 'started' | 'not'>('idle');
   const { report, replyTo } = note;
   const asked = state.asked !== null && state.asked === replyTo;
+  const rank = async () => {
+    if (ranking === 'asking') return;
+    setRanking('asking');
+    try {
+      setRanking((await rankBranch(report.thread_id)).started ? 'started' : 'not');
+    } catch {
+      setRanking('not');
+    }
+  };
   const ask = async () => {
     if (!replyTo || state.sending) return;
     setState({ asked: null, sending: true, error: null });
@@ -50,6 +61,20 @@ function BranchAsk({ note }: { note: NonNullable<ReviewView['branch']> }) {
         <button type="button" className="ib-btn ib-pri" onClick={() => void ask()} disabled={state.sending || !replyTo} data-review-branch-ask="">
           {state.sending ? 'Asking…' : 'Ask for a guided review'}
         </button>
+      )}
+      {note.canRank && ranking !== 'started' && (
+        <p className="ib-rvbranch-reach" data-review-branch-rank="">
+          Not ranked at this commit.{' '}
+          <button type="button" className="ib-btn" onClick={() => void rank()} disabled={ranking === 'asking'} data-review-branch-rank-button="">
+            {ranking === 'asking' ? 'Ranking…' : 'Rank'}
+          </button>
+          {ranking === 'not' && ' It could not start. Check the risk agent in No slop zone rules.'}
+        </p>
+      )}
+      {ranking === 'started' && (
+        <p className="ib-rvbranch-reach" role="status" data-review-branch-ranking="">
+          Ranking. Its level shows on the row when it is in.
+        </p>
       )}
       {asked && (
         <p className="ib-rvbranch-asked" role="status" data-review-branch-asked="">

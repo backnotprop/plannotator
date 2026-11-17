@@ -6,7 +6,7 @@
 
 import { inboxReviewPatchSize, type InboxReviewChanges, type InboxReviewChangesAnswer } from "@plannotator/core/inbox-types";
 import { getCurrentBranch, getDefaultBranch, runGitDiff, type DiffType } from "@plannotator/shared/review-core";
-import { branchBaseName, readBranchDiff } from "./inbox-branch-reports";
+import { branchBaseName, offlineGit, readBranchDiff } from "./inbox-branch-reports";
 import { runtime } from "./git";
 
 const DIFF_OF: Record<InboxReviewChanges, DiffType> = { uncommitted: "uncommitted", last: "last-commit", branch: "branch" };
@@ -15,7 +15,8 @@ export async function readInboxReviewChanges(root: string, changes: InboxReviewC
   const inside = await runtime.runGit(["rev-parse", "--is-inside-work-tree"], { cwd: root });
   if (inside.exitCode !== 0) return { git: false, files: 0, additions: 0, deletions: 0, branch: null, base: null };
   if (branch) {
-    const base = branchBaseName(await getDefaultBranch(runtime, root));
+    // Branch reviews' reads keep off the network and are short (`offlineGit`), as every other one of theirs.
+    const base = branchBaseName(await getDefaultBranch(offlineGit(runtime), root));
     const patch = await readBranchDiff(runtime, root, base, `refs/heads/${branch}`).catch(() => "");
     return { git: true, ...inboxReviewPatchSize(patch), branch, base };
   }

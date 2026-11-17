@@ -114,7 +114,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
               <span>Also rank branches agents report ready</span>
             </label>
             <p className="ib-quietline" data-pull-risk-branches-words="">
-              Each time an agent reports a branch ready for review, that branch&rsquo;s whole diff on this computer, pushed or not, goes once to the risk agent above and its provider. Branches nobody reported are never sent.
+              When an agent reports a branch ready for review, its whole diff against its base (up to 8 MB), pushed or not, goes to the risk agent above and its provider, once per commit, and only when that commit is on this computer. Branches nobody reported are never sent.
             </p>
           </>
         )}

@@ -5811,20 +5811,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const branch = changes === "branch" && branchReviewsOn() ? url.searchParams.get("branch") : null;
         return json(await readInboxReviewChanges(project.root, changes, branch && inboxPullSafeBranch(branch) ? branch : null));
       }
-      // Branch reviews (inbox-branch-service.ts): the reported branches, and the by-hand list of branches nobody
-      // reported. Read only; refused before any git while Branch reviews (or Code review) is off.
-      if (path === "/api/inbox/reviews/branches" || path === "/api/inbox/reviews/branches/unreported") {
-        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+      // Branch reviews (inbox-branch-service.ts): the reported branches, the by-hand list of branches nobody reported,
+      // and a reported branch's Rank. Refused before any git while Branch reviews (or Code review) is off.
+      if (path === "/api/inbox/reviews/branches" || path === "/api/inbox/reviews/branches/unreported" || path === "/api/inbox/reviews/branches/rank") {
+        const rank = path === "/api/inbox/reviews/branches/rank";
+        if (req.method !== (rank ? "POST" : "GET")) return json({ error: rank ? "Use POST." : "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!branchReviewsOn()) return json({ error: "Branch reviews are off.", code: "branch_reviews_off" }, 409);
         if (path === "/api/inbox/reviews/branches") return json({ serverSession, reports: await branchService.rows() });
+        if (rank) {
+          const body = (await readBody(req)) as { thread_id?: unknown };
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          if (!isInboxId("msg", body?.thread_id)) return json({ error: "thread_id: a reported branch's thread.", code: "validation_error" }, 400);
+          return json({ serverSession, started: await branchService.rank(body.thread_id) });
+        }
         const project = store.project(url.searchParams.get("project") ?? "");
         if (!project) return json({ error: "A project.", code: "validation_error" }, 400);
         // A branch with an open PR is the PR's row: never listed here.
         const openHeads = new Set((lastReviewsRead?.listed.pulls ?? []).filter(inboxPullIsOpen).map((pull) => pull.head));
-        return json({ serverSession, ...(await branchService.unreported(store.project(store.canonicalProjectId(project.id)) ?? project, openHeads)) });
+        try {
+          return json({ serverSession, ...(await branchService.unreported(store.project(store.canonicalProjectId(project.id)) ?? project, openHeads)) });
+        } catch {
+          // A git read that failed or ran out of time: the list says so, never "no branches".
+          return json({ error: "The branches could not be read.", code: "git_failed" }, 500);
+        }
       }
       // System's project setup (inbox-system-setup.ts): the projects found on this Mac with a git remote, and the
       // save of one project's setup.json. Owner only, same origin, and only while System is on.

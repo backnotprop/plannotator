@@ -1,11 +1,15 @@
 /**
  * Branch reviews in the Inbox server (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): the agents' side
  * (send_message's `branch`, inbox-mcp-branch.ts), the rows Reviews lists, the PRs a report's thread owns, and the routes
- * `GET /api/inbox/reviews/branches` and `GET /api/inbox/reviews/branches/unreported`. Off (config.json
- * `inboxBranchReviews`, or Code review): no field, no rows, and the routes answer `409 branch_reviews_off` before any git.
+ * `GET /api/inbox/reviews/branches`, `GET /api/inbox/reviews/branches/unreported` and
+ * `POST /api/inbox/reviews/branches/rank`. Off (config.json `inboxBranchReviews`, or Code review): no field, no rows,
+ * and the routes answer `409 branch_reviews_off` before any git.
  *
- * Nothing here runs by itself: a report is read when it arrives, judged for risk then (once, and only with the
- * person's switch on), and the list of branches nobody reported is read when the person opens it.
+ * Nothing here runs on a timer: a report is read when it arrives and judged for risk then (only with the person's
+ * switch on, and only when its commit is here: a cloud agent's only when pushed to the remote it named). A judgment
+ * that failed is tried once more on the next Reviews read; one lost (the Inbox restarted while it waited) or made
+ * under rules since changed reads "not ranked", and the person ranks it again by hand. The list of branches nobody
+ * reported is read when the person opens it.
  */
 import {
   inboxBranchReportOwners,
@@ -18,7 +22,7 @@ import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { inboxRowArchived, type InboxProject, type InboxPull, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { branchHeadHere, createInboxBranchReports, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
+import { branchHeadHere, createInboxBranchReports, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
 import type { InboxBranchMcp } from "./inbox-mcp-branch";
 import type { PullRisk } from "./inbox-pull-risk";
 
@@ -30,7 +34,7 @@ export interface InboxBranchServiceOptions {
   dataDir: string;
   runtime: ReviewGitRuntime;
   on: () => boolean;
-  risk: Pick<PullRisk, "assessBranch" | "branchJudgment">;
+  risk: Pick<PullRisk, "assessBranch" | "branchJudgment" | "branchPending" | "branchRankable">;
   /** The origin a project's folder has, as the repo cache last read it (`host/owner/repo`, lowercased), never a git call. */
   originOf: (root: string) => string | null;
   now?: () => number;
@@ -40,22 +44,50 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
   const { store, runtime } = options;
   const now = options.now ?? Date.now;
   const reports = createInboxBranchReports(options.dataDir);
-  /** Whether a report's head is a commit here: true is kept, false is read again after a while. */
+  /**
+   * Whether a report's head is a commit here (and, for a cloud agent's, pushed to the remote it named), by folder and
+   * commit (`reachKey`): true is kept, false is read again after a while.
+   */
   const reach = new Map<string, { here: boolean; at: number }>();
+  const reachKey = (kind: "here" | "pushed", folder: string | null, head: string) => `${kind}\u0000${folder ?? ""}\u0000${head}`;
+  /** A failed judgment is tried once more on a later Reviews read: by risk key and head. */
+  const retried = new Set<string>();
 
   const rootOf = (projectId: string): string | null => store.project(projectId)?.root ?? null;
   /** Where a report's git is read: the folder it was read in when reported, else its project's. */
   const folderOf = (report: InboxBranchReport): string | null => report.folder ?? rootOf(report.project_id);
 
-  const judge = (report: InboxBranchReport) => {
+  /** Seen before within the recheck, else asked of git and kept. */
+  const cached = async (key: string, ask: () => Promise<boolean>): Promise<boolean> => {
+    const seen = reach.get(key);
+    if (seen && (seen.here || now() - seen.at < UNREACHABLE_RECHECK_MS)) return seen.here;
+    const here = await ask();
+    reach.set(key, { here, at: now() });
+    return here;
+  };
+
+  /** The commit is here to be judged: a cloud agent's only when a remote-tracking ref of its named remote holds it. */
+  const judgeable = async (report: InboxBranchReport): Promise<boolean> => {
+    const folder = folderOf(report);
+    if (!folder || !report.head || !report.base) return false;
+    if (report.place !== "cloud") return reachable(report);
+    const head = report.head;
+    return cached(reachKey("pushed", folder, head), () => pushedHere(runtime, folder, head, report.remote_url));
+  };
+
+  /**
+   * Its risk, at most once per head and rules. The prompt's title is the branch's name only: the agent's summary is
+   * its own words about its own work, and never steers the judgment.
+   */
+  const judge = async (report: InboxBranchReport): Promise<void> => {
     const root = folderOf(report);
-    if (!root || !report.head || !report.base) return;
+    if (!root || !report.head || !report.base || !(await judgeable(report))) return;
     const { head, base } = report;
     options.risk.assessBranch({
       key: inboxBranchRiskKey(report.project_id, report.branch),
       head_sha: head,
       base,
-      title: report.summary ? `${report.branch}: ${report.summary}` : report.branch,
+      title: report.branch,
       read: () => readBranchDiff(runtime, root, base, head),
     });
   };
@@ -63,14 +95,15 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
   const mcp: InboxBranchMcp = {
     on: options.on,
     get: (projectId, branch) => reports.get(projectId, branch),
-    // The agent's own folder first (a worktree, a checkout inside a folder of checkouts), else the project's.
-    read: async (project, field, workingFolder) => {
+    ofThread: (threadId) => reports.ofThread(threadId),
+    // The agent's own folder first (a worktree of the project), else the project's.
+    read: async (project, field, workingFolder, readOptions) => {
       for (const folder of [workingFolder, project.root]) {
         if (!folder) continue;
-        const read = await readReportedBranch(runtime, folder, field);
+        const read = await readReportedBranch(runtime, folder, field, readOptions);
         if (read.reachable || folder === project.root) return { ...read, folder };
       }
-      return { ...(await readReportedBranch(runtime, null, field)), folder: null };
+      return { ...(await readReportedBranch(runtime, null, field, readOptions)), folder: null };
     },
     projectOfRemote: (remoteUrl) => {
       const key = inboxGitRemoteKey(remoteUrl);
@@ -85,9 +118,9 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
     },
     recorded: (report, reachable) => {
       reports.put(report);
-      if (report.head) reach.set(report.head, { here: reachable, at: now() });
-      // Risk once per reported head, never for a head this computer can't read.
-      if (reachable) judge(report);
+      if (report.head) reach.set(reachKey("here", folderOf(report), report.head), { here: reachable, at: now() });
+      // Risk once per reported head, never for a head this computer can't read (nor a cloud agent's unpushed one).
+      if (reachable) void judge(report).catch(() => {});
     },
     canonicalId: (projectId) => store.canonicalProjectId(projectId),
   };
@@ -100,16 +133,31 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
     });
 
   const reachable = async (report: InboxBranchReport): Promise<boolean> => {
-    if (!report.head) return false;
-    const seen = reach.get(report.head);
-    if (seen && (seen.here || now() - seen.at < UNREACHABLE_RECHECK_MS)) return seen.here;
-    const here = await branchHeadHere(runtime, folderOf(report), report.head);
-    reach.set(report.head, { here, at: now() });
-    return here;
+    const head = report.head;
+    if (!head) return false;
+    const folder = folderOf(report);
+    return cached(reachKey("here", folder, head), () => branchHeadHere(runtime, folder, head));
   };
 
-  const rowOf = async (report: InboxBranchReport): Promise<InboxBranchReportRow> => {
-    const { judgment, failed } = options.risk.branchJudgment(inboxBranchRiskKey(report.project_id, report.branch), report.head, report.base);
+  /** A cloud agent's remote is a project's origin here (the repo cache, no git). */
+  const remoteKnown = (remoteUrl: string | null): boolean => {
+    const key = remoteUrl ? inboxGitRemoteKey(remoteUrl) : null;
+    return !!key && store.allProjects().some((project) => options.originOf(project.root) === key);
+  };
+
+  /** `riskOn`: a branch may be judged now (`branchRankable`), read once per list. */
+  const rowOf = async (report: InboxBranchReport, riskOn: boolean): Promise<InboxBranchReportRow> => {
+    const key = inboxBranchRiskKey(report.project_id, report.branch);
+    const { judgment, failed } = options.risk.branchJudgment(key, report.head, report.base);
+    const pending = options.risk.branchPending(key, report.head, report.base);
+    const canRun = !judgment && !pending && riskOn && (await judgeable(report));
+    // Tried once more after a failure, on this read (no timer); after that the person ranks it by hand.
+    const once = `${key}\u0000${report.head}`;
+    const retrying = !!failed && canRun && !retried.has(once);
+    if (retrying) {
+      retried.add(once);
+      void judge(report).catch(() => {});
+    }
     return {
       thread_id: report.thread_id,
       project_id: report.project_id,
@@ -123,8 +171,10 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
       reports: report.reports,
       agent: report.agent,
       reachable: await reachable(report),
+      ...(report.place === "cloud" ? { remote_known: remoteKnown(report.remote_url) } : {}),
       risk: judgment,
       risk_failed: failed,
+      ...(canRun && !retrying ? { rankable: true } : {}),
     };
   };
 
@@ -133,12 +183,14 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
     /** This computer's reported branches as rows (for Reviews and for a linked machine's door read). */
     async rows(): Promise<InboxBranchReportRow[]> {
       if (!options.on()) return [];
-      return Promise.all(listed().map(({ report }) => rowOf(report)));
+      const riskOn = options.risk.branchRankable();
+      return Promise.all(listed().map(({ report }) => rowOf(report, riskOn)));
     },
     /** The Reviews rows' starts: a reported branch's thread is a review thread from its first report. */
     async started(): Promise<Map<string, InboxReviewStart>> {
       const out = new Map<string, InboxReviewStart>();
       if (!options.on()) return out;
+      const riskOn = options.risk.branchRankable();
       for (const { report, name } of listed()) {
         out.set(report.thread_id, {
           kind: "branch",
@@ -150,7 +202,7 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
           project_id: report.project_id,
           at: report.at,
           name,
-          report: await rowOf(report),
+          report: await rowOf(report, riskOn),
         });
       }
       return out;
@@ -163,6 +215,21 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
         pulls,
         projectsByRepo,
       );
+    },
+    /**
+     * Rank a reported branch now, by hand (its Rank action): the one way, beside its report, a branch is judged. Only
+     * when it can be (risk on, its commit here, no judgment kept or under way at this head and rules). False: nothing
+     * was started.
+     */
+    async rank(threadId: string): Promise<boolean> {
+      if (!options.on()) return false;
+      const report = reports.ofThread(threadId);
+      if (!report) return false;
+      const key = inboxBranchRiskKey(report.project_id, report.branch);
+      if (options.risk.branchJudgment(key, report.head, report.base).judgment || options.risk.branchPending(key, report.head, report.base) || !options.risk.branchRankable()) return false;
+      if (!(await judgeable(report))) return false;
+      await judge(report);
+      return options.risk.branchPending(key, report.head, report.base);
     },
     /** The safety net, for one project: read only when the person asks. `openHeads`: the branches with an open PR. */
     async unreported(project: InboxProject, openHeads: ReadonlySet<string>): Promise<InboxUnreportedBranchesAnswer> {

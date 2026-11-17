@@ -5,7 +5,7 @@
  * nothing here shows.
  */
 import { inboxBranchPlaceWords, inboxBranchReachWords, type InboxBranchReportRow, type InboxReviewRow, type InboxReviewsAnswer, type InboxUnreportedBranchesAnswer } from '@plannotator/core/inbox-types';
-import { get } from '../api';
+import { get, post } from '../api';
 import { inboxUrl, rememberMachine } from '../inboxUrl';
 
 /** A reported branch's row: what the agent reported. Null for every other row. */
@@ -39,10 +39,20 @@ export interface BranchNote {
   reach: string | null;
   /** A review can be asked for: the commit is in a checkout on this computer, or the branch is on the linked machine it is on. */
   canAsk: boolean;
+  /** Not ranked, and can be now: this computer's report only. */
+  canRank: boolean;
 }
 
 export function branchNoteOf(report: InboxBranchReportRow): BranchNote {
-  return { report, reach: inboxBranchReachWords(report), canAsk: report.reachable || !!report.machine };
+  return { report, reach: inboxBranchReachWords(report), canAsk: report.reachable || !!report.machine, canRank: report.rankable === true && !report.machine };
+}
+
+/**
+ * Rank a reported branch now (its Rank action: a judgment lost to a restart, failed twice, or made under rules since
+ * changed). `started`: false when nothing could start (risk off, the commit not here, or one under way already).
+ */
+export function rankBranch(threadId: string): Promise<{ started: boolean }> {
+  return post<{ started: boolean }>(inboxUrl('/reviews/branches/rank'), { thread_id: threadId });
 }
 
 /** The safety net: one project's local branches nobody reported (`GET /api/inbox/reviews/branches/unreported`). Read only when the person opens it. */

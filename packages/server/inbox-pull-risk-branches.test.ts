@@ -3,7 +3,9 @@
  *  - a branch judged while the person's switch is off, Branch reviews is off, or no rules exist;
  *  - the same head judged twice (a second report of it, a restart);
  *  - a PR opened on the very commit judged again instead of taking the branch's judgment;
- *  - the switch shown to a window with Branch reviews off, or lost by a window that doesn't send it.
+ *  - the switch shown to a window with Branch reviews off, or lost by a window that doesn't send it;
+ *  - a branch read as waiting when none is (no Rank), or as rankable when it can't run, or a judgment under old rules
+ *    still shown after the rules change (it would never be offered to rank again).
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -136,5 +138,31 @@ describe("a reported branch's risk", () => {
     expect(loadConfig().inboxPullRisk?.branches).toBe(true);
     risk.save({ rules: "Anything in billing.", provider: "pi-sdk", model: null, branches: false });
     expect(loadConfig().inboxPullRisk?.branches).toBeUndefined();
+  });
+
+  test("pending only while its judgment waits or runs; rankable only when a branch may run; old rules are no judgment", async () => {
+    rules(true);
+    let finish: (value: { text: string }) => void = () => {};
+    const risk = createPullRisk({
+      dataDir,
+      isOn: () => true,
+      branchesOn: () => true,
+      agents: () => [{ id: "pi-sdk", label: "Pi" }],
+      pulls: { wholeDiff: async () => ({ patch: "", partial: false, head_sha: HEAD }) },
+      run: () => new Promise((resolve) => (finish = resolve)),
+    });
+    expect(risk.branchRankable()).toBe(true);
+    expect(risk.branchPending("branch:prj_1:retry-jitter", HEAD, "main")).toBe(false);
+    risk.assessBranch(branch());
+    await settled();
+    expect(risk.branchPending("branch:prj_1:retry-jitter", HEAD, "main")).toBe(true);
+    finish({ text: HIGH });
+    await settled();
+    expect(risk.branchPending("branch:prj_1:retry-jitter", HEAD, "main")).toBe(false);
+    expect(risk.branchJudgment("branch:prj_1:retry-jitter", HEAD, "main").judgment).toMatchObject({ level: "high" });
+    saveConfig({ inboxPullRisk: { rules: "Anything in auth.", provider: "pi-sdk", model: null, branches: true } });
+    expect(risk.branchJudgment("branch:prj_1:retry-jitter", HEAD, "main").judgment).toBeNull();
+    rules(false);
+    expect(risk.branchRankable()).toBe(false);
   });
 });

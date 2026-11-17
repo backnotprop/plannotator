@@ -7,8 +7,9 @@
  *
  * - Nothing here runs on a timer. A report is read once when it arrives (its head, its base, whether the commit is in
  *   the project's checkout here); the by-hand list of branches nobody reported is read only when the person opens it.
- * - Every git command is local (no fetch, no network), with no way to ask anything (`interaction: "forbid"`), in the
- *   project's own folder, killed after `BRANCH_GIT_TIMEOUT_MS`.
+ * - Every git command is local and may reach no host (`offlineGit`: no transport at all, `protocol.allow=never`, and no
+ *   lazy fetch of a partial clone's missing objects, `GIT_NO_LAZY_FETCH=1`), with no way to ask anything
+ *   (`interaction: "forbid"`), in the project's own folder, killed after `BRANCH_GIT_TIMEOUT_MS` (the diff after 5 min).
  * - Bun only: the Inbox is.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -21,6 +22,7 @@ import {
   type InboxBranchReport,
   type InboxUnreportedBranch,
 } from "@plannotator/core/inbox-branch-reports";
+import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { inboxPullLongLived, inboxPullSafeBranch } from "@plannotator/core/inbox-types";
 import { getDefaultBranch, getWorktrees, type ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
@@ -30,6 +32,8 @@ export const INBOX_BRANCH_REPORTS_FILE = "branch-reports.json";
 export const BRANCH_GIT_TIMEOUT_MS = 5_000;
 /** A reported branch's diff, read for its risk run, no further than this (as a PR clone's diff). */
 export const BRANCH_DIFF_MAX_BYTES = 8 * 1024 * 1024;
+/** The safety net looks at no more recent branches than this to find its list. */
+export const UNREPORTED_SCAN_MAX = 120;
 
 export interface InboxBranchReports {
   get(projectId: string, branch: string): InboxBranchReport | null;
@@ -100,7 +104,25 @@ function isReport(value: unknown): value is InboxBranchReport {
   );
 }
 
-const git = (runtime: ReviewGitRuntime, root: string, args: string[]) => runtime.runGit(args, { cwd: root, interaction: "forbid", timeoutMs: BRANCH_GIT_TIMEOUT_MS });
+/**
+ * The runtime every read here goes through, the shared helpers' too (`getDefaultBranch`, `getWorktrees`): no prompt, a
+ * kill after `BRANCH_GIT_TIMEOUT_MS` unless the caller gives its own, and no way to reach a host.
+ */
+export function offlineGit(runtime: ReviewGitRuntime): ReviewGitRuntime {
+  return {
+    ...runtime,
+    runGit: (args, options) =>
+      runtime.runGit(args, {
+        timeoutMs: BRANCH_GIT_TIMEOUT_MS,
+        ...options,
+        interaction: "forbid",
+        config: { ...options?.config, "protocol.allow": "never" },
+        env: { ...options?.env, GIT_NO_LAZY_FETCH: "1" },
+      }),
+  };
+}
+
+const git = (runtime: ReviewGitRuntime, root: string, args: string[]) => offlineGit(runtime).runGit(args, { cwd: root });
 
 /** A commit id when `ref` names one in this repository, else null. */
 async function commitOf(runtime: ReviewGitRuntime, root: string, ref: string): Promise<string | null> {
@@ -116,22 +138,54 @@ export function branchBaseName(ref: string): string {
 }
 
 /**
- * What git here says of a reported branch: its head (the agent's, else the branch's tip here), its base (the agent's,
- * else the repository's default branch) and whether the head is a commit in this checkout. Never throws: a folder that
- * is no repository reads as nothing here.
+ * What git here says of a reported branch: its head (the agent's, else, with `localTip`, the branch's tip here), its
+ * base (the agent's, else the repository's default branch) and whether the head is a commit in this checkout. A cloud
+ * agent's report never reads a local tip (`localTip: false`): what branches this computer has is none of its business.
+ * Never throws: a folder that is no repository reads as nothing here.
  */
-export async function readReportedBranch(runtime: ReviewGitRuntime, root: string | null, input: { name: string; base?: string; head?: string }): Promise<{ head: string | null; base: string | null; reachable: boolean }> {
-  if (!root) return { head: input.head ?? null, base: input.base ?? null, reachable: false };
+export async function readReportedBranch(
+  runtime: ReviewGitRuntime,
+  root: string | null,
+  input: { name: string; base?: string; head?: string },
+  options: { localTip: boolean } = { localTip: true },
+): Promise<{ head: string | null; base: string | null; reachable: boolean; defaultBranch: string | null }> {
+  if (!root) return { head: input.head ?? null, base: input.base ?? null, reachable: false, defaultBranch: null };
   try {
     const inside = await git(runtime, root, ["rev-parse", "--is-inside-work-tree"]);
-    if (inside.exitCode !== 0) return { head: input.head ?? null, base: input.base ?? null, reachable: false };
-    const tip = (await commitOf(runtime, root, `refs/heads/${input.name}`)) ?? (await commitOf(runtime, root, `refs/remotes/origin/${input.name}`));
+    if (inside.exitCode !== 0) return { head: input.head ?? null, base: input.base ?? null, reachable: false, defaultBranch: null };
+    const tip = options.localTip ? ((await commitOf(runtime, root, `refs/heads/${input.name}`)) ?? (await commitOf(runtime, root, `refs/remotes/origin/${input.name}`))) : null;
     const named = input.head ? await commitOf(runtime, root, input.head) : null;
     const head = named ?? input.head ?? tip;
-    const base = input.base ?? branchBaseName(await getDefaultBranch(runtime, root));
-    return { head, base, reachable: !!(named ?? (input.head ? null : tip)) };
+    const defaultBranch = branchBaseName(await getDefaultBranch(offlineGit(runtime), root));
+    const base = input.base ?? defaultBranch;
+    return { head, base, reachable: !!(named ?? (input.head ? null : tip)), defaultBranch };
   } catch {
-    return { head: input.head ?? null, base: input.base ?? null, reachable: false };
+    return { head: input.head ?? null, base: input.base ?? null, reachable: false, defaultBranch: null };
+  }
+}
+
+/**
+ * A cloud agent's commit counts as pushed only when a remote-tracking ref here contains it, of a remote whose URL is
+ * the repository it says it pushed to. Only then is its diff ever read for risk: never a commit that exists here only
+ * locally. Reads `remote.*.url` and the refs; fetches nothing.
+ */
+export async function pushedHere(runtime: ReviewGitRuntime, root: string, head: string, remoteUrl: string | null): Promise<boolean> {
+  const wanted = remoteUrl ? inboxGitRemoteKey(remoteUrl) : null;
+  if (!wanted || !/^[0-9a-f]{7,64}$/i.test(head)) return false;
+  try {
+    const remotes = await git(runtime, root, ["config", "--get-regexp", "--", "^remote\\..*\\.url$"]);
+    if (remotes.exitCode !== 0) return false;
+    const names = remotes.stdout
+      .split("\n")
+      .map((line) => /^remote\.(.+)\.url (.+)$/.exec(line.trim()))
+      .flatMap((m) => (m && inboxGitRemoteKey(m[2]!) === wanted && /^[A-Za-z0-9._-]+$/.test(m[1]!) ? [m[1]!] : []));
+    for (const name of names) {
+      const holding = await git(runtime, root, ["for-each-ref", "--count=1", "--format=%(refname)", `--contains=${head}`, `refs/remotes/${name}/`]);
+      if (holding.exitCode === 0 && holding.stdout.trim() !== "") return true;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }
 
@@ -157,9 +211,8 @@ export async function readBranchDiff(runtime: ReviewGitRuntime, root: string, ba
   const ref = await baseRef(runtime, root, base);
   if (!ref) throw new Error(`The base ${base} isn't in the project's checkout on this computer.`);
   if (!(await commitOf(runtime, root, head))) throw new Error("The reported commit isn't in the project's checkout on this computer.");
-  const answer = await runtime.runGit(["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--no-color", "--end-of-options", `${ref}...${head}`], {
+  const answer = await offlineGit(runtime).runGit(["diff", "--no-ext-diff", "--no-textconv", "--no-relative", "--no-color", "--end-of-options", `${ref}...${head}`], {
     cwd: root,
-    interaction: "forbid",
     timeoutMs: 5 * 60_000,
     maxOutputBytes: BRANCH_DIFF_MAX_BYTES,
   });
@@ -169,8 +222,10 @@ export async function readBranchDiff(runtime: ReviewGitRuntime, root: string, ba
 
 /**
  * The safety net: local branches with a commit in the last `INBOX_UNREPORTED_BRANCH_DAYS` days and commits not on the
- * default branch, newest first, at most `INBOX_UNREPORTED_BRANCHES_MAX`, each with the worktree it is checked out in.
- * `skip`: branches reported or with an open PR. Read only, when the person opens the list.
+ * default branch, newest first, at most `INBOX_UNREPORTED_BRANCHES_MAX` of them (counted after the ones with nothing of
+ * their own are dropped; no more than `UNREPORTED_SCAN_MAX` are looked at), each with the worktree it is checked out in.
+ * `skip`: branches reported or with an open PR. Read only, when the person opens the list. A read that fails or times
+ * out throws (the list says it could not be read), never "nothing".
  */
 export async function readUnreportedBranches(
   runtime: ReviewGitRuntime,
@@ -181,29 +236,33 @@ export async function readUnreportedBranches(
 ): Promise<{ git: boolean; branches: InboxUnreportedBranch[] }> {
   const inside = await git(runtime, root, ["rev-parse", "--is-inside-work-tree"]).catch(() => null);
   if (!inside || inside.exitCode !== 0) return { git: false, branches: [] };
-  const baseRefName = await getDefaultBranch(runtime, root);
+  const baseRefName = await getDefaultBranch(offlineGit(runtime), root);
   const base = branchBaseName(baseRefName);
-  const listed = await git(runtime, root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname:short)%00%(committerdate:unix)", "refs/heads"]);
-  if (listed.exitCode !== 0) return { git: true, branches: [] };
+  const listed = await git(runtime, root, ["for-each-ref", "--sort=-committerdate", "--format=%(refname)%00%(committerdate:unix)", "refs/heads/"]);
+  if (listed.exitCode !== 0) throw new Error("git couldn't list the branches.");
   const since = now / 1000 - INBOX_UNREPORTED_BRANCH_DAYS * 86_400;
   const candidates: { branch: string; at: number }[] = [];
   for (const line of listed.stdout.split("\n")) {
-    const [branch, at] = line.split("\u0000");
+    const [ref, at] = line.split("\u0000");
     const seconds = Number(at);
+    // The full ref, never `%(refname:short)`: a name that is also a tag would read `heads/x` there.
+    const branch = ref?.startsWith("refs/heads/") ? ref.slice("refs/heads/".length) : "";
     if (!branch || !Number.isFinite(seconds) || seconds < since) continue;
     if (!inboxPullSafeBranch(branch) || inboxPullLongLived(branch) || branch === base || skip(branch)) continue;
     candidates.push({ branch, at: seconds });
-    if (candidates.length >= INBOX_UNREPORTED_BRANCHES_MAX) break;
+    if (candidates.length >= UNREPORTED_SCAN_MAX) break;
   }
   if (candidates.length === 0) return { git: true, branches: [] };
-  const worktrees = await getWorktrees(runtime, root).catch(() => []);
-  const checkedOut = new Map(worktrees.flatMap((tree) => (tree.branch ? [[tree.branch, tree.path] as const] : [])));
+  const worktrees = await getWorktrees(offlineGit(runtime), root).catch(() => []);
+  const checkedOut = new Map(worktrees.flatMap((tree) => (tree.branch ? [[tree.branch.replace(/^refs\/heads\//, ""), tree.path] as const] : [])));
   const branches: InboxUnreportedBranch[] = [];
   for (const { branch, at } of candidates) {
-    const ahead = await git(runtime, root, ["rev-list", "--count", "--end-of-options", `${baseRefName}..refs/heads/${branch}`]).catch(() => null);
-    const count = ahead && ahead.exitCode === 0 ? Number(ahead.stdout.trim()) : 0;
+    const ahead = await git(runtime, root, ["rev-list", "--count", "--end-of-options", `${baseRefName}..refs/heads/${branch}`]);
+    if (ahead.exitCode !== 0) throw new Error("git couldn't read the branches.");
+    const count = Number(ahead.stdout.trim());
     if (!Number.isFinite(count) || count <= 0) continue;
     branches.push({ project_id: projectId, branch, base, ahead: count, last_commit_at: new Date(at * 1000).toISOString(), worktree: checkedOut.get(branch) ?? null });
+    if (branches.length >= INBOX_UNREPORTED_BRANCHES_MAX) break;
   }
   return { git: true, branches };
 }

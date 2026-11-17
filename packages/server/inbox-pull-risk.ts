@@ -270,6 +270,10 @@ export interface PullRisk {
   assessBranch(branch: RiskBranch): void;
   /** A reported branch's judgment at that head and base under the current rules, or why it failed; nulls when none. */
   branchJudgment(key: string, head: string | null, base: string | null): { judgment: InboxPullRiskJudgment | null; failed: string | null };
+  /** A reported branch's judgment at that head and base under the current rules is waiting or running. */
+  branchPending(key: string, head: string | null, base: string | null): boolean;
+  /** A branch may be judged now: the person's `branches` switch, rules, an agent that is here, Code review and Branch reviews on. */
+  branchRankable(): boolean;
   /** Save the dialog. Throws InboxError on a bad input or a config that can't be written. */
   save(input: unknown): void;
   models(provider: string): Promise<InboxPullRiskModels>;
@@ -356,6 +360,15 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     const temp = `${file}.${process.pid}.tmp`;
     writeFileSync(temp, `${JSON.stringify({ v: 1, judgments: Object.fromEntries(all) })}\n`, { mode: 0o600 });
     renameSync(temp, file);
+  };
+
+  const branchRankable = (): boolean => {
+    try {
+      const { rules, provider, branches } = settings();
+      return !stopping.signal.aborted && branches && !!options.branchesOn?.() && !!rules && !!provider && options.isOn() && agents().some((a) => a.id === provider);
+    } catch {
+      return false;
+    }
   };
 
   let listed: readonly InboxPull[] = [];
@@ -558,8 +571,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     assessBranch(branch) {
       if (stopping.signal.aborted || now() < agentPausedUntil) return;
       try {
-        const { rules, provider, branches } = settings();
-        if (!branches || !options.branchesOn?.() || !rules || !provider || !options.isOn() || !agents().some((a) => a.id === provider)) return;
+        const { rules } = settings();
+        if (!branchRankable()) return;
         const hash = hashOf(rules);
         const one = load().get(branch.key);
         if (one && one.head === branch.head_sha && one.base === branch.base && one.rules === hash) return;
@@ -578,6 +591,11 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
         // The report answers whatever happened here.
       }
     },
+    branchPending(key, head, base) {
+      const { rules } = settings();
+      return !!rules && !!head && !!base && queued.has(`${key}\u0000${head}\u0000${base}\u0000${hashOf(rules)}`);
+    },
+    branchRankable: () => branchRankable(),
     branchJudgment(key, head, base) {
       const current = settings();
       if (!current.rules || !head || !base) return { judgment: null, failed: null };

@@ -8,7 +8,7 @@
  * Browser-safe: the server, the window and the tests read the same rules here.
  */
 
-import { inboxGitRemoteKey } from "./inbox-git-url";
+import { parseInboxGitUrl } from "./inbox-git-url";
 import { inboxPullIsOpen, inboxPullLongLived, inboxPullRepoKey, inboxPullSafeBranch, type InboxPull } from "./inbox-pulls";
 import type { InboxPullRiskJudgment } from "./inbox-pull-risk";
 import type { InboxReviewRow } from "./inbox-reviews";
@@ -83,6 +83,7 @@ export function checkInboxBranchField(value: unknown): InboxBranchField | string
   if (extra) return `branch.${extra}: not a field. branch takes name, base, head, remote_url and summary.`;
   const name = typeof raw.name === "string" ? raw.name.trim() : "";
   if (!name || !inboxPullSafeBranch(name)) return "branch.name: the branch's name (letters, digits and ._/- only).";
+  if (name === "HEAD") return INBOX_BRANCH_NAME_NOT_BASE;
   const out: InboxBranchField = { name };
   if (raw.base !== undefined) {
     const base = typeof raw.base === "string" ? raw.base.trim() : "";
@@ -95,8 +96,9 @@ export function checkInboxBranchField(value: unknown): InboxBranchField | string
     out.head = raw.head.trim().toLowerCase();
   }
   if (raw.remote_url !== undefined) {
-    if (typeof raw.remote_url !== "string" || raw.remote_url.length > 2000 || !inboxGitRemoteKey(raw.remote_url)) return "branch.remote_url: the git remote it was pushed to (an https or ssh URL).";
-    out.remote_url = raw.remote_url.trim();
+    const url = typeof raw.remote_url === "string" && raw.remote_url.length <= 2000 ? inboxBranchRemoteUrl(raw.remote_url) : null;
+    if (!url) return "branch.remote_url: the git remote it was pushed to (an https or ssh URL).";
+    out.remote_url = url;
   }
   if (raw.summary !== undefined) {
     const summary = typeof raw.summary === "string" ? raw.summary.replace(/\s+/g, " ").trim() : "";
@@ -104,6 +106,22 @@ export function checkInboxBranchField(value: unknown): InboxBranchField | string
     out.summary = Array.from(summary).slice(0, INBOX_BRANCH_SUMMARY_MAX).join("");
   }
   return out;
+}
+
+/**
+ * A reported remote as kept and shown: the URL rebuilt from its parts (https or ssh only; an https URL's user,
+ * password, query and fragment dropped), never the text as typed. Null: not a repository's URL. The window and a
+ * linked machine's rows read it again the same way.
+ */
+export function inboxBranchRemoteUrl(text: string): string | null {
+  const read = parseInboxGitUrl(text);
+  return read && read.kind === "repo" ? read.url : null;
+}
+
+/** `host/owner/repo` of a reported remote, for the words: plain text, never a link. */
+export function inboxBranchRemoteWords(url: string | null): string | null {
+  const read = url ? parseInboxGitUrl(url) : null;
+  return read && read.kind === "repo" ? `${read.host}/${read.slug}` : null;
 }
 
 /** What a second report does: the same head changes nothing; a new one adds to the same thread. */
@@ -121,7 +139,7 @@ export function sameCommit(a: string, b: string): boolean {
 }
 
 /**
- * The PRs a reported branch's thread owns: the person's own open PR from the repository itself (not a fork) whose head
+ * The PRs a reported branch's thread owns: the person's own open (or merged) PR from the repository itself (not a fork) whose head
  * branch is the reported branch, in a repository that is the report's project, never a long-lived branch. So a branch
  * reviewed before its PR and its PR stay one thread (the same rule `inboxReviewIsOf` reads from a review's source).
  * `projectsByRepo`: `host/repo` (lowercased) → the projects on it.
@@ -138,7 +156,8 @@ export function inboxBranchReportOwners(
   }
   const owners = new Map<string, { thread_id: string }>();
   for (const pull of pulls) {
-    if (!inboxPullIsOpen(pull) || !pull.mine) continue;
+    // A merged one too: the thread then reads as merged and leaves Reviews (a landing), never "Ready for review" again.
+    if (!(inboxPullIsOpen(pull) || pull.state === "merged") || !pull.mine) continue;
     if (pull.head_repo !== null && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase()) continue;
     const projects = projectsByRepo.get(inboxPullRepoKey(pull.host, pull.repo)) ?? [];
     const report = byBranch.get(pull.head)?.find((one) => projects.includes(one.project_id));
@@ -162,6 +181,10 @@ export interface InboxBranchReportRow {
   agent: InboxBranchReport["agent"];
   /** The head is a commit in a checkout of the project on the computer that took the report. */
   reachable: boolean;
+  /** A cloud agent's remote is the origin of a project on the computer that took the report. */
+  remote_known?: boolean;
+  /** Its risk can be ranked now by hand: risk is on, the commit is here (pushed, for a cloud agent's) and no judgment is kept or under way at this head under today's rules. */
+  rankable?: boolean;
   /** Its risk, once judged at this head (never Low from nothing: no judgment, no mark). */
   risk: InboxPullRiskJudgment | null;
   /** Why ranking failed at this head, when it did. */
@@ -207,10 +230,16 @@ export function inboxBranchPlaceWords(row: Pick<InboxBranchReportRow, "place" | 
  * What the thread says about opening the code, when it can't be opened here: a linked machine's branch is reviewed
  * there; a cloud agent's branch needs pushing, or fetching into a checkout here. Null: the code is here.
  */
-export function inboxBranchReachWords(row: Pick<InboxBranchReportRow, "place" | "machine" | "reachable" | "remote_url" | "branch">): string | null {
+export function inboxBranchReachWords(row: Pick<InboxBranchReportRow, "place" | "machine" | "reachable" | "remote_url" | "branch" | "remote_known">): string | null {
   if (row.machine) return `This branch is on ${row.machine.name ?? "another computer"}. Its review runs there: start it from this thread, and an agent on that computer writes it.`;
   if (row.reachable) return null;
-  if (row.place === "cloud") return row.remote_url ? `This computer doesn't have ${row.branch} yet. Fetch it from ${row.remote_url} into the project's checkout here, then start the review.` : `This computer doesn't have ${row.branch}. Ask the agent to push it, then fetch it here.`;
+  if (row.place === "cloud") {
+    // What the agent says, never a link: the person decides whether it is their repository.
+    const where = inboxBranchRemoteWords(row.remote_url);
+    if (!where) return `This computer doesn't have ${row.branch}. Ask the agent to push it, then fetch it here.`;
+    const unknown = row.remote_known === false ? " (not the origin of any project here)" : "";
+    return `The agent says it pushed it to ${where}${unknown}. If that is your repository, fetch ${row.branch} into the project's checkout here.`;
+  }
   return `The commit reported for ${row.branch} isn't in the project's checkout on this computer any more.`;
 }
 
@@ -225,7 +254,7 @@ export function inboxShortCommit(head: string | null): string {
 
 /** send_message's `branch` field: when to report, and what each part is. */
 export const INBOX_BRANCH_FIELD_DESCRIPTION =
-  "Only when you have finished work on a branch and it is ready for the person to review (never on each commit): the branch, so the Inbox opens one review thread for it in this project. Report again after more work on it and the same thread takes it. `name`: the branch. `base`: what it is compared with (default: the repository's default branch). `head`: the commit (default: the branch's tip). `remote_url`: where you pushed it, when the person's computer may not have it. `summary`: one line on what it does.";
+  "Only when you have finished work on a branch and it is ready for the person to review (never on each commit): the branch, so the Inbox opens one review thread for it in this project. Report again after more work on it and the same thread takes it. `name`: the branch. `base`: what it is compared with (default: the repository's default branch). `head`: the commit (default: the branch's tip). `remote_url`: the repository's URL where you pushed it, never one with a password in it, when the person's computer may not have it. `summary`: one line on what it does.";
 
 /** The send's result line after a report with a new head. */
 export function inboxBranchReportedLine(branch: string, head: string | null, update: boolean): string {
@@ -238,8 +267,11 @@ export function inboxBranchSameLine(branch: string, head: string | null, threadI
   return `Already reported ${branch}${head ? ` at ${head.slice(0, 7)}` : ""} (thread ${threadId}): nothing was sent. Report it again after more work on it.`;
 }
 
-/** A report from a cloud agent of a branch this computer can't read, with no `head`. */
-export const INBOX_BRANCH_HEAD_NEEDED = "branch.head: the commit you pushed; this computer can't read the branch.";
+/** A report from a cloud agent with no `head`: a cloud agent's report never reads a branch's tip here. */
+export const INBOX_BRANCH_HEAD_NEEDED = "branch.head: the commit you pushed (required for a cloud agent).";
+
+/** A report naming `HEAD` or the repository's default branch: a review thread is one work branch's. */
+export const INBOX_BRANCH_NAME_NOT_BASE = "branch.name: the branch your work is on, not HEAD or the repository's default branch.";
 
 /** A report while the person has Branch reviews off (it went off during the call): nothing is sent. */
 export const INBOX_BRANCH_REVIEWS_OFF_TEXT = "branch_reviews_off: Branch reviews are off in this Inbox, so nothing was sent. Send your message without `branch`.";
