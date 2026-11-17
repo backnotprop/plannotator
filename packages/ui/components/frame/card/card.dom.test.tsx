@@ -541,6 +541,46 @@ describe.skipIf(!hasDom)('CardRow', () => {
       expect(thumb!.querySelector('[data-frame-card-back]')).toBeNull();
     }
   });
+
+  test('a page row shows a small window, a bar over lines, while a page card keeps its full window with three dots', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="page" title="Row" href="/r" />
+        <Card kind="page" size="regular" title="Card" href="/c" face={<b>face</b>} />
+      </>,
+    );
+    const row = frame.querySelector('[data-frame-card-row] [data-frame-card-window]')!;
+    expect(row.querySelector('[data-frame-card-window-bar]')).not.toBeNull();
+    expect(row.querySelectorAll('.frame-card-window-body > i').length).toBe(3);
+    expect(row.textContent).toBe('');
+    nearScreen();
+    const card = frame.querySelector('[data-frame-card] [data-frame-card-window]')!;
+    expect(card.querySelectorAll('[data-frame-card-window-bar] > i').length).toBe(3);
+    expect(card.closest('[data-frame-card-thumb]')).toBeNull();
+  });
+
+  test('CardRows holds each row as a list item under its name, and marks the list so a pin anywhere keeps every date in line', () => {
+    const { CardRow, CardRows } = cardModule!;
+    const frame = mount(
+      <CardRows label="All plans">
+        <CardRow kind="document" title="One" href="/1" action={<button type="button">Pin</button>} />
+        {null}
+        <CardRow kind="page" title="Two" href="/2" pinned action={<button type="button">Unpin</button>} />
+      </CardRows>,
+    );
+    const list = frame.querySelector('ul')!;
+    expect(list.getAttribute('aria-label')).toBe('All plans');
+    expect(list.hasAttribute('data-frame-card-rows')).toBe(true);
+    expect([...list.children].map((item) => item.tagName)).toEqual(['LI', 'LI']);
+    const rows = [...list.querySelectorAll<HTMLElement>('[data-frame-card-row]')];
+    expect(rows.map((row) => row.getAttribute('data-frame-card-columns'))).toEqual(['action', 'action']);
+    for (const row of rows) {
+      const cells = [...row.children];
+      expect(cells.at(-2)!.hasAttribute('data-frame-card-end')).toBe(true);
+      expect(cells.at(-1)!.hasAttribute('data-frame-card-action')).toBe(true);
+    }
+  });
 });
 
 describe.skipIf(!hasDom)('motion API', () => {

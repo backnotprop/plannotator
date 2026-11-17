@@ -334,4 +334,81 @@ describe('card layout rules in frame.css', () => {
   test('the updates pill shows a pointer', () => {
     expect(block('[data-frame-card-updates]')).toContain('cursor: pointer;');
   });
+
+  test('a row title is regular weight; a card title stays medium', () => {
+    expect(block('[data-frame-card-row] [data-frame-card-title]')).toContain('font-weight: 400;');
+    expect(block('[data-frame-card-title]')).toContain('font-weight: 500;');
+  });
+
+  test('a row thumbnail keeps the card well geometry, so a sheet, window or table runs off its bottom edge', () => {
+    expect(block('.frame-card-sheet')).toContain('inset: 10% 10% -14px;');
+    expect(block('.frame-card-window')).toContain('inset: 9% 8% -10px;');
+    expect(block('.frame-card-panel-rows')).toContain('bottom: -10px;');
+    expect(block('[data-frame-card-thumb] .frame-card-sheet')).toContain('bottom: -2px;');
+    expect(css).not.toMatch(/\[data-frame-card-thumb\][^{]*\{[^}]*\binset:/);
+  });
+
+  test('in rows the page window keeps its bar but hides the dots; on cards the bar and dots stay', () => {
+    expect(block('.frame-card-window-bar')).toContain('height: 16px;');
+    expect(block('.frame-card-window-bar > i')).toContain('width: 5px;');
+    expect(block('[data-frame-card-thumb] .frame-card-window-bar')).toContain('height: 3px;');
+    expect(block('[data-frame-card-thumb] .frame-card-window-bar > i')).toContain('display: none;');
+  });
+
+  test('a row action takes a column only while a row in its list is pinned, or with no hover; otherwise it shows over the end of the grey line', () => {
+    const reserved = ':is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *)';
+    expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(0, 1fr) 180px;');
+    expect(block('[data-frame-card-row] > [data-frame-card-action]')).toContain('position: absolute;');
+    expect(block('[data-frame-card-row] > [data-frame-card-action]')).toContain('right: 10px;');
+    expect(block('[data-frame-card-row]:not(:hover, :focus-within) > [data-frame-card-action]')).toContain('pointer-events: none;');
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]:is(:hover, :focus-within) > [data-frame-card-end]')).toContain('opacity: 0;');
+    expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]${reserved}`)).toContain('grid-template-columns: 36px minmax(0, 1fr) 180px 28px;');
+    expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]${reserved} > [data-frame-card-action]`)).toContain('position: relative;');
+    const noHover = css.slice(css.indexOf('@media (hover: none) {\n  [data-frame-card-row]'));
+    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]', noHover)).toContain('180px 28px;');
+  });
+
+  test('a host focus outline of ordinary weight does not draw a second ring on a card or row link', () => {
+    const rule = ':is([data-frame-card], [data-frame-card-row]) :focus-visible:not([data-frame-card-action] *)';
+    expect(block(rule)).toContain('outline: none;');
+    expect(frameCss).not.toMatch(/@layer/);
+    const weight = (selector: string): number => {
+      let rest = selector;
+      let total = 0;
+      for (;;) {
+        const at = rest.search(/:(is|not|has|where)\(/);
+        if (at < 0) break;
+        const open = rest.indexOf('(', at);
+        let depth = 1;
+        let end = open + 1;
+        while (depth > 0) {
+          if (rest[end] === '(') depth++;
+          if (rest[end] === ')') depth--;
+          end++;
+        }
+        const name = rest.slice(at + 1, open);
+        const inner = rest.slice(open + 1, end - 1).split(',').map((part) => weight(part.trim()));
+        if (name !== 'where') total += Math.max(...inner);
+        rest = rest.slice(0, at) + ' ' + rest.slice(end);
+      }
+      const ids = (rest.match(/#[\w-]+/g) ?? []).length;
+      const classes = (rest.match(/\.[\w-]+|\[[^\]]*\]|:(?!:)[\w-]+/g) ?? []).length;
+      const types = (rest.match(/(^|[\s>+~])[a-z][\w-]*/gi) ?? []).length;
+      return total + ids * 10000 + classes * 100 + types;
+    };
+    for (const host of [':focus-visible', '*:focus-visible', 'a:focus-visible', '.link:focus-visible', 'a.link:focus-visible', 'body a:focus-visible', '.app a:focus-visible']) {
+      expect(weight(rule)).toBeGreaterThan(weight(host));
+    }
+    expect(weight(rule)).toBe(300);
+  });
+
+  test('a focused row is filled with the primary colour and its words take the primary foreground; no outline or border', () => {
+    const focused = '[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *))';
+    expect(block(focused)).toContain('background: var(--primary);');
+    expect(block(`${focused} :is([data-frame-card-title], [data-frame-card-secondary], [data-frame-card-line], [data-frame-card-line] *)`)).toContain('color: var(--primary-foreground);');
+    expect(block(`${focused} [data-frame-card-dot]`)).toContain('background: var(--primary-foreground);');
+    const rowRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => selector!.includes('[data-frame-card-row]'));
+    expect(rowRules.length).toBeGreaterThan(5);
+    for (const [, , body] of rowRules) expect(body).not.toMatch(/\b(border|outline)(-[a-z]+)?:(?!\s*none;)/);
+  });
 });

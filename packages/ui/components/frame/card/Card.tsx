@@ -578,11 +578,11 @@ export function CardRow({
           {secondary}
         </span>
       )}
-      <span className="flex min-w-0 justify-end">
+      <span data-frame-card-end="" className="flex min-w-0 justify-end">
         <GreyLine fact={fact} factMark={factMark} factTone={factTone} working={working} date={date} />
       </span>
       {present(action) && (
-        <span data-frame-card-action="" className="relative z-20 flex items-center justify-end">
+        <span data-frame-card-action="" className="z-20 flex items-center justify-end">
           {action}
         </span>
       )}
@@ -651,6 +651,20 @@ export function CardFaceDocument({ title, children }: { readonly title: string; 
 const GridColumns = createContext<number | null>(null);
 
 const CARD_GRID_ROW_GAP: Record<CardSize, number> = { large: 28, regular: 44 };
+
+/**
+ * A list of `CardRow`s. While no row in it is pinned, a row's action shows
+ * over the end of its grey line on hover and focus, so every date ends at the
+ * row's edge; once any row is pinned, every row keeps a column for it, so the
+ * dates still line up.
+ */
+export function CardRows({ children, label, ref }: { readonly children: ReactNode; readonly label?: string; readonly ref?: Ref<HTMLUListElement> }) {
+  return (
+    <ul ref={ref} aria-label={label} data-frame-card-rows="">
+      {Children.map(children, (child) => (present(child) ? <li className="min-w-0">{child}</li> : null))}
+    </ul>
+  );
+}
 
 /**
  * Cards of one size in fluid columns: each card fills its column. `large`
