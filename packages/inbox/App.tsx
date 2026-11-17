@@ -4788,7 +4788,7 @@ function Inbox() {
         })),
     [shapes.shapes, shapeOn],
   );
-  // The board open over its thread or over the grid. A review draws its own, over the review (ReviewPane).
+  // The board open over the grid (in `main`) or in its thread's own pane (ThreadSlot's `board`). A review draws its own (ReviewPane).
   const shapeLayerId = boardsOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
@@ -4808,6 +4808,26 @@ function Inbox() {
     say,
   });
   showMeThreadRef.current = threadShowMe.threadId;
+  const boardLayer = (inThread: boolean, sidebarToggle: boolean) => shapeLayerId && !reviewPaneOpen && (
+    <ThreadShapeLayer
+      host={shapeHost}
+      id={shapeLayerId}
+      thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
+      shapes={shapes} threadShowMe={threadShowMe}
+      onClose={() => close({ ...routeRef.current, shape: null })}
+      onBoard={(id) => go({ ...routeRef.current, shape: id })}
+      // Its review opens at the place a link names: the full-window review (ReviewPane), the board its corner card.
+      onOpenReview={(messageId, at) => {
+        setBoardLink(messageId);
+        boardPlaces.leave(shapeLayerId);
+        go({ ...routeRef.current, guide: messageId, guideAt: at });
+      }}
+      onAddToReply={addShapeReply}
+      place={boardPlaces.placeOf(shapeLayerId)}
+      onNavigate={(place) => boardPlaces.moved(shapeLayerId, place)}
+      inThread={inThread} sidebarToggle={sidebarToggle}
+    />
+  );
   reviewPaneOpenRef.current = reviewPaneOpen;
   // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
   const landGuide = () => {
@@ -5488,7 +5508,7 @@ function Inbox() {
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
   } else if (route.page === 'shapes') {
-    // The grid (the sidebar's Shape row). A board with a thread opens over its thread; one with none, over the grid.
+    // The grid (the sidebar's Shape row). A board with a thread opens in its thread; one with none, over the grid.
     main = (
       <ShapeGridPage
         shapes={shapeOn ? shapes.shapes : null}
@@ -5698,7 +5718,7 @@ function Inbox() {
             shapeReply, setShapeReply, patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed,
             seenOnSight, panesOnScreen, setOpenThreadCovered, listTitle, setThreadFull, leaveFull, showToast, toastNow, dismissToast,
             covered: !!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null,
-            fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile,
+            fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile, board: route.page === 'inbox' ? boardLayer : null,
           }}
         />
       </>
@@ -5912,29 +5932,9 @@ function Inbox() {
           )
         }
       >
-        <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
+        <main className="ib-main" data-shape-open={route.page === 'shapes' && shapeLayerId && !reviewPaneOpen ? '' : undefined}>
           {main}
-          {shapeLayerId && !reviewPaneOpen && (
-            <ThreadShapeLayer
-              host={shapeHost}
-              id={shapeLayerId}
-              thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
-              shapes={shapes}
-              threadShowMe={threadShowMe}
-              onClose={() => close({ ...routeRef.current, shape: null })}
-              onBoard={(id) => go({ ...routeRef.current, shape: id })}
-              // Its review opens at the place a link names: the full-window review (ReviewPane), the board its corner card.
-              onOpenReview={(messageId, at) => {
-                setBoardLink(messageId);
-                boardPlaces.leave(shapeLayerId);
-                go({ ...routeRef.current, guide: messageId, guideAt: at });
-              }}
-              covered={!!guideMessage}
-              onAddToReply={addShapeReply}
-              place={boardPlaces.placeOf(shapeLayerId)}
-              onNavigate={(place) => boardPlaces.moved(shapeLayerId, place)}
-            />
-          )}
+          {route.page === 'shapes' && boardLayer(false, true)}
           {!reviewPaneOpen && <ThreadShowMeBox threadShowMe={threadShowMe} />}
         </main>
       </SidebarShell>
