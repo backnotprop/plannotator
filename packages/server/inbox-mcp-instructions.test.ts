@@ -115,6 +115,21 @@ describe("which rules an MCP session follows", () => {
     expect(resolveInboxMcpReminder({ prompts: { inbox: { rules: "Shared rules.", runtimes } } })).toEqual({ custom: null, rules: "Shared rules." });
   });
 
+  test("the reminder switch off, as Settings → Agents or a shared false writes it: nothing of the person's, main's instructions byte for byte", () => {
+    const text = { rules: "Ask first.", reminder: "Ping me." };
+    for (const inboxReminder of [false, "false", { "claude-code": false, pi: false, opencode: false }]) {
+      const config = { inboxReminder, prompts: { inbox: text } };
+      expect(resolveInboxMcpReminder(config)).toBeNull();
+      expect(inboxMcpInstructions(resolveInboxMcpReminder(config))).toBe(INBOX_MCP_INSTRUCTIONS);
+    }
+  });
+
+  test("the reminder on for any host with one, or unset: the person's text is sent", () => {
+    for (const inboxReminder of [undefined, true, { "claude-code": false, pi: false }, { "claude-code": false, pi: false, opencode: true }]) {
+      expect(resolveInboxMcpReminder({ inboxReminder, prompts: { inbox: { rules: "Ask first." } } })).toEqual({ custom: null, rules: "Ask first." });
+    }
+  });
+
   test("no config: null, so the built-in instructions stand", () => {
     expect(resolveInboxMcpReminder({})).toBeNull();
     expect(resolveInboxMcpReminder(null)).toBeNull();
@@ -141,6 +156,12 @@ describe("Settings → Prompts: the room and the note for agents connected throu
       WAKES,
     );
     expect(model.mcp).toEqual({ room: INBOX_MCP_RULES_ROOM, dropped: false, reminder_dropped: true });
+  });
+
+  test("the reminder switched off: no note says too long for MCP (none is sent), as the rules section says nothing of the switch on the terminal path", () => {
+    const off = { "claude-code": false, pi: false, opencode: false };
+    const model = inboxRulesModel({ inboxReminder: off, prompts: { inbox: { rules: "r".repeat(INBOX_MCP_RULES_ROOM + 1), reminder: "c".repeat(2000) } } }, WAKES);
+    expect(model.mcp).toEqual({ room: INBOX_MCP_RULES_ROOM, dropped: false, reminder_dropped: false });
   });
 
   test("nothing set: nothing marked", () => {

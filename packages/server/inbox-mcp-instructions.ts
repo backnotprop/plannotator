@@ -3,6 +3,7 @@
  * Inbox rules and reminder in them (#3555). Pure, so Settings → Prompts
  * (inbox-rules.ts) reads the same room and the same fit as the server.
  */
+import { configuredInboxReminder, INBOX_REMINDER_HOSTS, type PlannotatorConfig } from "@plannotator/shared/config";
 import { INBOX_AGENT_RULES, inboxReminderCustomText, inboxReminderRulesText, INBOX_RULES_LEAD } from "@plannotator/shared/inbox/connection";
 
 /**
@@ -74,13 +75,27 @@ export interface InboxMcpReminder {
  * the person's own, trimmed and otherwise verbatim: the terminal path renames
  * `plannotator_inbox` in it to the host's tool name, but an MCP session has
  * no single tool name to rename to.
+ *
+ * The reminder switch (`inboxReminder`, Settings → Agents) governs it as it
+ * governs the terminal path, where the rules ride on the reminder: switched
+ * off, nothing of the person's is sent and the instructions are the built-in
+ * ones. A boolean switches every host, MCP included; the per-host form
+ * (what Settings → Agents writes) has no MCP entry, so MCP goes off when
+ * the reminder is off for every host that has one (`INBOX_REMINDER_HOSTS`).
  */
 export function resolveInboxMcpReminder(config: unknown): InboxMcpReminder | null {
+  if (!inboxMcpReminderOn(config)) return null;
   const inbox = (config as { prompts?: { inbox?: { reminder?: unknown; rules?: unknown } } } | null)?.prompts?.inbox;
   const shared = inbox && typeof inbox === "object" && !Array.isArray(inbox) ? { prompts: { inbox: { reminder: inbox.reminder, rules: inbox.rules } } } : null;
   const custom = inboxReminderCustomText(shared, "mcp")?.trim() ?? null;
   const rules = inboxReminderRulesText(shared, "mcp");
   return custom === null && rules === null ? null : { custom, rules };
+}
+
+/** Whether the reminder switch lets the person's text reach MCP sessions: on unless it is off for every reminder host. */
+export function inboxMcpReminderOn(config: unknown): boolean {
+  const record = config && typeof config === "object" && !Array.isArray(config) ? (config as PlannotatorConfig) : {};
+  return INBOX_REMINDER_HOSTS.some((host) => configuredInboxReminder(record, host) !== false);
 }
 
 /** The instructions with the person's text in place of the repeated lines (the text alone, without its separators). */
