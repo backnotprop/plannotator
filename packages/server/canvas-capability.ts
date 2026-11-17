@@ -126,6 +126,8 @@ export function createCanvasCapability(core: InboxCore): InboxCapability & { sto
     stream(send) {
       streams.add(send);
       tellWindows();
+      // A window that just connected (or reconnected) looks once: it lays out what waits and reads its canvas again.
+      send(canvasEventFrame([]));
       if (!timer) {
         seen = store.fingerprints();
         timer = setInterval(poll, 400);

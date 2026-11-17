@@ -9,7 +9,6 @@
  */
 import { partOf, type CanvasElement } from '@plannotator/core/canvas-scene';
 import { canvasApi, type CanvasFileRef } from './client';
-import { subscribeCanvasFrames } from './frames';
 
 /** How many of the agent's parts the new layout changed: added, removed, moved, resized or reworded. */
 export function changedPartCount(before: readonly CanvasElement[], after: readonly CanvasElement[]): number {
@@ -89,13 +88,8 @@ async function layOut(threadId: string, version: number, pictureOnly: boolean): 
   }
 }
 
-async function layOutPending(): Promise<void> {
+/** Lay out every agent version waiting for a browser engine (on every canvas frame: frames.ts). */
+export async function layOutPending(): Promise<void> {
   const list = await canvasApi.pending().catch(() => null);
   for (const { id, version, picture } of list?.pending ?? []) await layOut(id, version, picture === true);
-}
-
-/** Lay out every waiting version now and on every canvas frame, until stopped (the canvas went off, the window closed). */
-export function startCanvasLayout(): () => void {
-  void layOutPending();
-  return subscribeCanvasFrames(() => void layOutPending());
 }

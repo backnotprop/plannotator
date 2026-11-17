@@ -102,7 +102,7 @@ describe("off", () => {
     expect(capabilitiesFrame(list, true)).toEqual({ canvas: { on: false } });
   });
 
-  test("off, a window's stream gets no frame; on, it does, and stop ends it", async () => {
+  test("off, a window's stream gets no frame; on, it looks once as it connects, then hears each change, and stop ends it", async () => {
     const { list, capability } = world();
     const frames: string[] = [];
     const off = streamInboxCapabilities(list, (f) => frames.push(f), true);
@@ -118,13 +118,13 @@ describe("off", () => {
     expect(existsSync(join(dataDir, "canvases", ".windows.json"))).toBe(true);
     capability.store.agentWrite(ID, { board: BOARD, pins: {} });
     await new Promise((r) => setTimeout(r, 500));
-    expect(frames).toEqual([`event: canvas\ndata: ${JSON.stringify({ ids: [ID] })}\n\n`]);
+    expect(frames).toEqual([`event: canvas\ndata: ${JSON.stringify({ ids: [] })}\n\n`, `event: canvas\ndata: ${JSON.stringify({ ids: [ID] })}\n\n`]);
 
     local.stop();
     remote.stop();
     capability.store.agentWrite(ID, { board: BOARD, pins: {} });
     await new Promise((r) => setTimeout(r, 500));
-    expect(frames).toHaveLength(1);
+    expect(frames).toHaveLength(2);
   });
 
   test("turning it off through sync stops a running stream", async () => {
@@ -132,11 +132,12 @@ describe("off", () => {
     switchTo(true);
     const frames: string[] = [];
     const streams = streamInboxCapabilities(list, (f) => frames.push(f), true);
+    expect(frames).toHaveLength(1);
     switchTo(false);
     streams.sync();
     capability.store.agentWrite(ID, { board: BOARD, pins: {} });
     await new Promise((r) => setTimeout(r, 500));
-    expect(frames).toEqual([]);
+    expect(frames).toHaveLength(1);
     streams.stop();
   });
 });

@@ -24,8 +24,8 @@ export interface ThreadCanvasSeat {
   pane: (composer: ReactNode) => ReactNode;
   /** The preview card under a message that drew a version, else null. */
   cardFor: (messageId: string) => ReactNode;
-  /** The person's marks since the agent's latest version, while not removed from the reply. */
-  marks: { chip: ReactNode; feedback: string; sent: () => void } | null;
+  /** The person's marks since the agent's latest version, while not removed from the reply nor sent in one. */
+  marks: { chip: ReactNode; feedback: string } | null;
 }
 
 const dismissedKey = (threadId: string) => `plannotator-canvas-marks:${threadId}`;
@@ -103,7 +103,7 @@ export function useThreadCanvasSeat(input: { thread: InboxThread | null; on: boo
     },
     marks:
       lines.length > 0 && sig !== dismissedSig && !sentBefore
-        ? { chip: <CanvasMarksChip lines={lines} agent={agent} onRemove={() => dismiss(sig)} />, feedback, sent: () => dismiss(sig) }
+        ? { chip: <CanvasMarksChip lines={lines} agent={agent} onRemove={() => dismiss(sig)} />, feedback }
         : null,
   };
 }

@@ -3223,9 +3223,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       }
       const pendingAnnotations = withCommentWrites(records, writes, current.thread_id);
       const uploads = box.open ? replyUploads : draftUploads;
-      // The person's canvas marks (the reply box's chip) ride the reply that carries the words.
-      const canvasMarks = box.open ? (canvas?.marks ?? null) : null;
-      const carries = words !== '' || pendingAnnotations.length > 0 || uploads.length > 0 || canvasMarks !== null;
+      const carries = words !== '' || pendingAnnotations.length > 0 || uploads.length > 0 || !!canvas?.marks;
       // One reply per session, its picks, skips and action items in the draft. The latest agent message rides
       // last only to carry the words, the annotations and the pasted files; with none, a target with nothing to
       // send is left out.
@@ -3290,7 +3288,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           {
             value: JSON.stringify([
               p.target.message.id,
-              p.key === lastKey ? [words, uploads, sendTags.get(lastKey) ?? [], p.wordsTo ?? null, sendQuote ?? null, canvasMarks?.feedback ?? null] : [],
+              p.key === lastKey ? [words, uploads, sendTags.get(lastKey) ?? [], p.wordsTo ?? null, sendQuote ?? null, canvas?.marks?.feedback ?? null] : [],
               p.own.map((r) => [r.id, r.updated_at]),
             ]),
             answers: sendTargetAnswerIds(p.target),
@@ -3308,7 +3306,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const last = index === parts.length - 1;
         const annotationsFeedback = own.length > 0 ? await buildFeedback(own) : '';
         const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE, undefined, skillFilter);
-        const feedback = [withSkillsBlock(annotationsFeedback, skills), last ? (canvasMarks?.feedback ?? '') : ''].filter(Boolean).join('\n\n');
+        const feedback = [withSkillsBlock(annotationsFeedback, skills), last ? (canvas?.marks?.feedback ?? '') : ''].filter(Boolean).join('\n\n');
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(part.key) ?? [];
         const files = withPictures(last ? uploads : [], own);
@@ -3356,7 +3354,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         went += 1;
       }
       done = true;
-      canvasMarks?.sent();
       // Focus goes to the reply once it is in the thread (not to Reply: the box-close effect leaves it be).
       // From full screen's composer it stays in the card, which says the reply went.
       focusSent.current = !options.stayFull;
@@ -4453,7 +4450,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
-  // The thread canvas (only while on) takes a file's place beside the thread.
   const fileOpen = openAttachment !== null || (namedFile !== null && file === null) || (canvas?.open === true && file === null);
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
@@ -4784,8 +4780,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 review={pullReview}
               />
             )}
-            {canvas?.button}
-            {shapeButton}
+            {canvas?.button}{shapeButton}
             {artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
@@ -5321,8 +5316,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     newestKeycap={!file}
                   />
                 )}
-                {canvas?.cardFor(message.id)}
-                {message.guide &&
+                {canvas?.cardFor(message.id)}{message.guide &&
                   (codeReview && message.guide.review ? (
                     <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs && !message.guide.walkthrough} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
                   ) : (
@@ -5668,8 +5662,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     />
                   </div>
                 )}
-                {canvas?.marks?.chip}
-                {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
+                {canvas?.marks?.chip}{draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
                 {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
               </div>
               {/* A computer: a draft that did not save says so on its own line over the row, in full (a phone says it in
@@ -6020,10 +6013,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         composer={composer}
       />
     )}
-    {!openAttachment && file === null && !namedFile && canvas?.open && canvas.pane(composer ? <FullScreenComposer value={composer} noun={null} comment={null} /> : null)}
-    {!openAttachment && file === null && namedFile && (
+    {!openAttachment && file === null && (namedFile ? (
       <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
-    )}
+    ) : canvas?.pane(composer ? <FullScreenComposer value={composer} noun={null} comment={null} /> : null))}
     </>
     </ReuseContext.Provider>
     </CommentPictures>

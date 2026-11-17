@@ -287,8 +287,6 @@ import type { SearchShape } from './search/model';
 import { connectCommand } from './connectPrompt';
 import { SIDEBAR_OPEN_COOKIE, HIDE_AWAY_MACHINES_COOKIE, COMPOSE_LAST_COOKIE, DRAFTS_REFRESH_MS, EMPTY_SET, REFRESH_SPIN_MS, RECONNECT_SAY_GAP_MS, STALE_NOT_SAVED_MS, AGENTS_SESSIONS_REFRESH_MS, SEEN_RETRIES, SEEN_RETRY_MS, LOOK_RECORD_WAIT_MS, RECORD_PAUSE_MS, WHATS_NEW_RETRIES, WHATS_NEW_RETRY_MS, WHATS_NEW_RELEASES_RETRIES, WHATS_NEW_RELEASES_RETRY_MS, UNSENT_TOAST_MS } from './app/constants';
 import { shapeFrameListeners, subscribeShapeFrames } from './app/shapeFrames';
-import { canvasFrameListeners } from './canvas/frames';
-import { startCanvasLayout } from './canvas/layout';
 import { readRoute, routeOf, type Route } from './app/route';
 import { hashOf, writeRoute } from './app/writeRoute';
 import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
@@ -460,8 +458,6 @@ function Inbox() {
     });
   }, []);
   const [settings, setSettings] = useState<SettingsModel | null>(null);
-  /** The thread canvas (config.json `inboxCanvas`): this window's settings say so only while on, and only on this computer. */
-  const canvasOn = settings?.canvas?.on === true;
   /** The thread panes (panes/model.ts): the address names the active pane's thread. A second opens beside (panes/beside.ts). */
   const windowPanes = useRoutePanes(route.thread ?? null, route.page === 'inbox', splitViewOn(settings), (thread, replace) => writeRoute(paneRoute(routeRef.current, thread), { replace }));
   const { panes } = windowPanes;
@@ -1766,10 +1762,6 @@ function Inbox() {
         onShapes: (ids) => {
           for (const listener of shapeFrameListeners) listener(ids);
         },
-        // The thread canvas's canvases changed (only sent while it is on).
-        onCanvas: (ids) => {
-          for (const listener of canvasFrameListeners) listener(ids);
-        },
         onConnect: (hello) => {
           // A (re)connect: what happened while the stream was away is not known here; no held thread is drawn from as current.
           staleThreads(queryClient);
@@ -1779,7 +1771,6 @@ function Inbox() {
           listAfterEvents(80);
           // A reconnect may have missed `event: shapes`: the boards are read again.
           for (const listener of shapeFrameListeners) listener([]);
-          for (const listener of canvasFrameListeners) listener([]);
           reportWindow();
           emitAskChange(null);
           stepsBus.emit('*');
@@ -3713,9 +3704,6 @@ function Inbox() {
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings);
   const plansOn = usePlansOn(settings, showToast);
-  // The thread canvas (config.json `inboxCanvas`): while on, this window lays out every agent version waiting for a
-  // browser engine, whether or not its canvas is open (canvas/layout.ts).
-  useEffect(() => (canvasOn ? startCanvasLayout() : undefined), [canvasOn]);
 
   const projects = latest?.projects ?? [];
   /**
@@ -4743,7 +4731,7 @@ function Inbox() {
   }, [settingsMissing, refreshSettings]);
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
-  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.ref || (canvasOn && !!route.canvas));
+  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.ref || (settings?.canvas?.on === true && !!route.canvas));
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;

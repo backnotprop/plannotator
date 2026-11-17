@@ -5,6 +5,7 @@ import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEv
 import { parseRestartAgents } from './restartAgents';
 import { readHello, type RestartHello } from './sessionAdopt';
 import { scheduledFrame } from './scheduled/store';
+import { canvasFrameArrived } from './canvas/frames';
 
 
 export interface MachineRecordFrame {
@@ -54,8 +55,6 @@ export interface InboxEventHandlers {
   onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; float_drafts?: { on: boolean }; mark_read_warning?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean }; system?: { on: boolean }; chapter_diagrams?: { on: boolean }; scheduled_threads?: { on: boolean }; plans?: { on: boolean }; canvas?: { on: boolean } }) => void;
   onTailscale?: (tailscale: TailscaleSettings) => void;
   onShapes?: (ids: string[]) => void;
-  /** The thread canvas (only while on): these threads' canvases changed (an agent's version, a layout, a save). */
-  onCanvas?: (ids: string[]) => void;
   onMachine?: (frame: MachineRecordFrame) => void;
   onMachines?: (machines: MachineView[]) => void;
   onOutbox?: (entry: OutboxView) => void;
@@ -211,7 +210,8 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     case 'canvas':
       try {
         const data = JSON.parse(frame.data) as { ids?: unknown };
-        if (Array.isArray(data.ids)) handlers.onCanvas?.(data.ids.filter((id): id is string => typeof id === 'string'));
+        // The thread canvas (only while on): these threads' canvases changed (an agent's version, a layout, a save).
+        if (Array.isArray(data.ids)) canvasFrameArrived(data.ids.filter((id): id is string => typeof id === 'string'));
       } catch {
       }
       return;

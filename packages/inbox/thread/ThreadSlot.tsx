@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { closeTo } from '../app/focus';
 import { writeRoute } from '../app/writeRoute';
 import { CardChip } from '../board/CardChip';
@@ -24,6 +24,7 @@ import { openTakenBack } from '../takenBackCompose';
 import { pageOffersUpdates } from '../updateNotice';
 import { fileOpener } from './openFile';
 import type { ThreadSlotHost } from './slotHost';
+import { useFocusSubject } from './useFocusSubject';
 
 export interface ThreadSlotProps {
   paneId: PaneId;
@@ -63,16 +64,7 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   const activeRef = useRef(active);
   activeRef.current = active;
   /** Focus was in the thread's place when it gave way to the thread: it goes to the thread's subject. */
-  const focusSubject = useRef(false);
-  useEffect(() => {
-    focusSubject.current = false;
-  }, [threadId]);
-  // The thread landed while focus was in its place: focus goes to its subject, never to the page.
-  useLayoutEffect(() => {
-    if (!focusSubject.current || !thread || thread.thread_id !== threadId) return;
-    focusSubject.current = false;
-    document.querySelector<HTMLElement>(`section.ib-pane[data-thread-id="${CSS.escape(thread.thread_id)}"] .ib-subject`)?.focus();
-  }, [thread, threadId]);
+  const focusSubject = useFocusSubject(thread, threadId);
   // What the thread says of itself on screen, held back while the pane waits off the page.
   const screen = useRef<PaneOnScreen | null>(null);
   const reportScreen = () => {
