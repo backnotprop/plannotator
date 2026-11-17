@@ -251,12 +251,15 @@ function useFit(ref: RefObject<HTMLDivElement | null>, toast: InboxToastModel, p
 
 /**
  * What a phone's toast keeps clear of, at the window's bottom: the open
- * thread's foot (Reply, the reply box) and a full-screen file's bar, its name
- * chip and its captions. The image and video composers have their own place
- * for it (inbox.css), so their windows are left to the stylesheet.
+ * thread's foot (Reply, the reply box), a Shape board's dock and pill (the
+ * board takes the foot's place in its thread), and a full-screen file's bar,
+ * its name chip and its captions. The image and video composers have their own
+ * place for it (inbox.css), so their windows are left to the stylesheet.
  */
 const PHONE_FLOOR = [
   'section.ib-pane .ib-pfoot',
+  '[data-shape-layer] .shp-dock',
+  '[data-shape-layer] .shp-pill',
   '.ib-fvdock-phone .ib-fvbar',
   '.ib-fvdock-phone .ib-fvhandle',
   '.ib-view.ib-phone .ib-fvchip',

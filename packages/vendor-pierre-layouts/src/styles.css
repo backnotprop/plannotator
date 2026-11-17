@@ -1,0 +1,2 @@
+/* The engine's own sheet. With the npm package: @import "@pierre/layouts/styles.css". */
+@import "../upstream/src/styles.css";

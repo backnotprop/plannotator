@@ -244,6 +244,7 @@ We deliberately did **not** restructure the exports map in this PR (move-don't-r
 | `utils/identity-tater` | Side-effect entry that registers the full username dictionary into the identity generator slot. Import it only if you rely on the default tater names and want the full dictionary; a host with `identityProvider` should not. |
 | `utils/mermaid` (`loadMermaidRuntime`, `getMermaidRuntime`, `getMermaidRuntimeSource`, `setMermaidRuntime`, `MERMAID_CONFIG`) and `utils/mermaid-eager` | The Mermaid runtime slot and its eager registration. Omit `utils/mermaid-eager` for the lazy path with retry, which is what Plannotator itself does since 0.40.0 (Mermaid 12); import it to register the runtime in your entry chunk at startup. See "Lazy renderers and eager entries" and "Mermaid 12 (0.40.0)". |
 | `utils/mermaidTheme` (`buildMermaidThemeVariables`, `readThemeTokens`, `applyMermaidTheme`, `mermaidThemeKey`, `buildMermaidConfig`, `ensureContrast`, `buildMermaidShadow`, `DEFAULT_MERMAID_SHADOW_AMOUNT`), `utils/diagramShadow` and `utils/cssColor` | Theme-aware diagram configuration: the pure token-to-`themeVariables` mapping with its contrast guard, the palette-derived node shadow (`options.shadowAmount`, default 0.7 of Mermaid's own), the document token reader, and the cached per-`(palette, mode, shadow amount)` `initialize` step `MermaidBlock` runs before each render. Additive; with no theme tokens on the document the static `MERMAID_CONFIG` stays in force. See "Theme-aware Mermaid diagrams (0.40.0)". |
+| `components/frame` + `frame.css` | The page frame: rail, edges, versions panel, reading line and phone sheets. Host words, storage and colours come in as props; no backend. Import `frame.css` once in a Tailwind v4 entry after the theme. See `components/frame/README.md`. |
 
 **AI is fully avoidable** — with one precision worth knowing. No AI *UI* is reachable from the supported components: `useAIChat` is imported only by `components/ai/DocumentAIChatPanel` and `useAIProviderConfig`, neither of which any supported component imports, and `CommentPopover`'s Ask-AI affordance exists only behind the optional `onAskAI` prop. `configure.ts` does statically import the `useAIChat` module (it needs `setAITransport`), but if you never use AI the hook is dead code and bundlers eliminate it — verified empirically: a standalone consumer's production bundle importing the full supported surface contains zero `/api/ai` strings. Don't import `components/ai/*` and don't pass `aiTransport`, and you ship no AI code.
 
@@ -1858,6 +1859,9 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 
 ## Publishing & versioning
 
+- **Unreleased: ui (the page frame).** Minor: two `exports` subpaths are added, `./components/frame` and `./frame.css` (see `components/frame/README.md`). `useResizablePanel` gains `resizeTo(px)`, additive (keyboard resizing; clamped, applied and saved like a finished drag; a value that is not a finite number is ignored). Nothing is removed or renamed. `smoke:package` imports both new subpaths, and the strict-consumer gate checks `components/frame/index.ts` and `test-consumer/frame-example.tsx`. No core change.
+- **Unreleased: core 0.25.32 (#3093, why gh or glab could not answer; shares the unreleased 0.25.32 with the Linear entry below).** Core adds two `exports` subpaths: `./problem` (the `Problem` shape a server sends for something that failed, with an optional `retry` flag that adds Try again after its action, and `problemOf`, which reads one off the wire and drops anything it cannot draw) and `./problem-words` (the one table of words for gh / glab states: `TOOL_WORDS`, `toolProblem`, `cardProblem`, `refUnsupportedLine`, and `commandHostTrusted`, the one rule for which hosts a sign-in command may name). `ForgeRefCardResult`'s failure gains an optional `problem`. Browser-safe, no runtime dependencies; nothing removed or renamed. ui, additive only: `components/ProblemNotice` and `forgetRefCard` (utils/refCard); no new seam. A host whose server sends no `problem` draws as before, except the link card's failure line, whose words now come from the shared table. ui pins core `0.25.32` exactly; bun.lock changes only the two core version lines. Publish core first.
+- **Unreleased: core 0.25.32 (#3063 and #3146, Linear hover cards and the Linear key setting; on top of 0.25.31).** Core adds one `exports` subpath, `./linear-ref-card` (the Linear issue link parser, `findLinearIdentifiers`, `linearIssueUrl`, the card's `LinearCardFields`; browser-safe), and the type `InboxLinearKeyState` in `./inbox-types`; `forgeRefKey` (`./forge-ref-card`) no longer throws for a platform with no forge spec (a provider's ref, such as a Linear issue). Nothing removed or renamed. ui imports the subpath (`components/LinearRefCardView`), so **publish core 0.25.32 before the next ui**; ui pins `0.25.32` exactly and bun.lock changes only the two core version lines. ui gains, additively, `utils/refCardProviders` (`registerRefCardProvider`, `registerPlainTextLinker`), `components/LinearRefCardView` (optional `noKeyText`; `htmlAsText`) and four card parts exported from `components/RefHoverCard`; with nothing registered every host is unchanged (README "Hover-card providers and plain-text linkers").
 - **Unreleased: core 0.25.31 (over Tailscale, only the owner; on top of 0.25.30).** No `exports` subpath added, removed or renamed; no function export removed. Three optional or wire-only type fields are gone: `InboxMessage.by_guest`, `InboxVoiceSettings.guest` and `InboxPromptsSettings.reminder.editable` (the Inbox no longer has a tailnet guest, so nothing set or read them). A host that read them treats every page as the owner's. ui pins core `0.25.31` exactly; bun.lock changes only the two core version lines. Publish core first.
 - **Unreleased: core 0.25.30 (cloud agents; 0.25.29 is reserved by another branch).** New `exports` subpath `./inbox-cloud` (cloud agent presets, the wake's words and body, the setup Settings shows). `./inbox-types` gains `cloud_wake` on a message. No export removed or renamed. ui pins core `0.25.30` exactly; bun.lock changes only the two core version lines. Publish core first.
 - **Unreleased: core 0.25.28 (limits removed; 0.25.24–0.25.27 are taken or reserved by other branches).** No `exports` subpath added, removed or renamed; no export removed. Behaviour changes a host may notice: `parseQuestionAnswer` keeps `text`, `other` and `note` whole and no longer cuts `selected` labels or their count; `parseQuestionBlock` takes a block of any length and keeps every choice (no 20 cap). `MAX_QUESTION_BODY_CHARS`, `MAX_QUESTION_CHOICES`, `MAX_QUESTION_SELECTED_CHARS`, `MAX_QUESTION_OTHER_CHARS`, `MAX_QUESTION_TEXT_CHARS` and `MAX_QUESTION_NOTE_CHARS` keep their values but are `@deprecated` and no longer applied. `inboxStoredAgentName` keeps a name whole. `INBOX_TAGS_MAX`, `INBOX_ACTION_NOTE_MAX`, `INBOX_CARD_NOTES_MAX` and `INBOX_CARD_REASON_MAX` are now `Infinity`. `GUIDE_EXTRA_INSTRUCTIONS_MAX_CHARS` is 12,000 (was 2,000). New: `isSecretEnvPath` in `./annotatable`, and `documentRenderKindForPath` answers `"code"` for a `.env` file. A host that checks answers or picks against these caps itself must stop cutting at them. ui pins core `0.25.28` exactly; bun.lock changes only the two core version lines. Publish core first.
@@ -3160,3 +3164,120 @@ For a host that serves the frame (`frameUrl`). Plannotator's own hosts pass none
 - **Sandbox shim**: `history.replaceState` / `pushState` with a bare query (`'?variant=2'`) is applied to the page's own address (a served page keeps its path and takes the query; before, it took the folder's address from `<base>`). A srcdoc page refuses a query, so there only its fragment is kept, as for any refused URL. Every host that runs the shim gets this.
 - **Bridge message `plannotator-bridge-set-page-navigation`** (`{ active }`), posted on ready while the prop is set. Additive: an older bridge asset ignores it. The bridge has a second `link-click` sender (the form), registered only outside live mode.
 - **core `EMBED_BOOTSTRAP`** (`html` fences in an Inbox message): a person's click on a link that is only a query, or a GET form with no address of its own, loads the embed's own document again with that query (`location.replace`, the theme's `#pn=` fragment kept). `form-action 'none'` still refuses real submissions.
+
+## `HtmlViewer`: link clicks on the link guard's port; no network for a marked page (unreleased; `BRIDGE_PROTOCOL_VERSION` 2)
+
+- **Links travel on the link guard's `MessagePort`.** A link guard (`linkGuard.ts`) is injected as the first script of the frame's document on the inline path: right after a leading doctype, or at the very start (`documentStart` in `srcdoc.ts`, which reads only a BOM, whitespace, comments ended as the HTML tokenizer ends them and `<?...>` prologs, and fails closed to the start), never where a scan of the page says `<head>` is, so nothing the page contains can come before it. It posts the parent one `plannotator-bridge-link-offer` with this load's key and one end of a `MessageChannel`. `useHtmlAnnotation` takes exactly one offer per load the host started, only with the armed key (`armLinkOffer`, internal, called by `HtmlViewer` for every new srcdoc, served address and `frame.reload`), and refuses every other offer; the host never posts a port to the frame, and a forged `ready` gets nothing. The key is new per load: written into the srcdoc's guard script, or carried in a served frame's address as `__pnk` (the guard removes it with `replaceState` before the page's scripts run, so `location.search` is the page's own). The guard sends `link-click` (a link, or a `pageNavigation` GET form's address) only while a person's click is being dispatched, for the `href` the clicked link has at that moment (a form: a click on a button or input, a query address with no fragment). During that click the page's own script controls the address: it can rewrite the link or wrap the clicked element in one, so any real click can send any non-`javascript:` address, and the host's scheme and origin checks decide what it opens (below); the bridge hands clicks to `window.__plannotatorLinkGuard.follow`, which the page cannot replace. A `link-click` posted on the window, the page's own call and a script's `a.click()` are ignored. `onOpenLink(href, frame?)` and `frame.reload` are unchanged. **Hosts on `bridgeScriptUrl`**: the bridge tag carries `data-plannotator-link-key`, and the asset runs the guard at the end of `<head>`; a script the page puts earlier in `<head>` runs first there and can take the guard's place (send links with no click). The inline path has no such limit. A served frame gets a new key on every serve, on any scheme (an address that cannot carry one, not a URL, arms no key). New exports from `components/html-viewer` for hosts that build the document themselves: `newLinkKey`, `injectLinkGuard`, `withLinkKey`, `LINK_OFFER_MESSAGE`, `LINK_CLICK_MESSAGE`.
+
+### What a host must change for bridge protocol 2
+
+Bridge protocol 2 takes a person's link clicks off the window. The bridge no longer posts `plannotator-bridge-link-click` on the window, and the viewer no longer takes one from there.
+
+**A host that renders `HtmlViewer`** (inline bridge or `bridgeScriptUrl`) changes no code. `onOpenLink(href, frame?)` fires as before. On `bridgeScriptUrl`, serve the `bridge-script.asset.js` of the same package version: an older asset reports version 1, the banner shows, and its links are not followed.
+
+**A host that builds the frame's document itself** puts `BRIDGE_SCRIPT` or the asset into its own srcdoc or served page and listens for the bridge's messages. It does these steps for every load it starts:
+
+1. **Mint a key** for every load it starts: every new srcdoc, every new `src`, every reload. Use `const key = newLinkKey()`, which gives 16 random bytes as 32 lowercase hex characters.
+2. **Put the link guard first.** Make `html = injectLinkGuard(html, key)` the last step of building the document. The guard goes right after a leading doctype, or at the very start, so no byte of the page comes before it.
+   - For a served frame, also put the key in the address: `src = withLinkKey(url, key, location.href)`. This adds `__pnk=<key>` to the address.
+   - The guard reads that key in preference to the inline one, and removes it with `replaceState` before the page's scripts run.
+3. **Arm the load before the frame can post.** Keep `key` as the expected key, mark the load "not taken", and close the previous load's port.
+4. **Accept exactly one offer per load.** The guard creates a `MessageChannel` and posts `{ type: LINK_OFFER_MESSAGE, key }` to the parent, transferring one port. In the host's window `message` listener:
+   - Take the offer only when all of these hold: `event.source === iframe.contentWindow`, the type is the offer, the load is not taken, `event.data.key === expected`, and `event.ports[0]` exists. Then mark the load taken and listen on the port.
+   - Otherwise close `event.ports[0]` and ignore the message.
+   - A wrong key does not use up the load. A second offer, even with the right key, is refused.
+5. **Take links from that port only.** Each link arrives as `{ type: LINK_CLICK_MESSAGE, href }`, the raw href, at most 2048 characters.
+   - Treat it as untrusted: refuse control characters, resolve it, and check its scheme and origin.
+   - Never post a port to the frame. Ignore a window `link-click`.
+
+**A host that loads the bridge as an external script** cannot use step 2's inline guard, for example because its CSP blocks inline scripts. Such a host builds its own document with `bridge-script.asset.js`, which is the same code as `BRIDGE_SCRIPT`. It puts the load's key on the bridge's own tag:
+
+```ts
+const key = newLinkKey(); // step 1; arm it before the frame loads (step 3)
+const tag = `<script src="${bridgeAssetUrl}" data-plannotator-link-key="${key}"></script>`;
+iframe.srcdoc = withMyBridgeTag(page, tag); // no injectLinkGuard: the bridge installs the guard from its tag
+```
+
+What the bridge does with the tag:
+
+- When it starts, the bridge reads `data-plannotator-link-key` from its own tag (`document.currentScript`) and installs the link guard with that key.
+- It does this only when no guard ran before it and the session is not live.
+- The guard accepts only 32 lowercase hex characters, which `newLinkKey()` makes.
+- The guard then offers the port exactly as in step 4, and steps 3 to 5 are unchanged.
+
+What the host must get right:
+
+- **A classic script.** Use a classic `<script src>`, not `type="module"`: a module has no `document.currentScript`, so the bridge finds no key.
+- **A served frame.** You can also give the same key in the address (`withLinkKey`). The guard prefers the address's key. Arm the key you put in the address.
+- **No key on the tag.** Without the attribute there is no guard, and no link is followed. Annotation still works.
+- **Where the guard runs.** The guard runs where the tag is. Any script of the page that comes before the tag runs first and can take the guard's place, then send links with no click.
+  - Put the tag before every script of the page that your document allows.
+  - `HtmlViewer`'s `bridgeScriptUrl` path puts it at the end of `<head>`, which has the same limit.
+
+**A host that stays on protocol 1 with the new bridge script fails closed for links.** On a link click:
+
+- The bridge still stops the frame from navigating.
+- In-page `#` links still scroll.
+- The bridge never posts `link-click` on the window. Without a guard in the document it has nowhere to send the link, so no link is followed.
+
+Annotation, selection and the other window messages are unchanged. The bridge's `ready` message reports `protocolVersion: 2`.
+
+Before (protocol 1):
+
+```ts
+iframe.srcdoc = withMyBridge(page);
+window.addEventListener("message", (e) => {
+  if (e.source !== iframe.contentWindow) return;
+  if (e.data?.type === "plannotator-bridge-link-click") openLink(e.data.href);
+});
+```
+
+After (protocol 2):
+
+```ts
+import { LINK_CLICK_MESSAGE, LINK_OFFER_MESSAGE, injectLinkGuard, newLinkKey } from "@plannotator/ui/components/html-viewer";
+
+let load = { key: "", taken: false, port: null as MessagePort | null };
+
+function show(page: string) {
+  load.port?.close();
+  const key = newLinkKey();
+  load = { key, taken: false, port: null }; // armed before the frame can post
+  iframe.srcdoc = injectLinkGuard(withMyBridge(page), key); // last step: the guard goes first
+}
+
+window.addEventListener("message", (e) => {
+  if (e.source !== iframe.contentWindow || e.data?.type !== LINK_OFFER_MESSAGE) return;
+  const port = e.ports[0];
+  if (!port || load.taken || e.data.key !== load.key) return port?.close();
+  load.taken = true;
+  load.port = port;
+  port.onmessage = (m) => {
+    if (m.data?.type === LINK_CLICK_MESSAGE && typeof m.data.href === "string") openLink(m.data.href); // check it first
+  };
+});
+```
+
+**What a page can still do.** During a person's click, the page's own script controls the address that is sent.
+
+- It can rewrite the clicked link's `href`, or wrap the clicked element in a link, before the guard reads it.
+- So a real click anywhere on a hostile page, even a click meant to place a pin, can send any address except `javascript:`.
+- With no person's click, it sends nothing.
+
+The host's own checks are what limit that address:
+
+- `parseBridgeMessage` caps the href at 2048 characters and refuses control characters.
+- In annotate and plan review, `resolveHtmlLinkIntent` decides what the address means:
+  - A relative or root path opens as a linked document through `/api/doc`.
+  - An image opens only from the page's own folder.
+  - Another local file type only shows a toast.
+  - Another origin opens in a new tab (`noopener,noreferrer`).
+  - `data:`, `file:`, `mailto:` and `blob:` are dropped.
+- In the Inbox, a link to a thread on the Inbox's own origin opens in place. Another port, another host or the web opens in a new tab.
+
+So a hostile page can use a person's click to do what a link it drew could do, including moving the Inbox to another thread.
+
+On the inline path the guard is placed without scanning the page, so no script of the page runs before it, whatever the page contains. On `bridgeScriptUrl` the asset runs the guard at the end of `<head>`, so a script the page puts earlier in `<head>` runs first there and can take the guard's place.
+
+- **Protocol 2.** A host serving `bridge-script.asset.js` must serve the asset of the same package version: an older cached asset reports 1, gets the version-mismatch banner, and its link clicks are not followed.
+- **`<meta name="plannotator-network" content="none">`** in `rawHtml` (Plannotator's servers add it to a document opened outside the session's roots) makes the viewer put `<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">` right after the doctype. It names no `script-src`. A page without the tag gets no policy from the viewer, as before.

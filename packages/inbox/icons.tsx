@@ -11,7 +11,7 @@
 import type { InboxAuthor } from '@plannotator/core/inbox-types';
 import { HostMark as UiHostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import type { CSSProperties } from 'react';
-import { useAgentFace } from './agents/agentFaces';
+import { ProjectFaceMark, useShownAgentFace } from './agents/projectFace';
 import { useAgentFaceSources } from './agents/faceArtLoad';
 import { isOwnFace, type AgentFace, type OurFace, type OwnFace } from './agents/faceChoices';
 import { ownIconSrc } from './agents/ownIcons';
@@ -20,14 +20,18 @@ import { isSetFace, setArtStyle, setFaceParts, setIconSrc, useSetLook, type SetF
 
 export * from '@plannotator/ui/components/inbox-thread/icons';
 
-/** The mark for an agent host; with `agent`, that agent's chosen face when it has one. */
+/**
+ * The mark for an agent host; with `agent`, that agent's chosen face when it has one, else, with Settings → Rows' Agent
+ * icons "From the project name", its project's tile (agents/projectFace.tsx).
+ */
 export function HostMark({ host, big, agent }: { host: string | null | undefined; big?: boolean; agent?: string | null }) {
-  return <FaceOfMark host={host} big={big} face={useAgentFace(agent)} />;
+  return <FaceOfMark host={host} big={big} face={useShownAgentFace(agent)} agent={agent} />;
 }
 
-/** A given face in a mark's box (HostMark draws the agent's own; a preview draws one not kept yet). */
-export function FaceOfMark({ host, big, face }: { host: string | null | undefined; big?: boolean; face: AgentFace }) {
-  if (face === 'agent') return <UiHostMark host={host} big={big} />;
+/** A given face in a mark's box (HostMark draws the agent's own; a preview draws one not kept yet). `agent`: whose project a `project` face draws. */
+export function FaceOfMark({ host, big, face, agent }: { host: string | null | undefined; big?: boolean; face: AgentFace; agent?: string | null }) {
+  if (face === 'agent' || face === 'mark') return <UiHostMark host={host} big={big} />;
+  if (face === 'project') return <ProjectFaceMark agent={agent} host={host} big={big} />;
   if (isOwnFace(face)) return <OwnMark key={face} face={face} host={host} big={big} />;
   if (isSetFace(face)) return <SetMark key={face} face={face} host={host} big={big} />;
   return <FaceMark face={face} big={big} />;

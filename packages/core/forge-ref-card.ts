@@ -11,6 +11,7 @@
  */
 
 import { classifyForgeHost, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
+import type { Problem } from "./problem";
 
 export type { ForgePlatform } from "./forge-refs";
 
@@ -118,10 +119,11 @@ function refKindOf(platform: ForgePlatform, part: string): ForgeRef["kind"] | nu
 
 /**
  * One cache entry per ref. On GitHub an issue link to a PR is the same item, so the kind is not part of it there;
- * GitLab and Bitbucket number them apart (`:pull`, `:issue`).
+ * GitLab and Bitbucket number them apart (`:pull`, `:issue`). A ref card provider's ref (the Inbox's Linear issues, ui
+ * `utils/refCardProviders`) names a platform with no spec here: no kind in its key.
  */
 export function forgeRefKey(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number" | "kind">): string {
-  const kind = FORGE_SPECS[ref.platform].numbersByKind ? `:${ref.kind}` : "";
+  const kind = (FORGE_SPECS as Partial<typeof FORGE_SPECS>)[ref.platform]?.numbersByKind ? `:${ref.kind}` : "";
   return `${ref.host}/${ref.owner}/${ref.repo}#${ref.number}${kind}`.toLowerCase();
 }
 
@@ -212,7 +214,11 @@ export type ForgeRefCardError =
 
 export type ForgeRefCardResult =
   | { ok: true; data: ForgeRefCardData; fetchedAt: number }
-  | { ok: false; error: ForgeRefCardError; fetchedAt: number };
+  /**
+   * `problem` (newer servers): the tool's state in the one table's words (problem-words.ts); `error` stays the older
+   * code every window reads.
+   */
+  | { ok: false; error: ForgeRefCardError; problem?: Problem; fetchedAt: number };
 
 export const FORGE_REF_BODY_MAX = 4000;
 export const FORGE_REF_COMMENT_MAX = 600;
@@ -280,4 +286,14 @@ export function forgePullRefText(ref: Pick<ForgeRef, "platform" | "host" | "owne
   if (ref.platform === "github" && ref.host === "github.com") return `${ref.owner}/${ref.repo}#${ref.number}`;
   if (ref.platform === "gitlab" && ref.host === "gitlab.com") return `${ref.owner}/${ref.repo}!${ref.number}`;
   return forgePullUrl(ref);
+}
+
+/**
+ * A PR as a person reads it on screen: `owner/repo#12`, `group/project!45`, with the host in front only off
+ * github.com and gitlab.com (`gitlab.example.dev/group/project!45`). Never the URL: that is `forgePullRefText`'s, for
+ * what an agent writes back.
+ */
+export function forgePullRefShort(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
+  const text = `${ref.owner}/${ref.repo}${ref.platform === "gitlab" ? "!" : "#"}${ref.number}`;
+  return ref.host === (ref.platform === "gitlab" ? "gitlab.com" : "github.com") ? text : `${ref.host}/${text}`;
 }

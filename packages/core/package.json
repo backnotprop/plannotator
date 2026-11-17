@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.31",
+  "version": "0.25.32",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -40,6 +40,9 @@
     "./favicon-style": "./favicon-style.ts",
     "./forge-refs": "./forge-refs.ts",
     "./forge-ref-card": "./forge-ref-card.ts",
+    "./problem": "./problem.ts",
+    "./problem-words": "./problem-words.ts",
+    "./linear-ref-card": "./linear-ref-card.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",
@@ -60,6 +63,7 @@
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-reply-quote": "./inbox-reply-quote.ts",
+    "./inbox-thread-mention": "./inbox-thread-mention.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
     "./inbox-scheduled": "./inbox-scheduled.ts",

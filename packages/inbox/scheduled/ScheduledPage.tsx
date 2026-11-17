@@ -16,6 +16,7 @@ import { SidebarTrigger } from '../shell/sidebar';
 import { InboxApiError } from '../apiError';
 import { scheduledApi } from './client';
 import { useLaunchBlock } from './EditorParts';
+import { useEditorKey } from './editorKey';
 import { ScheduledEditor } from './ScheduledEditor';
 import { ScheduledTable, type RowActs } from './ScheduledTable';
 import { putScheduled, readScheduled, useScheduledPage } from './store';
@@ -117,9 +118,10 @@ export function ScheduledPage(props: ScheduledPageProps) {
   };
   const on = props.switch === 'on';
   const alone = props.phone || props.stacked;
+  const editorKey = useEditorKey(openId);
   const editor = openId && (
     <ScheduledEditor
-      key={openId}
+      key={editorKey.key}
       id={openId}
       row={rows.find((row) => row.id === openId) ?? null}
       version={snap.version}
@@ -128,7 +130,10 @@ export function ScheduledPage(props: ScheduledPageProps) {
       phone={props.phone}
       narrow={alone}
       onClose={() => props.onOpen(null)}
-      onCreated={(id) => props.onOpen(id, true)}
+      onCreated={(id) => {
+        editorKey.created(id);
+        props.onOpen(id, true);
+      }}
       onDelete={remove}
       onOpenThread={props.onOpenThread}
     />

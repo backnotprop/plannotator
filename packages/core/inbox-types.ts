@@ -2479,12 +2479,19 @@ export const INBOX_ROWS_OPTIONS = [
   // PRs"), off by default, so a look saved before it shows them as ever: no PR mark at any row's end. The thread's
   // own PR button stays. No rival.
   "hidePulls",
+  // Agent icons "From the project name" (approval "inbox-generated-agent-icons", 2026-11-15), off by default: an agent
+  // with no face picked for it shows its project's tile (its letters, its own mark on the corner) in rows, the Agents
+  // list, threads and pickers. A face picked for one agent stays. Agent icons is one three-way choice: each agent's
+  // own (neither), from the project name (this), or hidden (`hideAgents`, which wins).
+  "agentProjectIcons",
 ] as const;
 export type InboxRowsOption = (typeof INBOX_ROWS_OPTIONS)[number];
 
 /**
  * The options' rivals, never on together: Compact wins over Roomy, no preview over two lines, and Dot is Bold with
  * a dot (`unreadDot` brings `smallNames`). A look in any other shape is read as this one.
+ *
+ * Agent icons: hidden (`hideAgents`) wins over from the project name (`agentProjectIcons`).
  *
  * Letter marks: Inline wins over Dot. A mark style counts only while some marks show, and the picture switches only
  * while project marks show, so with marks off the look holds none of them (turned on again, marks start as Avatar).
@@ -2495,6 +2502,7 @@ export function inboxRowsCanonical(rows: readonly InboxRowsOption[]): InboxRowsO
   if (on.has("hidePreview")) on.delete("previewTwo");
   if (on.has("unreadDot")) on.add("smallNames");
   if (on.has("markInline")) on.delete("markDot");
+  if (on.has("hideAgents")) on.delete("agentProjectIcons");
   if (!on.has("marksThreads") && !on.has("marksProjects")) {
     on.delete("markInline");
     on.delete("markDot");
@@ -3299,6 +3307,33 @@ export interface InboxReplyDraft {
   recipients?: string[];
   /** The message the reply quotes (approval "inbox-reply-quote"), kept with the words. Absent: none. */
   quote?: InboxReplyQuote;
+  /**
+   * The threads mentioned in the words (approval "inbox-drag-threads"), each where its label stands in `body`, kept
+   * with the words so any window or device that opens the draft has them. Absent: none, or an older Inbox's draft.
+   */
+  mentions?: InboxReplyMention[];
+}
+
+/**
+ * A thread mentioned in a reply box (approval "inbox-drag-threads"): a token in the words, carried as an id and a
+ * range, never recovered from the words. `label` stands in the draft's words at `at`; an edit inside it ends the
+ * mention (the words stay as plain words).
+ */
+export interface InboxReplyMention {
+  /** The mentioned thread (its root message id). */
+  thread_id: string;
+  /** Its title when it was mentioned: one line, capped (`inboxThreadMentionTitle`). */
+  title: string;
+  /** What the box shows: the title, with ` · project` when that differs from the reply's project. */
+  label: string;
+  /** Where `label` starts in the words (UTF-16 offset). */
+  at: number;
+  /** Its project's name, when known. */
+  project?: string;
+  /** It was archived when mentioned (read_thread still reads it). */
+  archived?: boolean;
+  /** The Inbox that holds it (`ibx_…`), when the window knew. Absent: the window's own Inbox. */
+  machine?: string;
 }
 
 /** The quote a person's reply carries (approval "inbox-reply-quote"): a message of the thread and, when the person selected some, its words. */
@@ -3540,6 +3575,11 @@ export interface InboxAgentsGroup {
    */
   faces?: Record<string, InboxAgentFaceEntry>;
   faces_rev?: number;
+  /**
+   * The machine keeps a tile choice (`InboxAgentFaceEntry.tile`; approval "inbox-generated-agent-icons"). Absent from
+   * an Inbox from before tiles: the window then draws and offers that machine's agents what it can keep (no tile).
+   */
+  face_tiles?: true;
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
@@ -3748,6 +3788,8 @@ export interface InboxVoiceKeyState {
   last4: string | null;
 }
 
+export type InboxLinearKeyState = InboxVoiceKeyState;
+
 /** Settings → Voice (`GET /api/inbox/settings` `voice`). */
 export interface InboxVoiceSettings {
   on: boolean;
@@ -3858,6 +3900,17 @@ export type InboxOwnFace = `own:${string}`;
  */
 export type InboxSetFace = `set:${string}/${string}`;
 export type InboxAgentFace = InboxBuiltInFace | InboxOwnFace | InboxSetFace;
+/**
+ * A tile choice beside the face `agent` (approval "inbox-generated-agent-icons"; an entry's `tile`): `project`, a solid
+ * tile with its project's letters and the agent's own mark on its corner ("From the project name" in the picker), and
+ * `mark`, the agent's own mark picked by hand while Settings → Rows' Agent icons is "From the project name"
+ * (`agentProjectIcons`), so an agent can keep its own mark there. Never a `face`: an entry keeps `face: "agent"` and
+ * the tile in its own field, so a Plannotator from before tiles (0.28.66 and older) reads the entry as the own mark and
+ * keeps its given name; it drops the tile (and an entry with neither a face nor a name), and the file stays `v: 1`.
+ */
+export type InboxAgentTile = "project" | "mark";
+export const INBOX_AGENT_TILES: readonly InboxAgentTile[] = ["project", "mark"];
+export const isInboxAgentTile = (value: unknown): value is InboxAgentTile => value === "project" || value === "mark";
 
 /** Every built-in face, in the picker's order. */
 export const INBOX_AGENT_FACES: readonly InboxBuiltInFace[] = ["agent", ...INBOX_GLASS_FACES, "transparent", "totman"];
@@ -3928,8 +3981,10 @@ export const INBOX_AGENT_FACE_ID_MAX = 200;
 
 /** One agent's face, and the name the person gave it. */
 export interface InboxAgentFaceEntry {
-  /** `agent` (its own mark) only beside a `name`: an entry is kept for a face, a name, or both. */
+  /** `agent` (its own mark) only beside a `name` or a `tile`: an entry is kept for a face, a tile, a name, or a mix. */
   face: InboxAgentFace;
+  /** A tile choice (`InboxAgentTile`), only beside `face: "agent"`. Absent: none. An older Plannotator passes over it. */
+  tile?: InboxAgentTile;
   /** Every session id this agent was or is (never its key itself), oldest first. */
   sessions: string[];
   /**
@@ -3985,7 +4040,7 @@ export function readInboxAgentIcons(value: unknown): InboxAgentIcon[] {
  * or this browser's faces from before (`adopt`).
  */
 export type InboxAgentFaceChange =
-  | { agent: string; sessions?: string[]; face: InboxAgentFace }
+  | { agent: string; sessions?: string[]; face: InboxAgentFace; tile?: InboxAgentTile }
   | { agent: string; sessions?: string[]; name: string | null }
   | { adopt: Record<string, InboxAgentFace> };
 
@@ -4003,11 +4058,12 @@ export function readInboxAgentFaces(value: unknown): Record<string, InboxAgentFa
   const out = Object.create(null) as Record<string, InboxAgentFaceEntry>;
   if (!value || typeof value !== "object" || Array.isArray(value)) return out;
   for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
-    const entry = raw as { face?: unknown; sessions?: unknown; name?: unknown } | null;
+    const entry = raw as { face?: unknown; tile?: unknown; sessions?: unknown; name?: unknown } | null;
     if (!isId(key) || !entry || typeof entry !== "object" || !isInboxAgentFace(entry.face)) continue;
     const name = cleanInboxAgentName(entry.name);
-    if (entry.face === "agent" && !name) continue;
-    out[key] = { face: entry.face, sessions: cleanInboxFaceSessions(entry.sessions, key), ...(name ? { name } : {}) };
+    const tile = entry.face === "agent" && isInboxAgentTile(entry.tile) ? entry.tile : null;
+    if (entry.face === "agent" && !name && !tile) continue;
+    out[key] = { face: entry.face, ...(tile ? { tile } : {}), sessions: cleanInboxFaceSessions(entry.sessions, key), ...(name ? { name } : {}) };
   }
   return out;
 }

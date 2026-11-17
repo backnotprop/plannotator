@@ -34,12 +34,19 @@ async function get<T>(path: string): Promise<T> {
   return readJson<T>(await fetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store' }));
 }
 
-async function post<T>(path: string, body: Record<string, unknown> = {}): Promise<T> {
+/** A browser takes at most 64 KiB of keepalive bodies in flight: a larger one goes as an ordinary request. */
+const KEEPALIVE_MAX = 60_000;
+
+/** `keepalive`: the write outlives the page (an editor's save as the page hides or goes). */
+async function post<T>(path: string, body: Record<string, unknown> = {}, keepalive = false): Promise<T> {
   const session = pageServerSession();
+  const text = JSON.stringify(session ? { ...body, serverSession: session } : body);
   const response = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(session ? { ...body, serverSession: session } : body),
+    body: text,
+    // The browser's limit counts bytes, not characters.
+    ...(keepalive && new Blob([text]).size <= KEEPALIVE_MAX ? { keepalive: true } : {}),
   });
   return readJson<T>(response);
 }
@@ -50,8 +57,9 @@ type Saved = { scheduled: InboxScheduledRow };
 export const scheduledApi = {
   list: () => get<{ scheduled: InboxScheduledRow[]; launch_on: boolean }>(BASE),
   read: (id: string) => get<{ scheduled: InboxScheduledRow; runs: InboxScheduledRunSummary[] }>(one(id)),
-  create: (fields: ScheduledFields) => post<Saved>(BASE, { ...fields, idempotency_key: newUuid() }),
-  update: (id: string, fields: Partial<ScheduledFields>) => post<Saved>(one(id), fields),
+  /** `key`: the editor's one key for a new routine, so its retries and a reloaded page's draft make it once. */
+  create: (fields: ScheduledFields & { enabled?: boolean }, key: string = newUuid(), keepalive = false) => post<Saved>(BASE, { ...fields, idempotency_key: key }, keepalive),
+  update: (id: string, fields: Partial<ScheduledFields>, keepalive = false) => post<Saved>(one(id), fields, keepalive),
   turn: (id: string, on: boolean) => post<Saved>(one(id, on ? '/on' : '/off')),
   /** `202`: the run's divider; `failed`: why it didn't start (its thread says it too). */
   run: (id: string) => post<Saved & { message_id: string; failed?: string }>(one(id, '/run')),

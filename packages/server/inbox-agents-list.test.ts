@@ -498,6 +498,14 @@ describe("linked machines", () => {
     expect(group).toMatchObject({ machine: "ibx_far", total: 1, ended_today: 0 });
   });
 
+  test("a machine keeps a tile choice only when its list says so: an older Inbox's group never claims it", () => {
+    const agents = [{ id: "a", session: "a", state: "idle" }];
+    expect(inboxPeerAgentsGroup([{ agents, faces: {}, faces_rev: 1, face_tiles: true }], "ibx_new")!.face_tiles).toBe(true);
+    // 0.28.66 sends faces and no `face_tiles`; anything but `true` is not a claim.
+    expect(inboxPeerAgentsGroup([{ agents, faces: {}, faces_rev: 1 }], "ibx_old")!.face_tiles).toBeUndefined();
+    expect(inboxPeerAgentsGroup([{ agents, faces: {}, faces_rev: 1, face_tiles: "yes" }], "ibx_odd")!.face_tiles).toBeUndefined();
+  });
+
   test("another machine's agent with a name that is not text keeps its row, without that name", () => {
     const sent = [{ agents: [{ id: "a", session: "a", state: "idle", label: 7, title: { x: 1 }, first_thread: { id: "thr_1", name: null } }, { id: "b", session: "b", state: "idle", label: "Kept", title: "Also kept", first_thread: { id: "thr_2", name: "Ledger sync" } }] }];
     const group = inboxPeerAgentsGroup(sent, "ibx_far") as InboxAgentsGroup;

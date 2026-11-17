@@ -8,6 +8,7 @@ import { inboxApi, REF_CARD_READ_MS, signalWithin } from './api';
 import { createInboxCodeHighlightWorker } from './codeHighlightWorker';
 import { inboxImageSrcResolver } from './images';
 import { inboxUrl } from './inboxUrl';
+import { installLinearCards } from './linearCards';
 import { inboxRefTransport } from './refTransport';
 import { applyRememberedTextSize } from './textSize';
 import { inboxServerSync } from './theme';
@@ -78,3 +79,6 @@ configurePlannotatorUI({
     },
   },
 });
+
+// Hover cards for Linear issue links, and bare identifiers of the workspace's teams as links (linearCards.tsx).
+if (typeof window !== 'undefined') installLinearCards();

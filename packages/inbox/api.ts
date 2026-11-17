@@ -19,6 +19,7 @@ import type { CloudflareAccessSettings, TailscaleSettings } from './data/reach';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import { threadPullsOf } from './threadPulls/model';
 import { learnPullMachines, pullMachine, pullUrl } from './pulls/pullMachines';
 import { learnProjects } from './projectPictures';
 import { learnDefaultRefHost } from './defaultRefHost';
@@ -51,7 +52,7 @@ import type {
   InboxDraft,
   InboxDraftPasted,
   InboxReplyDraft,
-  InboxReplyQuote,
+  InboxReplyQuote, InboxReplyMention,
   InboxReplyDraftRow,
   InboxDraftStatus,
   InboxUpload,
@@ -1036,7 +1037,7 @@ export function replyDraftSaveBody(
   baseBody: string | null,
   files: ReplyDraftFileOps,
   recipients?: readonly string[],
-  quote?: InboxReplyQuote | null,
+  quote?: InboxReplyQuote | null, mentions?: readonly InboxReplyMention[],
 ): Record<string, unknown> {
   // The box's file changes (the Inbox applies them to the draft's files as they are), always sent, even empty:
   // a save without them is an older page's, which names long pastes only. `recipients` (the recipient pill) only
@@ -1051,7 +1052,7 @@ export function replyDraftSaveBody(
     ...(files.order ? { files_order: files.order } : {}),
     ...(recipients !== undefined ? { recipients } : {}),
     // The message the reply quotes (approval "inbox-reply-quote"): null takes it away; absent, the draft keeps its own.
-    ...(quote !== undefined ? { quote } : {}),
+    ...(quote !== undefined ? { quote } : {}), ...(mentions !== undefined ? { mentions } : {}), // the threads mentioned (absent: the draft's own stay)
   };
 }
 
@@ -1088,16 +1089,6 @@ export function pageServerSession(): string | null {
  * it takes the thread over.
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
-
-/** A thread's PRs answer as the window uses it: anything missing reads as none. */
-function threadPullsOf(answer: unknown): InboxThreadPullsAnswer {
-  const value = (answer && typeof answer === 'object' ? answer : {}) as Partial<InboxThreadPullsAnswer>;
-  return {
-    pulls: Array.isArray(value.pulls) ? value.pulls : [],
-    groups: Array.isArray(value.groups) ? value.groups : [],
-    removed: Array.isArray(value.removed) ? value.removed : [],
-  };
-}
 
 /** A browser takes at most 64 KiB of keepalive bodies in flight: a larger one goes as an ordinary request. */
 const KEEPALIVE_BODY_MAX = 60_000;
@@ -1179,8 +1170,8 @@ function learnMachines(model: ListModel): void {
   rememberLocal(localIdsIn(model));
   for (const row of rows) rememberMachine([row.thread_id], row.machine);
   for (const project of model.projects) rememberMachine([project.id], project.machine);
-  // Letter marks (letterMarks.tsx): the projects' names (a Board card names only an id) and their pictures' keys.
-  learnProjects(model.projects);
+  // Letter marks (letterMarks.tsx): the projects' names, their pictures' keys, and each agent session's project.
+  learnProjects(model.projects, rows);
   // The host an owner/repo#123 links on in a thread with no repo: the one most projects use (defaultRefHost.ts).
   learnDefaultRefHost(model.projects);
 }
@@ -1558,12 +1549,13 @@ export const inboxApi = {
    * lately, read on the thread's own machine. An Inbox older than PRs on threads, or a linked machine older than
    * reading them through its door, answers 404: both read as none.
    */
-  threadPulls: async (threadId: string, signal?: AbortSignal): Promise<InboxThreadPullsAnswer> => {
+  threadPulls: async (threadId: string, signal?: AbortSignal, options?: { retry?: boolean }): Promise<InboxThreadPullsAnswer> => {
     // Aborted when the card closes or a newer read starts, and given up after THREAD_PULLS_READ_MS: an unanswered
-    // read never holds one of the browser's few connections to this Inbox.
+    // read never holds one of the browser's few connections to this Inbox. `retry`: the card's Try again (the
+    // server reads a held failure again and waits a little for it; an older server ignores it).
     const within = signalWithin(THREAD_PULLS_READ_MS, signal);
     try {
-      return threadPullsOf(await get<unknown>(threadUrl(threadId, '/pulls'), within.signal));
+      return threadPullsOf(await get<unknown>(threadUrl(threadId, '/pulls', options?.retry ? 'retry=1' : undefined), within.signal));
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.status === 404) return { pulls: [], groups: [], removed: [] };
       throw cause;
@@ -1927,8 +1919,8 @@ export const inboxApi = {
     baseBody: string | null = null,
     files: ReplyDraftFileOps = NO_FILE_OPS,
     recipients?: readonly string[],
-    quote?: InboxReplyQuote | null,
-  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote)),
+    quote?: InboxReplyQuote | null, mentions?: readonly InboxReplyMention[],
+  ) => post<{ draft: InboxReplyDraft | null }>(threadUrl(threadId, `/draft`), replyDraftSaveBody(body, base, baseBody, files, recipients, quote, mentions)),
   /** A pending pasted-text upload's words (Put back after a reload, or in another window); `machine`: another machine's thread. */
   uploadText: (uploadId: string, machine: string | null = null) =>
     get<{ text: string }>(inboxUrl(`/uploads/${encodeURIComponent(uploadId)}/text`, undefined, machine)),

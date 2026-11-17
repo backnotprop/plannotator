@@ -31,6 +31,8 @@ const { setInboxAgents } = await import('./agentsList');
 
 const stored = new Map<string, string>();
 const saves: unknown[] = [];
+/** The cookie while Plans is off (it is, here): its row is left out (sidebarLayout.ts); the save sends the layout whole. */
+const COOKIE_DEFAULT = { ...INBOX_SIDEBAR_DEFAULT, top: INBOX_SIDEBAR_DEFAULT.top.filter((id) => id !== 'plans') };
 let serverRev = 0;
 const realFetch = globalThis.fetch;
 let root: Root | null = null;
@@ -145,7 +147,7 @@ test.skipIf(!hasDom)('a tick hides the row at once, leaves the menu open, saves 
   expect(document.querySelector('[data-sidebar-toggle="feedback"]')!.getAttribute('aria-checked')).toBe('false');
   expect(saves.at(-1)).toEqual({ ...INBOX_SIDEBAR_DEFAULT, hidden: ['feedback'] });
   // This browser remembers it for the next paint.
-  expect(stored.get(SIDEBAR_LAYOUT_COOKIE)).toBe(`${INBOX_SIDEBAR_DEFAULT.top.join(',')};${INBOX_SIDEBAR_DEFAULT.bottom.join(',')};feedback`);
+  expect(stored.get(SIDEBAR_LAYOUT_COOKIE)).toBe(`${COOKIE_DEFAULT.top.join(',')};${COOKIE_DEFAULT.bottom.join(',')};feedback`);
   // The logo and the Settings row's buttons hide too.
   await click(document.querySelector('[data-sidebar-toggle="logo"]'));
   await click(document.querySelector('[data-sidebar-toggle="theme"]'));

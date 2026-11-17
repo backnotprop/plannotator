@@ -295,7 +295,7 @@
     },
     "packages/core": {
       "name": "@plannotator/core",
-      "version": "0.25.31",
+      "version": "0.25.32",
       "dependencies": {
         "croner": "11.0.0",
       },
@@ -351,6 +351,7 @@
         "@plannotator/review-editor": "workspace:*",
         "@plannotator/system": "workspace:*",
         "@plannotator/ui": "workspace:*",
+        "@plannotator/vendor-pierre-layouts": "workspace:*",
         "@tanstack/react-query": "^5.105.3",
         "motion": "^14.4.0",
         "react": "^19.3.1",
@@ -432,6 +433,7 @@
         "@plannotator/core": "workspace:*",
         "@plannotator/sem-jiff": "0.2.0",
         "chokidar": "^5.0.0",
+        "diff": "^8.0.4",
         "parse5": "^7.3.0",
         "turndown": "^7.2.4",
       },
@@ -498,7 +500,7 @@
         "@lezer/highlight": "^1.2.5",
         "@pierre/diffs": "1.7.0-beta.3",
         "@plannotator/atomic-editor": "^0.9.0",
-        "@plannotator/core": "0.25.31",
+        "@plannotator/core": "0.25.32",
         "@plannotator/markdown-editor": "^0.5.0",
         "@plannotator/web-highlighter": "^0.8.2",
         "@tanstack/react-table": "^8.21.3",
@@ -533,6 +535,16 @@
         "react": "^19.2.3",
         "react-dom": "^19.2.3",
         "tailwindcss": "^4.1.18",
+      },
+    },
+    "packages/vendor-pierre-layouts": {
+      "name": "@plannotator/vendor-pierre-layouts",
+      "version": "0.0.0",
+      "dependencies": {
+        "react": "^19.3.1",
+      },
+      "devDependencies": {
+        "@types/react": "^19.3.0",
       },
     },
   },
@@ -1231,6 +1243,8 @@
     "@plannotator/telemetry": ["@plannotator/telemetry@workspace:apps/telemetry"],
 
     "@plannotator/ui": ["@plannotator/ui@workspace:packages/ui"],
+
+    "@plannotator/vendor-pierre-layouts": ["@plannotator/vendor-pierre-layouts@workspace:packages/vendor-pierre-layouts"],
 
     "@plannotator/waitlist-service": ["@plannotator/waitlist-service@workspace:apps/waitlist-service"],
 

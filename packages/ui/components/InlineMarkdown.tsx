@@ -8,7 +8,7 @@ import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { InlineImageTagsContext, UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { BarePathContext, CodeSpan, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
+import { BarePathContext, CodeSpan, isNewTabClick, useLocalLinkMatch, useLocalLinkResolver, type BarePathWrap } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
@@ -16,6 +16,7 @@ import { useMathRenderer } from "../hooks/useMathRenderer";
 import { HostTitle } from "./HostTitle";
 import { AuthorColorText } from "./AuthorColorText";
 import { matchAuthorColor } from "../utils/authorColor";
+import { plainTextLinkSpans, usePlainTextLinkers } from "../utils/refCardProviders";
 
 export interface DocPreviewResult {
   contents?: string;
@@ -330,7 +331,8 @@ function emitPlainTextWithBareUrls(
 
   type Span = { start: number; end: number; kind: 'url'; value: string }
     | { start: number; end: number; kind: 'path'; value: string }
-    | { start: number; end: number; kind: 'host'; value: string };
+    | { start: number; end: number; kind: 'host'; value: string }
+    | { start: number; end: number; kind: 'node'; value: string; node: (key: number) => React.ReactNode };
   const spans: Span[] = [];
 
   // Collect bare URLs
@@ -371,6 +373,9 @@ function emitPlainTextWithBareUrls(
     }
   }
 
+  // A host's plain-text linkers (utils/refCardProviders.ts), never over a URL or path above.
+  spans.push(...plainTextLinkSpans(text, previousChar, spans));
+
   if (spans.length === 0) {
     parts.push(transformPlainText(text));
     return;
@@ -383,7 +388,9 @@ function emitPlainTextWithBareUrls(
     if (span.start > last) {
       parts.push(transformPlainText(text.slice(last, span.start)));
     }
-    if (span.kind === 'host') {
+    if (span.kind === 'node') {
+      parts.push(span.node(nextKey()));
+    } else if (span.kind === 'host') {
       parts.push(<React.Fragment key={nextKey()}>{barePaths!.wrap(span.value)}</React.Fragment>);
     } else if (span.kind === 'url') {
       parts.push(
@@ -599,12 +606,15 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost, linkLabel = false }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const matchLocalLink = useLocalLinkMatch();
   const barePaths = useContext(BarePathContext);
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const inlineImageTags = useContext(InlineImageTagsContext);
   useSyncExternalStore(subscribeGitlabHosts, gitlabHostsSnapshot, gitlabHostsSnapshot);
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
+  // Text already on screen links once a host registers a plain-text linker.
+  usePlainTextLinkers();
   // Cross-repo `owner/repo#123` refs: for a caller that names its project's
   // repo (it knows the forge); otherwise they stay plain text, unless the
   // host opted in (`crossRepoRefsWithoutRepo`: the host it names, else
@@ -811,6 +821,21 @@ export const InlineMarkdown: React.FC<{
     match = remaining.match(/^<([^@>\s]+@[^>\s]+)>/);
     if (match && !linkLabel) {
       const email = match[1];
+      // A host whose test takes `mailto:` (LocalLinkMatchContext) and answers `unavailable` gets inert text. Absent,
+      // `isLocalLinkTarget` never takes a scheme, so the mail link draws as always.
+      const mailLink = resolveLocalLink && matchLocalLink(`mailto:${email}`) ? resolveLocalLink(`mailto:${email}`) : null;
+      if (mailLink?.kind === 'unavailable') {
+        parts.push(
+          <HostTitle key={key++} title={mailLink.title}>
+            <span className="text-muted-foreground underline decoration-dotted underline-offset-2" data-local-link="unavailable">
+              {email}
+            </span>
+          </HostTitle>,
+        );
+        remaining = remaining.slice(match[0].length);
+        previousChar = ">";
+        continue;
+      }
       parts.push(
         <a
           key={key++}
@@ -1284,7 +1309,7 @@ export const InlineMarkdown: React.FC<{
       const isInPageAnchor = safeLinkUrl.startsWith('#');
       // A host's resolver (Viewer `resolveLocalLink`) decides local paths
       // first; null from it, or no resolver, keeps the branches below.
-      const localLink = resolveLocalLink && isLocalLinkTarget(linkUrl) ? resolveLocalLink(linkUrl) : null;
+      const localLink = resolveLocalLink && matchLocalLink(linkUrl) ? resolveLocalLink(linkUrl) : null;
 
       if (localLink?.kind === 'open') {
         const openLink = localLink.open;

@@ -32,6 +32,8 @@ export interface ThreadSlotHost {
   phone: boolean;
   stack: Stack;
   full: boolean;
+  /** Beside other panes (panes/ThreadPanes.tsx): its ✕ closes the pane and stays with full screen's ‹ Inbox. */
+  paired?: boolean;
   fromCard: string | null;
   fileOpen: boolean;
   staleNotice: ReactNode;
@@ -78,13 +80,19 @@ export interface ThreadSlotHost {
   draftSignals: KeyedSignal;
   filesSignals: KeyedSignal;
   shapes: ReturnType<typeof useInboxShapes>;
+  /**
+   * The board open in this thread (`#thread=…&shape=…`), drawn in the thread's own pane under its header, or null.
+   * `sidebarToggle`: the board's own sidebar toggle, where the list's (and its toggle) is not beside the thread.
+   */
+  board: ((inThread: boolean, sidebarToggle: boolean) => ReactNode) | null;
   ask: { side: ThreadPaneProps['onSide']; sideWords: ThreadPaneProps['onSideWords'] };
   askReply: { threadId: string; words: string } | null;
   setAskReply: (next: null) => void;
   shapeReply: (ShapeReplyPart & { threadId: string }) | null;
   setShapeReply: (next: null) => void;
   patchQuestions: ThreadPaneProps['onQuestions'];
-  onPickSaves: ThreadPaneProps['onPickSaves'];
+  /** A run of pick saves on `threadId` (this pane's) changed or ended (App's `onPickSaves`). */
+  onPickSaves: (ids: ReadonlySet<string>, paneClosed: boolean | undefined, threadId: string | null) => void;
   afterWrite: () => Promise<void>;
   rowPatches: ReadonlyMap<string, { read_at?: unknown }>;
   decideInThread: (threadId: string) => ThreadPaneProps['decide'];
@@ -104,6 +112,7 @@ export interface ThreadSlotHost {
   toastNow: RefObject<InboxToastModel | null>;
   dismissToast: () => void;
   inboxLink: (href: string) => (() => void) | null;
-  holdSidebarIfTight: () => void;
+  /** Fold a docked sidebar on screen when the list and `columns` thread columns (the open ones by default) fit only without it. */
+  holdSidebarIfTight: (columns?: number) => void;
   backFromFile: RefObject<{ thread: string; name: string | null; label: string } | null>;
 }

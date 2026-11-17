@@ -63,7 +63,7 @@ import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, ty
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
-import { showsContents, useContentsShown } from '../contents';
+import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
@@ -138,9 +138,6 @@ export function fileFootRow(section: ParentNode): HTMLElement | null {
 
 /** Hide / Show tools: the html-annotate scope's existing chord (⌘⇧X), HTML files only, through the file viewer's scope. */
 const TOOLS_CHORD = inboxFileViewerShortcuts.shortcuts.toggleTools.bindings[0]!;
-
-/** How long the contents rail may take to load (its idle wait is 2 s at most) and measure before the Contents button stands in. */
-const RAIL_WAIT_MS = 2500;
 
 /** Drafts that close themselves on this same Escape (their own window listener): the selection toolbar, the quick-label picker. */
 const SELF_CLOSING_DRAFTS = '[data-pn-annotation-toolbar-row], [data-quick-label-picker]';
@@ -406,8 +403,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   // that cannot load is drawn as its alt text, as in a message body (Thread.tsx).
   const imageBaseDir = inboxMarkdownImageBase(attachment.id, effectiveVersion);
   const resolveImage = useCallback<ImageResolver>(
-    (src) => ({ kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) }),
-    [imageBaseDir],
+    (src) => source.markdownImage?.(src) ?? { kind: 'src', src: /^(https?:|data:|blob:)/i.test(src) ? src : getImageSrc(src, imageBaseDir) },
+    [imageBaseDir, source],
   );
   // Data and log files are drawn as code (inboxViewKind).
   const kind = inboxViewKind(attachment.kind, attachment.name);
@@ -1396,8 +1393,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   followLinkRef.current = followLink;
   // Stable across renders: ui's HtmlBlock redraws a raw HTML block whenever its link resolver changes.
   const resolveFileLink = useCallback<LocalLinkResolver>(
-    (href) => ({ kind: 'open', open: () => followLinkRef.current(href, pageFolder) }),
-    [pageFolder],
+    (href) => source.markdownLink?.(href) ?? { kind: 'open', open: () => followLinkRef.current(href, pageFolder) },
+    [pageFolder, source],
   );
   const linkedPath = linkedTop?.path ?? null;
   const openFromLinked = useCallback((href: string) => {
@@ -1419,7 +1416,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const annotations = useMemo(() => fileRecords.map(annotationOf), [fileRecords]);
   // The document's blocks keep their identity across saves (the Viewer re-renders on a new array);
   // only code comments, which carry their own lines, derive blocks from the annotations.
-  const documentBlocks = useMemo(() => (view && !isCode ? attachmentBlocks(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name]);
+  const documentBlocks = useMemo(() => (view && !isCode ? (source.textBlocks ?? attachmentBlocks)(kind, view.text, attachment.name) : []), [view, kind, isCode, attachment.name, source]);
   const commentBlocks = useMemo(() => (isCode ? codeCommentBlocks(annotations) : []), [isCode, annotations]);
   const blocks = isCode ? commentBlocks : documentBlocks;
   // The file's question cards, answerable like the body's (issue #2828).
@@ -1491,35 +1488,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [scrollViewport]);
   const sideFits = !full && !phone && docWidth >= RAIL_MIN_PAGE_WIDTH;
   const railGutter = hasContents && sideFits && contentsShown;
-  // The rail loads once the page is idle (2 s at most) and then measures. While it may still be on its way no
-  // stand-in shows (no button flashes before the rail); past that, a rail that never drew leaves the Contents
-  // button and sheet. The wait starts again for each file and each Hide or Show.
-  const railWaitKey = `${docKey}:${contentsShown}`;
-  const [railWaited, setRailWaited] = useState<string | null>(null);
-  useEffect(() => {
-    if (!hasContents || phone) return;
-    const timer = setTimeout(() => setRailWaited(railWaitKey), RAIL_WAIT_MS);
-    return () => clearTimeout(timer);
-  }, [hasContents, phone, railWaitKey]);
-  const waited = railWaited === railWaitKey;
-  // The Contents button over the file (ContentsPanel.tsx): on a phone, the sheet; hidden, Show wherever the rail
-  // would fit (Side by side by its layout, Full screen by the rail's measure), else the sheet; shown, nothing while
-  // the rail is there or on its way, and the sheet where it does not fit or never drew.
-  const contentsButton: ContentsButtonMode | null = !hasContents
-    ? null
-    : phone
-      ? 'sheet'
-      : !contentsShown
-        ? sideFits || railFits === true
-          ? 'show'
-          : railFits === false || waited
-            ? 'sheet'
-            : null
-        : railFits === true
-          ? null
-          : (railFits === false && !sideFits) || waited
-            ? 'sheet'
-            : null;
+  // The rail loads once the page is idle (2 s at most) and then measures (contents.ts, shared with a plan's page):
+  // the wait starts again for each file and each Hide or Show.
+  const waited = useContentsRailWaited(hasContents && !phone, `${docKey}:${contentsShown}`);
+  // The Contents button over the file (Side by side decides by its layout, Full screen by the rail's measure).
+  const contentsButton: ContentsButtonMode | null = contentsButtonMode({ hasContents, phone, shown: contentsShown, sideFits, railFits, waited });
   // Hide and Show remove the control that has focus: focus moves to the one that takes its place (the Show
   // button; the rail's current tick).
   const contentsFocusRef = useRef<'show' | 'rail' | null>(null);
