@@ -19,9 +19,9 @@
 .ib-plans-back:hover { background: var(--muted); }
 .ib-plans-back .ib-ic { width: 16px; height: 16px; }
 .ib-plans :is(button, input, select, a):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-/* The card and the row draw their own focus ring around the whole card (or fill the row); their link takes none of the
-   window's own (.pn-inbox :focus-visible), which would be a second ring around the title. */
-.pn-inbox :is([data-frame-card], [data-frame-card-row]) a:focus-visible { outline: none; }
+/* A long-press on a card or a row opens its menu (Pin to sidebar, Unpin), the only way to pin a row on a touch screen
+   (the rows show no pin at rest there). iOS would open its own link preview on a long-pressed link instead. */
+.ib-spaces :is([data-frame-card], [data-frame-card-row]) a { -webkit-touch-callout: none; }
 .ib-plans-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 
 /* A whole-page message: loading, failed, missing */
@@ -192,8 +192,8 @@
 .ib-spc-h.ib-spc-nowh { height: 20px; margin: 8px 0 16px; padding-bottom: 0; box-shadow: none; }
 .ib-spc-list .ib-spc-h { margin: 0 0 4px; padding: 0 8px 8px; }
 .ib-spc-list .ib-spc-h.ib-spc-nowh { padding-bottom: 0; }
-/* The card grids are the card's CardGrid (its `<li>` holds the item); the rest of Now, under its one row of large
-   cards, is rows, as the list draws them. */
+/* The card grids are the card's CardGrid and the rows its CardRows (their `<li>` holds the item); the rest of Now,
+   under its one row of large cards, is rows, as the list draws them. */
 .ib-spaces [data-frame-card-grid="large"] + .ib-spc-rows { margin-top: 20px; }
 .ib-spc-item { min-width: 0; display: flex; }
 [data-frame-card-grid] > li > .ib-spc-item { flex: 1; }

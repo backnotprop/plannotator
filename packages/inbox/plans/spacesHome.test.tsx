@@ -16,6 +16,8 @@
  * - a pin is not kept, the sidebar does not list the pinned spaces in the person's order, or Move up, Move down and
  *   Unpin do nothing; a read that began before a pin puts the old pins back; a failed pin is silent or keeps its
  *   new order; a pin's name does not say which plan;
+ * - on a touch screen a row or a card cannot be pinned or unpinned from its long-press menu, a tap opens that menu, the
+ *   rows show their pin at rest (the card's `actionAtRest="never"`), or a pinned row loses the pin after its title;
  * - a face draws before it is near the screen, stays once far, says the title twice, opens like every other plan
  *   ("Context"), is focusable, sits inside the link, goes blank while a newer version is read, or does not tint the
  *   block a change landed in; a document row's thumbnail is not its own face (or is a renderer's whole face, or a
@@ -465,6 +467,67 @@ test.skipIf(!hasDom)('pinning: the card\'s pin keeps a space in the sidebar, in 
   expect(pinned()).toEqual([c, b]);
   await click(host.querySelector(`[data-pinned-space="${b}"]`));
   expect(window.location.hash).toBe(`#plans=${b}`);
+});
+
+test.skipIf(!hasDom)('a touch screen pins from the long-press menu (Pin to sidebar, Unpin), on a row and on a card; a tap opens no menu', async () => {
+  const a = plan('Alpha plan', 'harbor-api', { decided: true });
+  const b = plan('Beta plan', 'harbor-api', { decided: true });
+  keptView = 'list';
+  window.location.hash = '#plans';
+  let host = draw();
+  await settle();
+  const pinned = () => [...host.querySelectorAll('[data-space-pins] [data-pinned-space]')].map((el) => el.getAttribute('data-pinned-space'));
+  // A finger on the title: Base UI opens the menu after 500 ms held, and not on a shorter touch.
+  const touch = async (id: string, ms: number) => {
+    const title = host.querySelector(`[data-space="${id}"] [data-frame-card-title]`)!;
+    expect(title).not.toBeNull();
+    const at = { clientX: 40, clientY: 40, identifier: 1, target: title } as unknown as Touch;
+    await act(async () => {
+      const start = new TouchEvent('touchstart', { bubbles: true, cancelable: true });
+      Object.defineProperty(start, 'touches', { value: [at] });
+      title.dispatchEvent(start);
+      await new Promise((r) => setTimeout(r, ms));
+      const end = new TouchEvent('touchend', { bubbles: true, cancelable: true });
+      Object.defineProperty(end, 'touches', { value: [] });
+      Object.defineProperty(end, 'changedTouches', { value: [at] });
+      title.dispatchEvent(end);
+    });
+    await settle();
+    return document.querySelector(`[data-space-menu="${id}"] [data-space-menu-pin]`);
+  };
+  // The rows show no pin at rest on a touch screen (the card's `actionAtRest="never"`): the menu is how a row is pinned.
+  expect(host.querySelector('[data-spaces-list]')?.getAttribute('data-frame-card-action-rest')).toBe('never');
+  expect(await touch(a, 100)).toBeNull();
+  const item = await touch(a, 600);
+  expect(item?.getAttribute('data-space-menu-pin')).toBe('pin');
+  expect(text(item)).toBe('Pin to sidebar');
+  await press(item);
+  expect(store.pins()).toEqual([a]);
+  expect(pinned()).toEqual([a]);
+  // Pinned, the row keeps the card's pin after its title (in the link), the one sign of it at rest.
+  expect(host.querySelector(`[data-space="${a}"] a [data-frame-card-pinned-mark]`)).not.toBeNull();
+  expect(host.querySelector(`[data-space="${b}"] [data-frame-card-pinned-mark]`)).toBeNull();
+  const unpin = await touch(a, 600);
+  expect(unpin?.getAttribute('data-space-menu-pin')).toBe('unpin');
+  expect(text(unpin)).toBe('Unpin');
+  await press(unpin);
+  expect(store.pins()).toEqual([]);
+  expect(host.querySelector('[data-space-pins]')).toBeNull();
+  expect(host.querySelector(`[data-space="${a}"] [data-frame-card-pinned-mark]`)).toBeNull();
+
+  // A card: the same menu.
+  keptView = 'cards';
+  host = redraw();
+  await settle();
+  expect(host.querySelector(`[data-space="${b}"] [data-frame-card]`)).not.toBeNull();
+  const card = await touch(b, 600);
+  expect(card?.getAttribute('data-space-menu-pin')).toBe('pin');
+  await press(card);
+  expect(store.pins()).toEqual([b]);
+  expect(pinned()).toEqual([b]);
+  await press(await touch(b, 600));
+  expect(store.pins()).toEqual([]);
+  expect(window.location.hash).toBe('#plans');
 });
 
 test.skipIf(!hasDom)('a face: drawn only near the screen, the plan\'s own top without the title again, inert; an HTML page in a frame that runs nothing', async () => {
