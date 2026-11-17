@@ -20,13 +20,16 @@
  *   names the wrong file;
  * - the Spaces home (approval "plans-home"): pins lose their order, keep a plan that is gone, or pin one that never
  *   was; the view is not the person's (config.json) or a bad one is kept; the list loses what the home's facts read
- *   (the main page's kind, who made the newest version, the versions the person decided on).
+ *   (the main page's kind, who made the newest version and when, the versions the person decided on); the list is
+ *   read and sent whole to a poll when nothing changed (its ETag's 304), or answers 304 when something did (a version,
+ *   a look, a pin, the view); a face reads more than its top (a document's first 16 KB, cut at a line's end) or an
+ *   HTML page above 512 KB.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { PLAN_PERSON, PLAN_PICTURE_TYPES, planApprovalState, planId, type SpacesView } from "@plannotator/core/plans";
+import { PLAN_FACE_HTML_MAX, PLAN_FACE_TEXT_BYTES, PLAN_PERSON, PLAN_PICTURE_TYPES, planApprovalState, planId, type SpacesView } from "@plannotator/core/plans";
 import { createPlanStore } from "./store";
 import { artifactServedType, handlePlanRoute, isPlansPath, type PlanRouteResult } from "./routes";
 
@@ -407,5 +410,51 @@ describe("Plans' routes", () => {
     const lines = body(await call("GET", "/api/plans"))!.plans as { id: string; primary_kind: string }[];
     expect(lines.find((p) => p.id === page.plan.id)!.primary_kind).toBe("html");
     expect(doc).toBeTruthy();
+  });
+
+  test("the list's ETag: 304 while nothing changed; a version, a look, a pin or the view is a new answer", async () => {
+    const { store, plan, doc } = world();
+    let view: SpacesView = "cards";
+    const get = (ifNoneMatch: string | null) => handlePlanRoute({ method: "GET", pathname: "/api/plans", params: new URLSearchParams(), json: async () => null, ifNoneMatch }, { store, view: { read: () => view, save: () => true } });
+    const first = (await get(null)) as { status: number; etag?: string; body: unknown };
+    expect(first.status).toBe(200);
+    expect(first.etag).toMatch(/^"[0-9a-f]{8}"$/);
+    const same = (await get(first.etag!)) as { status: number; body: unknown };
+    expect([same.status, same.body]).toEqual([304, null]);
+    const changes: (() => unknown)[] = [
+      () => store.addVersion(plan.id, doc, { bytes: new TextEncoder().encode("# Auth refactor\n\nv4\n"), committed_at: "2026-11-05T09:00:00.000Z", source: "plan-review" }),
+      () => store.recordLook(plan.id, { seen: 4 }),
+      () => store.setPin(plan.id, true),
+      () => (view = "list"),
+    ];
+    let tag = first.etag!;
+    for (const change of changes) {
+      change();
+      const next = (await get(tag)) as { status: number; etag?: string };
+      expect(next.status).toBe(200);
+      expect(next.etag).not.toBe(tag);
+      tag = next.etag!;
+    }
+    // The newest version's time is on the line ("Now" reads it).
+    expect((body(await get(null))!.plans[0] as { head_at: string }).head_at).toBe("2026-11-05T09:00:00.000Z");
+  });
+
+  test("a face reads only its top: a document's first 16 KB cut at a line's end; an HTML page whole, or nothing above 512 KB", async () => {
+    const { store, plan, doc, call } = world();
+    expect(body(await call("GET", `/api/plans/${plan.id}/versions/1?face=1`))).toEqual({ text: "# Auth refactor\n\nv1\n", cut: false });
+    const line = "A line of the plan that goes on for a while to fill the page.\n";
+    const long = line.repeat(Math.ceil((PLAN_FACE_TEXT_BYTES * 2) / line.length));
+    store.addVersion(plan.id, doc, { bytes: new TextEncoder().encode(long), committed_at: "2026-11-05T09:00:00.000Z", source: "plan-review" });
+    const top = body(await call("GET", `/api/plans/${plan.id}/versions/4?face=1`))!;
+    expect(top.cut).toBe(true);
+    expect(new TextEncoder().encode(top.text).length).toBeLessThanOrEqual(PLAN_FACE_TEXT_BYTES);
+    expect(long.startsWith(top.text)).toBe(true);
+    expect(top.text.endsWith("for a while to fill the page.")).toBe(true);
+    const page = store.createPlan({ name: "Mockup", created_at: "2026-11-06T09:00:00.000Z", document: { title: "Mockup", kind: "html" } });
+    store.addVersion(page.plan.id, page.document.id, { bytes: new TextEncoder().encode("<p>Small</p>"), committed_at: "2026-11-06T10:00:00.000Z", source: "plan-review" });
+    store.addVersion(page.plan.id, page.document.id, { bytes: new TextEncoder().encode(`<p>${"x".repeat(PLAN_FACE_HTML_MAX)}</p>`), committed_at: "2026-11-06T11:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/1?face=1`))).toEqual({ text: "<p>Small</p>", cut: false });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/2?face=1`))).toEqual({ text: null, cut: false });
+    expect((await call("GET", `/api/plans/${plan.id}/versions/9?face=1`))?.status).toBe(404);
   });
 });

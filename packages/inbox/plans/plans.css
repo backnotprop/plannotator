@@ -163,6 +163,14 @@
 .ib-spc-search .ib-ic { width: 14px; height: 14px; flex: none; }
 .ib-spc-search input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
 .ib-spc-search input::placeholder { color: var(--muted-foreground); }
+/* A project's scope in the search field: a chip whose × goes Home (search still covers every title). */
+.ib-spc-search.ib-spc-scoped { width: 290px; }
+.ib-spc-chip { display: inline-flex; align-items: center; gap: 2px; flex: none; max-width: 120px; height: 20px; padding: 0 2px 0 7px; border-radius: 6px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--foreground); font-size: var(--ib-fs-12, 12px); line-height: 16px; }
+.ib-spc-chip > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-spc-chip button { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 4px; color: var(--muted-foreground); }
+.ib-spc-chip button:hover { background: color-mix(in oklch, var(--foreground) 10%, transparent); color: var(--foreground); }
+.ib-spc-chip button:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; }
+.ib-spc-chip .ib-ic { width: 12px; height: 12px; }
 .ib-spc-vsw { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: color-mix(in oklch, var(--foreground) 5%, var(--card)); }
 .ib-spc-vsw button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; border-radius: 6px; color: var(--muted-foreground); cursor: pointer; }
 .ib-spc-vsw button:hover { color: var(--foreground); }
@@ -219,22 +227,23 @@
 /* The pinned spaces under Spaces in the sidebar. */
 .ib-space-pins { padding-left: 10px; }
 .ib-space-pins .ib-pin .ib-ic { width: 15px; height: 15px; flex: none; color: var(--muted-foreground); }
-/* Opening a card: its face grows into the plan page's document (openSpace). */
+/* Opening a card: its face grows into the plan page's document, and back (spacesMotion.ts; never with reduced motion). */
 .ib-space-opening [data-plan-document] { view-transition-name: ib-space-open; }
 ::view-transition-group(ib-space-open) { animation-duration: 280ms; animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1); }
 @media (prefers-reduced-motion: reduce) {
   .ib-spc-fold .ib-ic { transition: none; }
-  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
 }
 @media (max-width: 1100px) {
   .ib-spc-body { padding-left: 24px; padding-right: 24px; }
   .ib-spc-words { padding-left: 12px; }
+  .ib-spc-local { display: none; }
 }
 @media (max-width: 767px) {
   .ib-spc-hearth { padding: 8px 16px 28px 8px; }
   .ib-spc-top { flex-wrap: wrap; row-gap: 8px; }
-  .ib-spc-local { display: none; }
   .ib-spc-search { width: 150px; }
+  .ib-spc-search.ib-spc-scoped { width: 200px; }
+  .ib-spc-chip { max-width: 76px; }
   .ib-spc-words { padding: 20px 0 0 8px; flex-direction: column; align-items: flex-start; gap: 16px; }
   .ib-spc-words h1 { font-size: 24px; line-height: 30px; }
   .ib-spc-body, .ib-spc-list .ib-spc-body { padding: 8px 16px 48px; }

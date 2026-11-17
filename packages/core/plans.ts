@@ -235,6 +235,8 @@ export interface PlanIndexLine {
   head_source?: PlanVersionSource | null;
   /** The main page's version numbers that hold a decision of the person's (approved or changes asked), oldest first. */
   decided_versions?: number[];
+  /** When the main page's newest version came (its `committed_at`); absent from an older line (read `updated_at`). */
+  head_at?: string | null;
 }
 
 /** The person's pinned plans, in their order (`pins.json`, written whole), and the Spaces home's view. */
@@ -492,6 +494,21 @@ export function checkPlanCommentInput(input: unknown): { ok: true; doc: string |
 
 /** The most a version the person writes may hold (its text, in bytes): what a plan review's editor ever sends. */
 export const PLAN_TEXT_MAX = 2 * 1024 * 1024;
+
+/**
+ * A face on the Spaces home reads only the top of a version (`GET /api/plans/:id/versions/:n?face=1`): a document's
+ * first `PLAN_FACE_TEXT_BYTES`, cut at a line's end; an HTML page whole, or nothing above `PLAN_FACE_HTML_MAX` (the
+ * card shows its kind's ground).
+ */
+export const PLAN_FACE_TEXT_BYTES = 16 * 1024;
+export const PLAN_FACE_HTML_MAX = 512 * 1024;
+
+/** `GET /api/plans/:id/versions/:n?face=1`: the top of a version for its face; `text` null when it is too big to draw. */
+export interface PlanFaceText {
+  text: string | null;
+  /** The text is the version's first part only. */
+  cut: boolean;
+}
 
 /**
  * The body of `POST /api/plans/:id/versions`: a new newest version the person made, either their edit of the newest

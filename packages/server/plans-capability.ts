@@ -7,7 +7,9 @@
  * the settings answer. On:
  * - the import runs in the background once the Inbox is up, and when the switch is turned on;
  * - a request to `/api/plans` picks up what plan review wrote since (at most once per `pickUpMs`), in the background,
- *   and answers from what the library holds now (the list says `importing: true` meanwhile);
+ *   and answers from what the library holds now (the list says `importing: true` meanwhile); the Spaces home's poll
+ *   (`?poll=1`, every 5 s) picks up at most once per `pollPickUpMs` (30 s), since each pickup walks the plan history;
+ * - the list answers 304 to an `If-None-Match` that is still its `ETag` (nothing changed: no read, no body);
  * - one import at a time: the server is the library's one writer;
  * - an import that fails is not tried again on every request: the next pickup waits, twice as long after each failure
  *   in a row (from 4 s up to 5 min), the error is logged once per distinct message, and the list says
@@ -28,6 +30,8 @@ export interface PlansCapabilityOptions extends InboxCore {
   openStore?: (dataDir: string) => PlanStore;
   /** The shortest time between two pickups. */
   pickUpMs?: number;
+  /** The shortest time between two pickups the home's poll starts (`?poll=1`). */
+  pollPickUpMs?: number;
   /** The wait after the first failed import (doubled after each failure in a row), and its cap. */
   retryMs?: number;
   retryMaxMs?: number;
@@ -114,12 +118,13 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
         notBefore = 0;
         lastPickUp = 0;
       }
-      if (!running && Date.now() >= notBefore && Date.now() - lastPickUp >= (options.pickUpMs ?? 2000)) {
+      const wait = url.searchParams.get("poll") === "1" ? (options.pollPickUpMs ?? 30_000) : (options.pickUpMs ?? 2000);
+      if (!running && Date.now() >= notBefore && Date.now() - lastPickUp >= wait) {
         lastPickUp = Date.now();
         background(false);
       }
       const answer = await handlePlanRoute(
-        { method: req.method, pathname: url.pathname, params: url.searchParams, json: () => req.json() },
+        { method: req.method, pathname: url.pathname, params: url.searchParams, json: () => req.json(), ifNoneMatch: req.headers.get("if-none-match") },
         { store: storeOf(), importing: () => running !== null && !caughtUp, importError: () => importError, view: { read: spacesView, save: setSpacesView } },
       );
       if (!answer) return null;
@@ -128,7 +133,9 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
           headers: { "Content-Type": answer.file.contentType, "Cross-Origin-Resource-Policy": "same-origin", "Content-Security-Policy": "sandbox", ...NO_STORE },
         });
       }
-      return Response.json(answer.body, { status: answer.status, headers: NO_STORE });
+      const headers = answer.etag ? { ...NO_STORE, ETag: answer.etag } : NO_STORE;
+      if (answer.status === 304) return new Response(null, { status: 304, headers });
+      return Response.json(answer.body, { status: answer.status, headers });
     },
     // Present only while on: off, the settings answer is what it was before Plans existed.
     settingsWire: () => (on() ? { plans: { on: true } } : {}),

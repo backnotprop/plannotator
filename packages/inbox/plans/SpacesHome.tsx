@@ -2,19 +2,22 @@
  * The Spaces home (approval "plans-home", home-5.html): "What do you want to plan?" and Start a plan over the dither
  * field, "On this computer", Search plans and the cards/list switch at the top right; then "Now" (only active plans,
  * never cut), "Recent" (8 rows, or one row of cards) and an "All plans" link. The sidebar's project scopes the page to
- * it ("Now" first, then "Earlier"), with Home to go back; "All plans" is every plan by project (the newest 5 rows or
- * one row of cards each, then "Show N more"; a project's name folds its group, and folds are remembered). Search
- * looks through every title.
+ * it (the projects combined into it too; "Now" first, then "Earlier"), with Home to go back; "All plans" is every
+ * plan by project (the newest 5 rows or one row of cards each, then "Show N more"; a project's name folds its group,
+ * and folds are remembered). Search looks through every title, in a project's scope too (its matches first; the
+ * scope a chip in the field, whose × goes Home).
  *
  * Nothing moves under the person: an arrival redraws its face, dot and fact in place at once, but while they are
- * looking (the pointer over the page, or a scroll or a key in the last 4 s) its new place waits behind a quiet
- * "N updates · Show" pill; not looking, the page settles by itself, every card moving to its place in one move
- * (reduced motion: a cut). Opening a card grows its face into the plan page (a View Transition where there is one).
+ * looking (the pointer over the page, focus in it, or a scroll or a key in the last 4 s) its new place waits behind a
+ * quiet "N updates · Show" pill beside "Now" (counting only what this scope or search shows; said politely to a
+ * screen reader); not looking, the page settles by itself, every card moving to its place in one move and a newcomer
+ * in "Now" fading in (reduced motion: a cut). Opening a card grows its face into the plan page, and going back
+ * shrinks it into its card on the home as it was left (spacesMotion.ts).
  *
  * The card, the row, the pill and their motions are the frame's (packages/ui/components/frame), built by the sister
  * team; until they land they come from the one stand-in file (frameCardStandIn.tsx).
  */
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type RefObject } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactElement, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
@@ -25,11 +28,12 @@ import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { writeRoute } from '../app/writeRoute';
 import { startPlansDither, reducedMotion } from './dither';
-import { Card, CardRow, CardStyles, CardUpdatesPill, arrive, settleBatch, type CardLinkProps } from './frameCardStandIn';
+import { Card, CardRow, CardStyles, CardUpdatesPill, settleBatch, type CardLinkProps } from './frameCardStandIn';
 import { SpaceFace } from './SpaceFace';
 import { readPlans, setPlanPin, setSpacesView } from './store';
 import { ImportErrorNote } from './parts';
-import { ALL_PLANS_ROWS, RECENT_ROWS, factWords, heldLayout, homeSections, inProject, projectGroups, searchPlans, spaceFact, spaceKind, spaceUnread, type SpacesScopeProject } from './spacesModel';
+import { openSpace, spacesHomeShown, takeHomeScroll } from './spacesMotion';
+import { ALL_PLANS_ROWS, RECENT_ROWS, factWords, heldLayout, homeSections, inProject, projectGroups, searchPlans, spaceFact, spaceKind, spaceUnread, updatesWords, type SpacesScopeProject } from './spacesModel';
 
 /** How long a scroll or a key keeps the person "looking" (approval "plans-home"). */
 export const LOOK_MS = 4000;
@@ -57,28 +61,47 @@ export function SpacesHome(props: SpacesHomeProps) {
   const [query, setQuery] = useState('');
   const headId = useId();
 
+  const scopeId = props.scope.kind === 'project' ? props.scope.id : null;
+  const project = useMemo(() => (scopeId === null ? null : (props.projects.find((p) => p.id === scopeId) ?? { id: scopeId, name: scopeId })), [scopeId, props.projects]);
+  const q = query.trim();
+  const mode = q ? 'search' : props.scope.kind;
+  // What this page shows of the library: every title for a search (the approval's "across all titles"), else the scope.
+  const shows = useCallback((plans: readonly PlanSummary[]) => (q ? searchPlans(plans, q) : project ? inProject(plans, project) : [...plans]), [q, project]);
+
   // The layout as placed; the plans as they are now draw the content.
   const [placed, setPlaced] = useState<readonly PlanSummary[]>(props.plans);
+  const placedNow = useRef(placed);
+  placedNow.current = placed;
   const looking = useLooking(root);
-  const settle = useCallback((next: readonly PlanSummary[]) => settleBatch(body.current, () => flushSync(() => setPlaced(next))), []);
+  const settle = useCallback((next: readonly PlanSummary[]) => {
+    const before = new Set(placedNow.current.map((p) => p.id));
+    settleBatch(body.current, () => flushSync(() => setPlaced(next)));
+    // A newcomer in "Now" fades in where it lands (home-5's settle); nothing else does.
+    if (reducedMotion()) return;
+    for (const el of body.current?.querySelectorAll<HTMLElement>('[data-spaces-section="now"] [data-card-key]') ?? []) {
+      if (!before.has(el.dataset.cardKey!) && typeof el.animate === 'function') el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
+    }
+  }, []);
   useEffect(() => {
     if (looking || placed === props.plans) return;
     const t = setTimeout(() => settle(props.plans), 0);
     return () => clearTimeout(t);
   }, [looking, placed, props.plans, settle]);
-  const { layout, pending } = useMemo(() => heldLayout(placed, props.plans), [placed, props.plans]);
+  // Held and counted within what the page shows: an update elsewhere is no update here.
+  const { layout, pending } = useMemo(() => heldLayout(shows(placed), shows(props.plans)), [placed, props.plans, shows]);
   const fresh = useMemo(() => new Map(props.plans.map((p) => [p.id, p])), [props.plans]);
   const pins = useMemo(() => new Set(props.pins), [props.pins]);
 
-  const scopeId = props.scope.kind === 'project' ? props.scope.id : null;
-  const project = useMemo(() => (scopeId === null ? null : (props.projects.find((p) => p.id === scopeId) ?? { id: scopeId, name: scopeId })), [scopeId, props.projects]);
-  const q = query.trim();
-  const mode = q ? 'search' : props.scope.kind;
-  const pool = useMemo(() => {
-    const scoped = project ? inProject(layout, project) : layout;
-    return q ? searchPlans(scoped, q) : scoped;
-  }, [layout, project, q]);
+  const pool = layout;
   const { now, recent } = useMemo(() => homeSections(pool, null), [pool]);
+
+  // Where a plan opened from here comes back to, scrolled where it was.
+  const route = useMemo(() => ({ page: 'plans' as const, project: scopeId, thread: null, planAll: props.scope.kind === 'all' }), [scopeId, props.scope.kind]);
+  useLayoutEffect(() => {
+    spacesHomeShown(route, root.current);
+    const top = takeHomeScroll(route);
+    if (top !== null && root.current) root.current.scrollTop = top;
+  }, [route]);
 
   const cols = useColumns(body, 230, 24);
   const [folded, setFolded] = useState<ReadonlySet<string>>(readFolds);
@@ -100,8 +123,13 @@ export function SpacesHome(props: SpacesHomeProps) {
   const item = (plan: PlanSummary, size: 'large' | 'regular', withProject = false) => (
     <SpaceItem key={plan.id} plan={fresh.get(plan.id) ?? plan} size={size} list={list} secondary={withProject && mode !== 'project' ? plan.project_name || undefined : undefined} pinned={pins.has(plan.id)} portal={portal} />
   );
-  const items = (plans: readonly PlanSummary[], size: 'large' | 'regular', withProject = false) => <div className={list ? 'ib-spc-rows' : size === 'large' ? 'ib-spc-grid ib-spc-now' : 'ib-spc-grid'}>{plans.map((p) => item(p, size, withProject))}</div>;
-  const pill = pending > 0 && looking ? <CardUpdatesPill count={pending} onShow={() => settle(props.plans)} /> : null;
+  const items = (plans: readonly PlanSummary[], size: 'large' | 'regular', withProject = false) => (
+    <div className={list ? 'ib-spc-rows' : size === 'large' ? 'ib-spc-grid ib-spc-now' : 'ib-spc-grid'} role="list">
+      {plans.map((p) => item(p, size, withProject))}
+    </div>
+  );
+  const held = pending > 0 && looking;
+  const pill = held ? <CardUpdatesPill count={pending} onShow={() => settle(props.plans)} /> : null;
   // The pill sits by the first heading on the page ("Now" when there is one).
   let pillShown = false;
   const takePill = () => {
@@ -117,11 +145,12 @@ export function SpacesHome(props: SpacesHomeProps) {
   );
 
   const sections: ReactElement[] = [];
-  if (now.length) {
+  // "Now", and its heading whenever updates wait (the pill sits beside "Now").
+  if (now.length || held) {
     sections.push(
       <section key="now" className="ib-spc-sec" aria-labelledby={`${headId}-now`} data-spaces-section="now">
         {head('Now', `${headId}-now`)}
-        {items(now, list ? 'regular' : 'large', true)}
+        {now.length > 0 && items(now, list ? 'regular' : 'large', true)}
       </section>,
     );
   }
@@ -143,7 +172,11 @@ export function SpacesHome(props: SpacesHomeProps) {
       </section>,
     );
   } else if (mode === 'all' || mode === 'search') {
-    for (const group of projectGroups(recent)) {
+    // A search from a project's scope lists that project's matches first.
+    const scoped = project ? new Set(inProject(recent, project).map((p) => p.id)) : null;
+    const groups = projectGroups(recent);
+    if (scoped) groups.sort((a, b) => Number(b.plans.some((p) => scoped.has(p.id))) - Number(a.plans.some((p) => scoped.has(p.id))));
+    for (const group of groups) {
       const shut = mode === 'all' && folded.has(group.project);
       const open = mode === 'search' || opened.has(group.project);
       const cut = list ? ALL_PLANS_ROWS : cols;
@@ -189,7 +222,10 @@ export function SpacesHome(props: SpacesHomeProps) {
   return (
     <section className={`ib-dpage ib-spaces${list ? ' ib-spc-list' : ''}`} ref={root} aria-label="Spaces" data-spaces-home="" data-spaces-view={props.view} data-spaces-scope={mode}>
       <CardStyles />
-      <Hearth headId={`${headId}-h`} query={query} onQuery={setQuery} view={props.view} />
+      <Hearth headId={`${headId}-h`} query={query} onQuery={setQuery} view={props.view} scope={project} />
+      <p className="sr-only" role="status" aria-live="polite" data-spaces-updates-said="">
+        {held ? updatesWords(pending) : ''}
+      </p>
       <div className="ib-spc-body" ref={body}>
         {props.importing && (
           <p className="ib-plans-note" role="status">
@@ -226,8 +262,11 @@ function readFolds(): ReadonlySet<string> {
   }
 }
 
-/** The page's head: the field, the scope's tools at the top right, and the one question with Start a plan. */
-function Hearth({ headId, query, onQuery, view }: { headId: string; query: string; onQuery: (q: string) => void; view: SpacesView }) {
+/**
+ * The page's head: the field, the scope's tools at the top right, and the one question with Start a plan. In a
+ * project's scope the search field carries the scope as a chip; its × goes Home.
+ */
+function Hearth({ headId, query, onQuery, view, scope }: { headId: string; query: string; onQuery: (q: string) => void; view: SpacesView; scope: SpacesScopeProject | null }) {
   const host = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const words = useRef<HTMLDivElement>(null);
@@ -247,10 +286,18 @@ function Hearth({ headId, query, onQuery, view }: { headId: string; query: strin
             <Icon name="laptop" />
             On this computer
           </span>
-          <label className="ib-spc-search">
+          <div className={scope ? 'ib-spc-search ib-spc-scoped' : 'ib-spc-search'}>
             <Icon name="search" />
+            {scope && (
+              <span className="ib-spc-chip" data-spaces-scope-chip="">
+                <span dir="auto">{scope.name}</span>
+                <button type="button" aria-label={`Remove ${scope.name}, show every project`} onClick={home} data-spaces-scope-remove="">
+                  <Icon name="x" size={12} />
+                </button>
+              </span>
+            )}
             <input type="search" placeholder="Search plans" aria-label="Search plans" value={query} onChange={(e) => onQuery(e.target.value)} autoComplete="off" data-spaces-search="" />
-          </label>
+          </div>
           <ViewSwitch view={view} />
         </div>
       </div>
@@ -299,24 +346,18 @@ function ViewSwitch({ view }: { view: SpacesView }) {
 }
 
 /** One space as a card or a row: its face, its title, its one fact, its unread dot, and the pin beside the link. */
-function SpaceItem({ plan, size, list, secondary, pinned, portal }: { plan: PlanSummary; size: 'large' | 'regular'; list: boolean; secondary?: string; pinned: boolean; portal: HTMLElement | null }) {
-  const inner = useRef<HTMLDivElement>(null);
+// Drawn again only when its own plan, place or pin changed: a read that brings nothing new, or the person looking or
+// not, redraws no card and no face.
+const SpaceItem = memo(function SpaceItem({ plan, size, list, secondary, pinned, portal }: { plan: PlanSummary; size: 'large' | 'regular'; list: boolean; secondary?: string; pinned: boolean; portal: HTMLElement | null }) {
   const fact = spaceFact(plan, null);
   const words = factWords(fact);
   const factNode = fact.kind === 'move' ? <span className="ib-spc-you">{words}</span> : words;
   const time = fact.kind === 'date' ? fullTime(plan.updated_at) : undefined;
-  // Something arrived: the face takes its new content in place, with the arrival's short fade; nothing moves.
-  const stamp = `${plan.head_version_number}:${plan.updated_at}`;
-  const was = useRef(stamp);
-  useEffect(() => {
-    if (was.current === stamp) return;
-    was.current = stamp;
-    arrive(inner.current?.querySelector('[data-card-face]') ?? null);
-  }, [stamp]);
-  const pin = () => void setPlanPin(plan.id, !pinned).catch(() => {});
+  // A failed write puts the pin back and the window's toast says so (the store).
+  const pin = () => void setPlanPin(plan.id, !pinned);
   const action = (
     <Tip content={pinned ? 'Unpin' : 'Pin to sidebar'} side="bottom">
-      <button type="button" className={`ib-spc-pin${pinned ? ' ib-spc-pinned' : ''}`} aria-label={pinned ? 'Unpin' : 'Pin to sidebar'} onClick={pin} data-space-pin-toggle={plan.id}>
+      <button type="button" className={`ib-spc-pin${pinned ? ' ib-spc-pinned' : ''}`} aria-label={pinned ? `Unpin ${plan.name}` : `Pin ${plan.name} to sidebar`} onClick={pin} data-space-pin-toggle={plan.id}>
         <Icon name={pinned ? 'pinOff' : 'pin'} size={15} />
       </button>
     </Tip>
@@ -324,8 +365,8 @@ function SpaceItem({ plan, size, list, secondary, pinned, portal }: { plan: Plan
   const common = { kind: spaceKind(plan), title: plan.name, href: `#plans=${encodeURIComponent(plan.id)}`, linkComponent: SpaceLink, fact: factNode, unread: spaceUnread(plan), time, action, pinned };
   const face = plan.head_version_number >= 1 ? <SpaceFace plan={plan} /> : null;
   const box = (
-    <div className={list ? 'ib-spc-item ib-spc-rowitem' : 'ib-spc-item'} data-card-key={plan.id} data-space={plan.id}>
-      <div className="ib-spc-in" ref={inner}>
+    <div className={list ? 'ib-spc-item ib-spc-rowitem' : 'ib-spc-item'} role="listitem" data-card-key={plan.id} data-space={plan.id}>
+      <div className="ib-spc-in">
         {list ? <CardRow {...common} secondary={secondary} face={face} /> : <Card {...common} face={face} size={size} />}
       </div>
     </div>
@@ -345,71 +386,50 @@ function SpaceItem({ plan, size, list, secondary, pinned, portal }: { plan: Plan
       </ContextMenu.Portal>
     </ContextMenu.Root>
   );
-}
+});
 
 /** A card's link: the plan's address; a plain click opens it with the face growing into the page. */
 function SpaceLink({ href, className, children, ...rest }: CardLinkProps) {
+  const open = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    const card = e.currentTarget.closest<HTMLElement>('[data-card-key]');
+    if (!card?.dataset.cardKey) return;
+    e.preventDefault();
+    openSpace(card.dataset.cardKey, card.querySelector<HTMLElement>('[data-card-face]'));
+  };
   return (
-    <a
-      href={href}
-      className={className}
-      {...rest}
-      onClick={(e) => {
-        if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-        const id = e.currentTarget.closest<HTMLElement>('[data-card-key]')?.dataset.cardKey;
-        if (!id) return;
-        e.preventDefault();
-        openSpace(id, e.currentTarget.querySelector<HTMLElement>('[data-card-face]'));
-      }}
-    >
+    <a href={href} className={className} {...rest} onClick={open}>
       {children}
     </a>
   );
 }
 
-/** The class on the root while a card opens: the plan page's document takes the face's name (plans.css). */
-const OPENING = 'ib-space-opening';
-
-/** Open a plan; where View Transitions are, its face grows into the page's document (280 ms); else a cut. */
-export function openSpace(id: string, face: HTMLElement | null): void {
-  const go = () => writeRoute({ page: 'plans', project: null, thread: null, plan: id });
-  const start = typeof document.startViewTransition === 'function' ? document.startViewTransition.bind(document) : null;
-  if (!start || !face || reducedMotion()) return go();
-  face.style.viewTransitionName = 'ib-space-open';
-  const docEl = document.documentElement;
-  const move = start(async () => {
-    face.style.viewTransitionName = '';
-    docEl.classList.add(OPENING);
-    go();
-    await until(() => !!document.querySelector('[data-plan-document]'), 360);
-  });
-  void move.finished.finally(() => docEl.classList.remove(OPENING));
-}
-
-function until(ready: () => boolean, ms: number): Promise<void> {
-  const end = performance.now() + ms;
-  return new Promise((resolve) => {
-    const tick = () => (ready() || performance.now() > end ? resolve() : requestAnimationFrame(tick));
-    tick();
-  });
-}
-
 /**
- * The person is looking at the page: the pointer is over it, or they scrolled or pressed a key in the last 4 s.
- * Leaving the window counts as not looking.
+ * The person is looking at the page: the pointer is over it, focus is in it (a keyboard or a screen reader's user
+ * reading a card), or they scrolled or pressed a key in the last 4 s. Leaving the window counts as not looking.
  */
 export function useLooking(root: RefObject<HTMLElement | null>): boolean {
   const [looking, setLooking] = useState(false);
   useEffect(() => {
     let inside = false;
+    let focused = false;
     let last = -Infinity;
     let timer: ReturnType<typeof setTimeout> | null = null;
     const update = () => {
       const since = performance.now() - last;
-      setLooking(inside || since < LOOK_MS);
+      setLooking(inside || focused || since < LOOK_MS);
       if (timer) clearTimeout(timer);
-      timer = !inside && since < LOOK_MS ? setTimeout(update, LOOK_MS - since + 20) : null;
+      timer = !inside && !focused && since < LOOK_MS ? setTimeout(update, LOOK_MS - since + 20) : null;
     };
+    const focus = () => {
+      const now = !!root.current && root.current.contains(document.activeElement);
+      if (now !== focused) {
+        focused = now;
+        update();
+      }
+    };
+    // After focus moves (focusout comes before the next focusin): read where it is now.
+    const blurred = () => setTimeout(focus, 0);
     const move = (e: PointerEvent) => {
       const over = !!root.current && e.target instanceof Node && root.current.contains(e.target);
       if (over !== inside) {
@@ -427,6 +447,9 @@ export function useLooking(root: RefObject<HTMLElement | null>): boolean {
       update();
     };
     const el = root.current;
+    el?.addEventListener('focusin', focus);
+    el?.addEventListener('focusout', blurred);
+    focus();
     document.addEventListener('pointermove', move, { passive: true });
     document.documentElement.addEventListener('pointerleave', away);
     window.addEventListener('blur', away);
@@ -436,6 +459,8 @@ export function useLooking(root: RefObject<HTMLElement | null>): boolean {
     el?.addEventListener('scroll', active, { passive: true, capture: true });
     return () => {
       if (timer) clearTimeout(timer);
+      el?.removeEventListener('focusin', focus);
+      el?.removeEventListener('focusout', blurred);
       document.removeEventListener('pointermove', move);
       document.documentElement.removeEventListener('pointerleave', away);
       window.removeEventListener('blur', away);

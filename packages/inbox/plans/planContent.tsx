@@ -155,25 +155,112 @@ export function PlanContentRules({ children }: { children: ReactNode }) {
  */
 export const PLAN_HTML_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; form-action 'none'; base-uri 'none'";
 
+/** Links that ask the browser to reach a host before anything is opened (no policy reliably covers them). */
+const RESOURCE_HINTS = 'link[rel~="dns-prefetch" i], link[rel~="preconnect" i], link[rel~="prefetch" i], link[rel~="prerender" i], link[rel~="preload" i], link[rel~="modulepreload" i]';
+
 /**
  * A click on a link never takes the frame anywhere. Every link and image-map area opens a new window instead
  * (`target="_blank"`, its own `target` and the page's own `<base>` dropped), and a frame without `allow-popups` opens
- * none: the click does nothing. A link with no target follows the `<base target="_blank">` written first. Read in an
- * inert document (DOMParser runs and loads nothing); where there is none, the page is left as written.
+ * none: the click does nothing. A link with no target follows the `<base target="_blank">` written first. Resource
+ * hints (`dns-prefetch`, `preconnect`, …) are dropped, so a page never tells another host it was drawn. `still`: a
+ * face on the Spaces home (`stillPage`). Read in an inert document (DOMParser runs and loads nothing); where there is
+ * none, the page is left as written.
  */
-function linksGoNowhere(html: string): string {
+function linksGoNowhere(html: string, still = false): string {
   if (typeof DOMParser === 'undefined') return html;
   const doc = new DOMParser().parseFromString(html, 'text/html');
   for (const base of doc.querySelectorAll('base')) base.remove();
   for (const link of doc.querySelectorAll('a, area, form')) link.setAttribute('target', '_blank');
+  for (const hint of doc.querySelectorAll(RESOURCE_HINTS)) hint.remove();
+  if (still) stillPage(doc);
   return doc.documentElement.outerHTML;
 }
 
+const POLICY_HEAD = `<meta http-equiv="Content-Security-Policy" content="${PLAN_HTML_CSP}"><meta http-equiv="x-dns-prefetch-control" content="off"><base target="_blank">`;
+
 export function planHtmlSrcdoc(html: string): string {
-  const head = `<meta http-equiv="Content-Security-Policy" content="${PLAN_HTML_CSP}"><base target="_blank">`;
   // Always first, never after a `<head>` found by a pattern (one written inside a comment would swallow it): the
   // parser opens the head for it, and the page's own `<html>` and `<head>` after it only join that one.
-  return `${head}${linksGoNowhere(html)}`;
+  return `${POLICY_HEAD}${linksGoNowhere(html)}`;
+}
+
+/**
+ * The first cascade layer of a face, so its `!important` wins over every rule of the page's own (layered or not; a
+ * page's inline `style` is cleared of motion in `stillPage`): nothing animates or transitions.
+ */
+const STILL_STYLE = '<style>@layer plannotator-still{*,*::before,*::after,*::marker{animation:none!important;transition:none!important;scroll-behavior:auto!important}}</style>';
+
+/**
+ * An HTML page as a face on the Spaces home (approval "plans-home": "Idle page: nothing moves. Reduced motion: nothing
+ * moves."): the plan page's frame rules (`planHtmlSrcdoc`), plus no motion: CSS animations and transitions off, a
+ * `<marquee>` a plain block, SVG animation elements gone, an indeterminate `<progress>` stopped, and a moving `data:`
+ * picture (an animated GIF, WebP, PNG or AVIF, an SVG with animation) not drawn: its place stays, empty.
+ */
+export function planFaceSrcdoc(html: string): string {
+  return `${POLICY_HEAD}${STILL_STYLE}${linksGoNowhere(html, true)}`;
+}
+
+/** A transparent still pixel: what a moving picture's `src` becomes in a face (its size and place kept). */
+const STILL_PIXEL = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+
+function stillPage(doc: Document): void {
+  for (const marquee of [...doc.querySelectorAll('marquee')]) {
+    const block = doc.createElement('div');
+    for (const attr of ['class', 'id', 'style', 'dir', 'lang', 'title']) {
+      const value = marquee.getAttribute(attr);
+      if (value !== null) block.setAttribute(attr, value);
+    }
+    block.append(...marquee.childNodes);
+    marquee.replaceWith(block);
+  }
+  for (const el of doc.querySelectorAll('animate, animateTransform, animateMotion, animateColor, set, discard')) el.remove();
+  for (const bar of doc.querySelectorAll('progress:not([value])')) bar.setAttribute('value', '0');
+  for (const el of doc.querySelectorAll<HTMLElement>('[style]')) {
+    const style = el.getAttribute('style') ?? '';
+    const kept = stillCss(style.replace(/(^|;)\s*(-[a-z]+-)?(animation|transition)[a-z-]*\s*:[^;]*/gi, '$1').replace(/;\s*(?=;)/g, '').replace(/^\s*;\s*/, ''));
+    if (kept !== style) el.setAttribute('style', kept);
+  }
+  for (const sheet of doc.querySelectorAll('style')) {
+    const css = sheet.textContent ?? '';
+    const kept = stillCss(css);
+    if (kept !== css) sheet.textContent = kept;
+  }
+  for (const el of doc.querySelectorAll('[src], [poster], [href], [data]')) {
+    for (const attr of ['src', 'poster', 'href', 'xlink:href', 'data']) {
+      const value = el.getAttribute(attr);
+      if (value && isMovingDataImage(value)) el.setAttribute(attr, STILL_PIXEL);
+    }
+  }
+  // A picture's other sources could each move; a face draws its `src` only.
+  for (const el of doc.querySelectorAll('[srcset]')) el.removeAttribute('srcset');
+  for (const source of doc.querySelectorAll('picture > source')) source.remove();
+}
+
+/** CSS with each `url(data:…)` picture that moves replaced by `none`. */
+function stillCss(css: string): string {
+  return css.replace(/url\(\s*(['"]?)(data:[^'")]*)\1\s*\)/gi, (whole, _q: string, url: string) => (isMovingDataImage(url) ? 'none' : whole));
+}
+
+/**
+ * A `data:` picture that moves by itself: a GIF with more than one frame or a loop, a WebP with an `ANIM` chunk, an
+ * APNG (`acTL`), an AVIF sequence (`avis`), or an SVG with animation in it. Anything not a `data:` picture: false.
+ */
+export function isMovingDataImage(url: string): boolean {
+  const match = /^\s*data:image\/([a-z0-9.+-]+)((?:;[^,]*)?),(.*)$/is.exec(url);
+  if (!match) return false;
+  const type = match[1]!.toLowerCase();
+  let bytes: string;
+  try {
+    bytes = /;base64/i.test(match[2]!) ? atob(match[3]!.replace(/\s+/g, '')) : decodeURIComponent(match[3]!);
+  } catch {
+    return false;
+  }
+  if (type === 'svg+xml') return /<(animate|animateTransform|animateMotion|animateColor|set)\b|@keyframes|animation\s*:|transition\s*:/i.test(bytes);
+  if (type === 'gif') return bytes.includes('NETSCAPE2.0') || bytes.includes('ANIMEXTS1.0') || bytes.split('\x21\xF9\x04').length > 2;
+  if (type === 'webp') return bytes.includes('ANIM');
+  if (type === 'png' || type === 'apng') return bytes.includes('acTL');
+  if (type === 'avif') return bytes.slice(0, 64).includes('avis');
+  return false;
 }
 
 export function PlanHtmlFrame({ html, title }: { html: string; title: string }) {

@@ -5,7 +5,8 @@
  * same-origin, the page's server session on the one write).
  *
  *   GET  /api/plans                          every plan, newest change first, with the person's look; the person's
- *                                            pins in their order (`pins`) and the Spaces home's view (`view`)
+ *                                            pins in their order (`pins`) and the Spaces home's view (`view`); with
+ *                                            an `ETag`, and 304 for an `If-None-Match` that is still the answer
  *   POST /api/plans/pins                     { id, pinned, index? }: pin a plan (at `index`, else last), move it, or
  *                                            unpin it; answers the order (`pins`)
  *   POST /api/plans/view                     { view }: the Spaces home's view, "cards" or "list" (config.json)
@@ -13,7 +14,8 @@
  *   GET  /api/plans/:id/files/<asset_path>   an artifact's bytes (a raster picture as itself, other text as plain
  *                                            text, anything else as a download: `artifactServedType`)
  *   GET  /api/plans/:id/versions[?doc=]      a document's versions (the primary one without doc)
- *   GET  /api/plans/:id/versions/:n[?doc=]   one version's bytes, as saved
+ *   GET  /api/plans/:id/versions/:n[?doc=]   one version's bytes, as saved; `face=1`: the top a face draws, as
+ *                                            `PlanFaceText` (a document's first 16 KB, an HTML page up to 512 KB)
  *   GET  /api/plans/:id/diff[?doc=&from=&to=]  the two texts a diff needs: `to` the head unless named, `from` the
  *                                            version the person last saw (else the one before `to`)
  *   POST /api/plans/:id/look                 { doc?, seen? }: the person looked (and saw version `seen`)
@@ -44,7 +46,7 @@ import type { PlanStore } from "./store";
 export const PLANS_ROUTE_PREFIX = "/api/plans";
 
 export type PlanRouteResult =
-  | { status: number; body: unknown }
+  | { status: number; body: unknown; etag?: string }
   | { status: 200; file: { path: string; contentType: string } };
 
 export interface PlanRouteRequest {
@@ -54,6 +56,8 @@ export interface PlanRouteRequest {
   params: URLSearchParams;
   /** The JSON body of a POST; it throws on bad JSON. */
   json: () => Promise<unknown>;
+  /** The request's `If-None-Match` (the list's last `ETag`), if any. */
+  ifNoneMatch?: string | null;
 }
 
 export interface PlanRouteDeps {
@@ -103,6 +107,13 @@ async function bodyOf(req: PlanRouteRequest): Promise<{ value: unknown } | null>
   }
 }
 
+/** FNV-1a, 32 bits, as hex: a short tag for the list's stamp (not a secret). */
+function hashOf(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(16).padStart(8, "0");
+}
+
 /** True for `/api/plans` and every path under it. */
 export function isPlansPath(pathname: string): boolean {
   return pathname === PLANS_ROUTE_PREFIX || pathname.startsWith(`${PLANS_ROUTE_PREFIX}/`);
@@ -122,7 +133,13 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
 
   if (parts.length === 0) {
     if (method !== "GET") return bad("method not allowed", 405);
-    return { status: 200, body: { plans: store.list(), importing: deps.importing?.() ?? false, import_error: deps.importError?.() ?? null, pins: store.pins(), view: deps.view?.read() ?? "cards" } };
+    const importing = deps.importing?.() ?? false;
+    const importError = deps.importError?.() ?? null;
+    const view = deps.view?.read() ?? "cards";
+    // The same files, import state and view are the same answer: a window polling it is told so without a read.
+    const etag = `"${hashOf(JSON.stringify([store.listStamp(), importing, importError, view]))}"`;
+    if (req.ifNoneMatch === etag) return { status: 304, body: null, etag };
+    return { status: 200, body: { plans: store.list(), importing, import_error: importError, pins: store.pins(), view }, etag };
   }
 
   if (parts.length === 1 && parts[0] === "pins") {
@@ -285,6 +302,10 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
     if (method !== "GET") return bad("method not allowed", 405);
     const n = Number(parts[2]);
     if (!isPlanVersionNumber(n) || String(n) !== parts[2]) return bad("a version number", 404);
+    if (req.params.get("face") === "1") {
+      const face = store.versionFace(id, docId, n);
+      return face ? { status: 200, body: face } : bad(`${id} has no version ${n}.`, 404);
+    }
     const path = store.versionPath(id, docId, n);
     if (!path) return bad(`${id} has no version ${n}.`, 404);
     const ext = path.slice(path.lastIndexOf(".") + 1);

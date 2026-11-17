@@ -3,17 +3,22 @@
  * - the fact: "Your move" on a version the person already decided on, made themselves, or on a plan not active; an
  *   agent "is working" without a known live link to that very plan (never guessed from a project or a time);
  * - the unread dot on what the person read, decided on or wrote; none on a version that came since;
- * - "Now" holding a plan that waits on no one, or losing one that waits; Recent not newest first;
- * - a project's scope taking another project's plans, or losing one known only by its name or folder;
+ * - "Now" (`NOW_RULE` "fresh") holding a plan that waits on no one, an old plan that waits and was read (it keeps
+ *   "Your move" in Recent), or losing a fresh one that waits, an unread one, or one a linked agent is on; Recent not
+ *   newest first;
+ * - a project's scope taking another project's plans, or losing one known only by its name or folder, or one filed
+ *   under a project combined into it;
  * - search missing a title that holds every word, or matching one that does not;
  * - pins out of the person's order, or keeping a plan that is gone;
  * - the held layout moving a card under the person, showing a new plan before Show, or counting as "updates" what
  *   is already drawn in place or only pushed down by another;
- * - a document's face saying its title twice, or losing a heading that is not the title.
+ * - a document's face saying its title twice, or losing a heading that is not the title; faces of plans that all open
+ *   with "## Context" starting alike; a table, steps or code just below what a card shows staying out of view, or the
+ *   face reordering or inventing text to show it.
  */
 import { describe, expect, test } from 'bun:test';
 import type { PlanSummary } from '@plannotator/core/plans';
-import { faceMarkdown, factWords, heldLayout, homeSections, inProject, isYourMove, pinnedPlans, projectGroups, searchPlans, spaceDate, spaceFact, spaceKind, spaceUnread, type SpaceWork } from './spacesModel';
+import { FACE_VISIBLE_LINES, NOW_FRESH_MS, NOW_RULE, faceMarkdown, factWords, heldLayout, homeSections, inProject, isNow, isYourMove, pinnedPlans, projectGroups, searchPlans, spaceDate, spaceFact, spaceKind, spaceUnread, type SpaceWork } from './spacesModel';
 
 let n = 0;
 function summary(over: Partial<PlanSummary> = {}): PlanSummary {
@@ -92,14 +97,37 @@ test('the kind: an HTML main page is a page; Markdown and diagrams are documents
 });
 
 test('Now holds only what waits (on the person, or a linked agent); Recent is the rest, newest first', () => {
+  const at = Date.parse('2026-11-04T12:00:00.000Z');
   const waits = summary({ updated_at: '2026-11-03T09:00:00.000Z' });
   const done = summary({ decided_versions: [2], updated_at: '2026-11-09T09:00:00.000Z' });
   const older = summary({ decided_versions: [2], updated_at: '2026-11-04T09:00:00.000Z' });
   const worked = summary({ decided_versions: [2], updated_at: '2026-11-02T09:00:00.000Z' });
-  const sections = homeSections([older, worked, waits, done], work(worked.id));
+  const sections = homeSections([older, worked, waits, done], work(worked.id), at);
   expect(sections.now.map((p) => p.id)).toEqual([waits.id, worked.id]);
   expect(sections.recent.map((p) => p.id)).toEqual([done.id, older.id]);
-  expect(homeSections([older, worked, waits, done], null).now.map((p) => p.id)).toEqual([waits.id]);
+  expect(homeSections([older, worked, waits, done], null, at).now.map((p) => p.id)).toEqual([waits.id]);
+});
+
+test('Now ("fresh"): a version that waits stays 3 days; older and read, it keeps "Your move" in Recent; unread stays', () => {
+  expect(NOW_RULE).toBe('fresh');
+  const at = Date.parse('2026-11-20T12:00:00.000Z');
+  const ago = (ms: number) => new Date(at - ms).toISOString();
+  // Read (seen v2) and undecided: in Now for 3 days from when v2 came (`head_at`, not a later change).
+  const fresh = summary({ seen_version_number: 2, head_at: ago(NOW_FRESH_MS - 60_000), updated_at: ago(1000) });
+  const stale = summary({ seen_version_number: 2, head_at: ago(NOW_FRESH_MS + 60_000), updated_at: ago(1000) });
+  // An older line without `head_at`: its last change stands in.
+  const staleOld = summary({ seen_version_number: 2, head_at: undefined, updated_at: ago(NOW_FRESH_MS * 2) });
+  // A version came the person has not seen: in Now however old.
+  const unread = summary({ seen_version_number: 1, head_at: ago(NOW_FRESH_MS * 5), updated_at: ago(NOW_FRESH_MS * 5) });
+  const decided = summary({ seen_version_number: 2, decided_versions: [2], head_at: ago(1000) });
+  expect([fresh, stale, staleOld, unread, decided].map((p) => isNow(p, null, at))).toEqual([true, false, false, true, false]);
+  // Out of Now, the fact still says whose move it is.
+  expect(factWords(spaceFact(stale, null))).toBe('Your move');
+  const { now, recent } = homeSections([fresh, stale, unread, decided], null, at);
+  expect(now.map((p) => p.id).sort()).toEqual([fresh.id, unread.id].sort());
+  expect(recent.map((p) => p.id).sort()).toEqual([stale.id, decided.id].sort());
+  // A live session known to be on it: in Now, whatever else.
+  expect(isNow(decided, work(decided.id), at)).toBe(true);
 });
 
 test('a project scope: by the project id, else its name or folder name; never another project', () => {
@@ -110,6 +138,11 @@ test('a project scope: by the project id, else its name or folder name; never an
   const none = summary({ project_id: null, project_name: null });
   const scoped = inProject([byId, byName, byFolder, other, none], { id: 'prj_a', name: 'harbor-api', root: '/work/harbor/' });
   expect(scoped.map((p) => p.id).sort()).toEqual([byId.id, byName.id, byFolder.id].sort());
+  // Combined projects: a plan filed under a member (its id, its name or its folder) is the head's.
+  const memberId = summary({ project_id: 'prj_m', project_name: 'old-name' });
+  const memberFolder = summary({ project_id: null, project_name: 'harbor-old' });
+  const head = { id: 'prj_a', name: 'harbor-api', root: '/work/harbor/', combined: [{ id: 'prj_m', name: 'harbor-old', root: '/work/harbor-old' }] };
+  expect(inProject([memberId, memberFolder, other], head).map((p) => p.id).sort()).toEqual([memberId.id, memberFolder.id].sort());
   // All plans by project: newest first in each, projects by their newest; no project under its own name.
   const groups = projectGroups([byName, none, other]);
   expect(groups.map((g) => g.project).sort()).toEqual(['No project', 'harbor-api']);
@@ -177,9 +210,44 @@ describe('a document\'s face', () => {
   test('a first heading that is the title is left out; any other heading stays', () => {
     expect(faceMarkdown('# Rotate refresh tokens\n\nRetire keys after 14 days.\n', 'Rotate refresh tokens')).toBe('Retire keys after 14 days.\n');
     expect(faceMarkdown('\n\n## **Rotate**  refresh tokens ##\nBody', 'rotate refresh tokens')).toBe('Body');
-    expect(faceMarkdown('# Context\n\nWhy now.', 'Rotate refresh tokens')).toBe('# Context\n\nWhy now.');
+    expect(faceMarkdown('# Rollout\n\nWhy now.', 'Rotate refresh tokens')).toBe('# Rollout\n\nWhy now.');
     // Only the first heading: a later one with the title's words stays.
     expect(faceMarkdown('Intro line.\n\n# Rotate refresh tokens\n', 'Rotate refresh tokens')).toBe('Intro line.\n\n# Rotate refresh tokens\n');
+  });
+
+  test('plans that all open with "## Context" start with their own words', () => {
+    const plans = [
+      ['Sessions in Redis', '# Sessions in Redis\n\n## Context\n\nSessions live in Postgres and every request reads one.\n\n## Approach\n\n- Move them.\n'],
+      ['Offline drafts', '# Offline drafts\n\n## Context\n\nA note typed on the train is lost when the app closes.\n\n## Approach\n\n- Keep drafts.\n'],
+      ['Rate limits', '## Context:\n\nOne noisy key can starve every other customer.\n'],
+    ];
+    const firsts = plans.map(([title, text]) => faceMarkdown(text!, title!).split('\n')[0]);
+    expect(firsts).toEqual(['Sessions live in Postgres and every request reads one.', 'A note typed on the train is lost when the app closes.', 'One noisy key can starve every other customer.']);
+    // Only a leading one: "Overview" later on stays, and a heading that is not generic leads.
+    expect(faceMarkdown('## Rollout\n\nText.\n\n## Overview\n\nMore.', 'x')).toBe('## Rollout\n\nText.\n\n## Overview\n\nMore.');
+  });
+
+  test('a table, steps or code just below what a card shows is brought up by whole blocks; never reordered', () => {
+    const prose = (i: number) => `Paragraph ${i} ${'words that wrap across the sheet '.repeat(4)}`;
+    const text = ['# Plan', '', prose(1), '', prose(2), '', '## Steps', '', '1. First.', '2. Second.', '3. Third.', '', '## Later', '', 'Tail.'].join('\n');
+    const face = faceMarkdown(text, 'Plan');
+    const lines = text.split('\n');
+    // A suffix of the page, from a block's start: nothing invented, nothing moved.
+    expect(lines.slice(lines.length - face.split('\n').length).join('\n')).toBe(face);
+    // The steps' heading and first step are within what the card shows (about FACE_VISIBLE_LINES sheet lines).
+    const shown = face.split('\n');
+    expect(shown.indexOf('1. First.')).toBeGreaterThan(-1);
+    expect(shown.indexOf('1. First.')).toBeLessThan(FACE_VISIBLE_LINES);
+    expect(face.startsWith('Paragraph 1')).toBe(false);
+    // A moved start is content, never a heading ("## Approach" would make faces alike again).
+    const table = ['## Context', '', prose(1), '', prose(2), '', '## Approach', '', '- A token bucket per key.', '- Answer 429.', '- Log the key.', '', '| Tier | Per minute |', '| - | - |', '| Free | 60 |', '| Team | 600 |'].join('\n');
+    expect(faceMarkdown(table, 'Rate limits').split('\n')[0]).toBe('- A token bucket per key.');
+    // Nothing of that kind near the top: the face starts at the top.
+    const plain = ['# Plan', '', prose(1), '', prose(2), '', prose(3)].join('\n');
+    expect(faceMarkdown(plain, 'Plan').startsWith('Paragraph 1')).toBe(true);
+    // Already in view: no shift.
+    const near = ['# Plan', '', 'Short intro.', '', '| a | b |', '| - | - |', '| 1 | 2 |'].join('\n');
+    expect(faceMarkdown(near, 'Plan').startsWith('Short intro.')).toBe(true);
   });
 
   test('past a front matter block; only its top', () => {

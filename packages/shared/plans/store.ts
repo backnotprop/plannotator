@@ -25,7 +25,7 @@
  *
  * Nothing here runs unless a caller asks: creating the store reads and writes nothing.
  */
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, appendFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, appendFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -47,6 +47,9 @@ import {
   planApprovalState,
   planPinsWith,
   planDecisionVersion,
+  PLAN_FACE_HTML_MAX,
+  PLAN_FACE_TEXT_BYTES,
+  type PlanFaceText,
   type PlanActor,
   type PlanArtifact,
   type PlanComment,
@@ -185,6 +188,13 @@ export interface PlanStore {
   /** A version's file on disk, or null. */
   versionPath(id: string, docId: string, n: number): string | null;
   versionBytes(id: string, docId: string, n: number): Uint8Array | null;
+  /** The top of a version for its face on the Spaces home (`PlanFaceText`), or null when there is no such version. */
+  versionFace(id: string, docId: string, n: number): PlanFaceText | null;
+  /**
+   * A stamp of the files the list and the pins are read from (each one's inode, size and time): equal stamps, equal
+   * answers. Cheap: three stats, no read.
+   */
+  listStamp(): string;
   events(id: string): PlanEvent[];
   looks(): PlanLooks;
   /** The person's pinned plans, in their order (a plan no longer here is left out). */
@@ -391,6 +401,7 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       primary_kind: primary?.kind ?? "markdown",
       head_source: headVersion?.source ?? null,
       decided_versions: decided,
+      head_at: headVersion?.committed_at ?? null,
     };
   };
 
@@ -456,6 +467,40 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       } catch {
         return null;
       }
+    },
+
+    versionFace(id, docId, n) {
+      const path = this.versionPath(id, docId, n);
+      if (!path) return null;
+      try {
+        const size = statSync(path).size;
+        if (path.endsWith(".html")) return size > PLAN_FACE_HTML_MAX ? { text: null, cut: false } : { text: readFileSync(path, "utf8"), cut: false };
+        if (size <= PLAN_FACE_TEXT_BYTES) return { text: readFileSync(path, "utf8"), cut: false };
+        const fd = openSync(path, "r");
+        try {
+          const bytes = Buffer.alloc(PLAN_FACE_TEXT_BYTES);
+          const got = readSync(fd, bytes, 0, PLAN_FACE_TEXT_BYTES, 0);
+          // Cut at the last line's end, so no character is cut in two (a newline is never inside one in UTF-8).
+          const end = bytes.subarray(0, got).lastIndexOf(0x0a);
+          return { text: bytes.subarray(0, end > 0 ? end : got).toString("utf8"), cut: true };
+        } finally {
+          closeSync(fd);
+        }
+      } catch {
+        return null;
+      }
+    },
+
+    listStamp() {
+      const stamp = (name: string) => {
+        try {
+          const s = statSync(join(root, name));
+          return `${s.ino}:${s.size}:${s.mtimeMs}`;
+        } catch {
+          return "-";
+        }
+      };
+      return [PLAN_INDEX_FILE, PLAN_LOOKS_FILE, PLAN_PINS_FILE].map(stamp).join("|");
     },
 
     events: eventsOf,

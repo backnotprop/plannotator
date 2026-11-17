@@ -64,10 +64,9 @@ const planOf = () => {
 
 type SpacePinAction = 'unpin' | 'up' | 'down';
 
-/** Move a pinned space one up or down, or unpin it; a failed write puts the order back (the store does). */
+/** Move a pinned space one up or down, or unpin it; a failed write puts the order back and says so (the store does). */
 export function runSpacePin(id: string, index: number, action: SpacePinAction): void {
-  const done = action === 'unpin' ? setPlanPin(id, false) : setPlanPin(id, true, action === 'up' ? Math.max(0, index - 1) : index + 1);
-  void done.catch(() => {});
+  void (action === 'unpin' ? setPlanPin(id, false) : setPlanPin(id, true, action === 'up' ? Math.max(0, index - 1) : index + 1));
 }
 
 /** One pinned space: the pinned threads' row (PinnedRow.tsx), with the plan's unread dot and its fact in the tooltip. */

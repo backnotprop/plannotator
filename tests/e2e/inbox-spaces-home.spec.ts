@@ -1,7 +1,9 @@
 /**
  * The Spaces home (approval "plans-home"): with Plans on, the sidebar's Spaces row opens the home; "Now" holds the
  * plan that waits on the person, "Recent" the rest; the list view is kept for the person (config.json, so a reload
- * opens on it); a card's pin lists the space in the sidebar; a card opens its plan page, whose crumbs say Spaces.
+ * opens on it); a card's pin lists the space in the sidebar; a card opens its plan page, whose crumbs say Spaces. An
+ * HTML page's face moves nothing in a real browser: its CSS animation computes to none (approval "plans-home": "Idle
+ * page: nothing moves").
  * Real browser, compiled binary, temp PLANNOTATOR_DATA_DIR and HOME; the plan library is seeded with the store before
  * the Inbox starts (Plans on in config.json).
  *
@@ -43,6 +45,10 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
     return plan.id;
   };
   const waiting = seed('Rate limits per API key', 'ledger', 14, false);
+  // An HTML main page whose own CSS animates (and says so with !important): its face must not move.
+  const mockup = store.createPlan({ name: 'Pricing page mockup', project_name: 'ledger', created_at: '2026-11-13T09:00:00.000Z', document: { title: 'Pricing page mockup', kind: 'html' } });
+  const spinning = '<style>.spin { animation: spin 1s linear infinite !important; } @keyframes spin { to { transform: rotate(1turn); } }</style><h1>Pricing</h1><div class="spin" style="animation: spin 2s infinite">Loading</div>';
+  store.addVersion(mockup.plan.id, mockup.document.id, { bytes: new TextEncoder().encode(spinning), committed_at: '2026-11-13T09:00:00.000Z', source: 'plan-review', author_via: 'plan-review' });
   const done = ['Nightly export in batches', 'Checkout on one page', 'Sessions in Redis', 'Offline drafts'].map((name, i) => seed(name, i % 2 ? 'ledger' : 'field-notes', 10 + i, true));
 
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
@@ -62,13 +68,18 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
     await expect(home.locator('h1')).toHaveText('What do you want to plan?');
     await expect(home.locator('[data-spaces-local]')).toHaveText('On this computer');
     const now = home.locator('[data-spaces-section="now"] [data-space]');
-    await expect(now).toHaveCount(1);
+    await expect(now).toHaveCount(2);
     await expect(now.first()).toHaveAttribute('data-space', waiting);
     await expect(now.first().locator('.fc-fact')).toHaveText('Your move');
     await expect(home.locator('[data-spaces-section="recent"] [data-space]')).toHaveCount(done.length);
     // The face is the plan's own top, its title not said twice.
     await expect(now.first().locator('[data-space-face="document"]')).toContainText('Why rate limits per api key now.');
     await expect(now.first().locator('[data-space-face="document"]')).not.toContainText('Rate limits per API key');
+    // The HTML page's face: drawn, and still (its animation, the page's own with !important and inline, is none).
+    const frameEl = home.locator(`[data-space="${mockup.plan.id}"] iframe`);
+    await expect(frameEl).toHaveCount(1);
+    const frame = await (await frameEl.elementHandle())!.contentFrame();
+    await expect.poll(() => frame!.evaluate(() => getComputedStyle(document.querySelector('.spin')!).animationName)).toBe('none');
     await page.screenshot({ path: join(proofDir, 'cards-light.png') });
 
     // The list view, kept for the person: config.json says so and a reload opens on it.

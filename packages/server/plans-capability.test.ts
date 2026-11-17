@@ -202,6 +202,29 @@ describe("Plans on", () => {
     await capability.importing();
   });
 
+  test("the home's poll: 304 with no body while nothing changed, and it picks up plan history at most once per pollPickUpMs", async () => {
+    historyFixture();
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const get = (path: string, etag?: string) => routeInboxCapabilities(list, new Request(`http://127.0.0.1:1${path}`, etag ? { headers: { "If-None-Match": etag } } : {}), new URL(`http://127.0.0.1:1${path}`), owner);
+    // An ordinary read picks up (and the whole import runs once).
+    await get("/api/plans");
+    await capability.importing();
+    const answer = (await get("/api/plans?poll=1"))!;
+    // A poll right after: no pickup (the last one was under a minute ago).
+    expect(capability.importing()).toBeNull();
+    const etag = answer.headers.get("ETag")!;
+    expect(etag).toBeTruthy();
+    const unchanged = (await get("/api/plans?poll=1", etag))!;
+    expect(unchanged.status).toBe(304);
+    expect(await unchanged.text()).toBe("");
+    expect(capability.importing()).toBeNull();
+    // An ordinary read still picks up at once.
+    await get("/api/plans");
+    expect(capability.importing()).not.toBeNull();
+    await capability.importing();
+  });
+
   test("an import that keeps failing waits longer each time, is logged once, says so in the list, and Try again runs it now", async () => {
     historyFixture();
     const lines: string[] = [];

@@ -3703,7 +3703,7 @@ function Inbox() {
   const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings);
-  const plansOn = usePlansOn(settings);
+  const plansOn = usePlansOn(settings, showToast);
 
   const projects = latest?.projects ?? [];
   /**

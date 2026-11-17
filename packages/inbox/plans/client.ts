@@ -4,7 +4,7 @@
  * route, so a phone's door or a linked machine gets the unknown-route 404. Every write (a look, a comment kept or
  * taken away) carries the page's `serverSession`.
  */
-import type { PlanApprovalCleared, PlanApprovalMoved, PlanArtifact, PlanComment, PlanDecision, PlanDocument, PlanEvent, PlanLook, PlanRecord, PlanSummary, PlanVersion, SpacesView } from '@plannotator/core/plans';
+import type { PlanApprovalCleared, PlanApprovalMoved, PlanArtifact, PlanComment, PlanDecision, PlanDocument, PlanEvent, PlanFaceText, PlanLook, PlanRecord, PlanSummary, PlanVersion, SpacesView } from '@plannotator/core/plans';
 import { pageServerSession } from '../api';
 import { readJson } from '../apiError';
 
@@ -79,14 +79,27 @@ async function text(path: string): Promise<string> {
   return response.text();
 }
 
+/**
+ * The list. `retry`: the list's Try again, so the Inbox reads the plan history now, whatever its wait after a failure.
+ * `poll`: the home's every-5-s read (the Inbox picks up plan history less often for it). `etag`: the last answer's
+ * tag: an unchanged list answers 304, here null (nothing to draw again).
+ */
+async function list(retry = false, options: { poll?: boolean; etag?: string | null } = {}): Promise<{ list: PlansList; etag: string | null } | null> {
+  const query = retry ? '?retry=1' : options.poll ? '?poll=1' : '';
+  const response = await fetch(`${BASE}${query}`, { headers: { Accept: 'application/json', ...(options.etag ? { 'If-None-Match': options.etag } : {}) }, cache: 'no-store' });
+  if (response.status === 304) return null;
+  return { list: await readJson<PlansList>(response), etag: response.headers.get('ETag') };
+}
+
 export const plansApi = {
-  /** `retry`: the list's Try again, so the Inbox reads the plan history now, whatever its wait after a failure. */
-  list: (retry = false) => get<PlansList>(retry ? `${BASE}?retry=1` : BASE),
+  list,
   read: (id: string) => get<PlanRead>(one(id)),
   /** A document's versions (`doc` null: the primary one). */
   versions: (id: string, doc: string | null = null) => get<{ document_id: string; versions: PlanVersion[] }>(one(id, `/versions${docQuery(doc, '?')}`)),
   /** One version's text, as saved. */
   version: (id: string, n: number, doc: string | null = null) => text(one(id, `/versions/${n}${docQuery(doc, '?')}`)),
+  /** The top of the main page's version `n`, as its face on the Spaces home draws it (null text: too big to draw). */
+  face: (id: string, n: number) => get<PlanFaceText>(one(id, `/versions/${n}?face=1`)),
   /** Where one version's bytes are (its Download). */
   versionUrl: (id: string, n: number, doc: string | null = null) => one(id, `/versions/${n}${docQuery(doc, '?')}`),
   /** Keep the person's comment on version `n` of a document (`doc` null: the primary one), new or edited. */
@@ -107,14 +120,14 @@ export const plansApi = {
   saveVersion: (id: string, base: number, change: { text: string } | { restore: number }, doc: string | null = null) => post<PlanVersionSaved>(one(id, '/versions'), { ...(doc ? { doc } : {}), base, ...change }),
   /** Approve the version on screen; refused (409, `moved_on`) when a newer one came. */
   approve: (id: string, version: number, doc: string | null = null) => post<{ decision: PlanDecision }>(one(id, '/approve'), doc ? { doc, version } : { version }),
-  /**
-   * A Send went out (`thread_id`, the message that carried it; null: held for another machine, whose thread is not
-   * known here): its comments are sent, the plan has that thread, and `told` is the version a Direct Edits section carried.
-   */
   /** Pin a plan (at `index`, else last), move it, or unpin it: the order after. */
   pin: (id: string, pinned: boolean, index: number | null = null) => post<{ pins: string[] }>(`${BASE}/pins`, index === null ? { id, pinned } : { id, pinned, index }),
   /** Keep the Spaces home's view for the person (config.json). */
   saveView: (view: SpacesView) => post<{ view: SpacesView }>(`${BASE}/view`, { view }),
+  /**
+   * A Send went out (`thread_id`, the message that carried it; null: held for another machine, whose thread is not
+   * known here): its comments are sent, the plan has that thread, and `told` is the version a Direct Edits section carried.
+   */
   sent: (id: string, sent: { thread_id: string | null; message_id: string; to: { host: string; session: string } | null; comments: string[]; told?: { doc: string; version: number } | null }) => post<{ plan: PlanRecord; comments: PlanComment[] }>(one(id, '/sent'), sent),
 };
 

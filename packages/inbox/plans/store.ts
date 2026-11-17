@@ -2,13 +2,17 @@
  * The window's Plans data: the list, read once and shared (the sidebar's count and the home page), one plan with its
  * versions, a version's text and the two texts of a diff. Read only while Plans is on and something shows it. There
  * is no Plans event on the stream yet, so the list is read when the page opens, when the window comes back into
- * view, and every 2 s while the Inbox is still bringing in plan history (`importing`); each read also has the Inbox
- * pick up what plan review wrote since (packages/server/plans-capability.ts).
+ * view, every 5 s while the Spaces home is shown, and every 2 s while the Inbox is still bringing in plan history
+ * (`importing`); each read also has the Inbox pick up what plan review wrote since (packages/server/plans-capability.ts).
+ * A read that brings nothing new changes nothing: the Inbox answers 304 to the last `ETag`, and an answer equal to
+ * what is shown is not passed on, so nothing draws again.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { planPinsWith, type PlanSummary, type PlanVersion, type SpacesView } from '@plannotator/core/plans';
+import { planPinsWith, type PlanFaceText, type PlanSummary, type PlanVersion, type SpacesView } from '@plannotator/core/plans';
 import type { SettingsModel } from '../api';
+import type { InboxToastModel } from '../components/Toast';
 import { InboxApiError } from '../apiError';
+import { errorToast } from '../toastError';
 import { plansApi, type PlanDiffTexts, type PlanRead } from './client';
 import { setSidebarUnsaved } from '../sidebarLayout';
 
@@ -34,6 +38,11 @@ let snap = EMPTY;
 let reading: Promise<void> | null = null;
 let pollTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
+// The last list answer's tag (the Inbox answers 304 while it holds), and what the shown plans were read as.
+let listTag: string | null = null;
+let plansRead = '';
+// Each pin or view written here counts one: a read that began before a write does not put back what it held.
+let writeGen = 0;
 
 function emit(next: Partial<PlansSnapshot>) {
   snap = { ...snap, ...next };
@@ -42,14 +51,51 @@ function emit(next: Partial<PlansSnapshot>) {
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const isOff = (error: unknown) => error instanceof InboxApiError && error.status === 404;
+const samePins = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
 
-/** `retry`: the list's Try again after the Inbox could not read the plan history. */
-export function readPlans(retry = false): Promise<void> {
+/** The old home's "compact" choice (this browser's), carried to the Spaces list once, then forgotten. */
+export const OLD_PLANS_VIEW_KEY = 'plannotator-inbox-plans-view';
+function carryOldView(view: SpacesView): void {
+  try {
+    const old = localStorage.getItem(OLD_PLANS_VIEW_KEY);
+    if (old === null) return;
+    localStorage.removeItem(OLD_PLANS_VIEW_KEY);
+    if (old === 'compact' && view !== 'list') void setSpacesView('list');
+  } catch {
+    // No storage here: nothing to carry.
+  }
+}
+
+/** `retry`: the list's Try again after the Inbox could not read the plan history. `poll`: the home's timed read. */
+export function readPlans(retry = false, poll = false): Promise<void> {
   if (!on) return Promise.resolve();
   if (reading) return reading;
-  reading = plansApi.list(retry).then(
-    // A pin or view written while this read was out wins: the read does not put back what it held before.
-    (answer) => emit({ plans: answer.plans, importing: answer.importing, error: null, off: false, importError: answer.import_error ?? null, ...(pinWrites > 0 ? {} : { pins: answer.pins ?? [] }), ...(viewWrites > 0 ? {} : { view: answer.view ?? 'cards' }) }),
+  const gen = writeGen;
+  reading = plansApi.list(retry, { poll, etag: snap.plans && !snap.error && !snap.off ? listTag : null }).then(
+    (got) => {
+      // 304: the list is what it was.
+      if (!got) return;
+      const answer = got.list;
+      const next: Partial<PlansSnapshot> = {};
+      const read = JSON.stringify(answer.plans);
+      if (snap.plans === null || read !== plansRead) {
+        next.plans = answer.plans;
+        plansRead = read;
+      }
+      if (snap.importing !== answer.importing) next.importing = answer.importing;
+      if (snap.error !== null) next.error = null;
+      if (snap.off) next.off = false;
+      if (snap.importError !== (answer.import_error ?? null)) next.importError = answer.import_error ?? null;
+      // A pin or view written since this read began (or still on its way) wins: the read does not put back what it
+      // held before, and the next read is a whole one.
+      const stale = gen !== writeGen || pinWrites > 0 || viewWrites > 0;
+      listTag = stale ? null : got.etag;
+      if (!stale && !samePins(snap.pins, answer.pins ?? [])) next.pins = answer.pins ?? [];
+      if (!stale && snap.view !== (answer.view ?? 'cards')) next.view = answer.view ?? 'cards';
+      const first = snap.view === null && next.view;
+      if (Object.keys(next).length) emit(next);
+      if (first) carryOldView(next.view!);
+    },
     (error: unknown) => emit(isOff(error) ? { off: true, error: null } : { error: messageOf(error) }),
   );
   return reading.finally(() => {
@@ -97,7 +143,7 @@ export function usePlansPage(): PlansSnapshot {
       if (document.visibilityState === 'visible') void readPlans();
     };
     document.addEventListener('visibilitychange', back);
-    const timer = setInterval(back, PLANS_HOME_POLL_MS);
+    const timer = setInterval(() => document.visibilityState === 'visible' && void readPlans(false, true), PLANS_HOME_POLL_MS);
     return () => {
       document.removeEventListener('visibilitychange', back);
       clearInterval(timer);
@@ -106,11 +152,22 @@ export function usePlansPage(): PlansSnapshot {
   return usePlans();
 }
 
-/** The window's switch, from its settings (`plans` is present only while on). */
-export function usePlansOn(settings: Pick<SettingsModel, 'plans'> | null): boolean {
+type PlansToast = (toast: Omit<InboxToastModel, 'id'>) => void;
+let toastTo: PlansToast | null = null;
+
+/** The window's switch, from its settings (`plans` is present only while on); `toast`: the window's, for Plans' errors. */
+export function usePlansOn(settings: Pick<SettingsModel, 'plans'> | null, toast?: PlansToast): boolean {
   const value = settings?.plans?.on === true;
   useEffect(() => setPlansOn(value), [value]);
+  useEffect(() => {
+    toastTo = toast ?? null;
+  }, [toast]);
   return value;
+}
+
+/** A Plans write failed: the window's toast says so (as every Inbox write does), where there is a window. */
+export function plansWriteFailed(cause: unknown, fallback: string): void {
+  toastTo?.(errorToast(cause, fallback));
 }
 
 let pinWrites = 0;
@@ -118,10 +175,11 @@ let viewWrites = 0;
 
 /**
  * Pin a plan (at `index`, else last), move it, or unpin it: shown at once, then the Inbox's order. A failed write puts
- * the order back and says why (the caller's toast or line).
+ * the order back and the window's toast says so ("The space was not pinned.").
  */
 export async function setPlanPin(id: string, pinned: boolean, index: number | null = null): Promise<void> {
   const before = snap.pins;
+  writeGen++;
   emit({ pins: planPinsWith(before, id, pinned, index) });
   pinWrites++;
   try {
@@ -129,7 +187,7 @@ export async function setPlanPin(id: string, pinned: boolean, index: number | nu
     emit({ pins: answer.pins });
   } catch (error) {
     emit({ pins: before });
-    throw error;
+    plansWriteFailed(error, !pinned ? 'The space was not unpinned.' : before.includes(id) ? 'The space was not moved.' : 'The space was not pinned.');
   } finally {
     pinWrites--;
   }
@@ -137,6 +195,7 @@ export async function setPlanPin(id: string, pinned: boolean, index: number | nu
 
 /** The Spaces home's view: shown at once, kept for the person; a failed save keeps it for this window. */
 export async function setSpacesView(view: SpacesView): Promise<void> {
+  writeGen++;
   emit({ view });
   viewWrites++;
   try {
@@ -209,8 +268,52 @@ export function useDocVersions(id: string, doc: string | null, retry: number, fr
   return state.key === key ? { versions: state.versions, error: state.error } : { versions: null, error: null };
 }
 
-/** A version's bytes never change, nor an artifact's (a new one is a new record): each is read once per window. */
+/**
+ * A version's bytes never change, nor an artifact's (a new one is a new record): each is read once per window. Reading
+ * a plan document's version drops that document's older versions read before (`forgetOlder`), so a plan that keeps
+ * getting versions does not keep every one.
+ */
 const texts = new Map<string, Promise<string>>();
+
+/** Keys are `<prefix><n>`: drop those of the same prefix below `n`. */
+function forgetOlder<T>(cache: Map<string, T>, prefix: string, n: number): void {
+  for (const key of cache.keys()) {
+    if (!key.startsWith(prefix)) continue;
+    const m = Number(key.slice(prefix.length));
+    if (Number.isInteger(m) && m < n) cache.delete(key);
+  }
+}
+
+/** The faces' tops of versions (`GET …/versions/:n?face=1`), one per plan: a newer one drops the one before. */
+const faces = new Map<string, Promise<PlanFaceText>>();
+
+/**
+ * The top of a plan's main page version `n`, for its face. While a newer version is read, the one before stays (the
+ * face never goes blank); null until the first comes, and when it could not be read.
+ */
+export function useFaceText(id: string, n: number | null): PlanFaceText | null {
+  const [state, setState] = useState<{ id: string; face: PlanFaceText | null }>({ id, face: null });
+  useEffect(() => {
+    if (n === null) return;
+    let live = true;
+    const key = `${id}:${n}`;
+    let read = faces.get(key);
+    if (!read) {
+      read = plansApi.face(id, n);
+      faces.set(key, read);
+      forgetOlder(faces, `${id}:`, n);
+      read.catch(() => faces.delete(key));
+    }
+    read.then(
+      (face) => live && setState({ id, face }),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [id, n]);
+  return state.id === id ? state.face : null;
+}
 
 /** An artifact's bytes as text (an HTML page, an SVG); `hash` tells a changed file from the one read before. */
 export function useArtifactText(id: string, assetPath: string | null, hash: string, retry: number): { text: string | null; error: string | null } {
@@ -246,6 +349,7 @@ export function useVersionText(id: string, n: number | null, retry: number, doc:
     if (!read) {
       read = plansApi.version(id, n, doc);
       texts.set(key, read);
+      forgetOlder(texts, `${id}:${doc ?? ''}:`, n);
       read.catch(() => texts.delete(key));
     }
     read.then(
@@ -282,7 +386,11 @@ export function resetPlansForTests(plans: readonly PlanSummary[] | null = null, 
   if (pollTimer) clearTimeout(pollTimer);
   pollTimer = null;
   texts.clear();
+  faces.clear();
   pinWrites = 0;
   viewWrites = 0;
+  writeGen = 0;
+  listTag = null;
+  plansRead = '';
   snap = { ...EMPTY, plans };
 }

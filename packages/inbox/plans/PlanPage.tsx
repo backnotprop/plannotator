@@ -40,6 +40,7 @@ import { usePlanEditing } from './PlanEditing';
 import { flushQueuedPlanSent, planAgentOf } from './deliver';
 import { useComposeSessions } from '../compose/useComposeSessions';
 import { PlansMessage } from './parts';
+import { closeSpace } from './spacesMotion';
 import { PlanDocument } from './PlanDocument';
 import { PlanAnnotate } from './PlanAnnotate';
 import { PlanDiffView } from './PlanDiffView';
@@ -128,6 +129,16 @@ function useWidth(el: HTMLElement | null): number {
   return width;
 }
 
+/** The "Spaces" crumb: back to the home the plan was opened from, its document shrinking into its card (a plain click). */
+function spacesLink(id: string): ReactElement<{ className?: string }> {
+  const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault();
+    closeSpace(id);
+  };
+  return <a href={hashOf(plansRoute)} onClick={onClick} data-plans-back="" />;
+}
+
 /** A link the router follows in place (a plain click), and the browser opens elsewhere (a modified click). */
 function routeLink(route: Parameters<typeof writeRoute>[0], attrs: Record<string, string> = {}, options?: { replace?: boolean }, after?: () => void): ReactElement<{ className?: string }> {
   const onClick = (e: MouseEvent<HTMLAnchorElement>) => {
@@ -202,11 +213,11 @@ function PlanLoaded({ id, version, diff, phone, doc, file, read, versions, fresh
       <PageHeader
         identity={
           onMain && project ? (
-            <Breadcrumbs root={{ label: 'Spaces', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
+            <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={project} collectionLink={<span data-plan-crumb-project="" />} path={read.plan.name} />
           ) : onMain ? (
-            <Breadcrumbs collectionName="Spaces" collectionLink={routeLink(plansRoute, { 'data-plans-back': '' })} path={read.plan.name} />
+            <Breadcrumbs collectionName="Spaces" collectionLink={spacesLink(id)} path={read.plan.name} />
           ) : (
-            <Breadcrumbs root={{ label: 'Spaces', link: routeLink(plansRoute, { 'data-plans-back': '' }) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
+            <Breadcrumbs root={{ label: 'Spaces', link: spacesLink(id) }} collectionName={read.plan.name} collectionLink={routeLink(planFileRoute(id, primary, { kind: 'doc', id: primary }))} path={fileName} />
           )
         }
         actions={null}

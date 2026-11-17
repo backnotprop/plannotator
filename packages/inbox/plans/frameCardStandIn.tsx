@@ -7,12 +7,14 @@
  *
  * Contract (as agreed with the frame's team):
  * - Card({ kind, face, title, href, fact?, factMark?, unread?, size, time?, linkComponent?, action?, pinned? }): ONE
- *   link named by the title and the fact (the face is inert: hidden from screen readers, never focusable); the action
- *   is a sibling of the link in the card's box (top right of the well, shown on hover and focus-within, always on
- *   touch and while `pinned`); a document's face is paper with one sheet behind; the face is drawn only near the
- *   screen, in a fixed-aspect well with a quiet placeholder; the title takes two lines.
+ *   link named by the title and the fact, whose hit area covers the whole card; the face is a sibling of the link,
+ *   never inside it (inert: hidden from screen readers, never focusable, no pointer); the action is a sibling too
+ *   (top right of the well, shown on hover and focus-within, always on touch and while `pinned`); a document's face
+ *   is paper with one sheet behind; the face is drawn only near the screen and let go when it is far (a window of
+ *   screens around the scroll position), in a fixed-aspect well with a quiet placeholder; the title takes two lines.
  * - CardRow({ kind, title, href, linkComponent?, fact?, factMark?, unread?, time?, secondary?, thumb?, face?, action?,
- *   pinned? }): 44 px (52 on a phone), a 36x27 thumbnail on the kind's ground (`thumb`, else `face` scaled), one line.
+ *   pinned? }): 44 px (52 on a phone), a 36x27 thumbnail on the kind's ground (`thumb` when it is a picture's `src`;
+ *   else the kind's shape, static: a 36 px face would cost a whole face for nothing readable), one line.
  * - CardUpdatesPill({ count, onShow }): "N updates · Show".
  * - arrive(el): content changed in place, a short fade; never moves. settleBatch(container, mutate): FLIP over every
  *   card in the container around the host's reorder (measure, mutate, play 320 ms). Reduced motion: cuts.
@@ -65,20 +67,43 @@ const FACE_WIDTH = 420;
 
 const reducedMotion = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** Drawn once the element is near the screen (400 px ahead); without IntersectionObserver, at once. */
+/** The element's scrolling ancestor (null: the window), where "near the screen" is measured. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const y = getComputedStyle(p).overflowY;
+    if (y === 'auto' || y === 'scroll') return p;
+  }
+  return null;
+}
+
+/** How far ahead a face is drawn, and how far away it is let go (so a small window of faces stays alive). */
+const NEAR_MARGIN = '400px';
+const FAR_MARGIN = '1600px';
+
+/**
+ * Drawn once the element is near the screen (400 px ahead of its scroller's view), and let go again once it is far
+ * (1600 px out): a long page or a search keeps only the faces around what is shown. Without IntersectionObserver, at
+ * once and for good.
+ */
 function useNear(): [(el: HTMLElement | null) => void, boolean] {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [near, setNear] = useState(false);
   useEffect(() => {
-    if (!el || near) return;
+    if (!el) return;
     if (typeof IntersectionObserver === 'undefined') {
       setNear(true);
       return;
     }
-    const io = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { rootMargin: '400px' });
-    io.observe(el);
-    return () => io.disconnect();
-  }, [el, near]);
+    const root = scrollerOf(el);
+    const toward = new IntersectionObserver((entries) => entries.some((e) => e.isIntersecting) && setNear(true), { root, rootMargin: NEAR_MARGIN });
+    const away = new IntersectionObserver((entries) => entries.every((e) => !e.isIntersecting) && setNear(false), { root, rootMargin: FAR_MARGIN });
+    toward.observe(el);
+    away.observe(el);
+    return () => {
+      toward.disconnect();
+      away.disconnect();
+    };
+  }, [el]);
   return [setEl, near];
 }
 
@@ -109,10 +134,13 @@ function Scaled({ children }: { children: ReactNode }) {
 
 const isSrc = (face: CardFace): face is { src: string } => !!face && typeof face === 'object' && 'src' in (face as object) && typeof (face as { src?: unknown }).src === 'string';
 
-/** What sits in the well: paper for a document (one sheet behind), a flat window for a page, flat for an image or data. */
+/**
+ * What sits in the well: paper for a document (one sheet behind), a flat window for a page, flat for an image or data.
+ * `small` (a row's thumbnail): the kind's shape only, or a picture's `src`; never a whole face.
+ */
 function Well({ kind, face, small }: { kind: CardKind; face: CardFace; small?: boolean }) {
   const [ref, near] = useNear();
-  const body = !near ? null : isSrc(face) ? <img className="fc-img" src={face.src} alt="" draggable={false} /> : <Scaled>{face}</Scaled>;
+  const body = !near ? null : isSrc(face) ? <img className="fc-img" src={face.src} alt="" draggable={false} /> : small ? null : <Scaled>{face}</Scaled>;
   return (
     <div className={`fc-well fc-k-${kind}${small ? ' fc-small' : ''}`} ref={ref} aria-hidden="true" inert data-card-face="">
       {kind === 'document' && !small && <div className="fc-sheet fc-back" />}
@@ -140,8 +168,8 @@ export function Card(props: CardProps) {
   const Link = props.linkComponent ?? Anchor;
   return (
     <div className={`fc-card fc-${props.size}${props.pinned ? ' fc-pinned' : ''}`} data-card="" data-card-kind={props.kind}>
+      <Well kind={props.kind} face={props.face} />
       <Link href={props.href} className="fc-link" data-card-link="">
-        <Well kind={props.kind} face={props.face} />
         <span className="fc-text">
           <span className="fc-title" dir="auto">
             {props.unread && <span className="fc-dot" aria-hidden="true" />}
@@ -160,11 +188,12 @@ export function Card(props: CardProps) {
 
 export function CardRow(props: CardRowProps) {
   const Link = props.linkComponent ?? Anchor;
-  const thumb = props.thumb ?? props.face ?? null;
   return (
     <div className={`fc-row${props.pinned ? ' fc-pinned' : ''}`} data-card-row="" data-card-kind={props.kind}>
+      <span className="fc-thumb">
+        <Well kind={props.kind} face={props.thumb ?? null} small />
+      </span>
       <Link href={props.href} className="fc-rlink" data-card-link="">
-        <span className="fc-thumb">{thumb !== null && <Well kind={props.kind} face={thumb} small />}</span>
         <span className="fc-rname" dir="auto">
           {props.unread && <span className="fc-dot" aria-hidden="true" />}
           {props.unread && <span className="fc-sr">New. </span>}
@@ -226,9 +255,11 @@ const CSS = `
 .fc-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .fc-card { --fc-ease: cubic-bezier(0.22, 1, 0.36, 1); position: relative; display: flex; flex-direction: column; min-width: 0; border-radius: 12px; overflow: hidden; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 9%, transparent); transition: box-shadow 160ms ease-out; }
 .fc-card:hover { box-shadow: 0 0 0 1px color-mix(in oklch, var(--foreground) 16%, transparent), 0 10px 24px -14px color-mix(in oklch, var(--foreground) 30%, transparent); }
-.fc-card:has(.fc-link:focus-visible) { box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--primary); }
 .fc-link { display: flex; flex-direction: column; flex: 1; color: inherit; text-decoration: none; outline: none; }
-.fc-well { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--fc-g); }
+/* The link's hit area is the whole card (the face is its sibling); its focus ring is drawn on it, inside the card. */
+.fc-link::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.fc-link:focus-visible::after { box-shadow: inset 0 0 0 2px var(--primary), inset 0 0 0 4px var(--card); }
+.fc-well { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--fc-g); pointer-events: none; }
 .fc-k-document { --fc-g: color-mix(in oklab, var(--primary) 8%, var(--card)); }
 .fc-k-page { --fc-g: color-mix(in oklab, var(--foreground) 5%, var(--card)); }
 .fc-k-image { --fc-g: color-mix(in oklab, var(--warning) 10%, var(--card)); }
@@ -261,14 +292,15 @@ const CSS = `
 .fc-mark :is(svg, img) { width: 13px; height: 13px; }
 @keyframes fc-breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .fc-action, .fc-raction { opacity: 0; transition: opacity 120ms ease-out; }
-.fc-action { position: absolute; top: 8px; right: 8px; }
+.fc-action { position: absolute; top: 8px; right: 8px; z-index: 1; }
 .fc-card:hover .fc-action, .fc-card:focus-within .fc-action, .fc-pinned .fc-action, .fc-row:hover .fc-raction, .fc-row:focus-within .fc-raction, .fc-row.fc-pinned .fc-raction { opacity: 1; }
 @media (hover: none) { .fc-action, .fc-raction { opacity: 1; } }
-.fc-row { position: relative; display: flex; align-items: center; border-radius: 8px; }
+.fc-row { position: relative; display: flex; align-items: center; column-gap: 14px; padding-left: 6px; border-radius: 8px; }
 .fc-row:hover { background: color-mix(in oklch, var(--foreground) 5%, transparent); }
-.fc-row:has(.fc-rlink:focus-visible) { background: color-mix(in oklch, var(--primary) 12%, transparent); }
-.fc-rlink { flex: 1; min-width: 0; display: grid; grid-template-columns: 36px minmax(0, 1fr) minmax(0, 160px) minmax(0, 180px); align-items: center; column-gap: 14px; height: 44px; padding: 0 10px 0 6px; color: inherit; text-decoration: none; outline: none; }
-.fc-thumb { width: 36px; height: 27px; border-radius: 5px; overflow: hidden; display: block; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent); }
+.fc-row:focus-within { background: color-mix(in oklch, var(--primary) 12%, transparent); }
+.fc-rlink { flex: 1; min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 160px) minmax(0, 180px); align-items: center; column-gap: 14px; height: 44px; padding: 0 10px 0 0; color: inherit; text-decoration: none; outline: none; }
+.fc-rlink::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.fc-thumb { flex: none; width: 36px; height: 27px; border-radius: 5px; overflow: hidden; display: block; pointer-events: none; }
 .fc-small { width: 36px; height: 27px; aspect-ratio: auto; }
 .fc-small .fc-sheet { left: 12%; right: 12%; top: 14%; bottom: -2px; border-radius: 2px 2px 0 0; }
 .fc-small :is(.fc-win, .fc-panel) { border-radius: 2px; }
@@ -276,9 +308,9 @@ const CSS = `
 .fc-rtitle { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .fc-rsec { font-size: 13px; color: var(--muted-foreground); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .fc-rfact { display: flex; justify-content: flex-end; min-width: 0; }
-.fc-raction { flex: none; padding-right: 6px; }
+.fc-raction { position: relative; flex: none; padding-right: 6px; }
 @media (max-width: 767px) {
-  .fc-rlink { grid-template-columns: 36px minmax(0, 1fr) auto; height: 52px; }
+  .fc-rlink { grid-template-columns: minmax(0, 1fr) auto; height: 52px; }
   .fc-rsec, .fc-rgap { display: none; }
 }
 .fc-pill { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 12%, transparent); color: var(--primary); font-size: 13px; font-weight: 500; cursor: pointer; }
