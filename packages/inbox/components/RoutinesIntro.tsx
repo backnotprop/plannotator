@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { Icon } from '../icons';
 import { builtinSkillContent } from '../skills';
 import { playRoutinesLoop } from '../routinesIntroArt';
 import { useReducedMotion } from '../tour/Tour';
@@ -26,7 +27,10 @@ export function RoutinesIntro({ phone, onClose, onTurnOn }: { phone: boolean; on
         Picture: every weekday at 9:00 AM an agent runs and its reply lands in a thread, again and again.
       </p>
       <div className="ib-bi-text">
-        <h2 id="ib-rti-title">Routines</h2>
+        <h2 id="ib-rti-title" className="ib-rti-h">
+          Routines
+          <Icon name="scheduled" className="ib-rti-h-ic" />
+        </h2>
         <p id="ib-rti-desc">Save a prompt and pick when it runs. An agent runs it on this computer each time, and every run replies in its own thread.</p>
         {createRoutineBuiltIn() && (
           <p className="ib-bi-q" data-routines-intro-skill="">

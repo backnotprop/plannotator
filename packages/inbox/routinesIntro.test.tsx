@@ -222,7 +222,13 @@ describe.skipIf(!hasDom)('the words and the picture', () => {
   test('labelled by its title, described by its sentence; the picture hidden from screen readers, its words beside it; Settings → Capabilities named', async () => {
     await opened();
     const d = dialog()!;
-    expect(document.getElementById(d.getAttribute('aria-labelledby')!)!.textContent).toBe('Routines');
+    const title = document.getElementById(d.getAttribute('aria-labelledby')!)!;
+    expect(title.textContent).toBe('Routines');
+    // The sidebar row's glyph, after the word and hidden, so the name stays "Routines".
+    const glyph = title.lastElementChild!;
+    expect(glyph.getAttribute('data-icon')).toBe('scheduled');
+    expect(glyph.getAttribute('aria-hidden')).toBe('true');
+    expect(title.firstChild!.nodeType).toBe(Node.TEXT_NODE);
     expect(document.getElementById(d.getAttribute('aria-describedby')!)!.textContent).toBe(
       'Save a prompt and pick when it runs. An agent runs it on this computer each time, and every run replies in its own thread.',
     );
