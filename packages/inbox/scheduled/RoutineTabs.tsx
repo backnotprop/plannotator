@@ -137,10 +137,7 @@ export function RunsPanel({ record, runs, loaded, onOpenThread }: { record: Inbo
         {runs.map((run) => (
           <button key={run.message_id} type="button" className="st-runrow" onClick={() => thread && onOpenThread(thread, run.message_id)} data-run-outcome={run.outcome}>
             <b>Run {run.run}</b>
-            <span className={bad(run.outcome) ? 'st-bad' : 'st-mut'}>
-              {run.outcome === 'running' && <RunningDots />}
-              {OUTCOME_WORDS[run.outcome]}
-            </span>
+            <span className={bad(run.outcome) ? 'st-bad' : run.outcome === 'running' ? undefined : 'st-mut'}>{OUTCOME_WORDS[run.outcome]}</span>
             <span className="st-mut">{runWhenWords(run.started_at)}</span>
             <Icon name="chevR" size={12} />
           </button>

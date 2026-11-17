@@ -239,7 +239,6 @@ button.st-foot-mark:hover { background: var(--muted); }
 .st-lastrun svg.ib-ic { flex: none; }
 .st-lastrun:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .st-runspanel { margin-top: 14px; }
-.st-runrow .st-dots { margin-right: 7px; vertical-align: -1px; }
 .st-norun { padding: 22px 0 8px; font-size: var(--ib-fs-13-5, 13.5px); }
 .st-norun p { margin: 0; }
 .st-norun p + p { margin-top: 4px; }
