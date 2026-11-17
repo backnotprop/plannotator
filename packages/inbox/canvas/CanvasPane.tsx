@@ -1,6 +1,6 @@
 /**
  * The thread canvas beside the thread (docs/agent-guides/inbox-canvas.md): the same place a file opens, side by side
- * or full screen, a screen of its own on a phone. The whiteboard (packages/ui/components/canvas/CanvasBoard.tsx,
+ * or full screen, a screen of its own on a phone. The whiteboard (packages/inbox/canvas/board/CanvasBoard.tsx,
  * Excalidraw) loads only when the canvas opens. The person's changes save by themselves; the agent's new version
  * updates the open canvas in place with one quiet line saying what changed. An older version (`&cv=N`) shows read
  * only, with the way back to now.
@@ -14,7 +14,7 @@ import { canvasApi, type CanvasVersionWire } from './client';
 import type { ThreadCanvas } from './useThreadCanvas';
 import './canvas.css';
 
-const CanvasBoard = lazy(() => import('@plannotator/ui/components/canvas/CanvasBoard'));
+const CanvasBoard = lazy(() => import('./board/CanvasBoard'));
 
 export interface CanvasPaneProps {
   threadId: string;

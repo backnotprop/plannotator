@@ -1,7 +1,6 @@
-/// <reference path="../../globals.d.ts" />
 /**
  * The canvas surface: Excalidraw (MIT) with Plannotator's quiet dock in place of its toolbar and menus. Load it
- * lazily (`React.lazy(() => import("@plannotator/ui/components/canvas/CanvasBoard"))`): it is the only module that
+ * lazily (`React.lazy(() => import("./board/CanvasBoard"))`): it is the only module that
  * imports Excalidraw, and its stylesheet goes into the page only while a canvas is mounted.
  *
  * Host-neutral: it reads no address and makes no request of its own; pictures load through `fileUrl`, and every
@@ -21,7 +20,7 @@ import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { CanvasElement } from "@plannotator/core/canvas-scene";
 import { CANVAS_DOCK_TOOLS, type CanvasDockTool } from "./dock";
-import "./canvas.css";
+import "./board.css";
 
 export interface CanvasBoardFile {
   name: string;

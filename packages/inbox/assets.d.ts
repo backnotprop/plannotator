@@ -25,3 +25,9 @@ declare module '*?worker&inline' {
   const WorkerFactory: new () => Worker;
   export default WorkerFactory;
 }
+
+// A stylesheet as text, put into the page only while its component is mounted (the canvas's Excalidraw sheet).
+declare module '*.css?inline' {
+  const css: string;
+  export default css;
+}

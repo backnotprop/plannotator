@@ -89,6 +89,6 @@ export default mergeConfig(
     esbuild: { charset: 'ascii' },
     // The window's sheet keys on page marks, not on :has() anchored on the page (build/inbox-page-marks.ts).
     // The thread canvas's fonts from the Inbox itself, never esm.sh (build/excalidraw-assets.ts).
-    plugins: [excalidrawLocalAssets(path.resolve(__dirname, '../../packages/ui')), packedInboxApp(), inboxPageMarks()],
+    plugins: [excalidrawLocalAssets(path.resolve(__dirname, '../../packages/inbox')), packedInboxApp(), inboxPageMarks()],
   }),
 );

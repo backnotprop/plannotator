@@ -18,7 +18,7 @@ const hasDom = typeof document !== 'undefined';
 // Excalidraw's props as the canvas passes them, for the flag that keeps its keys inside the canvas.
 let excalidrawProps: Record<string, unknown> | null = null;
 
-let CanvasBoard: typeof import('@plannotator/ui/components/canvas/CanvasBoard').default;
+let CanvasBoard: typeof import('./board/CanvasBoard').default;
 let useShortcutScope: typeof import('../panes/scope').useShortcutScope;
 let shortcuts: typeof import('../shortcuts');
 
@@ -34,7 +34,7 @@ beforeAll(async () => {
     restoreElements: (elements: unknown[]) => elements,
   }));
   mock.module('@excalidraw/excalidraw/index.css?inline', () => ({ default: '' }));
-  CanvasBoard = (await import('@plannotator/ui/components/canvas/CanvasBoard')).default;
+  CanvasBoard = (await import('./board/CanvasBoard')).default;
   ({ useShortcutScope } = await import('../panes/scope'));
   shortcuts = await import('../shortcuts');
 });

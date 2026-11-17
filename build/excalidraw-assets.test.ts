@@ -27,7 +27,7 @@ describe('localExcalidrawFallback', () => {
 });
 
 describe('the installed Excalidraw, as the Inbox bundles it', () => {
-  const require = createRequire(join(import.meta.dir, '../packages/ui/package.json'));
+  const require = createRequire(join(import.meta.dir, '../packages/inbox/package.json'));
   const prod = dirname(require.resolve('@excalidraw/excalidraw'));
   const scripts: string[] = [];
   const walk = (dir: string) => {

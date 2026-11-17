@@ -2,9 +2,9 @@
 // `?board=a6&theme=dark&pins={"av":{"x":..}}`. window.__canvas holds the lift's result for a driver to read.
 import { createRoot } from "react-dom/client";
 import { lazy, Suspense, useEffect, useState } from "react";
-import { liftBoard, type LiftResult } from "@plannotator/ui/components/canvas/lift";
+import { liftBoard, type LiftResult } from "../../../packages/inbox/canvas/board/lift";
 
-const CanvasBoard = lazy(() => import("@plannotator/ui/components/canvas/CanvasBoard"));
+const CanvasBoard = lazy(() => import("../../../packages/inbox/canvas/board/CanvasBoard"));
 const q = new URLSearchParams(location.search);
 const theme = q.get("theme") === "dark" ? "dark" : "light";
 if (theme === "dark") document.documentElement.classList.add("dark");

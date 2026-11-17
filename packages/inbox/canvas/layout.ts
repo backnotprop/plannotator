@@ -2,7 +2,7 @@
  * The thread canvas's layout (docs/agent-guides/inbox-canvas.md "Where the layout runs"): an agent's board is HTML,
  * and only a browser engine lays HTML out, so the Inbox window does it. Every window open on this computer, while the
  * canvas is on, lays out each agent version waiting for one (`GET /api/canvas/pending`), in the background, whether or
- * not its canvas is open: the lift (packages/ui/components/canvas/lift.ts) measures the board in an off-screen box,
+ * not its canvas is open: the lift (packages/inbox/canvas/board/lift.ts) measures the board in an off-screen box,
  * the server keeps the elements and the warnings the agent's CLI is waiting for, and the window then draws the
  * version's picture (the message's preview card, `canvas read --png`). Two windows racing: the first answer wins,
  * the other's is refused as stale and dropped.
@@ -37,7 +37,7 @@ export function changedPartIds(before: readonly CanvasElement[], after: readonly
 
 /** Pictures for a scene, loaded as data URLs (the picture's export needs them in memory). */
 export async function sceneFiles(threadId: string, files: Record<string, CanvasFileRef>) {
-  const { fileData } = await import('@plannotator/ui/components/canvas/picture');
+  const { fileData } = await import('./board/picture');
   const out: Record<string, { dataURL: string; mimeType: string }> = {};
   await Promise.all(
     Object.entries(files).map(async ([id, f]) => {
@@ -50,7 +50,7 @@ export async function sceneFiles(threadId: string, files: Record<string, CanvasF
 
 /** Draw and keep a canvas's picture (the current one, and the version's when named). */
 export async function keepCanvasPicture(threadId: string, rev: number, elements: readonly CanvasElement[], files: Record<string, CanvasFileRef>, version?: number) {
-  const { canvasPicture, blobDataUrl } = await import('@plannotator/ui/components/canvas/picture');
+  const { canvasPicture, blobDataUrl } = await import('./board/picture');
   const blob = await canvasPicture(elements, await sceneFiles(threadId, files));
   if (!blob) return;
   await canvasApi.picture(threadId, { rev, ...(version ? { version } : {}), dataURL: await blobDataUrl(blob) });
@@ -71,7 +71,7 @@ async function layOut(threadId: string, version: number, pictureOnly: boolean): 
       return;
     }
     if (!wire.board || wire.layout?.state !== 'pending' || wire.layout.version !== version) return;
-    const { liftBoard } = await import('@plannotator/ui/components/canvas/lift');
+    const { liftBoard } = await import('./board/lift');
     const lifted = await liftBoard({ board: wire.board, pins: wire.pins, pictureUrl: (name) => canvasApi.fileUrl(threadId, name) });
     const before = wire.scene?.elements ?? [];
     // The first version changes nothing: there was nothing before it.

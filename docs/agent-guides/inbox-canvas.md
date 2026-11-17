@@ -20,8 +20,8 @@ Slice 1 is hidden: nothing of it shows, and no agent reads of it, unless config.
 | Store | `packages/shared/canvas/store.ts` | One folder per thread, versions, the base-rev check, pending layouts, pictures. |
 | Routes | `packages/server/canvas-capability.ts` | The capability on the Inbox's seam (`packages/server/inbox-capability.ts`): `/api/canvas`, the settings wire, `event: canvas`, the instruction and `read_thread` lines. Bun only (the Inbox has no Pi server). |
 | CLI | `apps/hook/server/canvas-command.ts` | `plannotator canvas`: writes the store directly. |
-| Whiteboard | `packages/ui/components/canvas/CanvasBoard.tsx` | Excalidraw under a quiet dock; host-neutral, so a space page can mount it next. |
-| Lift | `packages/ui/components/canvas/lift.ts` | Lays the board out in a hidden box and turns it into Excalidraw elements. |
+| Whiteboard | `packages/inbox/canvas/board/CanvasBoard.tsx` | Excalidraw under a quiet dock; host-neutral, so a space page can mount it next. |
+| Lift | `packages/inbox/canvas/board/lift.ts` | Lays the board out in a hidden box and turns it into Excalidraw elements. |
 | Window | `packages/inbox/canvas/` | The pane beside the thread, autosave, the background layout, the card, the reply chip. |
 
 ### Where the layout runs

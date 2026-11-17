@@ -4,7 +4,7 @@
  *
  * The rules and every message match the clean-room tool fresh agents were tested against (instructions v3): one line
  * per problem, naming the part and what to change, and nothing saved when there is one. Layout is not here: a real
- * browser lays the board out (`@plannotator/ui/components/canvas/lift`) and its warnings come back from there.
+ * browser lays the board out (packages/inbox/canvas/board/lift.ts) and its warnings come back from there.
  */
 
 export const BOARD_TAGS = new Set(["div", "p", "span", "b", "i", "img", "aside", "a", "br"]);
