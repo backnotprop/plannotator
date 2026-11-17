@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import type { ReactNode } from "react";
 
 /** The card's motions by name; the rules and their timings are in motions.css. */
 export const CARD_MOTIONS = {
@@ -90,17 +90,8 @@ export function arrive(element: HTMLElement): void {
 
 /** `arrive`: wrap a line or row the agent just wrote into a face; it opens in place and is tinted for a moment. */
 export function CardArrival({ children }: { readonly children: ReactNode }) {
-  const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (typeof requestAnimationFrame !== "function") {
-      setOpen(true);
-      return;
-    }
-    const frame = requestAnimationFrame(() => setOpen(true));
-    return () => cancelAnimationFrame(frame);
-  }, []);
   return (
-    <div className={CARD_MOTIONS.arrive} data-open={open ? "" : undefined}>
+    <div className={CARD_MOTIONS.arrive}>
       <div>
         <div className="frame-card-arrive-tint">{children}</div>
       </div>

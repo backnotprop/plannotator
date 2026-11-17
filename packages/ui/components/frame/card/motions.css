@@ -55,25 +55,24 @@
   }
 }
 
-/* arrive */
+/* arrive: animations from a hidden start to the line's own state, so a line whose animation never runs is still shown */
 .frame-card-arrive {
   display: grid;
-  grid-template-rows: 0fr;
-  opacity: 0;
-  transition:
-    grid-template-rows var(--frame-card-arrive-open-duration) var(--frame-card-ease),
-    opacity var(--frame-card-arrive-fade-duration) ease-out var(--frame-card-arrive-fade-delay);
+  grid-template-rows: 1fr;
+  animation: frame-card-arrive-open var(--frame-card-arrive-open-duration) var(--frame-card-ease) both;
 }
 .frame-card-arrive > * {
   min-height: 0;
   overflow: hidden;
+  animation: frame-card-fade-in var(--frame-card-arrive-fade-duration) ease-out var(--frame-card-arrive-fade-delay) both;
 }
-.frame-card-arrive[data-open] {
-  grid-template-rows: 1fr;
-  opacity: 1;
-}
-.frame-card-arrive[data-open] .frame-card-arrive-tint {
+.frame-card-arrive .frame-card-arrive-tint {
   animation: frame-card-landed var(--frame-card-arrive-tint-duration) ease-out;
+}
+@keyframes frame-card-arrive-open {
+  from {
+    grid-template-rows: 0fr;
+  }
 }
 @keyframes frame-card-landed {
   from {
@@ -129,8 +128,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .frame-card-fan,
-  [data-frame-card-hero],
-  .frame-card-arrive {
+  [data-frame-card-hero] {
     transition: none;
   }
   [data-frame-card]:is(:hover, :has(:focus-visible)) .frame-card-fan,
@@ -142,7 +140,9 @@
     transform: none;
   }
   .frame-card-breathe,
-  .frame-card-arrive[data-open] .frame-card-arrive-tint,
+  .frame-card-arrive,
+  .frame-card-arrive > *,
+  .frame-card-arrive .frame-card-arrive-tint,
   .frame-card-settle,
   .frame-card-settle [data-frame-card-dot],
   ::view-transition-group(*.frame-card-open),

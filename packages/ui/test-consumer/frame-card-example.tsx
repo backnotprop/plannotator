@@ -60,6 +60,11 @@ function RedisFace() {
             <td>session ids</td>
             <td>with last</td>
           </tr>
+          <tr>
+            <td>cookie</td>
+            <td>opaque id</td>
+            <td>browser</td>
+          </tr>
         </tbody>
       </table>
     </CardFaceDocument>
@@ -98,35 +103,102 @@ function CheckoutFace() {
   );
 }
 
-function RowsFace() {
-  const rows = [
-    ["key", "limit", "used"],
-    ["acme-prod", "600", "512"],
-    ["acme-ci", "120", "37"],
-    ["beta-web", "300", "301"],
-    ["beta-cron", "60", "12"],
-  ];
+function LimitsFace() {
+  const points = "14,170 40,162 66,150 92,110 104,96 118,160 160,150 186,130 200,92 214,86 228,156 282,148 306,124 322,96 340,142 360,134";
   return (
-    <table className="w-full border-collapse font-mono text-[12px] leading-4">
+    <svg viewBox="0 0 376 204" className="block h-full w-full" aria-hidden="true">
+      <g transform="translate(0 0)">
+        <text x="320" y="30" textAnchor="end" fontFamily="var(--font-mono)" fontSize="11" fill="var(--frame-ink-2)">
+          limit 600
+        </text>
+        <line x1="14" y1="42" x2="330" y2="42" stroke="var(--warning)" strokeWidth="1.25" strokeDasharray="5 4" />
+        <polyline points={points} fill="none" stroke="var(--foreground)" strokeWidth="1.75" strokeLinejoin="round" />
+        <line x1="14" y1="186" x2="330" y2="186" stroke="var(--frame-ink-3)" />
+      </g>
+    </svg>
+  );
+}
+
+function BatchesFace() {
+  const bars = [78, 46, 16, 78, 46, 16, 78, 46];
+  return (
+    <svg viewBox="26 22 268 196" className="block h-full w-full" aria-hidden="true">
+      <text x="44" y="50" fontFamily="var(--font-mono)" fontSize="11" fill="var(--frame-ink-2)">
+        20,000 rows each
+      </text>
+      {bars.map((height, index) => (
+        <rect key={index} x={44 + index * 26} y={140 - height} width="20" height={height} fill="color-mix(in oklch, var(--foreground) 16%, transparent)" />
+      ))}
+      <line x1="40" y1="186" x2="280" y2="186" stroke="var(--frame-ink-3)" />
+      {["00:00", "02:00", "04:00", "06:00"].map((tick, index) => (
+        <text key={tick} x={58 + index * 70} y="204" textAnchor="middle" fontFamily="var(--font-mono)" fontSize="11" fill="var(--frame-ink-2)">
+          {tick}
+        </text>
+      ))}
+    </svg>
+  );
+}
+
+function CsvFace() {
+  const rows = [
+    ["Date", "Amount", "Payee", "Ref"],
+    ["2026-11-02", "1,240.00", "Harbor Co", "INV-311"],
+    ["2026-11-03", "86.40", "Linen Lab", "ORD-88"],
+    ["2026-11-03", "412.00", "Northfield", "INV-312"],
+    ["2026-11-04", "18.00", "Acme Retail", "ORD-91"],
+    ["2026-11-05", "2,005.10", "Tidewater", "INV-313"],
+    ["2026-11-06", "64.00", "Kestrel", "ORD-95"],
+    ["2026-11-06", "310.00", "Quayside", "INV-314"],
+  ];
+  const muted = "bg-[color-mix(in_oklch,var(--foreground)_4%,transparent)] text-center font-normal text-[var(--frame-ink-2)]";
+  const cell = "px-2 py-1.5 text-left whitespace-nowrap shadow-[inset_-1px_-1px_0_color-mix(in_oklch,var(--foreground)_9%,transparent)]";
+  return (
+    <table className="w-full border-collapse font-mono text-[12px] leading-4 text-foreground">
+      <thead>
+        <tr>
+          <th className={`${cell} ${muted} w-6`} />
+          {["A", "B", "C", "D"].map((letter) => (
+            <th key={letter} className={`${cell} ${muted}`}>
+              {letter}
+            </th>
+          ))}
+        </tr>
+      </thead>
       <tbody>
         {rows.map((row, index) => (
-          <tr key={row[0]}>
-            {row.map((cell, column) => (
-              <td
-                key={column}
-                className={
-                  index === 0
-                    ? "bg-[color-mix(in_oklch,var(--foreground)_4%,transparent)] px-2 py-1.5 text-[var(--frame-ink-2)]"
-                    : "px-2 py-1.5 shadow-[inset_-1px_-1px_0_color-mix(in_oklch,var(--foreground)_9%,transparent)]"
-                }
-              >
-                {cell}
+          <tr key={index}>
+            <td className={`${cell} ${muted}`}>{index + 1}</td>
+            {row.map((value, column) => (
+              <td key={column} className={index === 0 ? `${cell} font-sans font-semibold` : cell}>
+                {value}
               </td>
             ))}
           </tr>
         ))}
       </tbody>
     </table>
+  );
+}
+
+function OfflineFace() {
+  const node = (x: number, y: number, label: string) => (
+    <g key={label}>
+      <circle cx={x} cy={y} r="30" fill="none" stroke="var(--frame-ink-2)" strokeWidth="1.25" />
+      <text x={x} y={y + 4} textAnchor="middle" fontSize="11" fontWeight="500" fill="var(--foreground)">
+        {label}
+      </text>
+    </g>
+  );
+  return (
+    <svg viewBox="0 0 400 280" className="block h-full w-full" aria-hidden="true">
+      <line x1="120" y1="110" x2="170" y2="110" stroke="var(--frame-ink-2)" strokeWidth="1.25" />
+      <line x1="230" y1="110" x2="280" y2="110" stroke="var(--frame-ink-2)" strokeWidth="1.25" />
+      <line x1="200" y1="140" x2="200" y2="170" stroke="var(--frame-ink-2)" strokeWidth="1.25" />
+      {node(90, 110, "Saved here")}
+      {node(200, 110, "Syncing")}
+      {node(310, 110, "Synced")}
+      {node(200, 200, "Conflict")}
+    </svg>
   );
 }
 
@@ -164,6 +236,7 @@ interface Plan {
   readonly project: string;
   readonly face?: ReactNode | CardImageFace;
   readonly fact?: string;
+  readonly factTone?: "default" | "action";
   readonly working?: boolean;
   readonly unread?: boolean;
   readonly time?: Date;
@@ -176,13 +249,13 @@ const NOW: readonly Plan[] = [
     title: "Move sessions from signed cookies to Redis",
     project: "tidepool-api",
     fact: "Your move",
-    unread: true,
+    factTone: "action",
     face: <RedisFace />,
   },
   {
     id: "checkout",
     kind: "page",
-    title: "Rebuild checkout as one page, with the order summary beside the form",
+    title: "Rebuild checkout as one page, with the order summary pinned beside the payment form",
     project: "kestrel-web",
     fact: "Maya Chen is working",
     working: true,
@@ -190,17 +263,23 @@ const NOW: readonly Plan[] = [
   },
   {
     id: "limits",
-    kind: "data",
+    kind: "image",
     title: "Rate limits per API key",
     project: "tidepool-api",
     fact: "Alex Rivera is working",
     working: true,
-    face: <RowsFace />,
+    face: <LimitsFace />,
   },
 ];
 
-const EARLIER: readonly Plan[] = [
+const RECENT: readonly Plan[] = [
+  { id: "batches", kind: "image", title: "Nightly batches for the ledger export", project: "ledgerline", unread: true, time: ago(0), face: <BatchesFace /> },
+  { id: "csv", kind: "data", title: "CSV import with column mapping", project: "ledgerline", unread: true, time: ago(0), face: <CsvFace /> },
   { id: "retry", kind: "document", title: "Retry policy for webhook delivery", project: "tidepool-api", unread: true, time: ago(0), face: <RetryFace /> },
+  { id: "offline", kind: "page", title: "Offline mode for the field app", project: "birch-mobile", time: ago(1), face: <OfflineFace /> },
+];
+
+const EARLIER: readonly Plan[] = [
   {
     id: "flags",
     kind: "document",
@@ -208,9 +287,14 @@ const EARLIER: readonly Plan[] = [
     project: "kestrel-web",
     time: ago(1),
     face: (
-      <CardFaceDocument title="Per-tenant feature flags">
+      <CardFaceDocument title="Per-tenant feature flags, so a beta can ship to one customer">
         <h1>Per-tenant feature flags</h1>
         <p>A beta should reach one customer without touching every other tenant on the shared cluster.</p>
+        <h2>Steps</h2>
+        <ol>
+          <li>Read flags per tenant at the edge</li>
+          <li>Cache them for a minute</li>
+        </ol>
       </CardFaceDocument>
     ),
   },
@@ -241,7 +325,7 @@ function PinButton({ title, pinned, onToggle }: { readonly title: string; readon
 }
 
 export function PlansHomeCardsExample() {
-  const [pins, setPins] = useState<ReadonlySet<string>>(() => new Set(["limits"]));
+  const [pins, setPins] = useState<ReadonlySet<string>>(() => new Set(["offline"]));
   const [updates, setUpdates] = useState(2);
   const [now, setNow] = useState<readonly Plan[]>(NOW);
   const grid = useRef<HTMLUListElement>(null);
@@ -270,6 +354,7 @@ export function PlansHomeCardsExample() {
       title={plan.title}
       href={`#${plan.id}`}
       fact={plan.fact}
+      factTone={plan.factTone}
       factMark={plan.working ? <AgentMark /> : undefined}
       working={plan.working}
       unread={plan.unread}
@@ -286,6 +371,7 @@ export function PlansHomeCardsExample() {
       title={plan.title}
       href={`#${plan.id}`}
       fact={plan.fact}
+      factTone={plan.factTone}
       factMark={plan.working ? <AgentMark /> : undefined}
       working={plan.working}
       unread={plan.unread}
@@ -308,13 +394,13 @@ export function PlansHomeCardsExample() {
         </CardGrid>
       </section>
       <CardGroups>
-        <CardGroup label="tidepool-api">{EARLIER.filter((plan) => plan.project === "tidepool-api").map((plan) => card(plan, "regular"))}</CardGroup>
-        <CardGroup label="kestrel-web">{EARLIER.filter((plan) => plan.project === "kestrel-web").map((plan) => card(plan, "regular"))}</CardGroup>
+        <CardGroup label="Recent">{RECENT.map((plan) => card(plan, "regular"))}</CardGroup>
+        <CardGroup label="kestrel-web">{EARLIER.map((plan) => card(plan, "regular"))}</CardGroup>
       </CardGroups>
       <section className="flex max-w-[960px] flex-col gap-1">
         <h2 className="px-2 text-[13px] font-medium leading-7 text-frame-muted-fg">The same plans as a list</h2>
         <div role="list" aria-label="All plans" className="flex flex-col">
-          {[...NOW, ...EARLIER].map((plan) => (
+          {[...NOW, ...RECENT, ...EARLIER].map((plan) => (
             <div role="listitem" key={plan.id}>
               {row(plan)}
             </div>

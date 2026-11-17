@@ -273,7 +273,7 @@ describe.skipIf(!hasDom)('CardFaceDocument', () => {
 });
 
 describe.skipIf(!hasDom)('CardGrid', () => {
-  test('cards are list items with their size class; a phone column fills the width', () => {
+  test('cards are list items with their size class, stretched so a row\'s bottoms align; a phone column fills the width', () => {
     const { Card, CardGrid, CardGroup } = cardModule!;
     const frame = mount(
       <CardGroup label="tidepool-api">
@@ -289,6 +289,10 @@ describe.skipIf(!hasDom)('CardGrid', () => {
     expect(large!.className.split(' ')).toContain('w-88');
     expect(regular!.className.split(' ')).toContain('max-sm:w-full');
     expect(frame.querySelector('section')!.getAttribute('aria-label')).toBe('tidepool-api');
+    const classes = list.className.split(' ');
+    expect(classes).toContain('items-stretch');
+    expect(classes).not.toContain('items-start');
+    expect([...list.children].every((child) => child.className.split(' ').includes('flex'))).toBe(true);
     void CardGrid;
   });
 });
@@ -349,6 +353,7 @@ describe.skipIf(!hasDom)('CardRow', () => {
     expect(row.querySelector('time')).not.toBeNull();
     const cardTitle = frame.querySelector('[data-frame-card] [data-frame-card-title]')!;
     expect(cardTitle.className.split(' ')).toContain('line-clamp-2');
+    expect(cardTitle.className).not.toContain('min-h');
   });
 
   test('the thumbnail is 36x27 on the kind ground: the given thumb as is, else the face drawn small with no sheet behind', () => {
@@ -370,7 +375,8 @@ describe.skipIf(!hasDom)('CardRow', () => {
     expect(own!.querySelector('[data-frame-card-stage]')).toBeNull();
     expect(small!.querySelector('[data-testid="small"]')).not.toBeNull();
     expect(small!.querySelector('[data-frame-card-back]')).toBeNull();
-    expect((small as HTMLElement).style.getPropertyValue('--frame-card-scale')).toBe(String(36 / 420));
+    expect(small!.querySelector<HTMLElement>('[data-frame-card-stage]')!.style.getPropertyValue('--frame-card-scale')).toBe(String((36 * 0.8) / 420));
+    expect(small!.querySelector('[data-frame-card-stage]')!.parentElement!.hasAttribute('data-frame-card-sheet')).toBe(true);
   });
 });
 
@@ -475,5 +481,61 @@ describe.skipIf(!hasDom)('CardUpdatesPill', () => {
     expect(frame.querySelector('[aria-live="polite"]')!.textContent).toBe('3 updates');
     act(() => root!.render(<CardUpdatesPill count={0} onShow={() => {}} />));
     expect(frame.querySelector('button')).toBeNull();
+  });
+});
+
+describe.skipIf(!hasDom)('fact tone and where a document face starts', () => {
+  test('factTone action draws the fact in the accent colour; the default and a date stay grey', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <Card kind="document" size="regular" title="A" href="/a" fact="Your move" factTone="action" />
+        <CardRow kind="document" title="B" href="/b" fact="Your move" factTone="action" />
+        <Card kind="document" size="regular" title="C" href="/c" fact="Maya Chen is working" />
+        <Card kind="document" size="regular" title="D" href="/d" factTone="action" time="2026-11-15T10:00:00Z" />
+      </>,
+    );
+    const lines = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-line]')];
+    expect(lines.map((line) => line.className.split(' ').includes('text-primary'))).toEqual([true, true, false, false]);
+    expect(lines.map((line) => line.dataset.frameCardFactTone ?? null)).toEqual(['action', 'action', null, null]);
+    expect(lines[2]!.className.split(' ')).toContain('text-muted-foreground');
+  });
+
+  test('a first heading that restates the title is skipped, with any heading right after it, so the face starts at the first paragraph', () => {
+    const { CardFaceDocument, cardHeadingRestatesTitle } = cardModule!;
+    expect(cardHeadingRestatesTitle('Per-tenant feature flags', 'Per-tenant feature flags, so a beta can ship')).toBe(true);
+    expect(cardHeadingRestatesTitle('Plan: move sessions to Redis', 'Move sessions from signed cookies to Redis')).toBe(true);
+    expect(cardHeadingRestatesTitle('Why sessions break today', 'Move sessions from signed cookies to Redis')).toBe(false);
+    expect(cardHeadingRestatesTitle('Sessions to Redis', 'Move sessions from signed cookies to Redis')).toBe(true);
+    expect(cardHeadingRestatesTitle('Session layout', 'Move sessions from signed cookies to Redis')).toBe(false);
+    expect(cardHeadingRestatesTitle('Redis', 'Move sessions to Redis')).toBe(false);
+    const frame = mount(
+      <CardFaceDocument title="Per-tenant feature flags, so a beta can ship to one customer">
+        <h1>Per-tenant feature flags</h1>
+        <h2>Context</h2>
+        <p>A beta should reach one customer.</p>
+        <h2>Steps</h2>
+        <ol>
+          <li>Read flags per tenant</li>
+        </ol>
+      </CardFaceDocument>,
+    );
+    const shown = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-document] > *')].filter((element) => !element.hidden);
+    expect(shown[0]!.tagName).toBe('P');
+    expect(shown.map((element) => element.tagName)).toEqual(['P', 'H2', 'OL']);
+  });
+
+  test('never opens on a bare list: a restating heading that a list follows directly stays', () => {
+    const { CardFaceDocument } = cardModule!;
+    const frame = mount(
+      <CardFaceDocument title="Retry policy">
+        <h1>Retry policy</h1>
+        <ul>
+          <li>1 minute</li>
+        </ul>
+      </CardFaceDocument>,
+    );
+    const shown = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-document] > *')].filter((element) => !element.hidden);
+    expect(shown.map((element) => element.tagName)).toEqual(['H1', 'UL']);
   });
 });

@@ -194,7 +194,7 @@
   --frame-paper-edge: color-mix(in oklch, var(--foreground) 12%, transparent);
   --frame-ink-2: color-mix(in oklch, var(--foreground) 55%, transparent);
   --frame-ink-3: color-mix(in oklch, var(--foreground) 22%, transparent);
-  --frame-card-ring: color-mix(in oklch, var(--foreground) 8%, transparent);
+  --frame-card-ring: color-mix(in oklch, var(--foreground) 9%, transparent);
   --frame-card-ring-hover: color-mix(in oklch, var(--foreground) 16%, transparent);
 }
 
@@ -216,7 +216,7 @@
 [data-frame-card-well] {
   --frame-card-ground: color-mix(in oklch, var(--foreground) 4%, var(--card));
   background: var(--frame-card-ground);
-  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 6%, transparent);
+  box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 7%, transparent);
   color: var(--foreground);
 }
 [data-frame-card-well][data-frame-card-face="ready"][data-frame-card-kind="document"] {
@@ -294,6 +294,23 @@
 [data-frame-card-thumb] {
   box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
 }
+[data-frame-card-thumb] .frame-card-sheet {
+  bottom: -2px;
+  border-radius: 2px 2px 0 0;
+}
+[data-frame-card-thumb] :is(.frame-card-window, .frame-card-panel) {
+  border-radius: 2px;
+}
+[data-frame-card-thumb] .frame-card-window-bar {
+  height: 3px;
+  padding: 0;
+}
+[data-frame-card-thumb] .frame-card-window-bar > i {
+  display: none;
+}
+[data-frame-card-thumb] .frame-card-window-body {
+  top: 3px;
+}
 
 [data-frame-card-row]:hover {
   background: var(--frame-surface-hover);
@@ -322,39 +339,44 @@
   outline-offset: -1px;
 }
 
-/* The sheet's type: rendered Markdown on a 420 px page, scaled with the card */
+/* The sheet's type: rendered Markdown on a 420 px page, scaled with the card. Headings are the body's size,
+   set apart by weight and space, so a plan's own words lead. */
 .frame-card-document {
-  padding: 22px 24px;
-  font-size: 13px;
-  line-height: 19px;
+  padding: 34px 36px;
+  font-size: 15px;
+  line-height: 24px;
   color: var(--foreground);
 }
 .frame-card-document :is(h1, h2, h3, h4, h5, h6) {
-  margin: 14px 0 10px;
-  font-size: 11px;
-  line-height: 14px;
-  font-weight: 500;
-  color: var(--frame-ink-2);
-}
-.frame-card-document :is(h1, h2, h3, h4, h5, h6):first-child,
-.frame-card-document [data-frame-card-title-repeat] + * {
-  margin-top: 0;
-}
-.frame-card-document h1 {
-  font-size: 17px;
+  margin: 18px 0 8px;
+  font-size: 15px;
   line-height: 22px;
   font-weight: 600;
   color: var(--foreground);
 }
-.frame-card-document :is(p, li) {
-  margin: 0 0 8px;
-  font-size: 13px;
-  line-height: 19px;
-  color: var(--frame-ink-2);
+.frame-card-document h1 {
+  margin: 0 0 12px;
+  font-size: 26px;
+  line-height: 32px;
+  font-weight: 650;
+  letter-spacing: -0.018em;
+  text-wrap: balance;
+}
+.frame-card-document > :first-child,
+.frame-card-document [data-frame-card-title-repeat] + :not([data-frame-card-title-repeat]) {
+  margin-top: 0;
+}
+.frame-card-document p {
+  margin: 0 0 10px;
+  font-size: 15px;
+  line-height: 24px;
+  color: color-mix(in oklch, var(--foreground) 82%, transparent);
 }
 .frame-card-document :is(ul, ol) {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   padding-left: 20px;
+  font-size: 15px;
+  line-height: 24px;
 }
 .frame-card-document ul {
   list-style: disc;
@@ -363,20 +385,20 @@
   list-style: decimal;
 }
 .frame-card-document li {
-  margin-bottom: 7px;
+  margin-bottom: 2px;
   padding-left: 4px;
 }
 .frame-card-document li::marker {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
   color: var(--frame-ink-2);
 }
 .frame-card-document table {
   width: 100%;
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   border-collapse: collapse;
-  font-size: 12px;
-  line-height: 16px;
+  font-size: 14px;
+  line-height: 20px;
 }
 .frame-card-document th {
   padding: 0 8px 6px 0;
@@ -391,21 +413,21 @@
 }
 .frame-card-document td:first-child {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 13px;
 }
 .frame-card-document pre {
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   padding: 12px 14px;
   border-radius: 8px;
   background: color-mix(in oklch, var(--foreground) 5%, transparent);
   font-family: var(--font-mono);
-  font-size: 12px;
-  line-height: 17px;
+  font-size: 13px;
+  line-height: 20px;
   white-space: pre;
 }
 .frame-card-document code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .frame-scrim {

@@ -219,10 +219,19 @@ describe('card motions', () => {
       expect(reduced).toContain(name);
     }
     expect(reduced).toMatch(/\.frame-card-breathe,[\s\S]*?\{\s*animation: none;\s*\}/);
-    expect(reduced).toMatch(/\.frame-card-fan,\s*\[data-frame-card-hero\],\s*\.frame-card-arrive \{\s*transition: none;\s*\}/);
+    expect(reduced).toMatch(/\.frame-card-fan,\s*\[data-frame-card-hero\] \{\s*transition: none;\s*\}/);
     expect(reduced).toMatch(/::view-transition-new\(\*\.frame-card-open\) \{\s*animation: none;\s*\}/);
     const animated = [...reduced.matchAll(/([^{}]+)\{\s*animation: none;/g)].map(([, selectors]) => selectors).join(',');
-    for (const name of ['frame-card-breathe', 'frame-card-settle', 'frame-card-arrive-tint']) expect(animated).toContain(name);
+    for (const name of ['.frame-card-breathe', '.frame-card-settle', '.frame-card-arrive,', '.frame-card-arrive > *', '.frame-card-arrive-tint']) expect(animated).toContain(name);
+  });
+
+  test('arrive ends at the line\'s own state: it is shown by default and only its animations start hidden', () => {
+    const rule = (selector: string) => css.match(new RegExp(`(?:^|\\})\\s*${selector.replace(/[.*>]/g, (c) => `\\${c}`)} \\{([^}]*)\\}`))?.[1] ?? '';
+    expect(rule('.frame-card-arrive')).toContain('grid-template-rows: 1fr;');
+    expect(rule('.frame-card-arrive')).toMatch(/animation: frame-card-arrive-open [^;]* both;/);
+    expect(rule('.frame-card-arrive > *')).not.toContain('opacity');
+    expect(rule('.frame-card-arrive > *')).toMatch(/animation: frame-card-fade-in [^;]* both;/);
+    expect(css).not.toMatch(/\.frame-card-arrive[^{]*\{[^}]*(opacity: 0|grid-template-rows: 0fr)/);
   });
 
   test('idle, only breathe loops, and its timings are custom properties in one place', () => {
