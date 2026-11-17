@@ -6,7 +6,7 @@
  * window's usual guards.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPromptsSettings } from "@plannotator/core/inbox-types";
@@ -287,5 +287,15 @@ describe("Settings → Prompts", () => {
     // The reminder's own text is no rules change: the note is not touched.
     await save({ reminder: "Shared line." });
     expect(readFileSync(note, "utf8")).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    // A note that cannot be written (its folder locked): the save still succeeds and the rules are kept.
+    chmodSync(join(home, ".claude", "rules"), 0o500);
+    try {
+      await save({ rules: "Keep messages short." });
+      expect(readFileSync(note, "utf8")).toBe(`${INBOX_NOTE_BLOCK}\n`);
+      expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).prompts.inbox.rules).toBe("Keep messages short.");
+      expect((await read(server)).rules?.shared).toBe("Keep messages short.");
+    } finally {
+      chmodSync(join(home, ".claude", "rules"), 0o755);
+    }
   });
 });

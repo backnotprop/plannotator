@@ -40,7 +40,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { inboxReminderRulesFor, loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
+import { inboxReminderRulesFor, loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool, type PlannotatorConfig } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
 	discoverInboxTools,
@@ -155,8 +155,7 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 	// Decided with the tool, once per extension instance (each session, /reload):
 	// the line (the person's own from config.json prompts.inbox, else
 	// INBOX_REMINDER_TEXT), or null when the reminder is off.
-	// The person's rules ride along unless Pi's own instructions file already holds them (the Inbox's note).
-	const reminder = resolveInboxReminder(config, process.env, "pi") ? resolveInboxReminderText(config, "pi", { rules: inboxReminderRulesFor(config, "pi") }) : null;
+	const reminder = piInboxReminder(config);
 	return discoverInboxTools(dataDir).then((tools) => {
 		if (!tools) return;
 		registerPiInbox(
@@ -165,6 +164,22 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 			{ ...options, reminder },
 		);
 	});
+}
+
+/**
+ * The reminder this Pi session starts with, or null when it is off: the
+ * person's own line or INBOX_REMINDER_TEXT, with the person's rules unless
+ * Pi's own instructions file already holds them (the Inbox's note), so they
+ * reach the session once. Decided once per extension instance, as Pi reads
+ * its instructions file once per session.
+ */
+export function piInboxReminder(
+	config: PlannotatorConfig,
+	env: NodeJS.ProcessEnv = process.env,
+	place?: Parameters<typeof inboxReminderRulesFor>[2],
+): string | null {
+	if (!resolveInboxReminder(config, env, "pi")) return null;
+	return resolveInboxReminderText(config, "pi", { rules: inboxReminderRulesFor(config, "pi", place) });
 }
 
 /**

@@ -1227,6 +1227,17 @@ export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig
   return withMachineState(loadSettings(options), readState().state);
 }
 
+/**
+ * config.json for a caller that must not act on a failed read: null when the
+ * file is there but cannot be read or is not a JSON object (loadConfig answers
+ * `{}` then, which reads as "nothing set"). Missing or blank: `{}`. The note
+ * refresh uses it, so an unreadable file never rewrites notes without rules.
+ */
+export function loadConfigOrNull(): PlannotatorConfig | null {
+  const read = readConfigForSave(getConfigPath());
+  return read.ok ? withMachineState(read.config as Record<string, unknown>, readState().state) : null;
+}
+
 function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
   try {
     const configPath = getConfigPath();
@@ -2320,6 +2331,40 @@ export function inboxReminderRulesFor(
     // No file, or not readable: the reminder carries them.
   }
   return rules;
+}
+
+/**
+ * inboxReminderRulesFor asked again on every request, for a host that builds
+ * its system prompt per request (OpenCode reads its AGENTS.md then): the note
+ * file is stat'ed each time and read again only when its path, size or
+ * modification time changed, so the answer follows the note as it changes
+ * (the Inbox writes new rules, the note is turned off) and costs one stat.
+ */
+export function inboxReminderRulesWatch(
+  config: PlannotatorConfig,
+  host: InboxToolHost,
+  place: { env: Readonly<Record<string, string | undefined>>; homeDir: string } = { env: process.env, homeDir: homedir() },
+): () => string | null {
+  let seen: string | null = null;
+  let answer: string | null = null;
+  return () => {
+    if (inboxReminderRulesText(config, host) === null) return null;
+    const file = inboxNoteFileOf(host, place.env, place.homeDir);
+    let key = `${file}:none`;
+    try {
+      if (file) {
+        const stat = statSync(file);
+        key = `${file}:${stat.size}:${stat.mtimeMs}:${stat.ino}`;
+      }
+    } catch {
+      // No file: the reminder carries them.
+    }
+    if (key !== seen) {
+      seen = key;
+      answer = inboxReminderRulesFor(config, host, place);
+    }
+    return answer;
+  };
 }
 
 /**

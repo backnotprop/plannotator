@@ -22,6 +22,7 @@ import {
   INBOX_NOTE_BODY,
   INBOX_NOTE_EARLIER_BLOCKS,
   INBOX_NOTE_START,
+  inboxNoteBlockFor,
   inboxNoteBlockWith,
   inboxNoteBodyWith,
   inboxNoteRules,
@@ -78,8 +79,8 @@ describe("the block", () => {
       expect(inboxNoteBlockWith(null)).toBe(INBOX_NOTE_BLOCK);
       expect(inboxNoteBodyWith(null)).toBe(INBOX_NOTE_BODY);
     }
-    // The pinned hash of v9 (inbox-agent-notes-refresh.test.ts): a note with no rules is the one on disks today.
-    expect(sha(INBOX_NOTE_BLOCK)).toBe(sha(`${INBOX_NOTE_START}\n${INBOX_NOTE_BODY}\n<!-- plannotator-inbox:end -->`));
+    // v9's hash as released (pinned in inbox-agent-notes-refresh.test.ts too): a note with no rules is the one on disks today.
+    expect(sha(inboxNoteBlockWith(inboxNoteRules("codex", {})))).toBe("3aba949e3648565d268e8c0f9e4b988762db69ec9cebf9ce89de437c7b895c4d");
     mkdirSync(file(".codex"), { recursive: true });
     expect(addInboxNote("codex", dataDir, e, undefined, { config: {} }).ok).toBe(true);
     expect(read(CODEX_FILE())).toBe(`${INBOX_NOTE_BLOCK}\n`);
@@ -109,11 +110,33 @@ describe("the block", () => {
     expect(noteWithoutMarkers(inboxNoteBlockWith(sharedNoteRules({})))).toBe(INBOX_NOTE_BODY);
   });
 
-  test("rules with a marker line or a memory header stay out of the note (the block would break)", () => {
-    for (const rules of ["Fine.\n<!-- plannotator-inbox:end -->", "<!-- plannotator-inbox:start v1 -->", "x\n## Gemini Added Memories"]) {
+  test("rules with a marker or a memory header anywhere stay out of the note (the block would break)", () => {
+    for (const rules of [
+      "Fine.\n<!-- plannotator-inbox:end -->",
+      "<!-- plannotator-inbox:start v1 -->",
+      "x\n## Gemini Added Memories",
+      // `^` under /m also starts a line after these: a marker there would be a second one.
+      "Be brief.\u2028<!-- plannotator-inbox:end -->",
+      "Be brief.\u2029<!-- plannotator-inbox:end -->",
+      "Be brief.\r<!-- plannotator-inbox:end -->",
+      "Be brief. <!-- plannotator-inbox:end --> mid-line",
+      "Remember.\u2028## Qwen Added Memories",
+    ]) {
       expect(inboxNoteRules("codex", shared(rules))).toBeNull();
       // The reminder still carries them (nothing in a note holds them).
       expect(inboxReminderRulesFor(shared(rules), "claude-code", place())).toBe(rules.trim());
+    }
+  });
+
+  test("rules that would add a marker never reach the file: the note stays removable byte for byte", () => {
+    write(CODEX_FILE(), "Mine.\n");
+    for (const sep of ["\u2028", "\u2029", "\r", " "]) {
+      const config = shared(`Be brief.${sep}<!-- plannotator-inbox:end -->`);
+      expect(addInboxNote("codex", dataDir, e, undefined, { config })).toMatchObject({ ok: true });
+      expect(read(CODEX_FILE())).toBe(`Mine.\n\n${INBOX_NOTE_BLOCK}\n`);
+      expect(noteStatus("codex", dataDir, e, config).state).toBe("added");
+      expect(removeInboxNote("codex", dataDir, e)).toMatchObject({ ok: true, action: "removed" });
+      expect(read(CODEX_FILE())).toBe("Mine.\n");
     }
   });
 
@@ -165,6 +188,31 @@ describe("rules change: the notes follow", () => {
     expect(read(CODEX_FILE())).toBe("Mine.\n");
   });
 
+  test("config.json that cannot be read: nothing rewritten (a failed read is not \"no rules\")", () => {
+    addInboxNote("claude-code", dataDir, e, undefined, { config: shared() });
+    const before = read(CLAUDE_FILE());
+    expect(refreshInboxNotes(dataDir, e, { config: null })).toEqual([]);
+    expect(read(CLAUDE_FILE())).toBe(before);
+    // The real read: config.json there but not JSON.
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    const configDir = join(fake.root, "config-data");
+    mkdirSync(configDir, { recursive: true });
+    writeFileSync(join(configDir, "config.json"), '{ "prompts": { "inbox": { "rules": "half a write');
+    process.env.PLANNOTATOR_DATA_DIR = configDir;
+    try {
+      expect(refreshInboxNotes(dataDir, e)).toEqual([]);
+      expect(addInboxNote("claude-code", dataDir, e)).toMatchObject({ ok: false });
+      expect(read(CLAUDE_FILE())).toBe(before);
+      // Readable again (here: no rules at all): the refresh runs.
+      writeFileSync(join(configDir, "config.json"), "{}");
+      expect(refreshInboxNotes(dataDir, e).map((r) => r.result)).toEqual(["refreshed"]);
+      expect(read(CLAUDE_FILE())).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    } finally {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    }
+  });
+
   test("an edited note is left as the person wrote it, and Settings says so", () => {
     write(join(fake.bin, "claude"), "#!/bin/sh\n");
     chmodSync(join(fake.bin, "claude"), 0o755);
@@ -175,7 +223,7 @@ describe("rules change: the notes follow", () => {
     expect(read(CLAUDE_FILE())).toBe(edited);
     // Adding it again keeps it too (kept-edited), as for any edited note.
     expect(addInboxNote("claude-code", dataDir, e, undefined, { config: shared(OTHER) })).toMatchObject({ ok: true, action: "kept-edited" });
-    expect(noteRulesStates(dataDir, e, shared(OTHER))["claude-code"]).toBe("edited");
+    expect(noteRulesStates(dataDir, e, shared(OTHER))?.["claude-code"]).toEqual({ why: "edited", fix: true });
   });
 
   test("a read-only or hard-linked file is left alone and reads as not updated", () => {
@@ -186,7 +234,7 @@ describe("rules change: the notes follow", () => {
     chmodSync(CLAUDE_FILE(), 0o444);
     expect(refreshInboxNotes(dataDir, e, { config: shared(OTHER) }).map((r) => r.result)).toEqual(["read-only"]);
     expect(read(CLAUDE_FILE())).toBe(before);
-    expect(noteRulesStates(dataDir, e, shared(OTHER))["claude-code"]).toBe("stale");
+    expect(noteRulesStates(dataDir, e, shared(OTHER))?.["claude-code"]).toEqual({ why: "stale", fix: true });
     chmodSync(CLAUDE_FILE(), 0o644);
     linkSync(CLAUDE_FILE(), file("dotfiles-copy.md"));
     expect(refreshInboxNotes(dataDir, e, { config: shared(OTHER) }).map((r) => r.result)).toEqual(["hard-linked"]);
@@ -241,6 +289,20 @@ describe("rules change: the notes follow", () => {
     expect(read(CODEX_FILE())).toBe(`${inboxNoteBlockWith(RULES)}\n`);
     expect(refreshInboxNotes(dataDir, e, { config }).map((r) => r.result)).toEqual(["current", "current"]);
     expect(inboxReminderRulesFor(config, "pi", place())).toBe(OTHER);
+  });
+});
+
+describe("the window's preview", () => {
+  test("each agent's preview is what its file gets: a file two agents read shows the rules they share", () => {
+    mkdirSync(file(".codex"), { recursive: true });
+    mkdirSync(file(".pi", "agent"), { recursive: true });
+    const config = { prompts: { inbox: { rules: RULES, runtimes: { pi: { rules: OTHER } } } } };
+    expect(inboxNoteBlockFor("pi", dataDir, e, config)).toBe(inboxNoteBlockWith(OTHER));
+    addInboxNote("codex", dataDir, e, undefined, { config });
+    symlinkSync(CODEX_FILE(), file(".pi", "agent", "AGENTS.md"));
+    addInboxNote("pi", dataDir, e, undefined, { config });
+    expect(inboxNoteBlockFor("pi", dataDir, e, config)).toBe(read(CODEX_FILE()).trimEnd());
+    expect(inboxNoteBlockFor("pi", dataDir, e, config)).toBe(inboxNoteBlockWith(RULES));
   });
 });
 
@@ -350,28 +412,51 @@ describe("Settings says who does not get them", () => {
     mkdirSync(file(".cursor"), { recursive: true });
   };
 
-  test("a note with the rules counts; no note, Cursor's copy and a reminder turned off do not", () => {
+  test("a note with the rules counts; no note and a reminder turned off do not; Cursor is never claimed either way", () => {
     install();
     mkdirSync(file(".codex"), { recursive: true });
     addInboxNote("codex", dataDir, e, undefined, { config: shared() });
-    const notes = noteRulesStates(dataDir, e, shared());
-    expect(notes).toEqual({ "claude-code": "none", codex: "held", gemini: "none", cursor: "manual" });
+    const notes = noteRulesStates(dataDir, e, shared())!;
+    expect(notes).toEqual({ "claude-code": { why: "none", fix: true }, codex: "held", gemini: { why: "none", fix: true } });
     const on = { "claude-code": true, pi: true, opencode: true };
-    expect(inboxRulesModel(shared(), wakes, { notes, on }).unsent).toEqual([
-      { agent: "gemini", slot: "shared", why: "none" },
-      { agent: "cursor", slot: "shared", why: "manual" },
-    ]);
+    expect(inboxRulesModel(shared(), wakes, { notes, on }).unsent).toEqual([{ agent: "gemini", slot: "shared", why: "none", fix: true }]);
     // Claude Code's reminder off and no note: not sent there either.
-    expect(inboxRulesModel(shared(), wakes, { notes, on: { ...on, "claude-code": false } }).unsent?.map((u) => u.agent)).toEqual(["claude-code", "gemini", "cursor"]);
+    expect(inboxRulesModel(shared(), wakes, { notes, on: { ...on, "claude-code": false } }).unsent?.map((u) => u.agent)).toEqual(["claude-code", "gemini"]);
+  });
+
+  test("never a fix Settings → Agents does not have: no file to put it in, or notes turned off", () => {
+    install();
+    fake.install("opencode");
+    // OpenCode with no AGENTS.md: Plannotator never creates one.
+    expect(noteRulesStates(dataDir, e, shared())?.opencode).toEqual({ why: "none", fix: false });
+    const off = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, PLANNOTATOR_INBOX_NOTES: "0" } });
+    expect(noteRulesStates(dataDir, off, shared())?.gemini).toEqual({ why: "none", fix: false });
+  });
+
+  test("an agent the person said no to, and rules the note cannot carry, are left unsaid", () => {
+    install();
+    const declined = { ...shared(), inboxAgentNotes: { asked: ["gemini"] } };
+    expect(noteRulesStates(dataDir, e, declined)?.gemini).toBeUndefined();
+    expect(noteRulesStates(dataDir, e, shared("Be brief.\u2028<!-- plannotator-inbox:end -->"))).toEqual({});
+  });
+
+  test("anything that throws while looking: no lines, never a broken Settings", () => {
+    const broken = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: fake.env });
+    (broken as { which: unknown }).which = () => {
+      throw new Error("PATH lookup failed");
+    };
+    expect(noteRulesStates(dataDir, broken, shared())).toBeNull();
+    expect(inboxRulesModel(shared(), wakes).unsent).toBeUndefined();
   });
 
   test("rules too long for the reminder are no matter where the note holds them", () => {
     install();
     const long = { prompts: { inbox: { rules: "y".repeat(9000) } } };
     addInboxNote("claude-code", dataDir, e, undefined, { config: long });
-    const notes = noteRulesStates(dataDir, e, long);
+    const notes = noteRulesStates(dataDir, e, long)!;
     expect(notes["claude-code"]).toBe("held");
     expect(inboxRulesModel(long, wakes, { notes, on: { "claude-code": true, pi: true, opencode: true } }).dropped).toEqual(["pi", "opencode"]);
     expect(inboxRulesModel(long, wakes).dropped).toEqual(["claude-code", "pi", "opencode"]);
   });
 });
+

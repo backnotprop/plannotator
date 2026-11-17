@@ -58,7 +58,7 @@ import {
   type InboxNoteAgentId,
   type InboxNoteAutoAdd,
 } from "@plannotator/core/inbox-types";
-import { loadConfig, saveConfig } from "@plannotator/shared/config";
+import { loadConfig, loadConfigOrNull, saveConfig } from "@plannotator/shared/config";
 import { inboxNoteHoldsRules, inboxNoteRulesSection, inboxReminderRulesText } from "@plannotator/shared/inbox/connection";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { type AgentFileRead, describeFsError, readAgentFile, stripJsonComments, withBom, writeAgentFileAtomic } from "./agent-files";
@@ -281,11 +281,15 @@ export function sharedNoteRules(config: unknown): string | null {
 
 function noteSafe(rules: string | null): string | null {
   if (rules === null) return null;
-  const lines = inboxNoteRulesSection(rules).split("\n");
-  if (lines.some((line) => /^<!-- plannotator-inbox:(start\b.*|end )-->/.test(line.trim()))) return null;
+  // Anywhere, not per line: the marker finders' `^` also starts a line after a CR, U+2028 or U+2029,
+  // and the memory tools find their header as plain text (indexOf).
+  if (rules.includes(NOTE_MARKER_PREFIX)) return null;
   if (MEMORY_SECTION_HEADERS.some((header) => rules.includes(header))) return null;
   return rules.replace(/\r\n?/g, "\n");
 }
+
+/** What every marker of the note starts with. */
+const NOTE_MARKER_PREFIX = "<!-- plannotator-inbox:";
 
 /** The note's body with these rules after it (none: INBOX_NOTE_BODY). Cursor's copy and `--notes cursor` print it. */
 export function inboxNoteBodyWith(rules: string | null): string {
@@ -757,7 +761,10 @@ export function addInboxNote(agent: InboxNoteAgentId, dataDir: string, e: AgentE
   const real = resolved(target.path);
   const owner = notes[agent] ?? INBOX_NOTE_AGENT_IDS.map((id) => notes[id]).find((r) => r?.path === real);
   // The block with the person's rules, the same for every agent whose record names this file.
-  const block = blockFor([agent, ...INBOX_NOTE_AGENT_IDS.filter((id) => id !== agent && id !== "cursor" && notes[id]?.path === real)], options.config ?? loadConfig());
+  const config = options.config === undefined ? loadConfigOrNull() : options.config;
+  // config.json there but unreadable: its rules are unknown, and `{}` would write a note without them.
+  if (config === null) return { ok: false, agent, reason: "config.json can't be read, so the note's rules are unknown; fix it and try again", path: shown };
+  const block = blockFor([agent, ...sharersOf(agent, real, notes)], config);
   let next: string;
   let action: "added" | "created" | "updated" | "unchanged" | "shared";
   /** The block's hash before this add (null: there was none), for the other records naming the same file. */
@@ -896,7 +903,10 @@ export interface RefreshInboxNotesOptions {
 export function refreshInboxNotes(dataDir: string, e: AgentEnvironment, options: RefreshInboxNotesOptions = {}): NoteRefresh[] {
   if (!agentHomeAllowed(e) || inboxNotesDisabled(e.env)) return [];
   const file = readInboxAgentNotes(dataDir);
-  const config = options.config ?? loadConfig();
+  const config = options.config === undefined ? loadConfigOrNull() : options.config;
+  // config.json there but unreadable: the rules each note should hold are unknown. Nothing is written
+  // (a read that failed is not "no rules"); the next start, or a save in Settings, refreshes them.
+  if (config === null) return [];
   const byPath = new Map<string, InboxNoteAgentId[]>();
   for (const agent of INBOX_NOTE_AGENT_IDS) {
     // Cursor's note is copied by hand into the app: never Plannotator's to rewrite, whatever a record says.
@@ -1235,36 +1245,52 @@ export function noteHolderIds(options: Pick<ConnectOptions, "dataDir" | "environ
  * Whether each agent found here holds its rules in its note now (Settings →
  * Prompts says who does not get them): `held`, the file it reads holds the
  * block with exactly its rules (inboxNoteHoldsRules, what the reminder side
- * checks too); `none`, no note there (never added, turned off, no file to put
- * it in); `edited`, a note the person edited, which Plannotator leaves as it
- * is; `stale`, Plannotator's note but not with these rules (read-only, other
- * hard links, changed while written, PLANNOTATOR_INBOX_NOTES=0, damaged);
- * `manual`, Cursor (copied by hand). Agents with no rules are left out.
+ * checks too); else why not: `none`, no note there (never added, turned off,
+ * no file to put it in); `edited`, a note the person edited, which
+ * Plannotator leaves as it is; `stale`, Plannotator's note but not with these
+ * rules (read-only, other hard links, changed while written,
+ * PLANNOTATOR_INBOX_NOTES=0, damaged). `fix`: Settings → Agents can put it
+ * right (the note can be added there: not with PLANNOTATOR_INBOX_NOTES=0, not
+ * where there is no file to put it in). Left out, so Settings says nothing it
+ * cannot stand behind: agents with no rules; Cursor (its copy by hand cannot
+ * be seen); rules the note cannot carry (noteSafe); an agent the person said
+ * no to (asked, and no note: "Don't add a note", or turned off). Null when
+ * anything throws: Settings then shows no line rather than failing.
  */
-export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: unknown): Partial<Record<InboxNoteAgentId, InboxNoteRulesState>> {
-  const out: Partial<Record<InboxNoteAgentId, InboxNoteRulesState>> = {};
-  if (!agentHomeAllowed(e)) return out;
-  for (const id of INBOX_NOTE_AGENT_IDS) {
-    if (agentRulesText(id, config) === null || !agentSpec(id).detect(e)) continue;
-    if (id === "cursor") {
-      out[id] = "manual";
-      continue;
+export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: unknown): Partial<Record<InboxNoteAgentId, InboxNoteRulesState>> | null {
+  try {
+    const out: Partial<Record<InboxNoteAgentId, InboxNoteRulesState>> = {};
+    if (!agentHomeAllowed(e)) return out;
+    const record = (value: unknown): Record<string, unknown> | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
+    const asked = record(record(config)?.inboxAgentNotes)?.asked;
+    const declined = (id: InboxNoteAgentId) => Array.isArray(asked) && asked.includes(id);
+    const notesOff = inboxNotesDisabled(e.env);
+    for (const id of INBOX_NOTE_AGENT_IDS) {
+      if (id === "cursor" || agentRulesText(id, config) === null || !agentSpec(id).detect(e)) continue;
+      if (inboxNoteHoldsAgentRules(id, e, config)) {
+        out[id] = "held";
+        continue;
+      }
+      if (inboxNoteRules(id, config) === null) continue;
+      const state = noteStatus(id, dataDir, e, config).state;
+      if (state === "absent" || state === "unavailable") {
+        if (!declined(id)) out[id] = { why: "none", fix: state === "absent" && !notesOff };
+      } else {
+        out[id] = { why: state === "edited" ? "edited" : "stale", fix: !notesOff };
+      }
     }
-    if (inboxNoteHoldsAgentRules(id, e, config)) {
-      out[id] = "held";
-      continue;
-    }
-    const state = noteStatus(id, dataDir, e, config).state;
-    out[id] = state === "absent" || state === "unavailable" ? "none" : state === "edited" ? "edited" : "stale";
+    return out;
+  } catch {
+    return null;
   }
-  return out;
 }
 
 /**
  * Whether the file `agent` reads its note from holds the note with exactly
  * its rules (inboxNoteHoldsRules: what the hosts' reminders check too). False
- * with no rules, for Cursor, and with no file. The Inbox's MCP instructions
- * (#3567) use it to leave the rules out for a client whose agent has them here.
+ * with no rules, for Cursor, and with no file. Exported for the Inbox's MCP
+ * instructions, which can leave the rules out for a client whose agent has
+ * them here (not used there yet).
  */
 export function inboxNoteHoldsAgentRules(agent: InboxNoteAgentId, e: AgentEnvironment, config: unknown): boolean {
   const rules = agentRulesText(agent, config);
@@ -1279,7 +1305,21 @@ function agentRulesText(agent: InboxNoteAgentId, config: unknown): string | null
   return host ? inboxReminderRulesText(config, host) : sharedRulesText(config);
 }
 
-export type InboxNoteRulesState = "held" | "none" | "edited" | "stale" | "manual";
+export type InboxNoteRulesState = "held" | { why: "none" | "edited" | "stale"; fix: boolean };
+
+/**
+ * The block the note in `agent`'s file should hold now: the rules of every agent whose record names
+ * the same file (blockFor), so a preview shows what the file gets (Pi's AGENTS.md a link to Codex's).
+ */
+export function inboxNoteBlockFor(agent: InboxNoteAgentId, dataDir: string, e: AgentEnvironment, config: unknown): string {
+  const path = noteTarget(agent, e).path;
+  return blockFor(path ? [agent, ...sharersOf(agent, resolved(path), readInboxAgentNotes(dataDir).notes)] : [agent], config);
+}
+
+/** The other agents (Cursor never) whose record names this resolved file. */
+function sharersOf(agent: InboxNoteAgentId, real: string, notes: InboxAgentNotesFile["notes"]): InboxNoteAgentId[] {
+  return INBOX_NOTE_AGENT_IDS.filter((id) => id !== agent && id !== "cursor" && notes[id]?.path === real);
+}
 
 function sharedRulesText(config: unknown): string | null {
   const record = (value: unknown): Record<string, unknown> | null => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null);

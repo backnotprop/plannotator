@@ -79,22 +79,36 @@ function DroppedNote({ hosts }: { hosts: InboxPromptHost[] }) {
   );
 }
 
-/** Why an agent found here does not get these rules: one line per reason, every agent it holds for named. */
+/**
+ * Why an agent found here does not get these rules: one line per reason (and per whether Settings → Agents can
+ * put it right: only then does the line say how), every agent it holds for named. The Inbox leaves out an agent
+ * nothing true can be said about.
+ */
 const UNSENT_WHY: Record<InboxRulesUnsent['why'], (one: boolean) => string> = {
-  none: (one) => `no note in ${one ? 'its' : 'their'} instructions. Turn it on in Settings → Agents.`,
-  edited: (one) => `you edited ${one ? 'its note' : 'their notes'}, so Plannotator leaves ${one ? 'it' : 'them'} as you wrote ${one ? 'it' : 'them'}. Turn the note off and on in Settings → Agents to replace ${one ? 'it' : 'them'}.`,
-  stale: (one) => `Plannotator could not update ${one ? 'its note' : 'their notes'}. Settings → Agents says why.`,
-  // Cursor alone: its note lives in the app.
-  manual: () => 'its note is copied by hand. Copy it again from Settings → Agents.',
+  none: (one) => `no note in ${one ? 'its' : 'their'} instructions.`,
+  edited: (one) => `you edited ${one ? 'its note' : 'their notes'}, so Plannotator leaves ${one ? 'it' : 'them'} as you wrote ${one ? 'it' : 'them'}.`,
+  stale: (one) => `Plannotator could not update ${one ? 'its note' : 'their notes'}.`,
+};
+const UNSENT_FIX: Record<InboxRulesUnsent['why'], ((one: boolean) => string) | null> = {
+  none: () => ' Turn it on in Settings → Agents.',
+  edited: (one) => ` Turn the note off and on in Settings → Agents to replace ${one ? 'it' : 'them'}.`,
+  stale: null,
 };
 
 function UnsentNotes({ unsent }: { unsent: InboxRulesUnsent[] }) {
-  const reasons = (Object.keys(UNSENT_WHY) as InboxRulesUnsent['why'][]).filter((why) => unsent.some((entry) => entry.why === why));
-  return reasons.map((why) => {
-    const names = unsent.filter((entry) => entry.why === why).map((entry) => INBOX_AGENT_LABELS[entry.agent]);
+  const groups: { why: InboxRulesUnsent['why']; fix: boolean; entries: InboxRulesUnsent[] }[] = [];
+  for (const why of Object.keys(UNSENT_WHY) as InboxRulesUnsent['why'][]) {
+    for (const fix of [true, false]) {
+      const entries = unsent.filter((entry) => entry.why === why && (UNSENT_FIX[why] !== null && entry.fix) === fix);
+      if (entries.length > 0) groups.push({ why, fix, entries });
+    }
+  }
+  return groups.map(({ why, fix, entries }) => {
+    const one = entries.length === 1;
     return (
-      <p className="pm-over" data-rules-unsent={why} key={why}>
-        Not sent to {names.join(', ')}: {UNSENT_WHY[why](names.length === 1)}
+      <p className="pm-over" data-rules-unsent={why} data-rules-fix={fix || undefined} data-rules-agents={entries.map((entry) => entry.agent).join(' ')} key={`${why}-${fix}`}>
+        Not sent to {entries.map((entry) => INBOX_AGENT_LABELS[entry.agent]).join(', ')}: {UNSENT_WHY[why](one)}
+        {fix && UNSENT_FIX[why]?.(one)}
       </p>
     );
   });

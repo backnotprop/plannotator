@@ -62,7 +62,7 @@ export function inboxRulesModel(config: PlannotatorConfig, wakes: Wakes, deliver
     const host = (INBOX_PROMPT_HOSTS as readonly string[]).includes(agent) ? (agent as InboxPromptHost) : null;
     // Claude Code, Pi and OpenCode get them by the reminder while it is on.
     if (host && delivery.on[host]) continue;
-    unsent.push({ agent, slot: host && runtimes[host] !== null ? host : "shared", why: state });
+    unsent.push({ agent, slot: host && runtimes[host] !== null ? host : "shared", why: state.why, fix: state.fix });
   }
   return { shared, runtimes, room: { shared: sharedRoom, runtimes: room }, dropped, unsent };
 }

@@ -391,7 +391,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, autoAddInboxNotes, inboxNoteBlockWith, inboxNoteRules, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, noteRulesStates, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, sharedNoteRules, unsaidAutoNotes } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, inboxNoteBlockFor, inboxNoteBlockWith, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, noteRulesStates, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, sharedNoteRules, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -2256,7 +2256,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const shared = inboxNoteBlockWith(sharedNoteRules(config));
     const own: Partial<Record<InboxNoteAgentId, string>> = {};
     for (const id of INBOX_NOTE_AGENT_IDS) {
-      const block = id === "cursor" ? shared : inboxNoteBlockWith(inboxNoteRules(id, config));
+      // What that agent's file gets: one several agents read carries the rules they share (inboxNoteBlockFor).
+      const block = id === "cursor" ? shared : inboxNoteBlockFor(id, dataDir, agentEnvironment, config);
       if (block !== shared) own[id] = block;
     }
     return { note_text: shared, note_texts: own };
@@ -3683,7 +3684,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const on = Object.fromEntries(
       INBOX_TOOL_HOSTS.map((host) => [host, !(host === "claude-code" && modOff) && resolveInboxReminder(config, env, host)]),
     ) as Record<InboxToolHost, boolean>;
-    return inboxPromptsModel(config, on, promptWakes(), { notes: noteRulesStates(dataDir, agentEnvironment, config) });
+    // Who the rules do not reach: never at the cost of Settings (null when it could not tell: no lines).
+    const notes = noteRulesStates(dataDir, agentEnvironment, config);
+    return inboxPromptsModel(config, on, promptWakes(), notes ? { notes } : undefined);
   };
   // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
   const promptWakes = () => ({ "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" });
