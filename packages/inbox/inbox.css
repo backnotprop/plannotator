@@ -7618,7 +7618,8 @@ dialog.ib-rti:focus { outline: none; }
 .ib-rti-art .ib-rti-count { font-family: var(--font-mono); font-size: 24px; font-weight: 700; }
 .ib-rti .ib-bi-q code { font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); color: var(--foreground); background: var(--ib-fill); padding: 1px 5px; border-radius: 5px; white-space: nowrap; }
 .ib-rti-acts { gap: 10px; padding: 18px 22px 20px; }
-.pn-inbox .ib-rti-acts .ib-btn, dialog .ib-rti-acts .ib-btn { flex: 1 1 0; min-width: 0; height: 36px; padding: 0 16px; font-size: var(--ib-fs-14, 14px); justify-content: center; color: var(--foreground); }
+.pn-inbox .ib-rti-acts .ib-btn, dialog .ib-rti-acts .ib-btn { flex: 1 1 0; min-width: 0; height: 36px; padding: 0 16px; font-size: var(--ib-fs-14, 14px); justify-content: center; color: var(--foreground); border-color: transparent; background: color-mix(in oklch, var(--foreground) 9%, transparent); }
+.pn-inbox .ib-rti-acts .ib-btn:hover, dialog .ib-rti-acts .ib-btn:hover { background: color-mix(in oklch, var(--foreground) 14%, transparent); }
 .ib-rti-acts .ib-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ib-bi-phone .ib-rti-art { height: 196px; }
 .ib-bi-phone .ib-rti-art .ib-rti-count { font-size: 20px; }
