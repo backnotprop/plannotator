@@ -71,7 +71,7 @@ import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
-import { useReplyHasWords, useReplyTextStore, useReplyTextWhile } from '../replyText';
+import { useReplyHasWords, useReplyTextStore } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
@@ -3927,8 +3927,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       </button>
     </>
   );
-  // The card draws the words, so while it shows, this pane follows them key by key (as the field does).
-  const composerText = useReplyTextWhile(replyText, composerShown);
+  // The card draws the words: it reads the open box's from `replyText` itself (`words`), so a key re-renders the card,
+  // never this pane and its messages.
   const composer: FullScreenComposerValue | null =
     composerShown
       ? {
@@ -3936,7 +3936,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           phone,
           reply: {
             to: replyTo,
-            value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            value: box.open ? '' : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            words: box.open ? replyText : undefined,
             onChange: (text) => changeReply(text, true),
             quote: quote && quotedMessage ? { message: quotedMessage, words: quote.words, onRemove: () => setQuote(null) } : null,
             onLateVoice,

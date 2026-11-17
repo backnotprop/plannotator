@@ -64,3 +64,18 @@ export function useReplyHasWords(store: ReplyText): boolean {
   const read = () => holdsWords(store.get());
   return useSyncExternalStore(store.subscribe, read, read);
 }
+
+/** Never changes: what the two hooks below read when there is no store. */
+const NO_STORE = createReplyText();
+
+/** `store`'s words, as `useReplyText` (the caller re-renders on every change); with no store, `fallback`. */
+export function useReplyTextOr(store: ReplyText | undefined, fallback: string): string {
+  const live = useReplyText(store ?? NO_STORE);
+  return store ? live : fallback;
+}
+
+/** Whether `store` (with no store, `fallback`) holds more than spaces, as `useReplyHasWords`. */
+export function useReplyHasWordsOr(store: ReplyText | undefined, fallback: string): boolean {
+  const live = useReplyHasWords(store ?? NO_STORE);
+  return store ? live : holdsWords(fallback);
+}

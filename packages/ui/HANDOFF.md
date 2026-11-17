@@ -3065,6 +3065,14 @@ Pinned by the Inbox's `packages/inbox/ask/sideCommand.test.tsx`.
 
 Pinned by the Inbox's `packages/inbox/ask/sideCommand.test.tsx`.
 
+## The composer's cost per key, and lists that open on typing only (additive; the list rule opt-in; no core change)
+
+- **`ComposerTokenTextarea`** (every host, no opt-in): the textareas pass `defaultValue=""` beside `value`, so React 19 no longer writes the words into the textarea's text child on every key (a whole-text DOM write and a mutation per key, which in Chrome also ended the browser's undo step: ⌘Z took back one character). Words the field mounts with are dropped from the text child at mount, before any typing. React's dev build warns once about a textarea with both props; production says nothing. The mirror's scroll and gutter sync after a value change runs in the next animation frame (before that frame paints), not in the key's task; scroll events and the ResizeObserver still sync at once.
+- **`findSkillReferenceTokens`**: the `/`-prose check walks back from the trigger instead of matching a regex over all the text before it (same results; a pass over the text per `/name` before). **`uniqueSkillReferences(tokens)`**: `extractSkillReferences` from tokens already found. `useSkillReferenceAutocomplete` scans the text once a change (it scanned twice).
+- **`quietOnDelete?: boolean`** on `useSkillReferenceAutocomplete` and `useMentionAutocomplete`, with **`onEdit(inputType)`** on their results (call it from the textarea's onChange in place of `onSelect`): a list opens when the person types, never because a deletion brought the caret into a `/name`, `$name` or `@name`; the list of a name being typed (open, or shut for a moment by a typo) stays through a Backspace. Absent: a deletion opens a list as a caret move does, as before. The Inbox's composers turn it on; CommentPopover does not.
+
+Pinned by `components/ComposerTokenTextarea.perKey.test.tsx`, `utils/skillReferences.test.ts` ("the prose check finds what the whole-text regex found") and the Inbox's `packages/inbox/pickerOpensOnTyping.test.tsx`.
+
 ## `useAnnotationHighlighter`: selection fixes (ui 0.63.0; every host, no opt-in, no core change)
 
 Fixes in the hook's release guard, for `Viewer` and every other host of the hook, on web-highlighter 0.8.2. A selection that worked keeps the same highlight, quote and stored positions.

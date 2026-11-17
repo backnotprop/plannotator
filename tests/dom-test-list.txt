@@ -306,6 +306,8 @@ packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
+packages/inbox/pickerOpensOnTyping.test.tsx
+packages/inbox/fullScreenComposerRenders.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
 packages/inbox/messageRedraws.test.tsx
@@ -541,6 +543,7 @@ packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
 packages/ui/components/DeferredMarkdownContentsRail.test.ts
 packages/ui/components/CommentPopover.overlayGutter.test.tsx
+packages/ui/components/ComposerTokenTextarea.perKey.test.tsx
 packages/ui/components/CommentPopover.multiTarget.test.tsx
 packages/ui/aiProviderConfigPersistence.test.tsx
 packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
