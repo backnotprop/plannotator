@@ -185,6 +185,9 @@
 .shp-grab { width: 38px; height: 4px; border-radius: 4px; background: color-mix(in oklab, var(--foreground) 22%, transparent); margin: 8px auto 0; flex: none; }
 .shp-scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .28); z-index: 29; animation: shp-fade-only .2s ease both; }
 .shp-root.panel-open:not(.panel-sheet) .shp-dock, .shp-root.panel-open:not(.panel-sheet) .shp-pill { left: calc((100% - var(--pw) - 12px) / 2); }
+/* Beside the board, References takes its room: the view ends left of it and the drawing fits what is left
+   (ShapeDrawn `aside`), so no part is under the panel. */
+.shp-root.panel-open:not(.panel-sheet) .shp-view { right: calc(var(--pw) + 12px); }
 /* As a sheet (a phone, a narrow pane: ShapeSurface `usePanelSheet`) the dock stays over it, whole and in reach; the
    sheet's list ends above the dock. */
 .shp-root.panel-open.panel-sheet .shp-dock { z-index: 32; }

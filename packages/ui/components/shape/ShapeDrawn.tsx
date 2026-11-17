@@ -429,6 +429,9 @@ export interface ShapeDrawnProps {
    * drawing fades out and a small track under it shows how much there is. Absent: it shrinks to fit.
    */
   pan?: boolean;
+  /** Px a side panel takes from the view (References beside the board): the drawing scales into what is left but keeps
+   *  the layout it has without the panel (no switch to its tall layout, no pan). */
+  aside?: number;
   /** A fixed canvas sits at the top of its view, not in the middle. Absent: in the middle, as before. */
   top?: boolean;
   /**
@@ -520,7 +523,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
 
   const canvas = drawn.width !== undefined && drawn.height !== undefined;
   const fit = useFit(frameRef, canvas);
-  const narrow = canvas ? (fit ? fit.w < 700 : false) : false;
+  const narrow = canvas ? (fit ? fit.w + (props.aside ?? 0) < 700 : false) : false;
   const useTall = canvas && narrow && !!drawn.tall;
   const html = useTall ? drawn.tall!.html : drawn.html;
   const css = useTall ? drawn.tall!.css ?? drawn.css ?? '' : drawn.css ?? '';

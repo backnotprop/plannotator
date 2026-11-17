@@ -1049,6 +1049,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           onRefOpen={(n) => void openRef(n)}
           onRefPeek={readFirst ? onRefPeek : undefined}
           pan={readFirst}
+          aside={panel && !sheet && rootEl ? panelWidth(rootEl.clientWidth) + 12 : 0}
           top={readFirst}
           resolveSrc={assetUrl}
           darkContrast={darkContrast}
