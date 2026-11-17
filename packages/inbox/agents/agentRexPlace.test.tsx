@@ -78,7 +78,7 @@ const LINE = 'Rex · billing / Claude Code';
 const agent = (id: string, over: Partial<InboxAgent> = {}): InboxAgent => ({ id, session: id, host: 'claude-code', project: { id: 'prj_bill', name: 'billing-svc' }, state: 'idle', waiting: 0, live: true, started_at: null, last_seen_at: null, ...over });
 const group = (agents: InboxAgent[], machine?: string): InboxAgentsGroup => ({ agents, total: agents.length, ended_today: 0, ...(machine ? { machine } : {}) });
 
-function mount(groups: InboxAgentsGroup[], options: { phone?: boolean; linked?: boolean } = {}) {
+function mount(groups: InboxAgentsGroup[], options: { phone?: boolean; linked?: boolean; own?: boolean } = {}) {
   setInboxAgents(groups);
   const host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -102,7 +102,7 @@ function mount(groups: InboxAgentsGroup[], options: { phone?: boolean; linked?: 
         onAddAgent={() => {}}
         pick={(go) => go}
         phone={options.phone === true}
-        onShowInRex={(a) => shown.push(a.id)}
+        onShowInRex={options.own ? undefined : (a) => shown.push(a.id)}
       />,
     ),
   );
@@ -146,6 +146,23 @@ test.skipIf(!hasDom)('Show in Rex: on the menu only when the list says it works 
   await press(row('ses_show')!.querySelector('[data-agent-more]')!);
   await press(document.querySelector('[data-agent-action="rex"]')!);
   expect(shown).toEqual(['ses_show']);
+});
+
+test.skipIf(!hasDom)("the Inbox's own Show in Rex: asks this Inbox, and a refusal takes the item away at once", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST') posts.push(String(input));
+    return Response.json(String(input).endsWith('/rex/show') ? { shown: false } : { faces: {}, rev: 0 });
+  }) as unknown as typeof fetch;
+  mount([group([agent('ses_show', { place: { kind: 'rex', line: LINE, show: true } })])], { own: true });
+  await settle();
+  await press(row('ses_show')!.querySelector('[data-agent-more]')!);
+  await press(document.querySelector('[data-agent-action="rex"]')!);
+  await settle();
+  expect(posts).toEqual(['/api/inbox/rex/show']);
+  const after = await itemsOf('ses_show');
+  expect(after === null || !after.includes('Show in Rex')).toBe(true);
+  // The place line stays.
+  expect(row('ses_show')!.querySelector('.ib-sr')!.textContent).toContain(LINE);
 });
 
 test.skipIf(!hasDom)("never on a phone, nor for a linked machine's agent", async () => {

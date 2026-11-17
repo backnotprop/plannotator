@@ -12,6 +12,7 @@ import { Tip } from '../components/Tip';
 import { AgentMark, type AgentMarkPicks } from './AgentMark';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
 import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry } from './model';
+import { showInRex } from '../data/actions/rexShow';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -79,7 +80,7 @@ export interface AgentsSectionProps {
   onDelete?: (agent: InboxAgent, machine: string | null) => void;
   /**
    * Show in Rex: Rex's app goes to the pane this computer's agent lives in. Offered on an agent whose place says so
-   * (`place.show`: Rex's app performs actions, and this window is on this computer). Absent: not offered.
+   * (`place.show`: Rex's app performs actions, and this window is on this computer). Absent: `showInRex` (the Inbox's own).
    */
   onShowInRex?: (agent: InboxAgent) => void;
   /** Says a line in the window's live region (the rename field's refusals). */
@@ -389,9 +390,15 @@ export function AgentsSection(props: AgentsSectionProps) {
   const onDelete = useMemo(() => (canDelete ? (entry: AgentEntry) => deleteNow.current?.(entry.agent, entry.machine === props.machines.self ? null : entry.machine) : undefined), [canDelete, props.machines.self]);
   const rexNow = useRef(props.onShowInRex);
   rexNow.current = props.onShowInRex;
-  const canShowInRex = props.onShowInRex !== undefined;
-  // This computer's agents only: a linked machine's Rex is not this one.
-  const onShowInRex = useMemo(() => (canShowInRex ? (entry: AgentEntry) => (entry.machine === null || entry.machine === props.machines.self ? rexNow.current?.(entry.agent) : undefined) : undefined), [canShowInRex, props.machines.self]);
+  // This computer's agents only: a linked machine's Rex is not this one. Offered only where the list says (`place.show`).
+  const onShowInRex = useMemo(
+    () => (entry: AgentEntry) => {
+      if (entry.machine !== null && entry.machine !== props.machines.self) return;
+      if (rexNow.current) rexNow.current(entry.agent);
+      else showInRex(entry.agent.session);
+    },
+    [props.machines.self],
+  );
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
     // background"). Its heading carries Add machine, then Add agent (under Tags' New tag); closed, nothing under it.

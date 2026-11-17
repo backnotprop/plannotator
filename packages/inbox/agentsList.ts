@@ -88,6 +88,12 @@ export function useOpensInRex(): boolean {
   return on;
 }
 
+/** Show in Rex was refused (the pane is gone, or Rex's app takes no actions now): the item goes until a read offers it again. */
+export function dropRexShow(session: string): void {
+  if (!current) return;
+  setInboxAgents(current.map((group) => ({ ...group, agents: group.agents.map((agent) => (agent.session === session && agent.place ? { ...agent, place: { kind: agent.place.kind, line: agent.place.line } } : agent)) })));
+}
+
 /** A named agent (its given name as `label`) → the agent as the list read it. */
 const asListed = new WeakMap<InboxAgent, InboxAgent>();
 const namedCache = new WeakMap<readonly InboxAgentsGroup[], { names: AgentNames; out: readonly InboxAgentsGroup[] }>();
