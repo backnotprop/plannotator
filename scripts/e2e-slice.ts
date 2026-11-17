@@ -467,7 +467,7 @@ export function gather(opts: {
 }
 
 /** The reason the CI slice leaves out SMOKE_SPECS. */
-export const SMOKE_ELSEWHERE = { specs: SMOKE_SPECS, why: 'Browser smoke (browser-smoke.yml) runs it on every PR' };
+export const SMOKE_ELSEWHERE = { specs: SMOKE_SPECS, why: 'Browser smoke (browser-smoke.yml) runs it on every PR that reaches the binary or the app pages' };
 
 /** The plan job's outputs: the shard count, the matrix, whether a shard needs the release-numbered binary, and the shard timeout. */
 export function planOutputs(slice: Slice): string {

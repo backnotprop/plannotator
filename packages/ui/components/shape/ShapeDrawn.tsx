@@ -429,6 +429,9 @@ export interface ShapeDrawnProps {
    * drawing fades out and a small track under it shows how much there is. Absent: it shrinks to fit.
    */
   pan?: boolean;
+  /** The px a side panel takes from the view right now (References beside the board, read as it slides): the drawing
+   *  scales into what is left but keeps the layout it has without the panel (no switch to its tall layout, no pan). */
+  aside?: () => number;
   /** A fixed canvas sits at the top of its view, not in the middle. Absent: in the middle, as before. */
   top?: boolean;
   /**
@@ -482,8 +485,8 @@ export interface ShapeDrawnProps {
 }
 
 /** How much room the view has, for a fixed canvas. */
-function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean, aside: React.RefObject<(() => number) | undefined>) {
+  const [size, setSize] = useState<{ w: number; h: number; aside: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el || !enabled) return;
@@ -492,6 +495,8 @@ function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
       setSize({
         w: el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
         h: el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom),
+        // Read with the width, in the same frame: as a panel slides, the two always add up to the room without it.
+        aside: aside.current?.() ?? 0,
       });
     };
     measure();
@@ -519,8 +524,10 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   handlers.current = props;
 
   const canvas = drawn.width !== undefined && drawn.height !== undefined;
-  const fit = useFit(frameRef, canvas);
-  const narrow = canvas ? (fit ? fit.w < 700 : false) : false;
+  const asideRef = useRef(props.aside);
+  asideRef.current = props.aside;
+  const fit = useFit(frameRef, canvas, asideRef);
+  const narrow = canvas ? (fit ? fit.w + fit.aside < 700 : false) : false;
   const useTall = canvas && narrow && !!drawn.tall;
   const html = useTall ? drawn.tall!.html : drawn.html;
   const css = useTall ? drawn.tall!.css ?? drawn.css ?? '' : drawn.css ?? '';

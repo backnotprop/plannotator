@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
-# Docs-only gate for the fast CI tier (Test, Browser smoke, Semgrep).
+# Docs-only rule for the fast CI tier. scripts/ci-affected.ts (the plan and
+# gate jobs) reads its verdict: a docs-only PR runs no test, build or scan but
+# Gitleaks.
 #
 # A PR that changes only files on the allowlist below cannot break a unit, DOM,
 # browser or package test, nor give Semgrep anything to scan: no test, build or
-# scanner reads them (scripts/ci-docs-only.test.ts holds that). The gated jobs
-# still start and report SUCCESS under their usual names, since the merge
-# script requires each fast check by name and a skipped matrix job loses its
-# name; their steps after this one skip.
+# scanner reads them (scripts/ci-docs-only.test.ts holds that).
 #
 # It is an allowlist on purpose, of named root files and of document and image
 # types in a few folders. Only types: `bun test` discovers *.test.ts anywhere,

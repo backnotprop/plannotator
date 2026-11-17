@@ -6973,8 +6973,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // A project's letter-mark picture (approval "inbox-letter-marks"; inbox-project-pictures.ts). GET: the picture
       // in order (the one set with Set picture…, then the repo's logo and the GitHub owner's picture when Settings →
       // Rows has them on, read from config.json `inboxRows`; the repo's logo also with `logo=1`, a local file, while
-      // GitHub is never turned on by the request: `pictureSources`), or a 404 and the window draws
-      // the letters. POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
+      // GitHub is never turned on by the request: `pictureSources`), or an empty 204 and the window draws the letters
+      // (an <img> errors on it the same as on a 404, and the console stays clear; an older window draws its letters too). POST `{ picture: "data:image/…;base64,…" | null }`: Set picture…, or take it away; the same
       // guards as every window write. Every window, and a linked
       // machine's window through the door; never an agent's.
       const projectPictureMatch = /^\/api\/inbox\/projects\/([A-Za-z0-9_]+)\/picture$/.exec(path);
@@ -6991,11 +6991,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             { id: project.id, root: project.root },
             { ...pictureSources(rowsState().rows ?? [], url.searchParams), repo: () => repos.get(project.root) ?? repos.refresh(project.root) },
           );
-          if (!picture) {
-            const miss = json({ error: "No picture for this project.", code: "no_picture" }, 404);
-            miss.headers.set("cache-control", "private, max-age=300");
-            return miss;
-          }
+          if (!picture) return new Response(null, { status: 204, headers: { "cache-control": "private, max-age=300" } });
           return new Response(picture.body, {
             headers: {
               "content-type": picture.type,

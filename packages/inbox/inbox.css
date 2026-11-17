@@ -12488,3 +12488,5 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-pempty[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 14%, transparent), color-mix(in oklch, var(--primary) 14%, transparent)); }
 .ib-topen { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); color: var(--primary); font-weight: 600; font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
 .ib-topen[data-thread-drop-label="refuse"] { color: var(--muted-foreground); }
+/* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
+.ib-topen[data-ghost-says] { visibility: hidden; }

@@ -125,17 +125,21 @@ export function standingReplyMentions(body: string, list: unknown): InboxReplyMe
   return kept;
 }
 
-/** The part of `from` an edit replaced, and what it became in `to`: `[start, fromEnd)` in `from` is `[start, toEnd)` in `to`. */
-function editOf(from: string, to: string, caret?: number | null): { start: number; fromEnd: number; toEnd: number } {
+/**
+ * The part of `from` an edit replaced, and what it became in `to`: `[start, fromEnd)` in `from` is `[start, toEnd)` in
+ * `to`. `told`: the caret placed it (else it is the first place that explains the change, which repeated letters can
+ * leave ambiguous).
+ */
+function editOf(from: string, to: string, caret?: number | null): { start: number; fromEnd: number; toEnd: number; told?: true } {
   const grow = to.length - from.length;
   // The caret after the edit tells an ambiguous one apart ("CI" typed before "CI"): an insertion ending at it, or a
   // deletion starting there, when that explains the change.
   if (typeof caret === 'number' && caret >= 0 && caret <= to.length) {
     if (grow > 0 && caret - grow >= 0 && to.slice(0, caret - grow) === from.slice(0, caret - grow) && to.slice(caret) === from.slice(caret - grow)) {
-      return { start: caret - grow, fromEnd: caret - grow, toEnd: caret };
+      return { start: caret - grow, fromEnd: caret - grow, toEnd: caret, told: true };
     }
     if (grow < 0 && to.slice(0, caret) === from.slice(0, caret) && to.slice(caret) === from.slice(caret - grow)) {
-      return { start: caret, fromEnd: caret - grow, toEnd: caret };
+      return { start: caret, fromEnd: caret - grow, toEnd: caret, told: true };
     }
   }
   let start = 0;
@@ -153,7 +157,7 @@ function editOf(from: string, to: string, caret?: number | null): { start: numbe
 export function remapReplyMentions(mentions: readonly InboxReplyMention[], from: string, to: string, caret?: number | null): InboxReplyMention[] {
   if (from === to) return [...mentions];
   if (mentions.length === 0) return [];
-  const edit = editOf(from, to, caret);
+  const edit = clearOfMentions(editOf(from, to, caret), mentions, from, to);
   const shift = edit.toEnd - edit.fromEnd;
   const out: InboxReplyMention[] = [];
   for (const m of mentions) {
@@ -162,6 +166,34 @@ export function remapReplyMentions(mentions: readonly InboxReplyMention[], from:
     else if (m.at >= edit.fromEnd) out.push({ ...m, at: m.at + shift });
   }
   return standingReplyMentions(to, out);
+}
+
+/** How far an ambiguous edit is slid looking for a place clear of the mentions. */
+const SLIDE_MAX = 64;
+
+/**
+ * An insertion or deletion no caret placed can often sit in several places that explain the change the same way
+ * ("M" typed before "Mn 1" reads as typed after its "M"). Of those, the nearest one that touches no mention: an edit
+ * never ends a mention it did not touch. One the caret placed, or a replacement, is as it is.
+ */
+function clearOfMentions(edit: ReturnType<typeof editOf>, mentions: readonly InboxReplyMention[], from: string, to: string): ReturnType<typeof editOf> {
+  if (edit.told) return edit;
+  const inserted = edit.toEnd - edit.start;
+  const removed = edit.fromEnd - edit.start;
+  if ((inserted > 0) === (removed > 0)) return edit;
+  const touches = (at: number) =>
+    mentions.some((m) => {
+      const end = m.at + m.label.length;
+      return removed > 0 ? at < end && at + removed > m.at : at > m.at && at < end;
+    });
+  if (!touches(edit.start)) return edit;
+  // Every place at or before the first that explains it: the words before it match (they did up to `start`).
+  for (let at = edit.start - 1; at >= Math.max(0, edit.start - SLIDE_MAX); at--) {
+    const same = removed > 0 ? from.slice(at + removed) === to.slice(at) : from.slice(at) === to.slice(at + inserted);
+    if (!same) break;
+    if (!touches(at)) return removed > 0 ? { start: at, fromEnd: at + removed, toEnd: at } : { start: at, fromEnd: at, toEnd: at + inserted };
+  }
+  return edit;
 }
 
 /** The words with each mention's label replaced by its title as listed (a draft read the way its sent words read back). */
