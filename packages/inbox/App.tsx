@@ -1731,8 +1731,8 @@ function Inbox() {
         onReactions: (reactions, rev) => hearReactionsEvent(reactions, rev),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
-          // Code review and Shape move the "/" list: the next box reads the catalog again.
-          if (capabilities.code_review || capabilities.shape) reloadSkillCatalog();
+          // Code review, Shape and Routines (/create-routine) move the "/" list: the next box reads the catalog again.
+          if (capabilities.code_review || capabilities.shape || capabilities.scheduled_threads) reloadSkillCatalog();
           // The Board too (its sidebar row; capabilities.ts): settings sync everywhere.
           if (namesCapability(capabilities)) setSettings((current) => (current ? withCapabilities(current, capabilities) : current));
           else void refreshSettings();
