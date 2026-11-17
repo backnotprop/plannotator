@@ -149,31 +149,54 @@ A fuller page, with the versions panel, its phone sheet and the rail sheet, is `
 
 ## Card
 
-`Card` draws one plan, document or page for a home or a list of plans: a preview well, then the title (up to two lines) and one grey line. `CardGrid`, `CardGroup` and `CardGroups` lay cards out in rows that wrap, at a fixed width per size (`large` 352 px, `regular` 256 px); on a phone each card fills the column.
+`Card` draws one plan, document or page for a home or a list of plans: a preview well, then the title (up to two lines) and one grey line. `CardRow` draws the same plan as one list row.
 
 ```tsx
-<Card
-  kind="document"
-  size="large"
-  title="Move sessions from signed cookies to Redis"
-  href="/plans/redis"
-  linkComponent={RouterLink}
-  fact="Your move"
-  unread
-  face={<CardFaceDocument title="Move sessions from signed cookies to Redis">{renderedMarkdown}</CardFaceDocument>}
-/>
+<CardGrid size="large" label="Now">
+  <Card
+    kind="document"
+    size="large"
+    title="Move sessions from signed cookies to Redis"
+    href="/plans/redis"
+    linkComponent={RouterLink}
+    fact="Your move"
+    factTone="action"
+    unread
+    face={<CardFaceDocument title="Move sessions from signed cookies to Redis">{renderedMarkdown}</CardFaceDocument>}
+  />
+</CardGrid>
 ```
 
-- **One link.** The whole card is one link (the host's `linkComponent`, or `<a>`), named by the title, the grey line, "new" when `unread` and "pinned" when `pinned`. Keyboard focus draws one ring around the card. The unread mark is a small dot before the title, with no number.
-- **The grey line** is `factMark` plus `fact` (for example an agent's 14 px mark and "Codex is working"); without `fact` it is the date from `time`. `factTone="action"` draws the fact in the accent colour, for a fact that asks the viewer to act ("Your move"); otherwise it is grey. When `time` is given, the full date and time are also in the line's `title` attribute. `working` makes the mark breathe.
-- **The face.** The card owns the preview well: 4:3, a quiet ground per kind from the theme (`--primary` for a document, `--foreground` for a page, `--warning` for an image, `--success` for data), the face cropped by the well's bottom edge. The sheet, window or panel is drawn at the card's size; the face inside it is laid out on a page 420 (document), 400 (page and data) or 320 (image) px wide and scaled to fit it. Cards in one row stretch to the tallest, so their bottoms line up. The face is `inert` and `aria-hidden`, so nothing in it can be reached or read on its own. It mounts only when the card comes near the screen; until then the well shows its quiet ground. `face={{ src }}` draws a lazy `<img>`; no `face` draws the designed empty face (a dashed sheet).
+The contract:
+
+| Prop | Type | What it does |
+|---|---|---|
+| `kind` | `"document" \| "page" \| "image" \| "data"` | The chrome and the ground: a sheet with one sheet behind, a window with three dots, or a panel. |
+| `title`, `href` | `string` | The link's text and target. |
+| `linkComponent` | the host's router link | Receives `href`, `className`, `title`, `aria-label` and `children`. Default `<a>`. |
+| `fact` | `string` | The grey line, for example "Your move". |
+| `factMark` | `ReactNode` | A 14 px mark before `fact`, for example the agent's icon. |
+| `factTone` | `"default" \| "action"` | `action` draws `fact` in the accent colour, for a fact that asks the viewer to act. |
+| `working` | `boolean` | The mark breathes while the agent works. |
+| `time` | `Date \| string` (ISO) | When it last changed. The card formats it ("Nov 15", with the year when not this year), shows it when there is no `fact`, and puts the full date and time in the link's tooltip. |
+| `unread`, `pinned` | `boolean` | A small dot before the title; `pinned` keeps `action` shown. Both are spoken. |
+| `action` | `ReactNode` | The host's own control, beside the link (see below). |
+| `face` (`Card`) | `ReactNode \| { src, fit? }`, optional | What the preview shows. `{ src }` is a lazy `<img>`, fitted inside its panel (`fit: "contain"`, the default) or filling it (`fit: "cover"`). No face draws the designed empty face, a dashed sheet. |
+| `size` (`Card`) | `"large" \| "regular"` | The title's size; the width comes from the column. |
+| `secondary` (`CardRow`) | `string` | A quieter text after the title, for example the project. |
+| `thumb` (`CardRow`) | `ReactNode \| { src, fit? }` | A small picture for the row's thumbnail. |
+
+- **One link.** The whole card or row is one link, named in this order: the title, a row's `secondary`, the grey line, "new" when `unread`, "pinned" when `pinned`. Keyboard focus on the link draws one ring around the card; the ring and shadow fade in. The unread mark is a small dot before the title, with no number.
+- **Sizes are fluid.** `CardGrid({ size })` lays cards out in columns with a minimum width, and each card fills its column: `large` gives three across a 1440 px layout's content column, `regular` four. `CardGroups` holds `CardGroup`s on one shared grid of regular columns, 44 px between rows, so every card lines up whatever its group. Under 768 px there is one column. Cards in one row stretch to the tallest, so their bottoms line up.
+- **The face.** The card owns the preview well: 4:3, a quiet ground per kind from the theme (`--primary` for a document, `--foreground` for a page, `--warning` for an image, `--success` for data), the face cropped by the well's bottom edge. The sheet, window or panel is drawn at the card's size; the face inside it is laid out on a page 420 (document), 400 (page and data) or 320 (image) px wide and scaled to fit it. The face is `inert` and `aria-hidden`, so nothing in it can be reached or read on its own. It mounts 240 px before the card scrolls into view, measured in the nearest scrolling ancestor (else the window), and is let go again once the card is far off screen; the well keeps its size, so nothing shifts.
 - **The host draws a face only from what the viewer may read.** The card shows whatever it is given.
+- **The card renders no content itself.** It never renders Markdown, HTML, Mermaid or Graphviz from a plan; a face is whatever the caller passes, so a caller that draws diagrams gates that rendering itself.
 - **Kinds.** A `document` always has exactly one sheet behind it, slightly turned; a `page` is a flat window with three dots; an `image` sits on a panel; `data` shows its first rows. No other kind has a sheet behind.
-- **`CardFaceDocument`** gives rendered Markdown the sheet's type: 34/36 px padding, body 15/24 at 82% of the foreground, headings the body's size at weight 600 with 18 px above, lists 15/24 with muted markers, tables on hairlines. When the first heading restates `title` (the same words, one the start of the other, or nearly all its words), the face starts at the first paragraph instead; it never opens on a bare list, so a heading that a list follows directly stays.
-- **`CardRow`** is the same plan as one list row, for a list view of the same data: a 36×27 thumbnail on the kind's ground (`thumb` as given, else the face drawn small), the unread dot, the title on one line, an optional quieter `secondary` (for example the project; hidden on a phone) and the grey line at the right. It is 44 px tall, 52 on a phone, filled on hover and focus only, with no border. One link, named like the card.
-- **`action`** is the host's own control, for example a pin button: top right of the card's preview, the right end of a row. It sits beside the link, never inside it, and comes after it in tab order; it shows on hover and focus, always on touch screens, and always while `pinned`. `pinned` is visual state only and adds "pinned" to the name; the host owns the control and what its click does.
-- **`CardUpdatesPill`** (`count`, `onShow`) is a quiet button reading "1 update · Show" or "3 updates · Show" for news the viewer has not taken in yet, so the cards do not jump under the pointer. The count is announced politely when it changes; with no updates it draws nothing.
-- **Motion** is in `card/motions.css` (imported by `frame.css`), named in `CARD_MOTIONS`, each timing a `--frame-card-*` custom property at the top of that file. `arrive`: wrap the line or row that just landed in a face in `CardArrival`, or call `arrive(element)` on it; it opens in place and is tinted for a moment, and the card around it never moves. `breathe`: the agent mark while `working`, in phase across cards, the only loop. `settle`: `settle` brings a new card to rest once and shows its dot; `settleBatch(container, mutate)` measures the container's children, runs the host's `mutate` once (it must leave the new order in the DOM; in React use `flushSync`) and slides each child from its old place, new ones from just above. The card never re-sorts itself. `fan`: hover or focus turns the sheet behind a document a little further and lifts the front. `open`: `transitionName` sets the preview's `view-transition-name` (with the `frame-card-open` view-transition class); give the page it opens the same name and class. Idle, nothing moves but `breathe`; under reduced motion nothing moves, `settleBatch` only runs `mutate`, and `open` is a plain cut.
+- **`CardFaceDocument`** gives rendered Markdown the sheet's type: 34/36 px padding, body 15/24 at 82% of the foreground, headings the body's size at weight 600 with 18 px above, lists 15/24 with muted markers, tables on hairlines. When the first heading is the title (the same text, ignoring case and spacing), the face starts at the first paragraph instead; it never opens on a bare list, so a heading that a list follows directly stays. A heading that only starts like the title ("Context" for "Context window cleanup") stays.
+- **`CardRow`**: a 36×27 thumbnail, the unread dot, the title on one line, the optional `secondary` (hidden on a phone) and the grey line at the right. It is 44 px tall, 52 on a phone, filled on hover and focus only, with no border. The thumbnail is the kind's small sheet, window or panel on its ground, holding `thumb` when given and otherwise a small glyph of the kind; it never draws a face scaled down.
+- **`action`** is the host's own control, for example a pin button: top right of the card's preview, the right end of a row. It sits beside the link, never inside it, and comes after it in tab order; it shows on hover and focus, always on touch screens, and always while `pinned`. Focus on it draws no card ring and does not fan the sheet. `pinned` is visual state only; the host owns the control and what its click does.
+- **`CardUpdatesPill`** (`count`, `onShow`) is a quiet pill reading "1 update · Show" or "3 updates · Show" for news the viewer has not taken in yet, so the cards do not jump under the pointer. The count is announced politely when it changes; with no updates it draws nothing.
+- **Motion** is in `card/motions.css` (imported by `frame.css`), named in `CARD_MOTIONS`, each timing a `--frame-card-*` custom property at the top of that file. `arrive`: wrap the line or row that just landed in a face in `CardArrival`, or call `arrive(element)` on it; it opens in place to its own height and is tinted for a moment, and the card around it never moves. `breathe`: the agent mark while `working`, in phase across cards, the only loop. `settle`: `settle` brings a new card to rest once and shows its dot; `settleBatch(container, mutate)` animates the container's direct children, so pass each grid's list (a `CardGrid`'s `ref`): it measures them, runs the host's `mutate` once (it must leave the new order in the DOM; in React use `flushSync`) and slides each from its old place, new ones from just above. The card never re-sorts itself. `fan`: hover or focus on the link turns the sheet behind a document a little further (240 ms) and lifts the front. `open`: `transitionName` sets the preview's `view-transition-name` (with the `frame-card-open` view-transition class); give the page it opens the same name and class. Idle, nothing moves but `breathe`; under reduced motion nothing moves, `settleBatch` only runs `mutate`, and `open` is a plain cut. `arrive` and `settleBatch` take `null` or `undefined`: `arrive` then does nothing and `settleBatch` only runs `mutate`.
 - A face renders inside the card, not in a portal, but it is scaled: give it fixed pixel sizes at its page width rather than sizes that depend on the viewport.
 
 See `test-consumer/frame-card-example.tsx` for a whole home.

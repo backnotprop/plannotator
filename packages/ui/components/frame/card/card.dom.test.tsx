@@ -23,7 +23,7 @@ class FakeObserver {
   disconnected = false;
   constructor(
     readonly callback: (entries: { isIntersecting: boolean; target: Element }[]) => void,
-    readonly options: { rootMargin?: string } = {},
+    readonly options: { rootMargin?: string; root?: Element | null } = {},
   ) {
     FakeObserver.made.push(this);
   }
@@ -39,6 +39,9 @@ class FakeObserver {
   }
   enter() {
     this.callback([{ isIntersecting: true, target: this.target! }]);
+  }
+  leave() {
+    this.callback([{ isIntersecting: false, target: this.target! }]);
   }
 }
 
@@ -68,6 +71,12 @@ function mount(node: ReactNode) {
 function nearScreen() {
   act(() => {
     for (const observer of FakeObserver.made) if (!observer.disconnected) observer.enter();
+  });
+}
+
+function farFromScreen() {
+  act(() => {
+    for (const observer of FakeObserver.made) if (!observer.disconnected) observer.leave();
   });
 }
 
@@ -119,7 +128,7 @@ describe.skipIf(!hasDom)('Card', () => {
     expect(read!.querySelector('[data-frame-card-dot]')).toBeNull();
   });
 
-  test('the grey line is the fact with its mark; without a fact it is the date; the time is always in the title attribute', () => {
+  test('the grey line is the fact with its mark; without a fact it is the date; the full time is a tooltip on the link, where the pointer reaches it', () => {
     const { Card, cardDateWords } = cardModule!;
     const at = '2026-11-15T10:00:00Z';
     const words = cardDateWords(new Date(at));
@@ -135,11 +144,13 @@ describe.skipIf(!hasDom)('Card', () => {
     expect(factLine.textContent).toBe('Codex is working');
     expect(factLine.querySelector('[data-frame-card-mark] svg')).not.toBeNull();
     expect(factLine.querySelector('time')).toBeNull();
-    expect(factLine.getAttribute('title')).toBeTruthy();
+    const [factLink, dateLink, bareLink] = [...frame.querySelectorAll('a')];
+    expect(factLink!.getAttribute('title')).toBeTruthy();
+    expect(dateLink!.getAttribute('title')).toBe(factLink!.getAttribute('title'));
+    expect(bareLink!.hasAttribute('title')).toBe(false);
     const dateLine = withDate!.querySelector('[data-frame-card-line]')!;
     expect(dateLine.textContent).toBe(words);
     expect(dateLine.querySelector('time')!.getAttribute('dateTime')).toBe(new Date(at).toISOString());
-    expect(dateLine.getAttribute('title')).toBe(factLine.getAttribute('title'));
     expect(withDate!.querySelector('a')!.getAttribute('aria-label')).toBe(`With a date, ${words}`);
     expect(bare!.querySelector('[data-frame-card-line]')).toBeNull();
     expect(bare!.querySelector('a')!.getAttribute('aria-label')).toBe('With nothing');
@@ -168,11 +179,11 @@ describe.skipIf(!hasDom)('Card', () => {
     for (const card of [page, image, data, emptyPage]) expect(card!.querySelectorAll('[data-frame-card-back]').length).toBe(0);
     expect(page!.querySelectorAll('[data-frame-card-window-bar] > i').length).toBe(3);
     expect(image!.querySelector('[data-frame-card-panel="image"]')).not.toBeNull();
-    expect(data!.querySelector('[data-frame-card-panel="data"]')!.className).toContain('frame-card-panel-rows');
+    expect(data!.querySelector('[data-frame-card-panel="data"] [data-frame-card-stage]')!.textContent).toBe('rows');
     expect(emptyPage!.querySelector('[data-frame-card-window][data-frame-card-blank]')).not.toBeNull();
   });
 
-  test('the face mounts only near the screen, through an observer with a margin; a picture face is a lazy image', () => {
+  test('the face mounts only near the screen and is let go far from it; the well keeps its place; a picture face is a lazy image', () => {
     const { Card } = cardModule!;
     const frame = mount(
       <>
@@ -182,16 +193,49 @@ describe.skipIf(!hasDom)('Card', () => {
     );
     expect(frame.querySelector('[data-testid="face"]')).toBeNull();
     expect(frame.querySelector('img')).toBeNull();
-    expect(FakeObserver.made.length).toBe(2);
-    expect(FakeObserver.made[0]!.options.rootMargin).toMatch(/px$/);
-    expect(FakeObserver.made[0]!.target!.hasAttribute('data-frame-card-well')).toBe(true);
+    expect(FakeObserver.made.map((observer) => observer.options.rootMargin)).toEqual(['240px', '1200px', '240px', '1200px']);
+    expect(FakeObserver.made.every((observer) => observer.target!.hasAttribute('data-frame-card-well'))).toBe(true);
     nearScreen();
     expect(frame.querySelector('[data-testid="face"]')!.textContent).toBe('Body');
     const image = frame.querySelector('img')!;
     expect(image.getAttribute('loading')).toBe('lazy');
     expect(image.getAttribute('src')).toBe('/shot.png');
     expect(image.getAttribute('alt')).toBe('');
-    expect(FakeObserver.made.every((observer) => observer.disconnected)).toBe(true);
+    const well = frame.querySelector('[data-frame-card-well]')!;
+    farFromScreen();
+    expect(frame.querySelector('[data-testid="face"]')).toBeNull();
+    expect(frame.querySelector('img')).toBeNull();
+    expect(frame.querySelector('[data-frame-card-well]')).toBe(well);
+    expect(well.getAttribute('data-frame-card-face')).toBe('loading');
+    expect(well.querySelectorAll('[data-frame-card-back]').length).toBe(1);
+    nearScreen();
+    expect(frame.querySelector('[data-testid="face"]')).not.toBeNull();
+  });
+
+  test('inside a scrolling list the look-ahead is measured in that list, not the window', () => {
+    const { Card } = cardModule!;
+    const frame = mount(
+      <div data-testid="scroller" style={{ overflowY: 'auto', height: '200px' }}>
+        <Card kind="document" size="regular" title="Plan" href="/p" face={DOC} />
+      </div>,
+    );
+    const scroller = frame.querySelector('[data-testid="scroller"]');
+    expect(FakeObserver.made.length).toBe(2);
+    expect(FakeObserver.made.every((observer) => observer.options.root === scroller)).toBe(true);
+  });
+
+  test('a picture face is fitted inside its panel by default, and fills it with fit cover', () => {
+    const { Card } = cardModule!;
+    const frame = mount(
+      <>
+        <Card kind="image" size="regular" title="Fitted" href="/a" face={{ src: '/a.png' }} />
+        <Card kind="image" size="regular" title="Filled" href="/b" face={{ src: '/b.png', fit: 'cover' }} />
+      </>,
+    );
+    nearScreen();
+    const [fitted, filled] = [...frame.querySelectorAll('img')];
+    expect(fitted!.getAttribute('data-frame-card-fit')).toBe('contain');
+    expect(filled!.getAttribute('data-frame-card-fit')).toBe('cover');
   });
 
   test('the mark breathes only while the agent works', () => {
@@ -203,9 +247,8 @@ describe.skipIf(!hasDom)('Card', () => {
       </>,
     );
     const [working, still] = [...frame.querySelectorAll('[data-frame-card-mark]')];
-    expect(working!.className).toContain('frame-card-breathe');
-    expect(still!.className).not.toContain('frame-card-breathe');
-    expect(frame.querySelectorAll('.frame-card-breathe').length).toBe(1);
+    expect(working!.hasAttribute('data-frame-card-working')).toBe(true);
+    expect(still!.hasAttribute('data-frame-card-working')).toBe(false);
   });
 
   test('settle and the view transition name are opt-in', () => {
@@ -217,12 +260,12 @@ describe.skipIf(!hasDom)('Card', () => {
       </>,
     );
     const [fresh, old] = [...frame.querySelectorAll<HTMLElement>('[data-frame-card]')];
-    expect(fresh!.className).toContain('frame-card-settle');
+    expect(fresh!.hasAttribute('data-frame-card-settle')).toBe(true);
     const well = fresh!.querySelector<HTMLElement>('[data-frame-card-well]')!;
-    expect(well.className).toContain('frame-card-open');
+    expect(well.hasAttribute('data-frame-card-transition')).toBe(true);
     expect(well.style.getPropertyValue('view-transition-name') || (well.style as unknown as { viewTransitionName?: string }).viewTransitionName).toBe('plan-n');
-    expect(old!.className).not.toContain('frame-card-settle');
-    expect(old!.querySelector('[data-frame-card-well]')!.className).not.toContain('frame-card-open');
+    expect(old!.hasAttribute('data-frame-card-settle')).toBe(false);
+    expect(old!.querySelector('[data-frame-card-well]')!.hasAttribute('data-frame-card-transition')).toBe(false);
   });
 });
 
@@ -248,7 +291,6 @@ describe.skipIf(!hasDom)('CardFaceDocument', () => {
     const same = frame.querySelector('[data-case="same"]')!;
     expect(same.querySelector('h1')!.hidden).toBe(true);
     expect(same.querySelector('h2')!.hidden).toBe(false);
-    expect(same.querySelector('[data-frame-card-document]')!.className).toBe('frame-card-document');
     expect(frame.querySelector<HTMLElement>('[data-case="other"] h1')!.hidden).toBe(false);
   });
 
@@ -272,28 +314,48 @@ describe.skipIf(!hasDom)('CardFaceDocument', () => {
   });
 });
 
-describe.skipIf(!hasDom)('CardGrid', () => {
-  test('cards are list items with their size class, stretched so a row\'s bottoms align; a phone column fills the width', () => {
-    const { Card, CardGrid, CardGroup } = cardModule!;
+describe.skipIf(!hasDom)('CardGrid and CardGroups', () => {
+  test('a grid takes its size and holds each card as a list item; the card fills its column, with no fixed width', () => {
+    const { Card, CardGrid } = cardModule!;
+    const frame = mount(
+      <CardGrid size="large" label="Now">
+        <Card kind="document" size="large" title="One" href="/1" />
+        {null}
+        <Card kind="page" size="large" title="Two" href="/2" />
+      </CardGrid>,
+    );
+    const list = frame.querySelector('ul')!;
+    expect(list.getAttribute('aria-label')).toBe('Now');
+    expect(list.getAttribute('data-frame-card-grid')).toBe('large');
+    expect([...list.children].map((child) => child.tagName)).toEqual(['LI', 'LI']);
+    for (const card of frame.querySelectorAll<HTMLElement>('[data-frame-card]')) expect(card.style.width).toBe('');
+  });
+
+  test('in CardGroups a group spans as many shared columns as it has cards, at most a row', () => {
+    const { Card, CardGroup, CardGroups } = cardModule!;
+    const cards = (n: number) => Array.from({ length: n }, (_, i) => <Card key={i} kind="document" size="regular" title={`P${i}`} href={`/${i}`} />);
+    const frame = mount(
+      <CardGroups>
+        <CardGroup label="two">{cards(2)}</CardGroup>
+        <CardGroup label="six">{cards(6)}</CardGroup>
+      </CardGroups>,
+    );
+    const [two, six] = [...frame.querySelectorAll<HTMLElement>('section')];
+    expect(two!.getAttribute('aria-label')).toBe('two');
+    expect(two!.style.gridColumn).toBe('span 2');
+    expect(six!.style.gridColumn).toBe('span 4');
+    expect(six!.querySelectorAll('li').length).toBe(6);
+  });
+
+  test('a group on its own lays out its cards in its own grid', () => {
+    const { Card, CardGroup } = cardModule!;
     const frame = mount(
       <CardGroup label="tidepool-api">
         <Card kind="document" size="regular" title="One" href="/1" />
-        <Card kind="document" size="large" title="Two" href="/2" />
       </CardGroup>,
     );
-    const list = frame.querySelector('ul')!;
-    expect(list.children.length).toBe(2);
-    expect([...list.children].every((child) => child.tagName === 'LI')).toBe(true);
-    const [regular, large] = [...frame.querySelectorAll('[data-frame-card]')];
-    expect(regular!.className.split(' ')).toContain('w-64');
-    expect(large!.className.split(' ')).toContain('w-88');
-    expect(regular!.className.split(' ')).toContain('max-sm:w-full');
-    expect(frame.querySelector('section')!.getAttribute('aria-label')).toBe('tidepool-api');
-    const classes = list.className.split(' ');
-    expect(classes).toContain('items-stretch');
-    expect(classes).not.toContain('items-start');
-    expect([...list.children].every((child) => child.className.split(' ').includes('flex'))).toBe(true);
-    void CardGrid;
+    expect(frame.querySelector('section')!.style.gridColumn).toBe('');
+    expect(frame.querySelector('ul')!.getAttribute('data-frame-card-grid')).toBe('regular');
   });
 });
 
@@ -322,61 +384,55 @@ describe.skipIf(!hasDom)('action and pinned', () => {
     const frame = mount(
       <>
         <Card kind="document" size="regular" title="Plan" href="/p" fact="Your move" unread pinned />
-        <CardRow kind="document" title="Plan" href="/p" fact="Your move" pinned />
+        <CardRow kind="document" title="Plan" href="/p" fact="Your move" pinned secondary="tidepool-api" />
         <CardRow kind="document" title="Other" href="/o" fact="Your move" />
       </>,
     );
     const [card, row, other] = [...frame.querySelectorAll('a')];
     expect(card!.getAttribute('aria-label')).toBe('Plan, Your move, new, pinned');
-    expect(row!.getAttribute('aria-label')).toBe('Plan, Your move, pinned');
+    expect(row!.getAttribute('aria-label')).toBe('Plan, tidepool-api, Your move, pinned');
     expect(other!.getAttribute('aria-label')).toBe('Other, Your move');
     expect(frame.querySelectorAll('[data-frame-card-pinned]').length).toBe(2);
   });
 });
 
 describe.skipIf(!hasDom)('CardRow', () => {
-  test('44 px tall, 52 on a phone; one link; the title on one line, the card title up to two', () => {
-    const { Card, CardRow } = cardModule!;
-    const frame = mount(
-      <>
-        <CardRow kind="page" title="Rebuild checkout as one page" href="/c" secondary="kestrel-web" time="2026-11-15T10:00:00Z" />
-        <Card kind="page" size="regular" title="Rebuild checkout as one page" href="/c" />
-      </>,
-    );
+  test('one link named by the title, the secondary text and the grey line; the date is a tooltip on the link', () => {
+    const { CardRow, cardDateWords } = cardModule!;
+    const at = '2026-11-15T10:00:00Z';
+    const frame = mount(<CardRow kind="page" title="Rebuild checkout as one page" href="/c" secondary="kestrel-web" time={at} unread />);
     const row = frame.querySelector<HTMLElement>('[data-frame-card-row]')!;
-    const classes = row.className.split(' ');
-    expect(classes).toContain('h-11');
-    expect(classes).toContain('max-sm:h-13');
-    expect(row.querySelectorAll('a').length).toBe(1);
-    expect(row.querySelector('[data-frame-card-title]')!.className.split(' ')).toContain('truncate');
+    const links = row.querySelectorAll('a');
+    expect(links.length).toBe(1);
+    expect(links[0]!.getAttribute('aria-label')).toBe(`Rebuild checkout as one page, kestrel-web, ${cardDateWords(new Date(at))}, new`);
+    expect(links[0]!.getAttribute('title')).toBeTruthy();
     expect(row.querySelector('[data-frame-card-secondary]')!.textContent).toBe('kestrel-web');
-    expect(row.querySelector('time')).not.toBeNull();
-    const cardTitle = frame.querySelector('[data-frame-card] [data-frame-card-title]')!;
-    expect(cardTitle.className.split(' ')).toContain('line-clamp-2');
-    expect(cardTitle.className).not.toContain('min-h');
+    expect(row.getAttribute('data-frame-card-columns')).toBe('secondary');
+    expect(row.querySelector('time')!.getAttribute('dateTime')).toBe(new Date(at).toISOString());
   });
 
-  test('the thumbnail is 36x27 on the kind ground: the given thumb as is, else the face drawn small with no sheet behind', () => {
+  test('the thumbnail draws the kind\'s chrome around the host\'s thumb, or else the kind\'s glyph, never a scaled face', () => {
     const { CardRow } = cardModule!;
     const frame = mount(
       <>
-        <CardRow kind="document" title="Own thumb" href="/a" thumb={<b data-testid="thumb">t</b>} face={<p>face</p>} />
-        <CardRow kind="document" title="Small face" href="/b" face={<p data-testid="small">face</p>} />
+        <CardRow kind="document" title="Own thumb" href="/a" thumb={<b data-testid="thumb">t</b>} />
+        <CardRow kind="page" title="Glyph" href="/b" />
+        <CardRow kind="image" title="Picture" href="/c" thumb={{ src: '/c.png' }} />
       </>,
     );
+    const [own, glyph, picture] = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-thumb]')];
+    expect(own!.getAttribute('data-frame-card-thumb')).toBe('picture');
+    expect(own!.querySelector('[data-testid="thumb"]')).toBeNull();
     nearScreen();
-    const [own, small] = [...frame.querySelectorAll('[data-frame-card-thumb]')];
-    for (const thumb of [own, small]) {
-      expect(thumb!.className).toContain('h-[27px]');
-      expect(thumb!.className).toContain('w-9');
+    expect(own!.querySelector('[data-frame-card-sheet] [data-testid="thumb"]')).not.toBeNull();
+    expect(glyph!.getAttribute('data-frame-card-thumb')).toBe('glyph');
+    expect(glyph!.querySelector('[data-frame-card-window]')).not.toBeNull();
+    expect(picture!.querySelector('[data-frame-card-panel="image"] img')!.getAttribute('src')).toBe('/c.png');
+    for (const thumb of [own, glyph, picture]) {
       expect(thumb!.hasAttribute('inert')).toBe(true);
+      expect(thumb!.querySelector('[data-frame-card-stage]')).toBeNull();
+      expect(thumb!.querySelector('[data-frame-card-back]')).toBeNull();
     }
-    expect(own!.querySelector('[data-testid="thumb"]')).not.toBeNull();
-    expect(own!.querySelector('[data-frame-card-stage]')).toBeNull();
-    expect(small!.querySelector('[data-testid="small"]')).not.toBeNull();
-    expect(small!.querySelector('[data-frame-card-back]')).toBeNull();
-    expect(small!.querySelector<HTMLElement>('[data-frame-card-stage]')!.style.getPropertyValue('--frame-card-scale')).toBe(String((36 * 0.8) / 420));
-    expect(small!.querySelector('[data-frame-card-stage]')!.parentElement!.hasAttribute('data-frame-card-sheet')).toBe(true);
   });
 });
 
@@ -451,6 +507,37 @@ describe.skipIf(!hasDom)('motion API', () => {
     ul.remove();
   });
 
+  test('arrive opens a line inside a scaled face to its own full height, not its scaled height', () => {
+    reduce(false);
+    const keyframes: Keyframe[][] = [];
+    Element.prototype.animate = function (this: Element, frames: Keyframe[] | PropertyIndexedKeyframes | null) {
+      animated.push(this);
+      keyframes.push(frames as Keyframe[]);
+      return { cancel() {}, finished: Promise.resolve() } as unknown as Animation;
+    } as typeof Element.prototype.animate;
+    const { arrive } = motionModule!;
+    const line = document.createElement('div');
+    document.body.appendChild(line);
+    Object.defineProperty(line, 'offsetHeight', { value: 18 });
+    line.getBoundingClientRect = () => ({ height: 18 * 0.66, width: 100, top: 0, left: 0 }) as DOMRect;
+    arrive(line);
+    const opening = keyframes.find((frames) => frames.some((frame) => 'height' in frame))!;
+    expect(opening.at(-1)!.height).toBe('18px');
+    line.remove();
+  });
+
+  test('the motion helpers take null or undefined: arrive does nothing, settleBatch only runs the change', () => {
+    reduce(false);
+    const { arrive, settleBatch } = motionModule!;
+    expect(() => arrive(null)).not.toThrow();
+    expect(() => arrive(undefined)).not.toThrow();
+    let calls = 0;
+    settleBatch(null, () => (calls += 1));
+    settleBatch(undefined, () => (calls += 1));
+    expect(calls).toBe(2);
+    expect(animated).toEqual([]);
+  });
+
   test('arrive animates only the element that landed, never the card around it', () => {
     reduce(false);
     const { Card } = cardModule!;
@@ -471,13 +558,13 @@ describe.skipIf(!hasDom)('CardUpdatesPill', () => {
     const frame = mount(<CardUpdatesPill count={1} onShow={() => (shown += 1)} />);
     const button = frame.querySelector('button')!;
     expect(button.getAttribute('type')).toBe('button');
-    expect(button.textContent).toBe('1 update·Show');
+    expect(button.textContent).toBe('1 update · Show');
     const live = frame.querySelector('[aria-live="polite"]')!;
     expect(live.textContent).toBe('1 update');
     act(() => button.click());
     expect(shown).toBe(1);
     act(() => root!.render(<CardUpdatesPill count={3} onShow={() => {}} />));
-    expect(frame.querySelector('button')!.textContent).toBe('3 updates·Show');
+    expect(frame.querySelector('button')!.textContent).toBe('3 updates · Show');
     expect(frame.querySelector('[aria-live="polite"]')!.textContent).toBe('3 updates');
     act(() => root!.render(<CardUpdatesPill count={0} onShow={() => {}} />));
     expect(frame.querySelector('button')).toBeNull();
@@ -496,36 +583,42 @@ describe.skipIf(!hasDom)('fact tone and where a document face starts', () => {
       </>,
     );
     const lines = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-line]')];
-    expect(lines.map((line) => line.className.split(' ').includes('text-primary'))).toEqual([true, true, false, false]);
     expect(lines.map((line) => line.dataset.frameCardFactTone ?? null)).toEqual(['action', 'action', null, null]);
-    expect(lines[2]!.className.split(' ')).toContain('text-muted-foreground');
   });
 
-  test('a first heading that restates the title is skipped, with any heading right after it, so the face starts at the first paragraph', () => {
-    const { CardFaceDocument, cardHeadingRestatesTitle } = cardModule!;
-    expect(cardHeadingRestatesTitle('Per-tenant feature flags', 'Per-tenant feature flags, so a beta can ship')).toBe(true);
-    expect(cardHeadingRestatesTitle('Plan: move sessions to Redis', 'Move sessions from signed cookies to Redis')).toBe(true);
-    expect(cardHeadingRestatesTitle('Why sessions break today', 'Move sessions from signed cookies to Redis')).toBe(false);
-    expect(cardHeadingRestatesTitle('Sessions to Redis', 'Move sessions from signed cookies to Redis')).toBe(true);
-    expect(cardHeadingRestatesTitle('Session layout', 'Move sessions from signed cookies to Redis')).toBe(false);
-    expect(cardHeadingRestatesTitle('Redis', 'Move sessions to Redis')).toBe(false);
+  test('the first heading is skipped only when it is the title, ignoring case and spacing, with any heading right after it', () => {
+    const { CardFaceDocument, cardHeadingIsTitle } = cardModule!;
+    expect(cardHeadingIsTitle('  per-tenant   Feature flags ', 'Per-tenant feature flags')).toBe(true);
+    expect(cardHeadingIsTitle('Context', 'Context window cleanup')).toBe(false);
+    expect(cardHeadingIsTitle('Per-tenant feature flags', 'Per-tenant feature flags, so a beta can ship')).toBe(false);
     const frame = mount(
-      <CardFaceDocument title="Per-tenant feature flags, so a beta can ship to one customer">
-        <h1>Per-tenant feature flags</h1>
-        <h2>Context</h2>
-        <p>A beta should reach one customer.</p>
-        <h2>Steps</h2>
-        <ol>
-          <li>Read flags per tenant</li>
-        </ol>
-      </CardFaceDocument>,
+      <>
+        <div data-case="same">
+          <CardFaceDocument title="Per-tenant feature flags">
+            <h1>Per-tenant feature flags</h1>
+            <h2>Context</h2>
+            <p>A beta should reach one customer.</p>
+            <h2>Steps</h2>
+            <ol>
+              <li>Read flags per tenant</li>
+            </ol>
+          </CardFaceDocument>
+        </div>
+        <div data-case="prefix">
+          <CardFaceDocument title="Context window cleanup">
+            <h1>Context</h1>
+            <p>Why it fills up.</p>
+          </CardFaceDocument>
+        </div>
+      </>,
     );
-    const shown = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-document] > *')].filter((element) => !element.hidden);
-    expect(shown[0]!.tagName).toBe('P');
-    expect(shown.map((element) => element.tagName)).toEqual(['P', 'H2', 'OL']);
+    const shown = (name: string) =>
+      [...frame.querySelectorAll<HTMLElement>(`[data-case="${name}"] [data-frame-card-document] > *`)].filter((element) => !element.hidden).map((element) => element.tagName);
+    expect(shown('same')).toEqual(['P', 'H2', 'OL']);
+    expect(shown('prefix')).toEqual(['H1', 'P']);
   });
 
-  test('never opens on a bare list: a restating heading that a list follows directly stays', () => {
+  test('never opens on a bare list: a title heading that a list follows directly stays', () => {
     const { CardFaceDocument } = cardModule!;
     const frame = mount(
       <CardFaceDocument title="Retry policy">

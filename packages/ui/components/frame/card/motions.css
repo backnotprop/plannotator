@@ -15,6 +15,7 @@
   --frame-card-lift: translateY(-3px);
   --frame-card-press: translateY(-1px) scale(0.985);
   --frame-card-fan-duration: 240ms;
+  --frame-card-ring-duration: 200ms;
   --frame-card-breathe-duration: 4.8s;
   --frame-card-breathe-low: 0.35;
   --frame-card-arrive-open-duration: 260ms;
@@ -30,15 +31,20 @@
   --frame-card-open-in-delay: 60ms;
 }
 
+/* the ring and shadow fade on hover and focus */
+[data-frame-card] {
+  transition: box-shadow var(--frame-card-ring-duration) var(--frame-card-ease);
+}
+
 /* fan, with the front's lift and press */
 .frame-card-fan,
 [data-frame-card-hero] {
   transition: transform var(--frame-card-fan-duration) var(--frame-card-ease);
 }
-[data-frame-card]:is(:hover, :has(:focus-visible)) .frame-card-fan {
+[data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) .frame-card-fan {
   transform: var(--frame-card-back-fan);
 }
-[data-frame-card]:is(:hover, :has(:focus-visible)) [data-frame-card-hero] {
+[data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) [data-frame-card-hero] {
   transform: var(--frame-card-lift);
 }
 [data-frame-card]:active [data-frame-card-hero] {
@@ -128,14 +134,15 @@
 
 @media (prefers-reduced-motion: reduce) {
   .frame-card-fan,
-  [data-frame-card-hero] {
+  [data-frame-card-hero],
+  [data-frame-card] {
     transition: none;
   }
-  [data-frame-card]:is(:hover, :has(:focus-visible)) .frame-card-fan,
+  [data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) .frame-card-fan,
   [data-frame-card]:active .frame-card-fan {
     transform: var(--frame-card-back-rest);
   }
-  [data-frame-card]:is(:hover, :has(:focus-visible)) [data-frame-card-hero],
+  [data-frame-card]:is(:hover, :has(:focus-visible:not([data-frame-card-action] *))) [data-frame-card-hero],
   [data-frame-card]:active [data-frame-card-hero] {
     transform: none;
   }

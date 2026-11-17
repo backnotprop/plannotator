@@ -68,7 +68,6 @@ export {
   CardGroup,
   CardGroups,
   CARD_FACE_WIDTH,
-  CARD_WIDTH,
   cardDateWords,
   cardName,
   type CardImageFace,

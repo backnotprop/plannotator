@@ -36,15 +36,16 @@ function cardTiming(element: Element, name: string, fallback: number) {
 
 /**
  * `settle` for a batch of changes (a re-sort, new cards, cards leaving):
- * measures every child of `container`, runs the host's `mutate` once, then
+ * measures the direct children of `container` (pass each grid's list, for
+ * example the `ref` of a `CardGrid`), runs the host's `mutate` once, then
  * slides each child that moved from its old place and brings each new one
  * down from just above, with `settle`'s duration and ease (FLIP). `mutate`
  * must leave the new order in the DOM when it returns (in React, wrap the
- * state change in `flushSync`). Under reduced motion it only runs `mutate`.
- * The card never re-sorts itself.
+ * state change in `flushSync`). Under reduced motion, or with no container
+ * (`null` or `undefined`), it only runs `mutate`. The card never re-sorts itself.
  */
-export function settleBatch(container: HTMLElement, mutate: () => void): void {
-  if (reducedMotion()) {
+export function settleBatch(container: HTMLElement | null | undefined, mutate: () => void): void {
+  if (container === null || container === undefined || reducedMotion()) {
     mutate();
     return;
   }
@@ -71,10 +72,12 @@ export function settleBatch(container: HTMLElement, mutate: () => void): void {
 /**
  * `arrive` for one element the host just put inside a face (a line, a row):
  * it opens in place and is tinted for a moment where it landed. Only that
- * element animates; the card never moves. Under reduced motion it does nothing.
+ * element animates; the card never moves. It opens to the element's own
+ * height, before the face's scale, so it lands at full size. Under reduced
+ * motion, or with no element (`null` or `undefined`), it does nothing.
  */
-export function arrive(element: HTMLElement): void {
-  if (reducedMotion() || typeof element.animate !== "function") return;
+export function arrive(element: HTMLElement | null | undefined): void {
+  if (element === null || element === undefined || reducedMotion() || typeof element.animate !== "function") return;
   const style = getComputedStyle(element);
   const ease = style.getPropertyValue("--frame-card-ease").trim() || "cubic-bezier(0.22, 1, 0.36, 1)";
   const open = cardDurationMs(style.getPropertyValue("--frame-card-arrive-open-duration"), 260);
@@ -82,7 +85,7 @@ export function arrive(element: HTMLElement): void {
   const delay = cardDurationMs(style.getPropertyValue("--frame-card-arrive-fade-delay"), 60);
   const tint = cardDurationMs(style.getPropertyValue("--frame-card-arrive-tint-duration"), 1600);
   const color = style.getPropertyValue("--frame-card-arrive-tint").trim() || "color-mix(in oklch, var(--primary) 18%, transparent)";
-  const height = element.getBoundingClientRect().height;
+  const height = element.offsetHeight;
   element.animate([{ height: "0px", overflow: "hidden" }, { height: `${height}px`, overflow: "hidden" }], { duration: open, easing: ease });
   element.animate([{ opacity: 0 }, { opacity: 1 }], { duration: fade, delay, easing: "ease-out", fill: "backwards" });
   element.animate([{ backgroundColor: color }, { backgroundColor: "transparent" }], { duration: tint, easing: "ease-out" });

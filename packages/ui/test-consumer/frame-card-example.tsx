@@ -235,6 +235,7 @@ interface Plan {
   readonly title: string;
   readonly project: string;
   readonly face?: ReactNode | CardImageFace;
+  readonly thumb?: CardImageFace;
   readonly fact?: string;
   readonly factTone?: "default" | "action";
   readonly working?: boolean;
@@ -298,7 +299,15 @@ const EARLIER: readonly Plan[] = [
       </CardFaceDocument>
     ),
   },
-  { id: "tokens", kind: "image", title: "Dark mode tokens for the dashboard", project: "kestrel-web", time: ago(4), face: { src: SWATCHES } },
+  {
+    id: "tokens",
+    kind: "image",
+    title: "Dark mode tokens for the dashboard",
+    project: "kestrel-web",
+    time: ago(4),
+    face: { src: SWATCHES },
+    thumb: { src: SWATCHES, fit: "cover" },
+  },
   { id: "search", kind: "document", title: "Search index for the docs site", project: "kestrel-web", time: ago(6) },
 ];
 
@@ -376,20 +385,20 @@ export function PlansHomeCardsExample() {
       working={plan.working}
       unread={plan.unread}
       time={plan.time}
-      face={plan.face}
+      thumb={plan.thumb}
       secondary={plan.project}
       pinned={pinned(plan)}
       action={action(plan)}
     />
   );
   return (
-    <div className="flex flex-col gap-14 p-6 sm:p-12">
+    <div className="flex flex-col gap-14 p-4 min-[768px]:p-12">
       <section className="flex flex-col gap-4">
-        <div className="flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3">
           <h2 className="text-[13px] font-medium leading-5 text-frame-muted-fg">Now</h2>
           <CardUpdatesPill count={updates} onShow={showUpdates} />
         </div>
-        <CardGrid label="Now" ref={grid}>
+        <CardGrid size="large" label="Now" ref={grid}>
           {now.map((plan) => card(plan, "large"))}
         </CardGrid>
       </section>
@@ -397,7 +406,7 @@ export function PlansHomeCardsExample() {
         <CardGroup label="Recent">{RECENT.map((plan) => card(plan, "regular"))}</CardGroup>
         <CardGroup label="kestrel-web">{EARLIER.map((plan) => card(plan, "regular"))}</CardGroup>
       </CardGroups>
-      <section className="flex max-w-[960px] flex-col gap-1">
+      <section className="flex flex-col gap-1">
         <h2 className="px-2 text-[13px] font-medium leading-7 text-frame-muted-fg">The same plans as a list</h2>
         <div role="list" aria-label="All plans" className="flex flex-col">
           {[...NOW, ...RECENT, ...EARLIER].map((plan) => (

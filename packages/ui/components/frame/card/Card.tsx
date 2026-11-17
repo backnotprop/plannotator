@@ -1,6 +1,8 @@
 import {
   Children,
+  createContext,
   isValidElement,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -17,15 +19,20 @@ import { CARD_MOTIONS, cardDurationMs } from "./motions";
 export type CardKind = "document" | "page" | "image" | "data";
 export type CardSize = "large" | "regular";
 
-/** A picture face: drawn as a lazy `<img>`. The face is hidden from assistive tech, so it takes no alt. */
+/**
+ * A picture face: drawn as a lazy `<img>`, fitted inside its panel (`contain`, the default) or filling it
+ * (`cover`). The face is hidden from assistive tech, so it takes no alt.
+ */
 export interface CardImageFace {
   readonly src: string;
+  readonly fit?: "contain" | "cover";
   readonly alt?: never;
 }
 
 export interface CardLinkProps {
   readonly href: string;
   readonly className?: string;
+  readonly title?: string;
   readonly "aria-label"?: string;
   readonly children?: ReactNode;
 }
@@ -33,11 +40,9 @@ export interface CardLinkProps {
 /** What a card and a row share: the link, the grey line, unread, pinned and the host's action. */
 interface CardCommonProps {
   readonly kind: CardKind;
-  /** What the preview shows; leave it out (or null) for the designed empty face. */
-  readonly face?: ReactNode | CardImageFace;
   readonly title: string;
   readonly href: string;
-  /** The host's router link; it receives `href`, `className`, `aria-label` and `children`. Default `<a>`. */
+  /** The host's router link; it receives `href`, `className`, `title`, `aria-label` and `children`. Default `<a>`. */
   readonly linkComponent?: ElementType<CardLinkProps>;
   /** The grey line, for example "Your move"; without it the line is the date from `time`. */
   readonly fact?: string;
@@ -48,6 +53,7 @@ interface CardCommonProps {
   /** The mark breathes while the agent works. */
   readonly working?: boolean;
   readonly unread?: boolean;
+  /** When it last changed: a `Date` or an ISO string. The card formats it, and puts the full date and time in a tooltip. */
   readonly time?: Date | string;
   /**
    * The host's own control (for example a pin button), beside the link and never inside it: top right of the
@@ -59,6 +65,8 @@ interface CardCommonProps {
 }
 
 export interface CardProps extends CardCommonProps {
+  /** What the preview shows; leave it out (or null) for the designed empty face, a dashed sheet. */
+  readonly face?: ReactNode | CardImageFace;
   readonly size: CardSize;
   /** Plays `settle` once: the card comes to rest and its unread dot appears. */
   readonly settle?: boolean;
@@ -67,21 +75,21 @@ export interface CardProps extends CardCommonProps {
 }
 
 export interface CardRowProps extends CardCommonProps {
-  /** A second, quieter text after the title, for example the project; hidden on a phone. */
+  /** A second, quieter text after the title, for example the project; spoken after the title, hidden on a phone. */
   readonly secondary?: string;
-  /** The 36×27 thumbnail; without it the face is drawn small. */
+  /** A small picture for the 36×27 thumbnail, drawn inside the kind's sheet, window or panel; without it, the kind's glyph. */
   readonly thumb?: ReactNode | CardImageFace;
 }
 
-/** The width each kind's face is laid out at (the page is 4:3), before it is scaled to the card. */
+/** The width each kind's face is laid out at, before it is scaled to fit its sheet, window or panel. */
 export const CARD_FACE_WIDTH: Record<CardKind, number> = { document: 420, page: 400, image: 320, data: 400 };
 
-/** The card's width per size, in CSS pixels; on a phone a card fills its column. */
-export const CARD_WIDTH: Record<CardSize, number> = { large: 352, regular: 256 };
+/** A first guess at a card's width, used only until the card has been measured. */
+const CARD_WIDTH_GUESS: Record<CardSize, number> = { large: 350, regular: 256 };
 
-const ROW_THUMB_WIDTH = 36;
-
+/** How far ahead of the screen a face mounts, and how far past it a face is let go again. */
 const NEAR_SCREEN_MARGIN = "240px";
+const FAR_FROM_SCREEN_MARGIN = "1200px";
 
 function isImageFace(face: unknown): face is CardImageFace {
   return (
@@ -116,35 +124,59 @@ function cardDateTitle(date: Date): string {
   return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
-/** The spoken name of a card or row: the title, the grey line, then "new" when unread and "pinned" when pinned. */
-export function cardName(title: string, line: string | null, unread: boolean, pinned = false): string {
-  return [title, line, unread ? "new" : null, pinned ? "pinned" : null]
+/**
+ * The spoken name of a card or row: the title, a row's `secondary`, the grey line, then "new" when unread and
+ * "pinned" when pinned.
+ */
+export function cardName(
+  title: string,
+  line: string | null,
+  unread: boolean,
+  pinned = false,
+  secondary: string | null = null,
+): string {
+  return [title, secondary, line, unread ? "new" : null, pinned ? "pinned" : null]
     .filter((part): part is string => part !== null && part !== "")
     .join(", ");
 }
 
-function useNearScreen<T extends Element>(ref: { readonly current: T | null }): boolean {
+function scrollingAncestor(element: Element): Element | null {
+  for (let node = element.parentElement; node !== null; node = node.parentElement) {
+    const { overflowY, overflowX } = getComputedStyle(node);
+    if (/(auto|scroll|overlay)/.test(`${overflowY} ${overflowX}`)) return node;
+  }
+  return null;
+}
+
+/**
+ * True while the element is near the screen: it turns true 240 px before the element scrolls into view and
+ * false again once it is far past, measured in the nearest scrolling ancestor (else the viewport).
+ */
+function useNearScreen<T extends Element>(ref: { readonly current: T | null }, enabled = true): boolean {
   const [near, setNear] = useState(() => typeof IntersectionObserver === "undefined");
   useEffect(() => {
-    if (near) return;
     const element = ref.current;
-    if (element === null) return;
-    if (typeof IntersectionObserver === "undefined") {
-      setNear(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
+    if (!enabled || element === null || typeof IntersectionObserver === "undefined") return;
+    const root = scrollingAncestor(element);
+    const enter = new IntersectionObserver(
       (entries) => {
-        if (entries.some((entry) => entry.isIntersecting)) {
-          setNear(true);
-          observer.disconnect();
-        }
+        if (entries.some((entry) => entry.isIntersecting)) setNear(true);
       },
-      { rootMargin: NEAR_SCREEN_MARGIN },
+      { root, rootMargin: NEAR_SCREEN_MARGIN },
     );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [near, ref]);
+    const leave = new IntersectionObserver(
+      (entries) => {
+        if (entries.every((entry) => !entry.isIntersecting)) setNear(false);
+      },
+      { root, rootMargin: FAR_FROM_SCREEN_MARGIN },
+    );
+    enter.observe(element);
+    leave.observe(element);
+    return () => {
+      enter.disconnect();
+      leave.disconnect();
+    };
+  }, [ref, enabled]);
   return near;
 }
 
@@ -207,7 +239,7 @@ function Blank() {
   );
 }
 
-function LazyImage({ src, onReady }: { readonly src: string; readonly onReady: () => void }) {
+function LazyImage({ src, fit = "contain", onReady }: { readonly src: string; readonly fit?: "contain" | "cover"; readonly onReady: () => void }) {
   return (
     <img
       src={src}
@@ -215,37 +247,16 @@ function LazyImage({ src, onReady }: { readonly src: string; readonly onReady: (
       loading="lazy"
       decoding="async"
       draggable={false}
+      data-frame-card-fit={fit}
       onLoad={onReady}
       onError={onReady}
-      className="block size-full object-cover object-top"
+      className={cn("block size-full", fit === "cover" ? "object-cover object-top" : "object-contain")}
     />
   );
 }
 
-function FaceFrame({
-  kind,
-  state,
-  face,
-  wellWidth,
-  onImageReady,
-}: {
-  readonly kind: CardKind;
-  readonly state: "loading" | "empty" | "ready";
-  readonly face: ReactNode | CardImageFace;
-  readonly wellWidth: number;
-  readonly onImageReady: () => void;
-}) {
-  const content =
-    state !== "ready" ? (
-      state === "empty" ? <Blank /> : null
-    ) : isImageFace(face) ? (
-      <LazyImage src={face.src} onReady={onImageReady} />
-    ) : (
-      <Stage kind={kind} wellWidth={wellWidth}>
-        {face}
-      </Stage>
-    );
-  const blank = state === "empty";
+/** The kind's chrome: a sheet for a document, a window with three dots for a page, a panel for an image or data. */
+function Chrome({ kind, blank = false, children }: { readonly kind: CardKind; readonly blank?: boolean; readonly children?: ReactNode }) {
   if (kind === "page") {
     return (
       <div data-frame-card-hero="" data-frame-card-window="" data-frame-card-blank={blank ? "" : undefined} className="frame-card-window">
@@ -254,14 +265,14 @@ function FaceFrame({
           <i />
           <i />
         </div>
-        <div className="frame-card-window-body">{content}</div>
+        <div className="frame-card-window-body">{children}</div>
       </div>
     );
   }
   if (kind === "document") {
     return (
       <div data-frame-card-hero="" data-frame-card-sheet="" data-frame-card-blank={blank ? "" : undefined} className="frame-card-sheet">
-        {content}
+        {children}
       </div>
     );
   }
@@ -272,75 +283,128 @@ function FaceFrame({
       data-frame-card-blank={blank ? "" : undefined}
       className={cn("frame-card-panel", kind === "data" && "frame-card-panel-rows")}
     >
-      {content}
+      {children}
     </div>
   );
 }
 
 /**
- * The preview well. A card's well is 4:3 with one sheet behind a document; a
- * row's thumbnail is 36×27 and draws `thumb` as given, else the face, small.
+ * The preview well: 4:3 on the kind's ground, one sheet behind a document,
+ * and the face inside the kind's chrome. The face mounts near the screen and
+ * is let go far from it; the well keeps its size either way.
  */
 function Well({
   kind,
   face,
-  thumb,
-  width,
-  compact = false,
+  size,
   transitionName,
 }: {
   readonly kind: CardKind;
   readonly face: ReactNode | CardImageFace;
-  readonly thumb?: ReactNode | CardImageFace;
-  readonly width: number;
-  readonly compact?: boolean;
+  readonly size: CardSize;
   readonly transitionName?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const near = useNearScreen(ref);
   const [imageReady, setImageReady] = useState(false);
-  const row = compact;
-  const ownThumb = row && present(thumb);
-  const shown = ownThumb ? thumb : face;
-  const image = isImageFace(shown);
-  const state: "loading" | "empty" | "ready" = !present(shown) ? "empty" : near ? "ready" : "loading";
+  const image = isImageFace(face);
+  const state: "loading" | "empty" | "ready" = !present(face) ? "empty" : near ? "ready" : "loading";
   const faceState = state === "ready" && image && !imageReady ? "loading" : state;
   const style = transitionName === undefined ? undefined : ({ viewTransitionName: transitionName } as CSSProperties);
+  const content =
+    state === "empty" ? (
+      <Blank />
+    ) : state === "loading" ? null : isImageFace(face) ? (
+      <LazyImage src={face.src} fit={face.fit} onReady={() => setImageReady(true)} />
+    ) : (
+      <Stage kind={kind} wellWidth={CARD_WIDTH_GUESS[size]}>
+        {face}
+      </Stage>
+    );
   return (
     <div
       ref={ref}
       data-frame-card-well=""
-      data-frame-card-thumb={row ? "" : undefined}
       data-frame-card-kind={kind}
       data-frame-card-face={faceState}
+      data-frame-card-transition={transitionName === undefined ? undefined : ""}
       inert
       aria-hidden="true"
       style={style}
-      className={cn(
-        "relative shrink-0 overflow-hidden",
-        row ? "h-[27px] w-9 rounded-[5px]" : "aspect-[4/3]",
-        transitionName !== undefined && CARD_MOTIONS.open,
-      )}
+      className={cn("relative aspect-[4/3] shrink-0 overflow-hidden", transitionName !== undefined && CARD_MOTIONS.open)}
     >
-      {ownThumb ? (
-        state === "ready" &&
-        (isImageFace(thumb) ? (
-          <span className={cn("block size-full", !imageReady && "invisible")}>
-            <LazyImage src={thumb.src} onReady={() => setImageReady(true)} />
-          </span>
-        ) : (
-          thumb
-        ))
-      ) : (
-        <>
-          {kind === "document" && !row && <div data-frame-card-back="" className={cn("frame-card-sheet", CARD_MOTIONS.fan)} />}
-          {(state !== "loading" || (kind === "document" && !row)) && (
-            <div className={cn("contents", state === "ready" && image && !imageReady && "[&_[data-frame-card-hero]>*]:invisible")}>
-              <FaceFrame kind={kind} state={state} face={face} wellWidth={width} onImageReady={() => setImageReady(true)} />
-            </div>
-          )}
-        </>
+      {kind === "document" && <div data-frame-card-back="" className={cn("frame-card-sheet", CARD_MOTIONS.fan)} />}
+      {(state !== "loading" || kind === "document") && (
+        <div className={cn("contents", faceState === "loading" && state === "ready" && "[&_[data-frame-card-hero]>*]:invisible")}>
+          <Chrome kind={kind} blank={state === "empty"}>
+            {content}
+          </Chrome>
+        </div>
       )}
+    </div>
+  );
+}
+
+/** The kind's small glyph, drawn with a few lines; never a face scaled down. */
+function Glyph({ kind }: { readonly kind: CardKind }) {
+  const line = "absolute left-[18%] h-px bg-[var(--frame-ink-3)]";
+  if (kind === "document") {
+    return (
+      <>
+        <i className={cn(line, "right-[34%] top-[26%]")} />
+        <i className={cn(line, "right-[18%] top-[48%]")} />
+        <i className={cn(line, "right-[28%] top-[70%]")} />
+      </>
+    );
+  }
+  if (kind === "page") {
+    return (
+      <>
+        <i className="absolute left-[14%] top-[22%] h-[30%] w-[38%] rounded-[1px] bg-[var(--frame-ink-3)]" />
+        <i className={cn(line, "left-[60%] right-[14%] top-[30%]")} />
+        <i className={cn(line, "left-[60%] right-[22%] top-[50%]")} />
+      </>
+    );
+  }
+  if (kind === "image") {
+    return <i className="absolute inset-x-[22%] bottom-[22%] top-[30%] rounded-[1px] bg-[var(--frame-ink-3)] [clip-path:polygon(0_100%,38%_30%,62%_70%,78%_45%,100%_100%)]" />;
+  }
+  return (
+    <>
+      <i className="absolute inset-x-0 top-[34%] h-px bg-[var(--frame-ink-3)]" />
+      <i className="absolute inset-x-0 top-[62%] h-px bg-[var(--frame-ink-3)]" />
+      <i className="absolute inset-y-0 left-[40%] w-px bg-[var(--frame-ink-3)]" />
+    </>
+  );
+}
+
+/** A row's 36×27 thumbnail: the kind's chrome on its ground, holding the host's `thumb` or else the kind's glyph. */
+function Thumb({ kind, thumb }: { readonly kind: CardKind; readonly thumb?: ReactNode | CardImageFace }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const own = present(thumb);
+  const near = useNearScreen(ref, own);
+  const [imageReady, setImageReady] = useState(false);
+  const content = !own ? (
+    <Glyph kind={kind} />
+  ) : !near ? null : isImageFace(thumb) ? (
+    <span className={cn("block size-full", !imageReady && "invisible")}>
+      <LazyImage src={thumb.src} fit={thumb.fit} onReady={() => setImageReady(true)} />
+    </span>
+  ) : (
+    thumb
+  );
+  return (
+    <div
+      ref={ref}
+      data-frame-card-well=""
+      data-frame-card-thumb={own ? "picture" : "glyph"}
+      data-frame-card-kind={kind}
+      data-frame-card-face={own ? (near ? "ready" : "loading") : "ready"}
+      inert
+      aria-hidden="true"
+      className="relative h-[27px] w-9 shrink-0 overflow-hidden rounded-[5px]"
+    >
+      <Chrome kind={kind}>{content}</Chrome>
     </div>
   );
 }
@@ -351,35 +415,33 @@ function GreyLine({
   factTone = "default",
   working,
   date,
-  className,
 }: {
   readonly fact?: string;
   readonly factMark?: ReactNode;
   readonly factTone?: "default" | "action";
   readonly working: boolean;
   readonly date: Date | null;
-  readonly className?: string;
 }) {
   const markRef = useRef<HTMLSpanElement>(null);
   const marked = present(factMark) && fact !== undefined;
   useBreatheInPhase(markRef, working && marked);
   if (fact === undefined && date === null) return null;
+  const action = fact !== undefined && factTone === "action";
   return (
     <span
       data-frame-card-line=""
-      data-frame-card-fact-tone={fact !== undefined && factTone === "action" ? "action" : undefined}
+      data-frame-card-fact-tone={action ? "action" : undefined}
       aria-hidden="true"
-      title={date === null ? undefined : cardDateTitle(date)}
       className={cn(
         "flex min-w-0 items-center gap-1.5 whitespace-nowrap text-[13px] leading-[18px]",
-        fact !== undefined && factTone === "action" ? "text-primary" : "text-muted-foreground",
-        className,
+        action ? "text-primary" : "text-muted-foreground",
       )}
     >
       {marked && (
         <span
           ref={markRef}
           data-frame-card-mark=""
+          data-frame-card-working={working ? "" : undefined}
           className={cn(
             "grid size-3.5 shrink-0 place-items-center [&_img]:size-[13px] [&_svg]:size-[13px]",
             working && CARD_MOTIONS.breathe,
@@ -400,19 +462,13 @@ function GreyLine({
 }
 
 function Dot() {
-  return (
-    <span
-      data-frame-card-dot=""
-      aria-hidden="true"
-      className="mr-[7px] inline-block size-[7px] shrink-0 rounded-full bg-primary align-[1px]"
-    />
-  );
+  return <span data-frame-card-dot="" aria-hidden="true" className="mr-[7px] inline-block size-[7px] shrink-0 rounded-full bg-primary align-[1px]" />;
 }
 
 /**
  * One plan, document or page as a card: a preview well and, under it, the
- * title (up to two lines) and one grey line. The whole card is one link; the
- * host's `action` sits beside it, never inside.
+ * title (up to two lines) and one grey line. The card fills its column; the
+ * whole card is one link, and the host's `action` sits beside it, never inside.
  */
 export function Card({
   kind,
@@ -442,26 +498,18 @@ export function Card({
       data-frame-card-size={size}
       data-frame-card-unread={unread ? "" : undefined}
       data-frame-card-pinned={pinned ? "" : undefined}
-      className={cn(
-        "relative flex min-w-0 flex-col overflow-hidden rounded-[12px] bg-card max-sm:w-full",
-        size === "large" ? "w-88" : "w-64",
-        settle && CARD_MOTIONS.settle,
-      )}
+      data-frame-card-settle={settle ? "" : undefined}
+      className={cn("relative flex h-full w-full min-w-0 flex-col overflow-hidden rounded-[12px] bg-card", settle && CARD_MOTIONS.settle)}
     >
-      <Well kind={kind} face={face} width={CARD_WIDTH[size]} transitionName={transitionName} />
+      <Well kind={kind} face={face} size={size} transitionName={transitionName} />
       <div className="flex min-w-0 flex-col gap-0.5 px-3.5 pb-[13px] pt-[11px]">
         <Link
           href={href}
+          title={date === null ? undefined : cardDateTitle(date)}
           aria-label={cardName(title, line, unread, pinned)}
           className="outline-none before:absolute before:inset-0 before:z-10 before:rounded-[12px] before:content-['']"
         >
-          <span
-            data-frame-card-title=""
-            className={cn(
-              "line-clamp-2 break-words font-medium text-foreground",
-              size === "large" ? "text-[15px] leading-[22px]" : "text-[14px] leading-5",
-            )}
-          >
+          <span data-frame-card-title="">
             {unread && <Dot />}
             {title}
           </span>
@@ -484,7 +532,6 @@ export function Card({
  */
 export function CardRow({
   kind,
-  face = null,
   thumb,
   title,
   href,
@@ -499,7 +546,6 @@ export function CardRow({
   action,
   pinned = false,
 }: CardRowProps) {
-  const hasAction = present(action);
   const Link: ElementType<CardLinkProps> = linkComponent ?? "a";
   const date = asDate(time);
   const line = fact ?? (date === null ? null : cardDateWords(date));
@@ -509,38 +555,28 @@ export function CardRow({
       data-frame-card-kind={kind}
       data-frame-card-unread={unread ? "" : undefined}
       data-frame-card-pinned={pinned ? "" : undefined}
-      className={cn(
-        "relative grid h-11 min-w-0 items-center gap-x-3.5 rounded-[8px] pl-1.5 pr-2.5 max-sm:h-13",
-        hasAction
-          ? secondary === undefined
-            ? "grid-cols-[36px_minmax(0,1fr)_180px_28px]"
-            : "grid-cols-[36px_minmax(0,1fr)_160px_180px_28px]"
-          : secondary === undefined
-            ? "grid-cols-[36px_minmax(0,1fr)_180px]"
-            : "grid-cols-[36px_minmax(0,1fr)_160px_180px]",
-        hasAction ? "max-sm:grid-cols-[36px_minmax(0,1fr)_auto_28px]" : "max-sm:grid-cols-[36px_minmax(0,1fr)_auto]",
-      )}
+      data-frame-card-columns={`${secondary === undefined ? "" : "secondary "}${present(action) ? "action" : ""}`.trim() || undefined}
+      className="relative grid min-w-0 items-center gap-x-3.5 rounded-[8px] pl-1.5 pr-2.5"
     >
-      <Well kind={kind} face={face} thumb={thumb} width={ROW_THUMB_WIDTH} compact />
+      <Thumb kind={kind} thumb={thumb} />
       <Link
         href={href}
-        aria-label={cardName(title, line, unread, pinned)}
+        title={date === null ? undefined : cardDateTitle(date)}
+        aria-label={cardName(title, line, unread, pinned, secondary ?? null)}
         className="flex min-w-0 items-center outline-none before:absolute before:inset-0 before:z-10 before:rounded-[8px] before:content-['']"
       >
         {unread && <Dot />}
-        <span data-frame-card-title="" className="truncate text-[14px] leading-5 text-foreground">
-          {title}
-        </span>
+        <span data-frame-card-title="">{title}</span>
       </Link>
       {secondary !== undefined && (
-        <span data-frame-card-secondary="" aria-hidden="true" className="truncate text-[13px] text-frame-muted-fg max-sm:hidden">
+        <span data-frame-card-secondary="" aria-hidden="true" className="truncate text-[13px] text-muted-foreground">
           {secondary}
         </span>
       )}
       <span className="flex min-w-0 justify-end">
-        <GreyLine fact={fact} factMark={factMark} factTone={factTone} working={working} date={date} className="justify-end" />
+        <GreyLine fact={fact} factMark={factMark} factTone={factTone} working={working} date={date} />
       </span>
-      {hasAction && (
+      {present(action) && (
         <span data-frame-card-action="" className="relative z-20 flex items-center justify-end">
           {action}
         </span>
@@ -549,35 +585,21 @@ export function CardRow({
   );
 }
 
-function wordsOf(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/[^\p{L}\p{N}]+/gu, " ")
-    .trim()
-    .split(" ")
-    .filter((word) => word !== "");
-}
-
-/** True when a heading says the same as the card's title: equal, one the start of the other, or nearly all its words. */
-export function cardHeadingRestatesTitle(heading: string, title: string): boolean {
-  const said = wordsOf(heading);
-  const wanted = wordsOf(title);
-  if (said.length === 0 || wanted.length === 0) return false;
-  const a = said.join(" ");
-  const b = wanted.join(" ");
-  if (a === b || b.startsWith(`${a} `) || a.startsWith(`${b} `)) return true;
-  if (said.length < 2) return false;
-  const inTitle = new Set(wanted);
-  return said.filter((word) => inTitle.has(word)).length / said.length >= 0.8;
+/** True when a heading is the card's title: the same text, ignoring case and spacing. */
+export function cardHeadingIsTitle(heading: string, title: string): boolean {
+  const plain = (text: string) => text.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const said = plain(heading);
+  return said !== "" && said === plain(title);
 }
 
 const SKIPPED = "data-frame-card-title-repeat";
 
 /**
  * A document face: rendered Markdown at the sheet's type. When the first
- * heading restates `title`, which the card already shows, the face starts at
- * the first paragraph instead; it never opens on a bare list, so a heading
- * that a list follows directly stays.
+ * heading is the card's title (the same text, ignoring case and spacing),
+ * which the card already shows, the face starts at the first paragraph
+ * instead; it never opens on a bare list, so a heading that a list follows
+ * directly stays.
  */
 export function CardFaceDocument({ title, children }: { readonly title: string; readonly children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -587,7 +609,7 @@ export function CardFaceDocument({ title, children }: { readonly title: string; 
     const apply = () => {
       const skip = new Set<HTMLElement>();
       const first = root.querySelector<HTMLElement>("h1, h2, h3, h4, h5, h6");
-      if (first !== null && cardHeadingRestatesTitle(first.textContent ?? "", title)) {
+      if (first !== null && cardHeadingIsTitle(first.textContent ?? "", title)) {
         const before: HTMLElement[] = [first];
         let next = first.nextElementSibling as HTMLElement | null;
         while (next !== null && next.matches("h1, h2, h3, h4, h5, h6, hr")) {
@@ -620,37 +642,84 @@ export function CardFaceDocument({ title, children }: { readonly title: string; 
   );
 }
 
-/** Cards of one size class in rows that wrap; on a phone, one column. */
+
+const GridColumns = createContext<number | null>(null);
+
+/**
+ * Cards of one size in fluid columns: each card fills its column. `large`
+ * gives three across a 1440 px layout's content column, `regular` four;
+ * columns have a minimum width, so they wrap, and a phone shows one.
+ */
 export function CardGrid({
   children,
+  size,
   label,
   ref,
 }: {
   readonly children: ReactNode;
+  readonly size: CardSize;
   readonly label?: string;
   readonly ref?: Ref<HTMLUListElement>;
 }) {
   return (
-    <ul ref={ref} aria-label={label} className="flex flex-wrap items-stretch gap-x-6 gap-y-7 max-sm:flex-col max-sm:flex-nowrap">
-      {Children.map(children, (child) =>
-        child === null || child === undefined || child === false ? null : <li className="flex min-w-0 max-sm:block">{child}</li>,
-      )}
+    <ul ref={ref} aria-label={label} data-frame-card-grid={size}>
+      {Children.map(children, (child) => (present(child) ? <li className="flex min-w-0">{child}</li> : null))}
     </ul>
   );
 }
 
-/** A named group of cards, its name over a hairline; groups placed in `CardGroups` wrap side by side. */
+/**
+ * A named group of regular cards, its name over a hairline. Inside
+ * `CardGroups` it takes as many of the shared columns as it has cards (up
+ * to a full row), so every card lines up whatever its group.
+ */
 export function CardGroup({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  const columns = useContext(GridColumns);
+  const count = Children.toArray(children).filter(present).length;
+  const shared = columns !== null;
   return (
-    <section data-frame-card-group="" aria-label={label} className="flex min-w-0 max-w-full flex-col gap-6 max-sm:w-full">
-      <h3 className="flex h-[30px] items-center pb-2 text-[13px] font-medium leading-5 text-frame-muted-fg shadow-[inset_0_-1px_0_var(--frame-divider)]">
+    <section
+      data-frame-card-group={shared ? "shared" : "alone"}
+      aria-label={label}
+      style={shared ? { gridColumn: `span ${Math.max(1, Math.min(count, columns))}` } : undefined}
+    >
+      <h3 className="flex h-[30px] items-center pb-2 text-[13px] font-medium leading-5 text-muted-foreground shadow-[inset_0_-1px_0_var(--frame-divider)]">
         {label}
       </h3>
-      <CardGrid>{children}</CardGrid>
+      {shared ? (
+        <ul data-frame-card-grid="group">
+          {Children.map(children, (child) => (present(child) ? <li className="flex min-w-0">{child}</li> : null))}
+        </ul>
+      ) : (
+        <CardGrid size="regular">{children}</CardGrid>
+      )}
     </section>
   );
 }
 
+/** Groups of regular cards on one shared grid of columns, 44 px between rows. */
 export function CardGroups({ children }: { readonly children: ReactNode }) {
-  return <div className="flex flex-wrap items-start gap-x-6 gap-y-11 max-sm:flex-col max-sm:flex-nowrap max-sm:items-stretch">{children}</div>;
+  const ref = useRef<HTMLDivElement>(null);
+  const [columns, setColumns] = useState(4);
+  useLayoutEffect(() => {
+    const element = ref.current;
+    if (element === null || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const style = getComputedStyle(element);
+      const narrow = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 767px)").matches;
+      const least = Number.parseFloat(style.getPropertyValue("--frame-card-column-min")) || 230;
+      const gap = Number.parseFloat(style.columnGap) || 0;
+      const width = element.clientWidth;
+      if (width > 0) setColumns(narrow ? 1 : Math.max(1, Math.floor((width + gap) / (least + gap))));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <div ref={ref} data-frame-card-groups="">
+      <GridColumns.Provider value={columns}>{children}</GridColumns.Provider>
+    </div>
+  );
 }

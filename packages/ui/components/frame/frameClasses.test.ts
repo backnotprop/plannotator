@@ -219,7 +219,7 @@ describe('card motions', () => {
       expect(reduced).toContain(name);
     }
     expect(reduced).toMatch(/\.frame-card-breathe,[\s\S]*?\{\s*animation: none;\s*\}/);
-    expect(reduced).toMatch(/\.frame-card-fan,\s*\[data-frame-card-hero\] \{\s*transition: none;\s*\}/);
+    expect(reduced).toMatch(/\.frame-card-fan,\s*\[data-frame-card-hero\],\s*\[data-frame-card\] \{\s*transition: none;\s*\}/);
     expect(reduced).toMatch(/::view-transition-new\(\*\.frame-card-open\) \{\s*animation: none;\s*\}/);
     const animated = [...reduced.matchAll(/([^{}]+)\{\s*animation: none;/g)].map(([, selectors]) => selectors).join(',');
     for (const name of ['.frame-card-breathe', '.frame-card-settle', '.frame-card-arrive,', '.frame-card-arrive > *', '.frame-card-arrive-tint']) expect(animated).toContain(name);
@@ -280,5 +280,48 @@ describe('layout and icons for host requests', () => {
     expect(fileIcon({ path: 'site/index.html' })).toBe(marks[0]);
     expect(fileIcon({ path: 'flow.mmd' })).toBe(marks[1]);
     expect(fileIcon({ path: 'graph.dot' })).toBe(marks[2]);
+  });
+});
+
+describe('card layout rules in frame.css', () => {
+  const css = frameCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  const block = (selector: string, from = css) => {
+    const at = from.indexOf(`${selector} {`);
+    return at < 0 ? '' : from.slice(at, from.indexOf('}', at));
+  };
+  const phone = (() => {
+    const blocks = [...css.matchAll(/@media \(max-width: 767px\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!);
+    return blocks.join('\n');
+  })();
+
+  test('a row is 44 px tall and 52 on a phone; under 768 px the secondary text is hidden', () => {
+    expect(block('[data-frame-card-row]')).toContain('height: 44px;');
+    expect(block('[data-frame-card-row]', phone)).toContain('height: 52px;');
+    expect(block('[data-frame-card-row] [data-frame-card-secondary]', phone)).toContain('display: none;');
+    expect(css).not.toMatch(/max-width: 639px|max-width: 640px/);
+  });
+
+  test('a card title takes two lines then an ellipsis; a row title one line', () => {
+    expect(block('[data-frame-card] [data-frame-card-title]')).toContain('-webkit-line-clamp: 2;');
+    const row = block('[data-frame-card-row] [data-frame-card-title]');
+    expect(row).toContain('white-space: nowrap;');
+    expect(row).toContain('text-overflow: ellipsis;');
+  });
+
+  test('cards fill fluid columns with a minimum width, and a phone shows one column', () => {
+    expect(block('[data-frame-card-grid="large"]')).toMatch(/repeat\(auto-fill, minmax\(280px, 1fr\)\)/);
+    expect(block('[data-frame-card-grid="regular"]')).toMatch(/repeat\(auto-fill, minmax\(230px, 1fr\)\)/);
+    expect(phone).toMatch(/\[data-frame-card-groups\] \{\s*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(block('[data-frame-card-groups]')).toContain('gap: 44px 24px;');
+    expect(block('[data-frame-card-groups]')).toContain('--frame-card-column-min: 230px;');
+    expect(block('[data-frame-card-groups]')).toMatch(/repeat\(auto-fill, minmax\(var\(--frame-card-column-min\), 1fr\)\)/);
+  });
+
+  test('focus on the host action draws no card ring and does not fan the sheet', () => {
+    const ring = /\[data-frame-card\]:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\) \{/;
+    expect(css).toMatch(ring);
+    expect(css).not.toMatch(/\[data-frame-card\]:has\(:focus-visible\)/);
+    expect(motionsCss).not.toMatch(/:has\(:focus-visible\)/);
+    expect(motionsCss).toMatch(/:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\)\) \.frame-card-fan/);
   });
 });
