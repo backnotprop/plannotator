@@ -212,7 +212,7 @@ test('at the default 256 px the scope and the tools share one line in both scope
   });
 });
 
-test('the tools stay put while the files scroll; the numbers keep two edges', async ({ browser }) => {
+test('the tools stay put while the files scroll; the numbers end on one edge', async ({ browser }) => {
   await withReview(browser, 520, async (page) => {
     const tools = page.getByRole('button', { name: 'List options' });
     const before = await tools.boundingBox();
@@ -224,14 +224,11 @@ test('the tools stay put while the files scroll; the numbers keep two edges', as
     expect((await tools.boundingBox())!.y).toBe(before!.y);
     await expect(page.locator('[data-tree-scope="all"]')).toBeInViewport();
 
-    const edges = await page.locator('[data-changes-tree]').evaluate((tree) => {
-      const right = (n: number) =>
-        [...new Set([...tree.shadowRoot!.querySelectorAll(`[data-item-section="trail"] > :nth-child(${n})`)]
-          .filter((el) => el.textContent)
-          .map((el) => Math.round(el.getBoundingClientRect().right)))];
-      return { plus: right(2), minus: right(3) };
-    });
-    expect(edges.plus.length).toBe(1);
-    expect(edges.minus.length).toBeLessThanOrEqual(1);
+    const edges = await page.locator('[data-changes-tree]').evaluate((tree) =>
+      [...new Set([...tree.shadowRoot!.querySelectorAll('[data-item-section="trail"] > :last-child')]
+        .filter((el) => el.textContent)
+        .map((el) => Math.round(el.getBoundingClientRect().right)))],
+    );
+    expect(edges.length).toBe(1);
   });
 });
