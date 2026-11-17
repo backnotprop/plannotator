@@ -629,20 +629,27 @@ describe("questions end to end: MCP send, window picks and Send, agent reads", (
         JSON.stringify({ prompts: { inbox: { rules: "Always ask before deleting.", reminder: "Ping me when done." } } }),
       );
       const server = await start(dataDir);
+      const guided = "A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.";
+      // A client that is not Claude Code (no known cut): the person's text beside all five built-in summary lines.
       const first = await mcpClient(server);
       const firstInstructions = first.getInstructions()!;
-      expect(firstInstructions.length).toBeLessThan(2048);
       expect(firstInstructions).toContain("Always ask before deleting.");
       expect(firstInstructions).toContain("Ping me when done.");
-      expect(firstInstructions).not.toContain("A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.");
-      // The two summary lines no tool repeats stay beside the person's text.
-      expect(firstInstructions).toContain("(an id from the Inbox, never from memory)");
-      expect(firstInstructions).toContain("pictures go in the body, `![alt](path)`.");
+      expect(firstInstructions).toContain(guided);
+      // Claude Code before 2.1.296 keeps 2,048 characters: the three lines the tools repeat step aside, the two no tool repeats stay.
+      const old = new Client({ name: "claude-code", version: "2.1.295" });
+      await old.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
+      clients.push(old);
+      const oldInstructions = old.getInstructions()!;
+      expect(oldInstructions.length).toBeLessThan(2048);
+      expect(oldInstructions).toContain("Always ask before deleting.");
+      expect(oldInstructions).not.toContain(guided);
+      expect(oldInstructions).toContain("(an id from the Inbox, never from memory)");
+      expect(oldInstructions).toContain("pictures go in the body, `![alt](path)`.");
       // A change applies at the next session, with no restart.
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ prompts: { inbox: { rules: "Never delete anything." } } }));
       const second = await mcpClient(server);
       const secondInstructions = second.getInstructions()!;
-      expect(secondInstructions.length).toBeLessThan(2048);
       expect(secondInstructions).toContain("Never delete anything.");
       expect(secondInstructions).not.toContain("Always ask before deleting.");
       expect(secondInstructions).not.toContain("Ping me when done.");

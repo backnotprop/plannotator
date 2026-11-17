@@ -204,7 +204,7 @@ import { openBrowser } from "./browser";
 import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
-import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, resolveInboxMcpReminder, type InboxMcpContext } from "./inbox-mcp";
+import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT, inboxMcpInitializeClient, resolveInboxMcpReminder, type InboxMcpClient, type InboxMcpContext } from "./inbox-mcp";
 import { guidePullKey, inboxGuideFileContents, inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createGitlabHosts, unnamedForgeHost, type GitlabHosts } from "./inbox-gitlab-hosts";
@@ -1668,6 +1668,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(options.mcpNow ? { now: options.mcpNow } : {}),
   };
   const mcp = createMcpHandler(() => createInboxMcpServer(mcpContext), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
+  // An initialize request gets a server built for its client: the person's rules are sized to what that client keeps.
+  const mcpForInitialize = (client: InboxMcpClient) =>
+    createMcpHandler(() => createInboxMcpServer({ ...mcpContext, mcpClient: client }), { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES });
 
   const health = (): InboxHealth => ({
     ok: true,
@@ -5356,6 +5359,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           headers.delete("content-length");
           return mcp.fetch(new Request(req.url, { method: "POST", headers, body: JSON.stringify(stripped) }));
         }
+        const client = inboxMcpInitializeClient(body);
+        if (client !== undefined) return mcpForInitialize(client).fetch(req);
       }
       return mcp.fetch(req);
     }

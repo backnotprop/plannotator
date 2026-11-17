@@ -26,7 +26,7 @@ import { INBOX_NOTE_BLOCK_LINE } from "@plannotator/core/inbox-review";
 import { antigravityConversationOfCall, checkInboxSubject, INBOX_ANTIGRAVITY_HOST, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, INBOX_T3_HOST, inboxTidyMcpLine, isInboxCombineRun, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
 import { inboxBodyWithBro, inboxStopNoticeReply, INBOX_OPTION_LINES_RULE, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SHOWING_RULE, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
-import { inboxMcpInstructions, type InboxMcpReminder } from "./inbox-mcp-instructions";
+import { inboxMcpInstructions, inboxMcpTierOf, type InboxMcpClient, type InboxMcpReminder } from "./inbox-mcp-instructions";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
 import { questionsWithoutPictureChoices } from "./inbox-picture-choices";
@@ -86,12 +86,17 @@ export function inboxServedTools(switches: { board: boolean; steps: boolean; sch
 export {
   INBOX_MCP_INSTRUCTIONS,
   INBOX_MCP_INSTRUCTIONS_MAX_CHARS,
-  INBOX_MCP_RULES_ROOM,
+  INBOX_MCP_RULES_ROOMS,
+  INBOX_MCP_TIERS,
+  inboxMcpInitializeClient,
   inboxMcpInstructions,
   inboxMcpSent,
+  inboxMcpTierOf,
   resolveInboxMcpReminder,
+  type InboxMcpClient,
   type InboxMcpReminder,
   type InboxMcpSent,
+  type InboxMcpTier,
 } from "./inbox-mcp-instructions";
 
 /**
@@ -362,6 +367,13 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMc
    * built-in instructions, as before.
    */
   inboxReminder?: () => InboxMcpReminder | null;
+  /**
+   * The connecting client's `initialize` `clientInfo` (name, version), for an
+   * initialize request: the room the person's text gets follows what that
+   * client keeps of the instructions (inboxMcpTierOf). Absent: the tightest
+   * room, Claude Code's before 2.1.296.
+   */
+  mcpClient?: InboxMcpClient;
   /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
   walkthroughThread?: (threadId: string) => boolean;
   /**
@@ -1183,7 +1195,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
   const clock = () => context.now?.() ?? Date.now();
   const server = new McpServer(
     { name: "plannotator-inbox", version: "1.0.0" },
-    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null), capabilities: { tools: {} } },
+    { instructions: inboxMcpInstructions(context.inboxReminder?.() ?? null, inboxMcpTierOf(context.mcpClient)), capabilities: { tools: {} } },
   );
   // Every tool's result carries a Tidy waiting on an agent no connection wakes (MCP only), once, at its end.
   const register = server.registerTool.bind(server) as (name: string, config: unknown, handler: (input: never, ctx: unknown) => Promise<ToolResult>) => unknown;

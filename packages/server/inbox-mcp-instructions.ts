@@ -1,10 +1,12 @@
 /**
  * The Inbox MCP server's instructions (`initialize`), and the person's own
- * Inbox rules and reminder in them (#3555). Pure, so Settings → Prompts
- * (inbox-rules.ts) reads the same room and the same fit as the server.
+ * Inbox rules and reminder in them (#3555), sized to what the connecting
+ * client keeps (its `initialize` `clientInfo`). Pure, so Settings → Prompts
+ * (inbox-rules.ts) reads the same rooms and the same fit as the server.
  */
+import type { InboxMcpTier } from "@plannotator/core/inbox-types";
 import { configuredInboxReminder, INBOX_REMINDER_HOSTS, type PlannotatorConfig } from "@plannotator/shared/config";
-import { INBOX_AGENT_RULES, inboxReminderCustomText, inboxReminderRulesText, INBOX_RULES_LEAD } from "@plannotator/shared/inbox/connection";
+import { INBOX_AGENT_RULES, INBOX_REMINDER_MAX_CHARS, inboxReminderCustomText, inboxReminderRulesText, INBOX_RULES_LEAD } from "@plannotator/shared/inbox/connection";
 
 /**
  * Under Claude Code's 2,048-character cap on server instructions. Room for
@@ -53,7 +55,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   INBOX_MCP_INSTRUCTIONS_ATTRIBUTION,
 ].join("\n");
 
-/** Claude Code's cap on server instructions: the built instructions stay under it, never at it. */
+/** Claude Code's cap on server instructions before 2.1.296: the built-in instructions alone stay under it, never at it, so every client reads them whole. */
 export const INBOX_MCP_INSTRUCTIONS_MAX_CHARS = 2048;
 
 /** The person's own Inbox rules and reminder for an MCP session, or null when neither is configured. */
@@ -98,33 +100,93 @@ export function inboxMcpReminderOn(config: unknown): boolean {
   return INBOX_REMINDER_HOSTS.some((host) => configuredInboxReminder(record, host) !== false);
 }
 
-/** The instructions with the person's text in place of the repeated lines (the text alone, without its separators). */
-function withPersonText(block: string): string {
-  return [
-    INBOX_MCP_INSTRUCTIONS_INTRO,
-    "",
-    INBOX_AGENT_RULES,
-    "",
-    ...INBOX_MCP_INSTRUCTIONS_OWN_LINES,
-    "",
-    block,
-    "",
-    INBOX_MCP_INSTRUCTIONS_ATTRIBUTION,
-  ].join("\n");
+/**
+ * How much a client keeps of the server instructions, from its `initialize`
+ * `clientInfo`:
+ * - `claude_code`: Claude Code 2.1.296 or later, which keeps 4,096 characters
+ *   (code.claude.com/docs/en/mcp: "Server instructions, and the description
+ *   of a tool that loads upfront: 4,096 characters"). T3 Code's Claude
+ *   threads are this: T3 runs Claude through the Agent SDK, which starts the
+ *   person's own Claude Code, and Claude Code names itself `claude-code` with
+ *   its version.
+ * - `claude_code_old`: Claude Code before 2.1.296 ("Before v2.1.296, the
+ *   shorter limit was 2,048 characters"), and any client that does not say
+ *   who it is or which version: the cap that was true for every Claude Code.
+ * - `other`: every other client that names itself (Codex's
+ *   `codex-mcp-client`, Cursor, Gemini, Qwen …). None documents a cut that we
+ *   know of (Codex's MCP doc: "Keep the first 512 characters
+ *   self-contained", no maximum), so they get the terminal path's cap on
+ *   the person's text (INBOX_REMINDER_MAX_CHARS).
+ */
+export type { InboxMcpTier };
+
+/** The tiers, tightest room first. */
+export const INBOX_MCP_TIERS: readonly InboxMcpTier[] = ["claude_code_old", "claude_code", "other"];
+
+/** An `initialize` request's `clientInfo`, as it arrived (anything else reads as unknown). */
+export type InboxMcpClient = { name?: unknown; version?: unknown } | null | undefined;
+
+/**
+ * A POST body that is an `initialize` request: its `clientInfo` (null when it
+ * has none), so the Inbox builds that connection's server for the client.
+ * Anything else (a tool call, a batch, nothing): undefined.
+ */
+export function inboxMcpInitializeClient(body: unknown): InboxMcpClient | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body) || (body as { method?: unknown }).method !== "initialize") return undefined;
+  const info = (body as { params?: { clientInfo?: unknown } }).params?.clientInfo;
+  return info && typeof info === "object" && !Array.isArray(info) ? (info as InboxMcpClient) : null;
 }
 
-/** The most characters the person's text (reminder, rules and the rules' lead) may take, the result staying under the cap. */
-const INBOX_MCP_PERSON_ROOM = INBOX_MCP_INSTRUCTIONS_MAX_CHARS - 1 - withPersonText("").length;
+/** The MCP client name Claude Code gives in `initialize`, and the first version that keeps 4,096 characters. */
+const CLAUDE_CODE_CLIENT = "claude-code";
+const CLAUDE_CODE_4096 = [2, 1, 296] as const;
+
+export function inboxMcpTierOf(client: InboxMcpClient): InboxMcpTier {
+  const name = client && typeof client === "object" ? client.name : undefined;
+  if (typeof name !== "string" || name.trim() === "") return "claude_code_old";
+  if (name !== CLAUDE_CODE_CLIENT) return "other";
+  const version = typeof client!.version === "string" ? /^(\d+)\.(\d+)\.(\d+)/.exec(client!.version.trim()) : null;
+  if (!version) return "claude_code_old";
+  const parts = version.slice(1, 4).map(Number);
+  for (let i = 0; i < 3; i++) {
+    if (parts[i]! !== CLAUDE_CODE_4096[i]) return parts[i]! > CLAUDE_CODE_4096[i] ? "claude_code" : "claude_code_old";
+  }
+  return "claude_code";
+}
+
+/**
+ * The built-in summary lines a tier keeps beside the person's text: all five
+ * wherever the room allows (4,096 and more); under 2,048 only the two no tool
+ * repeats, or the rules would get no room at all.
+ */
+const linesFor = (tier: InboxMcpTier): readonly string[] =>
+  tier === "claude_code_old" ? INBOX_MCP_INSTRUCTIONS_OWN_LINES : [...INBOX_MCP_INSTRUCTIONS_OWN_LINES, ...INBOX_MCP_INSTRUCTIONS_REPEATED_LINES];
+
+/** The instructions with the person's text after the tier's summary lines (the text alone, without its separators). */
+function withPersonText(block: string, tier: InboxMcpTier): string {
+  return [INBOX_MCP_INSTRUCTIONS_INTRO, "", INBOX_AGENT_RULES, "", ...linesFor(tier), "", block, "", INBOX_MCP_INSTRUCTIONS_ATTRIBUTION].join("\n");
+}
 
 const rulesBlock = (rules: string) => `${INBOX_RULES_LEAD}\n${rules}`;
 
+/** The most characters the person's text (reminder, rules and the rules' lead) may take in a tier, the result staying under its cap. */
+const PERSON_ROOM: Record<InboxMcpTier, number> = {
+  claude_code_old: 2048 - 1 - withPersonText("", "claude_code_old").length,
+  claude_code: 4096 - 1 - withPersonText("", "claude_code").length,
+  // No known cut: the terminal path's own cap on the person's text, so whatever Settings lets the person save fits whole.
+  other: INBOX_REMINDER_MAX_CHARS,
+};
+
 /**
  * The most characters the person's rules may hold and still reach an MCP
- * session (Settings → Prompts shows it). Much less than the terminal path's
- * room (`inboxRulesRoom`): Claude Code cuts server instructions at 2,048
- * characters and the built-in ones take most of them.
+ * session of each tier (Settings → Prompts shows them). Computed from the
+ * built-in text, so a longer built-in line shrinks them here, not in prose.
  */
-export const INBOX_MCP_RULES_ROOM = Math.max(0, INBOX_MCP_PERSON_ROOM - INBOX_RULES_LEAD.length - 1);
+export const INBOX_MCP_RULES_ROOMS: Readonly<Record<InboxMcpTier, number>> = {
+  claude_code_old: Math.max(0, PERSON_ROOM.claude_code_old - INBOX_RULES_LEAD.length - 1),
+  claude_code: Math.max(0, PERSON_ROOM.claude_code - INBOX_RULES_LEAD.length - 1),
+  other: Math.max(0, PERSON_ROOM.other - INBOX_RULES_LEAD.length - 1),
+};
 
 /** What of the person's text an MCP session gets: each is sent whole or left out whole, never cut. */
 export interface InboxMcpSent {
@@ -133,28 +195,29 @@ export interface InboxMcpSent {
 }
 
 /**
- * Which of the person's texts fit: the rules first (they are what the person
- * wrote for agents, and the lead says they win), then the reminder in the
- * room the rules leave. A text that does not fit is left out whole, as on the
- * terminal path; Settings → Prompts says so.
+ * Which of the person's texts fit a tier: the rules first (they are what the
+ * person wrote for agents, and the lead says they win), then the reminder in
+ * the room the rules leave. A text that does not fit is left out whole, as on
+ * the terminal path; Settings → Prompts says so.
  */
-export function inboxMcpSent(reminder: InboxMcpReminder | null): InboxMcpSent {
-  const rules = reminder?.rules != null && reminder.rules.length <= INBOX_MCP_RULES_ROOM;
-  const left = INBOX_MCP_PERSON_ROOM - (rules ? rulesBlock(reminder!.rules!).length + 2 : 0);
+export function inboxMcpSent(reminder: InboxMcpReminder | null, tier: InboxMcpTier = "claude_code_old"): InboxMcpSent {
+  const rules = reminder?.rules != null && reminder.rules.length <= INBOX_MCP_RULES_ROOMS[tier];
+  const left = PERSON_ROOM[tier] - (rules ? rulesBlock(reminder!.rules!).length + 2 : 0);
   const custom = reminder?.custom != null && reminder.custom.length <= left;
   return { rules, reminder: custom };
 }
 
 /**
- * The server instructions for a session. With nothing of the person's that
- * fits, exactly INBOX_MCP_INSTRUCTIONS. Otherwise the same text with the
- * person's reminder, then INBOX_RULES_LEAD and their rules (the terminal
- * path's order), in place of the three summary lines the tools repeat; every
- * other line stays, word for word, the attribution after the person's text.
- * Nothing is ever cut, and the result is always under the 2,048 cap.
+ * The server instructions for a session of a tier. With nothing of the
+ * person's that fits, exactly INBOX_MCP_INSTRUCTIONS. Otherwise the person's
+ * reminder, then INBOX_RULES_LEAD and their rules (the terminal path's order),
+ * after the summary lines and before the attribution: all five lines where the
+ * cap is 4,096 or more, only the two no tool repeats under 2,048. No fixed
+ * line is new or reworded, nothing is ever cut, and the result stays under the
+ * tier's cap.
  */
-export function inboxMcpInstructions(reminder: InboxMcpReminder | null): string {
-  const sent = inboxMcpSent(reminder);
+export function inboxMcpInstructions(reminder: InboxMcpReminder | null, tier: InboxMcpTier = "claude_code_old"): string {
+  const sent = inboxMcpSent(reminder, tier);
   const parts = [...(sent.reminder ? [reminder!.custom!] : []), ...(sent.rules ? [rulesBlock(reminder!.rules!)] : [])];
-  return parts.length === 0 ? INBOX_MCP_INSTRUCTIONS : withPersonText(parts.join("\n\n"));
+  return parts.length === 0 ? INBOX_MCP_INSTRUCTIONS : withPersonText(parts.join("\n\n"), tier);
 }

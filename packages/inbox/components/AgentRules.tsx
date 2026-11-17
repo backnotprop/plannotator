@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
+import { INBOX_PROMPT_HOSTS, type InboxMcpTier, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { RULES_COUNT_WITHIN, takeRulesEditorWish } from '../agentRules';
 import { HostMark, Icon } from '../icons';
@@ -60,7 +60,7 @@ export function AgentRulesSection({
               </p>
               {slot !== 'shared' && rules.dropped.includes(slot) && <DroppedNote hosts={[slot]} />}
               {slot === 'shared' && <DroppedNote hosts={rules.dropped.filter((host) => rules.runtimes[host] === null)} />}
-              {slot === 'shared' && rules.mcp?.dropped && <McpDroppedNote room={rules.mcp.room} />}
+              {slot === 'shared' && rules.mcp && rules.mcp.dropped.length > 0 && <McpDroppedNote mcp={rules.mcp} />}
             </div>
           ))
         )}
@@ -79,16 +79,34 @@ function DroppedNote({ hosts }: { hosts: InboxPromptHost[] }) {
   );
 }
 
-/** Agents connected through MCP read the rules in the MCP server's instructions, which hold far fewer characters. */
-export const MCP_AGENTS = 'agents connected through MCP (T3 Code, Codex and others)';
+type Mcp = NonNullable<Rules['mcp']>;
+const chars = (n: number) => n.toLocaleString('en-US');
 
-function McpDroppedNote({ room }: { room: number }) {
+/**
+ * Agents connected through MCP read the rules in the MCP server's instructions, whose room depends on
+ * the client (InboxMcpTier): Claude Code keeps 4,096 characters of them (2,048 before 2.1.296), other
+ * agents no known limit. The note names who misses the rules, widest first.
+ */
+function McpDroppedNote({ mcp }: { mcp: Mcp }) {
+  const text = mcp.dropped.includes('other')
+    ? `Not sent to agents connected through MCP (T3 Code, Codex and others): they take rules up to ${chars(mcp.rooms.other)} characters.`
+    : mcp.dropped.includes('claude_code')
+      ? `Not sent to Claude Code when it connects through MCP (T3 Code's Claude threads too): it takes rules up to ${chars(mcp.rooms.claude_code)} characters there (${chars(mcp.rooms.claude_code_old)} before 2.1.296). Codex and other agents get them.`
+      : `Not sent to Claude Code before 2.1.296 when it connects through MCP: it takes rules up to ${chars(mcp.rooms.claude_code_old)} characters there.`;
   return (
     <p className="pm-over" data-rules-dropped="mcp">
-      Not sent to {MCP_AGENTS}: they take rules up to {room.toLocaleString('en-US')} characters.
+      {text}
     </p>
   );
 }
+
+/** Who a list of MCP tiers is, for the reminder's note. */
+export function mcpWho(tiers: readonly InboxMcpTier[]): string {
+  if (INBOX_MCP_TIER_LIST.every((tier) => tiers.includes(tier))) return 'agents connected through MCP (T3 Code, Codex and others)';
+  const claude = tiers.includes('claude_code_old') && tiers.includes('claude_code') ? 'Claude Code' : tiers.includes('claude_code_old') ? 'Claude Code before 2.1.296' : tiers.includes('claude_code') ? 'Claude Code 2.1.296 and later' : null;
+  return [claude, tiers.includes('other') ? 'agents other than Claude Code' : null].filter(Boolean).join(' and ') + ' through MCP';
+}
+const INBOX_MCP_TIER_LIST: readonly InboxMcpTier[] = ['claude_code_old', 'claude_code', 'other'];
 
 function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first: Slot; onClose: () => void; onPrompts?: (next: InboxPromptsSettings) => void }) {
   const phone = usePhone();
@@ -101,7 +119,7 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
   const room = slot === 'shared' ? rules.room.shared : rules.room.runtimes[slot];
   const length = draft.trim().length;
   const over = length > room;
-  // Agents connected through MCP get the rules for all agents, in a much smaller room: shown from the start, never a reason to refuse Save.
+  // Agents connected through MCP get the rules for all agents; the count is current Claude Code's room, the tightest current client. Never a reason to refuse Save.
   const mcpRoom = slot === 'shared' ? (rules.mcp?.room ?? null) : null;
   const own = saved(slot) !== '';
   const can = !saving && !over && draft.trim() !== saved(slot).trim() && draft.trim() !== '';
@@ -160,7 +178,7 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
           {mcpRoom !== null && length >= mcpRoom - RULES_COUNT_WITHIN && (
             <span className="pm-count" data-over={length > mcpRoom || undefined} data-rules-count="mcp">
               {' '}
-              {length.toLocaleString('en-US')} / {mcpRoom.toLocaleString('en-US')} through MCP
+              {length.toLocaleString('en-US')} / {mcpRoom.toLocaleString('en-US')} for Claude Code through MCP
             </span>
           )}
         </p>
