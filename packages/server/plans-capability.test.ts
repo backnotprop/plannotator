@@ -225,6 +225,31 @@ describe("Plans on", () => {
     await capability.importing();
   });
 
+  test("plan review's write into history is heard: the next poll picks it up and answers with it, past the slow pickup", async () => {
+    historyFixture();
+    const capability = createPlansCapability({ dataDir, fixed: true, changed: () => {}, pickUpMs: 0, pollPickUpMs: 60_000, settleMs: 0, openStore: (dir) => createPlanStore({ dataDir: dir }) });
+    const list = [capability];
+    const poll = async () => (await (await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans?poll=1"), new URL("http://127.0.0.1:1/api/plans?poll=1"), owner))!.json()) as { plans: { name: string }[] };
+    await routeInboxCapabilities(list, new Request("http://127.0.0.1:1/api/plans"), new URL("http://127.0.0.1:1/api/plans"), owner);
+    await capability.importing();
+    expect((await poll()).plans.map((p) => p.name)).toEqual(["Auth refactor"]);
+    // Plan review writes a new plan (settled: an hour old); within the minute the slow pickup would wait.
+    const dir = join(dataDir, "history", "api", "rate-limits-2026-11-02");
+    mkdirSync(dir, { recursive: true });
+    const when = new Date(Date.now() - 3_600_000);
+    writeFileSync(join(dir, "001.md"), "# Rate limits\n\nv1\n");
+    utimesSync(join(dir, "001.md"), when, when);
+    let names: string[] = [];
+    for (let i = 0; i < 200 && !names.includes("Rate limits"); i++) {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      names = (await poll()).plans.map((p) => p.name);
+    }
+    expect(names.sort()).toEqual(["Auth refactor", "Rate limits"]);
+    // Heard once: the poll after it waits again.
+    await poll();
+    expect(capability.importing()).toBeNull();
+  }, 15_000);
+
   test("an import that keeps failing waits longer each time, is logged once, says so in the list, and Try again runs it now", async () => {
     historyFixture();
     const lines: string[] = [];

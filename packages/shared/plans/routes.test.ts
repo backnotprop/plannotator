@@ -457,4 +457,30 @@ describe("Plans' routes", () => {
     expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/2?face=1`))).toEqual({ text: null, cut: false });
     expect((await call("GET", `/api/plans/${plan.id}/versions/9?face=1`))?.status).toBe(404);
   });
+
+  test("a picture page's face is the picture, typed by its bytes; it is served as itself, an SVG as text (it runs nothing)", async () => {
+    const { store, call } = world();
+    const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="), (c) => c.charCodeAt(0));
+    const svg = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+    const page = store.createPlan({ name: "Chart", created_at: "2026-11-06T09:00:00.000Z", document: { title: "Chart", kind: "image" } });
+    store.addVersion(page.plan.id, page.document.id, { bytes: png, committed_at: "2026-11-06T10:00:00.000Z", source: "plan-review" });
+    store.addVersion(page.plan.id, page.document.id, { bytes: svg, committed_at: "2026-11-06T11:00:00.000Z", source: "plan-review" });
+    store.addVersion(page.plan.id, page.document.id, { bytes: new TextEncoder().encode("not a picture"), committed_at: "2026-11-06T12:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/1?face=1`))).toEqual({ text: null, cut: false, picture: `data:image/png;base64,${btoa(String.fromCharCode(...png))}` });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/2?face=1`))!.picture).toStartWith("data:image/svg+xml;base64,");
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/3?face=1`))).toEqual({ text: null, cut: false, picture: null });
+    const served = async (n: number) => {
+      const answer = await call("GET", `/api/plans/${page.plan.id}/versions/${n}`);
+      return answer && "file" in answer ? answer.file.contentType : null;
+    };
+    expect(await served(1)).toBe("image/png");
+    expect(await served(2)).toStartWith("text/plain");
+    expect(await served(3)).toBe("application/octet-stream");
+    // A data page is text.
+    const data = store.createPlan({ name: "Tiers", created_at: "2026-11-06T09:00:00.000Z", document: { title: "Tiers", kind: "data" } });
+    store.addVersion(data.plan.id, data.document.id, { bytes: new TextEncoder().encode("tier,rate\nfree,60\n"), committed_at: "2026-11-06T10:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${data.plan.id}/versions/1?face=1`))).toEqual({ text: "tier,rate\nfree,60\n", cut: false });
+    const csv = await call("GET", `/api/plans/${data.plan.id}/versions/1`);
+    expect(csv && "file" in csv ? csv.file.contentType : null).toBe("text/plain; charset=utf-8");
+  });
 });

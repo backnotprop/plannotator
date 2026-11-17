@@ -83,6 +83,8 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
     await expect(frameEl).toHaveCount(1);
     const frame = await (await frameEl.elementHandle())!.contentFrame();
     await expect.poll(() => frame!.evaluate(() => getComputedStyle(document.querySelector('.spin')!).animationName)).toBe('none');
+    // What would loop forever (its loading ring) is not drawn stopped mid-turn: a still page looks finished.
+    await expect.poll(() => frame!.evaluate(() => getComputedStyle(document.querySelector('.spin')!).visibility)).toBe('hidden');
     await page.screenshot({ path: join(proofDir, 'cards-light.png') });
 
     // The list view, kept for the person: config.json says so and a reload opens on it.

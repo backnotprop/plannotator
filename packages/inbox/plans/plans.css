@@ -184,15 +184,19 @@
 .ib-spc-body > .ib-plans-note { margin: 0 0 16px; }
 .ib-spc-sec { margin-bottom: 44px; }
 .ib-spc-list .ib-spc-sec { margin-bottom: 20px; }
-.ib-spc-h { display: flex; align-items: center; gap: 12px; min-height: 28px; margin: 0 0 14px; font-size: var(--ib-fs-13, 13px); line-height: 20px; font-weight: 500; color: var(--muted-foreground); }
-.ib-spc-list .ib-spc-h { margin: 0 0 4px; padding: 0 8px; }
-.ib-spc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 28px 24px; }
-.ib-spc-grid.ib-spc-now { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.ib-spc-h { display: flex; align-items: center; gap: 12px; height: 30px; margin: 0 0 16px; padding-bottom: 8px; font-size: var(--ib-fs-13, 13px); line-height: 20px; font-weight: 500; color: var(--muted-foreground); box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 8%, transparent); }
+.ib-spc-h:has(> .ib-spc-fold) { height: 36px; }
+.ib-spc-h.ib-spc-nowh { height: 20px; margin: 8px 0 16px; padding-bottom: 0; box-shadow: none; }
+.ib-spc-list .ib-spc-h { margin: 0 0 4px; padding: 0 8px 8px; }
+.ib-spc-list .ib-spc-h.ib-spc-nowh { padding-bottom: 0; }
+.ib-spc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 44px 24px; }
+.ib-spc-grid.ib-spc-now { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 28px 24px; }
+/* The rest of Now, under its one row of large cards: rows, as the list draws them. */
+.ib-spc-grid.ib-spc-now + .ib-spc-rows { margin-top: 20px; }
 .ib-spc-item { min-width: 0; display: flex; }
 .ib-spc-item > .ib-spc-in { display: contents; }
 .ib-spc-item > .ib-spc-in > * { flex: 1; min-width: 0; }
 .ib-spc-rows { display: flex; flex-direction: column; }
-.ib-spc-you { color: var(--primary); font-weight: 500; }
 .ib-spc-pin { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; background: color-mix(in oklch, var(--card) 88%, transparent); color: var(--muted-foreground); box-shadow: 0 1px 3px color-mix(in oklch, var(--foreground) 14%, transparent); cursor: pointer; }
 .ib-spc-rowitem .ib-spc-pin { background: transparent; box-shadow: none; }
 .ib-spc-pin:hover { color: var(--foreground); background: var(--card); }
@@ -219,11 +223,48 @@
 .ib-spc-crumbs b { font-weight: 600; }
 .ib-spc-list .ib-spc-crumbs { margin-left: 4px; }
 .ib-spc-none { margin: 8px 0; font-size: var(--ib-fs-14, 14px); color: var(--muted-foreground); }
-/* A face: the plan's top in the renderer's own type, at the sheet's scale (the card scales the 420 px column). */
-.ib-spc-face { padding: 26px 30px 0; font-size: 15px; line-height: 1.6; color: var(--foreground); }
-.ib-spc-face :is(h1, h2, h3) { margin-top: 0; }
+/* A face: the plan's top in the sheet's type (home-5's `.dd`), at the sheet's scale (the card scales the 420 px column).
+   Scoped here, so the plan page's own type is untouched. Headings are the body's size, set apart by weight and space;
+   list markers muted; the first sentence the lede. */
+.ib-spc-face { padding: 34px 36px; font-size: 15px; line-height: 24px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
+.ib-spc-face p { margin: 0 0 10px; font-size: 15px; line-height: 24px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
+.ib-spc-face :is(h1, h2, h3, h4, h5, h6), .ib-spc-face .ib-spc-fh { margin: 18px 0 8px; font-size: 15px; line-height: 22px; font-weight: 600; letter-spacing: normal; color: var(--foreground); }
+.ib-spc-face > .ib-spc-fh:first-child, .ib-spc-face .ib-spc-fb:first-child :is(h1, h2, h3, h4, h5, h6):first-child { margin-top: 0; }
+.ib-spc-face .ib-spc-lede { margin: 0 0 10px; font-size: 18px; line-height: 27px; font-weight: 500; color: var(--foreground); }
+.ib-spc-face [data-rich-list-kind] { margin: 0 0 2px; gap: 8px; }
+.ib-spc-face [data-rich-list-kind] :is(.text-sm, span, div) { font-size: 15px; line-height: 24px; }
+.ib-spc-face [data-rich-list-kind] .annotation-exclude span { color: color-mix(in oklch, var(--foreground) 40%, transparent); }
+.ib-spc-fb > div > div:last-child[data-rich-list-kind] { margin-bottom: 10px; }
+.ib-spc-face pre, .ib-spc-face table { margin: 0 0 10px; }
+/* A row's thumbnail: the same sheet, drawn at the thumbnail's scale (a texture of the plan's own lines). */
+.ib-spc-thumbface { width: 420px; transform: scale(0.066); transform-origin: 0 0; pointer-events: none; }
+.ib-spc-thumbface > * { display: block; margin: 0 0 10px; }
+.ib-spc-thumbface .ib-spc-tli::before { content: "• "; color: color-mix(in oklch, var(--foreground) 40%, transparent); }
+.ib-spc-thumbface .ib-spc-tcells { font-family: var(--font-mono, ui-monospace, monospace); white-space: pre; }
+.ib-spc-dataface.ib-spc-thumbface { transform: scale(0.072); }
 .ib-spc-pageface { width: 420px; height: 315px; overflow: hidden; }
 .ib-spc-pageface iframe { border: 0; transform-origin: 0 0; background: white; pointer-events: none; }
+/* A picture or a drawn diagram: drawn once into a canvas, fitted whole on the flat panel. */
+.ib-spc-picface { width: 420px; height: 307px; }
+.ib-spc-still { display: block; width: 100%; height: 100%; }
+/* Data: a spreadsheet's top, mono 12/16, the header and the row numbers tinted (home-5's `.fx-cells`). */
+.ib-spc-dataface { width: 420px; overflow: hidden; }
+.ib-spc-cells { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 16px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }
+.ib-spc-cells :is(th, td) { padding: 6px 8px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 7%, transparent), inset -1px 0 0 color-mix(in oklch, var(--foreground) 7%, transparent); }
+.ib-spc-cells th { font-weight: 500; color: var(--foreground); background: color-mix(in oklch, var(--foreground) 5%, transparent); }
+.ib-spc-cells :is(th, td):first-child { width: 34px; color: var(--muted-foreground); background: color-mix(in oklch, var(--foreground) 5%, transparent); text-align: right; }
+/* The plan page's picture and data pages (read only). */
+.ib-plan-picture { display: flex; align-items: flex-start; justify-content: center; }
+.ib-plan-picture img { max-width: 100%; height: auto; display: block; border-radius: 6px; }
+.ib-plan-picdiff { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px; align-items: start; }
+.ib-plan-picdiff figure { margin: 0; display: flex; flex-direction: column; gap: 8px; }
+.ib-plan-picdiff .ib-plan-picture { padding: 0; overflow: visible; }
+.ib-plan-picdiff figcaption { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); text-align: center; }
+.ib-plan-data { overflow: auto; }
+.ib-plan-data table { border-collapse: collapse; font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; line-height: 18px; }
+.ib-plan-data :is(th, td) { padding: 6px 10px; text-align: left; white-space: nowrap; box-shadow: inset 0 -1px 0 color-mix(in oklch, var(--foreground) 8%, transparent), inset -1px 0 0 color-mix(in oklch, var(--foreground) 8%, transparent); }
+.ib-plan-data thead th { position: sticky; top: 0; font-weight: 500; background: color-mix(in oklch, var(--foreground) 5%, var(--card)); }
+.ib-plan-data tbody th { font-weight: 400; color: var(--muted-foreground); text-align: right; background: color-mix(in oklch, var(--foreground) 3%, var(--card)); }
 /* The pinned spaces under Spaces in the sidebar. */
 .ib-space-pins { padding-left: 10px; }
 .ib-space-pins .ib-pin .ib-ic { width: 15px; height: 15px; flex: none; color: var(--muted-foreground); }

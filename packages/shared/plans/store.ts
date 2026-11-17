@@ -48,7 +48,9 @@ import {
   planPinsWith,
   planDecisionVersion,
   PLAN_FACE_HTML_MAX,
+  PLAN_FACE_PICTURE_MAX,
   PLAN_FACE_TEXT_BYTES,
+  planPictureTypeOf,
   type PlanFaceText,
   type PlanActor,
   type PlanArtifact,
@@ -79,7 +81,7 @@ const ARTIFACTS_FILE = "artifacts.jsonl";
 const COMMENTS_FILE = "comments.jsonl";
 const FILES_DIR = "files";
 
-const EXT: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot" };
+const EXT: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot", image: "img", data: "csv" };
 
 export function planLibraryDir(dataDir: string): string {
   return join(dataDir, PLAN_LIBRARY_DIR);
@@ -402,6 +404,7 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       head_source: headVersion?.source ?? null,
       decided_versions: decided,
       head_at: headVersion?.committed_at ?? null,
+      head_agent: headVersion?.agent_host && headVersion.agent_session ? { host: headVersion.agent_host, session: headVersion.agent_session, name: headVersion.agent_name } : null,
     };
   };
 
@@ -475,6 +478,13 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       try {
         const size = statSync(path).size;
         if (path.endsWith(".html")) return size > PLAN_FACE_HTML_MAX ? { text: null, cut: false } : { text: readFileSync(path, "utf8"), cut: false };
+        // A picture page: the picture itself, as a data: URL, when it is a picture the window draws and not too big.
+        if (path.endsWith(".img")) {
+          if (size > PLAN_FACE_PICTURE_MAX) return { text: null, cut: false, picture: null };
+          const bytes = new Uint8Array(readFileSync(path));
+          const type = planPictureTypeOf(bytes);
+          return { text: null, cut: false, picture: type ? `data:${type};base64,${Buffer.from(bytes).toString("base64")}` : null };
+        }
         if (size <= PLAN_FACE_TEXT_BYTES) return { text: readFileSync(path, "utf8"), cut: false };
         const fd = openSync(path, "r");
         try {

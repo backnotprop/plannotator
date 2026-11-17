@@ -186,6 +186,22 @@ const decode = (bytes: Uint8Array) => new TextDecoder().decode(bytes);
 const titleOfSlug = (slug: string) => (DATED_SLUG.exec(slug)?.[1] ?? slug).replace(/-+/g, " ").trim() || "Untitled plan";
 const IMPORTED_BY = { ...NO_ACTOR, author_via: "plan-review" };
 
+const AGENT_FIELD_MAX = 200;
+/**
+ * The agent session plan review recorded beside a history version (`NNN.agent.json`, packages/shared/storage.ts), as
+ * the version's agent; nothing when there is none or it does not read as one.
+ */
+function versionAgent(dir: string, n: number): { agent_host?: string; agent_session?: string; agent_name?: string | null } {
+  try {
+    const raw = JSON.parse(readFileSync(join(dir, `${String(n).padStart(3, "0")}.agent.json`), "utf8")) as Record<string, unknown> | null;
+    const ok = (v: unknown): v is string => typeof v === "string" && v.length > 0 && v.length <= AGENT_FIELD_MAX;
+    if (!raw || !ok(raw.host) || !ok(raw.session)) return {};
+    return { agent_host: raw.host, agent_session: raw.session, agent_name: ok(raw.name) ? raw.name : null };
+  } catch {
+    return {};
+  }
+}
+
 /** A decision snapshot's status and a feedback decision mean the same outcome. */
 function sameOutcome(snapshot: "approved" | "denied", decision: PlanDecisionKind): boolean {
   return snapshot === "approved" ? decision === "approved" || decision === "approved-with-notes" : decision === "denied" || decision === "feedback";
@@ -374,7 +390,7 @@ function* importChain(
       }).plan;
       report.plans_created++;
     }
-    store.addVersion(plan.id, plan.primary_doc_id, { bytes: read.bytes, committed_at: at, source: "plan-review", ...IMPORTED_BY, legacy });
+    store.addVersion(plan.id, plan.primary_doc_id, { bytes: read.bytes, committed_at: at, source: "plan-review", ...IMPORTED_BY, ...versionAgent(dir, file.n), legacy });
     report.versions_added++;
     newest = { text, at };
     if (++added % VERSIONS_PER_STEP === 0) yield;

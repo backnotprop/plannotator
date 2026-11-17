@@ -2,8 +2,9 @@
  * The Spaces home (approval "plans-home", home-5.html), drawn from a real plan library: a scratch `plan-library/`
  * written with the store, answered by the real route handler in place of the Inbox (the view kept in memory in place
  * of config.json). No server, no Inbox. What regresses if these fail:
- * - "Now" loses a plan that waits on the person or holds one that does not; Recent is not cut to its one row of cards
- *   or 8 rows; "All plans" loses a project, its newest 5 or "Show N more", or forgets a fold;
+ * - "Now" loses a plan that waits on the person or holds one that does not, or draws more than one row of large cards
+ *   (the rest of it as rows in the same section); Recent is not cut to its one row of cards or 8 rows; "All plans"
+ *   loses a project, its newest 5 or "Show N more", or forgets a fold;
  * - the cards/list switch is not the person's (kept through the Inbox, so another window opens on it);
  * - the sidebar's project does not scope the page, or Home does not go back;
  * - search misses a title or the empty search says nothing;
@@ -16,13 +17,16 @@
  *   Unpin do nothing; a read that began before a pin puts the old pins back; a failed pin is silent or keeps its
  *   new order; a pin's name does not say which plan;
  * - a face draws before it is near the screen, stays once far, says the title twice, opens like every other plan
- *   ("Context"), is focusable, sits inside the link, goes blank while a newer version is read; a row's thumbnail is a
- *   whole face; an HTML page in it can run, move (CSS animation, marquee, a moving GIF) or tell another host (resource
- *   hints);
+ *   ("Context"), is focusable, sits inside the link, goes blank while a newer version is read, or does not tint the
+ *   block a change landed in; a document row's thumbnail is not its own face (or is a renderer's whole face, or a
+ *   page's frame); an HTML page in it can run, move (CSS animation, marquee, a moving GIF), show a loading ring
+ *   stopped mid-turn, or tell another host (resource hints); a page face let go is prepared again when it comes back;
+ *   a picture or data page has no face of its own;
  * - a search from a project's scope misses another project's title, or the scope chip does not go Home;
  * - going back from a plan does not return to the home it was opened from, scrolled where it was;
  * - the old home's "compact" choice is not carried to the list once;
- * - any card says an agent is working (this build knows no live link from a session to a plan).
+ * - a card says an agent is working when the session that submitted its newest version is not live in the Inbox, or
+ *   does not say it (with the agent's mark) while it is.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -44,7 +48,8 @@ const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof imp
 const { readPlans, resetPlansForTests, usePlansOn, OLD_PLANS_VIEW_KEY } = (hasDom ? await import('./store') : {}) as typeof import('./store');
 const { resetSpacesMotionForTests } = (hasDom ? await import('./spacesMotion') : {}) as typeof import('./spacesMotion');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
-const { planHtmlSrcdoc } = (hasDom ? await import('./planContent') : {}) as typeof import('./planContent');
+const { planHtmlSrcdoc, planFaceSrcdoc } = (hasDom ? await import('./planContent') : {}) as typeof import('./planContent');
+const { resetSpaceFacesForTests } = (hasDom ? await import('./SpaceFace') : {}) as typeof import('./SpaceFace');
 const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
 
 let root: Root | null = null;
@@ -77,6 +82,10 @@ let holdList: Promise<void> | null = null;
 let holdFaces: Promise<void> | null = null;
 /** A pin write the Inbox refuses. */
 let pinFails = false;
+/** The sessions live in the Inbox (`GET /api/inbox/sessions`). */
+let liveSessions: { host: string; session: string }[] = [];
+/** The person's reduced-motion choice (on unless a test says otherwise). */
+let reduce = true;
 /** What the list answered: 200 or 304. */
 let listAnswers: number[] = [];
 /** The window's toasts. */
@@ -94,6 +103,9 @@ beforeEach(() => {
   observers = [];
   holdList = holdFaces = null;
   pinFails = false;
+  liveSessions = [];
+  reduce = true;
+  resetSpaceFacesForTests();
   listAnswers = [];
   toasts = [];
   commits = 0;
@@ -101,7 +113,7 @@ beforeEach(() => {
   localStorage.removeItem(SPACES_FOLDS_KEY);
   localStorage.removeItem(OLD_PLANS_VIEW_KEY);
   window.history.replaceState(null, '', '/');
-  window.matchMedia = ((query: string) => ({ matches: query.includes('reduce'), media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as unknown as typeof window.matchMedia;
+  window.matchMedia = ((query: string) => ({ matches: query.includes('reduce') && reduce, media: query, onchange: null, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false })) as unknown as typeof window.matchMedia;
   (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver = class {
     entry: { cb: IntersectionObserverCallback; els: Element[]; margin: string };
     constructor(cb: IntersectionObserverCallback, options?: IntersectionObserverInit) {
@@ -124,6 +136,10 @@ beforeEach(() => {
     // The holds as they are when the request goes out.
     const hold = url.pathname === '/api/plans' ? holdList : url.searchParams.get('face') === '1' ? holdFaces : null;
     if (pinFails && url.pathname === '/api/plans/pins') return Response.json({ error: 'The pins could not be saved.', code: 'io' }, { status: 500 });
+    if (url.pathname === '/api/inbox/sessions') {
+      const at = new Date().toISOString();
+      return Response.json({ serverSession: 'srv', home: '/home', projects: [{ project: { id: 'prj_harbor', name: 'harbor-api', root: '/work/harbor-api' }, sessions: liveSessions.map((s) => ({ ...s, started_at: at, last_seen_at: at, busy: true, idle_since: null, last_thread: null })) }] });
+    }
     const answer = await handlePlanRoute(
       { method: init?.method ?? 'GET', pathname: url.pathname, params: url.searchParams, json: async () => JSON.parse(String(init?.body ?? '{}')), ifNoneMatch: new Headers(init?.headers).get('If-None-Match') },
       { store, view: { read: () => keptView, save: (v) => ((keptView = v), viewSaves++, true) } },
@@ -159,10 +175,11 @@ const next = () => new Date(CLOCK_START + ++clock * 60_000).toISOString();
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 /** A plan with `versions` versions; `decided`: the person decided on its newest (so it waits on no one). */
-function plan(name: string, project: string | null, options: { versions?: number; decided?: boolean; text?: string; kind?: 'markdown' | 'html'; projectId?: string } = {}) {
+function plan(name: string, project: string | null, options: { versions?: number; decided?: boolean; text?: string; data?: Uint8Array; kind?: 'markdown' | 'html' | 'image' | 'data'; projectId?: string; agent?: { host: string; session: string } } = {}) {
   const { plan: record, document } = store.createPlan({ name, project_name: project, project_id: options.projectId ?? null, created_at: next(), document: { title: name, kind: options.kind ?? 'markdown' } });
   const count = options.versions ?? 1;
-  for (let i = 1; i <= count; i++) store.addVersion(record.id, document.id, { bytes: bytes(options.text ?? `# ${name}\n\nVersion ${i} of the plan.\n`), committed_at: next(), source: 'plan-review', author_via: 'plan-review' });
+  const agent = options.agent ? { agent_host: options.agent.host, agent_session: options.agent.session, agent_name: 'Codex' } : {};
+  for (let i = 1; i <= count; i++) store.addVersion(record.id, document.id, { bytes: options.data ?? bytes(options.text ?? `# ${name}\n\nVersion ${i} of the plan.\n`), committed_at: next(), source: 'plan-review', author_via: 'plan-review', ...agent });
   if (options.decided) decide(record.id, count);
   return record.id;
 }
@@ -172,10 +189,10 @@ function decide(id: string, n: number) {
   const at = next();
   store.addEvent(id, { ...NO_ACTOR, kind: 'decision', at, subject: { document_id: document.id, version_number: n }, decision: { document_id: document.id, version: version.version, version_number: n, decision: 'approved', at, feedback: null, feedback_record: null, snapshot: null }, legacy: null });
 }
-/** A new version arrives from the agent. */
-function arrive(id: string) {
+/** A new version arrives from the agent (`text`: its words, else "A newer version."). */
+function arrive(id: string, text?: string) {
   const document = store.read(id)!.documents[0]!;
-  store.addVersion(id, document.id, { bytes: bytes(`# ${store.get(id)!.name}\n\nA newer version.\n`), committed_at: next(), source: 'plan-review', author_via: 'plan-review' });
+  store.addVersion(id, document.id, { bytes: bytes(text ?? `# ${store.get(id)!.name}\n\nA newer version.\n`), committed_at: next(), source: 'plan-review', author_via: 'plan-review' });
 }
 
 async function settle() {
@@ -274,13 +291,17 @@ test.skipIf(!hasDom)('Now holds what waits on the person, never cut; Recent is o
   expect(host.querySelector('[data-spaces-home]')?.getAttribute('aria-label')).toBe('Spaces');
   expect(text(host.querySelector('h1'))).toBe('What do you want to plan?');
   expect(text(host.querySelector('[data-spaces-local]'))).toBe('On this computer');
-  // Now: every waiting plan, newest first, as large cards saying "Your move".
+  // Now: every waiting plan, newest first, never cut: one row of large cards saying "Your move" (4 before the page is
+  // measured), the rest as rows in the same section.
   expect(ids(section(host, 'now'))).toEqual([...waiting].reverse());
-  expect(section(host, 'now')!.querySelectorAll('.fc-large')).toHaveLength(6);
+  expect([...section(host, 'now')!.querySelectorAll('.fc-large')].map((el) => el.closest('[data-space]')!.getAttribute('data-space'))).toEqual([...waiting].reverse().slice(0, 4));
+  expect([...section(host, 'now')!.querySelectorAll('[data-card-row]')].map((el) => el.closest('[data-space]')!.getAttribute('data-space'))).toEqual([...waiting].reverse().slice(4));
   expect(text(section(host, 'now')!.querySelector('.fc-fact'))).toBe('Your move');
+  // "Your move" in the accent (the card's factTone 'action'); every other fact grey.
+  expect(section(host, 'now')!.querySelector('.fc-fact')!.classList.contains('fc-act')).toBe(true);
   // Recent: one row of cards (4 before the page is measured), newest first.
   expect(ids(section(host, 'recent'))).toEqual([...done].reverse().slice(0, 4));
-  // Nothing says an agent is working: no live link is known.
+  // Nothing says an agent is working: no session is live.
   expect(host.textContent).not.toContain('is working');
 
   expect(host.querySelector('[data-spaces-view-pick="cards"]')?.getAttribute('aria-pressed')).toBe('true');
@@ -633,9 +654,16 @@ test.skipIf(!hasDom)('an HTML face runs, moves and tells nothing: no animation, 
   // Nothing tells another host the home was opened.
   expect(srcdoc).not.toContain('hints.example');
   expect(doc.querySelector('meta[http-equiv="x-dns-prefetch-control"]')?.getAttribute('content')).toBe('off');
-  // Nothing moves: the first layer turns motion off over every rule; inline motion is gone, the rest kept.
-  expect(doc.querySelector('style')?.textContent).toContain('@layer plannotator-still');
-  expect(doc.querySelector('.spin')?.getAttribute('style')).toBe('color: red;');
+  // Nothing moves: the first layer (its name random, so the page cannot write into it) turns motion off over every rule,
+  // and hides what loops forever (a loading ring is not drawn stopped mid-turn); inline motion is gone, the rest kept.
+  const layer = doc.querySelector('style')?.textContent ?? '';
+  expect(layer).toMatch(/^@layer still-[0-9a-f]{16}\{/);
+  expect(layer).toContain('.spin{visibility:hidden!important}');
+  const inline = doc.querySelector('.spin')?.getAttribute('style') ?? '';
+  expect(inline).toStartWith('color: red; visibility: hidden !important;');
+  expect(inline).not.toContain('spin');
+  expect(inline).not.toContain('opacity');
+  expect(doc.querySelector('svg')?.getAttribute('visibility')).toBe('hidden');
   expect(doc.querySelector('marquee')).toBeNull();
   expect(text(doc.querySelector('div.m'))).toBe('Scrolling news');
   expect(doc.querySelector('animate')).toBeNull();
@@ -646,7 +674,26 @@ test.skipIf(!hasDom)('an HTML face runs, moves and tells nothing: no animation, 
   // The plan page's own frame drops the hints too.
   expect(planHtmlSrcdoc(html)).not.toContain('hints.example');
 
-  // In the list a row's thumbnail is the kind's shape, never a face or a frame.
+  // Let go and drawn again, the prepared page is the one kept (the page is not read again).
+  farAll();
+  await settle();
+  expect(host.querySelector(`[data-space="${page}"] iframe`)).toBeNull();
+  const parse = DOMParser.prototype.parseFromString;
+  let parsed = 0;
+  DOMParser.prototype.parseFromString = function (this: DOMParser, ...args: Parameters<DOMParser['parseFromString']>) {
+    parsed++;
+    return parse.apply(this, args);
+  };
+  try {
+    nearAll();
+    await settle();
+  } finally {
+    DOMParser.prototype.parseFromString = parse;
+  }
+  expect(host.querySelector(`[data-space="${page}"] iframe`)?.getAttribute('srcdoc')).toBe(srcdoc);
+  expect(parsed).toBe(0);
+
+  // In the list a page's thumbnail is the kind's shape, never a face or a frame.
   keptView = 'list';
   host = redraw();
   await settle();
@@ -654,6 +701,100 @@ test.skipIf(!hasDom)('an HTML face runs, moves and tells nothing: no animation, 
   await settle();
   expect(host.querySelector('[data-card-row] iframe')).toBeNull();
   expect(host.querySelector('[data-card-row] [data-space-face]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a page cannot dodge the still face: comments, escapes, !important, a known layer name, a nested document, image-set or an escaped url()', () => {
+  const moving = btoa('GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!\xff\x0bNETSCAPE2.0\x03\x01\x00\x00\x00;');
+  const face = (html: string) => new DOMParser().parseFromString(planFaceSrcdoc(html)!, 'text/html');
+  const style = (inline: string) => face(`<div id="d" style="${inline}">x</div>`).getElementById('d')?.getAttribute('style') ?? '';
+  // A style attribute ranks above every layer: it is rewritten through the CSSOM, whatever is written to dodge a pattern.
+  for (const inline of ['anim/**/ation: spin 1s', 'animation: spin 1s !important', 'ANIMATION-NAME: spin', 'transition: opacity 1s !important']) {
+    expect(style(inline)).not.toMatch(/spin|opacity/);
+    expect(style(inline)).toContain('animation: none !important');
+  }
+  // The layer's name is new on every face: a page cannot write a rule into it, or into a sublayer of it.
+  const layerOf = (doc: Document) => /@layer (still-[0-9a-f]{16})\{/.exec(doc.querySelector('style')?.textContent ?? '')?.[1];
+  const page = '<style>@layer still-x { .a { animation: spin 1s } }</style><p class="a">x</p>';
+  expect(layerOf(face(page))).toBeDefined();
+  expect(layerOf(face(page))).not.toBe(layerOf(face(page)));
+  // No nested document: our rules would not reach inside one.
+  const nested = face('<p>kept</p><iframe srcdoc="<marquee>x</marquee>"></iframe><object data="x.svg"></object><embed src="x.svg">');
+  expect(nested.querySelector('iframe, frame, object, embed')).toBeNull();
+  expect(text(nested.querySelector('p'))).toBe('kept');
+  // A moving picture in image-set("…") without url(), and one behind an escaped u\72l(…): stilled, or the sheet goes.
+  const sheet = (css: string) => face(`<style>${css}</style><p>x</p>`).querySelectorAll('style')[1]?.textContent ?? '';
+  expect(sheet(`.a { background-image: image-set("data:image/gif;base64,${moving}" 1x); }`)).not.toContain(moving);
+  expect(sheet(`.a { background: u\\72l(data:image/gif;base64,${moving}); }`)).toBe('');
+  // A template that would become a shadow tree stays an inert template.
+  expect(face('<div><template shadowrootmode="open"><style>*{animation:spin 1s}</style></template></div>').querySelector('template')?.hasAttribute('shadowrootmode')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a document row\'s thumbnail is its own face, small and static: its lede in plain words, no renderer', async () => {
+  const id = plan('Rate limits', 'harbor-api', { text: '# Rate limits\n\n## Context\n\nOne noisy key can starve every other customer. So we cap it.\n\n- A token bucket.\n' });
+  keptView = 'list';
+  window.location.hash = '#plans';
+  const host = draw();
+  await settle();
+  nearAll();
+  await settle();
+  const thumb = host.querySelector(`[data-space="${id}"] .fc-thumb`);
+  expect(text(thumb?.querySelector('.ib-spc-lede') ?? null)).toBe('One noisy key can starve every other customer.');
+  expect(text(thumb)).toContain('A token bucket.');
+  expect(thumb?.textContent).not.toContain('Context');
+  expect(thumb?.querySelector('[data-block-id]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('"<agent> is working", with its mark, only while the session that submitted the newest version is live', async () => {
+  const agent = { host: 'codex', session: 'ses_01JD0000000000000000000001' };
+  const worked = plan('Worked on', 'harbor-api', { decided: true, agent });
+  const other = plan('Someone else\'s', 'harbor-api', { decided: true, agent: { host: 'codex', session: 'ses_01JD0000000000000000000002' } });
+  window.location.hash = '#plans';
+  liveSessions = [agent];
+  const host = draw();
+  await settle();
+  const fact = (id: string) => text(host.querySelector(`[data-space="${id}"] .fc-fact`));
+  expect(fact(worked)).toBe('Codex is working');
+  expect(host.querySelector(`[data-space="${worked}"] .fc-fact .fc-mark`)).not.toBeNull();
+  // Grey: only "Your move" takes the accent.
+  expect(host.querySelector(`[data-space="${worked}"] .fc-fact`)!.classList.contains('fc-act')).toBe(false);
+  // A plan it works on is in Now, whatever its age; one whose session is not live is not, and says its date.
+  expect(ids(section(host, 'now'))).toEqual([worked]);
+  expect(fact(other)).not.toContain('is working');
+  expect(host.querySelector(`[data-space="${other}"] .fc-mark`)).toBeNull();
+});
+
+test.skipIf(!hasDom)('a change landing in a face tints the block it landed in, once; nothing tints under reduced motion', async () => {
+  reduce = false;
+  const opening = (step: string) => `# Rollout\n\nShip it to one region first. Then the rest.\n\n- ${step}\n`;
+  const id = plan('Rollout', 'harbor-api', { text: opening('Watch the error rate.') });
+  window.location.hash = '#plans';
+  const host = draw();
+  await settle();
+  nearAll();
+  await settle();
+  const face = () => host.querySelector(`[data-space="${id}"] [data-space-face="document"]`)!;
+  expect(face().querySelector('.fc-landed')).toBeNull();
+  arrive(id, opening('Watch the error rate and the p99.'));
+  await act(async () => await readPlans());
+  await settle();
+  // The lede and the line after it are the same: the list item is where it landed.
+  const landed = face().querySelector('.fc-landed');
+  expect(landed?.getAttribute('data-face-block')).toBe('1');
+  expect(text(landed)).toContain('the p99');
+});
+
+test.skipIf(!hasDom)('a picture page\'s face is the picture; a data page\'s face is its first rows as cells', async () => {
+  const png = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='), (c) => c.charCodeAt(0));
+  const picture = plan('Latency chart', 'harbor-api', { kind: 'image', data: png });
+  const table = plan('Tiers', 'harbor-api', { kind: 'data', text: 'tier,per minute\nfree,60\nteam,600\n' });
+  window.location.hash = '#plans';
+  const host = draw();
+  await settle();
+  nearAll();
+  await settle();
+  expect(host.querySelector(`[data-space="${picture}"] [data-space-face="image"]`)).not.toBeNull();
+  const cells = [...host.querySelectorAll(`[data-space="${table}"] [data-space-face="data"] tr`)].map((tr) => [...tr.children].map(text));
+  expect(cells).toEqual([['', 'tier', 'per minute'], ['1', 'free', '60'], ['2', 'team', '600']]);
 });
 
 test.skipIf(!hasDom)('a search from a project\'s scope looks through every title, that project\'s first; the scope chip\'s × goes Home', async () => {

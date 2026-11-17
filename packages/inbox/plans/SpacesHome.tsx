@@ -1,7 +1,8 @@
 /**
  * The Spaces home (approval "plans-home", home-5.html): "What do you want to plan?" and Start a plan over the dither
  * field, "On this computer", Search plans and the cards/list switch at the top right; then "Now" (only active plans,
- * never cut), "Recent" (8 rows, or one row of cards) and an "All plans" link. The sidebar's project scopes the page to
+ * never cut: one row of large cards at most, the rest of it as rows below), "Recent" (8 rows, or one row of cards)
+ * and an "All plans" link. The sidebar's project scopes the page to
  * it (the projects combined into it too; "Now" first, then "Earlier"), with Home to go back; "All plans" is every
  * plan by project (the newest 5 rows or one row of cards each, then "Show N more"; a project's name folds its group,
  * and folds are remembered). Search looks through every title, in a project's scope too (its matches first; the
@@ -11,7 +12,8 @@
  * looking (the pointer over the page, focus in it, or a scroll or a key in the last 4 s) its new place waits behind a
  * quiet "N updates · Show" pill beside "Now" (counting only what this scope or search shows; said politely to a
  * screen reader); not looking, the page settles by itself, every card moving to its place in one move and a newcomer
- * in "Now" fading in (reduced motion: a cut). Opening a card grows its face into the plan page, and going back
+ * in "Now" fading in (reduced motion: a cut). The clock and the live sessions the layout was placed with are frozen
+ * with it: a plan passing Now's 3 days, or an agent starting or stopping, waits like an arrival. Opening a card grows its face into the plan page, and going back
  * shrinks it into its card on the home as it was left (spacesMotion.ts).
  *
  * The card, the row, the pill and their motions are the frame's (packages/ui/components/frame), built by the sister
@@ -24,16 +26,18 @@ import { Menu } from '@base-ui/react/menu';
 import type { PlanSummary, SpacesView } from '@plannotator/core/plans';
 import { fullTime } from '@plannotator/core/inbox-format';
 import { SidebarTrigger } from '../shell/sidebar';
-import { Icon } from '../icons';
+import { HostMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { writeRoute } from '../app/writeRoute';
-import { startPlansDither, reducedMotion } from './dither';
+import { startStillField, reducedMotion } from './dither';
+import { useComposeSessions, type ComposeSessionsLoader } from '../compose/useComposeSessions';
+import { inboxApi } from '../api';
 import { Card, CardRow, CardStyles, CardUpdatesPill, settleBatch, type CardLinkProps } from './frameCardStandIn';
-import { SpaceFace } from './SpaceFace';
+import { SpaceFace, SpaceThumb } from './SpaceFace';
 import { readPlans, setPlanPin, setSpacesView } from './store';
 import { ImportErrorNote } from './parts';
 import { openSpace, spacesHomeShown, takeHomeScroll } from './spacesMotion';
-import { ALL_PLANS_ROWS, RECENT_ROWS, factWords, heldLayout, homeSections, inProject, projectGroups, searchPlans, spaceFact, spaceKind, spaceUnread, updatesWords, type SpacesScopeProject } from './spacesModel';
+import { ALL_PLANS_ROWS, RECENT_ROWS, factWords, heldLayout, homeSections, inProject, nextNowCrossing, projectGroups, searchPlans, spaceFact, spaceKind, spaceUnread, spaceWorks, updatesWords, type SpaceWork, type SpaceWorks, type SpacesScopeProject } from './spacesModel';
 
 /** How long a scroll or a key keeps the person "looking" (approval "plans-home"). */
 export const LOOK_MS = 4000;
@@ -68,32 +72,55 @@ export function SpacesHome(props: SpacesHomeProps) {
   // What this page shows of the library: every title for a search (the approval's "across all titles"), else the scope.
   const shows = useCallback((plans: readonly PlanSummary[]) => (q ? searchPlans(plans, q) : project ? inProject(plans, project) : [...plans]), [q, project]);
 
-  // The layout as placed; the plans as they are now draw the content.
+  // Which live session is on which plan (the session that submitted its newest version, while it is live here).
+  const works = useWorks(props.plans);
+  const worksNow = useRef(works);
+  worksNow.current = works;
+  // The clock Now's age is read with: it ticks only when a plan passes its 3 days.
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    const next = nextNowCrossing(props.plans, clock);
+    if (!Number.isFinite(next)) return;
+    const t = setTimeout(() => setClock(Date.now()), Math.min(Math.max(0, next - Date.now()) + 50, 2 ** 31 - 1));
+    return () => clearTimeout(t);
+  }, [props.plans, clock]);
+
+  // The layout as placed, with the works and the clock it was placed with; the plans as they are now draw the content.
   const [placed, setPlaced] = useState<readonly PlanSummary[]>(props.plans);
+  const [placedWith, setPlacedWith] = useState<{ work: SpaceWorks; at: number }>(() => ({ work: works, at: Date.now() }));
   const placedNow = useRef(placed);
   placedNow.current = placed;
   const looking = useLooking(root);
   const settle = useCallback((next: readonly PlanSummary[]) => {
     const before = new Set(placedNow.current.map((p) => p.id));
-    settleBatch(body.current, () => flushSync(() => setPlaced(next)));
+    settleBatch(body.current, () =>
+      flushSync(() => {
+        setPlaced(next);
+        setPlacedWith({ work: worksNow.current, at: Date.now() });
+      }),
+    );
     // A newcomer in "Now" fades in where it lands (home-5's settle); nothing else does.
     if (reducedMotion()) return;
     for (const el of body.current?.querySelectorAll<HTMLElement>('[data-spaces-section="now"] [data-card-key]') ?? []) {
       if (!before.has(el.dataset.cardKey!) && typeof el.animate === 'function') el.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 320, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
     }
   }, []);
+  const stale = placed !== props.plans || placedWith.work !== works || placedWith.at < clock;
   useEffect(() => {
-    if (looking || placed === props.plans) return;
+    if (looking || !stale) return;
     const t = setTimeout(() => settle(props.plans), 0);
     return () => clearTimeout(t);
-  }, [looking, placed, props.plans, settle]);
+  }, [looking, stale, props.plans, settle]);
   // Held and counted within what the page shows: an update elsewhere is no update here.
-  const { layout, pending } = useMemo(() => heldLayout(shows(placed), shows(props.plans)), [placed, props.plans, shows]);
+  const { layout, pending } = useMemo(
+    () => heldLayout(shows(placed), shows(props.plans), placedWith, { work: works, at: Math.max(clock, placedWith.at) }),
+    [placed, props.plans, shows, placedWith, works, clock],
+  );
   const fresh = useMemo(() => new Map(props.plans.map((p) => [p.id, p])), [props.plans]);
   const pins = useMemo(() => new Set(props.pins), [props.pins]);
 
   const pool = layout;
-  const { now, recent } = useMemo(() => homeSections(pool, null), [pool]);
+  const { now, recent } = useMemo(() => homeSections(pool, placedWith.work, placedWith.at), [pool, placedWith]);
 
   // Where a plan opened from here comes back to, scrolled where it was.
   const route = useMemo(() => ({ page: 'plans' as const, project: scopeId, thread: null, planAll: props.scope.kind === 'all' }), [scopeId, props.scope.kind]);
@@ -104,6 +131,7 @@ export function SpacesHome(props: SpacesHomeProps) {
   }, [route]);
 
   const cols = useColumns(body, 230, 24);
+  const nowCols = useColumns(body, 280, 24);
   const [folded, setFolded] = useState<ReadonlySet<string>>(readFolds);
   const fold = (name: string) => {
     const next = new Set(folded);
@@ -120,12 +148,21 @@ export function SpacesHome(props: SpacesHomeProps) {
   useLayoutEffect(() => setPortal(root.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
 
   const list = props.view === 'list';
-  const item = (plan: PlanSummary, size: 'large' | 'regular', withProject = false) => (
-    <SpaceItem key={plan.id} plan={fresh.get(plan.id) ?? plan} size={size} list={list} secondary={withProject && mode !== 'project' ? plan.project_name || undefined : undefined} pinned={pins.has(plan.id)} portal={portal} />
+  const item = (plan: PlanSummary, size: 'large' | 'regular', withProject = false, row = list) => (
+    <SpaceItem
+      key={plan.id}
+      plan={fresh.get(plan.id) ?? plan}
+      work={works.find((w) => w.plan === plan.id) ?? null}
+      size={size}
+      list={row}
+      secondary={withProject && mode !== 'project' ? plan.project_name || undefined : undefined}
+      pinned={pins.has(plan.id)}
+      portal={portal}
+    />
   );
-  const items = (plans: readonly PlanSummary[], size: 'large' | 'regular', withProject = false) => (
-    <div className={list ? 'ib-spc-rows' : size === 'large' ? 'ib-spc-grid ib-spc-now' : 'ib-spc-grid'} role="list">
-      {plans.map((p) => item(p, size, withProject))}
+  const items = (plans: readonly PlanSummary[], size: 'large' | 'regular', withProject = false, row = list) => (
+    <div className={row ? 'ib-spc-rows' : size === 'large' ? 'ib-spc-grid ib-spc-now' : 'ib-spc-grid'} role="list">
+      {plans.map((p) => item(p, size, withProject, row))}
     </div>
   );
   const held = pending > 0 && looking;
@@ -137,8 +174,8 @@ export function SpacesHome(props: SpacesHomeProps) {
     pillShown = true;
     return pill;
   };
-  const head = (words: string, id: string) => (
-    <h2 className="ib-spc-h" id={id}>
+  const head = (words: string, id: string, now = false) => (
+    <h2 className={now ? 'ib-spc-h ib-spc-nowh' : 'ib-spc-h'} id={id}>
       <span dir="auto">{words}</span>
       {takePill()}
     </h2>
@@ -149,8 +186,10 @@ export function SpacesHome(props: SpacesHomeProps) {
   if (now.length || held) {
     sections.push(
       <section key="now" className="ib-spc-sec" aria-labelledby={`${headId}-now`} data-spaces-section="now">
-        {head('Now', `${headId}-now`)}
-        {now.length > 0 && items(now, list ? 'regular' : 'large', true)}
+        {head('Now', `${headId}-now`, true)}
+        {/* One row of large cards at most; the rest of Now as rows under it, in the same section. */}
+        {now.length > 0 && (list ? items(now, 'regular', true) : items(now.slice(0, nowCols), 'large', true, false))}
+        {!list && now.length > nowCols && items(now.slice(nowCols), 'regular', true, true)}
       </section>,
     );
   }
@@ -269,10 +308,9 @@ function readFolds(): ReadonlySet<string> {
 function Hearth({ headId, query, onQuery, view, scope }: { headId: string; query: string; onQuery: (q: string) => void; view: SpacesView; scope: SpacesScopeProject | null }) {
   const host = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
-  const words = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!host.current || !canvas.current) return;
-    return startPlansDither(host.current, canvas.current, () => (words.current ? [words.current] : []));
+    return startStillField(host.current, canvas.current);
   }, []);
   return (
     <header className="ib-spc-hearth">
@@ -301,7 +339,7 @@ function Hearth({ headId, query, onQuery, view, scope }: { headId: string; query
           <ViewSwitch view={view} />
         </div>
       </div>
-      <div className="ib-spc-words" ref={words}>
+      <div className="ib-spc-words">
         <h1 id={headId} tabIndex={-1}>
           What do you want to plan?
         </h1>
@@ -348,10 +386,9 @@ function ViewSwitch({ view }: { view: SpacesView }) {
 /** One space as a card or a row: its face, its title, its one fact, its unread dot, and the pin beside the link. */
 // Drawn again only when its own plan, place or pin changed: a read that brings nothing new, or the person looking or
 // not, redraws no card and no face.
-const SpaceItem = memo(function SpaceItem({ plan, size, list, secondary, pinned, portal }: { plan: PlanSummary; size: 'large' | 'regular'; list: boolean; secondary?: string; pinned: boolean; portal: HTMLElement | null }) {
-  const fact = spaceFact(plan, null);
+const SpaceItem = memo(function SpaceItem({ plan, work, size, list, secondary, pinned, portal }: { plan: PlanSummary; work: SpaceWork | null; size: 'large' | 'regular'; list: boolean; secondary?: string; pinned: boolean; portal: HTMLElement | null }) {
+  const fact = spaceFact(plan, work);
   const words = factWords(fact);
-  const factNode = fact.kind === 'move' ? <span className="ib-spc-you">{words}</span> : words;
   const time = fact.kind === 'date' ? fullTime(plan.updated_at) : undefined;
   // A failed write puts the pin back and the window's toast says so (the store).
   const pin = () => void setPlanPin(plan.id, !pinned);
@@ -362,12 +399,14 @@ const SpaceItem = memo(function SpaceItem({ plan, size, list, secondary, pinned,
       </button>
     </Tip>
   );
-  const common = { kind: spaceKind(plan), title: plan.name, href: `#plans=${encodeURIComponent(plan.id)}`, linkComponent: SpaceLink, fact: factNode, unread: spaceUnread(plan), time, action, pinned };
+  // While its agent works on it, the agent's mark breathes beside the fact (the frame's `breathe`).
+  const factMark = fact.kind === 'working' ? <HostMark host={fact.host} /> : undefined;
+  const common = { kind: spaceKind(plan), title: plan.name, href: `#plans=${encodeURIComponent(plan.id)}`, linkComponent: SpaceLink, fact: words, factMark, factTone: fact.kind === 'move' ? ('action' as const) : ('default' as const), unread: spaceUnread(plan), time, action, pinned };
   const face = plan.head_version_number >= 1 ? <SpaceFace plan={plan} /> : null;
   const box = (
     <div className={list ? 'ib-spc-item ib-spc-rowitem' : 'ib-spc-item'} role="listitem" data-card-key={plan.id} data-space={plan.id}>
       <div className="ib-spc-in">
-        {list ? <CardRow {...common} secondary={secondary} face={face} /> : <Card {...common} face={face} size={size} />}
+        {list ? <CardRow {...common} secondary={secondary} face={face} thumb={plan.head_version_number >= 1 ? <SpaceThumb plan={plan} /> : undefined} /> : <Card {...common} face={face} size={size} />}
       </div>
     </div>
   );
@@ -471,6 +510,26 @@ export function useLooking(root: RefObject<HTMLElement | null>): boolean {
     };
   }, [root]);
   return looking;
+}
+
+/**
+ * The works the home shows: the Inbox's live sessions (read every few seconds, as compose reads them) against each
+ * plan's `head_agent`. The same array while nothing changed, so no card redraws for a read that brought nothing.
+ */
+// An answer that is not a sessions list (an older Inbox, an error page) is no live session, never a broken home.
+const readLiveSessions: ComposeSessionsLoader = async (trust) => {
+  const model = await inboxApi.composeSessions(null, trust);
+  return model && Array.isArray(model.projects) ? model : { serverSession: '', home: '', projects: [] };
+};
+
+function useWorks(plans: readonly PlanSummary[]): SpaceWork[] {
+  const { model } = useComposeSessions(true, readLiveSessions);
+  const live = useMemo(() => new Set(model?.projects.flatMap((group) => (Array.isArray(group.sessions) ? group.sessions : []).map((s) => `${s.host}:${s.session}`)) ?? []), [model]);
+  const next = useMemo(() => spaceWorks(plans, live), [plans, live]);
+  const kept = useRef(next);
+  const key = (works: readonly SpaceWork[]) => works.map((w) => `${w.plan}|${w.host}:${w.session}|${w.agent}`).join(',');
+  if (key(kept.current) !== key(next)) kept.current = next;
+  return kept.current;
 }
 
 /** How many regular cards one row of the page holds (auto-fill at `min` px with `gap`); 4 before the first measure. */

@@ -9,6 +9,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  planPictureTypeOf,
   checkPlanLookInput,
   gitBlobSha,
   isPlanDecision,
@@ -136,4 +137,17 @@ describe("planDocumentFileName", () => {
     expect(planDocumentFileName({ doc_path: null, title: "Request flow", kind: "mermaid" })).toBe("Request flow.mmd");
     expect(planDocumentFileName({ doc_path: null, title: "", kind: "html" })).toBe("Plan.html");
   });
+});
+
+test("a picture page's type comes from its bytes, never its name", () => {
+  const bytes = (text: string) => Uint8Array.from(text, (c) => c.charCodeAt(0));
+  expect(planPictureTypeOf(bytes("\x89PNG\r\n\x1a\n"))).toBe("image/png");
+  expect(planPictureTypeOf(bytes("\xff\xd8\xff\xe0"))).toBe("image/jpeg");
+  expect(planPictureTypeOf(bytes("GIF89a\x01\x00"))).toBe("image/gif");
+  expect(planPictureTypeOf(bytes("RIFF\x00\x00\x00\x00WEBPVP8 "))).toBe("image/webp");
+  expect(planPictureTypeOf(bytes("\x00\x00\x00\x1cftypavif"))).toBe("image/avif");
+  expect(planPictureTypeOf(new TextEncoder().encode('\uFEFF<?xml version="1.0"?>\n<!-- chart -->\n<svg xmlns="http://www.w3.org/2000/svg">'))).toBe("image/svg+xml");
+  // An HTML page that holds an SVG is no picture; nor is text.
+  expect(planPictureTypeOf(new TextEncoder().encode("<html><svg></svg></html>"))).toBeNull();
+  expect(planPictureTypeOf(new TextEncoder().encode("tier,rate"))).toBeNull();
 });

@@ -39,7 +39,7 @@
  * tab, the import's pickup of the agent's next version).
  */
 import { checkPlanPinInput, checkSpacesViewInput, type SpacesView } from "@plannotator/core/plans";
-import { checkPlanApproveInput, checkPlanCommentInput, checkPlanLookInput, checkPlanSentInput, checkPlanVersionInput, isPlanAnnotationId, isPlanId, isPlanPictureType, isPlanVersionNumber, planApprovalsOn, planDocumentFileName, planMediaType, planTextLines, PLAN_PERSON, type PlanVersion } from "@plannotator/core/plans";
+import { checkPlanApproveInput, checkPlanCommentInput, checkPlanLookInput, checkPlanSentInput, checkPlanVersionInput, isPlanAnnotationId, isPlanId, isPlanPictureType, isPlanVersionNumber, planApprovalsOn, planDocumentFileName, planMediaType, planPictureTypeOf, planTextLines, PLAN_PERSON, type PlanVersion } from "@plannotator/core/plans";
 import { buildDirectEditsSection } from "../direct-edits";
 import type { PlanStore } from "./store";
 
@@ -77,6 +77,7 @@ const CONTENT_TYPE: Record<string, string> = {
   html: "text/plain; charset=utf-8",
   mmd: "text/plain; charset=utf-8",
   dot: "text/plain; charset=utf-8",
+  csv: "text/plain; charset=utf-8",
 };
 
 /**
@@ -309,6 +310,13 @@ export async function handlePlanRoute(req: PlanRouteRequest, deps: PlanRouteDeps
     const path = store.versionPath(id, docId, n);
     if (!path) return bad(`${id} has no version ${n}.`, 404);
     const ext = path.slice(path.lastIndexOf(".") + 1);
+    // A picture page: a raster picture as itself (it runs nothing); an SVG as plain text, as an artifact's is (the
+    // window draws it as a data: picture); anything else a download.
+    if (ext === "img") {
+      const bytes = store.versionBytes(id, docId, n);
+      const type = bytes ? planPictureTypeOf(bytes) : null;
+      return { status: 200, file: { path, contentType: type ? artifactServedType(type) : "application/octet-stream" } };
+    }
     return { status: 200, file: { path, contentType: CONTENT_TYPE[ext] ?? "text/plain; charset=utf-8" } };
   }
 

@@ -37,8 +37,13 @@ export function isPlanId(prefix: PlanIdPrefix, value: unknown): value is string 
 export type PlanStatus = "active" | "done" | "archived";
 export const PLAN_STATUSES: readonly PlanStatus[] = ["active", "done", "archived"];
 
-export type PlanDocumentKind = "markdown" | "html" | "mermaid" | "graphviz";
-export const PLAN_DOCUMENT_KINDS: readonly PlanDocumentKind[] = ["markdown", "html", "mermaid", "graphviz"];
+/**
+ * A page's kind. `image`: a picture (PNG, JPEG, GIF, WebP, AVIF or SVG; its type is read from its bytes,
+ * `planPictureTypeOf`); `data`: a table as CSV or TSV text. Both are read-only on the plan page, as a diagram or an
+ * HTML page is.
+ */
+export type PlanDocumentKind = "markdown" | "html" | "mermaid" | "graphviz" | "image" | "data";
+export const PLAN_DOCUMENT_KINDS: readonly PlanDocumentKind[] = ["markdown", "html", "mermaid", "graphviz", "image", "data"];
 
 /** Where a version came from. Imported history versions are `plan-review`: plan review wrote them. */
 export type PlanVersionSource = "plan-review" | "agent-tool" | "annotate-live" | "person";
@@ -237,6 +242,19 @@ export interface PlanIndexLine {
   decided_versions?: number[];
   /** When the main page's newest version came (its `committed_at`); absent from an older line (read `updated_at`). */
   head_at?: string | null;
+  /**
+   * The agent session that wrote the main page's newest version, when it said so (plan review records the session it
+   * ran in: `history/{project}/{slug}/NNN.agent.json`); null when none is known. The Spaces home says "<agent> is
+   * working" only while this session is live in the Inbox and this is the newest plan it submitted.
+   */
+  head_agent?: PlanHeadAgent | null;
+}
+
+/** An agent session as a version records it: its host (`claude-code`, `codex`, …), its session id and its name. */
+export interface PlanHeadAgent {
+  host: string;
+  session: string;
+  name: string | null;
 }
 
 /** The person's pinned plans, in their order (`pins.json`, written whole), and the Spaces home's view. */
@@ -502,12 +520,32 @@ export const PLAN_TEXT_MAX = 2 * 1024 * 1024;
  */
 export const PLAN_FACE_TEXT_BYTES = 16 * 1024;
 export const PLAN_FACE_HTML_MAX = 512 * 1024;
+/** A picture page's face is the picture itself, up to this size (above it, the card shows its kind's ground). */
+export const PLAN_FACE_PICTURE_MAX = 2 * 1024 * 1024;
 
 /** `GET /api/plans/:id/versions/:n?face=1`: the top of a version for its face; `text` null when it is too big to draw. */
 export interface PlanFaceText {
   text: string | null;
   /** The text is the version's first part only. */
   cut: boolean;
+  /** A picture page: the picture as a `data:` URL (null when it is too big, or not a picture this list draws). */
+  picture?: string | null;
+}
+
+/** The picture types a picture page may hold: the raster ones every browser draws, and SVG (drawn as a picture). */
+export const PLAN_PAGE_PICTURE_TYPES: readonly string[] = [...PLAN_PICTURE_TYPES, "image/svg+xml"];
+
+/** A picture's type from its first bytes (never its name): PNG, JPEG, GIF, WebP, AVIF or SVG; else null. */
+export function planPictureTypeOf(bytes: Uint8Array): string | null {
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (bytes.length >= 8 && bytes[0] === 0x89 && ascii(1, 4) === "PNG") return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 && /^GIF8[79]a$/.test(ascii(0, 6))) return "image/gif";
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  if (bytes.length >= 12 && ascii(4, 8) === "ftyp" && /^avi[fs]$/.test(ascii(8, 12))) return "image/avif";
+  const head = new TextDecoder().decode(bytes.subarray(0, 1024)).replace(/^\uFEFF/, "").trimStart();
+  if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(head)) return "image/svg+xml";
+  return null;
 }
 
 /**
@@ -637,7 +675,7 @@ export function planApprovalState(events: readonly PlanEvent[], docId: string, h
   return held.length > 0 ? { kind: "cleared", version_number: head, from_version_number: older, names: held.map((a) => a.name) } : { kind: "undecided", version_number: head, from_version_number: older };
 }
 
-const PLAN_KIND_EXTENSION: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot" };
+const PLAN_KIND_EXTENSION: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot", image: "png", data: "csv" };
 
 /** A page's file name: the last part of its `doc_path`, else its title with its kind's extension ("Rollout.md"). */
 export function planDocumentFileName(doc: Pick<PlanDocument, "doc_path" | "title" | "kind">): string {

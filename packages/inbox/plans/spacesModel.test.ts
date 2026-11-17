@@ -13,13 +13,16 @@
  * - pins out of the person's order, or keeping a plan that is gone;
  * - the held layout moving a card under the person, showing a new plan before Show, or counting as "updates" what
  *   is already drawn in place or only pushed down by another;
- * - a document's face saying its title twice, or losing a heading that is not the title; faces of plans that all open
- *   with "## Context" starting alike; a table, steps or code just below what a card shows staying out of view, or the
- *   face reordering or inventing text to show it.
+ * - an agent said to be working on a plan its live session did not submit last, or one whose session is not live;
+ * - the clock and the works a layout was placed with not holding it (a plan passing Now's 3 days moving a card while
+ *   the person looks), or the home not knowing when the next plan leaves Now;
+ * - a document's face saying its title twice; starting on a list, or without the plan's first paragraph; its first
+ *   sentence not the lede; a generic heading ("Context") shown, or a specific one lost; a table, steps or code just
+ *   below what a card shows staying out of view, or the face reordering or inventing text to show it.
  */
 import { describe, expect, test } from 'bun:test';
 import type { PlanSummary } from '@plannotator/core/plans';
-import { FACE_VISIBLE_LINES, NOW_FRESH_MS, NOW_RULE, faceMarkdown, factWords, heldLayout, homeSections, inProject, isNow, isYourMove, pinnedPlans, projectGroups, searchPlans, spaceDate, spaceFact, spaceKind, spaceUnread, type SpaceWork } from './spacesModel';
+import { FACE_VISIBLE_LINES, NOW_FRESH_MS, NOW_RULE, faceMarkdown, faceParts, factWords, heldLayout, homeSections, inProject, isNow, isYourMove, nextNowCrossing, pinnedPlans, projectGroups, searchPlans, spaceDate, spaceFact, spaceKind, spaceUnread, spaceWorks, type SpaceWork } from './spacesModel';
 
 let n = 0;
 function summary(over: Partial<PlanSummary> = {}): PlanSummary {
@@ -90,11 +93,41 @@ test('the unread dot: a version came past the one read or decided on; the person
   expect(spaceUnread(summary())).toBe(true);
 });
 
-test('the kind: an HTML main page is a page; Markdown and diagrams are documents', () => {
+test('the kind, from the main page alone: HTML a page; a picture or a drawn diagram an image; a table data; else a document', () => {
   expect(spaceKind({ primary_kind: 'html' })).toBe('page');
+  expect(spaceKind({ primary_kind: 'image' })).toBe('image');
+  expect(spaceKind({ primary_kind: 'mermaid' })).toBe('image');
+  expect(spaceKind({ primary_kind: 'graphviz' })).toBe('image');
+  expect(spaceKind({ primary_kind: 'data' })).toBe('data');
   expect(spaceKind({ primary_kind: 'markdown' })).toBe('document');
-  expect(spaceKind({ primary_kind: 'mermaid' })).toBe('document');
   expect(spaceKind({ primary_kind: undefined })).toBe('document');
+});
+
+test('works: a live session is on the plan whose newest version it submitted last; never a session not live', () => {
+  const agent = { host: 'codex', session: 'ses_live', name: 'Codex' };
+  const older = summary({ head_agent: agent, head_at: '2026-11-10T09:00:00.000Z' });
+  const newer = summary({ head_agent: agent, head_at: '2026-11-11T09:00:00.000Z' });
+  const gone = summary({ head_agent: { host: 'claude-code', session: 'ses_gone', name: null }, head_at: '2026-11-12T09:00:00.000Z' });
+  const archived = summary({ head_agent: { host: 'pi', session: 'ses_pi', name: null }, status: 'archived' });
+  const none = summary({ head_agent: null });
+  const live = new Set(['codex:ses_live', 'pi:ses_pi']);
+  const works = spaceWorks([older, newer, gone, archived, none], live);
+  // One per session: its newest submit. The older plan it moved on from, the session not live, an archived plan: none.
+  expect(works).toEqual([{ plan: newer.id, agent: 'Codex', host: 'codex', session: 'ses_live' }]);
+  expect(spaceFact({ ...newer, decided_versions: [2] }, works)).toEqual({ kind: 'working', agent: 'Codex', host: 'codex', session: 'ses_live' });
+  expect(spaceFact({ ...older, decided_versions: [2] }, works).kind).toBe('date');
+  // A version that recorded no name: the Inbox's name for its host, else the host.
+  expect(spaceWorks([summary({ head_agent: { host: 'claude-code', session: 'ses_c', name: null } })], new Set(['claude-code:ses_c']), { 'claude-code': 'Claude Code' })[0]!.agent).toBe('Claude Code');
+  expect(spaceWorks([older, newer], new Set())).toEqual([]);
+});
+
+test('the next moment a plan leaves Now by age alone', () => {
+  const at = Date.parse('2026-11-20T12:00:00.000Z');
+  const soon = summary({ head_at: new Date(at - NOW_FRESH_MS + 60_000).toISOString() });
+  const later = summary({ head_at: new Date(at - 60_000).toISOString() });
+  const gone = summary({ head_at: new Date(at - NOW_FRESH_MS - 1).toISOString() });
+  expect(nextNowCrossing([later, soon, gone, summary({ head_at: undefined })], at)).toBe(at + 60_000);
+  expect(nextNowCrossing([gone], at)).toBe(Infinity);
 });
 
 test('Now holds only what waits (on the person, or a linked agent); Recent is the rest, newest first', () => {
@@ -204,6 +237,24 @@ describe('the held layout', () => {
     expect(heldLayout(held, [top, toNow, low]).pending).toBe(1);
   });
 
+  test('the clock is frozen with the layout: a plan passing Now\'s 3 days waits like an arrival', () => {
+    const placedAt = Date.parse('2026-11-20T12:00:00.000Z');
+    const edge = summary({ seen_version_number: 2, head_at: new Date(placedAt - NOW_FRESH_MS + 60_000).toISOString(), updated_at: '2026-11-17T12:01:00.000Z' });
+    const other = summary({ decided_versions: [2], updated_at: '2026-11-15T09:00:00.000Z' });
+    const placed = { work: null, at: placedAt };
+    const later = { work: null, at: placedAt + 120_000 };
+    // Placed while it was fresh: it stays in Now on the frozen clock, and its leaving is one update.
+    const { layout, pending } = heldLayout([edge, other], [edge, other], placed, later);
+    expect(homeSections(layout, placed.work, placed.at).now.map((p) => p.id)).toEqual([edge.id]);
+    expect(pending).toBe(1);
+    // Settled (placed again on the clock of now): it is in Recent, and nothing waits.
+    expect(homeSections(layout, later.work, later.at).now).toEqual([]);
+    expect(heldLayout([edge, other], [edge, other], later, later).pending).toBe(0);
+    // An agent starting on a plan while the person looks: one update, the card held where it was.
+    const working = { work: [work(other.id)], at: placedAt };
+    expect(heldLayout([edge, other], [edge, other], placed, working).pending).toBe(1);
+  });
+
   test('a plan that is gone leaves; nothing held is the fresh list', () => {
     const { top, mid, held } = base();
     expect(heldLayout(held, [top, mid]).layout.map((p) => p.id)).toEqual([top.id, mid.id]);
@@ -212,52 +263,65 @@ describe('the held layout', () => {
 });
 
 describe('a document\'s face', () => {
-  test('a first heading that is the title is left out; any other heading stays', () => {
-    expect(faceMarkdown('# Rotate refresh tokens\n\nRetire keys after 14 days.\n', 'Rotate refresh tokens')).toBe('Retire keys after 14 days.\n');
-    expect(faceMarkdown('\n\n## **Rotate**  refresh tokens ##\nBody', 'rotate refresh tokens')).toBe('Body');
-    expect(faceMarkdown('# Rollout\n\nWhy now.', 'Rotate refresh tokens')).toBe('# Rollout\n\nWhy now.');
-    // Only the first heading: a later one with the title's words stays.
-    expect(faceMarkdown('Intro line.\n\n# Rotate refresh tokens\n', 'Rotate refresh tokens')).toBe('Intro line.\n\n# Rotate refresh tokens\n');
+  const prose = (i: number) => `Paragraph ${i} ${'words that wrap across the sheet '.repeat(4)}`;
+
+  test('it starts at the first paragraph, whose first sentence is the lede; a first heading that is the title is left out', () => {
+    expect(faceParts('# Rotate refresh tokens\n\nRetire keys after 14 days. Then rotate.\n', 'Rotate refresh tokens')).toEqual({ heading: null, lede: 'Retire keys after 14 days.', blocks: ['Then rotate.'] });
+    // The lede is words, as the plan wrote them (its emphasis and links' marks only dropped).
+    expect(faceParts('Keep **drafts** in [IndexedDB](https://x.dev) on the device.', 'x').lede).toBe('Keep drafts in IndexedDB on the device.');
+    // A sentence ends only before a capital or a digit: "e.g. a" is no end.
+    expect(faceParts('Use e.g. a token bucket per key. It holds.', 'x').lede).toBe('Use e.g. a token bucket per key.');
   });
 
-  test('plans that all open with "## Context" start with their own words', () => {
+  test('never on a list: past a list before the first paragraph, to the paragraph', () => {
+    const parts = faceParts('# Plan\n\n- one\n- two\n\nOne noisy key can starve every other customer. More.\n\n- after', 'Plan');
+    expect(parts.lede).toBe('One noisy key can starve every other customer.');
+    expect(parts.blocks).toEqual(['More.', '- after']);
+  });
+
+  test('a generic heading is left out wherever it is (its words kept); a specific first heading tops the face at body size', () => {
     const plans = [
-      ['Sessions in Redis', '# Sessions in Redis\n\n## Context\n\nSessions live in Postgres and every request reads one.\n\n## Approach\n\n- Move them.\n'],
-      ['Offline drafts', '# Offline drafts\n\n## Context\n\nA note typed on the train is lost when the app closes.\n\n## Approach\n\n- Keep drafts.\n'],
+      ['Sessions in Redis', '# Sessions in Redis\n\n## Context\n\nSessions live in Postgres and every request reads one.\n\n## Overview\n\n- Move them.\n'],
+      ['Offline drafts', '# Offline drafts\n\n## Background\n\nA note typed on the train is lost when the app closes.\n'],
       ['Rate limits', '## Context:\n\nOne noisy key can starve every other customer.\n'],
     ];
-    const firsts = plans.map(([title, text]) => faceMarkdown(text!, title!).split('\n')[0]);
-    expect(firsts).toEqual(['Sessions live in Postgres and every request reads one.', 'A note typed on the train is lost when the app closes.', 'One noisy key can starve every other customer.']);
-    // Only a leading one: "Overview" later on stays, and a heading that is not generic leads.
-    expect(faceMarkdown('## Rollout\n\nText.\n\n## Overview\n\nMore.', 'x')).toBe('## Rollout\n\nText.\n\n## Overview\n\nMore.');
+    const faces = plans.map(([title, text]) => faceParts(text!, title!));
+    expect(faces.map((f) => f.lede)).toEqual(['Sessions live in Postgres and every request reads one.', 'A note typed on the train is lost when the app closes.', 'One noisy key can starve every other customer.']);
+    expect(faces.map((f) => f.heading)).toEqual([null, null, null]);
+    expect(faces[0]!.blocks).toEqual(['- Move them.']);
+    const specific = faceParts('# Plan\n\n## Session layout\n\nEach session is one hash.\n\n## Approach\n\nText.', 'Plan');
+    expect(specific.heading).toBe('Session layout');
+    expect(specific.lede).toBe('Each session is one hash.');
+    // A later specific heading stays in its place.
+    expect(specific.blocks).toEqual(['## Approach', 'Text.']);
   });
 
   test('a table, steps or code just below what a card shows is brought up by whole blocks; never reordered', () => {
-    const prose = (i: number) => `Paragraph ${i} ${'words that wrap across the sheet '.repeat(4)}`;
     const text = ['# Plan', '', prose(1), '', prose(2), '', '## Steps', '', '1. First.', '2. Second.', '3. Third.', '', '## Later', '', 'Tail.'].join('\n');
     const face = faceMarkdown(text, 'Plan');
     const lines = text.split('\n');
-    // A suffix of the page, from a block's start: nothing invented, nothing moved.
-    expect(lines.slice(lines.length - face.split('\n').length).join('\n')).toBe(face);
-    // The steps' heading and first step are within what the card shows (about FACE_VISIBLE_LINES sheet lines).
-    const shown = face.split('\n');
-    expect(shown.indexOf('1. First.')).toBeGreaterThan(-1);
-    expect(shown.indexOf('1. First.')).toBeLessThan(FACE_VISIBLE_LINES);
-    expect(face.startsWith('Paragraph 1')).toBe(false);
-    // A moved start is content, never a heading ("## Approach" would make faces alike again).
-    const table = ['## Context', '', prose(1), '', prose(2), '', '## Approach', '', '- A token bucket per key.', '- Answer 429.', '- Log the key.', '', '| Tier | Per minute |', '| - | - |', '| Free | 60 |', '| Team | 600 |'].join('\n');
-    expect(faceMarkdown(table, 'Rate limits').split('\n')[0]).toBe('- A token bucket per key.');
-    // Nothing of that kind near the top: the face starts at the top.
+    // The lede, then a suffix of the page from a block's start: nothing invented, nothing moved.
+    const [lede, ...rest] = face.split('\n\n');
+    expect(lede).toBe('Paragraph 1 words that wrap across the sheet words that wrap across the sheet words that wrap across the sheet words that wrap across the sheet');
+    const tail = rest.join('\n\n');
+    expect(lines.slice(lines.length - tail.split('\n').length).join('\n')).toBe(tail);
+    // The steps come up under the lede with their own heading; the paragraph between is left out (the face ends early).
+    expect(rest[0]).toBe('## Steps');
+    expect(face.includes('Paragraph 2')).toBe(false);
+    expect(face.split('\n').indexOf('1. First.')).toBeGreaterThan(-1);
+    expect(face.split('\n').indexOf('1. First.')).toBeLessThan(FACE_VISIBLE_LINES);
+    // Nothing of that kind near the top: the face goes on in order.
     const plain = ['# Plan', '', prose(1), '', prose(2), '', prose(3)].join('\n');
-    expect(faceMarkdown(plain, 'Plan').startsWith('Paragraph 1')).toBe(true);
+    expect(faceParts(plain, 'Plan').blocks[0]).toBe(prose(2));
     // Already in view: no shift.
     const near = ['# Plan', '', 'Short intro.', '', '| a | b |', '| - | - |', '| 1 | 2 |'].join('\n');
-    expect(faceMarkdown(near, 'Plan').startsWith('Short intro.')).toBe(true);
+    expect(faceParts(near, 'Plan').blocks).toEqual(['| a | b |\n| - | - |\n| 1 | 2 |']);
   });
 
-  test('past a front matter block; only its top', () => {
+  test('past a front matter block; only its top; a page with no paragraph starts at its top', () => {
     expect(faceMarkdown('---\ntitle: x\n---\n# Plan\n\nText', 'Plan')).toBe('Text');
-    const long = Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n');
-    expect(faceMarkdown(long, 'x', 10).split('\n')).toHaveLength(10);
+    const long = Array.from({ length: 200 }, (_, i) => `line ${i}\n`).join('\n');
+    expect(faceParts(long, 'x').blocks.length).toBeLessThanOrEqual(14);
+    expect(faceParts('- a\n- b\n\n| t |\n| - |', 'x')).toEqual({ heading: null, lede: '', blocks: ['- a\n- b', '| t |\n| - |'] });
   });
 });
