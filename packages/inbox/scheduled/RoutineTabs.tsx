@@ -46,6 +46,8 @@ export function RoutineTabs({ uid, tab, onTab, record }: { uid: string; tab: Rou
     document.getElementById(tabIdOf(uid, next))?.focus();
   };
   const onKey = (event: KeyboardEvent<HTMLElement>) => {
+    // Cmd+← and Alt+← are the browser's Back: not a tab switch.
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
     const index = TABS.findIndex((choice) => choice.id === tab);
     const next =
       event.key === 'ArrowRight' || event.key === 'ArrowDown'
@@ -64,40 +66,50 @@ export function RoutineTabs({ uid, tab, onTab, record }: { uid: string; tab: Rou
   const live = running(record);
   const failed = lastRunFailed(record);
   return (
+    // The row is a container: the pane's width, not the window's, puts the line beside the tabs or under them.
     <div className="st-tabsrow">
-      <div className="ib-seg st-tabs" role="tablist" aria-label="Routine" onKeyDown={onKey} data-scheduled-tabs="">
-        {TABS.map((choice) => {
-          const on = tab === choice.id;
-          return (
-            <button
-              key={choice.id}
-              type="button"
-              role="tab"
-              id={tabIdOf(uid, choice.id)}
-              className="ib-seg-o"
-              data-on={on ? '' : undefined}
-              data-scheduled-tab={choice.id}
-              aria-selected={on}
-              aria-controls={panelIdOf(uid, choice.id)}
-              tabIndex={on ? 0 : -1}
-              onClick={() => onTab(choice.id)}
-            >
-              {choice.label}
-              {choice.id === 'runs' && !!record?.runs && <span className="ib-n">{formatCount(record.runs)}</span>}
-              {choice.id === 'runs' && live && <RunningDots />}
-              {choice.id === 'runs' && failed && <span className="st-tabdot" aria-hidden="true" data-scheduled-runs-failed="" />}
-              {choice.id === 'runs' && (live || failed) && <span className="ib-sr">{live ? ', a run is going' : `, the last run ${OUTCOME_WORDS[record!.last_run!.outcome].toLowerCase()}`}</span>}
-            </button>
-          );
-        })}
+      <div className="st-tabsin">
+        <div className="ib-seg st-tabs" role="tablist" aria-label="Routine" onKeyDown={onKey} data-scheduled-tabs="">
+          {TABS.map((choice) => {
+            const on = tab === choice.id;
+            return (
+              <button
+                key={choice.id}
+                type="button"
+                role="tab"
+                id={tabIdOf(uid, choice.id)}
+                className="ib-seg-o"
+                data-on={on ? '' : undefined}
+                data-scheduled-tab={choice.id}
+                aria-selected={on}
+                aria-controls={panelIdOf(uid, choice.id)}
+                tabIndex={on ? 0 : -1}
+                onClick={() => onTab(choice.id)}
+              >
+                {choice.label}
+                {/* Heard as "Runs, 12", not "Runs12". */}
+                {choice.id === 'runs' && !!record?.runs && (
+                  <>
+                    <span className="ib-sr">, </span>
+                    <span className="ib-n">{formatCount(record.runs)}</span>
+                  </>
+                )}
+                {choice.id === 'runs' && live && <RunningDots />}
+                {choice.id === 'runs' && failed && <span className="st-tabdot" aria-hidden="true" data-scheduled-runs-failed="" />}
+                {choice.id === 'runs' && (live || failed) && <span className="ib-sr">{live ? ', a run is going' : `, the last run ${OUTCOME_WORDS[record!.last_run!.outcome].toLowerCase()}`}</span>}
+              </button>
+            );
+          })}
+        </div>
+        {/* On Runs the line keeps its place, unseen, so a switch never moves the panel below. */}
+        <LastRun record={record} shown={tab === 'edit'} onRuns={() => go('runs')} />
       </div>
-      {tab === 'edit' && <LastRun record={record} onRuns={() => go('runs')} />}
     </div>
   );
 }
 
 /** "Last run Today 9:00 AM · Replied", "Running · 0:42", or the one that didn't start or finish in red. Opens Runs. */
-function LastRun({ record, onRuns }: { record: InboxScheduledRow | null; onRuns: () => void }) {
+function LastRun({ record, shown, onRuns }: { record: InboxScheduledRow | null; shown: boolean; onRuns: () => void }) {
   const live = running(record);
   const now = useNow(live);
   if (!record) return null;
@@ -112,7 +124,8 @@ function LastRun({ record, onRuns }: { record: InboxScheduledRow | null; onRuns:
     );
   else return null;
   return (
-    <button type="button" className="st-lastrun" onClick={onRuns} data-scheduled-last-run={live ? 'running' : record.last_run!.outcome}>
+    // `visibility: hidden` off Edit: out of the Tab order and unheard, its height kept.
+    <button type="button" className="st-lastrun" onClick={onRuns} data-off={shown ? undefined : ''} aria-hidden={!shown || undefined} tabIndex={shown ? undefined : -1} data-scheduled-last-run={live ? 'running' : record.last_run!.outcome}>
       {words}
       <Icon name="chevR" size={12} />
     </button>

@@ -20,7 +20,6 @@ import { EditorFoot, routineOn } from './EditorFoot';
 import { SaveStatus } from './SaveStatus';
 import { localZone, ScheduleRow } from './ScheduleRow';
 import { useAutosave } from './useAutosave';
-import { runWhenWords } from './words';
 import { panelIdOf, RoutineTabs, RunsPanel, tabIdOf, type RoutineTab } from './RoutineTabs';
 
 export interface EditorProps {
@@ -41,12 +40,8 @@ export interface EditorProps {
   onTab?: (tab: RoutineTab) => void;
 }
 
-/** A one-time one after its time: "Done · ran Fri 5:02 PM", or that it didn't start or didn't run (skipped). */
-const doneWords = (record: InboxScheduledRow): string => {
-  if (!record.last_run) return "Done · didn't run";
-  if (record.last_run.outcome === 'didnt_start') return "Done · didn't start";
-  return `Done · ran ${runWhenWords(record.last_run.started_at).replace(/^Today /, '')}`;
-};
+/** A one-time one after its time: "Done" (the line by the tabs says when it ran and how), or that it didn't run (skipped). */
+const doneWords = (record: InboxScheduledRow): string => (record.last_run ? 'Done' : "Done · didn't run");
 
 function MoreMenu({ on, onTurn, onRun, onDelete }: { on: boolean | null; onTurn: () => void; onRun: (() => void) | null; onDelete: () => void }) {
   const anchor = useRef<HTMLButtonElement>(null);
