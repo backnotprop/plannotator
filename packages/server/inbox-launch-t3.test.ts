@@ -444,6 +444,22 @@ describe("T3 Code through the launch engine, against a fake t3", () => {
     expect(t.launch.runOfMessage(root.id)).toBeNull();
   });
 
+  test("once T3 said the turn is over, it is not asked again: the line stays, minute after minute, with no more `thread show`", async () => {
+    const t = setup();
+    const root = await t.send("Tighten the checkout copy.");
+    await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    t.clock.now += 11 * 60_000;
+    await until("the line", () => t.launch.runOfMessage(root.id));
+    const shows = () => t.t3!.calls().filter((args) => args[1] === "show").length;
+    const asked = shows();
+    for (let minute = 0; minute < 5; minute += 1) {
+      t.clock.now += 61_000;
+      expect(t.launch.runOfMessage(root.id)).toMatchObject({ state: "failed", cause: NOT_CONNECTED });
+      await Bun.sleep(50);
+    }
+    expect(shows()).toBe(asked);
+  });
+
   test("a long first turn: while T3 says the run is active, nothing says not connected, however long it takes", async () => {
     const t = setup();
     t.t3!.setRunStatus("running");
@@ -620,19 +636,24 @@ describe("the T3 model button's lists", () => {
     expect((await t3Choices(t)).last).toEqual({ model: "codex/gpt-5.5", effort: "high" });
   });
 
-  test("a model T3 no longer lists: refused before T3 is asked, in plain words, and Try again does not send it blindly; one T3 itself refuses shows T3's words", async () => {
+  test("a model a signed-in T3 doesn't list: refused before T3 is asked, in plain words, and Try again does not send it blindly; with no sign-in T3 decides, and its refusal shows T3's words", async () => {
     const t = signedIn();
     await t3Choices(t);
     const gone = await t.send("Tighten the checkout copy.", t.project, { model: "codex/gpt-4-retired" });
     const error = await until("refused", () => t.store.message(gone.id)!.launch!.error);
-    expect(error.text).toBe("T3 Code no longer lists Codex · gpt-4-retired. Send it again with another model.");
+    expect(error.text).toBe("T3 Code doesn't list Codex · gpt-4-retired. Send it again with another model.");
     expect((await t.route(gone.launch!.id, "retry")).ok).toBe(true);
     await until("refused again", () => t.store.message(gone.id)!.launch!.error);
     expect(t.starts()).toEqual([]);
 
-    // No sign-in: T3 is asked, and its refusal is what the line says.
-    const plain = setup();
-    const refused = await plain.send("Tighten the checkout copy.", plain.project, { model: "codex/retired" });
+    // No sign-in: the "already used" list holds only what ran before, so a model not in it is never refused here.
+    const used = [{ threadId: "thread:project:a:1", title: "Totals", providerInstanceId: "claudeAgent", model: "opus" }];
+    const plain = setup({ used });
+    expect((await hostOf(plain).choices([plain.shop]))!.models).toEqual(["claudeAgent/opus"]);
+    const fresh = await plain.send("Tighten the checkout copy.", plain.project, { model: "codex/gpt-5.5" });
+    await until("started", () => plain.store.message(fresh.id)!.launch!.session_ref);
+    // And T3's own refusal is what the line says.
+    const refused = await plain.send("Tidy the invoice copy.", plain.project, { model: "codex/retired" }, "Invoice copy");
     const said = await until("refused", () => plain.store.message(refused.id)!.launch!.error);
     expect(said.text).toBe("Model 'retired' is not available for provider instance 'codex'.");
   });

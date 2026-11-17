@@ -664,13 +664,15 @@ export function createInboxLaunch(options: {
   const TURN_ENDED_TTL_MS = 60_000;
   /**
    * Whether the session's turn has ended by its app's last word (true), or the app can't be asked (null, which counts
-   * as ended). Not asked yet, or a turn that runs: false. Asks again in the background once the word is a minute old.
+   * as ended). Not asked yet, or a turn that runs: false. Asks again in the background once the word is a minute old,
+   * but never after the app said the turn ended: that word can't change the line any more.
    * No `turnEnded` member: true.
    */
   const quietTurnEnded = (host: LaunchHost, launch: InboxLaunchRecord, memo: Memo): boolean => {
     if (!host.turnEnded) return true;
     const ref = launch.session_ref;
     if (!ref) return false;
+    if (memo.ended?.value === true) return true;
     if (!memo.endedAsking && (!memo.ended || now() - memo.ended.at >= TURN_ENDED_TTL_MS)) {
       memo.endedAsking = true;
       void host

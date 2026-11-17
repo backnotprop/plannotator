@@ -486,11 +486,12 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
         ctx.startLog(launch.id, `T3 thread ${made}, made by an earlier start of this launch: taken, no second thread`);
         return { ok: true as const, session: made, ref: made };
       }
-      // A model T3 no longer lists (a signed-in T3 says which it has) is refused before T3 is asked: its words, plainly.
+      // A model a signed-in T3's capabilities don't list is refused before T3 is asked, in plain words. Only that list:
+      // never the "already used" one, which holds only what ran before.
       const listedModels = launch.model ? await signedInLists(found.e).catch(() => null) : null;
       if (launch.model && listedModels && !listedModels.models.includes(launch.model)) {
         const words = t3ModelOf(launch.model) ? `${agentOf(t3ModelOf(launch.model)!.provider)} · ${t3ModelOf(launch.model)!.model}` : launch.model;
-        return { ok: false as const, code: "failed" as const, text: `T3 Code no longer lists ${words}. Send it again with another model.` };
+        return { ok: false as const, code: "failed" as const, text: `T3 Code doesn't list ${words}. Send it again with another model.` };
       }
       const startedAt = Date.now();
       // T3 didn't list the title's threads first: nothing would tell a thread this start made from an older one, so
