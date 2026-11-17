@@ -16,20 +16,47 @@ index 34e5869..f1b4a65 100644
 +export { CONTEXT_MENU_SLOT_NAME, CONTEXT_MENU_TRIGGER_TYPE, type ContextMenuAnchorRect, type FileTreeContextMenuButtonVisibility as ContextMenuButtonVisibility, type FileTreeContextMenuItem as ContextMenuItem, type FileTreeContextMenuOpenContext as ContextMenuOpenContext, type FileTreeContextMenuTriggerMode as ContextMenuTriggerMode, DEFAULT_FILE_TREE_LABELS, FILE_TREE_DEFAULT_ITEM_HEIGHT, FILE_TREE_DENSITY_PRESETS, FILE_TREE_SCROLLBAR_GUTTER_MEASURED_PROPERTY, FILE_TREE_SCROLLBAR_GUTTER_STYLE_ATTRIBUTE, FILE_TREE_SCROLLBAR_MEASURE_ATTRIBUTE, FILE_TREE_STYLE_ATTRIBUTE, FILE_TREE_TAG_NAME, FILE_TREE_UNSAFE_CSS_ATTRIBUTE, FLATTENED_PREFIX, FileTree, type FileTreeAddEvent, type FileTreeBatchEvent, type FileTreeBatchOperation, type FileTreeBuiltInIconSet, type FileTreeCollisionStrategy, type FileTreeCompositionOptions, type FileTreeDensity, type FileTreeDensityKeyword, type FileTreeDensityPreset, type FileTreeDirectoryHandle, type FileTreeDragAndDropConfig, type FileTreeDropContext, type FileTreeDropResult, type FileTreeDropTarget, type FileTreeFileHandle, type FileTreeGitStatusPatch, type FileTreeHeaderCompositionOptions, type FileTreeHydrationProps, type FileTreeIconConfig, type FileTreeIcons, type FileTreeInitialExpansion, type FileTreeItemHandle, type FileTreeLabels, type FileTreeLabelsOption, type FileTreeListener, type FileTreeMoveEvent, type FileTreeMoveOptions, type FileTreeMutationEvent, type FileTreeMutationEventForType, type FileTreeMutationEventInvalidation, type FileTreeMutationEventType, type FileTreeMutationHandle, type FileTreeMutationSemanticEvent, type FileTreeOptions, type FileTreePreparedInput, type FileTreeRemoveEvent, type FileTreeRemoveOptions, type FileTreeRenameEvent, type FileTreeRenamingConfig, type FileTreeRenamingItem, type FileTreeRenderOptions, type FileTreeRenderProps, type FileTreeResetEvent, type FileTreeResetOptions, type FileTreeResetPreparedOptions, type FileTreeRowDecoration, type FileTreeRowDecorationContext, type FileTreeRowDecorationRenderer, type FileTreeRowDoubleClickEvent, type FileTreeRowPart, type FileTreeRowPartClickEvent, type FileTreeRowParts, type FileTreeRowsOptions, type FileTreeScrollOffset, type FileTreeScrollToPathOptions, type FileTreeSearchBlurBehavior, type FileTreeSearchChangeListener, type FileTreeSearchMode, type FileTreeSearchSessionHandle, type FileTreeSelectionChangeListener, type FileTreeSortComparator, type FileTreeSortEntry, type FileTreeSsrPayload, type FileTreeVisibleRow, type GitStatus, type GitStatusEntry, HEADER_SLOT_NAME, type RemappedIcon, type TreeThemeInput, type TreeThemeStyles, createFileTreeIconResolver, getBuiltInSpriteSheet, preloadFileTree, prepareFileTreeInput, preparePresortedFileTreeInput, serializeFileTreeSsrPayload, themeToTreeStyles };
 \ No newline at end of file
 diff --git a/dist/model/FileTreeController.js b/dist/model/FileTreeController.js
-index 28da458..6689188 100644
+index 28da458..333753b 100644
 --- a/dist/model/FileTreeController.js
 +++ b/dist/model/FileTreeController.js
-@@ -128,7 +128,8 @@ var FileTreeController = class FileTreeController {
+@@ -108,6 +108,7 @@ var FileTreeController = class FileTreeController {
+ 	#renamingValue = "";
+ 	#removeRenamingPathIfCanceled = false;
+ 	#searchCollapsedOverrides = /* @__PURE__ */ new Set();
++	#searchText;
+ 	#searchMatchPathSet = /* @__PURE__ */ new Set();
+ 	#searchMatchingPaths = [];
+ 	#searchMode;
+@@ -128,7 +129,9 @@ var FileTreeController = class FileTreeController {
  	#visibleCount = 0;
  	#unsubscribe;
  	constructor(options) {
 -		const { dragAndDrop, fileTreeSearchMode, initialSearchQuery, initialSelectedPaths, renaming, onSearchChange, paths, preparedInput, ...baseOptions } = options;
-+		const { dragAndDrop, fileTreeSearchMode, initialSearchQuery, initialSelectedPaths, renaming, onDirectoryExpand, onSearchChange, paths, preparedInput, ...baseOptions } = options;
++		const { dragAndDrop, fileTreeSearchMode, initialSearchQuery, initialSelectedPaths, renaming, onDirectoryExpand, onSearchChange, paths, preparedInput, searchText, ...baseOptions } = options;
 +		this.#onDirectoryExpand = onDirectoryExpand;
++		this.#searchText = searchText;
  		const resolvedInput = resolveFileTreeInput({
  			paths,
  			preparedInput
-@@ -1175,9 +1176,11 @@ var FileTreeController = class FileTreeController {
+@@ -895,7 +898,7 @@ var FileTreeController = class FileTreeController {
+ 	}
+ 	#getListedPathsLowerCase() {
+ 		if (this.#listedPathsLowerCase != null) return this.#listedPathsLowerCase;
+-		this.#listedPathsLowerCase = this.#getListedPaths().map(toLowerCaseSearchPath);
++		this.#listedPathsLowerCase = this.#getListedPaths().map((path) => toLowerCaseSearchPath(this.#searchText?.(path) ?? path));
+ 		return this.#listedPathsLowerCase;
+ 	}
+ 	#getAllKnownDirectoryPaths() {
+@@ -905,7 +908,7 @@ var FileTreeController = class FileTreeController {
+ 	}
+ 	#getAllKnownDirectoryPathsLowerCase() {
+ 		if (this.#knownDirectoryPathsLowerCase != null) return this.#knownDirectoryPathsLowerCase;
+-		this.#knownDirectoryPathsLowerCase = this.#getAllKnownDirectoryPaths().map(toLowerCaseSearchPath);
++		this.#knownDirectoryPathsLowerCase = this.#getAllKnownDirectoryPaths().map((path) => toLowerCaseSearchPath(this.#searchText?.(path) ?? path));
+ 		return this.#knownDirectoryPathsLowerCase;
+ 	}
+ 	#invalidateKnownPathCaches() {
+@@ -1175,9 +1178,11 @@ var FileTreeController = class FileTreeController {
  		this.#selectionAnchorPath = canonicalAnchorPath;
  		return nextFocusedPath;
  	}
@@ -42,18 +69,21 @@ index 28da458..6689188 100644
  				this.#itemHandles.clear();
  				this.#invalidateKnownPathCaches();
 diff --git a/dist/model/publicTypes.d.ts b/dist/model/publicTypes.d.ts
-index 06d89e9..692572e 100644
+index 06d89e9..19868ac 100644
 --- a/dist/model/publicTypes.d.ts
 +++ b/dist/model/publicTypes.d.ts
-@@ -58,6 +58,7 @@ type FileTreeControllerBehaviorOptions = FileTreeStoreOptions & {
+@@ -58,8 +58,10 @@ type FileTreeControllerBehaviorOptions = FileTreeStoreOptions & {
    fileTreeSearchMode?: FileTreeSearchMode;
    initialSearchQuery?: string | null;
    initialSelectedPaths?: readonly FileTreePublicId[];
 +  onDirectoryExpand?: (path: FileTreePublicId) => void;
    onSearchChange?: FileTreeSearchChangeListener;
    renaming?: boolean | FileTreeRenamingConfig;
++  searchText?: (path: FileTreePublicId) => string;
  };
-@@ -196,6 +197,7 @@ type FileTreeOptionSurface = FileTreeRenderOptions & {
+ type FileTreeControllerOptions = FileTreeControllerBehaviorOptions & FileTreeInputOptions;
+ interface FileTreeVisibleSegment {
+@@ -196,6 +198,7 @@ type FileTreeOptionSurface = FileTreeRenderOptions & {
    labels?: FileTreeLabelsOption;
    onSelectionChange?: FileTreeSelectionChangeListener;
    renderRowDecoration?: FileTreeRowDecorationRenderer;
@@ -61,7 +91,7 @@ index 06d89e9..692572e 100644
    search?: boolean;
    searchFakeFocus?: boolean;
    searchBlurBehavior?: FileTreeSearchBlurBehavior;
-@@ -333,6 +335,41 @@ interface FileTreeRowDecorationContext {
+@@ -333,6 +336,41 @@ interface FileTreeRowDecorationContext {
    row: FileTreeVisibleRow;
  }
  type FileTreeRowDecorationRenderer = (context: FileTreeRowDecorationContext) => FileTreeRowDecoration | null;
@@ -187,10 +217,20 @@ index 0b41099..a745685 100644
  		searchEnabled: search === true,
  		searchFakeFocus: searchFakeFocus === true,
 diff --git a/dist/render/FileTreeView.js b/dist/render/FileTreeView.js
-index b4c7ee4..88ee8ae 100644
+index b4c7ee4..b868ebe 100644
 --- a/dist/render/FileTreeView.js
 +++ b/dist/render/FileTreeView.js
-@@ -362,11 +362,79 @@ function focusFirstMenuElement(menuElement) {
+@@ -204,9 +204,6 @@ function isFileTreeDirectoryHandle(item) {
+ function isSpaceSelectionKey(event) {
+ 	return event.code === "Space" || event.key === " " || event.key === "Spacebar";
+ }
+-function isSearchOpenSeedKey(event) {
+-	return event.key.length === 1 && /^[\p{L}\p{N}]$/u.test(event.key) && !event.ctrlKey && !event.metaKey && !event.altKey;
+-}
+ function getFileTreeGuideStyleText(focusedParentPath) {
+ 	if (focusedParentPath == null) return "";
+ 	return `[data-item-section="spacing-item"][data-ancestor-path="${focusedParentPath.replaceAll("\\", "\\\\").replaceAll("\"", "\\\"")}"] { opacity: 1; }`;
+@@ -362,11 +359,79 @@ function focusFirstMenuElement(menuElement) {
  	].join(", "));
  	focusElement(focusable ?? menuElement);
  }
@@ -271,7 +311,7 @@ index b4c7ee4..88ee8ae 100644
  			children: Array.from({ length: row.depth }).map((_, index) => /* @__PURE__ */ jsx("div", {
  				"data-item-section": "spacing-item",
  				"data-ancestor-path": row.ancestorPaths[index]
-@@ -374,24 +442,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -374,24 +439,31 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  		}) : null,
  		/* @__PURE__ */ jsx("div", {
  			"data-item-section": "icon",
@@ -309,7 +349,7 @@ index b4c7ee4..88ee8ae 100644
  		actionLaneEnabled ? /* @__PURE__ */ jsx("div", {
  			"data-item-section": "action",
  			children: showDecorativeActionAffordance ? /* @__PURE__ */ jsx("span", {
-@@ -403,13 +478,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
+@@ -403,13 +475,14 @@ function renderFileTreeRowContent(row, resolveIcon, { actionLaneEnabled = false,
  	] });
  }
  function renderStyledRow(frame, row, key, options = {}) {
@@ -325,7 +365,7 @@ index b4c7ee4..88ee8ae 100644
  	const gitDecoration = getBuiltInGitStatusDecoration(effectiveGitStatus, containsGitChange, labels);
  	const actionLaneEnabled = contextMenuEnabled && contextMenuButtonTriggerEnabled;
  	const decorationLaneEnabled = customDecoration != null || gitLaneActive || actionLaneEnabled;
-@@ -435,7 +511,14 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -435,7 +508,14 @@ function renderStyledRow(frame, row, key, options = {}) {
  		dragTargetFlattenedSegmentPath: dragTarget?.flattenedSegmentPath ?? null,
  		gitDecoration,
  		gitLaneActive,
@@ -340,7 +380,7 @@ index b4c7ee4..88ee8ae 100644
  		showDecorativeActionAffordance
  	});
  	const commonProps = {
-@@ -464,6 +547,9 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -464,6 +544,9 @@ function renderStyledRow(frame, row, key, options = {}) {
  			},
  			targetPath
  		}),
@@ -350,7 +390,7 @@ index b4c7ee4..88ee8ae 100644
  		key,
  		onContextMenu: contextMenuEnabled || dragAndDropEnabled ? (event) => {
  			if (shouldSuppressContextMenu()) {
-@@ -511,6 +597,10 @@ function renderStyledRow(frame, row, key, options = {}) {
+@@ -511,6 +594,10 @@ function renderStyledRow(frame, row, key, options = {}) {
  		} : void 0,
  		onClick: (event) => {
  			onRowClick(event, row, targetPath, mode);
@@ -361,7 +401,7 @@ index b4c7ee4..88ee8ae 100644
  		},
  		children: rowContent
  	});
-@@ -519,7 +609,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
+@@ -519,7 +606,7 @@ function renderRangeChildren(frame, range, hiddenRowPaths) {
  	if (range.end < range.start) return [];
  	return frame.controller.getVisibleRows(range.start, range.end).filter((row) => !hiddenRowPaths.has(getFileTreeRowPath(row))).map((row, slotIndex) => renderStyledRow(frame, row, range.start + slotIndex));
  }
@@ -370,7 +410,7 @@ index b4c7ee4..88ee8ae 100644
  	"use no memo";
  	const contextMenuAnchorRef = useRef(null);
  	const contextMenuTriggerRef = useRef(null);
-@@ -695,6 +785,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -695,6 +782,10 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		item: createContextMenuItem(row, targetPath),
  		row
  	}) ?? null, [renderRowDecoration]);
@@ -381,7 +421,21 @@ index b4c7ee4..88ee8ae 100644
  	const restoreContextMenuFocus = useCallback((restorePath) => {
  		const focusedButton = restorePath == null ? null : rowButtonRefs.current.get(restorePath) ?? null;
  		if (focusElement(focusedButton)) return true;
-@@ -1776,7 +1870,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1096,13 +1187,6 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+ 			event.stopPropagation();
+ 			return;
+ 		}
+-		if (searchEnabled && isSearchOpenSeedKey(event)) {
+-			controller.openSearch(event.key);
+-			setControllerRevision((revision) => revision + 1);
+-			event.preventDefault();
+-			event.stopPropagation();
+-			return;
+-		}
+ 		const isKeyboardContextMenuRequest = contextMenuEnabled && isContextMenuOpenKey(event);
+ 		const shouldInspectStickyKeyboardState = canKeyUseStickyKeyboardState(event, contextMenuEnabled);
+ 		const activeTreeElement = shouldInspectStickyKeyboardState && rootRef.current != null ? getActiveTreeElement(rootRef.current) : null;
+@@ -1776,7 +1860,9 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  		registerRenameInput,
  		renameView,
  		renderDecorationForRow,
@@ -391,7 +445,7 @@ index b4c7ee4..88ee8ae 100644
  		shouldSuppressContextMenu,
  		visualFocusPath
  	};
-@@ -1816,6 +1912,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
+@@ -1816,6 +1902,7 @@ function FileTreeView({ composition, controller, gitStatusByPath, ignoredGitDire
  			searchEnabled ? /* @__PURE__ */ jsx("div", {
  				"data-file-tree-search-container": true,
  				"data-open": isSearchOpen ? "true" : "false",

@@ -1,7 +1,7 @@
 import { ROW_ICONS } from './treeRows';
 
-export const TREE_ROW_HEIGHT = 28;
-export const TOUCH_ROW_HEIGHT = 44;
+const TREE_ROW_HEIGHT = 28;
+const TOUCH_ROW_HEIGHT = 44;
 
 const unsafeCSS = `
   [data-item-git-status="modified"], [data-item-git-status="renamed"], [data-item-git-status="untracked"] {
@@ -62,6 +62,13 @@ const unsafeCSS = `
     &:focus-visible, &[data-file-tree-search-input-fake-focus="true"] {
       outline: 1px solid color-mix(in oklab, var(--primary) 50%, transparent);
       outline-offset: 0;
+    }
+  }
+  @media (pointer: coarse) {
+    [data-file-tree-search-input] {
+      height: ${TOUCH_ROW_HEIGHT}px;
+      font-size: 16px;
+      line-height: ${TOUCH_ROW_HEIGHT - 2}px;
     }
   }
 `;

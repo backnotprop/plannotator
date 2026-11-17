@@ -5,7 +5,7 @@ import type { DiffFile } from '../types';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 
-export interface SectionEntry {
+interface SectionEntry {
   group: 'committed' | 'changes' | 'untracked';
   staged: boolean;
 }

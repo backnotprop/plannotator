@@ -265,7 +265,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
   const tree = useMemo(() => (blocks ? blocks.flatMap((block) => block.tree) : buildFileTree(files)), [files, blocks]);
   const plainTree = useMemo(() => (blocks ? [] : tree), [blocks, tree]);
 
-  // Since-base sidecar lookup for per-row lifecycle markers + stage buttons.
   const getSectionEntry = useMemo(() => {
     if (!sinceBaseSections) return undefined;
     return (filePath: string) => sinceBaseSections.files[filePath];

@@ -108,6 +108,7 @@ import type { HostLineNote } from './components/hostLineNotes';
 import { useLiveReview } from './live/useLiveReview';
 import {
   shouldHandleReviewSearchShortcut,
+  eventOrigin,
   isTypingTarget,
   useReviewSearch,
   type ReviewSearchMatch,
@@ -2597,7 +2598,7 @@ const ReviewApp: React.FC = () => {
       if (
         (e.metaKey || e.ctrlKey)
         && e.key.toLowerCase() === 'f'
-        && shouldHandleReviewSearchShortcut(e.target, searchInputRef.current)
+        && shouldHandleReviewSearchShortcut(eventOrigin(e), searchInputRef.current)
       ) {
         if (guideOpen) return;
         if (hasSearchableFiles && !showCommitsPanel) {
@@ -2610,7 +2611,7 @@ const ReviewApp: React.FC = () => {
       }
 
       // Enter/F3 to step through search matches
-      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isSearchPending && !isTypingTarget(e.target)) {
+      if ((e.key === 'Enter' || e.key === 'F3') && searchMatches.length > 0 && !isSearchPending && !isTypingTarget(e)) {
         e.preventDefault();
         stepSearchMatch(e.shiftKey ? -1 : 1);
         return;
@@ -2637,7 +2638,7 @@ const ReviewApp: React.FC = () => {
         }
       }
       // Cmd/Ctrl+B to toggle file tree
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !isTypingTarget(e.target)) {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'b' && !isTypingTarget(e)) {
         e.preventDefault();
         toggleNavigator();
         focusFileHeaderWhenLost(filesRef.current[activeFileIndexRef.current]?.path);
@@ -2645,7 +2646,7 @@ const ReviewApp: React.FC = () => {
       // Cmd/Ctrl+Shift+G to toggle the guided review takeover — gated on the
       // same hasSearchableFiles condition as the header badge so the shortcut
       // and badge agree on availability.
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'g' && !isTypingTarget(e.target)) {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === 'g' && !isTypingTarget(e)) {
         if (aiUIEnabled && hasSearchableFiles) {
           e.preventDefault();
           if (isCompactTouchLayout && !guideOpen) {
@@ -2656,7 +2657,7 @@ const ReviewApp: React.FC = () => {
         }
       }
       // Cmd/Ctrl+. to toggle sidebar
-      if ((e.metaKey || e.ctrlKey) && e.key === '.' && !isTypingTarget(e.target)) {
+      if ((e.metaKey || e.ctrlKey) && e.key === '.' && !isTypingTarget(e)) {
         e.preventDefault();
         if (reviewSidebar.isOpen) reviewSidebar.close();
         else reviewSidebar.open();
@@ -3513,7 +3514,7 @@ const ReviewApp: React.FC = () => {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.metaKey || e.ctrlKey || e.shiftKey || isTypingTarget(e.target)) return;
+      if (e.metaKey || e.ctrlKey || e.shiftKey || isTypingTarget(e)) return;
       // The guide takeover only CSS-hides the dock, so a diff panel can still
       // be "active" underneath — without this gate, bare `a`/`v` while
       // reading the guide would stage/mark-viewed that hidden file. The
@@ -5462,7 +5463,7 @@ const ReviewApp: React.FC = () => {
         return;
       }
 
-      const tag = (e.target as HTMLElement)?.tagName;
+      const tag = (eventOrigin(e) as HTMLElement | null)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (showExportModal || showNoAnnotationsDialog || showExitWarning) return;
       if (submitted || isSendingFeedback || isApproving || isExiting || isPlatformActioning) return;
@@ -5502,7 +5503,7 @@ const ReviewApp: React.FC = () => {
   // Copy Feedback button in the header.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'y' || isTypingTarget(e.target)) return;
+      if (!(e.metaKey || e.ctrlKey) || !e.shiftKey || e.altKey || e.key.toLowerCase() !== 'y' || isTypingTarget(e)) return;
 
       if (platformCommentDialog || showExportModal || showNoAnnotationsDialog || showExitWarning) return;
 

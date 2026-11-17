@@ -17,6 +17,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
 import type { DiffFile } from '../types';
 import type { RepoFiles, RepoFilesState } from '../hooks/useRepoFiles';
+import { key, searchInput, typeInSearch } from './treeKeys.testing';
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
@@ -103,7 +104,8 @@ const visibleRows = (el: HTMLElement) =>
   [...repoShadow(el).querySelectorAll<HTMLElement>('[data-type="item"]')].map((row) => {
     const path = row.dataset.itemPath!;
     if (row.dataset.itemType === 'folder') return `dir:${path.replace(/\/$/, '')}`;
-    return `${row.dataset.itemGitStatus ? 'changed' : 'file'}:${path}`;
+    const onDisk = row.querySelector('[title*="on disk since"]');
+    return `${onDisk ? 'disk' : row.dataset.itemGitStatus ? 'changed' : 'file'}:${path}`;
   });
 
 afterEach(async () => {
@@ -191,6 +193,7 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     await settle();
     expect(repoRow(el, 'packages/shared/review-core.ts').dataset.itemGitStatus).toBe('untracked');
     expect(repoRow(el, 'packages/shared/review-core.ts').querySelector('[title^="Added on disk"]')).not.toBeNull();
+    expect(visibleRows(el)).toContain('disk:packages/shared/review-core.ts');
   });
 
   test('a big repository renders only a window of rows', async () => {
@@ -291,15 +294,25 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
     }
   });
 
-  test('typing in All files finds as you type', async () => {
-    const el = await mount(<Tree />);
+  test('the search box filters All files as you type and opens nothing; a letter on a row starts no search', async () => {
+    const onOpenRepoFile = mock((_path: string, _options: { pin: boolean }) => {});
+    const onSelectFile = mock((_index: number) => {});
+    const el = await mount(<Tree onOpenRepoFile={onOpenRepoFile} onSelectFile={onSelectFile} />);
     await settle();
     const row = repoRow(el, 'README.md');
-    await act(async () => row.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true, composed: true })));
+    await act(async () => row.focus());
+    onOpenRepoFile.mockClear();
+    await act(async () => key(row, 'r'));
     await settle();
     const box = repoShadow(el).querySelector<HTMLElement>('[data-file-tree-search-container]')!;
-    expect(box.dataset.open).toBe('true');
-    expect(repoShadow(el).querySelector<HTMLInputElement>('[data-file-tree-search-input]')!.value).toBe('r');
+    expect(box.dataset.open).toBe('false');
+    const host = el.querySelector('[data-repo-file-tree]')!;
+    await typeInSearch(host, 'readme');
+    await settle();
+    expect(searchInput(host).value).toBe('readme');
+    expect(visibleRows(el)).toEqual(['file:README.md']);
+    expect(onOpenRepoFile).not.toHaveBeenCalled();
+    expect(onSelectFile).not.toHaveBeenCalled();
   });
 
   test('a file clicked twice opens once; after another file it opens again', async () => {

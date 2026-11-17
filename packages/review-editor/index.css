@@ -2147,7 +2147,6 @@ diffs-container {
    (theme.css) and the Tailwind utilities in the rows.
    ===================================================== */
 .review-sidebar {
-  --sidebar-fill-faint: color-mix(in oklab, var(--foreground) 5%, transparent);
   --sidebar-fill: color-mix(in oklab, var(--foreground) 6%, transparent);
   --sidebar-fill-strong: color-mix(in oklab, var(--foreground) 9%, transparent);
   --sidebar-line: color-mix(in oklab, var(--foreground) 9%, transparent);

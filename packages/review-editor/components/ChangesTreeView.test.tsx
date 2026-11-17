@@ -7,6 +7,7 @@ import { markFirstCodePainted } from '../utils/firstCodePaint';
 markFirstCodePainted();
 import type { DiffFile } from '../types';
 import type { SinceBaseSections } from '@plannotator/shared/types';
+import { key, searchInput, typeInSearch } from './treeKeys.testing';
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
@@ -177,6 +178,61 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(items).toEqual(['Copy path', 'Copy filename', 'Copy full path']);
   });
 
+  test('typing in the search box filters and opens nothing; Enter opens the match; arrows from the box open as they move', async () => {
+    const onSelectFile = mock((_index: number) => {});
+    const files = [file('src/alpha.ts'), file('src/beta.ts'), file('src/gamma.ts'), file('src/gamut.ts')];
+    const el = await mount(<Tree files={files} activeFileIndex={0} onSelectFile={onSelectFile} />);
+    const host = el.querySelector('[data-changes-tree]')!;
+    await typeInSearch(host, 'gam');
+    expect(searchInput(host).value).toBe('gam');
+    expect(onSelectFile).not.toHaveBeenCalled();
+    expect(rows(el).some((p) => p?.endsWith('beta.ts'))).toBe(false);
+    await act(async () => key(searchInput(host), 'ArrowDown'));
+    await settle();
+    expect(onSelectFile).toHaveBeenCalledTimes(1);
+    await act(async () => key(searchInput(host), 'Enter'));
+    await settle();
+    expect(onSelectFile.mock.calls.at(-1)?.[0]).toBeGreaterThanOrEqual(2);
+  });
+
+  test('search matches the real path: a group label adds nothing, a merged folder path finds its files', async () => {
+    const files = [file('src/code/editor.ts'), file('src/app.ts'), file('lib/deep/util.ts'), file('README.md')];
+    const el = await mount(<Tree groupByKind files={files} activeFileIndex={3} />);
+    const host = el.querySelector('[data-changes-tree]')!;
+    const found = () => rows(el).filter((p) => p && !p.endsWith('/')).map((p) => p!.split(/[/\u2215]/).pop());
+    const clear = () => act(async () => {
+      searchInput(host).value = '';
+      searchInput(host).dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+    });
+    await typeInSearch(host, 'code');
+    expect(found()).toEqual(['editor.ts']);
+    await clear();
+    await typeInSearch(host, 'lib/deep');
+    expect(found()).toEqual(['util.ts']);
+  });
+
+  test('a letter on a focused row goes to the page, not to a search; Escape in an empty search box stays in the tree', async () => {
+    const heard: string[] = [];
+    const listen = (event: KeyboardEvent) => heard.push(event.key);
+    window.addEventListener('keydown', listen);
+    try {
+      const el = await mount(<Tree files={[file('src/a.ts'), file('src/b.ts')]} activeFileIndex={0} />);
+      const host = el.querySelector('[data-changes-tree]')!;
+      const first = rowEls(el).find((r) => r.dataset.itemType === 'file')!;
+      await act(async () => first.focus());
+      await act(async () => key(first, 'v'));
+      await settle();
+      expect(heard).toEqual(['v']);
+      expect(host.shadowRoot!.querySelector<HTMLElement>('[data-file-tree-search-container]')!.dataset.open).toBe('false');
+      await act(async () => searchInput(host).focus());
+      await act(async () => key(searchInput(host), 'Escape'));
+      expect(heard).toEqual(['v']);
+      expect(host.shadowRoot!.activeElement).not.toBe(searchInput(host));
+    } finally {
+      window.removeEventListener('keydown', listen);
+    }
+  });
+
   test('group by git status: a file staged from its header moves to Staged', async () => {
     const tree = (staged: string[]) => (
       <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(staged)} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable />
@@ -226,10 +282,8 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('true');
   });
 
-  test('each row carries its own tight counts: nothing reserved from other rows, a huge count reads 12.3k with the exact number in its tooltip', async () => {
+  test('a huge count reads 12.3k with the exact number in its tooltip', async () => {
     const el = await mount(<Tree groupByKind files={[file('src/huge.ts', 12345, 9876), file('src/small.ts', 7, 0), file('README.md', 1, 1)]} activeFileIndex={0} />);
-    const host = el.querySelector<HTMLElement>('[data-changes-tree]')!;
-    expect(host.style.getPropertyValue('--trees-row-trail-columns')).toBe('');
     const path = (name: string) => rows(el).find((p) => p?.endsWith(name))!;
     expect(trail(el, path('huge.ts'))).toEqual(['+12.3k', '\u22129,876']);
     expect(trail(el, path('small.ts'))).toEqual(['+7']);

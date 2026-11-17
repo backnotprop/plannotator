@@ -5,6 +5,7 @@ import type { FileTreeNode } from '../utils/buildFileTree';
 import type { DiffFile } from '../types';
 import { GROUP_ICONS, TreeRowMenu, ancestorsOf, countParts, fileRowParts, gitStatusFor, type FileRowState } from './treeRows';
 import { treeLook } from './treeLook';
+import { useTreeSearchKeys } from './treeSearchKeys';
 
 export interface ChangesTreeGroup {
   key: string;
@@ -168,6 +169,11 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
+    searchText: (path: string) => {
+      const entry = live.current.layout.entries.get(path);
+      if (entry?.kind === 'file') return entry.file.path;
+      return entry?.kind === 'folder' ? `${entry.node.path}/` : '';
+    },
     ...treeLook(!!props.touch),
     gitStatus,
     onSelectionChange: (selected) => {
@@ -268,19 +274,24 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     model.refreshRows();
   }, [model, viewedFiles, annotationCounts, markdownPreviewedPaths, showViewedControls, props.threadCount]);
 
+  const openFocused = useCallback(() => {
+    const focused = model.getFocusedPath();
+    const { props: p, layout: l } = live.current;
+    const entry = focused ? l.entries.get(focused) : undefined;
+    if (entry?.kind === 'file' && entry.file.path !== p.activePath) p.onSelectFile(entry.index);
+  }, [model]);
+  const searchKeys = useTreeSearchKeys(model);
+
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
     return model.subscribe(() => {
       const focused = model.getFocusedPath();
       if (focused === lastFocused) return;
       lastFocused = focused;
-      const host = model.getFileTreeContainer();
-      if (!host?.shadowRoot?.activeElement) return;
-      const { props: p, layout: l } = live.current;
-      const entry = focused ? l.entries.get(focused) : undefined;
-      if (entry?.kind === 'file' && entry.file.path !== p.activePath) p.onSelectFile(entry.index);
+      if (!model.getFileTreeContainer()?.shadowRoot?.activeElement || searchKeys.quiet()) return;
+      openFocused();
     });
-  }, [model]);
+  }, [model, openFocused, searchKeys]);
 
   React.useImperativeHandle(handleRef, () => ({
     setAllFoldersExpanded: (expanded: boolean) => {

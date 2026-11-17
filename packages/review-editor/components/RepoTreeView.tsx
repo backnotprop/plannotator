@@ -8,6 +8,7 @@ import { initialRepoExpansion } from '../utils/repoTree';
 import { prefetchRepoFile } from '../hooks/useRepoFileText';
 import { TreeRowMenu, ancestorsOf, countParts, fileRowParts, folderLineCounts, gitStatusFor, notePart, type FileRowState } from './treeRows';
 import { treeLook } from './treeLook';
+import { useTreeSearchKeys } from './treeSearchKeys';
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 
@@ -94,7 +95,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     const onDisk = p.repo.onDisk[row.path];
     const mark = onDisk ? { text: '\u25cf', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] } : notePart(row.path, p);
     if (at !== undefined) return fileRowParts(p.files[at], p, mark);
-    return { tone: 'repo', title: row.path, trail: mark ? [mark] : [] };
+    return { title: row.path, trail: mark ? [mark] : [] };
   };
 
   const gitStatus = useMemo(() => {
@@ -173,25 +174,30 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     model.refreshRows();
   }, [model, props.viewedFiles, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.threadCount, repo.onDisk, files]);
 
+  const openFocused = useCallback(() => {
+    const focused = model.getFocusedPath();
+    if (!focused || focused.endsWith('/') || focused.endsWith(`/${LOADING}`)) return;
+    const { props: p, changedIndex: index } = live.current;
+    if (focused === p.activePath) return;
+    const at = index.get(focused);
+    if (at !== undefined) p.onSelectFile(at);
+    else if (focused !== lastOpened.current) {
+      lastOpened.current = focused;
+      p.onOpenRepoFile?.(focused, { pin: false });
+    }
+  }, [model]);
+  const searchKeys = useTreeSearchKeys(model);
+
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
     return model.subscribe(() => {
       const focused = model.getFocusedPath();
       if (focused === lastFocused) return;
       lastFocused = focused;
-      const host = model.getFileTreeContainer();
-      if (!host?.shadowRoot?.activeElement || !focused) return;
-      if (focused.endsWith('/') || focused.endsWith(`/${LOADING}`)) return;
-      const { props: p, changedIndex: index } = live.current;
-      if (focused === p.activePath) return;
-      const at = index.get(focused);
-      if (at !== undefined) p.onSelectFile(at);
-      else if (focused !== lastOpened.current) {
-        lastOpened.current = focused;
-        p.onOpenRepoFile?.(focused, { pin: false });
-      }
+      if (!model.getFileTreeContainer()?.shadowRoot?.activeElement || searchKeys.quiet()) return;
+      openFocused();
     });
-  }, [model]);
+  }, [model, openFocused, searchKeys]);
 
   useEffect(() => {
     if (activePath !== lastOpened.current) lastOpened.current = null;
