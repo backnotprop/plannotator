@@ -2,7 +2,8 @@
  * Branch reviews (config.json `inboxBranchReviews`, with Code review), in a real browser against the compiled binary.
  * Nothing is mocked: the binary runs `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, a simulated
  * agent writes through `plannotator inbox mcp` (scripts/inbox-sim.ts), and Chromium drives the window. HOME is the
- * scratch folder, and the sandbox env keeps the binary off the person's agents.
+ * scratch folder, and the sandbox env keeps the binary off the person's agents: its PATH is a fake `gh` (signed out)
+ * and the system's own folders, so no agent CLI (and no stub of one) can be found, the risk dialog's included.
  *
  * What is proved, in order:
  *  1. Off: send_message refuses `branch`, and Reviews has no safety net.
@@ -18,7 +19,7 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -98,9 +99,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const configFile = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configFile, 'utf8')) as Record<string, unknown>;
   writeFileSync(configFile, JSON.stringify({ ...config, inboxCodeReview: true, inboxReveals: { code_review: { shownAt: '2026-10-24T00:00:00.000Z' } } }));
-  for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
+  for (const dir of ['claude', 'codex', 'xdg', 'fakes']) mkdirSync(join(root, dir), { recursive: true });
+  const fakes = join(root, 'fakes');
+  // Signed out: no forge is ever asked, and Reviews lists no PRs.
+  writeFileSync(join(fakes, 'gh'), '#!/bin/sh\necho "You are not logged into any GitHub hosts." >&2\nexit 1\n');
+  chmodSync(join(fakes, 'gh'), 0o755);
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? '',
+    // A fake gh and the system's own folders only: no agent CLI can be found.
+    PATH: `${fakes}:/usr/bin:/bin`,
     HOME: root,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_DATA_DIR: dataDir,
