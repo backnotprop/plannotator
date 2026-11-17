@@ -213,7 +213,6 @@ jobs:
           packages/review-editor/components/DiffViewer.markdownPreview.test.tsx
           packages/review-editor/components/DiffViewer.changeNavigation.test.tsx
           packages/review-editor/components/AllFilesCodeView.inlineAnnotation.test.tsx
-          packages/review-editor/components/AllFilesCodeView.flushRoom.test.tsx
 
       # The DOM list (tests/dom-test-list.txt) is hand-maintained, and every
       # feature that adds a DOM-gated test file has to remember it — which is

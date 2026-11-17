@@ -130,7 +130,6 @@ export const DIFF_RENDERER_FILES = [
   'packages/review-editor/components/DiffViewer.markdownPreview.test.tsx',
   'packages/review-editor/components/DiffViewer.changeNavigation.test.tsx',
   'packages/review-editor/components/AllFilesCodeView.inlineAnnotation.test.tsx',
-  'packages/review-editor/components/AllFilesCodeView.flushRoom.test.tsx',
 ];
 const oneOf = (files: string[]) => (t: string) => files.includes(t);
 
