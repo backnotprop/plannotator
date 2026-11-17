@@ -73,6 +73,8 @@ export interface InboxRunEvidence {
   stoppedNote?: string | null;
   /** What of Plannotator's connects the session ("plugin" when not given; Pi's "extension"). */
   connector?: string;
+  /** False when the Inbox can't start the session again (its agent's own app runs it, T3 Code): the "not connected" line offers no Try again. */
+  restartable?: boolean;
   /** `cd <folder> && claude attach <ref>`; null before the session exists. */
   attachCommand: string | null;
   /** The launch's folder as the person knows it (`~/…`), for the failed line of a folder the Send made. */
@@ -177,7 +179,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
-  if (!e.seenLive && !hostStopped) return line("failed", { cause: `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
+  if (!e.seenLive && !hostStopped) return line("failed", { cause: `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?`, ...(e.restartable === false ? { no_retry: true as const } : {}) });
   const byPerson = e.stoppedByPersonAt !== null;
   // Not the person's Stop: the host's own words, when it has some.
   return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });

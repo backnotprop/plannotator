@@ -37,8 +37,12 @@
  * - T3 must be running, and the folder must be in a project T3 knows. When T3 refuses, the run line says why in
  *   plain words, with Try again.
  * - `t3 thread start` takes no request id, so a start cut short (no answer in 30 s, an Inbox closed mid-start) may
- *   have made the thread. Each start first notes the threads of that title the project has (`t3-start.json` in the
- *   launch's folder); a later start of the same launch takes a thread of that title made since, never a second one.
+ *   have made the thread. Each start first notes the threads of that title the project has, and then how it ended
+ *   (`t3-start.json` in the launch's folder). Only after an uncertain end does a later start of the same launch take a
+ *   thread of that title made since, and never one another launch or agent of this Inbox has (`t3AdoptableOf`).
+ * - The run line's "not connected" (`connectWaitMs`) shows only once `t3 thread show` says the thread's run is over
+ *   (`turnEnded`), so a long first turn is never called not connected; the Inbox can't start the thread again, so it
+ *   offers no Try again there.
  * - No Stop, attach or terminal: T3 has no host command for them. Delete forgets the launch here; the thread stays in T3.
  *
  * The first turn is what the T3 wake would send the thread (the engine's `firstTurn`, inbox.ts), and the engine
@@ -48,7 +52,7 @@
 
 import { mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { parseT3Capabilities, t3AgentName, t3LaunchChoiceArgs, t3ThreadRunsOf, t3UsedModels, type InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
+import { parseT3Capabilities, t3AgentName, t3LaunchChoiceArgs, t3ModelOf, t3ThreadRunsOf, t3UsedModels, type InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
 import { INBOX_T3_HOST, INBOX_T3_NAME, isT3ThreadId, type InboxLaunchInner, type InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { agentHomeAllowed, type AgentEnvironment } from "./inbox-agents";
 import { shellQuote } from "./inbox-launch-claude";
@@ -138,18 +142,78 @@ export function t3StartedThreadOf(stdout: string): string | null {
   return null;
 }
 
-/** The threads `t3 thread list --json` printed (`[{ threadId, title, … }]`, newest first); null when it printed none. */
-export function t3ListedThreadsOf(stdout: string): { threadId: string; title: string }[] | null {
+/**
+ * The threads `t3 thread list --json` printed (`[{ threadId, title, createdAt, … }]`, newest first; T3's
+ * `OrchestratorMcpThreadListItem`); null when it printed none. `createdAt` (ms) when T3 gave a time it reads.
+ */
+export function t3ListedThreadsOf(stdout: string): { threadId: string; title: string; createdAt: number | null }[] | null {
   for (const text of [stdout.trim(), stdout.trim().split("\n").pop() ?? ""]) {
     try {
       const said = JSON.parse(text) as unknown;
       if (!Array.isArray(said)) continue;
-      return (said as { threadId?: unknown; title?: unknown }[]).flatMap((t) => (isT3ThreadId(t?.threadId) && typeof t.title === "string" ? [{ threadId: t.threadId, title: t.title }] : []));
+      return (said as { threadId?: unknown; title?: unknown; createdAt?: unknown }[]).flatMap((t) => {
+        if (!isT3ThreadId(t?.threadId) || typeof t.title !== "string") return [];
+        const at = typeof t.createdAt === "string" ? Date.parse(t.createdAt) : Number.NaN;
+        return [{ threadId: t.threadId, title: t.title, createdAt: Number.isFinite(at) ? at : null }];
+      });
     } catch {
       // The next.
     }
   }
   return null;
+}
+
+/** A run of T3's that is over (cli/thread.ts `TERMINAL_RUN_STATUSES`), and "idle": a thread with nothing running. */
+const T3_ENDED_STATUSES = new Set(["idle", "completed", "failed", "cancelled", "interrupted", "rolled_back"]);
+
+/**
+ * Whether a T3 thread's turn has ended, from `t3 thread show --json` (`{ thread, messages }`, `thread` T3's
+ * `OrchestratorMcpThreadDetail`): false while a run is active (`activeRunId`, or a status that is not over) or it
+ * waits on the person's answer in T3 (`pendingRequestCount`); true when it is idle or its run is over; null when the
+ * answer doesn't say.
+ */
+export function t3TurnEndedOf(stdout: string): boolean | null {
+  for (const text of [stdout.trim(), stdout.trim().split("\n").pop() ?? ""]) {
+    try {
+      const thread = (JSON.parse(text) as { thread?: { status?: unknown; activeRunId?: unknown; pendingRequestCount?: unknown } } | null)?.thread;
+      if (!thread || typeof thread.status !== "string") continue;
+      if (typeof thread.activeRunId === "string" && thread.activeRunId) return false;
+      if (typeof thread.pendingRequestCount === "number" && thread.pendingRequestCount > 0) return false;
+      return T3_ENDED_STATUSES.has(thread.status);
+    } catch {
+      // The next.
+    }
+  }
+  return null;
+}
+
+/** What a start of a launch noted first (`t3-start.json`), and how it ended. */
+export interface T3StartAttempt {
+  title: string;
+  /** The threads of that title the project had before it. */
+  before: string[];
+  /** When it began (ms). */
+  at: number;
+  /**
+   * "running": written before the start, and still so when the Inbox closed during it; "uncertain": it timed out, or
+   * T3 answered with no thread; "refused": T3 said no; "started": it named its thread; "unlisted": T3 didn't list
+   * the title's threads before it, so none can be told apart. Only "running" and "uncertain" may have made a thread
+   * the Inbox doesn't know of, and only those are ever taken.
+   */
+  outcome: "running" | "uncertain" | "refused" | "started" | "unlisted";
+}
+
+/**
+ * The thread a cut-short start of this launch made, from T3's threads of the title now: only after an uncertain end
+ * (never after T3 refused, nor one that named its thread), only one that was not there before that start, not made
+ * before it began (when T3 says when), and never a thread this Inbox already knows (another launch's, or one an
+ * agent wrote from). Null: none, so a new start runs.
+ */
+export function t3AdoptableOf(attempt: T3StartAttempt | null, title: string, listed: { threadId: string; title: string; createdAt: number | null }[] | null, known: (thread: string) => boolean): string | null {
+  if (!attempt || attempt.title !== title || (attempt.outcome !== "running" && attempt.outcome !== "uncertain") || !listed) return null;
+  // A second of slack for two clocks on the same computer.
+  const made = listed.find((t) => t.title === title && !attempt.before.includes(t.threadId) && (t.createdAt === null || t.createdAt >= attempt.at - 1_000) && !known(t.threadId));
+  return made?.threadId ?? null;
 }
 
 /** Each absolute path in T3's words cut to its last name (`/Users/me/code/shop` → `shop`): the person never reads a path. */
@@ -208,6 +272,31 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost", "[::1]"]);
 
 type Lists = Omit<InboxLaunchChoices, "last">;
 
+/** `work` within `ms`, else a rejection; what it gives after that goes to `late` (a connection to close). */
+function withinMs<T>(work: Promise<T>, ms: number, late: (value: T) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      done = true;
+      reject(new Error(`no answer within ${ms} ms`));
+    }, ms);
+    work.then(
+      (value) => {
+        if (done) return late(value);
+        done = true;
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error: unknown) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 /** A read kept for `ttl`: while a new read runs, the older answer is given at once, so To never waits on T3 twice. */
 function keptRead<T>(ttl: number, now: () => number) {
   const kept = new Map<string, { at: number; value: T | null; reading: Promise<T | null> | null }>();
@@ -260,9 +349,11 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
     const grant = (await savedT3Grants(ctx.dataDir)).find((g) => g.endpoint.origin === address.origin || (LOOPBACK.has(g.endpoint.hostname) && Number(g.endpoint.port) === address.port));
     if (!grant) return null;
     return capabilities(`${grant.endpoint.href} ${grant.token() ?? ""}`, async () => {
-      const rpc = await connectT3(grant.endpoint, grant.token);
+      // The connect and the call share one limit: a T3 that never answers can't hold the lists (and the button) forever.
+      const deadline = Date.now() + CAPABILITIES_TIMEOUT_MS;
+      const rpc = await withinMs(connectT3(grant.endpoint, grant.token), CAPABILITIES_TIMEOUT_MS, (late) => void late.close?.().catch(() => {}));
       try {
-        const signal = AbortSignal.timeout(CAPABILITIES_TIMEOUT_MS);
+        const signal = AbortSignal.timeout(Math.max(1, deadline - Date.now()));
         const answer = await rpc.call("orchestrator_capabilities", {}, signal);
         for (const provider of ((answer as { providers?: unknown })?.providers ?? []) as { providerInstanceId?: unknown; driverKind?: unknown; displayName?: unknown }[]) {
           if (typeof provider?.providerInstanceId !== "string") continue;
@@ -289,25 +380,26 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
   };
 
   /** The threads of `title` T3 has in the project of `folder` now; null when T3 didn't say. */
-  const threadsTitled = async (found: { e: AgentEnvironment; t3: string }, folder: string, title: string): Promise<string[] | null> => {
+  const threadsTitled = async (found: { e: AgentEnvironment; t3: string }, folder: string, title: string) => {
     const result = await runT3(found, ["thread", "list", "--json"], folder);
     if (result.exitCode !== 0 || result.timedOut) return null;
     const listed = t3ListedThreadsOf(result.stdout);
-    return listed ? listed.filter((t) => t.title === title).map((t) => t.threadId) : null;
+    return listed ? listed.filter((t) => t.title === title) : null;
   };
 
-  /** What each start of a launch noted first: its title, and the threads of that title the project had then. */
+  /** What each start of a launch noted first (its title, the threads of that title the project had then, when) and how it ended. */
   const attemptFile = (id: string) => join(ctx.launchDir(id), "t3-start.json");
-  const readAttempt = (id: string): { title: string; before: string[] } | null => {
+  const readAttempt = (id: string): T3StartAttempt | null => {
     try {
-      const said = JSON.parse(readFileSync(attemptFile(id), "utf8")) as { title?: unknown; before?: unknown };
+      const said = JSON.parse(readFileSync(attemptFile(id), "utf8")) as { title?: unknown; before?: unknown; at?: unknown; outcome?: unknown };
       if (typeof said.title !== "string" || !Array.isArray(said.before)) return null;
-      return { title: said.title, before: said.before.filter((id): id is string => typeof id === "string") };
+      const outcome = said.outcome === "uncertain" || said.outcome === "refused" || said.outcome === "started" || said.outcome === "unlisted" ? said.outcome : "running";
+      return { title: said.title, before: said.before.filter((id): id is string => typeof id === "string"), at: typeof said.at === "number" ? said.at : 0, outcome };
     } catch {
       return null;
     }
   };
-  const writeAttempt = (id: string, attempt: { title: string; before: string[] }) => {
+  const writeAttempt = (id: string, attempt: T3StartAttempt) => {
     try {
       mkdirSync(ctx.launchDir(id), { recursive: true, mode: 0o700 });
       writeFileSync(attemptFile(id), `${JSON.stringify(attempt)}\n`, { mode: 0o600 });
@@ -326,6 +418,8 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
     worktree: true,
     interruptedStart: T3_LAUNCH_INTERRUPTED,
     connectWaitMs: T3_CONNECT_WAIT_MS,
+    // A model T3 no longer lists is refused there: never picked again by itself.
+    lastMustBeListed: true,
 
     async available(): Promise<LaunchAvailability> {
       // Not on Windows: `t3.cmd` goes through cmd.exe, which the T3 wake does not trust with a message either.
@@ -352,6 +446,15 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
       return runs ? { ...runs, agent: agentOf(runs.provider) } : null;
     },
 
+    /** `t3 thread show`: whether the thread's run is over (T3's `status`, `activeRunId`, `pendingRequestCount`); null when T3 can't be asked. */
+    async turnEnded(ref: string): Promise<boolean | null> {
+      const found = await command();
+      if (!found || !isT3ThreadId(ref)) return null;
+      const result = await runT3(found, ["thread", "show", ref, "--messages=0", "--json"]);
+      if (result.exitCode !== 0 || result.timedOut) return null;
+      return t3TurnEndedOf(result.stdout);
+    },
+
     startsIn(folder: string | null): string | null {
       if (folder === null) return T3_LAUNCH_NEW_FOLDER;
       const repo = gitRepoOf(folder);
@@ -372,25 +475,35 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
       const message = input.firstTurn ?? "";
       if (!message.trim()) return { ok: false as const, code: "failed" as const, text: "The message is empty." };
       const title = input.name.replace(/\s+/g, " ").trim();
-      // A start before this one may have made the thread without saying so (cut by the timeout or an Inbox that
-      // closed): a thread of its title made since then is that one, never a second.
+      // A start before this one that ended uncertain (cut by the timeout, an answer with no thread, an Inbox that
+      // closed) may have made the thread: a new thread of its title made since then, that no launch or agent here
+      // has, is that one, never a second. After a plain refusal nothing was made: a new start runs.
       const before = readAttempt(launch.id);
-      if (before && before.title === title) {
-        const listed = await threadsTitled(found, launch.folder, title);
-        const made = listed?.find((id) => !before.before.includes(id));
-        if (made) {
-          ctx.startLog(launch.id, `T3 thread ${made}, made by an earlier start of this launch: taken, no second thread`);
-          return { ok: true as const, session: made, ref: made };
-        }
+      const listed = await threadsTitled(found, launch.folder, title);
+      const made = t3AdoptableOf(before, title, listed, (thread) => ctx.sessionKnown?.(thread) === true);
+      if (made) {
+        writeAttempt(launch.id, { ...before!, outcome: "started" });
+        ctx.startLog(launch.id, `T3 thread ${made}, made by an earlier start of this launch: taken, no second thread`);
+        return { ok: true as const, session: made, ref: made };
       }
-      const had = await threadsTitled(found, launch.folder, title);
-      if (had) writeAttempt(launch.id, { title, before: had });
+      // A model T3 no longer lists (a signed-in T3 says which it has) is refused before T3 is asked: its words, plainly.
+      const listedModels = launch.model ? await signedInLists(found.e).catch(() => null) : null;
+      if (launch.model && listedModels && !listedModels.models.includes(launch.model)) {
+        const words = t3ModelOf(launch.model) ? `${agentOf(t3ModelOf(launch.model)!.provider)} · ${t3ModelOf(launch.model)!.model}` : launch.model;
+        return { ok: false as const, code: "failed" as const, text: `T3 Code no longer lists ${words}. Send it again with another model.` };
+      }
+      const startedAt = Date.now();
+      // T3 didn't list the title's threads first: nothing would tell a thread this start made from an older one, so
+      // none is ever taken for it ("unlisted").
+      writeAttempt(launch.id, { title, before: (listed ?? []).map((t) => t.threadId), at: startedAt, outcome: listed ? "running" : "unlisted" });
       const argv = [found.t3, "thread", "start", ".", "-", `--worktree=${base}`, ...(title ? [`--title=${title}`] : []), ...t3LaunchChoiceArgs({ model: launch.model, effort: launch.effort }), "--json"];
       const env = { ...t3ChildEnv(found.e), ...(input.login.PATH ? { PATH: input.login.PATH } : {}) };
       const result = await found.e.run(argv, { timeoutMs: startTimeoutMs, cwd: launch.folder, env, cleanEnv: true, stdin: message });
       // The message is never written down here: only the command and what T3 said.
       ctx.startLog(launch.id, `${["t3", ...argv.slice(1)].map((arg) => (/^[\w./:@=-]+$/.test(arg) ? arg : shellQuote(arg))).join(" ")} (in ${launch.folder}, the message on stdin)\nexit ${result.timedOut ? "timed out" : result.exitCode}\n${`${result.stdout}\n${result.stderr}`.trim().slice(-2000)}`);
       const thread = !result.timedOut && result.exitCode === 0 ? t3StartedThreadOf(result.stdout) : null;
+      // How it ended decides whether a later Try again may take a thread it made: only when T3 didn't say.
+      writeAttempt(launch.id, { title, before: (listed ?? []).map((t) => t.threadId), at: startedAt, outcome: !listed ? "unlisted" : thread ? "started" : result.timedOut || result.exitCode === 0 ? "uncertain" : "refused" });
       if (!thread) return { ok: false as const, code: "failed" as const, text: t3StartFailure(result, project, ctx.machineName?.() ?? null, startTimeoutMs) };
       ctx.startLog(launch.id, `T3 thread ${thread}, in a new worktree from ${base}`);
       return { ok: true as const, session: thread, ref: thread };

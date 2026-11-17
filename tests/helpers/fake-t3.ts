@@ -103,10 +103,12 @@ export function t3ScopeOf(access: T3Access): string {
  *   lists what it made. A thread it made is one `send` and `show` know; in
  *   state "taken-then-hang" it makes the thread, then never answers.
  * - `thread show <id> --json` names the thread's `providerInstanceId` and
- *   `model`, as T3's thread read does.
+ *   `model`, its run's `status`, `activeRunId` and `pendingRequestCount`, as
+ *   T3's thread read does (`setRunStatus`; "completed" until set).
  * - `thread list --json` in a project's folder lists that project's threads,
- *   newest first, with their title, provider and model: those `thread start`
- *   made there and `used` (threads T3 had already, by project folder).
+ *   newest first, with their title, provider, model and `createdAt`: those
+ *   `thread start` made there and `used` (threads T3 had already, by project
+ *   folder). A start on the model "retired" is refused in T3's words.
  *
  * `threads` maps a Codex thread to the T3 thread that runs it; `t3Threads`
  * are T3's other threads (a Claude one's id is T3's own). `db: false` makes no
@@ -137,6 +139,8 @@ export interface FakeT3Home {
   /** Every thread `thread start` made: its id, the folder it ran in, the base, the title, the provider, model and options asked for, and the message. */
   starts(): { id: string; cwd: string; base: string | null; title: string | null; provider: string | null; model: string | null; options: string[]; text: string }[];
   setState(state: FakeT3HomeState): void;
+  /** The status `thread show` gives every thread's run ("completed" until set; "running" has an active run). */
+  setRunStatus(status: string): void;
 }
 
 /** T3's state database (`userdata/statev2.sqlite`), one provider thread row per Codex thread. Bun only (`bun:sqlite`). */
@@ -216,6 +220,7 @@ const started = () => fs.existsSync(startsFile) ? fs.readFileSync(startsFile, "u
 const known = [...${JSON.stringify([...Object.values(threads), ...(options.t3Threads ?? [])])}, ...started().map((s) => s.id)];
 const projects = ${JSON.stringify(options.projects ?? [])};
 const turnsFile = ${JSON.stringify(turnsLog)};
+const runFile = ${JSON.stringify(join(dir, "run-status"))};
 const turns = () => fs.existsSync(turnsFile) ? fs.readFileSync(turnsFile, "utf8").split("\\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const say = (line, code) => { process.stderr.write(line + "\\n"); process.exit(code); };
 const thread = args.filter((a) => !a.startsWith("--"))[2];
@@ -240,11 +245,12 @@ else if (args[0] === "thread" && args[1] === "start") {
   const provider = flag("--provider") ?? null;
   const model = flag("--model") ?? null;
   if ((provider === null) !== (model === null)) say("--provider and --model go together.", 1);
+  if (model === "retired") say("Model 'retired' is not available for provider instance '" + provider + "'.", 1);
   const options = flags("--option");
   if (options.length > 0 && provider === null) say("--option needs --provider and --model.", 1);
   const { randomUUID } = require("node:crypto");
   const id = "thread:project:" + randomUUID() + ":" + randomUUID();
-  fs.appendFileSync(startsFile, JSON.stringify({ id, cwd, project, base, title: flag("--title") ?? null, provider, model, options, text }) + "\\n");
+  fs.appendFileSync(startsFile, JSON.stringify({ id, cwd, project, base, title: flag("--title") ?? null, provider, model, options, text, createdAt: new Date().toISOString() }) + "\\n");
   fs.appendFileSync(turnsFile, JSON.stringify([id, text]) + "\\n");
   if (state === "taken-then-hang") setTimeout(() => {}, 60000);
   else process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
@@ -252,8 +258,8 @@ else if (args[0] === "thread" && args[1] === "start") {
   const cwd = fs.realpathSync(process.cwd());
   const project = projects.find((root) => cwd === root || cwd.startsWith(root + "/"));
   if (!project) say("No T3 Code project matches '.'. Pass a project id or a path inside a project.", 1);
-  const mine = started().filter((s) => s.project === project).reverse().map((s) => ({ threadId: s.id, title: s.title ?? "", status: "running", ...runsOf(s.id) }));
-  process.stdout.write(JSON.stringify([...mine, ...(used[project] ?? []).map((t) => ({ status: "idle", ...t }))]) + "\\n");
+  const mine = started().filter((s) => s.project === project).reverse().map((s) => ({ threadId: s.id, title: s.title ?? "", status: "running", createdAt: s.createdAt, ...runsOf(s.id) }));
+  process.stdout.write(JSON.stringify([...mine, ...(used[project] ?? []).map((t) => ({ status: "idle", createdAt: "2026-11-01T00:00:00.000Z", ...t }))]) + "\\n");
 } else if (args[0] === "thread" && args[1] === "send") {
   if (state === "gone" || !known.includes(thread)) say("Thread " + thread + " was not found.", 1);
   if (state === "starting") say("Thread " + thread + " was not found.", 1);
@@ -266,7 +272,10 @@ else if (args[0] === "thread" && args[1] === "start") {
   if (state === "gone" || state === "starting" || !known.includes(thread)) say("Thread " + thread + " is no longer available.", 1);
   const limit = Number(flag("--messages") ?? 20);
   const messages = turns().filter((turn) => turn[0] === thread).map((turn, n) => ({ role: "user", runId: "run:" + n, text: turn[1] }));
-  process.stdout.write(JSON.stringify({ thread: { threadId: thread, status: "completed", ...runsOf(thread) }, messages: limit > 0 ? messages.slice(-limit) : [] }) + "\\n");
+  // T3's OrchestratorMcpThreadDetail, in part: the run's status ("running" holds an active run; "completed" is over).
+  const status = fs.existsSync(runFile) ? fs.readFileSync(runFile, "utf8").trim() : "completed";
+  const ended = ["idle", "completed", "failed", "cancelled", "interrupted", "rolled_back"].includes(status);
+  process.stdout.write(JSON.stringify({ thread: { threadId: thread, status, activeRunId: ended ? null : "run:active", pendingRequestCount: 0, ...runsOf(thread) }, messages: limit > 0 ? messages.slice(-limit) : [] }) + "\\n");
 } else say("unknown command", 2);
 `,
   );
@@ -283,6 +292,7 @@ else if (args[0] === "thread" && args[1] === "start") {
     envs: () => (existsSync(envLog) ? readFileSync(envLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, string>) : []),
     starts: () => (existsSync(startsLog) ? readFileSync(startsLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as ReturnType<FakeT3Home["starts"]>[number]) : []),
     setState,
+    setRunStatus: (status: string) => writeFileSync(join(dir, "run-status"), status),
   };
 }
 

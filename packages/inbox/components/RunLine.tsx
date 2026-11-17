@@ -376,9 +376,12 @@ export function RunLine({
             </button>
           )}
           {canOpen && openTerminal}
-          <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
-            Try again
-          </button>
+          {/* A session its agent's own app runs (T3 Code): the Inbox can start nothing again, so no Try again. */}
+          {!run.no_retry && (
+            <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
+              Try again
+            </button>
+          )}
         </>
       );
       break;

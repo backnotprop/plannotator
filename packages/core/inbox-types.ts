@@ -1273,6 +1273,8 @@ export interface InboxRun {
   untrusted: boolean;
   /** `failed` because the session's last turn ended in an error (its note is in the thread): Try again sends the message again. */
   turn_error?: true;
+  /** `failed` with nothing the Inbox can start again (a session its agent's own app runs, T3 Code, that never reached the Inbox): no Try again. */
+  no_retry?: true;
   /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
   home_folder?: true;
   /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */

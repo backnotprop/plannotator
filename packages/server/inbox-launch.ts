@@ -193,6 +193,12 @@ interface Memo {
   cloneFor?: string | null;
   /** When the running clone began: its percent shows only after a few seconds (E2). */
   cloneStartedAt?: number;
+  /**
+   * A `turnEnded` host (T3 Code): its app's last word on whether the session's turn ended (`value`, null when it
+   * couldn't be asked), and when it was asked; `asking` while a question runs.
+   */
+  ended?: { at: number; value: boolean | null } | null;
+  endedAsking?: boolean;
 }
 
 /** The clone percent shows once a clone has run this long (E2: a big repo, not every clone). */
@@ -486,6 +492,7 @@ export function createInboxLaunch(options: {
     displayFolder: options.displayFolder,
     bridge: options.live,
     machineName: () => options.machineName?.() ?? null,
+    sessionKnown: (session) => sessionKnown(session),
     log,
   };
   const claude = createClaudeLaunchHost(context);
@@ -506,6 +513,13 @@ export function createInboxLaunch(options: {
   const roots = () => [...store.launchedRoots(), ...store.scheduledRunLaunches()];
   /** A thread's launched messages, oldest first: its root, when New message launched it, then each reply sent to a new session. */
   const launchesOf = (threadId: string): InboxMessage[] => store.launchedRoots().filter((m) => m.thread_id === threadId);
+  /** A session already this Inbox's: a launch (deleted or not) started it, an agent wrote as it, or a person's message went to it. */
+  function sessionKnown(session: string): boolean {
+    if (roots().some((m) => m.launch?.session_ref === session || m.launch?.session === session)) return true;
+    return store.firstThreadsBySession().has(session);
+  }
+  /** When this Inbox started: a wait counted from a launch's start counts from here after a restart (what it heard before is gone). */
+  const bootAt = now();
   /** The launch a thread's run line, row and reply follow: a routine's newest run, else its latest launched message, else the thread's root. */
   const threadLaunch = (threadId: string): InboxMessage | undefined => store.scheduledRunOf(threadId) ?? launchesOf(threadId).at(-1) ?? store.message(threadId) ?? undefined;
   const states = new Map<LaunchHost, HostState>();
@@ -643,6 +657,34 @@ export function createInboxLaunch(options: {
     });
   };
 
+  /** Its agent's own app runs the session (T3 Code): the Inbox can neither stop it nor start it again. */
+  const isAppOwned = (launch: InboxLaunchRecord): boolean => (INBOX_LAUNCH_APP_OWNED as readonly string[]).includes(launch.agent);
+
+  /** How often a `turnEnded` host's app is asked again while its session has not reached the Inbox. */
+  const TURN_ENDED_TTL_MS = 60_000;
+  /**
+   * Whether the session's turn has ended by its app's last word (true), or the app can't be asked (null, which counts
+   * as ended). Not asked yet, or a turn that runs: false. Asks again in the background once the word is a minute old.
+   * No `turnEnded` member: true.
+   */
+  const quietTurnEnded = (host: LaunchHost, launch: InboxLaunchRecord, memo: Memo): boolean => {
+    if (!host.turnEnded) return true;
+    const ref = launch.session_ref;
+    if (!ref) return false;
+    if (!memo.endedAsking && (!memo.ended || now() - memo.ended.at >= TURN_ENDED_TTL_MS)) {
+      memo.endedAsking = true;
+      void host
+        .turnEnded(ref)
+        .catch(() => null)
+        .then((value) => {
+          memo.ended = { at: now(), value };
+          memo.endedAsking = false;
+          options.onChange();
+        });
+    }
+    return memo.ended ? memo.ended.value !== false : false;
+  };
+
   /** The run line of a launched root; null for an agent with no host here. */
   const runOfRoot = (root: InboxMessage): InboxRun | null => {
     const launch = root.launch!;
@@ -653,8 +695,11 @@ export function createInboxLaunch(options: {
     let live = liveOf(host, root, memo);
     // A host whose start delivers the first turn itself (T3 Code): connected once its session reached the Inbox (a
     // poll, a tool call, a message in the thread). Not by then, `connectWaitMs` after the start: the "not connected" line.
+    // The wait counts from the start, or from this Inbox's own start after a restart (what it heard before is gone);
+    // and the line shows only once the agent's app says the turn ended (or can't be asked): a session at work in a
+    // long first turn is never called not connected.
     const heard = host.connectWaitMs ? heardFrom(root) : null;
-    if (heard === false && live && !live.busy && now() - memo.startedAt >= host.connectWaitMs!) live = null;
+    if (heard === false && live && !live.busy && now() - Math.max(memo.startedAt, bootAt) >= host.connectWaitMs! && quietTurnEnded(host, launch, memo)) live = null;
     // A host read from before the last answer settled still shows our own prompt: never "waiting on Terminal".
     const settled = state.permissions.settledAfter?.(launch.id) ?? null;
     const hostState = settled !== null && (state.view?.at ?? 0) < settled ? null : sessionIn(host, launch.session_ref);
@@ -682,6 +727,7 @@ export function createInboxLaunch(options: {
       stoppedByPersonAt: memo.stoppedAt,
       stoppedNote: host.stoppedNote?.(launch) ?? null,
       connector: host.connector,
+      restartable: !isAppOwned(launch),
       attachCommand: host.attach(launch),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
@@ -1064,6 +1110,9 @@ ${result.text}`);
   /** The host's `resume` once; a failure is kept (and the CLI looked at again, for screen 15). */
   const respawn = (root: InboxMessage, host: LaunchHost, forReply: string) => {
     const launch = root.launch!;
+    // Its own app runs it (T3 Code): never "started again" here, and its polls never counted as quiet (that would
+    // read it stopped while it runs).
+    if (isAppOwned(launch)) return;
     const memo = memoOf(launch);
     respawning.add(launch.id);
     memo.startedAt = now();
@@ -1117,6 +1166,8 @@ ${result.text}`);
       return;
     }
     if (!host || launch.deleted_at || launch.error || !launch.session_ref || !root.to || respawning.has(launch.id) || starting.has(launch.id)) return;
+    // Its own app runs it (T3 Code): a reply goes in through its wake, and nothing here starts it again.
+    if (isAppOwned(launch)) return;
     // Only a session that connected once: one that never did is "not connected", and respawning it would not help.
     // A host that owns the process is the exception once that process ended (its line says a reply continues it).
     if (!root.delivery && host.processEnded?.(launch.session_ref) !== true) return;
@@ -1607,6 +1658,9 @@ ${result.text}`);
     if (!launch.error) {
       // Started but never connected (or cut off by an Inbox restart): respawn the session it made, or start anew without one.
       if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
+      // Its own app runs the session it made (T3 Code): nothing here starts it again, and the line stays as it reads
+      // (an older window still offers Try again; it is told why, and nothing changes).
+      if (isAppOwned(launch) && launch.session_ref) throw new InboxError("validation_error", `${host.name} runs this thread in its own app, so the Inbox can't start it again. Look at it in ${host.name}.`);
       if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, host, memo.respawn?.for ?? root.id);
       // No session was made: a first start, not "again".
       else void run(root, host, false);
@@ -2018,7 +2072,9 @@ ${result.text}`);
           const startsInProjects = host.startsIn ? projects.filter((p) => p.exists && !onNetwork(p.root) && host.startsIn!(p.root) === null) : null;
           const startsIn = startsInProjects ? startsInProjects.map((p) => p.id) : null;
           const lists = host.choices ? await withinLaunchWait(host.choices(startsInProjects ? startsInProjects.map((p) => p.root) : undefined)) : null;
-          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          const kept = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          // A host whose models must be listed (T3 Code): a last model it no longer lists is not picked again (Default is).
+          const last = kept?.model && host.lastMustBeListed && !lists!.models.includes(kept.model) ? null : kept;
           const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
           return [
             {

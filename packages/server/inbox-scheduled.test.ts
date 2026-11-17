@@ -408,6 +408,17 @@ describe("schedules refused when set", () => {
   });
 });
 
+test("T3 Code is never a routine's agent, though this engine has it: refused on create and on edit, nothing written", async () => {
+  const w = world();
+  // The engine has a T3 Code host (To can start it in New message): the refusal is the routine's own.
+  expect(w.launch.availableFor("t3")).not.toBeNull();
+  await expect(w.make({ agent: "t3" })).rejects.toMatchObject({ code: "validation_error", message: "agent: claude-code, codex, opencode or pi." });
+  expect(w.store.scheduledThreads()).toEqual([]);
+  const { record } = await w.make();
+  await expect(w.scheduled.update(record.id, { agent: "t3" }, { kind: "person" })).rejects.toMatchObject({ code: "validation_error" });
+  expect(w.store.scheduledThreads().map((r) => r.agent)).toEqual([FAKE]);
+});
+
 test("a schedule without tz takes this computer's zone, and an update changes only the fields it names", async () => {
   const w = world();
   const { record } = await w.make({ schedule: { cron: "0 9 * * *" } });

@@ -131,14 +131,14 @@ async function settle(turns = 4) {
   }
 }
 
-async function draw(thread: InboxThread, machine: MachineView | null) {
+async function draw(thread: InboxThread, machine: MachineView | null, run: InboxRun = RUN) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
-      <ThreadPane thread={thread} machine={machine} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={RUN} remote={false} />,
+      <ThreadPane thread={thread} machine={machine} sent={null} onQuestions={() => {}} onChanged={async () => {}} onClose={() => {}} file={null} onOpenFile={() => {}} onOpenGuide={() => {}} run={run} remote={false} />,
     );
   });
   await settle();
@@ -194,6 +194,20 @@ test.skipIf(!hasDom)('the header names the machine that started it, unless it wa
   await draw(t3, null);
   expect(started()).toBe('You started T3 Code (Claude Code · opus) in billing-svchigh');
   expect(host!.querySelector('[data-launch-inner]')!.textContent).toBe(' (Claude Code · opus)');
+});
+
+test.skipIf(!hasDom)("a T3 Code thread that never reached the Inbox: the line says so with no Try again (nothing here can start it again) and no Stop; another agent's same line keeps Try again", async () => {
+  const cause = "Started, but not connected to the Inbox. Is Plannotator's Inbox MCP server on in that folder?";
+  const t3 = threadOf(null);
+  t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'thread:project:a:b' }, launch: { ...t3.messages[0]!.launch!, agent: 't3' as const } };
+  await draw(t3, null, { ...RUN, state: 'failed', agent: 't3', cause, attach_command: null, no_retry: true } as InboxRun);
+  expect(host!.querySelector('[data-run]')!.textContent).toContain(cause);
+  expect(host!.querySelector('[data-run-retry]')).toBeNull();
+  expect(host!.querySelector('[data-run-stop]')).toBeNull();
+  act(() => root!.unmount());
+  host!.remove();
+  await draw(threadOf(null), null, { ...RUN, state: 'failed', cause, attach_command: null } as InboxRun);
+  expect(host!.querySelector('[data-run-retry]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)("a prompt only Claude Code's own dialog can approve: on another machine it says where, offers Copy attach command, never Approve in Terminal", async () => {

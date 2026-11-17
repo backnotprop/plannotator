@@ -206,6 +206,11 @@ export interface LaunchHostContext {
   bridge: { runStateOf(session: string): LaunchLive | null };
   /** This computer's name as linked machines know it; null when it has none. Words every window shows name it. */
   machineName?: () => string | null;
+  /**
+   * Whether an agent session is already this Inbox's: another launch started it, an agent wrote as it, or a person's
+   * message went to it. A host that picks up a session a cut-short start may have made (T3 Code) never takes one of those.
+   */
+  sessionKnown?: (session: string) => boolean;
   log: (line: string) => void;
 }
 
@@ -304,6 +309,17 @@ export interface LaunchHost {
    * before it says it is not connected. No member: delivered means connected.
    */
   readonly connectWaitMs?: number;
+  /**
+   * Only a `connectWaitMs` host: whether the session's turn has ended, as its own app says (T3 Code's `thread show`):
+   * true when it ended (or never ran), false while a turn runs or waits on the person there, null when the app can't
+   * be asked. The "not connected" line shows only on true or null: a session at work is never called not connected.
+   */
+  turnEnded?(ref: string): Promise<boolean | null>;
+  /**
+   * The last model picked is kept only while the host's lists still hold it (T3 Code: a model T3 no longer lists
+   * would be refused). No member: kept, as a full name typed through the API is.
+   */
+  readonly lastMustBeListed?: boolean;
   /** Every session it starts works in a new git worktree its own app makes (the launch block's `worktree`). */
   readonly worktree?: boolean;
   /**
