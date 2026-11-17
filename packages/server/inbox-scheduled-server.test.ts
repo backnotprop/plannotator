@@ -3,13 +3,19 @@
  * hides, the window's routes, and the agents' `routine` tool. What each test guards: off, agents get no tool
  * and a call writes nothing, the routes answer the plain off answer; on, the login item is added and removed with the
  * switch; an agent's routine arrives off and only the person turns it on the first time; a refused schedule
- * writes nothing; an agent's edit says old and new in its thread, and a folder move turns it off again.
+ * writes nothing; an agent's edit says old and new in its thread, and a folder move turns it off again; the person's
+ * own /create-routine Send (the window's reply) turns on the one routine an agent then makes in that thread, and an
+ * agent's bare call to the reply route or its own message with the same block does not.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
+import { INBOX_BUILTIN_SKILL_ROOT } from "@plannotator/core/inbox-review";
+import { INBOX_REPLY_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
+import { builtinSkillContent, composeInboxSkillsBlock } from "../inbox/skills";
 import { startInboxServer } from "./inbox";
 
 const restore: (() => void)[] = [];
@@ -200,5 +206,62 @@ describe("the window's editor", () => {
     // Another key is another routine.
     expect((await w.window("/api/inbox/scheduled", { ...fields, idempotency_key: "k-editor-2" })).status).toBe(201);
     expect(w.server.store.scheduledThreads()).toHaveLength(2);
+  });
+});
+
+describe("/create-routine: the person's own Send turns on the routine it asks for", () => {
+  const entry: Parameters<typeof composeInboxSkillsBlock>[0][number] = { name: CREATE_ROUTINE_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: CREATE_ROUTINE_SKILL.description };
+  const words = "/create-routine every weekday at 9 check for outdated dependencies";
+  const block = composeInboxSkillsBlock([entry], new Map([[entry.name, builtinSkillContent(entry)!]]), INBOX_REPLY_SKILL_AUDIENCE);
+  // In 2099: on or not, nothing comes due while the test runs.
+  const far = { at: "2099-01-05T09:00", tz: "America/New_York" };
+  const create = (w: Awaited<ReturnType<typeof world>>, name: string, thread_id?: string) =>
+    w.call({ op: "create", name, prompt: "Check for outdated dependencies.", schedule: far, agent: FAKE, ...(thread_id ? { thread_id } : {}) });
+
+  test("an agent's bare call to the reply route, or its own message with the same block, grants nothing", async () => {
+    const w = await world();
+    await w.setOn(true);
+    // Written as the person's reply (the route is open to a local call), but not the person's own Send.
+    const bare = await fetch(`${w.base}/api/inbox/messages/${w.thread}/reply`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idempotency_key: "k-bare", words, questions: [], feedback: block }) });
+    expect(bare.status).toBe(200);
+    const off = await create(w, "From a bare call", w.thread);
+    expect(off.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false, approved_at: null } });
+    expect(off.content[0]!.text).toContain(`No unused /create-routine request from the person in thread ${w.thread} in the last hour`);
+
+    const own = (await w.rpc("tools/call", { name: "send_message", arguments: { agent_session: "ses_maya", agent_host: "claude-code", agent_name: "Claude Code", project_path: w.folder, body: `${words}\n\n${block}`, subject: "Routine" } })).result as ToolResult;
+    const ownThread = own.structuredContent!.thread_id as string;
+    const stillOff = await create(w, "From an agent's message", ownThread);
+    expect(stillOff.structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false } });
+    expect(w.server.store.scheduledThreads().every((r) => !r.enabled && r.approved_at === null)).toBe(true);
+    expect(w.fake.calls).toEqual([]);
+  });
+
+  test("the window's reply with /create-routine: the agent's create in that thread is on, once; Routines lists it on", async () => {
+    const w = await world();
+    await w.setOn(true);
+    const sent = await w.window(`/api/inbox/messages/${w.thread}/reply`, { idempotency_key: "k-person", words, questions: [], feedback: block });
+    expect(sent.status).toBe(200);
+    // A replay of the same Send mints nothing more.
+    expect((await w.window(`/api/inbox/messages/${w.thread}/reply`, { idempotency_key: "k-person", words, questions: [], feedback: block })).status).toBe(200);
+
+    const made = await create(w, "Dependency check", w.thread);
+    expect(made.isError).toBeUndefined();
+    expect(made.content[0]!.text).toMatch(/^Made sch_\w+ "Dependency check": on, .+, next 2099-01-05T14:00:00\.000Z\. It is on: the person asked for it with \/create-routine in thread msg_\w+\. The person sees it in thread msg_\w+\.$/);
+    const id = made.structuredContent!.scheduled.id as string;
+    expect(w.server.store.scheduledThread(id)).toMatchObject({ enabled: true, made_by: { session: "ses_maya", thread_id: w.thread } });
+    expect(w.server.store.scheduledThread(id)!.approved_at).not.toBeNull();
+    expect(w.lines().map((m) => m.body)).toEqual([`Made the routine [Dependency check](#routine=${id}). It is on, as you asked with /create-routine.`]);
+    // Routines, as the window reads it: on.
+    const listed = (await (await fetch(`${w.base}/api/inbox/scheduled`)).json()) as { scheduled: { id: string; enabled: boolean; state: string; next_run: string | null }[] };
+    expect(listed.scheduled.find((row) => row.id === id)).toMatchObject({ enabled: true, next_run: "2099-01-05T14:00:00.000Z" });
+
+    // One Send, one routine; and without --thread, off as before.
+    expect((await create(w, "Second", w.thread)).structuredContent).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false } });
+    expect((await create(w, "Third")).content[0]!.text).toContain("It is off until the person turns it on in Routines in the Inbox.");
+    // Turned on, an agent may change it as before; it never started anything here.
+    expect((await w.call({ op: "off", id, thread_id: w.thread })).isError).toBeUndefined();
+    expect((await w.call({ op: "on", id, thread_id: w.thread })).isError).toBeUndefined();
+    expect(w.fake.calls).toEqual([]);
+    await w.call({ op: "delete", id });
   });
 });

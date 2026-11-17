@@ -469,10 +469,14 @@ export function createInboxScheduled(deps: {
       return { scheduled: rowOf(record), runs: dividersOf(record).slice(-20).reverse().map(summaryOf) };
     },
 
-    /** `createKey`: the window's key, kept on the record (inbox-scheduled-once.ts). */
-    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    /**
+     * `createKey`: the window's key, kept on the record (inbox-scheduled-once.ts). `asked`: an agent's create the
+     * person asked for with `/create-routine` (a grant it took, inbox-routine-grants.ts): made approved and on, as
+     * the person's own would be. Every field is checked the same either way.
+     */
+    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string, asked = false): Promise<{ record: InboxScheduledThread; told: string | null }> {
       const fields = await fieldsOf(input, null);
-      const on = by.kind === "person" && input.enabled === true;
+      const on = (by.kind === "person" && input.enabled === true) || (by.kind === "agent" && asked);
       const at = iso();
       const record = store.putScheduledThread({
         id: inboxId("sch"),
@@ -495,7 +499,7 @@ export function createInboxScheduled(deps: {
         created_at: at,
         updated_at: at,
       });
-      const told = await tell(by, record, `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
+      const told = await tell(by, record, on ? `Made the routine ${linkOf(record)}. It is on, as you asked with /create-routine.` : `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
       return { record: found(record.id), told };
     },
 

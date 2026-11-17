@@ -68,7 +68,7 @@ describe("options become the routine tool's fields", () => {
 
   test("create sends only what was given: no schedule is no schedule field, so the server's default (none) holds", () => {
     expect(call(["create", "--name", "Ad hoc", "--prompt", "Tidy the notes."]).args).toEqual({ op: "create", name: "Ad hoc", prompt: "Tidy the notes." });
-    expect(call(["create", "--name", "Once", "--prompt", "p", "--at", "2026-11-20T17:00"]).args.schedule).toEqual({ at: "2026-11-20T17:00" });
+    expect(call(["create", "--name", "Once", "--prompt", "p", "--at", "2099-11-20T17:00"]).args.schedule).toEqual({ at: "2099-11-20T17:00" });
     expect(call(["create", "--name", "Scratch", "--prompt", "p", "--scratch"]).args.folder).toEqual({ scratch: true });
     expect(call(["create", "--name", "Home", "--prompt", "p", "--folder", "~"]).args.folder).toEqual({ path: HOME });
   });
@@ -123,7 +123,7 @@ describe("bad usage is refused before anything is sent", () => {
     expect(usage(["create", "--no-schedule"])).toContain("does not take --no-schedule");
     expect(usage(["create", "--name"])).toContain("takes a value");
     expect(usage(["create", "--name", "a", "--name", "b"])).toContain("given twice");
-    expect(usage(["create", "--cron", "0 9 * * *", "--at", "2026-11-20T17:00"])).toContain("one of --cron, --at");
+    expect(usage(["create", "--cron", "0 9 * * *", "--at", "2099-11-20T17:00"])).toContain("one of --cron, --at");
     expect(usage(["update", "sch_1", "--tz", "Europe/Paris"])).toContain("--tz goes with");
     expect(usage(["create", "--folder", ".", "--scratch"])).toContain("not both");
     expect(usage(["update", "sch_1", "--file", "a.md", "--no-files"])).toContain("not both");
@@ -174,7 +174,8 @@ describe("help", () => {
         expect({ line, parsed: parse([example[1]!, ...words]).kind }).toEqual({ line, parsed: "call" });
       }
     }
-    expect(examples).toBeGreaterThanOrEqual(4);
+    // A placeholder line (`--at <YYYY-MM-DDTHH:MM>`) is not counted: a dated example would go stale.
+    expect(examples).toBeGreaterThanOrEqual(3);
   });
 
   test("the lineage: plannotator inbox --help names the command with Routines on or off (not on Windows), and its help says who turns them on", () => {
@@ -237,7 +238,9 @@ describe("help", () => {
         commands++;
       }
     }
-    expect(commands).toBeGreaterThanOrEqual(5);
+    expect(commands).toBeGreaterThanOrEqual(1);
+    // Its one create names the thread, so the routine it makes is the one the person's Send turned on.
+    expect(blocks.join("\n")).toMatch(/plannotator routine create .*--thread \S+/);
   });
 });
 

@@ -1,10 +1,12 @@
 /**
  * `plannotator routine …` as real processes against a real sandboxed Inbox (temp HOME and data dir, the fake launch
  * agent, a stand-in login item, agent CLI stubs on PATH). The Inbox runs in this test's process; every call is the
- * CLI, finding it through the data dir's `inbox.json`. No routine here is ever turned on or run: the only `run` and
- * `on` are ones the server refuses, and the fake agent records that it never started.
+ * CLI, finding it through the data dir's `inbox.json`. No routine here is ever run: the only `run` and `on` are ones
+ * the server refuses, the only ones on (asked for with /create-routine) run once in 2099, and the fake agent records
+ * that it never started.
  *
- * What can regress: a routine made from the shell arriving on, or the shell turning on or running one the person
+ * What can regress: a routine made from the shell arriving on (unless the person asked for it with /create-routine in
+ * the thread --thread names: then on, and its line and --json say so), or the shell turning on or running one the person
  * never turned on; a refused schedule, agent or folder writing anything; the shell's lines or --json not saying
  * what the server holds; an update changing fields it was not given; delete doing more (or less) than the
  * window's; and the command writing while the person has routines off.
@@ -14,6 +16,11 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
+import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
+import { INBOX_BUILTIN_SKILL_ROOT } from "@plannotator/core/inbox-review";
+import { INBOX_REPLY_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
+import type { SkillCatalogEntry } from "@plannotator/ui/utils/skillReferences";
+import { builtinSkillContent, composeInboxSkillsBlock } from "../../../packages/inbox/skills";
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { FAKE, fakeLaunchHost } from "../../../tests/helpers/fake-launch-host";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
@@ -53,12 +60,13 @@ function setEnv(name: string, value: string | undefined) {
 async function world(options: { scheduled?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-routine-cli-")));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
-  const home = join(root, "home");
-  const dataDir = join(home, ".plannotator");
+  const dataDir = join(root, "data");
+  // Under PLANNOTATOR_TEST_SANDBOX the in-process Inbox's launcher reads `<data dir>/agents-home` as home (inbox.ts): the
+  // folder checks accept a project under it and refuse one outside it (on Linux the temp folder is /tmp, a system folder).
+  const home = join(dataDir, "agents-home");
   const project = join(home, "code", "acme-api");
   for (const dir of [dataDir, project]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({}));
-  // The in-process Inbox's launcher reads this home; the folder checks refuse it, and accept the project under it.
   setEnv("HOME", home);
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", dataDir);
@@ -111,7 +119,7 @@ describe("what an agent can do from the shell is what the routine tool lets it",
     expect(made).toMatchObject({ code: 0, stderr: "" });
     // Plain lines, for the agent to tell the person: the id, the name, off, and that the person turns it on.
     expect(made.stdout).toMatch(/^Made sch_\S+ "Dependency check": off, /);
-    expect(made.stdout).toContain("It is off until the person turns it on in the Inbox.");
+    expect(made.stdout).toContain("It is off until the person turns it on in Routines in the Inbox.");
     const [record] = w.server.store.scheduledThreads();
     expect(record).toMatchObject({
       name: "Dependency check",
@@ -130,6 +138,44 @@ describe("what an agent can do from the shell is what the routine tool lets it",
       expect(refused.stderr).toStartWith("routine_not_approved: ");
     }
     expect(w.server.store.scheduledThread(record!.id)).toMatchObject({ enabled: false, approved_at: null });
+    nothingStarted(w);
+  });
+
+  test("asked for with /create-routine in the window, the one made with --thread there is on: its line and --json say on and the next run", async () => {
+    const w = await world();
+    const base = `http://127.0.0.1:${w.server.port}`;
+    const projectId = w.server.store.ensureProject({ name: "acme-api", root: w.project }).id;
+    const thread = w.server.store.sendMessage({ project_id: projectId, author: { kind: "agent", host: "claude-code", session: "ses_maya", name: "Claude Code" }, body: "What should run?" }).message.thread_id;
+    const builtin: SkillCatalogEntry = { name: CREATE_ROUTINE_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: CREATE_ROUTINE_SKILL.description };
+    const feedback = composeInboxSkillsBlock([builtin], new Map([[builtin.name, builtinSkillContent(builtin)!]]), INBOX_REPLY_SKILL_AUDIENCE);
+    const send = async (key: string) => {
+      const sent = await fetch(`${base}/api/inbox/messages/${thread}/reply`, {
+        method: "POST",
+        headers: { Origin: base, "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: w.server.serverSession, idempotency_key: key, words: "/create-routine every weekday at 9", questions: [], feedback }),
+      });
+      expect(sent.status).toBe(200);
+    };
+    await send("k-cli-1");
+    // In 2099: nothing comes due while the test runs.
+    const at = ["--at", "2099-01-05T09:00", "--tz", "America/New_York", "--agent", FAKE, "--prompt", "Check for outdated dependencies."];
+    const made = await w.cli(["create", "--name", "Dependency check", "--thread", thread, ...at]);
+    expect(made).toMatchObject({ code: 0, stderr: "" });
+    expect(made.stdout).toMatch(/^Made sch_\S+ "Dependency check": on, .+, next 2099-01-05T14:00:00\.000Z\. It is on: the person asked for it with \/create-routine in thread msg_\w+\./);
+    expect(made.stdout).not.toContain("not yet turned on");
+    // Another Send, another one: --json carries on, approved and the next run.
+    await send("k-cli-2");
+    const json = await w.cli(["create", "--name", "Weekly digest", "--thread", thread, "--json", ...at]);
+    expect(json).toMatchObject({ code: 0, stderr: "" });
+    const row = JSON.parse(json.stdout);
+    expect(row).toMatchObject({ asked_with_create_routine: true, scheduled: { enabled: true, state: "on", next_run: "2099-01-05T14:00:00.000Z" } });
+    expect(row.scheduled.approved_at).toEqual(expect.any(String));
+    // Used up: the next one there arrives off, and --json says so with the same fields.
+    const again = await w.cli(["create", "--name", "Second", "--thread", thread, "--json", ...at]);
+    expect(again).toMatchObject({ code: 0, stderr: "" });
+    expect(JSON.parse(again.stdout)).toMatchObject({ asked_with_create_routine: false, scheduled: { enabled: false, approved_at: null, next_run: null } });
+    const first = w.server.store.scheduledThreads().find((record) => record.name === "Dependency check")!;
+    expect(first).toMatchObject({ enabled: true, made_by: { session: "ses_maya", thread_id: thread } });
     nothingStarted(w);
   });
 

@@ -511,16 +511,19 @@ if (isReviewDrawCommand(rawArgs, () => {
   }
 }
 // `plannotator routine <command> [options]`: sugar over `inbox call routine` (routine-command.ts). Its --help needs no Inbox.
-if (rawArgs[0] === "routine") {
-  const routineDataDir = getPlannotatorDataDir();
-  process.exit(
-    await runRoutineCommand(rawArgs.slice(1), {
-      cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
-      env: process.env,
-      askAiChild: isAskAiChild(process.env),
-      ensureRunning: () => ensureInboxRunning(routineDataDir),
-    }),
-  );
+{
+  const args = rawArgs;
+  if (args[0] === "routine") {
+    const routineDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runRoutineCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        askAiChild: isAskAiChild(process.env),
+        ensureRunning: () => ensureInboxRunning(routineDataDir),
+      }),
+    );
+  }
 }
 // `plannotator inbox pulls ls|add|rm <thread> [<ref>...]`: a thread's PRs, sugar over `inbox call thread_pulls` (inbox-pulls-command.ts).
 {
@@ -955,7 +958,8 @@ const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard ===
 // Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
 const stepsOnForHelp = () => loadConfig().inboxSteps === true;
 /** The person turned routines on (config.json `inboxScheduledThreads`; never on Windows): only then does either help name them. */
-const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig().inboxScheduledThreads === true;
+// Read quietly: a broken config.json is routines off, and the help's other read already warns once.
+const scheduledOnForHelp = () => process.platform !== "win32" && loadConfig({ quiet: true }).inboxScheduledThreads === true;
 /** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
 const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
