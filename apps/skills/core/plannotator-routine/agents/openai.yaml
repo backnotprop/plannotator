@@ -1,5 +1,0 @@
-interface:
-  display_name: "Plannotator Routine"
-  short_description: "Make or change a routine: a prompt the Plannotator Inbox runs on a schedule."
-policy:
-  allow_implicit_invocation: false

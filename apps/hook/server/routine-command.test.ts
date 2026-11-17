@@ -15,8 +15,9 @@ import { SCHEDULED_THREAD_OPS } from "../../../packages/server/inbox-mcp-schedul
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { formatTopLevelHelp, ROUTINE_COMMAND_USAGE, ROUTINE_OP_USAGE, ROUTINE_OPS, SUBCOMMAND_HELP } from "./cli";
-import { formatInboxHelp } from "./inbox-help";
-import { parseRoutineCommand, ROUTINE_OP_FLAGS, runRoutineCommand } from "./routine-command";
+import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
+import { formatInboxHelp, INBOX_ROUTINE_COMMAND_LINE } from "./inbox-help";
+import { parseRoutineCommand, ROUTINE_AGENT_HINT, ROUTINE_OP_FLAGS, runRoutineCommand } from "./routine-command";
 
 const CWD = "/work/acme-api";
 const HOME = "/home/maya";
@@ -100,6 +101,14 @@ describe("options become the routine tool's fields", () => {
     expect(usage(["update", '{"id":"sch_1"}', "--name", "x"])).toContain("not both");
     expect(usage(["update", "{nope"])).toContain("JSON");
   });
+
+  test("the JSON object's folder and files are made whole as the options' are; a value the tool must refuse is left as is", () => {
+    expect(call(["create", '{"name":"n","prompt":"p","folder":{"path":"../acme-web"},"attachments":["notes/deps.md","~/a.md"]}']).args).toMatchObject({
+      folder: { path: "/work/acme-web" },
+      attachments: ["/work/acme-api/notes/deps.md", "/home/maya/a.md"],
+    });
+    expect(call(["update", '{"id":"sch_1","folder":{"scratch":true},"attachments":[3]}']).args).toMatchObject({ folder: { scratch: true }, attachments: [3] });
+  });
 });
 
 describe("bad usage is refused before anything is sent", () => {
@@ -168,16 +177,67 @@ describe("help", () => {
     expect(examples).toBeGreaterThanOrEqual(4);
   });
 
-  test("the lineage: plannotator inbox --help and plannotator --help name the command while routines are on, and say nothing of it while off", () => {
+  test("the lineage: plannotator inbox --help names the command with Routines on or off (not on Windows), and its help says who turns them on", () => {
     const home = join(tmpdir(), "plannotator-routine-help-no-home");
-    const guide = (scheduled: boolean) =>
-      formatInboxHelp({ command: ["plannotator"], dataDir: "/home/someone/.plannotator", platform: "linux", scheduled, agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "" } }) });
+    const guide = (scheduled: boolean, platform: "linux" | "mac" | "windows" = "linux") =>
+      formatInboxHelp({ command: ["plannotator"], dataDir: "/home/someone/.plannotator", platform, scheduled, agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "" } }) });
+    for (const scheduled of [true, false]) {
+      expect(guide(scheduled).split("\n")).toContain(INBOX_ROUTINE_COMMAND_LINE);
+      expect(guide(scheduled, "mac").split("\n")).toContain(INBOX_ROUTINE_COMMAND_LINE);
+    }
+    // Windows has no routines, so its help is never asked with them on.
+    expect(guide(false, "windows")).not.toContain("plannotator routine");
+    expect(INBOX_ROUTINE_COMMAND_LINE).toContain("plannotator routine --help");
+    // Off, only that line: the routine section and the command's ops stay hidden.
     expect(guide(true)).toContain("`plannotator routine --help`");
-    expect(guide(true)).toContain("plannotator routine <create|list|get|update|on|off|run|delete>");
-    expect(guide(false)).not.toContain("plannotator routine");
+    expect(guide(false)).not.toContain("`plannotator routine --help`");
+    expect(guide(false)).not.toContain("plannotator routine create");
+    expect(ROUTINE_COMMAND_USAGE).toContain("Settings → Capabilities");
     expect(formatTopLevelHelp({ scheduled: true })).toContain("plannotator routine --help");
     expect(formatTopLevelHelp({ scheduled: false })).not.toContain("plannotator routine");
     expect(formatTopLevelHelp()).not.toContain("plannotator routine");
+  });
+
+  test("a heredoc example in a help runs as printed: copied into a shell, its prompt is read whole and its EOF closes it", async () => {
+    let heredocs = 0;
+    for (const op of ROUTINE_OPS) {
+      const lines = ROUTINE_OP_USAGE[op].split("\n");
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i]!.endsWith("<<'EOF'")) continue;
+        let start = i;
+        while (start > 0 && lines[start - 1]!.endsWith("\\")) start--;
+        const end = lines.indexOf("EOF", i);
+        expect({ op, closes: end > i }).toEqual({ op, closes: true });
+        const example = lines.slice(start, end + 1).join("\n");
+        const body = lines.slice(i + 1, end).join("\n");
+        // `plannotator` here prints its stdin, so what the shell reads as the prompt is what comes back.
+        const shell = Bun.spawn(["/bin/sh", "-c", `plannotator() { cat; }\n${example}\necho END`], { stdout: "pipe", stderr: "pipe", env: { PATH: "/usr/bin:/bin" } });
+        expect({ op, out: await new Response(shell.stdout).text() }).toEqual({ op, out: `${body}\nEND\n` });
+        heredocs++;
+      }
+    }
+    expect(heredocs).toBeGreaterThanOrEqual(2);
+  });
+
+  test("every command in the Inbox's /create-routine skill parses as a call, with flags its command takes", () => {
+    const blocks = [...CREATE_ROUTINE_SKILL.body.matchAll(/```bash\n([\s\S]*?)```/g)].map((m) => m[1]!);
+    let commands = 0;
+    for (const block of blocks) {
+      for (const line of block.replace(/ \\\n\s+/g, " ").split("\n")) {
+        const command = /^plannotator routine (\S+)(.*)$/.exec(line);
+        if (!command) continue;
+        const rest = command[2]!.replace(/ <<'EOF'$/, "");
+        if (rest.includes("<")) {
+          // A template line: its flags are still the command's.
+          for (const flag of rest.match(/--[a-z-]+/g) ?? []) expect({ line, flag, takes: (ROUTINE_OP_FLAGS as Record<string, readonly string[]>)[command[1]!]?.includes(flag) }).toEqual({ line, flag, takes: true });
+          continue;
+        }
+        const words = [...rest.matchAll(/'([^']*)'|"([^"]*)"|(\S+)/g)].map((m) => m[1] ?? m[2] ?? m[3]!);
+        expect({ line, parsed: parse([command[1]!, ...words]).kind }).toEqual({ line, parsed: "call" });
+        commands++;
+      }
+    }
+    expect(commands).toBeGreaterThanOrEqual(5);
   });
 });
 
@@ -251,5 +311,14 @@ describe("runRoutineCommand", () => {
     const refused = await run(["on", "sch_1"], stand);
     expect(refused).toMatchObject({ exit: 1, out: "" });
     expect(refused.err).toStartWith("routine_not_approved: ");
+    expect(refused.err).not.toContain(ROUTINE_AGENT_HINT);
+  });
+
+  test("the agent refusal (a shell that names no session, a create without --agent) says to ask the person, under the server's words", async () => {
+    const stand = standIn(() => ({ isError: true, content: [{ type: "text", text: "validation_error: agent: claude-code, codex, opencode or pi." }] }));
+    const refused = await run(["create", "--name", "Dependency check", "--cron", "0 9 * * 1-5", "--prompt", "Check deps."], stand);
+    expect(refused).toMatchObject({ exit: 1, out: "", err: `validation_error: agent: claude-code, codex, opencode or pi.\n${ROUTINE_AGENT_HINT}\n` });
+    expect(ROUTINE_AGENT_HINT).toContain("--agent");
+    expect(ROUTINE_AGENT_HINT).toContain("Ask the person");
   });
 });

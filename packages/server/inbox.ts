@@ -6611,7 +6611,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const searched = await search.handle(req, url);
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on() });
       if (skills) return skills;
 
       // Launch: Stop, Open in Terminal, Delete, Try again, Trust folder and its settings (404 while `inboxLaunch.enabled` is off, but for the settings route).

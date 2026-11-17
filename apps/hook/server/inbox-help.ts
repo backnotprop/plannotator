@@ -327,6 +327,9 @@ function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false, br
   return [`### ${name}`, "", ...args, ...lines, ""];
 }
 
+/** `plannotator inbox --help`'s one line for `plannotator routine`, shown with Routines on or off. */
+export const INBOX_ROUTINE_COMMAND_LINE = "  plannotator routine --help      Routines: work an agent runs on a schedule, each run reporting in the Inbox.";
+
 export function formatInboxHelp(options: InboxHelpOptions): string {
   const board = INBOX_CARD_ACTION_ON && options.board === true;
   const steps = options.steps === true;
@@ -580,8 +583,9 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     INBOX_COMMAND_USAGE,
     // Thread steps from a shell, only while the person has them on.
     ...(steps ? ["", "  plannotator inbox steps [--session <id>] <thread> --json '<list>'", "                                  Your steps in a thread (see steps); '-' reads the list from stdin."] : []),
-    // Routines from a shell, only while the person has them on.
-    ...(scheduled ? ["", "  plannotator routine <create|list|get|update|on|off|run|delete> ...", "                                  Routines from a shell (see routine): plannotator routine --help."] : []),
+    // Routines from a shell: one line whatever the setting, so an agent asked for one finds the command (its help says
+    // they must be on). Not on Windows, where there are no routines.
+    ...(ctx.platform !== "windows" ? ["", INBOX_ROUTINE_COMMAND_LINE] : []),
     "```",
     "",
     "`--tailscale` is the person's choice: never add it to a start you run. The MCP server and the agent tools answer only on this computer.",

@@ -293,8 +293,9 @@ export const CARD_COMMAND_USAGE = [
 /**
  * `plannotator routine …` (routine-command.ts): the Inbox's routines from a shell, a thin client over the `routine`
  * tool (packages/server/inbox-mcp-scheduled.ts), whose ops these are. `plannotator routine --help` is the overview;
- * each command's own --help (ROUTINE_OP_USAGE) has its options and examples. Listed in `plannotator --help` and
- * `plannotator inbox --help` while the person has routines on; its own help answers either way.
+ * each command's own --help (ROUTINE_OP_USAGE) has its options and examples. `plannotator inbox --help` names it in
+ * one line whatever the setting (not on Windows, where there are no routines), and in its routine section while the
+ * person has routines on, as `plannotator --help` does; its own help answers either way.
  */
 export const ROUTINE_OPS = ["create", "list", "get", "update", "on", "off", "run", "delete"] as const;
 export type RoutineOp = (typeof ROUTINE_OPS)[number];
@@ -315,6 +316,7 @@ export const ROUTINE_COMMAND_USAGE = [
   "A routine is a saved prompt that an agent on this computer runs on a schedule. The",
   "Plannotator Inbox starts each run and keeps every run in the routine's own thread,",
   "where the person reads it and replies.",
+  "Routines must be on in the Inbox (Settings → Capabilities); only the person turns them on.",
   "",
   "- Make one only when the person asks for work that runs on its own, on a schedule.",
   "  Use the schedule they asked for; never make one up.",
@@ -332,9 +334,9 @@ export const ROUTINE_COMMAND_USAGE = [
   "In place of options, a command takes the routine tool's fields as one JSON object:",
   "  plannotator routine update '{\"id\":\"sch_1a2b\",\"name\":\"Nightly check\"}'",
   "",
-  "Works only while the person has Routines on (Inbox Settings → Capabilities), on macOS",
-  "and Linux. Off, it exits 1 with routines_off and writes nothing: tell the person, and",
-  "leave their settings as they are.",
+  "On macOS and Linux. With Routines off, a command exits 1 with routines_off and",
+  "writes nothing: tell the person, and leave their settings as they are. A stopped",
+  "Inbox starts in the background first, as for 'plannotator inbox call'.",
   "Exit 0 done, 1 refused or no Inbox (<code>: <message> on stderr), 2 bad usage.",
 ].join("\n");
 
@@ -362,8 +364,10 @@ const ROUTINE_CREATE_OPTIONS = [
   "                      a subfolder). Default: your session's project, else this",
   "                      folder. Never home, / or a hidden folder.",
   "  --scratch           A new empty folder, made at the first run, instead.",
-  "  --agent <agent>     Who runs it: claude-code, codex, opencode or pi.",
-  "                      Default: the agent you are.",
+  "  --agent <agent>     Who runs it: claude-code, codex, opencode or pi. Default: the",
+  "                      agent you are, when the Inbox knows which one you are. If",
+  "                      create answers 'validation_error: agent: …', ask the person",
+  "                      which agent runs it and pass that one. Never pick one yourself.",
   "  --model <model>     The model it runs with. Default: the agent's own.",
   "  --effort <effort>   The reasoning effort it runs with. Default: the agent's own.",
   "  --file <path>       A file each run gets with its prompt. Repeat for more.",
@@ -398,10 +402,11 @@ export const ROUTINE_OP_USAGE: Record<RoutineOp, string> = {
     "  plannotator routine create --name \"Dependency check\" --cron '0 9 * * 1-5' \\",
     "    --prompt 'Check this repo for outdated dependencies and list what to update.'",
     "",
-    "  plannotator routine create --name \"Weekly notes\" --cron '0 16 * * 5' --tz Europe/Paris \\",
-    "    --folder ~/code/api --prompt - <<'EOF'",
-    "  Draft release notes from the pull requests merged this week.",
-    "  EOF",
+    "A prompt from stdin, not indented, so its EOF line closes it:",
+    "plannotator routine create --name \"Weekly notes\" --cron '0 16 * * 5' --tz Europe/Paris \\",
+    "  --folder ~/code/api --prompt - <<'EOF'",
+    "Draft release notes from the pull requests merged this week.",
+    "EOF",
     "",
     "  plannotator routine create --name \"Deploy check\" --at 2026-11-20T17:00 \\",
     "    --prompt 'Check that the staging deploy finished and say how it went.'",
@@ -447,9 +452,11 @@ export const ROUTINE_OP_USAGE: Record<RoutineOp, string> = {
     "",
     "Examples:",
     "  plannotator routine update sch_1a2b --cron '0 7 * * 1-5'",
-    "  plannotator routine update sch_1a2b --prompt - <<'EOF'",
-    "  Check for outdated dependencies and open one pull request with the safe updates.",
-    "  EOF",
+    "",
+    "A prompt from stdin, not indented, so its EOF line closes it:",
+    "plannotator routine update sch_1a2b --prompt - <<'EOF'",
+    "Check for outdated dependencies and open one pull request with the safe updates.",
+    "EOF",
     "",
     ROUTINE_OP_FOOTER,
   ].join("\n"),
@@ -463,7 +470,8 @@ export const ROUTINE_OP_USAGE: Record<RoutineOp, string> = {
     "starts its agent the way New message in the Inbox does, in the person's own",
     "permission mode, and replies in the routine's own thread. Until the person has",
     "turned the routine on once, it answers routine_not_approved; while a run is going,",
-    "routine_running.",
+    "routine_running; while starting agents from the Inbox is off, launch_off: tell the",
+    "person, who turns it on in Settings → Agents.",
     "",
     ROUTINE_OP_FOOTER,
   ].join("\n"),

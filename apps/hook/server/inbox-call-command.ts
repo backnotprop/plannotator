@@ -35,7 +35,9 @@
  *
  * stdout: the result as one JSON value, and nothing else, so anything on it is
  * a success (empty on failure: `jq` then finds nothing, where a JSON error
- * would read as a result with null fields). A failure goes to stderr as
+ * would read as a result with null fields). With `CallCommandDeps.text` (what
+ * `plannotator routine` asks for without --json) it is the result's words
+ * instead. A failure goes to stderr as
  * `<code>: <message>`. Exit 0 ok, 1 refused or unreachable, 2 bad usage.
  */
 

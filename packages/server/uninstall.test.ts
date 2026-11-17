@@ -445,7 +445,6 @@ describe("default uninstall", () => {
       "plannotator-annotate",
       "plannotator-last",
       "plannotator-inbox",
-      "plannotator-routine",
       // The knowledge-layer CLI reference skill, installed to the same scopes.
       "plannotator",
     ]) {
@@ -651,9 +650,6 @@ describe("default uninstall", () => {
     writeText(join(alternateConfig, "opencode", "commands", "plannotator-inbox.md"));
     writeText(join(homeDir, ".kiro", "skills", "plannotator-inbox", "SKILL.md"));
     writeText(join(homeDir, ".vibe", "skills", "plannotator-inbox", "SKILL.md"));
-    // The routine skill: Kiro and Vibe beside the Claude and shared-agent copies above.
-    writeText(join(homeDir, ".kiro", "skills", "plannotator-routine", "SKILL.md"));
-    writeText(join(homeDir, ".vibe", "skills", "plannotator-routine", "SKILL.md"));
     // The installer never wrote a Claude command of that name: one there is the person's.
     const ownInboxCommand = join(homeDir, ".claude", "commands", "plannotator-inbox.md");
     writeText(ownInboxCommand, "my own command");
@@ -720,10 +716,6 @@ describe("default uninstall", () => {
       join(homeDir, ".vibe", "skills", "plannotator-inbox"),
       join(homeDir, ".gemini", "commands", "plannotator-inbox.toml"),
       join(alternateConfig, "opencode", "commands", "plannotator-inbox.md"),
-      join(homeDir, ".claude", "skills", "plannotator-routine"),
-      join(homeDir, ".agents", "skills", "plannotator-routine"),
-      join(homeDir, ".kiro", "skills", "plannotator-routine"),
-      join(homeDir, ".vibe", "skills", "plannotator-routine"),
     ]) {
       expect(existsSync(installed)).toBe(false);
     }

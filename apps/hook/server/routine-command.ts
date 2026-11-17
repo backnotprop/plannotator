@@ -6,7 +6,7 @@
  * server's (packages/server/inbox-scheduled.ts): nothing here checks a value, it only says which field a flag fills.
  *
  * stdout: the tool's lines of text, or with --json its structured result as one JSON value. A refusal goes to stderr
- * as `<code>: <message>` and exits 1; bad usage exits 2. `--help` (the overview) and `<command> --help` (its options
+ * as `<code>: <message>` and exits 1 (the `agent:` one with ROUTINE_AGENT_HINT under it); bad usage exits 2. `--help` (the overview) and `<command> --help` (its options
  * and examples) answer without an Inbox, routines on or off.
  */
 
@@ -116,7 +116,12 @@ export function parseRoutineCommand(argv: readonly string[], cwd: string, home: 
     if (!fields || typeof fields !== "object" || Array.isArray(fields)) return usage("The JSON must be one object.");
     const object = fields as Record<string, unknown>;
     if (object.op !== undefined && object.op !== op) return usage(`The JSON says op ${JSON.stringify(object.op)}, the command ${op}.`);
-    return { kind: "call", op, args: { ...object, op }, promptFromStdin: false, json, session };
+    // Paths in it are made whole as the options' are; anything else is left for the tool to take or refuse.
+    const args: Record<string, unknown> = { ...object, op };
+    const given = object.folder as { path?: unknown } | null | undefined;
+    if (given && typeof given === "object" && typeof given.path === "string") args.folder = { ...given, path: wholePath(given.path, cwd, home) };
+    if (Array.isArray(object.attachments)) args.attachments = object.attachments.map((file) => (typeof file === "string" ? wholePath(file, cwd, home) : file));
+    return { kind: "call", op, args, promptFromStdin: false, json, session };
   }
 
   if (takesId && word === undefined) return usage(`routine ${op} takes a routine id (sch_…): 'plannotator routine list' shows them.`);
@@ -157,6 +162,9 @@ export function parseRoutineCommand(argv: readonly string[], cwd: string, home: 
   return { kind: "call", op, args, promptFromStdin, json, session };
 }
 
+/** Said under the tool's `validation_error: agent: …`: the Inbox could not tell which agent this is, or cannot start that one. */
+export const ROUTINE_AGENT_HINT = "Ask the person which agent runs it (claude-code, codex, opencode or pi), then pass that one with --agent. Never pick one yourself.";
+
 /** Run `plannotator routine …`; resolves to the exit code. */
 export async function runRoutineCommand(argv: readonly string[], deps: CallCommandDeps): Promise<number> {
   const out = deps.out ?? writeWholeToStdout;
@@ -177,5 +185,9 @@ export async function runRoutineCommand(argv: readonly string[], deps: CallComma
   }
   const args = { ...parsed.args };
   if (parsed.promptFromStdin) args.prompt = (await (deps.stdin ?? (() => Bun.stdin.text()))()).replace(/^﻿/, "");
-  return runInboxCallCommand([...(parsed.session !== null ? ["--session", parsed.session] : []), "routine", JSON.stringify(args)], { ...deps, out, err, text: !parsed.json });
+  const errWithHint = (text: string) => {
+    err(text);
+    if (text.startsWith("validation_error: agent: ")) err(`${ROUTINE_AGENT_HINT}\n`);
+  };
+  return runInboxCallCommand([...(parsed.session !== null ? ["--session", parsed.session] : []), "routine", JSON.stringify(args)], { ...deps, out, err: errWithHint, text: !parsed.json });
 }
