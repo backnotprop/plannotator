@@ -807,3 +807,4 @@ packages/inbox/components/listDrops.test.tsx
 packages/inbox/agents/projectFaceMarks.test.tsx
 packages/ui/components/frame/frame.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
+packages/inbox/pulls/branchReviews.test.tsx
