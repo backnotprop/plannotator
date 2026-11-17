@@ -12534,3 +12534,4 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-topen[data-thread-drop-label="refuse"] { color: var(--muted-foreground); }
 /* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
 .ib-topen[data-ghost-says] { visibility: hidden; }
+.pn-inbox span.ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: none; }

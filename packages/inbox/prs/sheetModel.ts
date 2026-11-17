@@ -182,6 +182,16 @@ export interface SheetModel {
 
 const isMergedWithin = (pull: InboxPull, now: number, ms: number) => pull.state === 'merged' && !!pull.merged_at && now - Date.parse(pull.merged_at) <= ms;
 
+/**
+ * The board as Reviews' project filter shows it: only the PRs of that project's repositories (two clones of one origin
+ * are two projects, each with that repository), so its sections, its Merged view and its head line count only those.
+ * No project: the answer as it is.
+ */
+export function boardInProject<T extends Pick<InboxPullsAnswer, 'pulls' | 'projects'>>(answer: T, project: string | null): T {
+  if (!project) return answer;
+  return { ...answer, pulls: answer.pulls.filter((pull) => (answer.projects[inboxPullRepoKey(pull.host, pull.repo)] ?? []).includes(project)) };
+}
+
 /** The Open view: a section per repository with an open PR, the repositories with the most on you first. */
 export function sheetModel(answer: Pick<InboxPullsAnswer, 'pulls' | 'projects'>, now: number, risk: RiskLevels = {}): SheetModel {
   const stacks = inboxPullStacks(answer.pulls).filter((stack) => stack.layers.some(inboxPullIsOpen));

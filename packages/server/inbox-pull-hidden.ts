@@ -6,7 +6,10 @@
  * machine asleep, a search cut short, another account), so absence forgets nothing. New activity on it does not bring
  * it back.
  *
- *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id? } }, back?: { [thread id]: at } }
+ *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id? } }, repos?: { [repo key]: { label, at } }, back?: { [thread id]: at } }
+ *
+ * `repos`: repositories the person hid from the board (`inboxPullRepoKey`): every PR in one is hidden as a hidden PR
+ * is, new ones too, until the repository is shown again. A record goes only on Show again.
  *
  * `back`: a thread the Inbox list left out for its hidden PRs and that came back on new activity after the hide (an
  * agent message, a question, a prompt, a stop or failure, the person's own send, a snooze coming due), with that
@@ -19,7 +22,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { InboxPull, InboxPullHidden, InboxReviewRow } from "@plannotator/core/inbox-types";
+import { inboxPullRepoOfKey, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxReviewRow } from "@plannotator/core/inbox-types";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_HIDDEN_FILE = "pull-hidden.json";
@@ -49,35 +52,46 @@ const keptOf = (value: Kept): Kept => ({ title: value.title, url: value.url, at:
 
 /**
  * A write's body: `hide`, PRs to hide, each `{ key, title, url }` (the list's own); `threads`, Inbox threads whose open
- * PRs to hide (the Inbox list's row menu and picks); `show`, keys to show again. At least one of them, each at most
+ * PRs to hide (the Inbox list's row menu and picks); `show`, keys to show again; `hide_repos`, repositories to hide,
+ * each `{ key, label }` (`inboxPullRepoKey`); `show_repos`, their keys to show again. At least one of them, each at most
  * `PULL_HIDDEN_MAX`; a URL is the forge's http(s) link.
  */
-export function pullHiddenBodyOf(body: Record<string, unknown>): { hide: { key: string; title: string; url: string }[]; threads: string[]; show: string[] } {
-  const hide = body.hide ?? [];
-  const threads = body.threads ?? [];
-  const show = body.show ?? [];
-  if (!Array.isArray(hide) || !Array.isArray(threads) || !Array.isArray(show) || hide.length + threads.length + show.length === 0) {
-    throw new InboxError("validation_error", "hide: PRs to hide, each { key, title, url }; threads: thread ids whose PRs to hide; show: keys to show again.", { field: "hide" });
+export function pullHiddenBodyOf(body: Record<string, unknown>): { hide: { key: string; title: string; url: string }[]; threads: string[]; show: string[]; hide_repos: { key: string; label: string }[]; show_repos: string[] } {
+  const lists = [body.hide, body.threads, body.show, body.hide_repos, body.show_repos].map((list) => list ?? []);
+  if (!lists.every((list): list is unknown[] => Array.isArray(list)) || lists.reduce((n, list) => n + list.length, 0) === 0) {
+    throw new InboxError("validation_error", "hide: PRs to hide, each { key, title, url }; threads: thread ids whose PRs to hide; show: keys to show again; hide_repos: repositories, each { key, label }; show_repos: their keys.", { field: "hide" });
   }
-  if (hide.length > PULL_HIDDEN_MAX || threads.length > PULL_HIDDEN_MAX || show.length > PULL_HIDDEN_MAX) {
+  const [hide, threads, show, hideRepos, showRepos] = lists;
+  if (lists.some((list) => list.length > PULL_HIDDEN_MAX)) {
     throw new InboxError("validation_error", `That is more than ${PULL_HIDDEN_MAX} at once. Hide or show fewer, then the rest.`, { field: "hide" });
   }
   const key = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 600;
   return {
-    hide: hide.map((entry) => {
+    hide: hide!.map((entry) => {
       const { key: k, title, url } = (entry ?? {}) as { key?: unknown; title?: unknown; url?: unknown };
       if (!key(k) || typeof title !== "string" || title.length > 1000 || typeof url !== "string" || url.length > 2048 || !/^https?:\/\//.test(url)) {
         throw new InboxError("validation_error", "hide: each { key (a PR's key), title, url (its link) }.", { field: "hide" });
       }
       return { key: k, title, url };
     }),
-    threads: threads.map((id) => {
+    threads: threads!.map((id) => {
       if (!key(id)) throw new InboxError("validation_error", "threads: each a thread's id.", { field: "threads" });
       return id;
     }),
-    show: show.map((k) => {
+    show: show!.map((k) => {
       if (!key(k)) throw new InboxError("validation_error", "show: each a PR's key.", { field: "show" });
       return k;
+    }),
+    hide_repos: hideRepos!.map((entry) => {
+      const { key: k, label } = (entry ?? {}) as { key?: unknown; label?: unknown };
+      if (!key(k) || k.includes("#") || !k.includes("/") || typeof label !== "string" || label.length > 600) {
+        throw new InboxError("validation_error", "hide_repos: each { key (host/owner/repo), label }.", { field: "hide_repos" });
+      }
+      return { key: k.toLowerCase(), label };
+    }),
+    show_repos: showRepos!.map((k) => {
+      if (!key(k)) throw new InboxError("validation_error", "show_repos: each a repository's key.", { field: "show_repos" });
+      return k.toLowerCase();
     }),
   };
 }
@@ -85,15 +99,18 @@ export function pullHiddenBodyOf(body: Record<string, unknown>): { hide: { key: 
 export interface InboxPullHiddenStore {
   /** The hidden PRs, newest first. */
   list(): InboxPullHidden[];
+  /** Whether a PR is hidden: itself, or its repository. */
   has(key: string): boolean;
-  /** When it was hidden, or null when it is not. */
+  /** When it was hidden (its own hide, else its repository's), or null when it is not. */
   atOf(key: string): string | null;
+  /** The hidden repositories, newest first. */
+  repos(): InboxRepoHidden[];
   /** When the thread came back on activity newer than its hides, or null. */
   backOf(threadId: string): string | null;
   /** Threads that came back, each with its activity's time (a later time replaces an earlier one). */
   markBack(back: readonly { thread_id: string; at: string }[]): void;
   /** Hides and shows again; answers the list now. Hiding a hidden PR keeps its first time. */
-  change(input: { hide: readonly PullToHide[]; show: readonly string[] }, now: Date): InboxPullHidden[];
+  change(input: { hide: readonly PullToHide[]; show: readonly string[]; hide_repos?: readonly { key: string; label: string }[]; show_repos?: readonly string[] }, now: Date): InboxPullHidden[];
   /**
    * A read of the forges: a hidden PR seen merged or closed is forgotten (it left every list on its own). The only
    * way a record goes besides Show again: a PR the read does not list is kept.
@@ -108,6 +125,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
   const file = join(dir, INBOX_PULL_HIDDEN_FILE);
   let hidden: Map<string, Kept> | null = null;
   const back = new Map<string, string>();
+  const repos = new Map<string, { label: string; at: string }>();
 
   const load = (): Map<string, Kept> => {
     if (hidden) return hidden;
@@ -118,6 +136,11 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
       if (parsed.v !== 1 || !parsed.hidden || typeof parsed.hidden !== "object") throw new Error("not a pull hidden file");
       for (const [key, value] of Object.entries(parsed.hidden)) if (isKept(value)) hidden.set(key, keptOf(value));
       for (const [thread, at] of Object.entries(parsed.back && typeof parsed.back === "object" ? parsed.back : {})) if (typeof at === "string" && Number.isFinite(Date.parse(at))) back.set(thread, at);
+      const savedRepos = (parsed as { repos?: unknown }).repos;
+      for (const [repo, value] of Object.entries(savedRepos && typeof savedRepos === "object" ? savedRepos : {})) {
+        const kept = value as { label?: unknown; at?: unknown } | null;
+        if (kept && typeof kept.label === "string" && typeof kept.at === "string" && Number.isFinite(Date.parse(kept.at))) repos.set(repo, { label: kept.label, at: kept.at });
+      }
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -126,6 +149,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
       }
       hidden = new Map();
       back.clear();
+      repos.clear();
     }
     return hidden;
   };
@@ -134,7 +158,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
     try {
       mkdirSync(dir, { recursive: true });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, hidden: Object.fromEntries(map), ...(back.size > 0 ? { back: Object.fromEntries(back) } : {}) })}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify({ v: 1, hidden: Object.fromEntries(map), ...(repos.size > 0 ? { repos: Object.fromEntries(repos) } : {}), ...(back.size > 0 ? { back: Object.fromEntries(back) } : {}) })}\n`, { mode: 0o600 });
       renameSync(temp, file);
     } catch {
       // A read-only folder: the records stay in memory.
@@ -146,8 +170,12 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
 
   return {
     list,
-    has: (key) => load().has(key),
-    atOf: (key) => load().get(key)?.at ?? null,
+    has: (key) => load().has(key) || repos.has(inboxPullRepoOfKey(key)),
+    atOf: (key) => load().get(key)?.at ?? repos.get(inboxPullRepoOfKey(key))?.at ?? null,
+    repos: () => {
+      load();
+      return [...repos].map(([key, repo]) => ({ key, ...repo })).sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : a.key.localeCompare(b.key)));
+    },
     backOf: (threadId) => {
       load();
       return back.get(threadId) ?? null;
@@ -166,9 +194,15 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
       }
       save(map);
     },
-    change({ hide, show }, now) {
+    change({ hide, show, hide_repos = [], show_repos = [] }, now) {
       const map = load();
       let changed = false;
+      for (const key of show_repos) changed = repos.delete(key) || changed;
+      for (const { key, label } of hide_repos) {
+        if (repos.has(key)) continue;
+        repos.set(key, { label, at: now.toISOString() });
+        changed = true;
+      }
       for (const key of show) changed = map.delete(key) || changed;
       for (const { key, title, url, thread_id } of hide) {
         if (map.has(key)) continue;
@@ -193,7 +227,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
     },
     shown(pulls) {
       const map = load();
-      return map.size === 0 ? [...pulls] : pulls.filter((pull) => !map.has(pull.key));
+      return map.size === 0 && repos.size === 0 ? [...pulls] : pulls.filter((pull) => !map.has(pull.key) && !repos.has(inboxPullRepoOfKey(pull.key)));
     },
   };
 }

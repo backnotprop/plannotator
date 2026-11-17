@@ -181,6 +181,8 @@ export interface InboxPullsAnswer {
    * here so Reviews can list them with Show again. Absent from an older Inbox.
    */
   hidden?: InboxPullHidden[];
+  /** The repositories hidden (every PR in them left out): Hidden lists them too. Absent from an older Inbox. */
+  hidden_repos?: InboxRepoHidden[];
 }
 
 /** A PR the person hid from their lists: nothing is done on the forge. `at`: when, ISO. */
@@ -191,6 +193,20 @@ export interface InboxPullHidden {
   at: string;
   /** The Inbox thread it belongs to (its review, hand-off or the thread's own PR list), when one does: Hidden opens it. */
   thread_id?: string;
+}
+
+/** A repository the person hid from their lists (every PR in it, new ones too): nothing is done on the forge. */
+export interface InboxRepoHidden {
+  /** `inboxPullRepoKey`: `host/owner/repo`, lowercased. */
+  key: string;
+  /** Its name as the board showed it. */
+  label: string;
+  at: string;
+}
+
+/** A PR key's repository key (`host/owner/repo#12` → `host/owner/repo`; GitLab's `…#12:pull` too). */
+export function inboxPullRepoOfKey(key: string): string {
+  return key.replace(/#\d+(?::[a-z]+)?$/, "").toLowerCase();
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */

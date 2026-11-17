@@ -97,8 +97,8 @@ describe("the PRs a machine keeps hidden", () => {
   });
 
   test("a write names PRs by key, with their title and web link, or threads by id; anything else is refused", () => {
-    expect(pullHiddenBodyOf({ hide: [hide(7)], show: [pull(8).key] })).toEqual({ hide: [hide(7)], threads: [], show: [pull(8).key] });
-    expect(pullHiddenBodyOf({ threads: ["thr_a"] })).toEqual({ hide: [], threads: ["thr_a"], show: [] });
+    expect(pullHiddenBodyOf({ hide: [hide(7)], show: [pull(8).key] })).toMatchObject({ hide: [hide(7)], threads: [], show: [pull(8).key] });
+    expect(pullHiddenBodyOf({ threads: ["thr_a"] })).toMatchObject({ hide: [], threads: ["thr_a"], show: [] });
     // A self-hosted forge on plain http, as a linked machine's list may carry.
     const plain = { key: "git.lan/team/app#4:pull", title: "MR 4", url: "http://git.lan/team/app/-/merge_requests/4" };
     expect(pullHiddenBodyOf({ hide: [plain] }).hide).toEqual([plain]);
@@ -162,5 +162,42 @@ describe("the Inbox list's threads with hidden PRs", () => {
     expect(again.backOf("thr_a")).toBe(T2);
     expect(again.atOf(pull(7).key)).toBe(T1);
     expect(again.atOf(pull(8).key)).toBeNull();
+  });
+});
+
+describe("the repositories a machine keeps hidden", () => {
+  const REPO = "github.com/northwind/api";
+  const other = (number: number) => pull(number, { key: `github.com/northwind/web#${number}`, repo: "northwind/web" });
+
+  test("every PR in a hidden repository is hidden, a new one too, across a restart; Show again brings them all back", () => {
+    const dataDir = scratch();
+    const hidden = createInboxPullHidden(dataDir);
+    hidden.change({ hide: [], show: [], hide_repos: [{ key: REPO, label: "api" }] }, new Date("2026-11-17T10:00:00Z"));
+    const again = createInboxPullHidden(dataDir);
+    // #900 was never seen before the hide: new PRs there stay hidden too.
+    expect(again.shown([pull(7), pull(900), other(8)]).map((p) => p.key)).toEqual([other(8).key]);
+    expect(again.has(pull(900).key)).toBe(true);
+    expect(again.atOf(pull(900).key)).toBe("2026-11-17T10:00:00.000Z");
+    expect(again.repos()).toEqual([{ key: REPO, label: "api", at: "2026-11-17T10:00:00.000Z" }]);
+    // The hidden PRs' list stays the PRs hidden one by one.
+    expect(again.list()).toEqual([]);
+    again.change({ hide: [], show: [], show_repos: [REPO] }, new Date());
+    expect(createInboxPullHidden(dataDir).shown([pull(7), other(8)])).toHaveLength(2);
+  });
+
+  test("a thread whose PRs are all in a hidden repository leaves the Inbox list as one whose PRs were hidden", () => {
+    const hidden = createInboxPullHidden(scratch());
+    hidden.change({ hide: [], show: [], hide_repos: [{ key: REPO, label: "api" }] }, new Date("2026-11-17T10:00:00Z"));
+    const inPlay = new Map([["thr_a", new Map([[pull(7).key, { ...hide(7), thread_id: "thr_a" }]])], ["thr_b", new Map([[other(8).key, { key: other(8).key, title: "x", url: other(8).url, thread_id: "thr_b" }]])]]);
+    const { gone, hideable } = threadPullsHidden(inPlay, (key) => hidden.atOf(key));
+    expect([...gone.keys()]).toEqual(["thr_a"]);
+    expect(hideable.has("thr_b")).toBe(true);
+  });
+
+  test("a write's repositories: host/owner/repo, lowercased; a PR's key is refused", () => {
+    expect(pullHiddenBodyOf({ hide_repos: [{ key: "GitHub.com/Northwind/API", label: "API" }] }).hide_repos).toEqual([{ key: REPO, label: "API" }]);
+    expect(pullHiddenBodyOf({ show_repos: [REPO] }).show_repos).toEqual([REPO]);
+    expect(() => pullHiddenBodyOf({ hide_repos: [{ key: `${REPO}#7`, label: "api" }] })).toThrow();
+    expect(() => pullHiddenBodyOf({ hide_repos: "api" })).toThrow();
   });
 });

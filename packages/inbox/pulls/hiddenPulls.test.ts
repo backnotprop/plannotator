@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxPullStacks, inboxReviewRows, type InboxListRow, type InboxPull, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { forgetHiddenChanges, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
+import { forgetHiddenChanges, hideRepo, repoChangeKey, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
 import { rowMenuActions } from '../rowMenu';
 import { reviewsOnYou } from './reviewsModel';
 import { sheetModel } from '../prs/sheetModel';
@@ -112,5 +112,31 @@ describe('labels', () => {
     expect(hiddenLabel({ key: 'github.com/northwind/api#7' })).toBe('#7');
     expect(hiddenRepo({ key: 'github.com/northwind/api#7' })).toBe('northwind/api');
     expect(hiddenRepo({ key: 'gitlab.com/northwind/data/ledger#61:pull' })).toBe('gitlab.com/northwind/data/ledger');
+  });
+});
+
+describe('a repository hidden here leaves at once', () => {
+  const REPO = 'github.com/northwind/api';
+  const web = pull(20, { key: 'github.com/northwind/web#20', repo: 'northwind/web', host: 'github.com' });
+  const repoHid: HiddenChanges = new Map([[repoChangeKey(REPO), { hide: true, repo: { key: REPO, label: 'api', at: '2026-11-17T10:00:00.000Z' }, since: 1_000 }]]);
+
+  test("every PR in it leaves the board, its counts and Reviews; Hidden lists the repository, not each PR", () => {
+    const model = pullsShown({ ...MODEL, pulls: [...PULLS, web] }, repoHid)!;
+    expect(model.pulls.map((p) => p.key)).toEqual([web.key]);
+    expect(sheetModel(model, Date.now(), {}).head).toMatchObject({ open: 1, repos: 1 });
+    expect(model.hidden).toEqual([]);
+    expect(model.hidden_repos!.map((r) => r.key)).toEqual([REPO]);
+    expect(reviewsShown(REVIEWS, repoHid)!.rows).toEqual([]);
+  });
+
+  test('a refused write puts it back and says why', async () => {
+    const saved = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'No.' }), { status: 400, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+    try {
+      await expect(hideRepo({ key: REPO, label: 'api' })).rejects.toThrow();
+      expect(pullsShown(MODEL, hiddenChangesNow())!.pulls).toHaveLength(PULLS.length);
+    } finally {
+      globalThis.fetch = saved;
+    }
   });
 });

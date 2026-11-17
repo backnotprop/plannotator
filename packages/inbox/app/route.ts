@@ -173,7 +173,8 @@ export function routeOf(fullHash: string): Route {
     const layer = stack ? params.get('layer') || null : null;
     return {
       page: 'prs',
-      project: null,
+      // Reviews' project filter, which the board follows (`boardInProject`).
+      project: params.get('project') || null,
       thread: null,
       prsView: params.get('state') === 'merged' ? 'merged' : 'open',
       prsLayout: sheetLayoutOf(params.get('layout')),

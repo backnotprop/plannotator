@@ -217,6 +217,50 @@ test("a tile's popover hides that PR only (a phone's sheet)", async () => {
   expect(tile(key(7))).not.toBeNull();
 });
 
+test("Hide repository: the repository leaves the board and its head line at once, in one write naming it; Undo shows it again", async () => {
+  if (!hasDom) return;
+  for (const layout of ['grid', 'table'] as const) {
+    sent.length = 0;
+    toasts.length = 0;
+    mount(<Board layout={layout} />);
+    expect($('[data-pr-summary]')!.textContent).toContain('in 2 repositories');
+    click($('[data-pr-repo-hide="github.com/northwind/ledger"]')!);
+    expect($('[data-pr-repo="github.com/northwind/ledger"]')).toBeNull();
+    expect($('[data-pr-repo="github.com/northwind/web"]')).not.toBeNull();
+    expect($('[data-pr-summary]')!.textContent).toContain('1 open in 1 repository');
+    expect(sent.map((s) => [new URL(s.url, 'http://x').pathname, s.body.hide_repos])).toEqual([['/api/inbox/pulls/hidden', [{ key: 'github.com/northwind/ledger', label: 'ledger' }]]]);
+    sent[0]!.answer(200, { hidden: [], hid: [], threads_left: ['thr_a'] });
+    await settle();
+    expect(toasts).toHaveLength(1);
+    expect(toasts[0]!.toast.lead).toContain('ledger');
+    expect(toasts[0]!.toast.lead).toContain('thread');
+    act(() => toasts[0]!.toast.onUndo!());
+    expect(sent[1]!.body).toMatchObject({ show_repos: ['github.com/northwind/ledger'] });
+    sent[1]!.answer(200, { hidden: [] });
+    await settle();
+    expect($('[data-pr-repo="github.com/northwind/ledger"]')).not.toBeNull();
+    act(() => root?.unmount());
+    host?.remove();
+    hidden.forgetHiddenChanges();
+  }
+});
+
+test("Reviews' Hidden lists a hidden repository, and its Show again shows that repository", () => {
+  if (!hasDom) return;
+  const repos: string[] = [];
+  const answer = { ...reviewsOfPulls(MODEL), hidden_repos: [{ key: 'github.com/northwind/web', label: 'web', at: '2026-11-17T10:00:00.000Z' }] };
+  mount(
+    <div className="ib-lbody">
+      <ReviewsList answer={answer} model={MODEL} rows={answer.rows} filter="all" projectNames={new Map()} selected={null} phone={false} onOpen={() => {}} onNew={() => {}} onShowAgain={() => {}} onShowRepo={(repo) => repos.push(repo.key)} />
+    </div>,
+  );
+  expect($('[data-pulls-hidden]')!.getAttribute('data-pulls-hidden')).toBe('1');
+  click($('[data-pulls-hidden-toggle]')!);
+  expect($('[data-pulls-hidden-repo="github.com/northwind/web"]')!.textContent).toContain('web');
+  click($(`[data-pulls-show-again="${hidden.repoChangeKey('github.com/northwind/web')}"]`)!);
+  expect(repos).toEqual(['github.com/northwind/web']);
+});
+
 test("Reviews: a row's menu hides the row's open PRs; Hidden lists what is hidden, and Show again reaches the page", async () => {
   if (!hasDom) return;
   const answer = { ...reviewsOfPulls(MODEL), hidden: [{ key: key(5), title: 'Old change', url: pull(5).url, at: '2026-11-16T10:00:00.000Z', thread_id: 'thr_old' }] satisfies InboxPullHidden[] };

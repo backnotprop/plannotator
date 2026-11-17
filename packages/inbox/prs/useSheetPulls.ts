@@ -40,7 +40,7 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
         .then((answer) => {
           if (controller.signal.aborted) return;
           setModel(answer);
-          settleHidden(answer.hidden);
+          settleHidden(answer.hidden, Date.now(), answer.hidden_repos);
           setError(null);
           // Others (the projects' other PRs) and a linked machine's board still being read: on the server's next answer.
           const pending = answer.hosts.some((h) => h.others_pending) || Object.values(answer.machines ?? {}).some((m) => m.pending);

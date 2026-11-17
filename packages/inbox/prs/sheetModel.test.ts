@@ -4,7 +4,9 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull } from '@plannotator/core/inbox-types';
-import { FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, tileOpens, topFirst } from './sheetModel';
+import { routeOf } from '../app/route';
+import { hashOf } from '../app/writeRoute';
+import { boardInProject, FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, tileOpens, topFirst } from './sheetModel';
 
 const NOW = Date.parse('2026-11-09T12:00:00Z');
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
@@ -192,4 +194,44 @@ describe('a tile opens the launchpad for a single open PR Reviews lists (the own
     // Reviews not read yet: the PR view, never a blank pane.
     expect(tileOpens(one, stackOf(one), null)).toBe('pull');
   });
+});
+
+describe('the board in a Reviews project filter (boardInProject)', () => {
+  const answer = {
+    pulls: [
+      pr({ repo: 'northwind/ledger', requested: true }),
+      pr({ repo: 'northwind/ledger', checks: 'failure' }),
+      pr({ repo: 'northwind/web', requested: true }),
+      pr({ repo: 'outside/tool' }),
+      pr({ repo: 'northwind/ledger', state: 'merged', merged_at: day(2) }),
+      pr({ repo: 'northwind/web', state: 'merged', merged_at: day(2) }),
+    ],
+    projects: { 'github.com/northwind/ledger': ['prj_ledger', 'prj_ledger_2'], 'github.com/northwind/web': ['prj_web'] },
+  };
+
+  test("only that project's repositories, and the head line counts only those; Merged too", () => {
+    const shown = boardInProject(answer, 'prj_ledger');
+    const sheet = sheetModel(shown, NOW);
+    expect(sheet.sections.map((section) => section.key)).toEqual(['github.com/northwind/ledger']);
+    expect(sheet.head).toEqual({ open: 2, repos: 1, needYou: 1, failing: 1, landedWeek: 1 });
+    expect(mergedModel(shown, NOW).sections.map((section) => section.key)).toEqual(['github.com/northwind/ledger']);
+    // A second clone of the same origin is a project with that repository too.
+    expect(sheetModel(boardInProject(answer, 'prj_ledger_2'), NOW).head.repos).toBe(1);
+  });
+
+  test('no filter is everything, "not a project" repositories included', () => {
+    expect(boardInProject(answer, null)).toBe(answer);
+    expect(sheetModel(boardInProject(answer, null), NOW).head).toMatchObject({ open: 4, repos: 3 });
+  });
+
+  test('a project with no repository on the board shows nothing, rather than everything', () => {
+    expect(sheetModel(boardInProject(answer, 'prj_gone'), NOW).sections).toEqual([]);
+  });
+});
+
+test("the board's own page (a phone's) keeps Reviews' project filter in its address, so a reload still shows that project", () => {
+  const route = routeOf('#prs&project=prj_ledger&state=merged');
+  expect(route).toMatchObject({ page: 'prs', project: 'prj_ledger', prsView: 'merged' });
+  expect(routeOf(hashOf(route))).toMatchObject({ page: 'prs', project: 'prj_ledger', prsView: 'merged' });
+  expect(routeOf('#prs').project).toBeNull();
 });

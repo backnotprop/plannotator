@@ -38,7 +38,7 @@ import { retryTies, startReview } from './startReviews';
 import { untiedStarts } from './reviewStarts';
 import type { InboxToastModel } from '../components/Toast';
 import { useToastAbove } from '../toastAbove';
-import { focusWhenGone, hideWithUndo } from '../pulls/hiddenPulls';
+import { focusWhenGone, hideRepoWithUndo, hideWithUndo, itemsBy } from '../pulls/hiddenPulls';
 import { SheetTable, type TableSection } from './SheetTable';
 import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
 import {
@@ -92,6 +92,8 @@ export interface SheetPageProps {
   machineName?: (machine: string) => string | null;
   /** Open a review thread (Start review thread's report, a tile's Open review thread). Without it neither is offered. */
   onOpenThread?: (threadId: string) => void;
+  /** Reviews' project filter's name, when one is on: `model` is already that project's (`boardInProject`). */
+  projectName?: string | null;
 }
 
 /** The popover: the PR it is of, the tile it hangs from, and whether Enter or a tap pinned it (its actions take focus). */
@@ -552,8 +554,30 @@ export function SheetPage(props: SheetPageProps) {
     },
   });
   const actions = selectOn && (chosen.size > 0 || live.at !== 'idle');
+  // Hide repository (hiddenPulls.ts): every PR in it leaves the board, Reviews and the counts, new ones too; nothing
+  // changes on the forge. Revealed with its header on a desktop (prs.css); not while picking. Undo is the toast's.
+  const repoHide = (section: { key: string; label: string; platform: InboxPull['platform'] }) =>
+    selectOn ? null : (
+      <button
+        type="button"
+        className="ib-prs-rhide"
+        aria-label={`Hide ${section.label}`}
+        title={`Hide this repository from your lists, new pull requests too. They stay open on ${forgeName(section)}.`}
+        onClick={(event) => {
+          // The section leaves: focus goes to the next one's Hide, else the page's title.
+          const root = event.currentTarget.closest('.pn-inbox');
+          focusWhenGone(itemsBy(() => root, 'data-pr-repo-hide'), section.key, () => document.getElementById(titleId));
+          void hideRepoWithUndo(section, props.onToast);
+        }}
+        data-pr-repo-hide={section.key}
+      >
+        <Icon name="eyeOff" size={13} />
+        Hide
+      </button>
+    );
   const table = (sections: TableSection[]) => (
     <SheetTable
+      repoHide={repoHide}
       sections={sections}
       query={q}
       now={now}
@@ -611,7 +635,7 @@ export function SheetPage(props: SheetPageProps) {
               merged!.sections
                 .map((section) => ({ section, shown: section.pulls.filter((p) => !q || matchesQuery(p, q)) }))
                 .filter(({ shown }) => shown.length > 0)
-                .map(({ section, shown }) => ({ key: section.key, host: shown[0]!.host, repo: shown[0]!.repo, label: section.label, outside: false, units: shown.map(alone), count: `${section.pulls.length} merged` })),
+                .map(({ section, shown }) => ({ key: section.key, host: shown[0]!.host, repo: shown[0]!.repo, platform: shown[0]!.platform, label: section.label, outside: false, units: shown.map(alone), count: `${section.pulls.length} merged` })),
             )
           : merged!.sections.map((section) => {
               const shown = section.pulls.filter((p) => !q || matchesQuery(p, q));
@@ -621,6 +645,7 @@ export function SheetPage(props: SheetPageProps) {
                   <div className="ib-prs-sech">
                     <h2>{section.label}</h2>
                     <span className="ib-prs-secn">{section.pulls.length} merged</span>
+                    {repoHide({ key: section.key, label: section.label, platform: section.pulls[0]!.platform })}
                   </div>
                   <div className="ib-prs-tiles">{shown.map((p) => tile(p, alone(p), false))}</div>
                 </section>
@@ -633,8 +658,11 @@ export function SheetPage(props: SheetPageProps) {
   } else if (empty) {
     body = (
       <div className="ib-prs-empty">
-        <h2>{empty.kind === 'nothing' ? 'Nothing open' : empty.head}</h2>
-        {(empty.kind === 'nothing' ? ['Pull requests that ask for your review, that are yours or that are assigned to you show here, from any repository, with every open one in your projects.'] : empty.lines).map(
+        <h2>{empty.kind === 'nothing' ? (props.projectName ? `Nothing open in ${props.projectName}` : 'Nothing open') : empty.head}</h2>
+        {(empty.kind === 'nothing'
+          ? [props.projectName ? 'Clear the project filter in Reviews to see every repository.' : 'Pull requests that ask for your review, that are yours or that are assigned to you show here, from any repository, with every open one in your projects.']
+          : empty.lines
+        ).map(
           (line) => (
             <p key={line}>{line}</p>
           ),
@@ -645,7 +673,7 @@ export function SheetPage(props: SheetPageProps) {
     const count = (section: (typeof visible)[number]) => `${section.open} open${section.landedWeek > 0 ? ` · ${section.landedWeek} landed this week` : ''}`;
     body = (
       <>
-        {layout === 'table' && visible.length > 0 && table(visible.map((section) => ({ ...section, count: count(section) })))}
+        {layout === 'table' && visible.length > 0 && table(visible.map((section) => ({ ...section, platform: section.units[0]!.platform, count: count(section) })))}
         {layout === 'grid' && visible.map((section) => (
           <section key={section.key} className="ib-prs-sec" aria-label={section.label} data-pr-repo={section.key}>
             <div className="ib-prs-sech">
@@ -653,6 +681,7 @@ export function SheetPage(props: SheetPageProps) {
               <h2 title={`${section.host}/${section.repo}`}>{section.label}</h2>
               {section.outside && <span className="ib-prs-outside">not a project</span>}
               <span className="ib-prs-secn">{count(section)}</span>
+              {repoHide({ key: section.key, label: section.label, platform: section.units[0]!.platform })}
             </div>
             <div className="ib-prs-tiles">{section.units.map(unit)}</div>
           </section>
@@ -894,6 +923,11 @@ export function SheetPage(props: SheetPageProps) {
           {/* Nothing listed: the empty words below say so; "0 open in 0 repositories" would only repeat them. */}
           {head && (head.open > 0 || head.landedWeek > 0) && (
             <p className="ib-prs-sum" data-pr-summary="">
+              {props.projectName && (
+                <span className="ib-prs-in" dir="auto" data-pr-summary-project="">
+                  In {props.projectName}
+                </span>
+              )}
               <span>
                 {head.open} open in {head.repos} {head.repos === 1 ? 'repository' : 'repositories'}
               </span>

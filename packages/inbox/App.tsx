@@ -226,7 +226,7 @@ import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
-import { sheetModel, tileOpens } from './prs/sheetModel';
+import { boardInProject, sheetModel, tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
 import { type SheetLayout } from './prs/tableModel';
@@ -4210,9 +4210,12 @@ function Inbox() {
   // The board in Reviews' pane: Open or Merged, Grid or Table, kept while the Inbox is open (Reviews' address has no room for them).
   const [paneView, setPaneView] = useState<SheetView>('open');
   const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
-  const sheetHead = useMemo(() => (sheetPulls.model ? sheetModel(sheetPulls.model, Date.now(), {}).head : null), [sheetPulls.model]);
+  // The board follows Reviews' project filter: in Reviews' pane, on its own page (a phone's), beside a thread from Reviews.
+  const boardProject = route.page === 'reviews' || route.page === 'prs' ? (route.project ?? null) : (route.reviews?.project ?? null);
+  const boardModel = useMemo(() => (sheetPulls.model ? boardInProject(sheetPulls.model, boardProject) : null), [sheetPulls.model, boardProject]);
+  const sheetHead = useMemo(() => (boardModel ? sheetModel(boardModel, Date.now(), {}).head : null), [boardModel]);
   // What the board shares in Reviews' pane and on its own page; a review thread opens beside Reviews.
-  const sheetShared = { model: sheetPulls.model, error: sheetPulls.error, loading: sheetPulls.loading, phone, onMerged: sheetPulls.refresh, onToast: showToast, machineName: (id: string) => machineViews?.find((m) => m.id === id)?.name ?? null, onOpenThread: (id: string) => go({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id }) };
+  const sheetShared = { model: boardModel, projectName: boardProject ? (projectNames.get(boardProject) ?? null) : null, error: sheetPulls.error, loading: sheetPulls.loading, phone, onMerged: sheetPulls.refresh, onToast: showToast, machineName: (id: string) => machineViews?.find((m) => m.id === id)?.name ?? null, onOpenThread: (id: string) => go({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id }) };
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
@@ -5181,15 +5184,15 @@ function Inbox() {
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       prsSummary={sheetHead}
       onToast={showToast}
-      onPullRequests={() => go({ page: 'prs', project: null, thread: null })}
+      onPullRequests={() => go({ page: 'prs', project, thread: null })}
       prBoard={
         <SheetPage
           mode="pane"
           {...sheetShared}
           view={paneView}
           onView={setPaneView}
-          onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project: null, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
-          onOpenStack={(stack) => go({ page: 'prs', project: null, thread: null, stack: stack.id, layer: null })}
+          onOpenPull={(pull, stack) => go(boardPull(pull, stack, { page: 'prs', project, thread: null, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'reviews' }))}
+          onOpenStack={(stack) => go({ page: 'prs', project, thread: null, stack: stack.id, layer: null })}
           layout={paneLayout}
           onLayout={setPaneLayout}
         />
@@ -5205,13 +5208,13 @@ function Inbox() {
   /** A board tile's click: a single open PR Reviews lists opens its launchpad; anything else `view`, the PR view. */
   const boardPull = (pull: InboxPull, stack: InboxPullStack, view: Route): Route => {
     const opens = tileOpens(pull, stack, pulls.model);
-    return opens === 'pull' ? view : { page: 'reviews', project: null, thread: null, stack: opens.launchpad, layer: null };
+    return opens === 'pull' ? view : { page: 'reviews', project: view.project ?? null, thread: null, stack: opens.launchpad, layer: null };
   };
   /** Where the board is: its own page on a phone, Reviews' right pane on a desktop. */
-  const prsHome = (from: Route): Route => (phone ? { page: 'prs', project: null, thread: null, prsView: from.prsView } : { page: 'reviews', project: null, thread: null });
+  const prsHome = (from: Route): Route => (phone ? { page: 'prs', project: from.project ?? null, thread: null, prsView: from.prsView } : { page: 'reviews', project: from.project ?? null, thread: null });
   /** A PR's Back, opened from the board in Reviews, from the board, or from a stack's page. */
   const prsBack = (from: Route): Route =>
-    from.prsFrom === 'reviews' ? { page: 'reviews', project: null, thread: null } : from.prsFrom === 'sheet' ? prsHome(from) : { ...from, layer: null, scope: 'layer', prsFrom: 'stack' };
+    from.prsFrom === 'reviews' ? { page: 'reviews', project: from.project ?? null, thread: null } : from.prsFrom === 'sheet' ? prsHome(from) : { ...from, layer: null, scope: 'layer', prsFrom: 'stack' };
   let main: ReactNode;
   if (tourOn && !tourFixture) {
     main = <TourLoading />;
@@ -5488,7 +5491,7 @@ function Inbox() {
         onView={(prsView) => writeRoute({ ...route, prsView }, { replace: true })}
         layout={route.prsLayout}
         onLayout={(prsLayout) => writeRoute({ ...route, prsLayout }, { replace: true })}
-        onBack={() => close({ page: 'reviews', project: null, thread: null })}
+        onBack={() => close({ page: 'reviews', project: route.project ?? null, thread: null })}
         onOpenPull={(pull, stack) => go(boardPull(pull, stack, { ...route, stack: stack.id, layer: pull.key, scope: 'layer', prsFrom: 'sheet' }))}
         onOpenStack={(stack) => go({ ...route, stack: stack.id, layer: null })}
       />
