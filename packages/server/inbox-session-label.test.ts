@@ -22,6 +22,8 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_DEFAULT_TOOLS } from "../../apps/hook/hooks/mod/inbox-default-tools";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { cleanInboxSessionLabel, createInboxLiveSessions } from "./inbox-sessions";
+import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { createInboxSessionLabels } from "./inbox-session-labels";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -372,5 +374,59 @@ describe("the shared wake (Pi, OpenCode 2)", () => {
     await pollNow();
     expect(bodies).toHaveLength(1);
     expect(bodies[0]).not.toHaveProperty("label");
+  });
+});
+
+async function threads(server: InboxServer): Promise<{ session_labels: Record<string, string>; session_titles: Record<string, string> }> {
+  const response = await fetch(`${base(server)}/api/inbox/threads`);
+  expect(response.status).toBe(200);
+  return (await response.json()) as { session_labels: Record<string, string>; session_titles: Record<string, string> };
+}
+
+async function restartable() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-label-restart-")));
+  roots.push(root);
+  const project = join(root, "ledger");
+  mkdirSync(project, { recursive: true });
+  return { project, dataDir: join(root, "data") };
+}
+
+describe("session labels across an Inbox restart (#3462)", () => {
+  test("an ended session keeps its label and title in the list after the Inbox restarts", async () => {
+    const { project, dataDir } = await restartable();
+    const first = await startInboxServer({ dataDir });
+    await poll(first, "ses_a", project, { label: "Fix login redirect" });
+    expect((await threads(first)).session_labels.ses_a).toBe("Fix login redirect");
+    first.stop();
+
+    const second = await startInboxServer({ dataDir });
+    servers.push(second);
+    // Nothing has polled yet: the session is not live, and its label is the persisted one.
+    expect((await threads(second)).session_labels.ses_a).toBe("Fix login redirect");
+  });
+
+  test("a live label after the restart wins over the persisted one, and replaces it on disk", async () => {
+    const { project, dataDir } = await restartable();
+    const first = await startInboxServer({ dataDir });
+    await poll(first, "ses_a", project, { label: "Old title" });
+    first.stop();
+
+    const second = await startInboxServer({ dataDir });
+    servers.push(second);
+    await poll(second, "ses_a", project, { label: "New title" });
+    expect((await threads(second)).session_labels.ses_a).toBe("New title");
+    expect(createInboxSessionLabels(inboxDir(dataDir)).labels().ses_a).toBe("New title");
+  });
+
+  test("a live session with no label after the restart does not get its old label back", async () => {
+    const { project, dataDir } = await restartable();
+    const first = await startInboxServer({ dataDir });
+    await poll(first, "ses_a", project, { label: "Old title" });
+    first.stop();
+
+    const second = await startInboxServer({ dataDir });
+    servers.push(second);
+    await poll(second, "ses_a", project, {});
+    expect((await threads(second)).session_labels.ses_a).toBeUndefined();
   });
 });

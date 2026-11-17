@@ -398,6 +398,7 @@ import {
   type InboxNoteAgentId,
   type InboxStepsWire,
 } from "@plannotator/core/inbox-types";
+import { createInboxSessionLabels } from "./inbox-session-labels";
 
 /**
  * The hosts whose own connection polls the bridge and wakes its session with the reply: the waking hosts but Codex,
@@ -1296,6 +1297,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const withIcons = { ...wire, icons: agentIconFiles.list() };
     for (const listener of agentFaceListeners) listener(withIcons);
   });
+  // Each session's last known label and host title (inbox/session-labels.json): what an ended session shows after a restart.
+  const sessionLabelStore = createInboxSessionLabels(inboxDir(dataDir));
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
   /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
@@ -4474,6 +4477,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           .filter((agent) => agent.session === session)
           .map((agent) => agent.launch_id),
       ]),
+    onLabel: (session, label, title) => sessionLabelStore.note(session, label, title),
   });
 
   // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while boards are on.
@@ -5463,8 +5467,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const merged = url.searchParams.get("machines") === "1";
         const snoozedMode = snoozedModeOf(url);
         const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
-        const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
-        const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
+        // A session the Inbox is not hearing now (ended, or not heard since a restart) shows its last known label and
+        // title; a live session's own always wins, and a live one with none shows none.
+        const liveNow = new Set(live.allLive().map((s) => s.session));
+        const remembered = (all: Record<string, string>) => {
+          const out: Record<string, string> = {};
+          for (const [session, text] of Object.entries(all)) if (!liveNow.has(session)) out[session] = text;
+          return out;
+        };
+        const labels = { ...remembered(sessionLabelStore.labels()), ...(merged ? machines.sessionNames().labels : {}), ...live.labels() };
+        const titles = { ...remembered(sessionLabelStore.titles()), ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
         // (inbox-linked-marks), and that machine's windows show them. This Inbox's own windows read them apart.
         const door = fromDeviceDoor.get(req);

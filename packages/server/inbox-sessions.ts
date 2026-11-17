@@ -368,6 +368,8 @@ export function createInboxLiveSessions(options: {
   uncertainItemsOf?: (session: string) => string[];
   /** Each poll, with the sessions its conversation continues (nearest first): the agent icons' faces link it (inbox-agent-faces.ts). */
   onPoll?: (session: string, continues: readonly string[]) => void;
+  /** Each poll's cleaned label and host title (null: none sent): the Inbox keeps the last known of each across restarts (inbox-session-labels.ts). */
+  onLabel?: (session: string, label: string | null, title: string | null) => void;
   /** Where each session's first-seen time is kept across restarts (inbox-first-seen.ts); absent: in memory only. */
   firstSeen?: InboxFirstSeen;
 }) {
@@ -566,6 +568,7 @@ export function createInboxLiveSessions(options: {
     const title = cleanInboxSessionLabel(body[INBOX_TITLE_POLL_FIELD]);
     if ((entry.title ?? null) !== title) labelChanges += 1;
     entry.title = title;
+    options.onLabel?.(session, label, title);
     entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
