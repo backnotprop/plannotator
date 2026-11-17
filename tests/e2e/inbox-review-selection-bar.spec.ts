@@ -469,8 +469,9 @@ test('the bottom of the viewport: above the first selected line, not on them, in
         const r = el.getBoundingClientRect();
         return { top: r.top, bottom: r.bottom, height: innerHeight };
       }, undefined, { timeout: 2_000 });
-      expect(at.top, 'line 5 on screen').toBeGreaterThanOrEqual(0);
-      expect(at.bottom, 'line 5 on screen').toBeLessThanOrEqual(at.height);
+      // A pixel either way: scrolled to the bottom, a row can end half a pixel past it.
+      expect(at.top, 'line 5 on screen').toBeGreaterThanOrEqual(-1);
+      expect(at.bottom, 'line 5 on screen').toBeLessThanOrEqual(at.height + 1);
     }).toPass({ timeout: 30_000 });
     await page.waitForTimeout(300);
     await lineAtBottom(page, NEXT, 5);
