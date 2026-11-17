@@ -294,6 +294,32 @@ describe('card layout rules in frame.css', () => {
     return blocks.join('\n');
   })();
 
+  test('a row keeps its title: at least 40% of the row (112 px at the least), the project gives way first, then the trailing text', () => {
+    expect(block('[data-frame-card-row]')).toContain('--frame-card-row-title-min: max(112px, 40%);');
+    expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(block('[data-frame-card-row][data-frame-card-columns~="secondary"]')).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(20px, 160px) minmax(clamp(0px, 100% - 98px - var(--frame-card-row-title-min), 180px), 180px);');
+    const columns = [...css.matchAll(/([^{}]+)\{[^{}]*grid-template-columns: ([^;]+);[^{}]*\}/g)].filter(([, selector]) => selector!.includes('[data-frame-card-row]')).map(([, , value]) => value!);
+    for (const value of columns) expect(value).toMatch(/^36px minmax\((0|var\(--frame-card-row-title-min\)), 1fr\) /);
+    for (const value of columns) expect(value).not.toMatch(/ (160|180)px( |$)/);
+  });
+
+  test('a list shows a project whole or not at all: under the width where 160 px of project and the title at 40% fit, it drops the project and keeps the trailing text aligned', () => {
+    expect(block('[data-frame-card-rows]')).toContain('container: frame-card-rows / inline-size;');
+    const rowPadding = 6 + 10, thumb = 36, project = 160, trailing = 180, gaps = 3 * 14, titleShare = 0.4;
+    const threshold = Math.ceil(rowPadding + (thumb + project + trailing + gaps) / (1 - titleShare));
+    expect(threshold).toBe(713);
+    const at = css.indexOf(`@media (min-width: 768px) {\n  @container frame-card-rows (width < ${threshold}px) {`);
+    expect(at).toBeGreaterThan(-1);
+    const narrow = css.slice(at, css.indexOf('\n}\n', at));
+    expect(block('    [data-frame-card-row][data-frame-card-columns~="secondary"]', narrow)).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(narrow).not.toMatch(/fit-content|auto\b|min-content|max-content/);
+    expect(block('    [data-frame-card-row] [data-frame-card-secondary]', narrow)).toContain('display: none;');
+    expect(block('    [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2)', narrow)).toContain('padding-inline-end: 20px;');
+    expect(narrow).not.toMatch(/hover|focus|pinned|action-rest/);
+    expect(css.indexOf('@container')).toBeLessThan(css.indexOf('@media (max-width: 767px) {\n  [data-frame-card-row] {'));
+  });
+
   test('a row is 44 px tall and 52 on a phone; under 768 px the secondary text is hidden', () => {
     expect(block('[data-frame-card-row]')).toContain('height: 44px;');
     expect(block('[data-frame-card-row]', phone)).toContain('height: 52px;');
@@ -369,8 +395,6 @@ describe('card layout rules in frame.css', () => {
   });
 
   test('a row never moves: no rule changes its columns for a pin, and the action shows just before the trailing text on hover or keyboard focus only', () => {
-    expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(0, 1fr) 180px;');
-    expect(block('[data-frame-card-row][data-frame-card-columns~="secondary"]')).toContain('grid-template-columns: 36px minmax(0, 1fr) 160px 180px;');
     const columnRules = [...css.matchAll(/([^{}]+)\{([^{}]*grid-template-columns[^{}]*)\}/g)].map(([, selector]) => selector!).filter((selector) => selector.includes('[data-frame-card-row]'));
     for (const selector of columnRules) {
       expect(selector).not.toContain('pinned');
