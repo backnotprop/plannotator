@@ -118,14 +118,14 @@ const ITEMS: { action: BulkAction; label: string; icon: IconName; iconClass?: st
   { action: 'priority-remove', label: 'Remove from Priority', icon: 'toBottom' },
 ];
 
-/** Runs one action on the rows it takes. Mark read gives its answer: false when its warning was cancelled. */
-export function runBulk(act: PickActions, action: BulkAction, until?: string): Promise<boolean> | void {
+/** Runs one action on the rows it takes. */
+export function runBulk(act: PickActions, action: BulkAction, until?: string): void {
   const rows = bulkTargets(act.rows, action, act.rules);
   if (rows.length === 0) return;
   const { bulk } = act;
   if (action === 'archive') void bulk.archive(rows);
   else if (action === 'snooze' && until) void bulk.snooze(rows, until);
-  else if (action === 'read') return bulk.markRead(rows);
+  else if (action === 'read') void bulk.markRead(rows);
   else if (action === 'unread') void bulk.markUnread(rows);
   else if (action === 'star' || action === 'unstar') void bulk.star(rows, action === 'star');
   else if (action === 'priority-add' || action === 'priority-remove') void bulk.priority(rows, action === 'priority-add');
