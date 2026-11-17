@@ -49,17 +49,17 @@ import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
 /** A poll's `model`: an id such as `claude-opus-5-5` or a provider's, else null. */
-function modelIdOf(value: unknown): string | null {
+export function modelIdOf(value: unknown): string | null {
   return typeof value === "string" && /^[\w.:/@\[\]-]{1,120}$/.test(value) ? value : null;
 }
 
 /** A poll's `effort`: one of INBOX_EFFORT_LEVELS, else null. */
-function effortLevelOf(value: unknown): string | null {
+export function effortLevelOf(value: unknown): string | null {
   return typeof value === "string" && (INBOX_EFFORT_LEVELS as readonly string[]).includes(value) ? value : null;
 }
 
 /** A poll's `context`: a whole percentage, 0 to 100, else null. */
-function contextPercentOf(value: unknown): number | null {
+export function contextPercentOf(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 && value <= 100 ? value : null;
 }
 

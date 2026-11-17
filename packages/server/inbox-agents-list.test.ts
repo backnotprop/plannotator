@@ -514,6 +514,18 @@ describe("the cap", () => {
 });
 
 describe("linked machines", () => {
+  test("another machine's agent keeps its model, effort and context; a value a poll here would refuse is dropped", () => {
+    const base = { host: "claude-code", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null };
+    const far = inboxPeerAgentsGroup([{ agents: [
+      { ...base, id: "ses-set", session: "ses-set", model: "claude-opus-5-5", effort: "high", context: 63 },
+      { ...base, id: "ses-odd", session: "ses-odd", model: "<b>opus</b>", effort: "turbo", context: 140 },
+    ], total: 2, ended_today: 0 }], "ibx_far")!;
+    expect(far.agents.map((agent) => [agent.id, agent.model, agent.effort, agent.context])).toEqual([
+      ["ses-set", "claude-opus-5-5", "high", 63],
+      ["ses-odd", undefined, undefined, undefined],
+    ]);
+  });
+
   test("the merged view: this Inbox's group first, named by its id, then each machine's from its list, named and capped", () => {
     const own = inboxAgentsGroup(evidence({ sessions: [{ session: "ses-here", host: "pi", root: null, startedAt: 1, lastSeen: 2, live: true, busy: false, label: null }] }));
     const farAgents = Array.from({ length: 100 }, (_, i) => ({ id: `ses-${i}`, session: `ses-${i}`, host: "codex", project: null, state: "idle", waiting: 0, live: true, started_at: null, last_seen_at: null }));
