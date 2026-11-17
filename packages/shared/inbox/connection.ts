@@ -1660,10 +1660,18 @@ export function parseInboxPlace(value: unknown): InboxPlace | null {
  * Where the session lives, from the environment it started with: a Rex pane
  * when Rex's terminal runs it directly (TERM_PROGRAM is `rex`; a tmux or
  * another terminal inside Rex sets its own, and then nothing is said), with
- * REX_SESSION and REX_BLOCK. REX_SERVER is never read. Null otherwise.
+ * REX_SESSION and REX_BLOCK. REX_SERVER is never read. Null otherwise, and
+ * always under test (NODE_ENV `test`, or PLANNOTATOR_TEST_SANDBOX): a test
+ * run from a Rex pane never sends the person's pane.
  */
-export function inboxPlaceFromEnv(env: { TERM_PROGRAM?: string | undefined; REX_SESSION?: string | undefined; REX_BLOCK?: string | undefined }): InboxPlace | null {
-  if (env.TERM_PROGRAM !== 'rex') return null
+export function inboxPlaceFromEnv(env: {
+  TERM_PROGRAM?: string | undefined
+  REX_SESSION?: string | undefined
+  REX_BLOCK?: string | undefined
+  NODE_ENV?: string | undefined
+  PLANNOTATOR_TEST_SANDBOX?: string | undefined
+}): InboxPlace | null {
+  if (env.TERM_PROGRAM !== 'rex' || env.NODE_ENV === 'test' || env.PLANNOTATOR_TEST_SANDBOX) return null
   return parseInboxPlace({ kind: 'rex', session: env.REX_SESSION, block: env.REX_BLOCK })
 }
 

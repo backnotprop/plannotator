@@ -70,6 +70,8 @@ export function RunLine({
   const [copied, setCopied] = useState(false);
   const [cloneCopied, setCloneCopied] = useState(false);
   const [whatsIn, setWhatsIn] = useState(false);
+  // Where Open in Rex put it ("Rex · <session> / <tab>"): said under the line, so a tab the app did not jump to is found.
+  const [opened, setOpened] = useState<string | null>(null);
   const clone = run.clone ?? null;
   // The machine in a clone's words: its name, else this computer (a sentence's first word takes a capital).
   const where = machineName ?? 'this computer';
@@ -84,14 +86,18 @@ export function RunLine({
   const act = async (what: 'stop' | 'open' | 'retry' | 'trust') => {
     setBusy(what);
     setError(null);
+    setOpened(null);
     try {
       if (what === 'stop') await inboxApi.launchStop(run.launch_id, machine);
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id, machine);
       else if (what === 'trust') await inboxApi.launchTrust(run.launch_id, run.trust?.warning ?? null, machine);
-      else await inboxApi.launchOpen(run.launch_id);
+      else {
+        const answer = await inboxApi.launchOpen(run.launch_id, inRex);
+        setOpened(answer.opened === 'rex' && typeof answer.line === 'string' ? answer.line : null);
+      }
       onChanged();
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
+      setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? (inRex ? "Rex didn't open it. Copy the command instead." : 'Terminal did not open; copy the command instead.') : 'That did not work; try again.');
       // The folder changed since this line was read: draw the new warning for the next click.
       if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') onChanged();
     } finally {
@@ -400,6 +406,11 @@ export function RunLine({
         {icon === 'spin' ? <span className="ib-run-spin" aria-hidden="true" /> : icon === 'warn' ? <Icon name="warn" size={14} /> : <span className="ib-run-stopmark" aria-hidden="true" />}
         <span className="ib-run-text" role={run.state === 'failed' || run.state === 'waiting_terminal' || run.state === 'clone_failed' ? 'status' : undefined}>
           {text}
+          {opened && (
+            <span className="ib-run-sub" data-run-opened="">
+              Opened in <bdi>{opened}</bdi>
+            </span>
+          )}
           {bar !== null && (
             <span className="ib-run-bar" aria-hidden="true" data-run-clone-bar="">
               <i style={{ width: `${bar}%` }} />

@@ -49,4 +49,10 @@ describe('where the session lives, on the poll', () => {
     for (const poll of await pollsOf(async () => Promise.reject(new Error('no env')))) expect(INBOX_PLACE_POLL_FIELD in poll).toBe(false)
     for (const poll of await pollsOf()) expect(INBOX_PLACE_POLL_FIELD in poll).toBe(false)
   })
+
+  test('a session under test (bun test, or a sandboxed Plannotator) sends none, even in Rex', async () => {
+    const env = { TERM_PROGRAM: 'rex', REX_SESSION: SESSION, REX_BLOCK: BLOCK }
+    for (const poll of await pollsOf(async () => inboxPlaceFromEnv({ ...env, NODE_ENV: 'test' }))) expect(INBOX_PLACE_POLL_FIELD in poll).toBe(false)
+    for (const poll of await pollsOf(async () => inboxPlaceFromEnv({ ...env, PLANNOTATOR_TEST_SANDBOX: '1' }))) expect(INBOX_PLACE_POLL_FIELD in poll).toBe(false)
+  })
 })

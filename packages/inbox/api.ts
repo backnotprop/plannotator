@@ -1880,7 +1880,7 @@ export const inboxApi = {
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),
   // Launch (behind `inboxLaunch.enabled`, on unless false): the run line's buttons and Settings → Agents' switches.
   launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
-  launchOpen: (launchId: string) => post<{ ok: true; command: string; opened?: 'rex' }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
+  launchOpen: (launchId: string, inRex = false) => post<{ ok: true; command: string; opened?: 'rex'; line?: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), inRex ? { in: 'rex' } : {}),
   launchDelete: (launchId: string, machine?: string | null) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`, undefined, machine), {}),
   launchRetry: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`, undefined, machine), {}),
   /** `warning`: the line the person read (`run.trust.warning`): a server that now reads another saves nothing. */

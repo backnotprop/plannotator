@@ -183,8 +183,6 @@ export interface AgentFacts {
   title: string;
   /** "Claude Code · billing-svc · Studio" */
   sub: string;
-  /** Where it lives, as Rex confirmed it at the list's read ("Rex · work / api"); null when nothing says. */
-  place: string | null;
   state: string;
   rows: [string, string][];
 }
@@ -208,8 +206,10 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  // Where it lives (a Rex pane, as Rex named it at the last read): a row of its own.
+  if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
-  return { title: entry.name, sub, place: agent.place?.line ?? null, state, rows };
+  return { title: entry.name, sub, state, rows };
 }
 
 /**

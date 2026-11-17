@@ -80,7 +80,7 @@ export interface AgentsSectionProps {
   onDelete?: (agent: InboxAgent, machine: string | null) => void;
   /**
    * Show in Rex: Rex's app goes to the pane this computer's agent lives in. Offered on an agent whose place says so
-   * (`place.show`: Rex's app performs actions, and this window is on this computer). Absent: `showInRex` (the Inbox's own).
+   * (`place.show`: Rex's app is attached on this computer and has not said no lately). Absent: `showInRex` (the Inbox's own).
    */
   onShowInRex?: (agent: InboxAgent) => void;
   /** Says a line in the window's live region (the rename field's refusals). */
@@ -116,12 +116,6 @@ function AgentTip({ entry, machine }: { entry: AgentEntry; machine: MachineView 
     <span className="ib-agtip" data-agent-tip="">
       <bdi className="ib-agtip-t">{facts.title}</bdi>
       <span className="ib-agtip-s">{facts.sub}</span>
-      {/* Where it lives (a Rex pane, as Rex named it at the list's read): one more quiet line, the card's own. */}
-      {facts.place && (
-        <bdi className="ib-agtip-s" data-agent-place="">
-          {facts.place}
-        </bdi>
-      )}
       <span className="ib-agtip-st">{facts.state}</span>
       {facts.rows.length > 0 && (
         <span className="ib-agtip-dl">
@@ -292,7 +286,7 @@ const AgentRow = memo(
             </span>
             <span className="ib-sr">
               , {agentHostName(entry.agent.host)}
-              {entry.agent.place ? `, ${entry.agent.place.line}` : ''}
+              {entry.agent.place ? `, in ${entry.agent.place.line.replace(' · ', ', ').replace(' / ', ', ')}` : ''}
             </span>
           </button>
         </Tip>
@@ -390,12 +384,14 @@ export function AgentsSection(props: AgentsSectionProps) {
   const onDelete = useMemo(() => (canDelete ? (entry: AgentEntry) => deleteNow.current?.(entry.agent, entry.machine === props.machines.self ? null : entry.machine) : undefined), [canDelete, props.machines.self]);
   const rexNow = useRef(props.onShowInRex);
   rexNow.current = props.onShowInRex;
+  const announceNow = useRef(props.announce);
+  announceNow.current = props.announce;
   // This computer's agents only: a linked machine's Rex is not this one. Offered only where the list says (`place.show`).
   const onShowInRex = useMemo(
     () => (entry: AgentEntry) => {
       if (entry.machine !== null && entry.machine !== props.machines.self) return;
       if (rexNow.current) rexNow.current(entry.agent);
-      else showInRex(entry.agent.session);
+      else showInRex(entry.agent.session, announceNow.current);
     },
     [props.machines.self],
   );

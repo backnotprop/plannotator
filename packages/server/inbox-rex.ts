@@ -2,49 +2,59 @@
  * Plannotator Inbox and Rex (superlogical.com/rex), a terminal server with sessions, tabs ("windows") and panes
  * ("blocks"): where an agent lives, Open in Rex and Show in Rex (backnotprop/plannotator#3303).
  *
- *  - Where it lives. A session in a Rex pane says so on its poll (INBOX_PLACE_POLL_FIELD: Rex's ids, a hint). Before
- *    anything is shown, `places` asks this computer's Rex whether that block exists and sits in a window of that
- *    session, and reads the session's and the tab's names then, for that answer only: they are never kept. A miss, no
- *    Rex, a slow Rex: nothing is shown.
- *  - Open in Rex. A launched session's Open in Terminal opens its attach command in a new Rex tab, in the Rex session
- *    named for the project (made when there is none), when Rex is where the person works: Rex's app is attached to
- *    its server here. Otherwise the caller opens Terminal as before.
- *  - Show in Rex. Rex's app goes to an agent's pane (`session.select`, then `session.focus_block`). Offered only while
- *    the app performs actions for other programs (its Remote Control setting): `remoteOn` is the last answer the app
- *    gave, kept for a minute.
+ *  - Where it lives. A session in a Rex pane says so on its poll (INBOX_PLACE_POLL_FIELD: Rex's ids, a hint). Rex is
+ *    asked whether that block exists and sits in a window of that session, and the session's and the tab's names are
+ *    read then. A list never waits on Rex: `places` answers from what the last read confirmed and starts the next
+ *    read in the background (`onChange` says when it brought something new). The names live in memory only, for a
+ *    few seconds; a miss, no Rex, a slow Rex: nothing is shown.
+ *  - Open in Rex. A launched session's attach command opens in a new tab of a Rex session the Inbox made for the
+ *    project, recognised by the id it recorded when it made it (`sessionsFile`), never by its name: the Inbox never
+ *    makes a tab in, or changes the active tab of, a session it did not make. The command runs through the person's
+ *    login shell (Rex's own `login` option), with the Inbox's login PATH in front.
+ *  - Show in Rex. Rex's app goes to an agent's pane (`session.select`, then `session.focus_block`), on the person's
+ *    click only. Nothing asks the app anything in the background: the app's answer to that click is the only word
+ *    on whether it performs actions for other programs (its Remote Control setting). Only a confirmed success counts
+ *    as yes; every refusal, error, timeout or answer of an unknown shape counts as no, and the item is not offered
+ *    again for a while.
  *
- * What it never does: start a Rex server (no `rex` binary, no autostart: only an existing socket is connected to),
- * type into a pane, read a pane's contents, list or show sessions that did not connect to the Inbox themselves, write
- * Rex's config. Only on macOS, where the app runs; every failure is "no Rex", silently.
+ * What it never does: start a Rex server (no `rex` binary: only an existing socket, owned by this user, is connected
+ * to), type into a pane, read a pane's contents, list or show sessions that did not connect to the Inbox themselves,
+ * write Rex's config, act through an app that is not attached over this computer's own socket. Only on macOS, where
+ * the app runs; every failure is "no Rex", silently.
  */
-import { join } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { graphemesOf } from "@plannotator/core/inbox-format";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
-import { connectRex, RexCallError, RexUnavailable, type RexConnection } from "./inbox-rex-socket";
+import { connectRex, RexUnavailable, type RexConnection } from "./inbox-rex-socket";
 
-/** The longest a read (where agents live) may take, connecting included; past it nothing is shown. */
+/** The longest a background read (where agents live) may take, connecting included; past it nothing is shown. */
 export const INBOX_REX_READ_TIMEOUT_MS = 400;
-/** The longest Open in Rex or Show in Rex may take. */
-export const INBOX_REX_ACTION_TIMEOUT_MS = 3_000;
-/** How long the app's last answer about performing actions (Remote Control) stands. */
-export const INBOX_REX_REMOTE_MS = 60_000;
-/** After a Rex that did not answer in time, how long nothing asks it again (the list never waits on it twice). */
+/** The longest Open in Rex may take to make its tab (it is never retried elsewhere once asked). */
+export const INBOX_REX_OPEN_TIMEOUT_MS = 10_000;
+/** The longest Show in Rex waits for the app. */
+export const INBOX_REX_SHOW_TIMEOUT_MS = 3_000;
+/** After the app said no (or nothing usable) to Show in Rex, how long it is not offered. */
+export const INBOX_REX_REFUSED_MS = 5 * 60_000;
+/** After a Rex that did not answer in time, how long nothing asks it again. */
 export const INBOX_REX_SLOW_BACKOFF_MS = 30_000;
+/** How old the last read may be before a list starts another (it still answers from the last one at once). */
+export const INBOX_REX_FRESH_MS = 2_000;
+/** A confirmed place is shown at most this long after the last read that confirmed it. */
+const KEEP_MS = 30_000;
 /** A read connection is closed once nothing used it this long. */
 const IDLE_CLOSE_MS = 3_000;
 /** The longest a name shown from Rex is, in characters. */
 const NAME_MAX = 60;
 const TERMINAL_FLAVOR = "com.superlogical.terminal.shell";
+const SESSION_ID = /^session:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** What a failed Open in Rex says (the window shows it under the run line). */
+export const INBOX_REX_OPEN_FAILED = "Rex didn't open it. Copy the command instead.";
 
 /** Where this computer's Rex server listens, on macOS (the app's server); null elsewhere. */
 export function inboxRexSocketPath(platform: string, homeDir: string): string | null {
   return platform === "darwin" ? join(homeDir, "Library", "Application Support", "rex", "server.sock") : null;
-}
-
-/** A place as a window draws it: one quiet line, and whether Show in Rex is offered. */
-export interface InboxRexShown {
-  line: string;
-  show: boolean;
 }
 
 /** A name from Rex as the window may draw it: no control, separator or bidi characters, one line, cut. */
@@ -60,38 +70,105 @@ export function inboxRexLine(session: string, tab: string): string {
   return session && tab ? `Rex · ${session} / ${tab}` : session || tab ? `Rex · ${session || tab}` : "Rex";
 }
 
-type Resolved = { status?: unknown; target?: Record<string, unknown> | null; candidates?: unknown };
+type Resolved = { status?: unknown; target?: Record<string, unknown> | null };
 const resultsOf = (answer: Record<string, unknown>): Resolved[] => (Array.isArray(answer.results) ? (answer.results as Resolved[]) : []);
 const text = (value: unknown) => (typeof value === "string" ? value : "");
 
-/** The app's answer to an action says it performs none for other programs (Remote Control off). */
-function refusesActions(cause: unknown): boolean {
-  if (!(cause instanceof RexCallError)) return true;
-  if (/not accepting actions|remote control/i.test(cause.message)) return true;
-  return cause.code === "refused" || cause.code === "not_supported" || cause.code === "client_unavailable" || cause.code === "timeout";
+/** The socket is a socket (not a link to one, not a file) and this user's own. */
+export function inboxRexSocketOk(path: string, uid: number | null): boolean {
+  try {
+    const stat = lstatSync(path);
+    return stat.isSocket() && (uid === null || stat.uid === uid);
+  } catch {
+    return false;
+  }
+}
+
+/** Rex sessions the Inbox made for Open in Rex, by project: only these ever get a tab from it. */
+function sessionsKept(file: string | null) {
+  let memory: Record<string, string> = {};
+  if (file) {
+    try {
+      const read = JSON.parse(readFileSync(file, "utf8")) as { sessions?: Record<string, unknown> };
+      for (const [key, id] of Object.entries(read.sessions ?? {})) if (typeof id === "string" && SESSION_ID.test(id)) memory[key] = id;
+    } catch {
+      memory = {};
+    }
+  }
+  const save = () => {
+    if (!file) return;
+    try {
+      mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+      const tmp = `${file}.${process.pid}.tmp`;
+      writeFileSync(tmp, JSON.stringify({ v: 1, sessions: memory }), { mode: 0o600 });
+      renameSync(tmp, file);
+    } catch {
+      // Memory still has it for this run.
+    }
+  };
+  return {
+    of: (project: string): string | null => memory[project] ?? null,
+    set(project: string, session: string) {
+      memory = { ...memory, [project]: session };
+      save();
+    },
+    forget(project: string) {
+      if (!(project in memory)) return;
+      const { [project]: _gone, ...rest } = memory;
+      memory = rest;
+      save();
+    },
+  };
 }
 
 export interface InboxRexOptions {
   /** This computer's Rex socket (`inboxRexSocketPath`); null: no Rex here. */
   socketPath: string | null;
+  /** This user's id: the socket and the app's connection must be this user's. Default: the process's own. */
+  uid?: number | null;
   readTimeoutMs?: number;
-  actionTimeoutMs?: number;
+  openTimeoutMs?: number;
+  showTimeoutMs?: number;
   now?: () => number;
   /** Said in the hello. */
   version?: string;
+  /** Where the ids of the Rex sessions the Inbox made are kept, by project. Null: this run's memory only. */
+  sessionsFile?: string | null;
+  /** A background read changed what the list would show (a place line, the app attached or gone). */
+  onChange?: () => void;
 }
+
+/** What Open in Rex did. `sent`: the tab was asked for (whatever came of it): Terminal must not open as well. */
+export type InboxRexOpened = { opened: true; session: string; window: string; line: string } | { opened: false; sent: boolean };
 
 export type InboxRex = ReturnType<typeof createInboxRex>;
 
 export function createInboxRex(options: InboxRexOptions) {
   const now = options.now ?? Date.now;
+  const uid = options.uid !== undefined ? options.uid : (process.getuid?.() ?? null);
   const readTimeout = options.readTimeoutMs ?? INBOX_REX_READ_TIMEOUT_MS;
-  const actionTimeout = options.actionTimeoutMs ?? INBOX_REX_ACTION_TIMEOUT_MS;
+  const openTimeout = options.openTimeoutMs ?? INBOX_REX_OPEN_TIMEOUT_MS;
+  const showTimeout = options.showTimeoutMs ?? INBOX_REX_SHOW_TIMEOUT_MS;
+  const kept = sessionsKept(options.sessionsFile ?? null);
+  const socketPath = () => (options.socketPath && inboxRexSocketOk(options.socketPath, uid) ? options.socketPath : null);
+
   /** No asking before this (a Rex that did not answer in time). */
   let quietUntil = 0;
-  /** The app's last answer about actions, by its client id. */
-  let remote: { app: string; on: boolean; at: number } | null = null;
-  let probing: Promise<void> | null = null;
+  /** What the last reads confirmed: each hinted session's place and line, and the app attached here. */
+  const confirmed = new Map<string, { place: InboxPlace; line: string; at: number }>();
+  let app: { id: string | null; at: number } = { id: null, at: 0 };
+  /** The app said no (or nothing usable) to Show in Rex: its id, and when. */
+  let refused: { app: string; at: number } | null = null;
+  let lastRead = 0;
+  let lastKey = "";
+  let lastHints: ReadonlyMap<string, InboxPlace> = new Map();
+  let reading: Promise<void> | null = null;
+  /** Bumped whenever what the list shows from Rex changes (the delivery watch compares it). */
+  let version = 0;
+  const changed = () => {
+    version++;
+    options.onChange?.();
+  };
 
   /** One read connection, reused while reads come, closed once idle. */
   let reader: Promise<RexConnection> | null = null;
@@ -104,8 +181,9 @@ export function createInboxRex(options: InboxRexOptions) {
     void was?.then((c) => c.close()).catch(() => undefined);
   };
   const readConnection = (): Promise<RexConnection> => {
-    if (!options.socketPath) return Promise.reject(new RexUnavailable("no Rex here"));
-    reader ??= connectRex(options.socketPath, { timeoutMs: readTimeout, version: options.version });
+    const path = socketPath();
+    if (!path) return Promise.reject(new RexUnavailable("no Rex here"));
+    reader ??= connectRex(path, { timeoutMs: readTimeout, version: options.version });
     const mine = reader;
     mine.catch(() => {
       if (reader === mine) reader = null;
@@ -142,34 +220,58 @@ export function createInboxRex(options: InboxRexOptions) {
     }
   };
 
-  /** Run `work` on a connection of its own (an action: it may attach to a session), closed after. */
-  const act = async <T>(work: (rex: RexConnection) => Promise<T>): Promise<T | null> => {
-    if (!options.socketPath) return null;
+  /** A connection of its own (an action may attach to a session), closed after; `work` gets it and its deadline. */
+  const act = async <T>(timeoutMs: number, work: (rex: RexConnection) => Promise<T>): Promise<T | null> => {
+    const path = socketPath();
+    if (!path) return null;
     let rex: RexConnection | null = null;
-    let timer: ReturnType<typeof setTimeout> | null = null;
     try {
-      const connected = await connectRex(options.socketPath, { timeoutMs: actionTimeout, version: options.version });
-      rex = connected;
-      const late = new Promise<null>((resolve) => {
-        timer = setTimeout(() => {
-          connected.close();
-          resolve(null);
-        }, actionTimeout);
-      });
-      return await Promise.race([work(connected), late]);
+      rex = await connectRex(path, { timeoutMs, version: options.version });
+      return await work(rex);
     } catch {
       return null;
     } finally {
-      if (timer) clearTimeout(timer);
       rex?.close();
     }
   };
 
-  /** Rex's app attached here: its client id. One Mac app, else none (another device's app is never asked). */
+  /** A call that gives up after `ms` (the connection is closed by the caller). */
+  const within = <T>(ms: number, call: Promise<T>): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new RexUnavailable("late")), ms);
+      call.then(
+        (value) => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        (cause) => {
+          clearTimeout(timer);
+          reject(cause);
+        },
+      );
+    });
+
+  /**
+   * Rex's app attached here: its client id. Exactly one Mac app, connected over this computer's own socket as this
+   * user (`principal`: peer, unix, this uid). An app on another computer (a tailnet connection) is never one.
+   */
   const appOf = async (rex: RexConnection): Promise<string | null> => {
     const answer = await rex.call("client.list", { kinds: ["app"] });
-    const apps = (Array.isArray(answer.clients) ? answer.clients : []) as { client_id?: unknown; info?: { platform?: unknown }; connection_state?: unknown }[];
-    const here = apps.filter((c) => typeof c.client_id === "string" && (c.info?.platform ?? "macos") === "macos" && (c.connection_state ?? "connected") === "connected");
+    const clients = (Array.isArray(answer.clients) ? answer.clients : []) as Record<string, unknown>[];
+    const here = clients.filter((c) => {
+      const info = (c.info ?? {}) as Record<string, unknown>;
+      const principal = (c.principal ?? {}) as Record<string, unknown>;
+      const state = c.connection_state;
+      return (
+        typeof c.client_id === "string" &&
+        info.kind === "app" &&
+        info.platform === "macos" &&
+        (state === undefined || state === "connected") &&
+        principal.kind === "peer" &&
+        principal.transport === "unix" &&
+        (uid === null || principal.uid === uid)
+      );
+    });
     return here.length === 1 ? (here[0]!.client_id as string) : null;
   };
 
@@ -182,135 +284,195 @@ export function createInboxRex(options: InboxRexOptions) {
     return text(target.window_id) || null;
   };
 
-  /** Ask the app to go to a session's tab; whether it did. Its answer about actions is kept (`remote`). */
-  const select = async (rex: RexConnection, app: string, session: string, window: string): Promise<boolean> => {
-    try {
-      await rex.call("client.perform", { client_id: app, action: "session.select", args: { session_id: session, window_id: window }, origin: "api", timeout_ms: Math.max(500, actionTimeout - 500) });
-      remote = { app, on: true, at: now() };
-      return true;
-    } catch (cause) {
-      if (refusesActions(cause)) remote = { app, on: false, at: now() };
-      return false;
+  /** One read: the hinted places Rex confirms, with names, and the app attached here. */
+  const readNow = async (hints: ReadonlyMap<string, InboxPlace>) => {
+    const found = await read(async (rex) => {
+      const bySession = new Map<string, { session: string; place: InboxPlace }[]>();
+      for (const [session, place] of hints) bySession.set(place.session, [...(bySession.get(place.session) ?? []), { session, place }]);
+      const rows: { session: string; place: InboxPlace; window: string }[] = [];
+      const windowNames = new Map<string, string>();
+      for (const [rexSession, entries] of bySession) {
+        const results = resultsOf(await rex.call("target.resolve", { kinds: ["block"], queries: entries.map((e) => e.place.block), scope: { session: rexSession } }));
+        const mine: typeof rows = [];
+        entries.forEach((e, i) => {
+          const target = results[i]?.status === "resolved" ? results[i]!.target : null;
+          const window = target && target.kind === "block" && target.block_id === e.place.block && target.session_id === rexSession ? text(target.window_id) : "";
+          if (window) mine.push({ ...e, window });
+        });
+        rows.push(...mine);
+        const windows = [...new Set(mine.map((r) => r.window))];
+        if (windows.length === 0) continue;
+        const named = resultsOf(await rex.call("target.resolve", { kinds: ["window"], queries: windows, scope: { session: rexSession } }));
+        windows.forEach((w, i) => windowNames.set(w, named[i]?.status === "resolved" ? cleanName(named[i]!.target?.label) : ""));
+      }
+      const sessions = [...new Set(rows.map((r) => r.place.session))];
+      const named = sessions.length ? resultsOf(await rex.call("target.resolve", { kinds: ["session"], queries: sessions })) : [];
+      const sessionNames = new Map(sessions.map((s, i) => [s, named[i]?.status === "resolved" && named[i]!.target?.session_id === s ? cleanName(named[i]!.target?.label) : ""]));
+      return { rows, sessionNames, windowNames, app: await appOf(rex) };
+    });
+    const at = now();
+    lastRead = at;
+    let moved = false;
+    if (!found) {
+      // No answer: nothing confirmed stands past its time (and an app that may be gone is not acted on).
+      if (app.id !== null) moved = true;
+      app = { id: null, at };
+    } else {
+      const lines = new Map(found.rows.map((r) => [r.session, { place: r.place, line: inboxRexLine(found.sessionNames.get(r.place.session) ?? "", found.windowNames.get(r.window) ?? "") }]));
+      for (const session of hints.keys()) {
+        const next = lines.get(session);
+        const was = confirmed.get(session);
+        if (!next) {
+          if (was) moved = true;
+          confirmed.delete(session);
+        } else {
+          if (!was || was.line !== next.line || was.place.block !== next.place.block) moved = true;
+          confirmed.set(session, { ...next, at });
+        }
+      }
+      if (found.app !== app.id) moved = true;
+      app = { id: found.app, at };
     }
+    if (moved) changed();
   };
 
-  /**
-   * Whether the app performs actions for other programs, asked once a minute at most and never while a read waits:
-   * `session.select` with no session, which changes nothing; the app refuses every action while Remote Control is off.
-   */
-  const probeRemote = (app: string) => {
-    if (probing || (remote && remote.app === app && now() - remote.at < INBOX_REX_REMOTE_MS)) return;
-    probing = (async () => {
-      await act(async (rex) => {
-        try {
-          await rex.call("client.perform", { client_id: app, action: "session.select", args: { session_id: "" }, origin: "api", timeout_ms: 1_000 });
-          remote = { app, on: true, at: now() };
-        } catch (cause) {
-          remote = { app, on: !refusesActions(cause), at: now() };
-        }
+  /** Start a read when the last one is stale or asked about other places; never more than one at a time. */
+  const refresh = (hints: ReadonlyMap<string, InboxPlace>) => {
+    const key = [...hints].map(([s, p]) => `${s}=${p.session}/${p.block}`).sort().join(",");
+    if (reading || (key === lastKey && now() - lastRead < INBOX_REX_FRESH_MS)) return;
+    lastKey = key;
+    lastHints = hints;
+    reading = readNow(hints)
+      .catch(() => undefined)
+      .finally(() => {
+        reading = null;
       });
-    })().finally(() => {
-      probing = null;
-    });
   };
+
+  const appHere = () => (app.id !== null && now() - app.at < KEEP_MS ? app.id : null);
 
   return {
     /**
-     * Each place Rex confirms, by session: the line (the session's and the tab's names, read now) and whether Show in
-     * Rex is offered (`actions`: the window asking is on this computer). Places Rex does not confirm are left out.
+     * The places Rex confirmed for these hints, by session (one line each), from the last read: answered at once,
+     * never waiting on Rex. A stale or different ask starts the next read in the background.
      */
-    async places(hints: ReadonlyMap<string, InboxPlace>, actions: boolean): Promise<Map<string, InboxRexShown>> {
-      const out = new Map<string, InboxRexShown>();
-      if (hints.size === 0) return out;
-      const found = await read(async (rex) => {
-        const bySession = new Map<string, { session: string; block: string }[]>();
-        for (const [session, place] of hints) bySession.set(place.session, [...(bySession.get(place.session) ?? []), { session, block: place.block }]);
-        const rows: { session: string; rexSession: string; window: string }[] = [];
-        const windowNames = new Map<string, string>();
-        for (const [rexSession, blocks] of bySession) {
-          const answer = await rex.call("target.resolve", { kinds: ["block"], queries: blocks.map((b) => b.block), scope: { session: rexSession } });
-          const results = resultsOf(answer);
-          blocks.forEach((b, i) => {
-            const target = results[i]?.status === "resolved" ? results[i]!.target : null;
-            const window = target && target.kind === "block" && target.block_id === b.block && target.session_id === rexSession ? text(target.window_id) : "";
-            if (window) rows.push({ session: b.session, rexSession, window });
-          });
-          const windows = [...new Set(rows.filter((r) => r.rexSession === rexSession).map((r) => r.window))];
-          if (windows.length === 0) continue;
-          const named = resultsOf(await rex.call("target.resolve", { kinds: ["window"], queries: windows, scope: { session: rexSession } }));
-          windows.forEach((w, i) => windowNames.set(w, named[i]?.status === "resolved" ? cleanName(named[i]!.target?.label) : ""));
-        }
-        if (rows.length === 0) return { rows, sessionNames: new Map<string, string>(), windowNames, app: null as string | null };
-        const sessions = [...new Set(rows.map((r) => r.rexSession))];
-        const named = resultsOf(await rex.call("target.resolve", { kinds: ["session"], queries: sessions }));
-        const sessionNames = new Map(sessions.map((s, i) => [s, named[i]?.status === "resolved" && named[i]!.target?.session_id === s ? cleanName(named[i]!.target?.label) : ""]));
-        const app = actions ? await appOf(rex) : null;
-        return { rows, sessionNames, windowNames, app };
-      });
-      if (!found) return out;
-      const app = found.app;
-      if (app) probeRemote(app);
-      const showable = !!app && remote?.app === app && remote.on && now() - remote.at < INBOX_REX_REMOTE_MS;
-      for (const row of found.rows) {
-        out.set(row.session, { line: inboxRexLine(found.sessionNames.get(row.rexSession) ?? "", found.windowNames.get(row.window) ?? ""), show: showable });
+    places(hints: ReadonlyMap<string, InboxPlace>): Map<string, string> {
+      refresh(hints);
+      const out = new Map<string, string>();
+      for (const [session, place] of hints) {
+        const known = confirmed.get(session);
+        if (known && known.place.session === place.session && known.place.block === place.block && now() - known.at < KEEP_MS) out.set(session, known.line);
       }
       return out;
     },
 
-    /** Whether Open in Terminal opens in Rex here: Rex's app is attached to its server on this computer. */
-    async opensHere(): Promise<boolean> {
-      return (await read(appOf)) !== null;
+    /** Rex's app is attached here over this computer's own socket (as the last read said); starts a read when stale. */
+    appAttached(): boolean {
+      refresh(lastHints);
+      return appHere() !== null;
+    },
+
+    /** Show in Rex may be offered: the app is attached here and has not said no to it lately. */
+    offersShow(): boolean {
+      const id = appHere();
+      return id !== null && !(refused && refused.app === id && now() - refused.at < INBOX_REX_REFUSED_MS);
+    },
+
+    /** What the list's Rex part depends on (the delivery watch says `agents` when it moves). */
+    version: () => version,
+
+    /** Wait for the read under way (tests). */
+    settled: async () => {
+      while (reading) await reading;
     },
 
     /**
-     * Open `command` in a new Rex tab named `tab`, in the Rex session named `project` (made when there is none), and
-     * have the app go to it when it performs actions. Null when Rex's app is not attached here or Rex said no before
-     * the tab was made: the caller opens Terminal instead. Never types into a pane: the command is the tab's program.
+     * Open `command` in a new tab named `tab` of the Rex session the Inbox made for `projectKey` (made now, labelled
+     * `project`, when it has none or that one is gone). Runs through the person's login shell, with `pathPrepend`
+     * first on its PATH. The app is asked to go to the tab, best effort, after it exists: whatever it answers, an
+     * open tab is an open. `sent: true` on a failure means the tab may exist: the caller opens nothing else.
      */
-    async open(request: { project: string; tab: string; command: string }): Promise<{ session: string; window: string } | null> {
+    async open(request: { project: string; projectKey: string; tab: string; command: string; pathPrepend?: readonly string[] }): Promise<InboxRexOpened> {
       const project = cleanName(request.project).slice(0, 128) || "Plannotator";
       const tab = cleanName(request.tab).slice(0, 128);
-      return act(async (rex) => {
-        const app = await appOf(rex);
-        if (!app) return null;
-        const layout = { block: { flavor: TERMINAL_FLAVOR, options: { command: ["/bin/sh", "-c", request.command] } } };
-        // The session named for the project: by its label only (Rex would also take an id's end, another session's).
-        const result = resultsOf(await rex.call("target.resolve", { kinds: ["session"], queries: [project] }))[0];
-        const sameName = (t: Record<string, unknown> | null | undefined) => !!t && t.kind === "session" && typeof t.session_id === "string" && text(t.label).toLowerCase() === project.toLowerCase();
-        const candidates = (Array.isArray(result?.candidates) ? result.candidates : []) as Record<string, unknown>[];
-        const existing = result?.status === "resolved" && sameName(result.target) ? (result.target!.session_id as string) : result?.status === "ambiguous" ? ((candidates.find(sameName)?.session_id as string | undefined) ?? null) : null;
+      let sent = false;
+      const result = await act(openTimeout, async (rex): Promise<InboxRexOpened> => {
+        const appId = await within(openTimeout, appOf(rex));
+        if (!appId) return { opened: false, sent: false };
+        const layout = {
+          block: {
+            flavor: TERMINAL_FLAVOR,
+            // The person's own shell as a login shell reads their profile first; the Inbox's PATH goes in front.
+            options: { command: ["/bin/sh", "-c", request.command], login: true, ...(request.pathPrepend?.length ? { path_prepend: [...request.pathPrepend] } : {}) },
+          },
+        };
+        // The session the Inbox made for this project, by the id it kept: never one found by its name.
+        let own = kept.of(request.projectKey);
+        let ownLabel = project;
+        if (own) {
+          const result = resultsOf(await within(openTimeout, rex.call("target.resolve", { kinds: ["session"], queries: [own] })))[0];
+          if (result?.status === "resolved" && result.target?.session_id === own) ownLabel = cleanName(result.target?.label) || project;
+          else {
+            kept.forget(request.projectKey);
+            own = null;
+          }
+        }
         let session: string;
         let window: string;
-        if (existing) {
-          await rex.call("session.attach", { session_id: existing });
-          const made = await rex.call("session.new_window", { session_id: existing, ...(tab ? { window_label: tab } : {}), layout, focus: true });
-          session = existing;
+        if (own) {
+          await within(openTimeout, rex.call("session.attach", { session_id: own }));
+          sent = true;
+          const made = await within(openTimeout, rex.call("session.new_window", { session_id: own, ...(tab ? { window_label: tab } : {}), layout, focus: true }));
+          session = own;
           window = text(made.window_id);
         } else {
-          const made = await rex.call("session.create", { label: project, initial_windows: [{ ...(tab ? { window_label: tab } : {}), layout }] });
+          sent = true;
+          const made = await within(openTimeout, rex.call("session.create", { label: project, initial_windows: [{ ...(tab ? { window_label: tab } : {}), layout }] }));
           session = text(made.session_id);
           window = text((made.initial_windows as { window_id?: unknown }[] | undefined)?.[0]?.window_id);
+          if (SESSION_ID.test(session)) kept.set(request.projectKey, session);
         }
-        if (!session || !window) return null;
-        await select(rex, app, session, window);
-        return { session, window };
-      }).catch(() => null);
+        if (!session || !window) return { opened: false, sent: true };
+        // Best effort, on its own short clock: the tab is open whatever the app says.
+        await within(1_500, rex.call("client.perform", { client_id: appId, action: "session.select", args: { session_id: session, window_id: window }, origin: "api", timeout_ms: 1_000 })).catch(() => undefined);
+        return { opened: true, session, window, line: inboxRexLine(ownLabel, tab) };
+      });
+      return result ?? { opened: false, sent };
     },
 
-    /** Have Rex's app go to `place`'s pane. Whether it did; false when the pane is gone or the app performs no actions. */
-    async show(place: InboxPlace): Promise<boolean> {
-      return (
-        (await act(async (rex) => {
-          const window = await windowOf(rex, place);
-          const app = window ? await appOf(rex) : null;
-          if (!window || !app) return false;
-          if (!(await select(rex, app, place.session, window))) return false;
-          // The pane itself, in a tab of several.
-          await rex.call("session.attach", { session_id: place.session });
-          await rex.call("session.focus_block", { session_id: place.session, block_id: place.block }).catch(() => undefined);
-          return true;
-        })) === true
-      );
+    /**
+     * Have Rex's app go to `place`'s pane, on the person's click. `shown` only for the app's confirmed success
+     * (`performed_by` is that app); anything else is a no, and Show in Rex is not offered for a while.
+     */
+    async show(place: InboxPlace): Promise<{ shown: boolean }> {
+      const outcome = await act(showTimeout, async (rex) => {
+        const window = await within(showTimeout, windowOf(rex, place));
+        const appId = window ? await within(showTimeout, appOf(rex)) : null;
+        if (!window || !appId) return { shown: false, app: null as string | null };
+        let answer: Record<string, unknown> | null = null;
+        try {
+          answer = await within(showTimeout, rex.call("client.perform", { client_id: appId, action: "session.select", args: { session_id: place.session, window_id: window }, origin: "api", timeout_ms: Math.max(500, showTimeout - 500) }));
+        } catch {
+          answer = null;
+        }
+        if (!answer || answer.performed_by !== appId) return { shown: false, app: appId };
+        // The pane itself, in a tab of several: best effort, the app already went there.
+        try {
+          await within(1_500, rex.call("session.attach", { session_id: place.session }));
+          await within(1_500, rex.call("session.focus_block", { session_id: place.session, block_id: place.block }));
+        } catch {
+          // Shown all the same.
+        }
+        return { shown: true, app: appId };
+      });
+      if (outcome?.app && !outcome.shown) {
+        refused = { app: outcome.app, at: now() };
+        changed();
+      } else if (outcome?.shown && refused) {
+        refused = null;
+        changed();
+      }
+      return { shown: outcome?.shown === true };
     },
 
     /** Close what is open (the Inbox stops). */

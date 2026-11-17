@@ -792,6 +792,8 @@ async function placeOf($: Engine): Promise<InboxPlace | null> {
     TERM_PROGRAM: text(await $.env.get('TERM_PROGRAM')),
     REX_SESSION: text(await $.env.get('REX_SESSION')),
     REX_BLOCK: text(await $.env.get('REX_BLOCK')),
+    NODE_ENV: text(await $.env.get('NODE_ENV')),
+    PLANNOTATOR_TEST_SANDBOX: text(await $.env.get('PLANNOTATOR_TEST_SANDBOX')),
   })
 }
 

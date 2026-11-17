@@ -32,6 +32,12 @@ describe("the place hint", () => {
     expect(inboxPlaceFromEnv({ ...REX, REX_SESSION: `${SESSION}\n` })).toBeNull();
   });
 
+  test("under test (bun test, or a sandboxed Plannotator) never: a test run from a Rex pane does not send the person's pane", () => {
+    expect(inboxPlaceFromEnv({ ...REX, NODE_ENV: "test" })).toBeNull();
+    expect(inboxPlaceFromEnv({ ...REX, PLANNOTATOR_TEST_SANDBOX: "1" })).toBeNull();
+    expect(inboxPlaceFromEnv({ ...REX, NODE_ENV: "production" })).toEqual({ kind: "rex", session: SESSION, block: BLOCK });
+  });
+
   test("REX_SERVER is never part of it", () => {
     expect(inboxPlaceFromEnv({ ...REX, REX_SERVER: "/elsewhere.sock" } as typeof REX)).toEqual({ kind: "rex", session: SESSION, block: BLOCK });
   });
@@ -75,5 +81,9 @@ describe("the shared connection's poll (Pi, OpenCode and the other hosts on agen
   test("anywhere else, tmux inside Rex included: no such field", async () => {
     expect(INBOX_PLACE_POLL_FIELD in (await pollBody({ ...REX, TERM_PROGRAM: "tmux" }))).toBe(false);
     expect(INBOX_PLACE_POLL_FIELD in (await pollBody({}))).toBe(false);
+  });
+
+  test("a connection under test sends none, even from Rex's terminal", async () => {
+    expect(INBOX_PLACE_POLL_FIELD in (await pollBody({ ...REX, PLANNOTATOR_TEST_SANDBOX: "1" }))).toBe(false);
   });
 });

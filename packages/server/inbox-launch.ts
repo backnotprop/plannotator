@@ -89,7 +89,7 @@ import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from ".
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import type { InboxRex } from "./inbox-rex";
+import { INBOX_REX_OPEN_FAILED, type InboxRex } from "./inbox-rex";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -243,8 +243,8 @@ export function createInboxLaunch(options: {
   folderReadTimeoutMs?: number;
   /** macOS's folder dialog ("Choose in Finder…"): the folder picked, or null when the person cancelled (tests stand in). */
   chooseFolder?: () => Promise<string | null>;
-  /** This computer's Rex (inbox-rex.ts): Open in Terminal opens a Rex tab while Rex's app is attached here. Absent: Terminal only. */
-  rex?: Pick<InboxRex, "opensHere" | "open">;
+  /** This computer's Rex (inbox-rex.ts): Open in Rex, when the window's button said Rex. Absent: Terminal only. */
+  rex?: Pick<InboxRex, "open">;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -1304,6 +1304,46 @@ ${result.text}`);
   /** The quiet check's answers by URL, for a minute: typing on, or a second window, asks git once. */
   const reachKnown = new Map<string, { at: number; reach: Awaited<ReturnType<typeof checkGitRemote>> }>();
 
+  /** Opens under way, by launch (one per click). */
+  const opening = new Map<string, Promise<{ body: Record<string, unknown>; status: number; error?: InboxError }>>();
+  /**
+   * Open in Terminal, or Open in Rex when the window's button said Rex (`rex`: never from another machine). Rex: a new
+   * tab in the Rex session the Inbox made for the project (inbox-rex.ts); it never falls back to Terminal, so the
+   * command never runs twice. Either failing hands the host's `terminalFailed` the command, so nothing is left without
+   * a process (Pi, Codex and OpenCode hand their session over in `terminal`).
+   */
+  const openTerminal = async (root: InboxMessage, host: LaunchHost, launch: InboxLaunchRecord, rex: boolean): Promise<{ body: Record<string, unknown>; status: number; error?: InboxError }> => {
+    const e = await environment();
+    // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
+    // first: `terminal` may hand a session over, and a refused Open must change nothing.
+    const osascript = rex ? null : e.which("osascript");
+    const unavailable = () => new InboxError("open_unavailable", options.platform === "darwin" ? "osascript is not on PATH; copy the command instead." : "Open in Terminal is for macOS; copy the command instead.");
+    if (rex && !options.rex) return { body: {}, status: 409, error: new InboxError("open_unavailable", INBOX_REX_OPEN_FAILED) };
+    if (!rex && !osascript) return { body: {}, status: 409, error: unavailable() };
+    // A start or restart the agent refused for trust: the host's command where trust is accepted.
+    const untrusted = !!launch.error || respawnUntrustedOf(memoOf(launch));
+    const command = host.terminal(launch, untrusted);
+    if (rex) {
+      // The tab runs the command itself (nothing is typed), through the person's login shell with the Inbox's PATH first.
+      const opened = await options.rex!.open({
+        project: store.project(root.project_id)?.name ?? basename(launch.folder),
+        projectKey: root.project_id ?? launch.folder,
+        tab: host.name,
+        command,
+        pathPrepend: [...loginPath, ...options.installDirs],
+      });
+      if (opened.opened) return { body: { ok: true, command, opened: "rex", line: opened.line }, status: 200 };
+      host.terminalFailed?.(launch, command);
+      return { body: {}, status: 409, error: new InboxError("open_unavailable", INBOX_REX_OPEN_FAILED) };
+    }
+    // `on run argv`: the command is an argument, never part of the script's text.
+    const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
+    const result = await e.run([osascript!, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });
+    if (result.exitCode !== 0) host.terminalFailed?.(launch, command);
+    if (result.exitCode !== 0) return { body: {}, status: 409, error: new InboxError("open_unavailable", `Terminal did not open: ${(result.stderr || result.stdout).trim().slice(0, 200)}`) };
+    return { body: { ok: true, command }, status: 200 };
+  };
+
   /**
    * `door`: the request
    * came through the device door (a linked machine's Stop, Try again, Trust folder or Delete; remote launch). A
@@ -1406,30 +1446,25 @@ ${result.text}`);
         return json({ run: await stopLaunch(root, host) });
       case "open": {
         if (via === "tailnet") return localOnly();
-        const e = await environment();
-        // Rex, where the person works in it (its app is attached here, inbox-rex.ts): a new Rex tab instead of Terminal.
-        // Only for a window on this computer, never a linked machine's (its window offers Terminal).
-        const rex = !door && options.rex && (await options.rex.opensHere()) ? options.rex : null;
-        // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
-        // first: `terminal` may hand a session over, and a refused Open must change nothing.
-        const osascript = e.which("osascript");
-        const unavailable = () => new InboxError("open_unavailable", options.platform === "darwin" ? "osascript is not on PATH; copy the command instead." : "Open in Terminal is for macOS; copy the command instead.");
-        if (!osascript && !rex) throw unavailable();
-        // A start or restart the agent refused for trust: the host's command where trust is accepted.
-        const untrusted = !!launch.error || respawnUntrustedOf(memoOf(launch));
-        const command = host.terminal(launch, untrusted);
-        // The tab runs the command itself (nothing is typed), in the Rex session named for the project.
-        if (rex && (await rex.open({ project: store.project(root.project_id)?.name ?? basename(launch.folder), tab: host.name, command }))) return json({ ok: true, command, opened: "rex" });
-        if (!osascript) {
-          host.terminalFailed?.(launch, command);
-          throw unavailable();
+        // One open per click: a second press while one is under way gets the same answer, never a second tab.
+        const under = opening.get(launch.id);
+        if (under) {
+          const answer = await under;
+          if (answer.error) throw answer.error;
+          return json(answer.body, answer.status);
         }
-        // `on run argv`: the command is an argument, never part of the script's text.
-        const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
-        const result = await e.run([osascript, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });
-        if (result.exitCode !== 0) host.terminalFailed?.(launch, command);
-        if (result.exitCode !== 0) throw new InboxError("open_unavailable", `Terminal did not open: ${(result.stderr || result.stdout).trim().slice(0, 200)}`);
-        return json({ ok: true, command });
+        // Where the window's button said it opens (`in`): Rex only when it said Rex, and then Rex or nothing (an
+        // older window sends none: Terminal, as before).
+        const inRex = body.in === "rex";
+        const done = openTerminal(root, host, launch, inRex && !door);
+        opening.set(launch.id, done);
+        try {
+          const answer = await done;
+          if (answer.error) throw answer.error;
+          return json(answer.body, answer.status);
+        } finally {
+          opening.delete(launch.id);
+        }
       }
       case "delete": {
         // A Delete under way (a double click): the same answer, once it is done.

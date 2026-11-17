@@ -1,7 +1,8 @@
 /**
  * Rex in a running Inbox (CI runs this: it starts one), with a fake Rex (tests/helpers/fake-rex.ts) as this
- * computer's. What it guards: an agent's place reaches the Agents list only as Rex confirms it, as one line; Show in
- * Rex is offered only to a window on this computer and only while Rex's Remote Control is on; the Show route answers
+ * computer's. What it guards: an agent's place reaches the Agents list only as Rex confirms it, as one line, and only
+ * for this computer's own window (the tailnet gets none, and makes no Rex read); a session the Inbox launched never
+ * gets one; Show in Rex asks the app only at the click, and a refusal takes the item away; the Show route answers
  * only this computer's own window (never the tailnet, never another site); a session that never said it lives in
  * Rex is never shown there.
  */
@@ -14,11 +15,12 @@ import type { InboxAgentsGroup } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_POLL_PATH, INBOX_PLACE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { NO_BROWSER } from "../../tests/helpers/no-browser";
+import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxRex } from "./inbox-rex";
 
-const ENV_KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_BROWSER", "HOME"] as const;
+const ENV_KEYS = ["PLANNOTATOR_DATA_DIR", "PLANNOTATOR_INBOX_TAILSCALE", "PLANNOTATOR_BROWSER", "HOME", "PLANNOTATOR_TEST_SANDBOX"] as const;
 const savedEnv = Object.fromEntries(ENV_KEYS.map((key) => [key, process.env[key]]));
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -70,25 +72,59 @@ async function world(options: { remote: boolean }) {
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   process.env.HOME = home;
   process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
+  process.env.PLANNOTATOR_TEST_SANDBOX = dataDir;
   delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxLaunch: { enabled: true } }));
   const fake = startFakeRex({ remote: options.remote });
   fakes.push(fake);
-  const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale(), rex: createInboxRex({ socketPath: fake.socketPath }) });
+  const launchHost = fakeLaunchHost();
+  const server = await startInboxServer({
+    dataDir,
+    binaryPath: null,
+    phones: false,
+    tailscale: scriptedTailscale(),
+    readProjectRepo: async () => null,
+    launchHosts: () => [launchHost.host],
+    rex: createInboxRex({ socketPath: fake.socketPath, readTimeoutMs: 1_000 }),
+  });
   servers.push(server);
   const client = new Client({ name: "inbox-rex-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
   const base = `http://127.0.0.1:${server.port}`;
-  /** A session writes once (so it is listed) and polls, saying where it lives (or not). */
-  const agent = async (session: string, place?: { session: string; block: string }) => {
-    await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: session, agent_name: "Claude Code", agent_host: "claude-code", body: `Hello from ${session}.` } });
+  /** A session polls, saying where it lives (or not). */
+  const poll = async (session: string, place?: { session: string; block: string }) => {
     const response = await fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
       body: JSON.stringify({ session, waitMs: 0, ...(place ? { [INBOX_PLACE_POLL_FIELD]: { kind: "rex", ...place } } : {}) }),
     });
     expect(response.status).toBe(200);
+  };
+  /** A session writes once (so it is listed) and polls. */
+  const agent = async (session: string, place?: { session: string; block: string }) => {
+    await client.callTool({ name: "send_message", arguments: { project_path: project, agent_session: session, agent_name: "Claude Code", agent_host: "claude-code", body: `Hello from ${session}.` } });
+    await poll(session, place);
+  };
+  /** A session the Inbox launched (the engine's fake host), answering a question: its session id once started. */
+  const launched = async () => {
+    const store = server.store;
+    const folder = store.ensureProject({ name: "my-app", root: project });
+    const asked = store.sendMessage({ project_id: folder.id, author: { kind: "agent", host: "claude-code", session: "ses-asker", name: "Claude Code" }, body: "Which one?", wakes: true, idempotency_key: "asked" }).message;
+    const sent = await fetch(`${base}/api/inbox/messages/${asked.id}/reply`, {
+      method: "POST",
+      headers: { Origin: base, "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k1", words: "This one.", questions: [], to: { launch: { agent: FAKE, project_id: folder.id } } }),
+    });
+    expect(sent.status).toBe(200);
+    const id = ((await sent.json()) as { reply: { id: string } }).reply.id;
+    let session: string | null = null;
+    for (let i = 0; i < 400 && !session; i++) {
+      session = store.message(id)?.launch?.session ?? null;
+      if (!session) await Bun.sleep(5);
+    }
+    expect(session).not.toBeNull();
+    return session!;
   };
   const windowHeaders = { "Sec-Fetch-Site": "same-origin", Origin: base };
   const agentsOf = async (headers: Record<string, string> = windowHeaders, at = base) => {
@@ -102,10 +138,10 @@ async function world(options: { remote: boolean }) {
     expect(listener).not.toBeNull();
     return { at: `http://127.0.0.1:${listener}`, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, Origin: `https://${MAGIC}:${server.port}`, "Sec-Fetch-Site": "same-origin" } };
   };
-  return { fake, agent, agentsOf, show, tailnet };
+  return { fake, agent, poll, launched, agentsOf, show, tailnet };
 }
 
-/** Wait for the app's answer about actions (asked in the background after a read). */
+/** Wait for the list to say it (Rex is read in the background; the list answers from the last read). */
 async function until(check: () => Promise<boolean>) {
   for (let i = 0; i < 100; i++) {
     if (await check()) return;
@@ -121,29 +157,33 @@ describe("the Agents list and Rex", () => {
     await w.agent("ses-in-rex", ids);
     await w.agent("ses-elsewhere");
     await w.agent("ses-wrong", { session: ids.session, block: "block:01a1eb35-0de6-701f-808a-16e06621d0ae" });
+    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place !== undefined);
     const agents = await w.agentsOf();
-    expect(agents.find((a) => a.session === "ses-in-rex")?.place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code" });
+    expect(agents.find((a) => a.session === "ses-in-rex")?.place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code", show: true });
     expect(agents.find((a) => a.session === "ses-elsewhere")?.place).toBeUndefined();
     expect(agents.find((a) => a.session === "ses-wrong")?.place).toBeUndefined();
+    // Read for the list, the app was asked nothing.
+    expect(w.fake.methods()).not.toContain("client.perform");
   });
 
-  test("Show in Rex: offered to this computer's window while Remote Control is on, never over the tailnet", async () => {
+  test("a session the Inbox launched gets no place, whatever pane it says", async () => {
+    const w = await world({ remote: true });
+    const ids = w.fake.addSession("my-app", "Claude Code");
+    const session = await w.launched();
+    await w.poll(session, ids);
+    await w.agent("ses-in-rex", ids);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place !== undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)?.place).toBeUndefined();
+  });
+
+  test("over the tailnet: no place, and Rex is not read", async () => {
     const w = await world({ remote: true });
     const ids = w.fake.addSession("my-app", "Claude Code");
     await w.agent("ses-in-rex", ids);
-    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place?.show === true);
     const remote = w.tailnet();
-    const overTailnet = (await w.agentsOf(remote.headers, remote.at)).find((a) => a.session === "ses-in-rex");
-    expect(overTailnet?.place?.show).toBeUndefined();
-  });
-
-  test("Remote Control off: never offered", async () => {
-    const w = await world({ remote: false });
-    const ids = w.fake.addSession("my-app", "Claude Code");
-    await w.agent("ses-in-rex", ids);
-    await w.agentsOf();
-    for (let i = 0; i < 20 && !w.fake.methods().includes("client.perform"); i++) await Bun.sleep(20);
-    expect((await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place?.show).toBeUndefined();
+    for (let i = 0; i < 3; i++) expect((await w.agentsOf(remote.headers, remote.at)).find((a) => a.session === "ses-in-rex")?.place).toBeUndefined();
+    await Bun.sleep(50);
+    expect(w.fake.calls).toEqual([]);
   });
 });
 
@@ -156,6 +196,16 @@ describe("POST /api/inbox/rex/show", () => {
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ shown: true });
     expect(w.fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
+  });
+
+  test("the app refuses (Remote Control off): not shown, and the list stops offering it", async () => {
+    const w = await world({ remote: false });
+    const ids = w.fake.addSession("my-app", "Claude Code");
+    await w.agent("ses-in-rex", ids);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place?.show === true);
+    expect(await (await w.show("ses-in-rex")).json()).toEqual({ shown: false });
+    const place = (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place;
+    expect(place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code" });
   });
 
   test("another site, the tailnet, or a session not in Rex: refused, and Rex is asked nothing", async () => {

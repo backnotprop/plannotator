@@ -4730,6 +4730,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // From the start, as the presence: a session's first poll moves the Agents however soon a window opened. The launches'
   // part is learned at the first look (they are made below), so an Inbox with launches says `agents` once then.
   let lastAgentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#`;
+  // What the list shows from Rex (inbox-rex.ts, made below): a place line or the app moving says `agents` too.
+  let rexVersion: () => number = () => 0;
   const deliveryWatch = setInterval(() => syncSection("timer:delivery", () => {
     // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
     launch.sweep(deliveryListeners.size > 0);
@@ -4740,7 +4742,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}`;
+    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}#${rexVersion()}`;
     const agents = agentsSignature !== lastAgentsSignature;
     lastAgentsSignature = agentsSignature;
     if (!moved && !labels && !agents) return;
@@ -4760,12 +4762,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
     process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
   // Rex (superlogical.com/rex): where agents live, Open in Rex, Show in Rex. Only an existing server is ever reached.
-  const rex =
-    options.rex ??
-    createInboxRex({ socketPath: inboxRexSocketPath(process.platform, process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir()), version });
+  // Under test (bun test, or a sandboxed binary) no Rex is reached but one a test names: `options.rex`, or a sandbox's
+  // PLANNOTATOR_TEST_REX_SOCKET (its fake). The person's own Rex never is.
+  const rexSocket = process.env.NODE_ENV === "test" ? null : process.env.PLANNOTATOR_TEST_SANDBOX ? (process.env.PLANNOTATOR_TEST_REX_SOCKET || null) : inboxRexSocketPath(process.platform, homedir());
+  const rex = options.rex ?? createInboxRex({ socketPath: rexSocket, version, sessionsFile: join(store.dir, "rex-sessions.json") });
+  rexVersion = rex.version;
   /**
-   * Where the given live sessions say they live (their polls' place hints), but for the ones the Inbox launched: those
-   * run in the background, whatever pane the Inbox itself was started from (Open in Rex is their way in).
+   * Where the given live sessions say they live (their polls' place hints), but for the ones the Inbox launched and
+   * the conversations that go on from them: those run in the background, whatever pane the Inbox itself was started
+   * from (Open in Rex is their way in).
    */
   const rexHints = (sessions: Iterable<string>): Map<string, InboxPlace> => {
     const hints = new Map<string, InboxPlace>();
@@ -4774,27 +4779,32 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const place = live.placeOf(session);
       if (!place) continue;
       launched ??= new Set(launch.agents().map((agent) => agent.session));
-      if (!launched.has(session)) hints.set(session, place);
+      if (launched.has(session) || live.continuesOf(session).some((old) => launched!.has(old))) continue;
+      hints.set(session, place);
     }
     return hints;
   };
   /**
-   * This Inbox's agents with where they live (inbox-rex.ts): each place Rex confirms now, as one line (Rex's own names,
-   * read for this answer and never kept), and `show` for a window on this computer (`here`); and, for such a window,
-   * `open_in: "rex"` while Open in Terminal opens a Rex tab. With no hint and no launch listed, Rex is never asked.
+   * This Inbox's agents with where they live (inbox-rex.ts), for a window on this computer only (`here`; a phone,
+   * the tailnet or a linked machine gets none and makes no Rex read): each place Rex last confirmed, as one line, and
+   * `show` while Show in Rex may be offered; and `open_in: "rex"` while Rex's app is attached here and a launch is
+   * listed. Answered at once from the last read; a stale one starts the next in the background (never waited on).
    */
-  const withRexPlaces = async (groups: InboxAgentsGroup[], here: boolean): Promise<InboxAgentsGroup[]> => {
+  const withRexPlaces = (groups: InboxAgentsGroup[], here: boolean): InboxAgentsGroup[] => {
+    if (!here) return groups;
     const at = groups.findIndex((group) => !group.machine || group.machine === machines.selfId);
     const own = at >= 0 ? groups[at]! : null;
     if (!own) return groups;
     const hints = rexHints(own.agents.filter((agent) => agent.live && !agent.launch).map((agent) => agent.session));
-    const launched = here && own.agents.some((agent) => agent.launch);
+    const launched = own.agents.some((agent) => agent.launch);
     if (hints.size === 0 && !launched) return groups;
-    const [shown, opens] = await Promise.all([rex.places(hints, here), launched ? rex.opensHere() : Promise.resolve(false)]);
+    const shown = rex.places(hints);
+    const opens = launched && rex.appAttached();
     if (shown.size === 0 && !opens) return groups;
+    const show = rex.offersShow();
     const agents = own.agents.map((agent) => {
-      const place = agent.launch ? undefined : shown.get(agent.session);
-      return place ? { ...agent, place: { kind: "rex" as const, line: place.line, ...(place.show ? { show: true as const } : {}) } } : agent;
+      const line = agent.launch ? undefined : shown.get(agent.session);
+      return line ? { ...agent, place: { kind: "rex" as const, line, ...(show ? { show: true as const } : {}) } } : agent;
     });
     const out = [...groups];
     out[at] = { ...own, agents, ...(opens ? { open_in: "rex" as const } : {}) };
@@ -4914,7 +4924,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
     launch,
     machine: () => machines.selfId,
-    places: (sessions) => rex.places(rexHints(sessions), false),
+    places: (sessions) => rex.places(rexHints(sessions)),
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
@@ -5585,7 +5595,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const phone = door !== undefined && !fromMachine;
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
         // Where this computer's agents live, as Rex says now; Show in Rex and Open in Rex only for a window on this computer.
-        const agents = await withRexPlaces(listed, via === "local" && door === undefined);
+        const agents = withRexPlaces(listed, via === "local" && door === undefined);
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
         const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
@@ -5594,8 +5604,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (since === null) return json(model);
         return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
-      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in. This computer's own
-      // window only: never the tailnet, a phone or a linked machine (their Rex is not this one), never an agent's call.
+      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click.
+      // A request from this computer only, as a page of this Inbox sends it (never the tailnet, a phone or a linked
+      // machine: their Rex is not this one). A local program that copies those headers could ask too; all it can do is
+      // move Rex's app to a pane.
       if (path === "/api/inbox/rex/show") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         if (via !== "local" || fromDeviceDoor.has(req) || req.headers.get("sec-fetch-site") !== "same-origin") {
@@ -5606,7 +5618,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const session = typeof body.session === "string" ? body.session : "";
         const place = session ? rexHints([session]).get(session) : undefined;
         if (!place) return json({ error: "That session isn't in Rex.", code: "not_in_rex" }, 404);
-        return json({ shown: await rex.show(place) });
+        return json(await rex.show(place));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
@@ -6713,7 +6725,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The device door is never the owner here: it may not trust a folder, so it is offered none.
       // A linked machine is the owner's other computer: it may trust a folder for a press in its window (remote launch).
       const machineDoor = door?.platform === MACHINE_PLATFORM;
-      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null);
+      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door);
       if (composed) return composed;
       const reviewed = await liveReview.route(req, url, !door);
       if (reviewed) return reviewed;

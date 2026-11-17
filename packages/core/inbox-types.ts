@@ -3483,10 +3483,10 @@ export interface InboxComposeSession {
 }
 
 /**
- * Where an agent lives, as this computer's Rex confirmed it for this answer (packages/server/inbox-rex.ts): one quiet
- * line, "Rex · <session> / <tab>" in Rex's own names, read then and never kept. `show`: Show in Rex is offered (the
- * window asking is on this computer, and Rex's app performs actions). Additive: absent from an older Inbox, and for an
- * agent whose place Rex does not confirm.
+ * Where an agent lives, as this computer's Rex last confirmed it (packages/server/inbox-rex.ts): one quiet line,
+ * "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered (the window asking is on
+ * this computer, Rex's app is attached here and has not said no to it lately). Additive: absent from an older Inbox,
+ * and for an agent whose place Rex does not confirm.
  */
 export interface InboxAgentPlace {
   kind: "rex";
