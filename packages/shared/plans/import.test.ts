@@ -195,6 +195,24 @@ describe("plan import", () => {
     expect(importPlanLibrary(store, { dataDir })).toMatchObject({ versions_added: 0, decisions_added: 0 });
   });
 
+  test("the agent plan review recorded beside a version is that version's agent; one that does not read as one is none", () => {
+    const dataDir = scratch();
+    const store = createPlanStore({ dataDir });
+    version(dataDir, "api", "queue-2026-11-01", 1, "# Queue\n\nv1\n", day(1));
+    version(dataDir, "api", "queue-2026-11-01", 2, "# Queue\n\nv2\n", day(1, 10));
+    put(join(dataDir, "history", "api", "queue-2026-11-01", "002.agent.json"), JSON.stringify({ host: "codex", session: "ses_1", name: "Codex" }), day(1, 10));
+    version(dataDir, "api", "other-2026-11-01", 1, "# Other\n\nv1\n", day(1));
+    put(join(dataDir, "history", "api", "other-2026-11-01", "001.agent.json"), JSON.stringify({ host: "", session: 7 }), day(1));
+    importPlanLibrary(store, { dataDir });
+    const queue = store.list().find((p) => p.name === "Queue")!;
+    expect(store.versions(queue.id).map((v) => [v.agent_host, v.agent_session, v.agent_name])).toEqual([[null, null, null], ["codex", "ses_1", "Codex"]]);
+    expect(queue.head_agent).toEqual({ host: "codex", session: "ses_1", name: "Codex" });
+    const other = store.list().find((p) => p.name === "Other")!;
+    expect(other.head_agent).toBeNull();
+    // No sidecar is a plan of its own, or a version.
+    expect(store.list()).toHaveLength(2);
+  });
+
   test("an unreadable version stops its chain there; the next run goes on from it, in order", () => {
     if (process.platform === "win32" || process.getuid?.() === 0) return;
     const dataDir = scratch();

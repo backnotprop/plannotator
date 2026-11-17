@@ -18,7 +18,8 @@ export interface Route {
    * Plans (`#plans`, only while config.json `inboxPlans` is on; approval "inbox-plans"): the plan open (`#plans=pln_…`),
    * the version read (`&v=3`; absent: the newest), the two versions compared (`&from=3&to=5`), and `#plans&new` for
    * the get-started screen once there are plans. The file on screen: another of its documents (`&doc=doc_…`) or an
-   * artifact (`&file=<path>`); absent: the plan's main page.
+   * artifact (`&file=<path>`); absent: the plan's main page. The Spaces home's scope: every plan by project
+   * (`#plans&all`), or one of the sidebar's projects (`#plans&project=<id>`, in `project`); absent: the home.
    */
   plan?: string | null;
   planDoc?: string | null;
@@ -26,6 +27,7 @@ export interface Route {
   planVersion?: number | null;
   planDiff?: { from: number; to: number } | null;
   planNew?: boolean;
+  planAll?: boolean;
   /** Routines (`#routines`): the one open beside the list (`#routine=sch_…`, `#routine=new` for a new one). */
   scheduled?: string | null;
   /**
@@ -237,7 +239,7 @@ function plansRouteOf(params: URLSearchParams): Route {
   const to = versionOf(params.get('to'));
   return {
     page: 'plans',
-    project: null,
+    project: plan ? null : params.get('project') || null,
     thread: null,
     plan,
     planVersion: plan ? versionOf(params.get('v')) : null,
@@ -245,5 +247,6 @@ function plansRouteOf(params: URLSearchParams): Route {
     planFile: plan ? params.get('file') || null : null,
     planDiff: plan && from !== null && to !== null && from !== to ? { from, to } : null,
     planNew: !plan && params.has('new'),
+    planAll: !plan && !params.get('project') && params.has('all'),
   };
 }

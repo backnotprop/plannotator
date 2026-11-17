@@ -7,6 +7,9 @@
  * Motion is the "click": the field settles in 10 frames from coarse cells to fine, 12 a second, then stays still.
  * Under reduced motion, or while the window is hidden, only the still frame is drawn. It draws again (still) when the
  * theme or the size changes. Decoration only: the canvas is aria-hidden.
+ *
+ * The Spaces home's field is the approved home-5's own (`startStillField`): six soft blobs over the same 8x8 Bayer
+ * matrix, in 3 px dots, still from the first frame (it never moves, so reduced motion changes nothing).
  */
 
 const BAYER = (() => {
@@ -121,6 +124,86 @@ function draw(host: HTMLElement, canvas: HTMLCanvasElement, rooms: readonly HTML
     }
   }
   ctx.putImageData(img, 0, 0);
+}
+
+/** home-5's blobs (x, y, radius, in the field's width) and its home hearth's strength (`data-k`). */
+export const STILL_FIELD = {
+  cell: 3,
+  k: 0.34,
+  alphaLight: 0.22,
+  alphaDark: 0.26,
+  blobs: [
+    [0.18, 0.2, 0.22],
+    [0.7, 0.18, 0.2],
+    [0.88, 0.62, 0.26],
+    [0.3, 0.82, 0.28],
+    [0.55, 0.95, 0.2],
+    [0.05, 0.6, 0.18],
+  ] as readonly (readonly [number, number, number])[],
+} as const;
+
+/** home-5's Bayer order, as its `drawDither` lists it. */
+const HOME_BAYER = [0, 32, 8, 40, 2, 34, 10, 42, 48, 16, 56, 24, 50, 18, 58, 26, 12, 44, 4, 36, 14, 46, 6, 38, 60, 28, 52, 20, 62, 30, 54, 22, 3, 35, 11, 43, 1, 33, 9, 41, 51, 19, 59, 27, 49, 17, 57, 25, 15, 47, 7, 39, 13, 45, 5, 37, 63, 31, 55, 23, 61, 29, 53, 21];
+
+/**
+ * Which cells of a `w` x `h` field home-5's `drawDither` fills, as written: each blob adds a cone (1 at its centre, 0
+ * at its radius; the radius is in the field's width, so it stays round), the sum times `k`, capped at 1, against the
+ * Bayer threshold. Exported for the test that holds its coverage.
+ */
+export function stillFieldCells(w: number, h: number, k: number = STILL_FIELD.k): Uint8Array {
+  const out = new Uint8Array(w * h);
+  for (let j = 0; j < h; j++) {
+    for (let i = 0; i < w; i++) {
+      let v = 0;
+      for (const [bx, by, br] of STILL_FIELD.blobs) {
+        const dx = i / w - bx;
+        const dy = (j / h - by) * (h / w);
+        v += Math.max(0, 1 - Math.hypot(dx, dy) / br);
+      }
+      v = Math.min(1, v * k);
+      if (v * 64 > HOME_BAYER[(j % 8) * 8 + (i % 8)]!) out[j * w + i] = 1;
+    }
+  }
+  return out;
+}
+
+function drawStill(host: HTMLElement, canvas: HTMLCanvasElement): void {
+  const r = host.getBoundingClientRect();
+  if (!r.width || !r.height) return;
+  const w = Math.ceil(r.width / STILL_FIELD.cell);
+  const h = Math.ceil(r.height / STILL_FIELD.cell);
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const img = ctx.createImageData(w, h);
+  const buf = new Uint32Array(img.data.buffer);
+  const [ir, ig, ib] = inkOf(host);
+  const alpha = Math.round(255 * (isLight() ? STILL_FIELD.alphaLight : STILL_FIELD.alphaDark));
+  const px = ((alpha << 24) | (ib << 16) | (ig << 8) | ir) >>> 0;
+  const cells = stillFieldCells(w, h);
+  for (let n = 0; n < cells.length; n++) if (cells[n]) buf[n] = px;
+  ctx.putImageData(img, 0, 0);
+}
+
+/** home-5's still field into `canvas`, filling `host`; drawn again when the size or the theme changes. Returns the stop. */
+export function startStillField(host: HTMLElement, canvas: HTMLCanvasElement): () => void {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const still = () => drawStill(host, canvas);
+  still();
+  const later = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(still, 80);
+  };
+  const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(later) : null;
+  resize?.observe(host);
+  const theme = typeof MutationObserver === 'function' ? new MutationObserver(later) : null;
+  theme?.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+  return () => {
+    if (timer) clearTimeout(timer);
+    resize?.disconnect();
+    theme?.disconnect();
+  };
 }
 
 export function reducedMotion(): boolean {

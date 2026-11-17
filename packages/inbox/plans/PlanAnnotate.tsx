@@ -181,7 +181,7 @@ export function PlanAnnotate({ read, document, docRef, versions, shown, phone, a
             records={waiting}
             earlierRecords={earlier}
             agent={agent}
-            projectName={project ?? 'Plans'}
+            projectName={project ?? 'Spaces'}
             projectRoot={read.plan.project_root ?? ''}
             version="current"
             onVersion={noop}

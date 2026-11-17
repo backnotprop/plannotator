@@ -1,9 +1,7 @@
 /**
- * The window's Plans page, drawn from a real plan library: a scratch `plan-library/` written with the store
+ * The window's Spaces page (a plan's page; the home is spacesHome.test.tsx), drawn from a real plan library: a scratch `plan-library/` written with the store
  * (packages/shared/plans/store.ts), answered by the real route handler (packages/shared/plans/routes.ts) in place of
  * the Inbox, so what the page shows is what the library holds. No server, no Inbox. What regresses if these fail:
- * - the list leaves out a plan, loses "changed since you looked" or the number of new versions, or shows a decision
- *   the plan's record does not hold;
  * - an empty library does not show the get-started screen, or its action does not say how a plan arrives;
  * - a plan's page does not show the newest version's text, the versions newest first, the version you saw, or the
  *   "changed since you looked" banner; opening it does not record the look;
@@ -13,19 +11,19 @@
  * - Send opens New message with anything but the plan's own agent session and the comments as plan feedback, or is
  *   not disabled, in the Inbox's words, when no session is known; once sent, its comments are not marked sent or the
  *   plan does not get the thread, or a later Send does not go into that thread as a reply;
- * - an Escape leaves the plan page for the Plans list (the plan page is not a file beside a thread);
+ * - an Escape leaves the plan page for the Spaces home (the plan page is not a file beside a thread);
  * - approval "plans-editing": an older version or a diagram page offers Edit; Done does not make a new version of the
  *   person's words, does not send the agent what changed (or say it was not told), or a stale base loses the
  *   person's text; Restore does not make a new newest version; Approve approves a version the plan moved past; the
  *   moved approval's line is not shown, or comes back after its Dismiss;
- * - an approval of an older version reads as current in the list, the rail head or the reading line (approval
+ * - an approval of an older version reads as current in the rail head or the reading line (approval
  *   "plans-editing": "v4 is new and not approved. You approved v2, and that does not carry over."), or a version
  *   row loses its own past approval; a sent-back older version reads as changes asked on the newest;
  * - the page leaves the shared frame (its ground, top bar, rail, page card and versions panel), the reading line's
  *   version words leave its end, or the plan's decision comes back into the reading line or leaves the rail head
  *   (where it shows with the versions panel closed);
- * - the project leaves the rail head's quiet line or the top bar's "Plans / project / plan", or its crumb becomes a
- *   link (the Plans list has no address for one project);
+ * - the project leaves the rail head's quiet line or the top bar's "Spaces / project / plan", or its crumb becomes a
+ *   link;
  * - the files rail loses the main page's place or mark, mixes artifacts in with pages, shows Artifacts with none,
  *   opens a row without the versions and the address following, draws an HTML artifact that can run, load or follow
  *   a link, shows a picture the server sends as a download, or forgets that it was closed;
@@ -33,9 +31,7 @@
  *   versions to the frame's sheet;
  * - the versions panel cannot be closed, forgets that it was, or cannot be opened again from the reading line;
  * - another page's activity shows the main page's history, or an artifact's shows anything plan-wide;
- * - opening a plan through another page's link marks every version new in the list;
- * - the compact list leaves out a plan or orders it differently, loses a column, is not a link, is not remembered,
- *   or search and the empty search stop working in it;
+ * - opening a plan through another page's link counts as reading its main page;
  * - picking a version in the versions panel does not show that version, Compare and Copy link are lost, the version
  *   you saw loses "You saw this", a sent-back version loses "Changes asked", or versions with no name each say
  *   "No name recorded";
@@ -58,7 +54,6 @@ const hasDom = typeof document !== 'undefined';
 const { PlansRoute } = (hasDom ? await import('./PlansPage') : {}) as typeof import('./PlansPage');
 const { readRoute } = (hasDom ? await import('../app/route') : {}) as typeof import('../app/route');
 const { resetPlansForTests } = (hasDom ? await import('./store') : {}) as typeof import('./store');
-const { PLANS_VIEW_KEY } = (hasDom ? await import('./PlansHome') : {}) as typeof import('./PlansHome');
 const storageModule = hasDom ? await import('@plannotator/ui/utils/storage') : null;
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
@@ -123,7 +118,6 @@ afterEach(() => {
   document.body.innerHTML = '';
   globalThis.fetch = realFetch;
   window.matchMedia = realMatchMedia!;
-  localStorage.removeItem(PLANS_VIEW_KEY);
   storageModule?.resetStorageBackend();
   resetPlansForTests();
   rmSync(dir, { recursive: true, force: true });
@@ -212,44 +206,11 @@ function rowWidth(width: () => number) {
   };
 }
 
-test.skipIf(!hasDom)('the list is the library: changed since you looked first, with how many versions are new; the decision from its record', async () => {
-  const changed = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nv1\n', '# Rotate refresh tokens\n\nv2\n', '# Rotate refresh tokens\n\nv3\n'], { seen: 1, deniedOn: 1 });
-  const approved = plan('Offline drafts', 'field-notes', ['# Offline drafts\n\nv1\n', '# Offline drafts\n\nv2\n'], { seen: 2, approvedOn: 2 });
-  const never = plan('Ledger import', 'harbor-api', ['# Ledger import\n\nv1\n']);
-  window.location.hash = '#plans';
-  const host = draw();
-  await settle();
-
-  const since = host.querySelector('[data-plans-group="since"]')!;
-  expect(since).not.toBeNull();
-  expect([...since.querySelectorAll('[data-plan-row]')].map((r) => r.getAttribute('data-plan-row'))).toEqual([changed]);
-  expect(text(since.querySelector('[data-plan-changed]'))).toContain('2 new');
-  expect(text(since.querySelector(`[data-plan-row="${changed}"]`))).toContain('you saw v1');
-  // Every plan is listed once; the others are not marked changed.
-  const rows = [...host.querySelectorAll('[data-plan-row]')].map((r) => r.getAttribute('data-plan-row'));
-  expect(rows.sort()).toEqual([changed, approved, never].sort());
-  expect(host.querySelector(`[data-plan-row="${approved}"] [data-plan-changed]`)).toBeNull();
-  expect(host.querySelector(`[data-plan-row="${never}"] [data-plan-changed]`)).toBeNull();
-  // The decision is the record's, on the newest version: approved on v2 (the newest); changes asked on v1 is not v3's.
-  expect(host.querySelector(`[data-plan-row="${approved}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('approved');
-  expect(host.querySelector(`[data-plan-row="${changed}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('none');
-  expect(text(host.querySelector(`[data-plan-row="${changed}"] [data-plan-decision]`))).toBe('No decision on v3');
-  expect(host.querySelector(`[data-plan-row="${never}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('none');
-  // The project groups follow.
-  expect(host.querySelector('[data-plans-group="p:field-notes"]')).not.toBeNull();
-});
-
-test.skipIf(!hasDom)('an approval of an older version never reads as current: the list, the rail head and the reading line say the newest is not approved', async () => {
+test.skipIf(!hasDom)('an approval of an older version never reads as current: the rail head and the reading line say the newest is not approved', async () => {
   const older = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n', '# Rotate\n\nv4\n'], { seen: 4, approvedOn: 2 });
   const current = plan('Offline drafts', 'field-notes', ['# Offline drafts\n\nv1\n', '# Offline drafts\n\nv2\n'], { seen: 2, approvedOn: 2 });
-  window.location.hash = '#plans';
-  const host = draw();
-  await settle();
-  expect(text(host.querySelector(`[data-plan-row="${older}"] [data-plan-decision]`))).toBe('v4 is new and not approved');
-  expect(host.querySelector(`[data-plan-row="${older}"] [data-plan-decision]`)?.getAttribute('data-plan-decision')).toBe('none');
-  expect(text(host.querySelector(`[data-plan-row="${current}"] [data-plan-decision]`))).toBe('Approved');
-
   window.location.hash = `#plans=${older}`;
+  const host = draw();
   await settle();
   expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('v4 is new and not approved');
   expect(host.querySelector('[data-plan-reading] [data-plan-decision]')).toBeNull();
@@ -262,70 +223,6 @@ test.skipIf(!hasDom)('an approval of an older version never reads as current: th
   await settle();
   // On its newest version the decision is current: just its words.
   expect(text(host.querySelector('[data-pages-rail-meta] [data-plan-rail-decision]'))).toBe('Approved');
-});
-
-test.skipIf(!hasDom)('the compact list: the switch shows the same plans one line each, is remembered, and search works the same', async () => {
-  const changed = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n'], { seen: 1 });
-  const older = plan('Offline drafts', 'field-notes', ['# Offline drafts\n\nv1\n', '# Offline drafts\n\nv2\n', '# Offline drafts\n\nv3\n'], { seen: 3, approvedOn: 1 });
-  const newer = plan('Ledger import', 'harbor-api', ['# Ledger import\n\nv1\n', '# Ledger import\n\nv2\n', '# Ledger import\n\nv3\n', '# Ledger import\n\nv4\n']);
-  const rowIds = (host: Element) => [...host.querySelectorAll('[data-plan-row]')].map((r) => r.getAttribute('data-plan-row'));
-  window.location.hash = '#plans';
-  let host = draw();
-  await settle();
-  // Rows with previews by default.
-  expect(host.querySelector('[data-plans-compact]')).toBeNull();
-  expect(host.querySelector('[data-plans-view-pick="rows"]')?.getAttribute('aria-pressed')).toBe('true');
-  const inRows = rowIds(host);
-  expect(inRows.sort()).toEqual([changed, older, newer].sort());
-
-  await act(async () => (host.querySelector('[data-plans-view-pick="compact"]') as HTMLButtonElement).click());
-  const table = host.querySelector('table[data-plans-compact]')!;
-  expect(table).not.toBeNull();
-  expect(host.querySelector('[data-plans-view-pick="compact"]')?.getAttribute('aria-pressed')).toBe('true');
-  expect(host.querySelector('.ib-plans-thumb')).toBeNull();
-  // Since you looked first, then every other plan newest first; the same plans as the rows.
-  expect(rowIds(host)).toEqual([changed, newer, older]);
-  expect([...table.querySelectorAll('thead th')].map(text)).toEqual(['Name', 'Project', 'Version', 'Decision', 'Last change']);
-  const line = table.querySelector(`[data-plan-row="${older}"]`)!;
-  expect(text(line.querySelector('.ib-plans-c-project'))).toBe('field-notes');
-  expect(text(line.querySelector('.ib-plans-c-version'))).toBe('v3');
-  expect(text(line.querySelector('[data-plan-decision]'))).toBe('v3 is new and not approved');
-  expect(text(table.querySelector(`[data-plan-row="${newer}"] [data-plan-decision]`))).toBe('No decision');
-  expect(text(table.querySelector(`[data-plan-row="${changed}"] [data-plan-changed]`))).toContain('2 new');
-  // Each line is a link to its plan.
-  const link = line.querySelector('a')!;
-  expect(link.getAttribute('href')).toBe(`#plans=${older}`);
-  expect(link.getAttribute('title')).toBe('Offline drafts');
-
-  // Search and the empty search are the same in both views.
-  const search = host.querySelector('[data-plans-search]') as HTMLInputElement;
-  const type = async (value: string) =>
-    act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, value);
-      search.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-  await type('ledger');
-  expect(rowIds(host)).toEqual([newer]);
-  await type('kubernetes');
-  expect(host.querySelector('[data-plans-none]')).not.toBeNull();
-  await type('');
-
-  // Remembered: a window opened again shows the compact list.
-  unlisten();
-  act(() => root?.unmount());
-  document.body.innerHTML = '';
-  host = draw();
-  await settle();
-  expect(host.querySelector('table[data-plans-compact]')).not.toBeNull();
-  await act(async () => (host.querySelector('[data-plans-view-pick="rows"]') as HTMLButtonElement).click());
-  expect(host.querySelector('table[data-plans-compact]')).toBeNull();
-  expect(rowIds(host).sort()).toEqual(inRows.sort());
-
-  // A plain click on a line opens the plan.
-  await act(async () => (host.querySelector('[data-plans-view-pick="compact"]') as HTMLButtonElement).click());
-  await act(async () => (host.querySelector(`[data-plan-row="${newer}"] a`) as HTMLAnchorElement).click());
-  await settle();
-  expect(host.querySelector(`[data-plan-page="${newer}"]`)).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions panel; main page first, other pages and artifacts by name; a row opens its file, the versions and the address follow', async () => {
@@ -358,8 +255,8 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(row.querySelector('[data-docked-panel-clip] [data-versions-panel]')).not.toBeNull();
   // On the frame's own ground, in theme colours.
   expect(host.querySelector('[data-frame-ground][data-frame-colors="theme"] [data-plan-page] [data-frame]')).not.toBeNull();
-  // The top bar: Plans / the project / the plan; the project is words, not a link (no address for one project).
-  expect(text(shell.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Plans');
+  // The top bar: Spaces / the project / the plan; the project is words, not a link.
+  expect(text(shell.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Spaces');
   expect(shell.querySelector('[data-page-header] [data-breadcrumb-root]')?.getAttribute('href')).toBe('#plans');
   const projectCrumb = shell.querySelector('[data-page-header] [data-plan-crumb-project]')!;
   expect(text(projectCrumb)).toBe('harbor-api');
@@ -411,8 +308,8 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(text(host.querySelector('[data-plan-document]'))).toContain('Rollout second version.');
   expect(host.querySelectorAll('[data-versions-panel] [data-version-row]').length).toBe(2);
   expect(host.querySelector(`[data-plan-file="d:${rollout.id}"]`)?.getAttribute('aria-current')).toBe('page');
-  // The top bar: Plans / the plan / the page.
-  expect(text(host.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Plans');
+  // The top bar: Spaces / the plan / the page.
+  expect(text(host.querySelector('[data-page-header] [data-breadcrumb-root]'))).toBe('Spaces');
   expect(host.querySelector('[data-page-header] a[aria-label="Rotate refresh tokens"]')?.getAttribute('href')).toBe(`#plans=${id}`);
   expect(text(host.querySelector('[data-page-header] [aria-current="page"]'))).toBe('Rollout');
   expect(readingWords(host)).toBe('v2 · newest');
@@ -469,11 +366,11 @@ test.skipIf(!hasDom)('the frame: top bar, files rail, page card and versions pan
   expect(host.querySelector('[data-plan-files]')).toBeNull();
   await act(async () => (host.querySelector('button[aria-label="Show files"]') as HTMLButtonElement).click());
   await settle();
-  // A plan with no artifacts: one page, no Artifacts heading. With no project: no quiet line, Plans / the plan.
+  // A plan with no artifacts: one page, no Artifacts heading. With no project: no quiet line, Spaces / the plan.
   expect(fileNames(host.querySelector('[data-plan-files]')!)).toEqual(['Ledger import']);
   expect(host.querySelector('[data-pages-rail-meta]')).toBeNull();
   expect(host.querySelector('[data-plan-crumb-project]')).toBeNull();
-  expect(text(host.querySelector('[data-page-header] a[data-plans-back]'))).toBe('Plans');
+  expect(text(host.querySelector('[data-page-header] a[data-plans-back]'))).toBe('Spaces');
   expect(host.querySelector('[data-plan-files-artifacts]')).toBeNull();
   expect(text(host.querySelector('[data-plan-files]'))).not.toContain('Artifacts');
 });
@@ -778,7 +675,7 @@ async function editAndDone(host: Element, words: string) {
   await settle();
 }
 
-test.skipIf(!hasDom)('an Escape never leaves the plan page for the Plans list; × still goes back to Plans', async () => {
+test.skipIf(!hasDom)('an Escape never leaves the plan page for the Spaces home; × still goes back to it', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate refresh tokens\n\nRetire keys after 14 days.\n']);
   keptStorage();
   window.location.hash = `#plans=${id}`;
@@ -1182,7 +1079,7 @@ test.skipIf(!hasDom)('approving names the version on screen: refused once the pl
   expect(text(host.querySelector('[data-plan-version="3"] [data-version-approval]'))).toBe('Approved by you');
 });
 
-test.skipIf(!hasDom)('only the main page counts as looking: a link to another page of a never-opened plan marks nothing new', async () => {
+test.skipIf(!hasDom)('only the main page counts as looking: a link to another page of a never-opened plan leaves it unread on the home', async () => {
   const id = plan('Rotate refresh tokens', 'harbor-api', ['# Rotate\n\nv1\n', '# Rotate\n\nv2\n', '# Rotate\n\nv3\n']);
   const notes = store.addDocument(id, { title: 'Notes', created_at: at(3) });
   store.addVersion(id, notes.id, { bytes: bytes('# Notes\n'), committed_at: at(3), source: 'agent-tool' });
@@ -1190,15 +1087,14 @@ test.skipIf(!hasDom)('only the main page counts as looking: a link to another pa
   const host = draw();
   await settle();
   expect(readingWords(host)).toBe('v1 · newest');
-  // That page's versions are remembered; the plan is still unlooked, so the list marks nothing.
+  // That page's versions are remembered; the plan's main page is still unread, so the home keeps its dot.
   expect(store.looks().plans[id]?.docs[notes.id]).toBe(1);
   expect(store.list()[0]).toMatchObject({ seen_version_number: null, changed: false });
   resetPlansForTests(null, true);
   window.location.hash = '#plans';
   await settle();
-  expect(host.querySelector(`[data-plan-row="${id}"]`)).not.toBeNull();
-  expect(host.querySelector(`[data-plan-row="${id}"] [data-plan-changed]`)).toBeNull();
-  expect(host.querySelector('[data-plans-group="since"]')).toBeNull();
+  expect(host.querySelector(`[data-space="${id}"]`)).not.toBeNull();
+  expect(host.querySelector(`[data-space="${id}"] [data-frame-card-dot]`)).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on the get-started screen; Try again reads again with ?retry=1', async () => {
@@ -1217,14 +1113,14 @@ test.skipIf(!hasDom)('an import that failed is a quiet note in the list and on t
   resetPlansForTests(null, true);
   const host = draw();
   await settle();
-  const note = host.querySelector('[data-plans-home] [data-plans-import-error]')!;
+  const note = host.querySelector('[data-spaces-home] [data-plans-import-error]')!;
   expect(note.getAttribute('title')).toBe('disk says no');
   expect(retries).toBe(0);
   await act(async () => (note.querySelector('button') as HTMLButtonElement).click());
   await settle();
   expect(retries).toBe(1);
   expect(host.querySelector('[data-plans-import-error]')).toBeNull();
-  expect(host.querySelector('[data-plan-row]')).not.toBeNull();
+  expect(host.querySelector('[data-space]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('an empty library shows the get-started screen, whose action says how a plan arrives', async () => {
@@ -1232,7 +1128,7 @@ test.skipIf(!hasDom)('an empty library shows the get-started screen, whose actio
   const host = draw();
   await settle();
   expect(host.querySelector('[data-plans-start]')).not.toBeNull();
-  expect(host.querySelector('[data-plans-home]')).toBeNull();
+  expect(host.querySelector('[data-spaces-home]')).toBeNull();
   const how = host.querySelector<HTMLButtonElement>('[data-plans-how]')!;
   const steps = host.querySelector<HTMLElement>('[data-plans-steps]')!;
   expect(how.getAttribute('aria-expanded')).toBe('false');
@@ -1445,7 +1341,7 @@ test.skipIf(!hasDom)('off: the page draws nothing, reads nothing, and a #plans l
   await settle();
   expect(window.location.hash).toBe('');
   expect(readRoute().page).toBe('inbox');
-  expect(host.querySelector('[data-plans-home], [data-plans-start], [data-plan-page]')).toBeNull();
+  expect(host.querySelector('[data-spaces-home], [data-plans-start], [data-plan-page]')).toBeNull();
   expect(text(host)).toBe('');
   expect(reads).toBe(0);
 });
