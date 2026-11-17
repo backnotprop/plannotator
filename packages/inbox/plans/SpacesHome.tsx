@@ -19,7 +19,9 @@
  * The card, the row, the pill and their motions are the frame's (`@plannotator/ui/components/frame`: Card, CardRow,
  * CardGrid, CardUpdatesPill, settleBatch, arrive). The card grids are the card's `CardGrid`, each given its row gap
  * (28 px for Now's large cards, 44 for the rest; never its default), and Now's one row of large cards is counted with
- * the same column minimum the grid draws (280 px, 230 for regular, 24 between). Rows are the home's own list.
+ * the same column minimum the grid draws (280 px, 230 for regular, 24 between). Rows are the card's `CardRows` with
+ * `actionAtRest="never"`: a row shows its pin only on hover or keyboard focus, and on a touch screen a row is pinned
+ * from its long-press menu (Pin to sidebar, Unpin); a pinned row keeps the card's pin after its title.
  */
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent, type ReactElement, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
@@ -32,7 +34,7 @@ import { Tip } from '../components/Tip';
 import { writeRoute } from '../app/writeRoute';
 import { startStillField, reducedMotion } from './dither';
 import { useInboxAgents } from '../agentsList';
-import { CARD_FACE_WIDTH, Card, CardGrid, CardRow, CardUpdatesPill, settleBatch, type CardLinkProps } from '@plannotator/ui/components/frame';
+import { CARD_FACE_WIDTH, Card, CardGrid, CardRow, CardRows, CardUpdatesPill, settleBatch, type CardLinkProps } from '@plannotator/ui/components/frame';
 import { mermaidMayLoad } from './planContent';
 import { SpaceFace, SpaceThumb } from './SpaceFace';
 import { readPlans, setPlanPin, setSpacesView, useFaceText } from './store';
@@ -166,9 +168,9 @@ export function SpacesHome(props: SpacesHomeProps) {
   );
   const items = (plans: readonly PlanSummary[], size: 'large' | 'regular', withProject = false, row = list) =>
     row ? (
-      <div className="ib-spc-rows" role="list" data-spaces-list="">
+      <CardRows className="ib-spc-rows" data-spaces-list="" actionAtRest="never">
         {plans.map((p) => item(p, size, withProject, row))}
-      </div>
+      </CardRows>
     ) : (
       <CardGrid size={size} gap={size === 'large' ? 28 : 44}>
         {plans.map((p) => item(p, size, withProject, row))}
@@ -416,9 +418,9 @@ const SpaceItem = memo(function SpaceItem({ plan, work, size, list, secondary, p
   const common = { kind, title: plan.name, href: `#plans=${encodeURIComponent(plan.id)}`, linkComponent: SpaceLink, fact: words, factMark, factTone: fact.kind === 'move' ? ('action' as const) : ('default' as const), working: fact.kind === 'working', unread: spaceUnread(plan), time, action, pinned };
   const face = plan.head_version_number >= 1 ? <SpaceFace plan={plan} /> : null;
   const box = (
-    <div className={list ? 'ib-spc-item ib-spc-rowitem' : 'ib-spc-item'} role={list ? 'listitem' : undefined} data-card-key={plan.id} data-space={plan.id}>
+    <div className={list ? 'ib-spc-item ib-spc-rowitem' : 'ib-spc-item'} data-card-key={plan.id} data-space={plan.id}>
       <div className="ib-spc-in">
-        {list ? <CardRow {...common} secondary={secondary} thumb={thumb} /> : <Card {...common} face={face} size={size} />}
+        {list ? <CardRow {...common} secondary={secondary} thumb={thumb} empty={plan.head_version_number < 1} /> : <Card {...common} face={face} size={size} />}
       </div>
     </div>
   );
