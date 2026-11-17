@@ -82,7 +82,6 @@ import {
   startStatusLine,
   scratchFolderOf,
   scratchProject,
-  folderProject,
   untildePath,
   SCRATCH_PICK,
   sendThreadName,
@@ -94,9 +93,9 @@ import {
   type ComposeClone,
   type ComposeCloneRequest,
   cloneOfUrl,
+  addAgentStart,
   agentStartsIn,
-  defaultStartProject,
-  launchForAgent,
+  composeStartOf,
   launchGroups,
   projectWithAgent,
   type LaunchHistory,
@@ -392,42 +391,21 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const canStart = !!startLaunch && startLaunch.agents.length > 0 && (startLaunch.projects.length > 0 || (grouped && machineGroups.groups.some((g) => !!g.scratch)));
   // The launch block of the machine a pick is on: this computer's, or that machine's last good read.
   const blockOf = (machine: string | null) => (machine ? there.reads.get(machine)?.launch : model?.launch);
+  // The start the pick makes with its machine's block (`composeStartOf`: another folder, the scratch folder, a project).
   const start: (ComposeStart & { machine: string | null }) | null = useMemo(() => {
     if (!startPick) return null;
     const block = startPick.machine ? there.reads.get(startPick.machine)?.launch : model?.launch;
-    const agent = block?.agents.find((a) => a.agent === startPick.agent);
-    // "Another folder…": a folder under that machine's home; the Send names it, and the far side makes it a project.
-    // An agent that names the projects it starts in (T3 Code) starts in one of those alone.
-    if (agent?.starts_in && (startPick.folder || !agentStartsIn(agent, startPick.projectId))) return null;
-    if (agent && startPick.folder && !pulls && !box) {
-      return {
-        agent: agent.agent,
-        name: agent.name,
-        project: folderProject(startPick.folder.path, startPick.folder.name),
-        folder: startPick.folder.path,
-        ...(startPick.folder.create ? { create: true as const } : {}),
-        ...(startPick.folder.clone ? { clone: startPick.folder.clone } : {}),
-        machine: startPick.machine,
-      };
-    }
-    // "New scratch folder": its root stands in for the project; the folder is made when the person sends.
-    if (agent && startPick.projectId === SCRATCH_PICK && block?.scratch && ((!pulls && !box) || linkScratch)) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine: startPick.machine };
-    const project = block?.projects.find((p) => p.id === startPick.projectId && (!onlyProjects || onlyProjects.includes(p.id)));
-    return agent && project ? { agent: agent.agent, name: agent.name, project, machine: startPick.machine, ...(agent.worktree ? { worktree: true as const } : {}) } : null;
+    return composeStartOf(startPick, block, { folders: !pulls && !box, scratch: (!pulls && !box) || linkScratch, only: onlyProjects ?? null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [startPick, model?.launch, there.reads, pulls, box, onlyProjects?.join(), linkScratch]);
   // Add agent: the default start, once the launch block is read, unless the person chose To already.
   const launchPicked = useRef(false);
   useEffect(() => {
     if (!request.launch || launchPicked.current || startPick || chosen || !startLaunch || !canStart) return;
-    const asked = startLaunch.agents.find((a) => a.agent === request.launch!.agent) ?? startLaunch.agents[0]!;
-    // An agent that starts only in some projects (T3 Code) has its own default among them; none: the first agent.
-    const ownDefault = defaultStartProject(launchForAgent(startLaunch, asked.agent), current);
-    const agent = ownDefault ? asked : startLaunch.agents[0]!;
-    const project = ownDefault ?? defaultStartProject(launchForAgent(startLaunch, agent.agent), current);
-    if (!project) return;
+    const picked = addAgentStart(startLaunch, request.launch.agent, current);
+    if (!picked) return;
     launchPicked.current = true;
-    setStartPick({ agent: agent.agent, projectId: project.id, machine: (project as MachineLaunchProject).machine ?? null });
+    setStartPick({ agent: picked.agent, projectId: picked.project.id, machine: (picked.project as MachineLaunchProject).machine ?? null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request.launch, startLaunch, canStart, startPick, chosen, current]);
   // "+" on a project row and Add agent: an agent that machine doesn't have (or none started yet) becomes its first,

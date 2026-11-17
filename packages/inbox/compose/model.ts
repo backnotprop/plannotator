@@ -500,6 +500,47 @@ export function launchForAgent<T extends { agents: readonly LaunchAgentEntry[]; 
   return { ...rest, projects: launch.projects.filter((p) => entry.starts_in!.includes(p.id)) } as unknown as T;
 }
 
+/** Compose's start pick: To's agent and project (or a folder), on a machine (null: this computer). */
+export interface ComposeStartPick {
+  agent: string;
+  projectId: string;
+  machine: string | null;
+  folder?: { path: string; name: string; create?: boolean; clone?: ComposeClone };
+}
+
+/**
+ * The start a pick makes with its machine's launch block; null when the block doesn't offer it. "Another folder…"
+ * is a folder under that machine's home (the Send names it, and the far side makes it a project), when `folders`
+ * (not for a pull handoff or a review box). "New scratch folder": its root stands in for the project, made when the
+ * person sends, when `scratch`. `only`: the projects To may start in (null: any). An agent that names the projects
+ * it starts in (T3 Code) starts in one of those alone, never in a folder.
+ */
+export function composeStartOf(pick: ComposeStartPick, block: InboxComposeLaunch | undefined, rules: { folders: boolean; scratch: boolean; only: readonly string[] | null }): (ComposeStart & { machine: string | null }) | null {
+  const agent = block?.agents.find((a) => a.agent === pick.agent);
+  if (!block || !agent) return null;
+  const { machine } = pick;
+  if (agent.starts_in && (pick.folder || !agentStartsIn(agent, pick.projectId))) return null;
+  if (pick.folder && rules.folders) {
+    const { path, name, create, clone } = pick.folder;
+    return { agent: agent.agent, name: agent.name, project: folderProject(path, name), folder: path, ...(create ? { create: true as const } : {}), ...(clone ? { clone } : {}), machine };
+  }
+  if (pick.projectId === SCRATCH_PICK && block.scratch && rules.scratch) return { agent: agent.agent, name: agent.name, project: scratchProject(block.scratch.root), scratch: true, machine };
+  const project = block.projects.find((p) => p.id === pick.projectId && (!rules.only || rules.only.includes(p.id)));
+  return project ? { agent: agent.agent, name: agent.name, project, machine, ...(agent.worktree ? { worktree: true as const } : {}) } : null;
+}
+
+/**
+ * Add agent's default start: the asked agent in its own default project (one that starts only in some, T3 Code, has
+ * its own among them), else the first agent in its default. Null: no project to start in yet.
+ */
+export function addAgentStart(launch: InboxComposeLaunch, asked: string | null, current: { id: string | null; root: string | null } | null): { agent: string; project: LaunchProject } | null {
+  const wanted = launch.agents.find((a) => a.agent === asked) ?? launch.agents[0]!;
+  const own = defaultStartProject(launchForAgent(launch, wanted.agent), current);
+  const agent = own ? wanted : launch.agents[0]!;
+  const project = own ?? defaultStartProject(launchForAgent(launch, agent.agent), current);
+  return project ? { agent: agent.agent, project } : null;
+}
+
 // ── Remote launch: the folder menu grouped by machine (approval "remote-launch", the picker's A) ──
 
 /** A machine as compose sees it (`GET /api/inbox/machines`). */
