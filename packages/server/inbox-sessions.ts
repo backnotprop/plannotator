@@ -370,6 +370,8 @@ export function createInboxLiveSessions(options: {
   onPoll?: (session: string, continues: readonly string[]) => void;
   /** Where each session's first-seen time is kept across restarts (inbox-first-seen.ts); absent: in memory only. */
   firstSeen?: InboxFirstSeen;
+  /** The person's New message was just written (not a replay): inbox.ts's `/create-routine` grant. */
+  onSent?: (req: Request, body: Record<string, unknown>, message: InboxMessage) => void;
 }) {
   const { store, serverSession } = options;
   const now = options.now ?? Date.now;
@@ -1349,6 +1351,7 @@ export function createInboxLiveSessions(options: {
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
     });
+    if (!result.replayed) options.onSent?.(req, body, result.message);
     return answer({ message: result.message, replayed: result.replayed });
   };
 

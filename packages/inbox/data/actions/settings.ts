@@ -66,7 +66,7 @@ export function useSettingsSaves(
   const toggleShape = (next: boolean) => saveSetting((s) => ({ ...s, shape: { on: next } }), () => inboxApi.saveShape(next), (s, saved) => ({ ...s, shape: saved.shape }), reloadSkillCatalog);
 
   const toggleScheduled = (next: boolean) =>
-    saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }));
+    saveSetting((s) => ({ ...s, scheduled_threads: { ...s.scheduled_threads, on: next } }), () => scheduledApi.saveSwitch(next), (s, saved) => ({ ...s, scheduled_threads: saved.scheduled_threads ?? { on: next } }), reloadSkillCatalog);
 
   const toggleExperimental = (next: boolean) =>
     saveSetting(
