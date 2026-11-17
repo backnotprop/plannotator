@@ -787,7 +787,7 @@ const STUCK_HEADER_LINE_CSS = `
 // Flush files (`flushFiles`): the header's own hairline is the seam, and an unread file's trailing row is not drawn
 // (the viewer gives its room back, the separator's height).
 const FLUSH_FILES_CSS = `
-  :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
+  :host([data-trailing-unread]) [data-separator][data-separator-last] { visibility: hidden; }
 `;
 
 const WARM_UP_REST_MS = 150;
