@@ -436,7 +436,7 @@ describe.skipIf(!hasDom)('CardGrid and CardGroups', () => {
   test('a group on its own lays out its cards in its own grid, 24 px between rows', () => {
     const { Card, CardGroup } = cardModule!;
     const frame = mount(
-      <CardGroup label="tidepool-api">
+      <CardGroup label="payments">
         <Card kind="document" size="regular" title="One" href="/1" />
       </CardGroup>,
     );
@@ -491,13 +491,13 @@ describe.skipIf(!hasDom)('action and pinned', () => {
     const frame = mount(
       <>
         <Card kind="document" size="regular" title="Plan" href="/p" fact="Your move" unread pinned />
-        <CardRow kind="document" title="Plan" href="/p" fact="Your move" pinned secondary="tidepool-api" />
+        <CardRow kind="document" title="Plan" href="/p" fact="Your move" pinned secondary="payments" />
         <CardRow kind="document" title="Other" href="/o" fact="Your move" />
       </>,
     );
     const [card, row, other] = [...frame.querySelectorAll('a')];
     expect(card!.getAttribute('aria-label')).toBe('Plan, Your move, new, pinned');
-    expect(row!.getAttribute('aria-label')).toBe('Plan, tidepool-api, Your move, pinned');
+    expect(row!.getAttribute('aria-label')).toBe('Plan, payments, Your move, pinned');
     expect(other!.getAttribute('aria-label')).toBe('Other, Your move');
     expect(frame.querySelectorAll('[data-frame-card-pinned]').length).toBe(2);
   });
@@ -507,13 +507,13 @@ describe.skipIf(!hasDom)('CardRow', () => {
   test('one link named by the title, the secondary text and the grey line; the date is a tooltip on the link', () => {
     const { CardRow, cardDateWords } = cardModule!;
     const at = '2026-11-15T10:00:00Z';
-    const frame = mount(<CardRow kind="page" title="Rebuild checkout as one page" href="/c" secondary="kestrel-web" time={at} unread />);
+    const frame = mount(<CardRow kind="page" title="Rebuild checkout as one page" href="/c" secondary="web-app" time={at} unread />);
     const row = frame.querySelector<HTMLElement>('[data-frame-card-row]')!;
     const links = row.querySelectorAll('a');
     expect(links.length).toBe(1);
-    expect(links[0]!.getAttribute('aria-label')).toBe(`Rebuild checkout as one page, kestrel-web, ${cardDateWords(new Date(at))}, new`);
+    expect(links[0]!.getAttribute('aria-label')).toBe(`Rebuild checkout as one page, web-app, ${cardDateWords(new Date(at))}, new`);
     expect(links[0]!.getAttribute('title')).toBeTruthy();
-    expect(row.querySelector('[data-frame-card-secondary]')!.textContent).toBe('kestrel-web');
+    expect(row.querySelector('[data-frame-card-secondary]')!.textContent).toBe('web-app');
     expect(row.getAttribute('data-frame-card-columns')).toBe('secondary');
     expect(row.querySelector('time')!.getAttribute('dateTime')).toBe(new Date(at).toISOString());
   });
