@@ -38,7 +38,9 @@ const T3_THREAD_ID = /^[A-Za-z0-9][A-Za-z0-9._~%:!*'()-]{0,4095}$/;
 const T3_THREAD_ID_PLAIN = /^[A-Za-z0-9][A-Za-z0-9._~%:-]{0,4095}$/;
 
 export function isT3ThreadId(value: unknown): value is string {
-  return typeof value === "string" && T3_THREAD_ID.test(value);
+  // Never a launch's placeholder (`launch:<id>`, the session a T3 Code launch is addressed to until T3 names its
+  // thread): no T3 id has that form, and a wake that took it would send the first turn to a thread that isn't there.
+  return typeof value === "string" && T3_THREAD_ID.test(value) && !value.startsWith("launch:");
 }
 
 /** Whether a T3 thread id can go into a command line (`--session t3:<id>`) unquoted. */

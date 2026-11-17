@@ -89,7 +89,7 @@ import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from ".
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
+import { INBOX_LAUNCH_APP_OWNED, INBOX_T3_HOST, inboxId, type InboxComposeLaunch, type InboxLaunchInner, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
@@ -213,7 +213,7 @@ interface HostState {
 export function createInboxLaunch(options: {
   store: InboxStore;
   /** The mod's bridge poll: Claude Code's sessions say through it whether they are live and busy. */
-  live: { runStateOf(session: string): LaunchLive | null };
+  live: { runStateOf(session: string): LaunchLive | null; lastHeardOf?(session: string): number | null };
   dataDir: string;
   serverSession: string;
   homeDir: string;
@@ -485,6 +485,7 @@ export function createInboxLaunch(options: {
     startLog,
     displayFolder: options.displayFolder,
     bridge: options.live,
+    machineName: () => options.machineName?.() ?? null,
     log,
   };
   const claude = createClaudeLaunchHost(context);
@@ -631,6 +632,17 @@ export function createInboxLaunch(options: {
     return [...launchesOf(threadId), ...(run ? [run] : [])].filter((m) => !m.launch!.deleted_at && inboxLaunchedSession(m) === session).at(-1) ?? null;
   };
 
+  /** Whether a launched root's session has reached the Inbox: polled, called a tool, or wrote in the thread. */
+  const heardFrom = (root: InboxMessage): boolean => {
+    const session = root.to?.session;
+    if (!session || session.startsWith("launch:")) return false;
+    if (options.live.runStateOf(session) || (options.live.lastHeardOf?.(session) ?? null) !== null) return true;
+    return store.threadMessageIds(root.thread_id).some((id) => {
+      const message = store.message(id);
+      return message?.author.kind === "agent" && message.author.session === session;
+    });
+  };
+
   /** The run line of a launched root; null for an agent with no host here. */
   const runOfRoot = (root: InboxMessage): InboxRun | null => {
     const launch = root.launch!;
@@ -638,7 +650,11 @@ export function createInboxLaunch(options: {
     if (launch.deleted_at || !host) return null;
     const state = stateOf(host);
     const memo = memoOf(launch);
-    const live = liveOf(host, root, memo);
+    let live = liveOf(host, root, memo);
+    // A host whose start delivers the first turn itself (T3 Code): connected once its session reached the Inbox (a
+    // poll, a tool call, a message in the thread). Not by then, `connectWaitMs` after the start: the "not connected" line.
+    const heard = host.connectWaitMs ? heardFrom(root) : null;
+    if (heard === false && live && !live.busy && now() - memo.startedAt >= host.connectWaitMs!) live = null;
     // A host read from before the last answer settled still shows our own prompt: never "waiting on Terminal".
     const settled = state.permissions.settledAfter?.(launch.id) ?? null;
     const hostState = settled !== null && (state.view?.at ?? 0) < settled ? null : sessionIn(host, launch.session_ref);
@@ -646,8 +662,10 @@ export function createInboxLaunch(options: {
     else memo.waitingSince = null;
     const project = store.project(root.project_id)?.name ?? launch.folder;
     const last = state.lastAvailable;
+    // A start the Inbox closed during (no session, no error, and none runs now): the host's own words, with Try again.
+    const cut = host.interruptedStart && !launch.session_ref && !launch.error && !starting.has(launch.id) ? { code: "failed" as const, text: host.interruptedStart, at: launch.started_at } : null;
     return inboxRunOf({
-      launch,
+      launch: cut ? { ...launch, error: cut } : launch,
       project,
       now: now(),
       startedAt: memo.startedAt,
@@ -655,7 +673,7 @@ export function createInboxLaunch(options: {
       cliAvailable: last === null ? null : !(last.ok === false && last.missing),
       live,
       turnWaiting: turnWaitingOf(root, memo),
-      seenLive: !!root.delivery,
+      seenLive: heard ?? !!root.delivery,
       host: hostState,
       waitingSince: memo.waitingSince,
       respawnFailed: respawnFailedOf(memo),
@@ -806,6 +824,19 @@ export function createInboxLaunch(options: {
     }
   };
 
+  /** The agent and model a host's thread runs (`innerOf`), kept on the launch; nothing is said when the host can't tell. */
+  const readInner = async (rootId: string, host: LaunchHost, ref: string): Promise<void> => {
+    try {
+      const inner = await host.innerOf!(ref);
+      const root = store.message(rootId);
+      if (!inner || !root?.launch || root.launch.deleted_at || root.launch.session_ref !== ref) return;
+      store.settleLaunch(rootId, { inner });
+      options.onChange();
+    } catch (error) {
+      log(`Inbox launch ${rootId}: what it runs was not read: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   /** Start (or start again after a failed start) the agent for a launched root, in the background. */
   const run = async (root: InboxMessage, host: LaunchHost, again: boolean): Promise<void> => {
     const launch = root.launch!;
@@ -839,16 +870,11 @@ export function createInboxLaunch(options: {
         return;
       }
       if (result.ok) {
-        store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref });
-        // The start put the message in as the session's first turn: delivered, in the same step (no wake runs in
-        // between), so the agent's own wake never sends it again.
-        if (host.startsWithTurn) {
-          try {
-            store.recordDelivery(root.id, { host: launch.agent, session: result.session });
-          } catch (error) {
-            log(`Inbox launch ${launch.id}: the first turn went in, but its delivery was not recorded: ${error instanceof Error ? error.message : String(error)}`);
-          }
-        }
+        // The start put the message in as the session's first turn: delivered in the same snapshot that moves it,
+        // so no wake ever sees it on the session undelivered (an Inbox stopped right after included).
+        store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref, ...(host.startsWithTurn ? { delivered: true } : {}) });
+        // What it runs (T3 Code: the agent and model inside), read after the start and never holding it up.
+        if (host.innerOf) void readInner(root.id, host, result.ref);
       } else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() } });
       log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.ref}` : `did not start (${result.code})`}`);
     } catch (error) {
@@ -1139,6 +1165,8 @@ ${result.text}`);
   const stopLaunch = async (root: InboxMessage, host: LaunchHost): Promise<InboxRun | null> => {
     const launch = root.launch!;
     const state = stateOf(host);
+    // Its own app runs it (T3 Code): nothing to stop from here, and the line stays as it is.
+    if ((INBOX_LAUNCH_APP_OWNED as readonly string[]).includes(launch.agent)) return runOfRoot(root);
     // Cancel during a clone (E1, E7): git is stopped, and the partly cloned folder goes.
     const cloning = clones.get(launch.id);
     if (cloning) {
@@ -1420,6 +1448,11 @@ ${result.text}`);
     if (door && !door.window) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
     switch (match[2]) {
       case "stop":
+        // An agent whose own app runs the session (T3 Code): the Inbox can't stop it, and saying "stopped" would be
+        // false. Said in words an older linked window (which still offers Stop) shows as it is.
+        if ((INBOX_LAUNCH_APP_OWNED as readonly string[]).includes(launch.agent)) {
+          throw new InboxError("validation_error", `${host.name} runs this thread in its own app. Stop it in ${host.name}.`);
+        }
         return json({ run: await stopLaunch(root, host) });
       case "open": {
         if (via === "tailnet") return localOnly();
@@ -1800,14 +1833,18 @@ ${result.text}`);
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
       // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
-      const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
+      const lists = host.choices ? await withinLaunchWait(host.choices(startsIn ? [startsIn] : undefined)) : null;
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
-      if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
-        throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+      // T3 Code takes an effort only with a model: its lists have no effort without one.
+      if (target.choice?.effort && !target.choice.model && host.agent === INBOX_T3_HOST) {
+        throw new InboxError("validation_error", `${host.name} takes an effort only with a model. Nothing was sent.`, { field: "to.launch.effort" });
       }
       const modelEfforts = target.choice?.model ? lists?.model_efforts?.[target.choice.model] : undefined;
+      if (target.choice?.effort && lists && !modelEfforts && !lists.efforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ") || "none"}. Nothing was sent.`, { field: "to.launch.effort" });
+      }
       if (target.choice?.effort && modelEfforts && !modelEfforts.includes(target.choice.effort)) {
-        throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
+        throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ") || "none"}. Nothing was sent.`, { field: "to.launch.effort" });
       }
       const model = target.choice?.model;
       const effort = target.choice?.effort;
@@ -1975,13 +2012,14 @@ ${result.text}`);
           state.lastAvailable = ok;
           // `scratch_trusted`: whether it starts in the scratch root without a trust prompt (the trust-once row).
           if (!ok.ok) return [];
-          const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
-          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
-          const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
           // An agent that starts only in some folders (T3 Code: a git repository): the projects it starts in, here now, and
           // never a new folder. A project on a network drive is never read in this process (projectThere): not offered.
           const onNetwork = (at: string) => mounted.some((d) => d.network && (at === d.path || at.startsWith(`${d.path}/`)));
-          const startsIn = host.startsIn ? projects.filter((p) => p.exists && !onNetwork(p.root) && host.startsIn!(p.root) === null).map((p) => p.id) : null;
+          const startsInProjects = host.startsIn ? projects.filter((p) => p.exists && !onNetwork(p.root) && host.startsIn!(p.root) === null) : null;
+          const startsIn = startsInProjects ? startsInProjects.map((p) => p.id) : null;
+          const lists = host.choices ? await withinLaunchWait(host.choices(startsInProjects ? startsInProjects.map((p) => p.root) : undefined)) : null;
+          const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
+          const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
           return [
             {
               agent: host.agent,
@@ -2159,12 +2197,12 @@ ${result.text}`);
      * run line's state (null: no line, which is live and idle, or resting with nothing waiting on it). An agent with
      * no host here (a downgrade) is left out, as it has no line.
      */
-    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null; scheduled: boolean }[] {
+    agents(): { launch_id: string; session: string; thread_id: string; host: string; project_id: string; started_at: string; started: boolean; run: InboxRun["state"] | null; scratch: string | null; scheduled: boolean; inner?: InboxLaunchInner }[] {
       return roots().flatMap((root) => {
         const launch = root.launch!;
         const session = inboxLaunchedSession(root);
         if (launch.deleted_at || !session || !hostOf(launch)) return [];
-        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run }];
+        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run, ...(launch.inner ? { inner: launch.inner } : {}) }];
       });
     },
 

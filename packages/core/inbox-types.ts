@@ -1193,6 +1193,8 @@ export interface InboxLaunchRecord {
   /** Fixed at Send, so Try again and every restart start the same. */
   model?: string;
   effort?: string;
+  /** An agent host that runs other agents (T3 Code): the agent and model its thread runs, as the host said after the start. Absent when it didn't say. */
+  inner?: InboxLaunchInner;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
@@ -1223,6 +1225,13 @@ export interface InboxLaunchClone {
   brings?: string[];
   /** `failed` or `cancelled`: when it ended. Only a reply written after it clones again (E7), never one the clone already had. */
   ended_at?: string;
+}
+
+/** What a T3 Code thread runs: the provider instance (`claudeAgent`), its model (`opus`) and the agent in words ("Claude Code"). */
+export interface InboxLaunchInner {
+  provider: string;
+  model: string;
+  agent: string;
 }
 
 /** The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it. */
@@ -3512,7 +3521,7 @@ export interface InboxAgent {
    * run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in
    * a project), absent from an older Inbox.
    */
-  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null };
+  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null; inner?: InboxLaunchInner };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */

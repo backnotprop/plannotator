@@ -15,10 +15,13 @@ export function pickLaunchModel(choice: InboxLaunchChoice, choices: InboxLaunchC
 
 export const shortLaunchModel = (model: string) => model.slice(model.lastIndexOf('/') + 1);
 
+/** A model as the menu and the button say it: the agent's own words for it (T3 Code: "Claude Code · opus"), else its short name. */
+export const launchModelWords = (model: string, choices: Pick<InboxLaunchChoices, 'model_labels'>) => choices.model_labels?.[model] ?? shortLaunchModel(model);
+
 export function launchChoiceButton(choice: InboxLaunchChoice, choices: InboxLaunchChoices): string {
   const fallback = choices.models.length > 0 ? 'Default model' : `Default ${choices.effort_word.toLowerCase()}`;
   if (!choice.model && choices.models.length > 0) return choice.effort ? `Default model · ${choice.effort}` : fallback;
-  return launchChoiceLine(choice, shortLaunchModel) ?? fallback;
+  return launchChoiceLine(choice, (model) => launchModelWords(model, choices)) ?? fallback;
 }
 
 /** A full model name the CLI doesn't list (sent through the API) still shows as the last choice. */

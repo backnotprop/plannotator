@@ -125,6 +125,35 @@ export function t3ModeDeniedLine(itemId: string, thread: string, code: string, m
   return `T3 refused ${itemId} for thread ${thread} (${code}): the saved grant (${mode ?? "its mode"}) cannot send into that thread. It waits in the Inbox for the agent's next read. To wake it, run \`plannotator t3 login --url ${endpoint}\` and choose a mode that covers the thread.`;
 }
 
+/** The T3 grants `plannotator t3 login` saved under `<dataDir>/t3-code/`, each with a token. */
+export async function savedT3Grants(dataDir: string): Promise<T3Credentials[]> {
+  const root = join(dataDir, "t3-code");
+  const found: T3Credentials[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync(root).filter((name) => existsSync(join(root, name, "oauth.json")));
+  } catch {
+    return found;
+  }
+  if (names.length === 0) return found;
+  const [{ T3Credentials }] = await loadT3();
+  for (const name of names) {
+    const path = join(root, name, "oauth.json");
+    try {
+      const credentials = new T3Credentials(dataDir, new URL((JSON.parse(readFileSync(path, "utf8")) as { endpoint: string }).endpoint));
+      if (credentials.token()) found.push(credentials);
+    } catch {
+      // Not a grant this build reads.
+    }
+  }
+  return found;
+}
+
+/** T3's MCP client over HTTP with a saved grant's token (the T3 client loads only now). */
+export async function connectT3(endpoint: URL, token: () => string | undefined): Promise<T3Rpc & { close?(): Promise<void> }> {
+  return (await loadT3())[2].T3Client.connect(endpoint, token);
+}
+
 export interface InboxT3Wake {
   /** Whether a message from this host and session wakes it: a T3 thread a saved grant reaches. */
   wakes(host: unknown, session: unknown): Promise<boolean>;
@@ -222,28 +251,7 @@ export function createInboxT3Wake(options: {
   const stopping = new AbortController();
 
   // ── The grants, and which one reaches a thread ──
-  const grants = async (): Promise<T3Credentials[]> => {
-    const root = join(dataDir, "t3-code");
-    const found: T3Credentials[] = [];
-    let names: string[] = [];
-    try {
-      names = readdirSync(root).filter((name) => existsSync(join(root, name, "oauth.json")));
-    } catch {
-      return found;
-    }
-    if (names.length === 0) return found;
-    const [{ T3Credentials }] = await loadT3();
-    for (const name of names) {
-      const path = join(root, name, "oauth.json");
-      try {
-        const credentials = new T3Credentials(dataDir, new URL((JSON.parse(readFileSync(path, "utf8")) as { endpoint: string }).endpoint));
-        if (credentials.token()) found.push(credentials);
-      } catch {
-        // Not a grant this build reads.
-      }
-    }
-    return found;
-  };
+  const grants = () => savedT3Grants(dataDir);
   const epochOf = (credentials: T3Credentials): string | undefined => {
     try {
       return credentials.read()?.epoch;
@@ -328,7 +336,8 @@ export function createInboxT3Wake(options: {
 
   // ── The sessions it wakes ──
   let known: Set<string> | null = null;
-  const knownSessions = (): Set<string> => (known ??= store.wakingSessionsOfHost(INBOX_T3_HOST));
+  // A launch's placeholder (`launch:<id>`) is never a T3 thread: the launch engine starts it (inbox-launch-t3.ts).
+  const knownSessions = (): Set<string> => (known ??= new Set([...store.wakingSessionsOfHost(INBOX_T3_HOST)].filter(isT3ThreadId)));
   /**
    * The threads a sweep looks at: those, and every T3 thread that wrote though nothing was promised then (no
    * grant yet, a lapsed one, T3 not answering): a reply to it goes in once a grant reaches it.
@@ -397,7 +406,7 @@ export function createInboxT3Wake(options: {
 
   const wakesItem = (item: InboxMessage, session: string): boolean => {
     if (!store.isOwner(item, session)) return item.tags?.some((tag) => tag.session === session && tag.host === INBOX_T3_HOST && tag.wakes) ?? false;
-    if (item.to) return item.to.host === INBOX_T3_HOST;
+    if (item.to) return item.to.host === INBOX_T3_HOST && isT3ThreadId(item.to.session);
     const asked = item.reply_to ? store.message(item.reply_to) : null;
     return asked?.author.kind === "agent" && asked.author.host === INBOX_T3_HOST && isT3ThreadId(asked.author.session);
   };
@@ -768,7 +777,11 @@ export function createInboxT3Wake(options: {
       sweptSessions().add(message.author.session);
       if (message.wakes === true) knownSessions().add(message.author.session);
     } else {
-      const add = (session: string) => (knownSessions().add(session), sweptSessions().add(session));
+      const add = (session: string) => {
+        if (!isT3ThreadId(session)) return;
+        knownSessions().add(session);
+        sweptSessions().add(session);
+      };
       if (message.to?.host === INBOX_T3_HOST) add(message.to.session);
       for (const tag of message.tags ?? []) if (tag.host === INBOX_T3_HOST && tag.wakes) add(tag.session);
     }

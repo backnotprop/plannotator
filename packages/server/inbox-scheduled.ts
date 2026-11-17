@@ -6,7 +6,7 @@
  * Nothing here runs, writes or sets a timer while the capability switch is off (`on()`).
  */
 import type { InboxMessage, InboxProject, InboxRun } from "@plannotator/core/inbox-types";
-import { inboxId, INBOX_HOST_NAMES } from "@plannotator/core/inbox-types";
+import { inboxId, INBOX_HOST_NAMES, INBOX_LAUNCH_APP_OWNED } from "@plannotator/core/inbox-types";
 import type {
   InboxScheduledChange,
   InboxScheduledFolder,
@@ -217,7 +217,8 @@ export function createInboxScheduled(deps: {
     }
     if (creating || input.folder !== undefined) out.folder = await folderOf(input.folder);
     if (creating || input.agent !== undefined) {
-      if (typeof input.agent !== "string" || !launch.availableFor(input.agent)) throw new InboxError("validation_error", "agent: claude-code, codex, opencode or pi.", { field: "agent" });
+      // T3 Code's own app runs its threads, with no Stop from here: not a routine's agent (New message only).
+      if (typeof input.agent !== "string" || (INBOX_LAUNCH_APP_OWNED as readonly string[]).includes(input.agent) || !launch.availableFor(input.agent)) throw new InboxError("validation_error", "agent: claude-code, codex, opencode or pi.", { field: "agent" });
       out.agent = input.agent;
     }
     if (input.model !== undefined) out.model = optionalToken(input.model, "model");

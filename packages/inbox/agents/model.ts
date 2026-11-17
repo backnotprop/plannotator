@@ -3,6 +3,7 @@
  * Pure: what each machine's group holds, each agent's name, the thread its row opens and the facts its hover card
  * says, from data the window already has (the list's `agents`, its rows and the linked machines). No read of its own.
  */
+import { launchInnerWords } from '@plannotator/core/inbox-launch-choice';
 import { INBOX_HOST_NAMES, type InboxAgent, type InboxAgentsGroup, type InboxListRow, type InboxListSection, type InboxParticipant } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 import type { MachineView } from '../api';
@@ -189,7 +190,10 @@ export interface AgentFacts {
 
 export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: Date = new Date()): AgentFacts {
   const { agent } = entry;
-  const sub = [agentHostName(agent.host), agent.project?.name, machine?.name].filter(Boolean).join(' · ');
+  // An agent host (T3 Code): the agent and model its thread runs, once the host said ("T3 Code (Claude Code · opus)").
+  const inner = launchInnerWords(agent.launch?.inner);
+  const host = inner ? `${agentHostName(agent.host)} (${inner})` : agentHostName(agent.host);
+  const sub = [host, agent.project?.name, machine?.name].filter(Boolean).join(' · ');
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =
     away ??

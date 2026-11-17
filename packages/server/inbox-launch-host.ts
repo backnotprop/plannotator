@@ -18,7 +18,7 @@
  */
 
 import { join } from "node:path";
-import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
+import type { InboxLaunchAgent, InboxLaunchError, InboxLaunchInner, InboxLaunchNotReady, InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import type { InboxLaunchChoices } from "@plannotator/core/inbox-launch-choice";
 import type { resolveInboxLaunch } from "@plannotator/shared/config";
@@ -204,6 +204,8 @@ export interface LaunchHostContext {
   displayFolder: (path: string) => string;
   /** The mod's bridge poll (createInboxLaunch's `live`), for a host whose sessions connect through the mod. */
   bridge: { runStateOf(session: string): LaunchLive | null };
+  /** This computer's name as linked machines know it; null when it has none. Words every window shows name it. */
+  machineName?: () => string | null;
   log: (line: string) => void;
 }
 
@@ -261,7 +263,13 @@ export interface LaunchHost {
    * scopes); not cached. None: the machine's own setup.
    */
   available(folders?: readonly string[]): Promise<LaunchAvailability>;
-  choices?(): Promise<Omit<InboxLaunchChoices, "last"> | null>;
+  /**
+   * The model and effort lists To's menu offers. `folders`: the folders it would start in (T3 Code lists the models
+   * its threads there used when it can't read its full list); other hosts ignore them.
+   */
+  choices?(folders?: readonly string[]): Promise<Omit<InboxLaunchChoices, "last"> | null>;
+  /** Only an agent host that runs other agents (T3 Code): what the session runs, read after the start; null when it can't say. */
+  innerOf?(ref: string): Promise<InboxLaunchInner | null>;
   /** How a launch made now in `folder` starts; fixed on the record at Send. */
   startOf(folder: string): { full: boolean; ownMode: boolean; bypass: boolean };
   /** It starts in `folder` (and every scratch folder in it) without a trust prompt. */
@@ -284,6 +292,18 @@ export interface LaunchHost {
    * No member: any folder.
    */
   startsIn?(folder: string | null): string | null;
+  /**
+   * Only a host whose start can't be picked up again once the Inbox stops mid-start (T3 Code): the run line's cause
+   * for a launch with no session and no error that no start runs for now. Its Try again starts it again (`start`
+   * finds a thread the cut start made). No member: the generic "not connected" line.
+   */
+  readonly interruptedStart?: string;
+  /**
+   * Only a host whose start puts the first turn in itself, so the root is delivered before its session ever reached
+   * the Inbox (T3 Code): how long after the start the run line waits for the session to poll, call a tool or write,
+   * before it says it is not connected. No member: delivered means connected.
+   */
+  readonly connectWaitMs?: number;
   /** Every session it starts works in a new git worktree its own app makes (the launch block's `worktree`). */
   readonly worktree?: boolean;
   /**

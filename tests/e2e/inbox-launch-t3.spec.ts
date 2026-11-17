@@ -6,9 +6,10 @@
  * PLANNOTATOR_DATA_DIR, a launch PATH of the system's tools alone, PLANNOTATOR_INBOX_CONNECT=0, NO_BROWSER.
  *
  *  1. The journey: To offers T3 Code in the git repository only, and says it starts in a new worktree from the
- *     branch the project is on; Send runs one `t3 thread start . - --worktree main …` in the project with the
- *     message on stdin; the thread says who started it, has no Stop, and a reply goes into the new T3 thread once.
- *  2. T3 Code not running: the line says why in T3's own words and keeps the message; Try again starts it.
+ *     branch the project is on; Send runs one `t3 thread start . - --worktree=main …` (Default: no agent or model
+ *     flag) in the project with the message on stdin; the thread says who started it and what T3 runs it on
+ *     ("T3 Code (Claude Code · opus)"), has no Stop, and a reply goes into the new T3 thread once.
+ *  2. T3 Code not running: the line says why in plain words and keeps the message; Try again starts it.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-launch-t3.spec.ts`.
@@ -159,13 +160,21 @@ test('the journey: T3 Code in the repository only, one `t3 thread start` in a ne
   const { page, t3 } = world;
   const { threadId } = await launch(page, 'Tighten the checkout copy. Keep the button label.');
   const p = pane(page);
-  await expect(p.locator('[data-launched]')).toHaveText('You started T3 Code in shop');
+  // Default: T3 runs it on the project's own model, and the header says which once T3 said.
+  await expect(p.locator('[data-launched]')).toHaveText('You started T3 Code (Claude Code · opus) in shop', { timeout: 20_000 });
 
   const start = await waitFor('t3 thread start', () => t3.starts()[0]);
   expect(start.cwd).toBe(world.shop);
   expect(start.base).toBe('main');
-  expect(t3.calls()[0]!.slice(0, 7)).toEqual(['thread', 'start', '.', '-', '--worktree', 'main', '--title']);
-  expect(t3.calls()[0]!.at(-1)).toBe('--json');
+  const starts = t3.calls().filter((args) => args[0] === 'thread' && args[1] === 'start');
+  expect(starts).toHaveLength(1);
+  expect(starts[0]!.slice(0, 5)).toEqual(['thread', 'start', '.', '-', '--worktree=main']);
+  expect(starts[0]![5]!.startsWith('--title=')).toBe(true);
+  expect(starts[0]!.at(-1)).toBe('--json');
+  // Default passes no agent or model.
+  expect(starts[0]!.some((arg) => arg.startsWith('--provider') || arg.startsWith('--model'))).toBe(false);
+  // The T3 wake never took the launch's placeholder for a thread.
+  expect(t3.calls().filter((args) => args.some((arg) => arg.startsWith('launch:')))).toEqual([]);
   // The message went in on stdin, never on the command line.
   expect(start.text).toContain('Tighten the checkout copy.');
   expect(t3.calls().flat().join(' ')).not.toContain('Tighten');
@@ -180,7 +189,7 @@ test('the journey: T3 Code in the repository only, one `t3 thread start` in a ne
   // T3 Code runs the thread: no Stop on the thread's menu.
   await p.locator('[data-thread-more]').click();
   await page.locator('[data-thread-menu] [data-launch-item]').first().waitFor({ state: 'visible', timeout: 10_000 });
-  expect(await page.locator('[data-thread-menu] [data-launch-item]').allTextContents()).not.toContain('Stop T3 Code');
+  await expect(page.locator('[data-thread-menu] [data-launch-item="stop"]')).toHaveCount(0);
   await page.keyboard.press('Escape');
 
   await p.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();

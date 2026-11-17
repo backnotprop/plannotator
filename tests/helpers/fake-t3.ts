@@ -15,6 +15,8 @@
  * - `readFailure`: answer every `t3_thread_read` with this typed failure
  *   (`orchestration_error` is T3's "could not be completed").
  * - `stallMs`: hold every request this long first, as a T3 that black-holes.
+ * - `capabilities`: `orchestrator_capabilities`' answer (the providers and
+ *   models the Inbox's T3 launch lists for a signed-in T3).
  *
  * A send is idempotent by `clientRequestId`, as T3's is: a retry under the
  * same id returns the first receipt and records no second turn.
@@ -28,6 +30,8 @@ export interface FakeT3 {
   turns: { threadId: string; message: string; clientRequestId: string; mode: string }[];
   /** Every t3_thread_send call, a retry or a denied one included. */
   sendCalls: number;
+  /** Every orchestrator_capabilities call (`capabilities`: its answer, T3's `OrchestratorMcpCapabilitiesResult`). */
+  capabilityCalls: number;
   threads: string[];
   state: {
     token: string;
@@ -86,15 +90,23 @@ export function t3ScopeOf(access: T3Access): string {
  *   server running, "stale" as with a runtime file whose server does not
  *   answer, "gone" as for a thread T3 deleted, "fail" with another failure,
  *   "hang" never answers.
- * - `thread start . - --worktree <base> [--title <t>] --json` (the Inbox's T3
- *   Code launch, inbox-launch-t3.ts), as T3's cli/thread.ts answers it: run in
- *   a folder inside one of `projects` (T3's projects, by folder), it makes a
- *   new thread (`thread:project:<uuid>:<uuid>`, the form a real
- *   `t3 thread start` gave), takes the message from stdin as its first turn
- *   and prints `{ threadId, projectId, runId }`; in any other folder it says
- *   "No T3 Code project matches '.'. …", exit 1. A base named
- *   "no-such-branch" is refused in T3's words. `starts()` lists what it made.
- *   A thread it made is one `send` and `show` know.
+ * - `thread start . - --worktree=<base> [--title=<t>] [--provider=<p> --model=<m>
+ *   [--option=effort=<v>]] --json` (the Inbox's T3 Code launch,
+ *   inbox-launch-t3.ts; each flag also as `--name value`), as T3's
+ *   cli/thread.ts answers it: run in a folder inside one of `projects` (T3's
+ *   projects, by folder), it makes a new thread (`thread:project:<uuid>:<uuid>`,
+ *   the form a real `t3 thread start` gave) on the provider and model given,
+ *   else the project's default (`defaultModel`, Claude Code's opus), takes the
+ *   message from stdin as its first turn and prints `{ threadId, projectId,
+ *   runId }`; in any other folder it says "No T3 Code project matches '.'. …",
+ *   exit 1. A base named "no-such-branch" is refused in T3's words. `starts()`
+ *   lists what it made. A thread it made is one `send` and `show` know; in
+ *   state "taken-then-hang" it makes the thread, then never answers.
+ * - `thread show <id> --json` names the thread's `providerInstanceId` and
+ *   `model`, as T3's thread read does.
+ * - `thread list --json` in a project's folder lists that project's threads,
+ *   newest first, with their title, provider and model: those `thread start`
+ *   made there and `used` (threads T3 had already, by project folder).
  *
  * `threads` maps a Codex thread to the T3 thread that runs it; `t3Threads`
  * are T3's other threads (a Claude one's id is T3's own). `db: false` makes no
@@ -122,8 +134,8 @@ export interface FakeT3Home {
   turns(): [string, string][];
   /** The environment each call ran with. */
   envs(): Record<string, string>[];
-  /** Every thread `thread start` made: its id, the folder it ran in, the base, the title and the message. */
-  starts(): { id: string; cwd: string; base: string | null; title: string | null; text: string }[];
+  /** Every thread `thread start` made: its id, the folder it ran in, the base, the title, the provider, model and options asked for, and the message. */
+  starts(): { id: string; cwd: string; base: string | null; title: string | null; provider: string | null; model: string | null; options: string[]; text: string }[];
   setState(state: FakeT3HomeState): void;
 }
 
@@ -145,7 +157,29 @@ function writeStateDb(dir: string, threads: Record<string, string>, schema: "0.1
   db.close();
 }
 
-export function makeFakeT3Home(home: string, threads: Record<string, string>, options: { t3Threads?: string[]; schema?: "0.1.9" | "unknown"; projects?: string[]; db?: false } = {}): FakeT3Home {
+export interface FakeT3UsedThread {
+  threadId: string;
+  title: string;
+  providerInstanceId: string;
+  model: string;
+}
+
+export function makeFakeT3Home(
+  home: string,
+  threads: Record<string, string>,
+  options: {
+    t3Threads?: string[];
+    schema?: "0.1.9" | "unknown";
+    projects?: string[];
+    db?: false;
+    /** The threads each project (by folder) already has, newest first (`thread list`). */
+    used?: Record<string, FakeT3UsedThread[]>;
+    /** The project default a start without `--provider`/`--model` runs. */
+    defaultModel?: { provider: string; model: string };
+    /** The port its runtime file names (a signed-in test's scripted MCP server's). */
+    port?: number;
+  } = {},
+): FakeT3Home {
   const dir = join(home, ".t3");
   mkdirSync(join(dir, "userdata"), { recursive: true });
   mkdirSync(join(dir, "bin"), { recursive: true });
@@ -162,7 +196,8 @@ export function makeFakeT3Home(home: string, threads: Record<string, string>, op
     if (state === "down") rmSync(runtimeFile, { force: true });
     else {
       const startedAt = state === "starting" ? new Date().toISOString() : "2026-11-14T00:00:00.000Z";
-      writeFileSync(runtimeFile, `${JSON.stringify({ version: 1, pid: process.pid, port: 9, origin: "http://127.0.0.1:9", startedAt, serverVersion: "0.1.9" })}\n`);
+      const port = options.port ?? 9;
+      writeFileSync(runtimeFile, `${JSON.stringify({ version: 1, pid: process.pid, port, origin: `http://127.0.0.1:${port}`, startedAt, serverVersion: "0.1.9" })}\n`);
       // The file's own time is a start too: an old one stands for a server up for long.
       if (state !== "starting") utimesSync(runtimeFile, new Date("2026-11-14T00:00:00.000Z"), new Date("2026-11-14T00:00:00.000Z"));
     }
@@ -184,7 +219,11 @@ const turnsFile = ${JSON.stringify(turnsLog)};
 const turns = () => fs.existsSync(turnsFile) ? fs.readFileSync(turnsFile, "utf8").split("\\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const say = (line, code) => { process.stderr.write(line + "\\n"); process.exit(code); };
 const thread = args.filter((a) => !a.startsWith("--"))[2];
-const flag = (name) => { const at = args.indexOf(name); return at >= 0 ? args[at + 1] : undefined; };
+const flags = (name) => args.flatMap((a, i) => a === name ? [args[i + 1]] : a.startsWith(name + "=") ? [a.slice(name.length + 1)] : []);
+const flag = (name) => flags(name)[0];
+const used = ${JSON.stringify(options.used ?? {})};
+const fallback = ${JSON.stringify(options.defaultModel ?? { provider: "claudeAgent", model: "opus" })};
+const runsOf = (id) => { const made = started().find((s) => s.id === id); return made ? { providerInstanceId: made.provider ?? fallback.provider, model: made.model ?? fallback.model } : { providerInstanceId: fallback.provider, model: fallback.model }; };
 const take = (text) => fs.appendFileSync(turnsFile, JSON.stringify([thread, text]) + "\\n");
 if (state === "hang") setTimeout(() => {}, 60000);
 else if (state === "down") say("No running T3 Code server uses ${dir}. Start T3 Code, then retry.", 1);
@@ -198,11 +237,23 @@ else if (args[0] === "thread" && args[1] === "start") {
   if (!text.trim()) say("The message is empty.", 1);
   const base = flag("--worktree") ?? null;
   if (base === "no-such-branch") say('Base ref "no-such-branch" does not resolve to a commit in project "' + require("node:path").basename(project) + '" (' + project + ').', 1);
+  const provider = flag("--provider") ?? null;
+  const model = flag("--model") ?? null;
+  if ((provider === null) !== (model === null)) say("--provider and --model go together.", 1);
+  const options = flags("--option");
+  if (options.length > 0 && provider === null) say("--option needs --provider and --model.", 1);
   const { randomUUID } = require("node:crypto");
   const id = "thread:project:" + randomUUID() + ":" + randomUUID();
-  fs.appendFileSync(startsFile, JSON.stringify({ id, cwd, base, title: flag("--title") ?? null, text }) + "\\n");
+  fs.appendFileSync(startsFile, JSON.stringify({ id, cwd, project, base, title: flag("--title") ?? null, provider, model, options, text }) + "\\n");
   fs.appendFileSync(turnsFile, JSON.stringify([id, text]) + "\\n");
-  process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
+  if (state === "taken-then-hang") setTimeout(() => {}, 60000);
+  else process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
+} else if (args[0] === "thread" && args[1] === "list") {
+  const cwd = fs.realpathSync(process.cwd());
+  const project = projects.find((root) => cwd === root || cwd.startsWith(root + "/"));
+  if (!project) say("No T3 Code project matches '.'. Pass a project id or a path inside a project.", 1);
+  const mine = started().filter((s) => s.project === project).reverse().map((s) => ({ threadId: s.id, title: s.title ?? "", status: "running", ...runsOf(s.id) }));
+  process.stdout.write(JSON.stringify([...mine, ...(used[project] ?? []).map((t) => ({ status: "idle", ...t }))]) + "\\n");
 } else if (args[0] === "thread" && args[1] === "send") {
   if (state === "gone" || !known.includes(thread)) say("Thread " + thread + " was not found.", 1);
   if (state === "starting") say("Thread " + thread + " was not found.", 1);
@@ -215,7 +266,7 @@ else if (args[0] === "thread" && args[1] === "start") {
   if (state === "gone" || state === "starting" || !known.includes(thread)) say("Thread " + thread + " is no longer available.", 1);
   const limit = Number(flag("--messages") ?? 20);
   const messages = turns().filter((turn) => turn[0] === thread).map((turn, n) => ({ role: "user", runId: "run:" + n, text: turn[1] }));
-  process.stdout.write(JSON.stringify({ thread: { threadId: thread, status: "completed" }, messages: limit > 0 ? messages.slice(-limit) : [] }) + "\\n");
+  process.stdout.write(JSON.stringify({ thread: { threadId: thread, status: "completed", ...runsOf(thread) }, messages: limit > 0 ? messages.slice(-limit) : [] }) + "\\n");
 } else say("unknown command", 2);
 `,
   );
@@ -235,11 +286,11 @@ else if (args[0] === "thread" && args[1] === "start") {
   };
 }
 
-export function startFakeT3(options: { threads: string[]; token?: string; access?: T3Access; modes?: Record<string, T3RuntimeMode> }): FakeT3 {
+export function startFakeT3(options: { threads: string[]; token?: string; access?: T3Access; modes?: Record<string, T3RuntimeMode>; capabilities?: unknown }): FakeT3 {
   const turns: FakeT3["turns"] = [];
   const receipts = new Map<string, Record<string, unknown>>();
   const state: FakeT3["state"] = { token: options.token ?? "t3-test-access", access: options.access ?? "full-access", modes: options.modes ?? {}, deny: null, readFailure: null, stallMs: 0 };
-  const fake = { turns, sendCalls: 0, threads: options.threads, state } as Omit<FakeT3, "endpoint" | "stop">;
+  const fake = { turns, sendCalls: 0, capabilityCalls: 0, threads: options.threads, state } as Omit<FakeT3, "endpoint" | "stop">;
   const text = (value: unknown, isError = false) => ({ content: [{ type: "text", text: JSON.stringify(value) }], ...(isError ? { isError: true } : { structuredContent: value }) });
   const failure = (code: string, message: string) => text({ _tag: "OrchestratorMcpFailure", code, message }, true);
   const modeOf = (threadId: string): T3RuntimeMode => state.modes[threadId] ?? "auto";
@@ -255,8 +306,11 @@ export function startFakeT3(options: { threads: string[]; token?: string; access
       if (rpc.id === undefined) return new Response(null, { status: 202 });
       let result: unknown;
       if (rpc.method === "initialize") result = { protocolVersion: "2025-11-25", capabilities: { tools: {} }, serverInfo: { name: "scripted-t3", version: "test" } };
-      else if (rpc.method === "tools/list") result = { tools: ["t3_thread_read", "t3_thread_send"].map((name) => ({ name, inputSchema: { type: "object" } })) };
-      else {
+      else if (rpc.method === "tools/list") result = { tools: ["t3_thread_read", "t3_thread_send", "orchestrator_capabilities"].map((name) => ({ name, inputSchema: { type: "object" } })) };
+      else if (rpc.params?.name === "orchestrator_capabilities") {
+        fake.capabilityCalls++;
+        result = options.capabilities === undefined ? failure("invalid_request", "No tool orchestrator_capabilities.") : text(options.capabilities);
+      } else {
         const name = rpc.params?.name;
         const args = rpc.params?.arguments ?? {};
         const threadId = String(args.threadId);

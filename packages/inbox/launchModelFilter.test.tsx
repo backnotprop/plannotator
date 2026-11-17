@@ -59,3 +59,36 @@ test.skipIf(!hasDom)('a long model list filters as you type; Enter picks the bes
   key('Escape');
   expect(closed).toBe(1);
 });
+
+test.skipIf(!hasDom)("T3 Code's menu: each model reads as its agent and model, Default first; a model's own efforts only, none with Default; the button says the pick in the same words", async () => {
+  const { LaunchChoiceButton } = await import('./compose/LaunchChoiceMenu');
+  const t3: InboxLaunchChoices = {
+    models: ['claudeAgent/opus', 'claudeAgent/sonnet', 'codex/gpt-5.5'],
+    efforts: [],
+    effort_word: 'Effort',
+    model_efforts: { 'claudeAgent/opus': ['low', 'high', 'max'], 'claudeAgent/sonnet': [], 'codex/gpt-5.5': ['low', 'xhigh'] },
+    model_labels: { 'claudeAgent/opus': 'Claude Code · opus', 'claudeAgent/sonnet': 'Claude Code · sonnet', 'codex/gpt-5.5': 'Codex · gpt-5.5' },
+  };
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  const render = (choice: InboxLaunchChoice) =>
+    act(() =>
+      root!.render(
+        <>
+          <LaunchChoiceButton choice={choice} choices={t3} open onToggle={() => {}} className="b" />
+          <LaunchChoiceMenu choice={choice} choices={t3} phone={false} onChoice={() => {}} onClose={() => {}} />
+        </>,
+      ),
+    );
+  const column = (field: string) => [...host!.querySelectorAll<HTMLElement>(`[data-compose-choice-menu="${field}"] .ib-cp-op`)].map((row) => row.textContent);
+  render({});
+  expect(column('model')).toEqual(['Default', 'Claude Code · opus', 'Claude Code · sonnet', 'Codex · gpt-5.5']);
+  expect(column('effort')).toEqual([]);
+  expect(host.querySelector('[data-compose-choice]')!.textContent).toBe('Default model');
+  render({ model: 'claudeAgent/opus', effort: 'high' });
+  expect(column('effort')).toEqual(['Default', 'low', 'high', 'max']);
+  expect(host.querySelector('[data-compose-choice]')!.textContent).toBe('Claude Code · opus · high');
+  render({ model: 'claudeAgent/sonnet' });
+  expect(column('effort')).toEqual([]);
+});

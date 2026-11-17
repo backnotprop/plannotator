@@ -312,16 +312,23 @@ Inbox's way into a thread once T3 released its Claude.
 ### T3 Code: threads the Inbox starts
 
 New message → To → **New T3 Code session** in a project that is a git
-repository runs `t3 thread start . - --worktree <branch> --title <name> --json`
-in that project's folder (`packages/server/inbox-launch-t3.ts`). T3 Code makes
-the new thread in a new worktree, from the branch the folder has checked out,
-and the person's message (the T3 wake's own text for it) is the first turn.
-The Inbox records that message as delivered, so the T3 wake (`inbox-t3-local.ts`,
-`t3 thread send`) sends only the replies after it. The thread is T3's: its
-model, permission mode and prompts stay in T3 Code's app, and the Inbox offers
-no Stop for it. T3 Code must be running and must know the project. When it
-refuses, the run line quotes T3's reason. The rest is "T3 Code" in
-`inbox-launch.md`.
+repository runs `t3 thread start . - --worktree=<branch> --title=<name> --json`
+in that project's folder (`packages/server/inbox-launch-t3.ts`), with
+`--provider=`, `--model=` and `--option=effort=` when the person picked an
+agent and model in the model button (Default passes none, so T3's project
+default applies). The list is that machine's T3's: `orchestrator_capabilities`
+over the saved `plannotator t3 login` grant, else the pairs its threads already
+used (`t3 thread list --json`), else no button. T3 Code makes the new thread in
+a new worktree, from the branch the folder has checked out, and the person's
+message (the T3 wake's own text for it) is the first turn. The Inbox records
+that message as delivered in the same write that moves it to the thread, so
+the T3 wake (`inbox-t3-local.ts`, `t3 thread send`) sends only the replies
+after it, and the wake never treats the `launch:` placeholder as a T3 thread.
+After the start, `t3 thread show --json` names what T3 runs it on ("T3 Code
+(Claude Code · opus)"). The thread is T3's: its permission prompts stay in T3
+Code's app, and the server refuses Stop for it. T3 Code must be running and
+must know the project. When it refuses, the run line says why in plain words.
+The rest is "T3 Code" in `inbox-launch.md`.
 
 ### Codex Stop hook: which turn the plan belongs to
 

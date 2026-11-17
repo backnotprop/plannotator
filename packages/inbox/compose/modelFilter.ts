@@ -58,12 +58,12 @@ export function modelSearchText(model: string): string {
   return `${provider} ${provider}/${id} ${provider} ${id}`;
 }
 
-export function filterLaunchModels(models: readonly string[], query: string): string[] {
+export function filterLaunchModels(models: readonly string[], query: string, labels?: Record<string, string>): string[] {
   const tokens = query.trim().split(/[\s/]+/).filter(Boolean);
   if (tokens.length === 0) return [...models];
   const found: { model: string; score: number }[] = [];
   for (const model of models) {
-    const text = modelSearchText(model);
+    const text = labels?.[model] ? `${labels[model]} ${modelSearchText(model)}` : modelSearchText(model);
     let score = 0;
     let all = true;
     for (const token of tokens) {

@@ -9,6 +9,8 @@ export interface InboxLaunchChoices {
   efforts: string[];
   effort_word: string;
   model_efforts?: Record<string, string[]>;
+  /** The words a model reads as, where its value doesn't say it (T3 Code: `claudeAgent/opus` reads "Claude Code · opus"). */
+  model_labels?: Record<string, string>;
   last?: InboxLaunchChoice;
 }
 
@@ -142,6 +144,120 @@ export function openCodeSessionModel(model: string | undefined, variant: string 
   const at = model.indexOf("/");
   if (at <= 0 || at === model.length - 1) return null;
   return { providerID: model.slice(0, at), id: model.slice(at + 1), ...(inboxLaunchTokenOk(variant) ? { variant } : {}) };
+}
+
+/**
+ * T3 Code runs other agents: each model is one of a provider instance's (`claudeAgent`, `codex`, or one the person
+ * added). Its value here is `<instance>/<slug>` (an instance id is a slug with no "/", T3's PROVIDER_SLUG_PATTERN), so a
+ * pick, the last choice and a linked machine's forward carry the agent with no field of their own.
+ */
+export function t3ModelOf(value: string | undefined): { provider: string; model: string } | null {
+  if (!inboxLaunchTokenOk(value)) return null;
+  const at = value.indexOf("/");
+  if (at <= 0 || at === value.length - 1) return null;
+  const provider = value.slice(0, at);
+  return /^[a-zA-Z][a-zA-Z0-9_-]*$/.test(provider) ? { provider, model: value.slice(at + 1) } : null;
+}
+
+/** `t3 thread start`'s flags for a pick. Default passes none, so T3 uses the project's own default; an effort goes only with a model (T3: "--option needs --provider and --model"). */
+export function t3LaunchChoiceArgs(choice: InboxLaunchChoice): string[] {
+  const picked = t3ModelOf(choice.model);
+  if (!picked) return [];
+  // `--name=value`: a value is never read as a flag (T3's CLI lexer takes the text after "=" as it is).
+  return [`--provider=${picked.provider}`, `--model=${picked.model}`, ...(inboxLaunchTokenOk(choice.effort) ? [`--option=effort=${choice.effort}`] : [])];
+}
+
+/** T3's agents by driver (its default instance id is the driver's: `defaultInstanceIdForDriver`), in the names this app uses. */
+const T3_AGENT_NAMES: Record<string, string> = {
+  claudeAgent: "Claude Code",
+  codex: "Codex",
+  opencode: "OpenCode",
+  pi: "Pi",
+  cursor: "Cursor",
+  antigravity: "Antigravity",
+  kiro: "Kiro",
+  grok: "Grok",
+};
+
+/** The agent a T3 provider instance runs, in words: T3's own display name, else this table (by driver, then instance), else the instance id. */
+export function t3AgentName(instance: string, driver?: string | null, displayName?: string | null): string {
+  const shown = displayName?.replace(/\s+/g, " ").trim();
+  if (shown) return shown.slice(0, 60);
+  return (driver ? T3_AGENT_NAMES[driver] : undefined) ?? T3_AGENT_NAMES[instance] ?? instance;
+}
+
+const t3Label = (agent: string, model: string, label?: unknown) => `${agent} · ${typeof label === "string" && label.trim() ? label.replace(/\s+/g, " ").trim().slice(0, 80) : model}`;
+
+/**
+ * T3's `orchestrator_capabilities` answer (a signed-in T3): each provider's listed models, the model's `effort`
+ * option as its efforts. Other options (and boolean values) are left out. Null when it lists no model.
+ */
+export function parseT3Capabilities(answer: unknown): Omit<InboxLaunchChoices, "last"> | null {
+  const providers = (answer as { providers?: unknown } | null)?.providers;
+  if (!Array.isArray(providers)) return null;
+  const models: string[] = [];
+  const labels: Record<string, string> = {};
+  const modelEfforts: Record<string, string[]> = {};
+  for (const provider of providers as { providerInstanceId?: unknown; driverKind?: unknown; displayName?: unknown; models?: unknown }[]) {
+    if (typeof provider?.providerInstanceId !== "string" || !Array.isArray(provider.models)) continue;
+    const agent = t3AgentName(provider.providerInstanceId, typeof provider.driverKind === "string" ? provider.driverKind : null, typeof provider.displayName === "string" ? provider.displayName : null);
+    for (const entry of provider.models as { id?: unknown; label?: unknown; options?: unknown }[]) {
+      if (typeof entry?.id !== "string") continue;
+      const value = `${provider.providerInstanceId}/${entry.id}`;
+      if (!t3ModelOf(value) || models.includes(value)) continue;
+      const effort = (Array.isArray(entry.options) ? entry.options : []).find((option: { id?: unknown }) => option?.id === "effort") as { values?: unknown } | undefined;
+      const levels = (Array.isArray(effort?.values) ? effort.values : []).filter((level): level is string => inboxLaunchTokenOk(level));
+      models.push(value);
+      labels[value] = t3Label(agent, entry.id, entry.label);
+      modelEfforts[value] = [...new Set(levels)];
+    }
+  }
+  if (models.length === 0) return null;
+  // No effort with Default: T3 takes an option only with a model.
+  return { models, efforts: [], effort_word: "Effort", model_efforts: modelEfforts, model_labels: labels };
+}
+
+/** What a `t3 … --json` printed: all of it, else its last line (T3 may log a line first). Undefined when neither is JSON. */
+function t3Json(stdout: string): unknown {
+  for (const text of [stdout.trim(), stdout.trim().split("\n").pop() ?? ""]) {
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      // The next.
+    }
+  }
+  return undefined;
+}
+
+/** The agent and model pairs T3 threads used (`t3 thread list --json`, newest first), for a T3 the Inbox isn't signed in to. */
+export function t3UsedModels(lists: readonly string[], agentOf: (instance: string) => string = (instance) => t3AgentName(instance)): Omit<InboxLaunchChoices, "last"> | null {
+  const models: string[] = [];
+  const labels: Record<string, string> = {};
+  for (const list of lists) {
+    const threads = t3Json(list);
+    if (!Array.isArray(threads)) continue;
+    for (const thread of threads as { providerInstanceId?: unknown; model?: unknown }[]) {
+      if (typeof thread?.providerInstanceId !== "string" || typeof thread.model !== "string") continue;
+      const value = `${thread.providerInstanceId}/${thread.model}`;
+      if (!t3ModelOf(value) || models.includes(value)) continue;
+      models.push(value);
+      labels[value] = t3Label(agentOf(thread.providerInstanceId), thread.model);
+    }
+  }
+  if (models.length === 0) return null;
+  return { models, efforts: [], effort_word: "Effort", model_efforts: {}, model_labels: labels };
+}
+
+/** The agent and model a T3 thread runs, from `t3 thread show <id> --json` (`{ thread, messages }`); null when it doesn't say. */
+export function t3ThreadRunsOf(stdout: string): { provider: string; model: string } | null {
+  const thread = (t3Json(stdout) as { thread?: { providerInstanceId?: unknown; model?: unknown } } | null)?.thread;
+  if (!thread || typeof thread.providerInstanceId !== "string" || typeof thread.model !== "string") return null;
+  return t3ModelOf(`${thread.providerInstanceId}/${thread.model}`);
+}
+
+/** "Claude Code · opus": what an agent host's thread runs (T3 Code), as its meta line and agent row say it. */
+export function launchInnerWords(inner: { agent: string; model: string } | null | undefined): string | null {
+  return inner?.agent && inner.model ? `${inner.agent} · ${inner.model}` : null;
 }
 
 export function launchChoiceLine(choice: InboxLaunchChoice | null | undefined, shortModel = (model: string) => model): string | null {

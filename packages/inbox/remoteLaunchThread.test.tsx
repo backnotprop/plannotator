@@ -185,6 +185,15 @@ test.skipIf(!hasDom)('the header names the machine that started it, unless it wa
   scheduled.messages[0] = { ...scheduled.messages[0]!, scheduled_run: { scheduled_id: 'sch_a', name: 'CSV export', run: 1, due_at: '2026-11-06T09:12:00.000Z', by: 'schedule' } };
   await draw(scheduled, null);
   expect(started()).toBe('Routine · Claude Code in billing-svc');
+  act(() => root!.unmount());
+  host!.remove();
+  // A T3 Code thread: the agent and model T3 runs it on, once T3 said, and the effort asked for after.
+  const t3 = threadOf(null);
+  const launch = { ...t3.messages[0]!.launch!, agent: 't3' as const, model: 'claudeAgent/opus', effort: 'high', inner: { provider: 'claudeAgent', model: 'opus', agent: 'Claude Code' } };
+  t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'ses_a' }, launch };
+  await draw(t3, null);
+  expect(started()).toBe('You started T3 Code (Claude Code · opus) in billing-svchigh');
+  expect(host!.querySelector('[data-launch-inner]')!.textContent).toBe(' (Claude Code · opus)');
 });
 
 test.skipIf(!hasDom)("a prompt only Claude Code's own dialog can approve: on another machine it says where, offers Copy attach command, never Approve in Terminal", async () => {

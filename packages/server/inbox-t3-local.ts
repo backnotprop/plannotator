@@ -250,7 +250,11 @@ export function createT3Local(options: {
   const home = () => t3HomeOf(environment);
   // A test run reads agent files only in a scratch home (never the person's real ~/.t3).
   const allowed = () => agentHomeAllowed(environment);
-  const launcher = (): string | null => t3CommandOf(environment);
+  // In a test run, only a `t3` in a temp folder too (never one a real T3CODE_HOME or PATH names), as the T3 launch host's.
+  const launcher = (): string | null => {
+    const command = t3CommandOf(environment);
+    return command && agentHomeAllowed({ homeDir: command, env: environment.env }) ? command : null;
+  };
   const installed = () => environment.platform !== "win32" && allowed() && launcher() !== null;
   const server = () => (installed() ? t3ServerOf(home()) : null);
   const running = () => server() !== null;

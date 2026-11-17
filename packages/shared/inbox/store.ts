@@ -60,6 +60,7 @@ import {
   type InboxReaction,
   type InboxAddressee,
   type InboxLaunchClone,
+  type InboxLaunchInner,
   type InboxLaunchError,
   type InboxLaunchRecord,
   type InboxReplyViewing,
@@ -7457,22 +7458,62 @@ export class InboxStore {
    */
   settleLaunch(
     messageId: string,
-    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
+    outcome:
+      | { to: InboxAddressee; session_ref: string; delivered?: boolean }
+      | { error: InboxLaunchError | null }
+      | { deleted_at: string }
+      | { clone: InboxLaunchClone; made_inode?: string | null }
+      | { inner: InboxLaunchInner },
   ): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
+    if ("inner" in outcome) {
+      const next: InboxMessage = { ...message, launch: { ...message.launch, inner: outcome.inner } };
+      this.appendMessage(next, this.stamp());
+      return next;
+    }
+    if ("to" in outcome) return this.settleLaunchStarted(message, outcome);
     // A clone's folder: a new identity when the Inbox made it again, or none (`null`) once it is gone or no longer
     // the Inbox's, so a later Cancel never removes a folder made at that path since.
     const { made_folder: _madeFolder, made_inode: _madeInode, ...unmade } = message.launch;
     const next: InboxMessage =
       "clone" in outcome
         ? { ...message, launch: { ...(outcome.made_inode === null ? unmade : message.launch), clone: outcome.clone, ...(outcome.made_inode ? { made_folder: true as const, made_inode: outcome.made_inode } : {}) } }
-        : "to" in outcome
-        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null } }
         : "error" in outcome
           ? { ...message, launch: { ...message.launch, error: outcome.error } }
           : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };
     this.appendMessage(next, this.stamp());
+    return next;
+  }
+
+  /**
+   * Started: the root moves from its placeholder to the real session. `delivered`: the start put the root in as the
+   * session's first turn (T3 Code), so the same snapshot records it delivered: no wake ever sees it addressed to the
+   * session and undelivered, even if the Inbox stops right after. A reply the person wrote while it started was
+   * addressed to the placeholder: it moves too (one snapshot each), so it goes to the session like any later reply.
+   */
+  private settleLaunchStarted(message: InboxMessage, outcome: { to: InboxAddressee; session_ref: string; delivered?: boolean }): InboxMessage {
+    const placeholder = message.to?.session ?? null;
+    const at = this.stamp();
+    const to = { host: outcome.to.host, session: outcome.to.session };
+    const { t3_wait: _t3Wait, ...kept } = message;
+    const delivered = outcome.delivered === true && !message.delivery;
+    const next: InboxMessage = {
+      ...(delivered ? kept : message),
+      to,
+      launch: { ...message.launch!, session: outcome.to.session, session_ref: outcome.session_ref, error: null },
+      ...(delivered ? { delivery: { state: "delivered" as const, host: outcome.to.host, session: outcome.to.session, at } } : {}),
+    };
+    this.appendMessage(next, at);
+    if (delivered) this.markAgentChecked(message.thread_id, this.messageSeq.get(message.id) ?? 0, at, outcome.to.session);
+    if (placeholder?.startsWith("launch:") && placeholder !== outcome.to.session) {
+      for (const later of this.threadMessages(message.thread_id)) {
+        if (later.id === message.id || later.author.kind !== "person" || later.delivery || later.launch) continue;
+        if (later.to?.session !== placeholder) continue;
+        const { t3_wait: _wait, ...rest } = later;
+        this.appendMessage({ ...rest, to }, this.stamp());
+      }
+    }
     return next;
   }
 
