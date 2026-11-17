@@ -184,10 +184,10 @@
 .shp-sidep.sheet.open { transform: none; }
 .shp-grab { width: 38px; height: 4px; border-radius: 4px; background: color-mix(in oklab, var(--foreground) 22%, transparent); margin: 8px auto 0; flex: none; }
 .shp-scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .28); z-index: 29; animation: shp-fade-only .2s ease both; }
-.shp-root.panel-open:not(.panel-sheet) .shp-dock, .shp-root.panel-open:not(.panel-sheet) .shp-pill { left: calc((100% - var(--pw) - 12px) / 2); }
-/* Beside the board, References takes its room: the view ends left of it and the drawing fits what is left
-   (ShapeDrawn `aside`), so no part is under the panel. */
-.shp-root.panel-open:not(.panel-sheet) .shp-view { right: calc(var(--pw) + 12px); }
+/* Beside the board, References takes its room: the whole surface (title, drawing, dock, pill, Show more, the example
+   card, and the boxes bounded by it) ends left of the panel, and the drawing fits what is left (ShapeDrawn `aside`).
+   Nothing of the board is under the panel. */
+.shp-root.panel-open:not(.panel-sheet) .shp-surface { margin-right: calc(var(--pw) + 12px); }
 /* As a sheet (a phone, a narrow pane: ShapeSurface `usePanelSheet`) the dock stays over it, whole and in reach; the
    sheet's list ends above the dock. */
 .shp-root.panel-open.panel-sheet .shp-dock { z-index: 32; }
@@ -300,7 +300,6 @@
 /* "Show more": the board's corner, only when there is more to draw. */
 .shp-more { position: absolute; right: 28px; bottom: 22px; z-index: 5; appearance: none; border: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: color-mix(in oklab, var(--popover) 94%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 85%, transparent); font: 500 12.5px/1 var(--font-sans); cursor: pointer; }
 .shp-more:hover { background: var(--muted); }
-.shp-root.panel-open:not(.panel-sheet) .shp-more { right: calc(var(--pw) + 28px); }
 .shp-root.phone .shp-more { right: 12px; bottom: 66px; }
 
 /* ── Follow an example (approval "trace-it-board", r5; the path on its rail from r7) ── The card sits where the
@@ -317,7 +316,6 @@
   animation: shp-ex-card-in .24s var(--ex-ease) both; }
 .shp-ex-card.expanded { width: min(1180px, calc(100% - 32px)); }
 @keyframes shp-ex-card-in { from { opacity: 0; transform: translateY(8px); } }
-.shp-root.panel-open:not(.panel-sheet) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); max-width: calc(100% - var(--pw) - 44px); }
 .shp-ex-card.leaving { pointer-events: none; }
 /* The board's status stays in view while an example is followed: it rides above the card, on the card's curve. */
 /* It keeps sliding with the dock when a panel opens. */

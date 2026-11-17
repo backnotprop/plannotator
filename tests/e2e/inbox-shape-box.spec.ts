@@ -309,12 +309,16 @@ test("a part's comment bubble takes its own press: one click opens it beside Ref
   await expect(page.locator('.shp-sidep.open:not(.sheet)')).toBeVisible();
   // The panel slides in (0.32 s) and the drawing refits into the room left of it: the bubble ends clear of the panel.
   await page.waitForTimeout(400);
-  const clear = async () => {
+  const clearOfPanel = (what: ReturnType<Page['locator']>) => async () => {
     const panel = (await page.locator('.shp-sidep.open').boundingBox())!;
-    const shown = (await bubble.boundingBox())!;
+    const shown = (await what.boundingBox())!;
     return shown.x + shown.width <= panel.x;
   };
-  await expect.poll(clear, { message: 'the bubble is clear of the References panel' }).toBe(true);
+  await expect.poll(clearOfPanel(bubble), { message: 'the bubble is clear of the References panel' }).toBe(true);
+  // The title and its line wrap in the same room: none of them under the panel either.
+  for (const head of ['.shp-head h1', '.shp-claim', '.shp-head-side']) {
+    await expect.poll(clearOfPanel(page.locator(head).first()), { message: `${head} is clear of the References panel` }).toBe(true);
+  }
   // Bounded: a click on a covered bubble would wait for it until the test's own timeout.
   await bubble.click({ timeout: 10_000 });
   await expect(composer(page)).toContainText('Make it green.');

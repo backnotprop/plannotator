@@ -246,6 +246,8 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   }, []);
   const phone = usePhone(rootEl);
   const sheet = usePanelSheet(rootEl, phone);
+  /** The board's own surface: beside the References panel it ends left of it, so boxes kept inside it stay clear of it. */
+  const [surfaceEl, setSurfaceEl] = useState<HTMLElement | null>(null);
   const reduce = useReducedMotion();
 
   const [loaded, setLoaded] = useState<ShapeLoaded | null>(null);
@@ -1119,7 +1121,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
       <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}${sheet ? ' panel-sheet' : ''}${follow.sheet ? ' follow-sheet' : ''}`}>
         <RefHoverCards rootRef={rootRef} />
 
-        <section className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>
+        <section ref={setSurfaceEl} className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>
           {/*
             The title comes first (owner feedback 2026-11-04, shape-board-look): no eyebrow row above it. What the row
             said that the board still needs sits in the group at the title's right: the agent drawing, Finished, and
@@ -1297,12 +1299,12 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
           {hoverRect && <div className="shp-pin-hover" style={{ left: hoverRect.left - 4, top: hoverRect.top - 3, width: hoverRect.width + 8, height: hoverRect.height + 6 }} />}
 
           {reading && !target && !general && (
-            <ShapeTalkBox anchor={reading.el} within={rootEl} label={reading.label} onClose={() => setReading(null)}>
+            <ShapeTalkBox anchor={reading.el} within={surfaceEl} label={reading.label} onClose={() => setReading(null)}>
               {talkFor(reading.on)}
             </ShapeTalkBox>
           )}
           {general && finished && (
-            <ShapeTalkBox anchor={general.el} within={rootEl} label="The whole board" onClose={() => setGeneral(null)}>
+            <ShapeTalkBox anchor={general.el} within={surfaceEl} label="The whole board" onClose={() => setGeneral(null)}>
               {talkFor(null)}
             </ShapeTalkBox>
           )}
@@ -1310,7 +1312,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
             <CommentPopover
               key={`part-${talkKey}`}
               anchorEl={target.el}
-              within={rootEl}
+              within={surfaceEl}
               // With the box: the header is the label as written (CommentPopover quotes a contextText itself).
               contextText={boxSelect ? target.text : quoteLabel(target)}
               headerText={boxSelect ? quoteLabel(target) : undefined}
@@ -1376,7 +1378,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
             <CommentPopover
               key={`general-${talkKey}`}
               anchorEl={general.el}
-              within={rootEl}
+              within={surfaceEl}
               contextText=""
               isGlobal
               headerText={general.view ? `${tabLabel(general.view)} · the whole guide` : 'The whole board'}
