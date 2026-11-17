@@ -833,3 +833,4 @@ packages/ui/components/frame/frame.dom.test.tsx
 packages/ui/components/frame/card/card.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
 packages/inbox/pulls/branchReviews.test.tsx
+packages/review-editor/App.treePanes.test.tsx

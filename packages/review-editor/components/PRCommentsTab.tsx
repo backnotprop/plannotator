@@ -500,12 +500,12 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                 }`}
               >
                 <div
-                  className="flex items-center gap-2.5"
+                  className="flex flex-wrap items-center gap-x-2.5 gap-y-1"
                   onClick={(e) => { e.stopPropagation(); toggleCollapsed(id); }}
                 >
                   <Avatar src={getEntryAvatar(entry)} name={entry.data.author} />
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                    <span className="text-[13px] font-semibold text-foreground truncate">
+                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 flex-1 basis-36">
+                    <span className="text-[13px] font-semibold text-foreground truncate shrink-0 max-w-full">
                       {entry.data.author || 'unknown'}
                     </span>
                     {entry.data.isBot && (
@@ -517,7 +517,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                       </span>
                     )}
                   </div>
-                  <div className="flex items-center gap-2 flex-shrink-0">
+                  <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
                     <span className="text-xs text-muted-foreground tabular-nums">
                       {formatRelativeTime(getEntryTime(entry))}
                     </span>
@@ -606,12 +606,12 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
     >
       {/* Header */}
       <div
-        className="flex items-center gap-2.5"
+        className="flex flex-wrap items-center gap-x-2.5 gap-y-1"
         onClick={(e) => { e.stopPropagation(); onToggleCollapse(); }}
       >
         <Avatar src={first.avatarUrl} name={first.author} />
-        <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <span className={`text-[13px] font-semibold truncate ${thread.isResolved ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0 flex-1 basis-36">
+          <span className={`text-[13px] font-semibold truncate shrink-0 max-w-full ${thread.isResolved ? 'line-through text-muted-foreground' : 'text-foreground'}`}>
             {first.author || 'unknown'}
           </span>
           {first.isBot && (
@@ -628,12 +628,12 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
             </span>
           )}
           {thread.path && (
-            <span className="text-xs font-mono text-muted-foreground truncate flex-shrink min-w-0">
+            <span className="text-xs font-mono text-muted-foreground truncate shrink-0 max-w-full">
               {thread.path.split('/').pop()}{lineLabel ? `:${lineLabel}` : ''}
             </span>
           )}
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0 ml-auto">
           {replies.length > 0 && (
             <span className="text-xs text-muted-foreground">
               {replies.length} repl{replies.length === 1 ? 'y' : 'ies'}
