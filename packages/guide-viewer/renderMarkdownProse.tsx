@@ -9,9 +9,8 @@ const HEADING = /^#{1,6} (.*)$/;
  * with inline markdown (bold/italic/code/links) handled per-line via
  * {@link renderInlineMarkdown}.
  *
- * Originally written for Code Tour stop details; shared with Guided Review
- * section overviews since both are short agent-authored prose blocks that
- * don't warrant pulling in a full markdown renderer.
+ * Used for Guided Review section overviews: short agent-authored prose
+ * blocks that don't warrant pulling in a full markdown renderer.
  */
 export function renderMarkdownProse(
   text: string,

@@ -17,7 +17,7 @@ import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
-import { awayLine, outboxLine } from '../machines';
+import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
@@ -25,6 +25,7 @@ import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OW
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
+import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
@@ -4886,13 +4887,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             </button>
           </p>
         )}
-        {machine && (
-          // Another machine's thread: which machine, or since when it is away (its rows are greyed in the list).
-          <div className="ib-tmeta" data-thread-machine={machine.id} data-away={awayLine(machine) ? '' : undefined}>
-            <span>{awayLine(machine) ?? `On ${machine.name}`}</span>
-          </div>
-        )}
-        {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
+        <ThreadMeta machine={machine} cardChip={cardChip} messages={thread.messages} />
         {notice}
         {launched && <StartedBy launched={launched} root={thread.messages[0]} project={thread.project.name} />}
         {confirmDelete && launched && (

@@ -2796,7 +2796,7 @@ pre code.pn-code[data-keep-layout] {
 /* Pierre's diff colours from the theme, as the review stylesheet passes them into its shadow DOM. */
 .ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
 /* FileHeader's height is this variable, which only the review stylesheet defined: here the row shrank onto its file name. */
-.ib-gbody { --panel-header-h: 33px; }
+.ib-gbody { --panel-header-h: 32px; }
 /* The foot of a review's comments panel when no verdict is given there: what rides the next Send. */
 .ib-gstrip { margin: 0; padding: 10px 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); }
 /* A review narrower than its fold width (REVIEW_FOLD_PANEL_BELOW, PullReview's): the panel folds into the header's
@@ -9673,7 +9673,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-rv-walk .ib-vhead > * { flex: none; }
 .ib-rv-walk .ib-vhead > .ib-sp { flex: 1 1 0; min-width: 0; }
 /* The height the diff renderer reserves for a file's header (review-editor's index.css sets it in the review app). */
-.ib-rv-walk .ib-gbody { --panel-header-h: 33px; }
+.ib-rv-walk .ib-gbody { --panel-header-h: 32px; }
 /* The title asks for no room: it takes what is free, up to its own width, so the chapter name gives way only after it. */
 .ib-review.ib-rv-walk .ib-vhead .ib-rv-title { flex: 1000 1 0; max-width: max-content; min-width: 0; text-overflow: ellipsis; font-size: var(--ib-fs-13, 13px); font-weight: 400; color: var(--muted-foreground); }
 /* Who sent it and when, after the title: both give way together where the bar is short. */
@@ -9802,7 +9802,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
    "review-file-title", take B): nothing is painted behind the name, at rest or under the pointer, and the code keeps its
    own fill inside a border with corners. The name's row sticks to the top while the page scrolls, so it is painted with
    the surface it sits on (the chapter's code column: --card under 7% --muted; the page in All files), never transparent.
-   usePierreTheme's --pn-diff-* hooks carry this inside the diff. The row keeps its 33 px (PANEL_HEADER_HEIGHT). */
+   usePierreTheme's --pn-diff-* hooks carry this inside the diff. The row keeps its 32 px (PANEL_HEADER_HEIGHT). */
 .ib-rv-walk [data-guide-file-shell] {
   --pn-diff-header-bg: color-mix(in srgb, var(--muted) 7%, var(--card));
   --pn-diff-code-border: 1px solid color-mix(in oklch, var(--border) 70%, transparent);
@@ -10731,6 +10731,8 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 /* The tree: one column. */
 /* From nothing, not from the tree's height: a big tree otherwise squeezes the layers above it to a row, hiding the one you are on. */
 .ib-prp-files { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 8px 12px; scrollbar-width: thin; }
+.ib-prp-files.ib-prp-pierre { display: flex; flex-direction: column; overflow: hidden; }
+.ib-prp-pierre > .review-file-tree { flex: 1 1 0; min-height: 0; }
 .ib-prp-fileshead { display: flex; align-items: center; padding: 0 6px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prp-list { list-style: none; margin: 0; padding: 0; }
 .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding-right: 6px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); text-align: left; color: var(--foreground); }
@@ -12407,6 +12409,17 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 @media (pointer: coarse) {
   .pn-cbox .ib-vmic { width: 44px; height: 44px; border-radius: 10px; }
 }
+/* A review comment's lines (live review threads): where, then the code as it read. */
+.ib-ranchor { margin: 0 0 6px; font-size: var(--ib-fs-13, 13px); line-height: 1.5; }
+.ib-ranchor-where { display: flex; gap: 6px; min-width: 0; color: var(--muted-foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-ranchor-state { white-space: nowrap; font-family: inherit; }
+.ib-ranchor-code { margin: 4px 0 0; padding: 6px 8px; overflow-x: auto; border: 1px solid var(--border); border-radius: 6px; background: var(--muted); color: var(--foreground); font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); line-height: 1.6; white-space: pre; }
+.ib-ranchor-open { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 6px; }
+.ib-ranchor-btn { height: 28px; padding: 0 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--background); color: var(--foreground); font: inherit; font-size: var(--ib-fs-12, 12px); cursor: pointer; }
+.ib-ranchor-btn:hover { background: var(--muted); }
+.ib-ranchor-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-ranchor-btn:disabled { opacity: 0.6; cursor: default; }
+.ib-ranchor-err { color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); }
 
 /* Dragging threads (approval "inbox-drag-threads"; threadDrag.ts, replyMentions.tsx). Fills and tints only: never an
    outline on a row. The ghost is a pill of the thread under the pointer; the row it came from keeps its fill, its words

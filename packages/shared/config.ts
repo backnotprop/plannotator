@@ -174,7 +174,6 @@ export interface PlannotatorConfig {
   reviewDefaults?: ReviewDefaults;
   /** Optional analysis layers used by code review. */
   reviewAnalysis?: {
-    /** Named-entity semantic diff. Enabled by default for backwards compatibility. */
     semanticDiff?: boolean;
     /** Call-stack impact analysis powered by the optional CallDiff runtime. */
     callFlow?: boolean;
@@ -877,7 +876,7 @@ export interface PlannotatorConfig {
    */
   cursorSandbox?: boolean;
   /**
-   * Let Claude Code agent jobs (code review, Code Tour, Guided Review) run
+   * Let Claude Code agent jobs (code review, Guided Review) run
    * under the user's own Claude Code sandbox setting. When true (default),
    * Plannotator passes nothing sandbox-related and the user's settings decide.
    * Set to false on systems where Claude Code's sandbox cannot start (Linux

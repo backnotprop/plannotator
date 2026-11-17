@@ -169,7 +169,7 @@ async function open(
     if ((await page.locator('.fixed.inset-0').count()) === 0) break;
     await page.keyboard.press('Escape');
   }
-  await page.getByText('doc.md', { exact: true }).first().click();
+  await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
   return { context, page, engineRequests };
 }
 
