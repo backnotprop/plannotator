@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import React, { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import type { SourceSaveCapability } from "@plannotator/core/source-save";
+import { PANEL_TRANSITION_MS } from "@plannotator/ui/hooks/usePanelPresence";
 
 const hasDom = typeof document !== "undefined";
 
@@ -198,6 +199,12 @@ async function mountApp(planResponse: PlanResponse): Promise<void> {
   }
 }
 
+async function finishPanelExit(): Promise<void> {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, PANEL_TRANSITION_MS + 30));
+  });
+}
+
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -390,7 +397,8 @@ describe.if(hasDom)("App document permissions", () => {
     const closeAnnotations = document.querySelector<HTMLButtonElement>('button[aria-label="Close Annotations"]');
     if (!closeAnnotations) throw new Error("Compact Annotations close control did not render");
     await act(async () => closeAnnotations.click());
-    expect(document.querySelector('[data-pn-compact-plan-stage="true"]')).toBeNull();
+    await finishPanelExit();
+    expect(document.querySelector('[data-pn-compact-plan-stage="true"]') === null).toBe(true);
 
     await act(async () => optionsButton.click());
     await act(async () => findButtonContaining("Ask AI")?.click());
@@ -399,6 +407,7 @@ describe.if(hasDom)("App document permissions", () => {
     const closeAI = document.querySelector<HTMLButtonElement>('button[aria-label="Close Ask AI"]');
     if (!closeAI) throw new Error("Compact Ask AI close control did not render");
     await act(async () => closeAI.click());
+    await finishPanelExit();
 
     const completion = document.querySelector("[data-pn-compact-plan-completion]");
     expect(completion?.textContent).toContain("Ready to finish?");
@@ -495,7 +504,8 @@ describe.if(hasDom)("App document permissions", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(document.querySelector("[data-pn-plan-navigator]")).toBeNull();
+    await finishPanelExit();
+    expect(document.querySelector("[data-pn-plan-navigator]") === null).toBe(true);
     expect(document.body.textContent).toContain("Selected file");
     expect(document.querySelector("[data-pn-compact-document-title]")?.textContent).toBe("alpha.md");
   });

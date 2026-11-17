@@ -147,6 +147,49 @@ describe.skipIf(!hasDom)('useRepoFiles', () => {
     expect(state.dirs.get('src')?.map((entry) => entry.path)).toEqual(['src/a.ts']);
   });
 
+  test('a quiet lazy refresh keeps visible folders until the refreshed tree is ready', async () => {
+    let refreshing = false;
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const net = (async (url: string) => {
+      const dir = new URL(url, 'http://localhost').searchParams.get('dir') ?? '';
+      if (refreshing && dir === 'src') await pending;
+      const entries = dir === '' ? [{ name: 'src', path: 'src', type: 'dir' }, { name: 'extra', path: 'extra', type: 'dir' }]
+        : dir === 'src' ? (refreshing
+            ? [{ name: 'new.ts', path: 'src/new.ts', type: 'file' }]
+            : [{ name: 'old.ts', path: 'src/old.ts', type: 'file' }, { name: 'gone', path: 'src/gone', type: 'dir' }])
+        : dir === 'extra' ? [{ name: 'fresh.ts', path: 'extra/fresh.ts', type: 'file' }]
+        : [{ name: 'nested.ts', path: 'src/gone/nested.ts', type: 'file' }];
+      return Response.json(listing([], { paths: undefined, lazy: true, dir, entries }));
+    }) as unknown as typeof fetch;
+    const view = await render({ enabled: true, snapshotId: 's1' }, net);
+    await flush();
+    await act(async () => {
+      view.latest.current!.loadDir('src');
+      view.latest.current!.loadDir('src/gone');
+    });
+    await flush();
+    refreshing = true;
+    await view.rerender({ enabled: false, snapshotId: 's1' });
+    await view.rerender({ enabled: true, snapshotId: 's1' });
+    await flush();
+    const before = view.latest.current!.state;
+    if (before.status !== 'ready') throw new Error('not ready');
+    expect(before.dirs.get('src')?.map(entry => entry.path)).toEqual(['src/old.ts', 'src/gone']);
+    await act(async () => view.latest.current!.loadDir('extra'));
+    await flush();
+    const during = view.latest.current!.state;
+    if (during.status !== 'ready') throw new Error('not ready');
+    expect(during.dirs.get('extra')?.map(entry => entry.path)).toEqual(['extra/fresh.ts']);
+    await act(async () => release());
+    await flush();
+    const after = view.latest.current!.state;
+    if (after.status !== 'ready') throw new Error('not ready');
+    expect(after.dirs.get('src')?.map(entry => entry.path)).toEqual(['src/new.ts']);
+    expect(after.dirs.has('src/gone')).toBe(false);
+    expect(after.dirs.get('extra')?.map(entry => entry.path)).toEqual(['extra/fresh.ts']);
+  });
+
   test('says when the session cannot list', async () => {
     const net = fakeFetch(() => ({ available: false, reason: 'static-patch', message: 'A patch file has no repository to list.' }));
     const view = await render({ enabled: true, snapshotId: 's1' }, net.impl);
