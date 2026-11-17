@@ -394,13 +394,38 @@
  * shows it at rest; with "never" it shows only on keyboard focus. Hover
  * styles apply only where the screen has hover, so a tap leaves none behind. A pinned row's resting mark
  * is the card's pin after the title, never drawn while the action shows.
+ *
+ * The title is what a row must show: it keeps at least 40% of the row (112 px
+ * at the least). A project is shown whole or not at all: a CardRows narrower
+ * than 713 px, where a 160 px project and the title at 40% no longer fit, does
+ * not show it. The trailing text keeps 180 px in every row, so columns stay
+ * aligned, and gives way only to the title's minimum. A row outside a CardRows
+ * has no list width to go by: its project shrinks first, down to 20 px, then
+ * its trailing text. A phone keeps its own layout below.
  */
+[data-frame-card-rows] {
+  container: frame-card-rows / inline-size;
+}
 [data-frame-card-row] {
+  --frame-card-row-title-min: max(112px, 40%);
   height: 44px;
-  grid-template-columns: 36px minmax(0, 1fr) 180px;
+  grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);
 }
 [data-frame-card-row][data-frame-card-columns~="secondary"] {
-  grid-template-columns: 36px minmax(0, 1fr) 160px 180px;
+  grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(20px, 160px) minmax(clamp(0px, 100% - 98px - var(--frame-card-row-title-min), 180px), 180px);
+}
+@media (min-width: 768px) {
+  @container frame-card-rows (width < 713px) {
+    [data-frame-card-row][data-frame-card-columns~="secondary"] {
+      grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);
+    }
+    [data-frame-card-row] [data-frame-card-secondary] {
+      display: none;
+    }
+    [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2) {
+      padding-inline-end: 20px;
+    }
+  }
 }
 [data-frame-card-trail] > [data-frame-card-action] {
   position: absolute;

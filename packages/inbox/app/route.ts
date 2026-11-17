@@ -30,6 +30,8 @@ export interface Route {
   planAll?: boolean;
   /** Routines (`#routines`): the one open beside the list (`#routine=sch_…`, `#routine=new` for a new one). */
   scheduled?: string | null;
+  /** The open routine's Runs tab (`#routine=sch_…&runs`); absent: its Edit tab. */
+  routineRuns?: boolean;
   /**
    * Pull requests (`#prs`, Code review on; approval "inbox-pr-dashboard"): Open or Merged (`&state=merged`), a stack's
    * page (`&stack=`, a layer's key), a PR opened from it (`&layer=`; `&scope=stack`, `&range=` or `&since=`, `PullViewScope`), and `&from=sheet` when the PR was
@@ -160,7 +162,10 @@ export function routeOf(fullHash: string): Route {
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
   // The Artifacts wall (the sidebar's Artifacts row). `#thread=…&artifacts` is a thread's own grid, below.
   if (params.has('artifacts') && !params.get('thread')) return { page: 'artifacts', project: null, thread: null, pinned: params.get('artifacts') === 'pinned' };
-  if (params.has('routine') || params.has('routines')) return { page: 'scheduled', project: null, thread: null, scheduled: params.get('routine') || null };
+  if (params.has('routine') || params.has('routines')) {
+    const scheduled = params.get('routine') || null;
+    return { page: 'scheduled', project: null, thread: null, scheduled, ...(scheduled && params.has('runs') ? { routineRuns: true } : {}) };
+  }
   if (params.has('plans')) return plansRouteOf(params);
   if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   if (params.has('prs')) {
