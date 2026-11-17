@@ -19,6 +19,7 @@ import { request } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { CREATE_ROUTINE_SKILL } from '@plannotator/core/create-routine-skill';
+import { resetSkillCatalogCache } from '@plannotator/ui/utils/skillCatalog';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxApp } = (hasDom ? await import('./App') : {}) as typeof import('./App');
@@ -76,6 +77,9 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
+  // One global skill, so the "/" list opens with Routines off too (an empty catalog opens no list).
+  mkdirSync(join(dir, '.claude', 'skills', 'write-better'), { recursive: true });
+  writeFileSync(join(dir, '.claude', 'skills', 'write-better', 'SKILL.md'), '---\nname: write-better\ndescription: Improve prose.\n---\n\n# Write better\n');
   // This Bun by its own path: the PATH below has no `bun` on it.
   child = Bun.spawn([process.execPath, SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), String(TESTS)], {
     // No agent CLI on PATH: the Inbox can start nothing.
@@ -116,6 +120,8 @@ beforeEach(() => {
     close() {}
   };
   window.location.hash = '';
+  // The catalog is the page's, kept between renders: each test starts as a fresh page.
+  resetSkillCatalogCache();
 });
 
 afterEach(async () => {
@@ -243,6 +249,8 @@ test.skipIf(!hasDom)(
   async () => {
     await routines(true);
     const el = await renderApp(`#thread=${world.waiting}`, '[data-message-id]');
+    // Turned on in another window: its capabilities event reaches this one.
+    fire('capabilities', { scheduled_threads: { on: true } });
     act(() => button(el, 'Reply').click());
     await until(() => textarea(el) !== null, 'the reply box');
     await type(textarea(el)!, '/create-routine every weekday at 9, check this repo for outdated dependencies');
