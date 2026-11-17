@@ -150,9 +150,16 @@ export const SMOKE_ROOTS = [
   'apps/inbox/vite.config.ts', 'apps/inbox/vite.shape.config.ts', 'apps/inbox/vite.surface.config.ts',
 ];
 
-/** Every repo file the roots reach through imports and file paths named in their code. */
+const closures = new WeakMap<Graph, Map<string, Set<string>>>();
+/** Every repo file the roots reach through imports and file paths named in their code (kept per graph). */
 export function closureOf(g: Graph, roots: string[]): Set<string> {
+  const key = roots.join('\n');
+  let byRoots = closures.get(g);
+  if (!byRoots) closures.set(g, (byRoots = new Map()));
+  const known = byRoots.get(key);
+  if (known) return known;
   const seen = new Set(roots);
+  byRoots.set(key, seen);
   const stack = [...roots];
   while (stack.length) {
     const n = g.graph[stack.pop()!];

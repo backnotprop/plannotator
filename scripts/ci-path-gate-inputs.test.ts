@@ -88,10 +88,10 @@ const GATES: Gate[] = [
 type Job = { steps?: { id?: string; run?: string }[] };
 
 /** What a gate runs for: the `grep -Eq` pattern of a gate step, or a windows.yml rule's globs with the heavy fail-safe. */
-let graph: ReturnType<typeof buildGraph> | undefined;
+// The picker's graph of this checkout, built once before the tests (not inside a test's time).
+const graph = buildGraph();
 function gatePattern({ workflow, job }: Gate): { test: (path: string) => boolean } {
   if (job === 'browser-smoke:smoke') {
-    graph ??= buildGraph();
     return { test: (path) => decideGates('browser-smoke.yml', 'subset', [], [{ status: 'M', path, added: [], removed: [] }], undefined, graph)[0]!.run };
   }
   if (job.startsWith('windows:')) {
