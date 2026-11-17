@@ -7,6 +7,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ComponentPropsWithoutRef,
   type CSSProperties,
   type ElementType,
   type ReactNode,
@@ -57,7 +58,8 @@ interface CardCommonProps {
   readonly time?: Date | string;
   /**
    * The host's own control (for example a pin button), beside the link and never inside it: top right of the
-   * card's preview, the right end of a row. Shown on hover and focus, always on touch and while `pinned`.
+   * card's preview, the right end of a row. Shown on hover and keyboard focus; on a card also while `pinned` and
+   * always on touch; on a row on touch as its `CardRows`' `actionAtRest` says.
    */
   readonly action?: ReactNode;
   /** Visual state only: keeps `action` shown and adds "pinned" to the spoken name. The host owns the click. */
@@ -79,6 +81,8 @@ export interface CardRowProps extends CardCommonProps {
   readonly secondary?: string;
   /** A small picture for the 36×27 thumbnail, drawn inside the kind's sheet, window or panel; without it, the kind's glyph. */
   readonly thumb?: ReactNode | CardImageFace;
+  /** Nothing to show yet, for example a plan with no version: the thumbnail is the empty face in small, on the neutral ground, as on a card with no face. */
+  readonly empty?: boolean;
 }
 
 /**
@@ -382,12 +386,14 @@ function Glyph({ kind }: { readonly kind: CardKind }) {
 }
 
 /** A row's 36×27 thumbnail: the kind's chrome on its ground, holding the host's `thumb` or else the kind's glyph. */
-function Thumb({ kind, thumb }: { readonly kind: CardKind; readonly thumb?: ReactNode | CardImageFace }) {
+function Thumb({ kind, thumb, empty = false }: { readonly kind: CardKind; readonly thumb?: ReactNode | CardImageFace; readonly empty?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  const own = present(thumb);
+  const own = !empty && present(thumb);
   const near = useNearScreen(ref, own);
   const [imageReady, setImageReady] = useState(false);
-  const content = !own ? (
+  const content = empty ? (
+    <Blank />
+  ) : !own ? (
     <Glyph kind={kind} />
   ) : !near ? null : isImageFace(thumb) ? (
     <span className={cn("block size-full", !imageReady && "invisible")}>
@@ -400,14 +406,16 @@ function Thumb({ kind, thumb }: { readonly kind: CardKind; readonly thumb?: Reac
     <div
       ref={ref}
       data-frame-card-well=""
-      data-frame-card-thumb={own ? "picture" : "glyph"}
+      data-frame-card-thumb={empty ? "empty" : own ? "picture" : "glyph"}
       data-frame-card-kind={kind}
-      data-frame-card-face={own ? (near ? "ready" : "loading") : "ready"}
+      data-frame-card-face={empty ? "empty" : own ? (near ? "ready" : "loading") : "ready"}
       inert
       aria-hidden="true"
       className="relative h-[27px] w-9 shrink-0 overflow-hidden rounded-[5px]"
     >
-      <Chrome kind={kind}>{content}</Chrome>
+      <Chrome kind={kind} blank={empty}>
+        {content}
+      </Chrome>
     </div>
   );
 }
@@ -461,6 +469,15 @@ function GreyLine({
         <span className="truncate">{fact}</span>
       )}
     </span>
+  );
+}
+
+/** A pinned row's resting mark, after its title: a plain pin. */
+function PinnedMark() {
+  return (
+    <svg data-frame-card-pinned-mark="" viewBox="0 0 16 16" width="12" height="12" aria-hidden="true" className="ml-1.5 shrink-0 text-muted-foreground">
+      <path d="M6 2h4l-.5 4 2.5 2.5V10H4V8.5L6.5 6 6 2Zm2 8v4" fill="currentColor" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -548,6 +565,7 @@ export function CardRow({
   secondary,
   action,
   pinned = false,
+  empty = false,
 }: CardRowProps) {
   const Link: ElementType<CardLinkProps> = linkComponent ?? "a";
   const date = asDate(time);
@@ -561,7 +579,7 @@ export function CardRow({
       data-frame-card-columns={`${secondary === undefined ? "" : "secondary "}${present(action) ? "action" : ""}`.trim() || undefined}
       className="relative grid min-w-0 items-center gap-x-3.5 rounded-[8px] pl-1.5 pr-2.5"
     >
-      <Thumb kind={kind} thumb={thumb} />
+      <Thumb kind={kind} thumb={thumb} empty={empty} />
       <Link
         href={href}
         title={date === null ? undefined : cardDateTitle(date)}
@@ -572,20 +590,23 @@ export function CardRow({
         <span data-frame-card-title="" dir="auto">
           {title}
         </span>
+        {pinned && <PinnedMark />}
       </Link>
       {secondary !== undefined && (
         <span data-frame-card-secondary="" aria-hidden="true" className="truncate text-[13px] text-muted-foreground">
           {secondary}
         </span>
       )}
-      <span className="flex min-w-0 justify-end">
-        <GreyLine fact={fact} factMark={factMark} factTone={factTone} working={working} date={date} />
-      </span>
-      {present(action) && (
-        <span data-frame-card-action="" className="relative z-20 flex items-center justify-end">
-          {action}
+      <span data-frame-card-end="" className="flex min-w-0 items-center justify-end">
+        <span data-frame-card-trail="" className="relative flex min-w-0 items-center">
+          <GreyLine fact={fact} factMark={factMark} factTone={factTone} working={working} date={date} />
+          {present(action) && (
+            <span data-frame-card-action="" className="z-20 flex items-center justify-end">
+              {action}
+            </span>
+          )}
         </span>
-      )}
+      </span>
     </div>
   );
 }
@@ -651,6 +672,33 @@ export function CardFaceDocument({ title, children }: { readonly title: string; 
 const GridColumns = createContext<number | null>(null);
 
 const CARD_GRID_ROW_GAP: Record<CardSize, number> = { large: 28, regular: 44 };
+
+/**
+ * A list of `CardRow`s. No row keeps room for its action: every fact or date
+ * ends at the row's edge, and a row's action shows just before it on hover or
+ * keyboard focus, where the text before it always keeps 20 px clear. `actionAtRest` says what a screen without hover shows at
+ * rest: `"touch"` (the default) shows each row's action, so touch can reach
+ * it; `"never"` shows none, for a host that gives touch another way in, such
+ * as a long-press menu, and pinned rows then keep the card's pin.
+ */
+export function CardRows({
+  children,
+  label,
+  actionAtRest = "touch",
+  ref,
+  ...rest
+}: Omit<ComponentPropsWithoutRef<"ul">, "children" | "aria-label" | "dangerouslySetInnerHTML"> & {
+  readonly children: ReactNode;
+  readonly label?: string;
+  readonly actionAtRest?: "touch" | "never";
+  readonly ref?: Ref<HTMLUListElement>;
+}) {
+  return (
+    <ul {...rest} ref={ref} aria-label={label} data-frame-card-rows="" data-frame-card-action-rest={actionAtRest}>
+      {Children.map(children, (child) => (present(child) ? <li className="min-w-0">{child}</li> : null))}
+    </ul>
+  );
+}
 
 /**
  * Cards of one size in fluid columns: each card fills its column. `large`
