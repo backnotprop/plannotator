@@ -14,7 +14,7 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { act, useRef, useState } from 'react';
+import { act, useEffect, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
@@ -34,6 +34,12 @@ let savedHash = '';
 let posts: { path: string; body: Record<string, unknown> }[] = [];
 let stamped = false;
 let saveFails = false;
+/** The switch as the fake Inbox holds it: on only once a save was answered. */
+let savedOn = false;
+/** While set, a save waits for it (a slow save). */
+let saveGate: Promise<void> | null = null;
+/** What the Routines page's read (`GET /api/inbox/scheduled`) was answered, in order. */
+let pageReads: number[] = [];
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -44,6 +50,9 @@ beforeEach(() => {
   posts = [];
   stamped = false;
   saveFails = false;
+  savedOn = false;
+  saveGate = null;
+  pageReads = [];
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input).replace(/^https?:\/\/[^/]+/, '');
     const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
@@ -55,7 +64,18 @@ beforeEach(() => {
       stamped = true;
       return ok({ show, reveal: { next: null } });
     }
-    if (path.endsWith('/api/inbox/settings') && init?.method === 'POST') return saveFails ? ok({ error: 'config_not_saved' }, 500) : ok({ scheduled_threads: { on: true, login: 'added' } });
+    if (path.endsWith('/api/inbox/settings') && init?.method === 'POST') {
+      if (saveGate) await saveGate;
+      if (saveFails) return ok({ error: 'config_not_saved' }, 500);
+      savedOn = true;
+      return ok({ scheduled_threads: { on: true, login: 'added' } });
+    }
+    // The Routines page's read: the Inbox answers "off" until the switch is saved (inbox-scheduled-routes.ts).
+    if (path.endsWith('/api/inbox/scheduled')) {
+      const answer = savedOn ? ok({ scheduled: [], launch_on: true }) : ok({ error: 'routines_off' }, 404);
+      pageReads.push(answer.status);
+      return answer;
+    }
     if (path.includes('/skills')) return ok({ skills: [] });
     return ok({ error: 'not in this test' }, 404);
   }) as typeof fetch;
@@ -116,6 +136,12 @@ function Harness({ state }: { state: State }) {
     refreshSettings: () => Promise.resolve(),
     openSettings: () => {},
   });
+  const [hash, setHash] = useState(window.location.hash);
+  useEffect(() => {
+    const follow = () => setHash(window.location.hash);
+    window.addEventListener('hashchange', follow);
+    return () => window.removeEventListener('hashchange', follow);
+  }, []);
   return (
     <>
       <main className="ib-main">
@@ -123,10 +149,19 @@ function Harness({ state }: { state: State }) {
         <button type="button" data-opener="">
           Something on the page
         </button>
+        {hash === '#routines' && <RoutinesPageRead />}
       </main>
       {dialog}
     </>
   );
+}
+
+/** The Routines page as it reads on opening (scheduled/store.ts `useScheduledPage`: one read when it mounts). */
+function RoutinesPageRead() {
+  useEffect(() => {
+    void fetch('/api/inbox/scheduled');
+  }, []);
+  return <section data-routines-page="" />;
 }
 
 function mount(state: State) {
@@ -229,9 +264,12 @@ describe.skipIf(!hasDom)('the words and the picture', () => {
     expect(glyph.getAttribute('data-icon')).toBe('scheduled');
     expect(glyph.getAttribute('aria-hidden')).toBe('true');
     expect(title.firstChild!.nodeType).toBe(Node.TEXT_NODE);
-    expect(document.getElementById(d.getAttribute('aria-describedby')!)!.textContent).toBe(
-      'Save a prompt and pick when it runs. An agent runs it on this computer each time, and every run replies in its own thread.',
-    );
+    // Described by the sentence right under the title, inside the dialog (not the picture's words, not the Settings line).
+    const description = document.getElementById(d.getAttribute('aria-describedby')!)!;
+    expect(d.contains(description)).toBe(true);
+    expect(description.previousElementSibling).toBe(title);
+    expect(description.textContent!.trim().length).toBeGreaterThan(0);
+    expect(description.hasAttribute('data-routines-intro-settings')).toBe(false);
     expect(d.querySelector('.ib-rti-art')!.getAttribute('aria-hidden')).toBe('true');
     expect(d.querySelector('[data-routines-intro-picture]')!.closest('[aria-hidden]')).toBeNull();
     expect(d.querySelector('[data-routines-intro-settings]')!.textContent).toContain('Settings → Capabilities');
@@ -251,19 +289,42 @@ describe.skipIf(!hasDom)('Turn on', () => {
     act(() => dialog()!.querySelector<HTMLButtonElement>('[data-routines-intro-on]')!.click());
     expect(dialog()).toBeNull();
     expect(current?.scheduled_threads?.on).toBe(true);
+    await until(() => document.querySelector('[data-routines-page]') !== null);
     expect(window.location.hash).toBe('#routines');
-    await until(() => switchSaves().length === 1);
     expect(switchSaves().map((s) => s.body)).toEqual([{ scheduled_threads: { on: true } }]);
     expect(notNows()).toHaveLength(0);
   });
 
-  test("a save that fails: the switch goes back off and a toast says Routines aren't on", async () => {
+  test('a slow save: the Routines page opens only once the switch is saved, so its read never finds Routines off', async () => {
+    let release = () => {};
+    saveGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await opened();
+    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-routines-intro-on]')!.click());
+    expect(dialog()).toBeNull();
+    expect(current?.scheduled_threads?.on).toBe(true);
+    await wait(TIMES.settledMs * 4);
+    // The save is still on its way: no page yet, so nothing has read the Routines off.
+    expect(switchSaves()).toHaveLength(1);
+    expect(document.querySelector('[data-routines-page]')).toBeNull();
+    expect(pageReads).toEqual([]);
+    release();
+    await until(() => pageReads.length > 0);
+    expect(window.location.hash).toBe('#routines');
+    expect(pageReads).toEqual([200]);
+  });
+
+  test("a save that fails: the switch goes back off, a toast says Routines aren't on, and no page opens", async () => {
     saveFails = true;
     await opened();
     act(() => dialog()!.querySelector<HTMLButtonElement>('[data-routines-intro-on]')!.click());
     await until(() => toasts.length === 1);
     expect(current?.scheduled_threads?.on).toBe(false);
     expect(toasts).toEqual(['Routines aren’t on']);
+    await wait(TIMES.settledMs * 2);
+    expect(window.location.hash).not.toBe('#routines');
+    expect(pageReads).toEqual([]);
   });
 });
 
@@ -288,12 +349,15 @@ describe.skipIf(!hasDom)('No thanks, Escape, a click outside', () => {
       await wait(TIMES.settledMs * 4);
       expect(claims()).toHaveLength(1);
       expect(dialog()).toBeNull();
-      // A reload: the Inbox stamped it, so the line no longer names it.
+      // A reload whose settings still name it (a stale line): the page claims again, the Inbox answers that it was
+      // shown on this machine, and nothing opens.
       act(() => root!.unmount());
       host!.remove();
-      mount({ due: false, idle: true, held: false });
+      const again = mount({ due: true, idle: false, held: false });
+      again({ idle: true });
+      await until(() => claims().length === 2);
       await wait(TIMES.settledMs * 4);
-      expect(claims()).toHaveLength(1);
+      expect(claims()).toHaveLength(2);
       expect(dialog()).toBeNull();
     });
   }

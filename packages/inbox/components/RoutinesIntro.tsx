@@ -31,7 +31,7 @@ export function RoutinesIntro({ phone, onClose, onTurnOn }: { phone: boolean; on
           Routines
           <Icon name="scheduled" className="ib-rti-h-ic" />
         </h2>
-        <p id="ib-rti-desc">Save a prompt and pick when it runs. An agent runs it on this computer each time, and every run replies in its own thread.</p>
+        <p id="ib-rti-desc">Save a prompt and pick when it runs. An agent runs it on this computer each time, and each run replies in the routine’s own thread.</p>
         {createRoutineBuiltIn() && (
           <p className="ib-bi-q" data-routines-intro-skill="">
             Once they’re on, you can also type <code>/create-routine</code> in any message and describe what you want.

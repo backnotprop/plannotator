@@ -4,13 +4,14 @@
  * What regresses: counting days in UTC instead of the person's local day; a day with one send counting; Inbox notes
  * (an ack, a skip line), a routine's run dividers or an agent's words counting as sends; someone already here not
  * qualifying from their history; any skip condition (Windows, Routines decided on or off, a routine made, launches
- * off) letting it through; the store walked when a cheaper fact already said no; it sharing a local day with another
- * one-time dialog or letting anything else (a dialog, the agent note, a tip, the star ask) follow it that day; the
- * line not asking again the next day; first run.
+ * off) letting it through; the store walked when a cheaper fact already said no, on a day the line would refuse it
+ * anyway, or again after three good days were found; it sharing a local day with another one-time dialog or letting
+ * anything else (a dialog, the agent note, a tip, the star ask) follow it that day; the line not asking again the next
+ * day; first run; a 23- or 25-hour day around a daylight-saving change.
  */
 import { describe, expect, test } from "bun:test";
 import { revealAgainAt, revealAsideNow, revealLineFree, revealMayClaim, revealNext, type RevealState } from "./reveals";
-import { routinesIntroGoodDays, routinesIntroOpen, routinesIntroSend, type RoutinesIntroFacts } from "./routines-intro";
+import { routinesIntroGoodDays, routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits, type RoutinesIntroFacts } from "./routines-intro";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -64,7 +65,10 @@ describe("three good days of sends", () => {
 
 describe("who: each skip condition", () => {
   const good = [local(1, 9), local(1, 10), local(2, 9), local(2, 10), local(3, 9), local(3, 10)];
-  const facts = (over: Partial<RoutinesIntroFacts> = {}): RoutinesIntroFacts => ({ supported: true, saved: () => undefined, routineMade: () => false, launchOn: () => true, sends: () => good, ...over });
+  const facts = (over: Partial<RoutinesIntroFacts> = {}): RoutinesIntroFacts => ({ supported: true, saved: () => undefined, routineMade: () => false, launchOn: () => true, goodDays: () => routinesIntroGoodDays(good), ...over });
+  const walked = () => {
+    throw new Error("walked the store");
+  };
 
   test("open: offered here, never decided, no routine, launches on, three good days", () => {
     expect(routinesIntroOpen(facts())).toBe(true);
@@ -77,13 +81,113 @@ describe("who: each skip condition", () => {
     ["a routine exists (or existed)", { routineMade: () => true }],
     ["Start agents from New message is off", { launchOn: () => false }],
   ] as const) {
-    test(`closed when ${name}, without walking the store`, () => {
-      expect(routinesIntroOpen(facts({ ...over, sends: () => { throw new Error("walked the store"); } }))).toBe(false);
+    test(`closed when ${name}, without walking the store, even on a day the walk would wait`, () => {
+      expect(routinesIntroOpen(facts({ ...over, goodDays: walked }))).toBe(false);
+      expect(routinesIntroOpen(facts({ ...over, goodDays: walked, waits: () => true }))).toBe(false);
     });
   }
 
   test("closed without three good days", () => {
-    expect(routinesIntroOpen(facts({ sends: () => good.slice(1) }))).toBe(false);
+    expect(routinesIntroOpen(facts({ goodDays: () => routinesIntroGoodDays(good.slice(1)) }))).toBe(false);
+  });
+
+  test("on a day the line would refuse it anyway, open without walking the store (so the line still names when it could go)", () => {
+    expect(routinesIntroOpen(facts({ waits: () => true, goodDays: walked }))).toBe(true);
+    expect(routinesIntroOpen(facts({ waits: () => false, goodDays: () => false }))).toBe(false);
+  });
+
+  test("three good days found once are kept: the store is never walked again; until then each read walks it", () => {
+    let walks = 0;
+    let sends = good.slice(1);
+    const goodDays = routinesIntroGoodDaysOnce(() => {
+      walks++;
+      return sends;
+    });
+    expect(goodDays()).toBe(false);
+    expect(goodDays()).toBe(false);
+    expect(walks).toBe(2);
+    sends = good;
+    expect(goodDays()).toBe(true);
+    expect(walks).toBe(3);
+    for (let i = 0; i < 5; i++) expect(goodDays()).toBe(true);
+    expect(walks).toBe(3);
+  });
+});
+
+describe("when the walk waits", () => {
+  const NOW = new Date(2026, 10, 10, 15, 0);
+  const at = (msAgo: number) => new Date(NOW.getTime() - msAgo).toISOString();
+
+  test("in its first two days, and while first use is unknown", () => {
+    expect(routinesIntroWaits({ firstUseAt: null }, NOW)).toBe(true);
+    expect(routinesIntroWaits({ firstUseAt: at(DAY) }, NOW)).toBe(true);
+    expect(routinesIntroWaits({ firstUseAt: at(2 * DAY - HOUR) }, NOW)).toBe(true);
+    expect(routinesIntroWaits({ firstUseAt: at(2 * DAY) }, NOW)).toBe(false);
+    expect(routinesIntroWaits({ firstUseAt: at(30 * DAY) }, NOW)).toBe(false);
+  });
+
+  test("on a local day something else was shown; not when that was yesterday", () => {
+    const first = at(30 * DAY);
+    for (const stamp of ["lastShownAt", "dayShownAt", "asideShownAt", "tipShownAt"] as const) {
+      expect(routinesIntroWaits({ firstUseAt: first, [stamp]: at(5 * HOUR) }, NOW)).toBe(true);
+      expect(routinesIntroWaits({ firstUseAt: first, [stamp]: new Date(2026, 10, 9, 23, 0).toISOString() }, NOW)).toBe(false);
+    }
+  });
+
+  test("it waits exactly while the line refuses it, so the answer it skips could never have shown it", () => {
+    const first = at(30 * DAY);
+    for (const over of [{ firstUseAt: null }, { firstUseAt: at(DAY) }, { firstUseAt: first, lastShownAt: at(5 * HOUR) }, { firstUseAt: first, tipShownAt: at(3 * HOUR) }]) {
+      const state: RevealState = { release: true, threads: 20, open: { routines: true }, ...over };
+      expect(routinesIntroWaits(state, NOW)).toBe(true);
+      expect(revealMayClaim("routines", state, NOW)).toBe(false);
+    }
+  });
+});
+
+describe("daylight saving: the person's local day, 23 or 25 hours long", () => {
+  /** Runs `body` with the process in New York's time zone (DST began 2026-03-08 and ended 2026-11-01), then restores it. */
+  const inNewYork = (body: () => void) => {
+    const saved = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      body();
+    } finally {
+      if (saved === undefined) delete process.env.TZ;
+      else process.env.TZ = saved;
+    }
+  };
+
+  test("the 25-hour day DST ends: 00:30 and 23:30 (24 h apart) are one day; the next morning is another", () => {
+    inNewYork(() => {
+      const nov = (d: number, h: number, m = 0) => new Date(2026, 10, d, h, m).toISOString();
+      expect(Date.parse(nov(1, 23, 30)) - Date.parse(nov(1, 0, 30))).toBe(24 * HOUR);
+      expect(routinesIntroGoodDays([nov(1, 0, 30), nov(1, 23, 30), nov(2, 0, 30), nov(2, 9), nov(3, 9), nov(3, 10)])).toBe(true);
+      // One send each side of the long day's end: no day of two.
+      expect(routinesIntroGoodDays([nov(1, 23, 59), nov(2, 0, 1), nov(3, 9), nov(3, 10), nov(4, 9), nov(4, 10)])).toBe(false);
+    });
+  });
+
+  test("the 23-hour day DST begins: 23:30 and the next 00:30 are two days", () => {
+    inNewYork(() => {
+      const mar = (d: number, h: number, m = 0) => new Date(2026, 2, d, h, m).toISOString();
+      expect(routinesIntroGoodDays([mar(8, 0, 30), mar(8, 23, 30), mar(9, 0, 30), mar(9, 9), mar(10, 9), mar(10, 10)])).toBe(true);
+      expect(routinesIntroGoodDays([mar(8, 23, 30), mar(9, 0, 30), mar(10, 9), mar(10, 10), mar(11, 9), mar(11, 10)])).toBe(false);
+    });
+  });
+
+  test("its day of its own ends at the next local midnight, across the change", () => {
+    inNewYork(() => {
+      // Shown at 00:30, before the clocks go back at 02:00: the day still has 24.5 hours to run.
+      const shown = new Date(2026, 10, 1, 0, 30);
+      const midnight = new Date(2026, 10, 2).getTime();
+      const state: RevealState = { release: true, firstUseAt: new Date(2026, 9, 1).toISOString(), threads: 20, open: { routines: false, steps: true }, ownDayShownAt: shown.toISOString(), lastShownAt: shown.toISOString() };
+      expect(revealAgainAt(state, new Date(2026, 10, 1, 11, 0))).toBe(midnight);
+      expect(new Date(midnight).getHours()).toBe(0);
+      expect(midnight - shown.getTime()).toBe(24.5 * HOUR);
+      // 24 hours after the show, still its day.
+      expect(revealNext(state, new Date(2026, 10, 1, 23, 30))).toBeNull();
+      expect(revealNext(state, new Date(2026, 10, 2, 0, 30))).toBe("steps");
+    });
   });
 });
 

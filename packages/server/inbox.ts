@@ -310,7 +310,7 @@ import {
 import { launchTipClaim, launchTipDue, launchTipLaunched, type LaunchTipState } from "@plannotator/shared/inbox/launch-tip";
 import { sidebarTipClaim, sidebarTipDue, type SidebarTipState } from "@plannotator/shared/inbox/sidebar-tip";
 import { revealGrillMeGap, type GrillMeTipQuestion } from "@plannotator/shared/inbox/grill-me-tip";
-import { routinesIntroOpen, routinesIntroSend } from "@plannotator/shared/inbox/routines-intro";
+import { routinesIntroGoodDaysOnce, routinesIntroOpen, routinesIntroSend, routinesIntroWaits } from "@plannotator/shared/inbox/routines-intro";
 import { splitInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import { configStarAskStore, createStarAsk, readStarAskRecord, runGh, starAskEnabled, starAskOpen, type StarAskClaim } from "@plannotator/shared/star-ask";
 import { claimInboxStar, inboxStarAction } from "./inbox-star-ask";
@@ -3342,12 +3342,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return starAskOpen(readStarAskRecord(config), (config as { starAsk?: unknown }).starAsk);
   };
   const starAsk = createStarAsk({ store: configStarAskStore, run: runGh, enabled: () => starAskEnabled(), returning: () => true });
-  const lineOffers: Partial<Record<RevealId, () => boolean>> = {
+  const lineOffers: Partial<Record<RevealId, (state?: RevealState, now?: Date) => boolean>> = {
     code_review: codeReviewUndecided,
     board: boardUndecided,
     // Routines (shared/inbox/routines-intro.ts): offered here and never decided, no routine made, launches on, and three
     // good days of sends. Read once the routines module exists (`routinesIntroUndecided`), on a release build only.
-    routines: () => routinesIntroUndecided(),
+    // Inside the line's state (`state`, `now`), the walk waits on a day the line would refuse it anyway.
+    routines: (state, now) => routinesIntroUndecided(state && now ? () => routinesIntroWaits(state, now) : undefined),
     steps: stepsUndecided,
     agent_rules: agentRulesUnset,
     personal_agents: noPersonalAgent,
@@ -3415,8 +3416,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** Voice's who (inbox-voice.ts), read once the voice module exists. */
   let voiceIntroOpen: () => boolean = () => false;
   /** The Routines intro's who (shared/inbox/routines-intro.ts), read once the routines switch and launch exist. */
-  let routinesIntroUndecided: () => boolean = () => false;
-  /** The times of the person's own sends in this store, newest threads' order as the store keeps them (the intro's walk). */
+  let routinesIntroUndecided: (waits?: () => boolean) => boolean = () => false;
+  /** The times of the person's own sends in this store, thread by thread in the store's order, oldest first (the intro's walk). */
   const personSends = function* (): Generator<string> {
     for (const threadId of store.threadIds())
       for (const id of store.threadMessageIds(threadId)) {
@@ -3424,6 +3425,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (message && routinesIntroSend(message)) yield message.created_at;
       }
   };
+  /** The intro's three good days: walked until found, then kept. */
+  const routinesGoodDays = routinesIntroGoodDaysOnce(personSends);
   const revealState = (now: Date, load: string | null = null): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
@@ -3431,7 +3434,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A list options or voice `shownAt` without `dueAt` is a fresh install's mark (never shown), not a show.
     const shown = (intro: { dueAt?: string; shownAt?: string } | undefined) => (intro?.dueAt ? intro.shownAt : undefined);
     // Version 1 of the list dialog, kept under `before` when version 2 became due (inbox-list-intro.ts).
-    const offers = Object.fromEntries(Object.entries(lineOffers).map(([id, undecided]) => [id, !lineOfferSaved(id as RevealId)?.shownAt && undecided!()]));
     const open: RevealState["open"] = {
       // The update-day dialogs: who they are for was decided at a release start (and is kept until claimed).
       sound: soundState().dialog_due,
@@ -3441,7 +3443,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
       // dialog before the Board was a switch: the reveal offers it to them too (`claimReveal`). The Checklist
       // (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board need not be on.
-      ...offers,
+      // The offers are read below, once the line's stamps are known.
     };
     const state: RevealState = {
       release: snoozeIntroRelease,
@@ -3450,8 +3452,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       lastShownAt: revealLastShown([reveals?.lastShownAt, snooze?.shownAt, shown(config.inboxListIntro), shown(config.inboxListIntro?.before), shown(config.inboxVoiceIntro), config.inboxBoardIntro?.shownAt]),
       dayShownAt: reveals?.dayShownAt ?? null,
       notNowAt: reveals?.notNowAt ?? null,
-      // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
-      heavy: snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now),
+      // Read below, once the offers are known.
+      heavy: false,
       // Roots in the store. The onboarding tour's threads live in the window only (tour/content), never here.
       threads: store.threadIds().length,
       open,
@@ -3464,6 +3466,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Routines' day of its own (reveals.ts `ownDay`): nothing else on the local day it was shown.
       ownDayShownAt: reveals?.routines?.shownAt ?? null,
     };
+    // The offers, each one's "undecided" while unshown. They read the stamps above (Routines' walk waits on a day the
+    // line would refuse it anyway), so they come after them.
+    for (const [id, undecided] of Object.entries(lineOffers)) open[id as RevealId] = !lineOfferSaved(id as RevealId)?.shownAt && undecided!(state, now);
+    // Read only while an entry that asks for heavy use is still open (a walk of every thread; a release build).
+    state.heavy = snoozeIntroRelease && INBOX_REVEALS.some((entry) => entry.heavyUse && entry.enabled && open[entry.id] === true) && revealHeavyUse(seenAgentMessages(), now);
     // The grill-me tip (reveals.ts `lastResort`): its gap (a walk of the store) is read only while it is unshown, in a
     // release build, and the line has nothing else for this moment; otherwise it could not be claimed anyway.
     if (open.grill_me_tip) open.grill_me_tip = snoozeIntroRelease && revealMayClaim("grill_me_tip", state, now) && revealGrillMeGap(grillMeUse());
@@ -4827,14 +4834,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   scheduled.sync();
   if (scheduledCap.on()) void scheduledCap.syncLogin();
-  routinesIntroUndecided = () =>
+  routinesIntroUndecided = (waits) =>
     snoozeIntroRelease &&
     routinesIntroOpen({
       supported: scheduledCap.wire().scheduled_threads !== undefined,
       saved: () => options.scheduled ?? loadConfig().inboxScheduledThreads,
       routineMade: () => store.scheduledEverMade(),
       launchOn: () => launch.settingsState().enabled,
-      sends: personSends,
+      waits,
+      goodDays: routinesGoodDays,
     });
   // No login-shell read at start: the launch module reads it the first time New message asks (`warmLogin`).
 
