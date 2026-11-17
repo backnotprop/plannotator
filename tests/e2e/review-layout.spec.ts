@@ -85,6 +85,7 @@ function buildRepo(root: string): string {
   git(repo, ['config', 'user.name', 'Test']);
   write(repo, 'README.md', '# Sidebar\n');
   write(repo, 'src/api/routes.ts', 'export const routes = {};\nexport const version = 1;\n');
+  write(repo, 'LICENSE', 'MIT\n');
   git(repo, ['add', '-A']);
   git(repo, ['commit', '-q', '-m', 'initial']);
   git(repo, ['checkout', '-q', '-b', 'feature/sidebar']);
@@ -304,8 +305,88 @@ test('a double click keeps one tab per file, and closing a tab keeps focus in th
     await row(page, 'README.md').dblclick();
     await expect(tabs('README.md')).toHaveCount(1);
     await expect(tabs('routes.ts')).toHaveCount(1);
+    const order = () => page.locator('[data-pane="0"] [data-pane-tab]').allTextContents();
+    await row(page, 'billing.test.ts').click();
+    await page.locator('[data-tree-scope="all"]').click();
+    await page.locator('[data-repo-file-tree] [data-item-path="LICENSE"]').dblclick();
+    await expect(tabs('LICENSE')).toHaveCount(1);
+    await expect(page.locator('[data-pane-tab][data-preview-tab]')).toHaveCount(0);
+    await page.locator('[data-tree-scope="changes"]').click();
+    expect(await order()).toEqual(['All changes', 'routes.ts', 'README.md', 'billing.test.ts', 'LICENSE']);
+    await row(page, 'billing.test.ts').dblclick();
+    await expect(tabs('billing.test.ts')).toHaveCount(1);
+    await expect.poll(order).toEqual(['All changes', 'routes.ts', 'README.md', 'billing.test.ts', 'LICENSE']);
+
+    await row(page, 'routes.ts').click();
+    await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toHaveText('routes.ts');
+    await row(page, 'routes.ts').click({ button: 'right' });
+    await page.locator('[data-tree-open-to-side]').click();
+    await expect(page.locator('[data-pane="1"] [data-pane-tab][aria-selected="true"]')).toHaveText('routes.ts');
+    await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toHaveText('routes.ts');
     await expect.poll(() => page.locator('[data-pane-tab]').count()).toBeGreaterThan(1);
     await page.locator('[data-pane-tab-close]').last().click();
     await expect.poll(() => page.evaluate(() => document.activeElement?.tagName ?? 'BODY')).not.toBe('BODY');
   });
 });
+
+test('PR Overview at 820 px: a comment card keeps its time clear of its badge and its author and file whole', async ({ browser }) => {
+  test.skip(!existsSync(binary), `compile the binary first: ${binary}`);
+  const root = mkdtempSync(join(tmpdir(), 'plannotator-review-layout-pr-'));
+  const repo = buildRepo(root);
+  const readyFile = join(root, 'ready.jsonl');
+  let child: ChildProcess | undefined;
+  try {
+    child = spawn(binary, ['review'], { env: reviewEnv(root, readyFile), cwd: repo, stdio: 'ignore' });
+    await expect.poll(() => (existsSync(readyFile) ? readFileSync(readyFile, 'utf8') : ''), { timeout: 30_000 }).toContain('"url"');
+    const url = (JSON.parse(readFileSync(readyFile, 'utf8').trim().split('\n')[0]!) as { url: string }).url;
+    const context = await browser.newContext({ viewport: { width: 820, height: 900 } });
+    await context.addCookies(Object.entries(FIRST_RUN).map(([name, value]) => ({ name, value, url })));
+    const pr = 'https://github.com/acme/payments/pull/42';
+    const hoursAgo = new Date(Date.now() - 4 * 3_600_000).toISOString();
+    await context.route('**/api/diff', async (route) => {
+      const real = await route.fetch();
+      await route.fulfill({ response: real, json: { ...(await real.json()), prMetadata: { platform: 'github', host: 'github.com', owner: 'acme', repo: 'payments', number: 42, title: 'Billing', author: 'tomas', baseBranch: 'main', headBranch: 'feature/sidebar', baseSha: 'a'.repeat(40), headSha: 'b'.repeat(40), url: pr } } });
+    });
+    await context.route('**/api/pr-context/stream', (route) => route.fulfill({ status: 404, body: '' }));
+    await context.route('**/api/pr-context', (route) =>
+      route.fulfill({
+        json: {
+          body: '', state: 'OPEN', isDraft: false, labels: [], reviewDecision: 'CHANGES_REQUESTED', mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN', comments: [], checks: [], linkedIssues: [],
+          reviews: [{ id: 'r1', author: 'priya-raman', state: 'CHANGES_REQUESTED', body: 'The retry waits too long.', submittedAt: hoursAgo, url: `${pr}#r1` }],
+          reviewThreads: [{ id: 't1', isResolved: false, isOutdated: false, path: 'src/billing/schedule.ts', line: 17, startLine: null, diffSide: 'RIGHT', comments: [{ id: 'c1', author: 'priya-raman', body: 'Why 17?', createdAt: hoursAgo, url: `${pr}#c1` }] }],
+        },
+      }),
+    );
+    const page = await context.newPage();
+    await page.goto(url);
+    const review = page.locator('[data-comment-id="r1"]');
+    const thread = page.locator('[data-comment-id="t1"]');
+    await expect(review).toBeVisible({ timeout: 30_000 });
+    await expect(thread).toBeVisible();
+    const box = (el: Element) => { const r = el.getBoundingClientRect(); return { left: r.left, right: r.right, top: r.top, bottom: r.bottom }; };
+    const header = (card: typeof review) =>
+      card.evaluate((el, boxSource) => {
+        const measure = new Function(`return ${boxSource}`)() as (el: Element) => { left: number; right: number; top: number; bottom: number };
+        const spans = [...el.querySelectorAll<HTMLElement>(':scope > div:first-child span')];
+        const time = spans.find((span) => /ago|now/.test(span.textContent ?? ''))!;
+        const badge = spans.find((span) => span.textContent === 'Changes Requested');
+        const name = spans.find((span) => span.textContent === 'priya-raman')!;
+        const ref = spans.find((span) => (span.textContent ?? '').startsWith('schedule.ts'));
+        const t = measure(time);
+        const gap = (other?: HTMLElement) => {
+          if (!other) return null;
+          const o = measure(other);
+          const apart = Math.max(o.left - t.right, t.left - o.right, o.top - t.bottom, t.top - o.bottom);
+          return Math.floor(apart);
+        };
+        const whole = (span?: HTMLElement) => (span ? span.scrollWidth <= span.clientWidth : null);
+        return { badgeGap: gap(badge) === null ? null : gap(badge)! >= 4, nameWhole: whole(name), refWhole: whole(ref), refGap: gap(ref) === null ? null : gap(ref)! >= 4 };
+      }, box.toString());
+    expect(await header(review)).toEqual({ badgeGap: true, nameWhole: true, refWhole: null, refGap: null });
+    expect(await header(thread)).toEqual({ badgeGap: null, nameWhole: true, refWhole: true, refGap: true });
+    await context.close();
+  } finally {
+    await stopReview(child, root);
+  }
+});
+
