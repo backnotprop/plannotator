@@ -387,6 +387,7 @@ export function PlansHomeCardsExample() {
       unread={plan.unread}
       time={plan.time}
       thumb={plan.thumb}
+      empty={plan.face === undefined}
       secondary={plan.project}
       pinned={pinned(plan)}
       action={action(plan)}

@@ -331,8 +331,19 @@ describe('card layout rules in frame.css', () => {
     expect(motionsCss).toMatch(/:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\)\) \.frame-card-fan/);
   });
 
-  test('the updates pill shows a pointer', () => {
+  test('the updates pill shows a pointer and is 20 px tall, the heading line, with a 24 px hit area that takes no room', () => {
     expect(block('[data-frame-card-updates]')).toContain('cursor: pointer;');
+    expect(block('[data-frame-card-updates]')).toContain('height: 20px;');
+    expect(block('[data-frame-card-updates]')).toContain('position: relative;');
+    expect(block('[data-frame-card-updates]::after')).toContain('inset: -2px 0;');
+    expect(block('[data-frame-card-updates]::after')).toContain('position: absolute;');
+  });
+
+  test('the kind tints apply only to a ready face, so an empty card well or row thumbnail stays on the neutral ground', () => {
+    const tints = [...css.matchAll(/([^{}]*)\{[^{}]*--frame-card-ground: color-mix\(in (oklab|oklch), var\(--(primary|warning|success)|([^{}]*)\{[^{}]*--frame-card-ground: color-mix\(in oklch, var\(--foreground\) 5%/g)].map(([rule]) => rule!);
+    expect(tints.length).toBe(7);
+    for (const rule of tints) expect(rule).toContain('[data-frame-card-face="ready"]');
+    expect(block('[data-frame-card-well]')).toContain('--frame-card-ground: color-mix(in oklch, var(--foreground) 4%, var(--card));');
   });
 
   test('a row title is regular weight; a card title stays medium', () => {
@@ -355,13 +366,17 @@ describe('card layout rules in frame.css', () => {
     expect(block('[data-frame-card-thumb] .frame-card-window-bar > i')).toContain('display: none;');
   });
 
-  test('a row action takes a column only while a row in its list is pinned, or with no hover; otherwise it shows over the end of the grey line', () => {
+  test('a row action takes a column only while a row in its list is pinned, or with no hover; otherwise it shows over the end of the grey line on hover or its own focus, and focus on the link leaves the line in view', () => {
     const reserved = ':is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *)';
     expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(0, 1fr) 180px;');
     expect(block('[data-frame-card-row] > [data-frame-card-action]')).toContain('position: absolute;');
     expect(block('[data-frame-card-row] > [data-frame-card-action]')).toContain('right: 10px;');
-    expect(block('[data-frame-card-row]:not(:hover, :focus-within) > [data-frame-card-action]')).toContain('pointer-events: none;');
-    expect(block('[data-frame-card-row][data-frame-card-columns~="action"]:is(:hover, :focus-within) > [data-frame-card-end]')).toContain('opacity: 0;');
+    const hover = css.slice(css.indexOf('@media (hover: hover) {'));
+    const hidden = block(`[data-frame-card-row]:not(${reserved}):not(:hover, :has(> [data-frame-card-action]:focus-within)) > [data-frame-card-action]`, hover);
+    expect(hidden).toContain('opacity: 0;');
+    expect(hidden).toContain('pointer-events: none;');
+    expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]:not(${reserved}):is(:hover, :has(> [data-frame-card-action]:focus-within)) > [data-frame-card-end]`, hover)).toContain('opacity: 0;');
+    expect(css).not.toMatch(/:focus-within\) > \[data-frame-card-end\]/);
     expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]${reserved}`)).toContain('grid-template-columns: 36px minmax(0, 1fr) 180px 28px;');
     expect(block(`[data-frame-card-row][data-frame-card-columns~="action"]${reserved} > [data-frame-card-action]`)).toContain('position: relative;');
     const noHover = css.slice(css.indexOf('@media (hover: none) {\n  [data-frame-card-row]'));
@@ -402,11 +417,12 @@ describe('card layout rules in frame.css', () => {
     expect(weight(rule)).toBe(300);
   });
 
-  test('a focused row is filled with the primary colour and its words take the primary foreground; no outline or border', () => {
+  test('a focused row keeps the 12% tint and gains a 3 px primary bar at its leading edge, drawn as a shadow; no outline or border', () => {
     const focused = '[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *))';
-    expect(block(focused)).toContain('background: var(--primary);');
-    expect(block(`${focused} :is([data-frame-card-title], [data-frame-card-secondary], [data-frame-card-line], [data-frame-card-line] *)`)).toContain('color: var(--primary-foreground);');
-    expect(block(`${focused} [data-frame-card-dot]`)).toContain('background: var(--primary-foreground);');
+    expect(block(focused)).toContain('background: color-mix(in oklch, var(--primary) 12%, transparent);');
+    expect(block(focused)).toContain('box-shadow: inset 3px 0 0 var(--primary);');
+    expect(block(`${focused}:dir(rtl)`)).toContain('box-shadow: inset -3px 0 0 var(--primary);');
+    expect(css).not.toContain('var(--primary-foreground)');
     const rowRules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].filter(([, selector]) => selector!.includes('[data-frame-card-row]'));
     expect(rowRules.length).toBeGreaterThan(5);
     for (const [, , body] of rowRules) expect(body).not.toMatch(/\b(border|outline)(-[a-z]+)?:(?!\s*none;)/);

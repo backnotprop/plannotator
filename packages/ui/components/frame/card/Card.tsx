@@ -79,6 +79,8 @@ export interface CardRowProps extends CardCommonProps {
   readonly secondary?: string;
   /** A small picture for the 36×27 thumbnail, drawn inside the kind's sheet, window or panel; without it, the kind's glyph. */
   readonly thumb?: ReactNode | CardImageFace;
+  /** Nothing to show yet, for example a plan with no version: the thumbnail is the empty face in small, on the neutral ground, as on a card with no face. */
+  readonly empty?: boolean;
 }
 
 /**
@@ -382,12 +384,14 @@ function Glyph({ kind }: { readonly kind: CardKind }) {
 }
 
 /** A row's 36×27 thumbnail: the kind's chrome on its ground, holding the host's `thumb` or else the kind's glyph. */
-function Thumb({ kind, thumb }: { readonly kind: CardKind; readonly thumb?: ReactNode | CardImageFace }) {
+function Thumb({ kind, thumb, empty = false }: { readonly kind: CardKind; readonly thumb?: ReactNode | CardImageFace; readonly empty?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
-  const own = present(thumb);
+  const own = !empty && present(thumb);
   const near = useNearScreen(ref, own);
   const [imageReady, setImageReady] = useState(false);
-  const content = !own ? (
+  const content = empty ? (
+    <Blank />
+  ) : !own ? (
     <Glyph kind={kind} />
   ) : !near ? null : isImageFace(thumb) ? (
     <span className={cn("block size-full", !imageReady && "invisible")}>
@@ -400,14 +404,16 @@ function Thumb({ kind, thumb }: { readonly kind: CardKind; readonly thumb?: Reac
     <div
       ref={ref}
       data-frame-card-well=""
-      data-frame-card-thumb={own ? "picture" : "glyph"}
+      data-frame-card-thumb={empty ? "empty" : own ? "picture" : "glyph"}
       data-frame-card-kind={kind}
-      data-frame-card-face={own ? (near ? "ready" : "loading") : "ready"}
+      data-frame-card-face={empty ? "empty" : own ? (near ? "ready" : "loading") : "ready"}
       inert
       aria-hidden="true"
       className="relative h-[27px] w-9 shrink-0 overflow-hidden rounded-[5px]"
     >
-      <Chrome kind={kind}>{content}</Chrome>
+      <Chrome kind={kind} blank={empty}>
+        {content}
+      </Chrome>
     </div>
   );
 }
@@ -548,6 +554,7 @@ export function CardRow({
   secondary,
   action,
   pinned = false,
+  empty = false,
 }: CardRowProps) {
   const Link: ElementType<CardLinkProps> = linkComponent ?? "a";
   const date = asDate(time);
@@ -561,7 +568,7 @@ export function CardRow({
       data-frame-card-columns={`${secondary === undefined ? "" : "secondary "}${present(action) ? "action" : ""}`.trim() || undefined}
       className="relative grid min-w-0 items-center gap-x-3.5 rounded-[8px] pl-1.5 pr-2.5"
     >
-      <Thumb kind={kind} thumb={thumb} />
+      <Thumb kind={kind} thumb={thumb} empty={empty} />
       <Link
         href={href}
         title={date === null ? undefined : cardDateTitle(date)}

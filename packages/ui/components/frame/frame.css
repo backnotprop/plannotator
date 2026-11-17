@@ -384,7 +384,8 @@
 
 /*
  * Rows. The action has no column of its own while no row in its CardRows is
- * pinned: it shows over the end of the grey line on hover and focus. Once a
+ * pinned: it shows over the end of the grey line on hover, or while it has
+ * focus itself; focus on the row's link leaves the grey line in view. Once a
  * row there is pinned (or the row is pinned outside a CardRows, or the screen
  * has no hover), every row with an action keeps a 28 px column for it.
  */
@@ -400,11 +401,14 @@
   inset-block: 0;
   right: 10px;
 }
-[data-frame-card-row]:not(:hover, :focus-within) > [data-frame-card-action] {
-  pointer-events: none;
-}
-[data-frame-card-row][data-frame-card-columns~="action"]:is(:hover, :focus-within) > [data-frame-card-end] {
-  opacity: 0;
+@media (hover: hover) {
+  [data-frame-card-row]:not(:is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *)):not(:hover, :has(> [data-frame-card-action]:focus-within)) > [data-frame-card-action] {
+    opacity: 0;
+    pointer-events: none;
+  }
+  [data-frame-card-row][data-frame-card-columns~="action"]:not(:is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *)):is(:hover, :has(> [data-frame-card-action]:focus-within)) > [data-frame-card-end] {
+    opacity: 0;
+  }
 }
 [data-frame-card-row][data-frame-card-columns~="action"]:is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *) {
   grid-template-columns: 36px minmax(0, 1fr) 180px 28px;
@@ -415,10 +419,6 @@
 [data-frame-card-row][data-frame-card-columns~="action"]:is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *) > [data-frame-card-action] {
   position: relative;
   inset: auto;
-  pointer-events: auto;
-}
-[data-frame-card-row][data-frame-card-columns~="action"]:is([data-frame-card-pinned], [data-frame-card-rows]:has([data-frame-card-pinned]) *) > [data-frame-card-end] {
-  opacity: 1;
 }
 @media (hover: none) {
   [data-frame-card-row][data-frame-card-columns~="action"] {
@@ -430,10 +430,6 @@
   [data-frame-card-row][data-frame-card-columns~="action"] > [data-frame-card-action] {
     position: relative;
     inset: auto;
-    pointer-events: auto;
-  }
-  [data-frame-card-row][data-frame-card-columns~="action"] > [data-frame-card-end] {
-    opacity: 1;
   }
 }
 [data-frame-card-row] [data-frame-card-title] {
@@ -469,14 +465,20 @@
 
 /* "3 updates · Show" */
 [data-frame-card-updates] {
+  position: relative;
   cursor: pointer;
-  height: 24px;
+  height: 20px;
   padding: 0 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 500;
   color: var(--primary);
   background: color-mix(in oklch, var(--primary) 10%, transparent);
+}
+[data-frame-card-updates]::after {
+  content: "";
+  position: absolute;
+  inset: -2px 0;
 }
 [data-frame-card-updates]:hover {
   background: color-mix(in oklch, var(--primary) 16%, transparent);
@@ -490,13 +492,11 @@
   background: var(--frame-surface-hover);
 }
 [data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) {
-  background: var(--primary);
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+  box-shadow: inset 3px 0 0 var(--primary);
 }
-[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) :is([data-frame-card-title], [data-frame-card-secondary], [data-frame-card-line], [data-frame-card-line] *) {
-  color: var(--primary-foreground);
-}
-[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)) [data-frame-card-dot] {
-  background: var(--primary-foreground);
+[data-frame-card-row]:has(:focus-visible:not([data-frame-card-action] *)):dir(rtl) {
+  box-shadow: inset -3px 0 0 var(--primary);
 }
 
 /* The host's action: shown on hover and focus, always on touch and while pinned */

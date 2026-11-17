@@ -560,6 +560,27 @@ describe.skipIf(!hasDom)('CardRow', () => {
     expect(card.closest('[data-frame-card-thumb]')).toBeNull();
   });
 
+  test('an empty row shows the empty face in small on the neutral ground, like a card with no face, whatever its kind', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="document" title="New plan" href="/n" empty thumb={<b data-testid="thumb">t</b>} />
+        <CardRow kind="document" title="Plan" href="/p" />
+        <Card kind="document" size="regular" title="New plan" href="/n" />
+      </>,
+    );
+    nearScreen();
+    const [empty, glyph] = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-thumb]')];
+    expect(empty!.getAttribute('data-frame-card-thumb')).toBe('empty');
+    expect(empty!.getAttribute('data-frame-card-face')).toBe('empty');
+    expect(empty!.querySelector('[data-frame-card-sheet]')!.hasAttribute('data-frame-card-blank')).toBe(true);
+    expect(empty!.querySelector('[data-testid="thumb"]')).toBeNull();
+    expect(glyph!.getAttribute('data-frame-card-face')).toBe('ready');
+    expect(glyph!.querySelector('[data-frame-card-blank]')).toBeNull();
+    const well = frame.querySelector('[data-frame-card] [data-frame-card-well]')!;
+    expect(well.getAttribute('data-frame-card-face')).toBe('empty');
+  });
+
   test('CardRows holds each row as a list item under its name, and marks the list so a pin anywhere keeps every date in line', () => {
     const { CardRow, CardRows } = cardModule!;
     const frame = mount(
