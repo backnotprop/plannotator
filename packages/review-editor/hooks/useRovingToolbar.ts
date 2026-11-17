@@ -29,14 +29,14 @@ export function useRovingToolbar(ref: RefObject<HTMLElement | null>, enabled = t
       }
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight' && event.key !== 'Home' && event.key !== 'End') return;
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
       if (event.altKey || event.metaKey || event.ctrlKey) return;
       const list = items(root);
       const index = list.findIndex((el) => el === document.activeElement);
       if (index === -1) return;
       event.preventDefault();
       event.stopPropagation();
-      const next = event.key === 'Home' ? 0 : event.key === 'End' ? list.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length;
+      const next = (index + (event.key === 'ArrowRight' ? 1 : -1) + list.length) % list.length;
       current = list[next];
       sync();
       current.focus();

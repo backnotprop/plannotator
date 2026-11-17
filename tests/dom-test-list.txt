@@ -638,6 +638,7 @@ packages/inbox/broRevealApp.test.tsx
 packages/inbox/grillMeTip.test.tsx
 packages/inbox/personalAgentsIntro.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
+packages/inbox/routinesIntro.test.tsx
 packages/inbox/tabIconChoice.test.tsx
 packages/inbox/themeChooser.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
@@ -834,3 +835,4 @@ packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
 packages/inbox/pulls/branchReviews.test.tsx
 packages/inbox/canvas/canvasKeys.test.tsx
 packages/ui/components/canvas/lift.test.ts
+packages/review-editor/App.treePanes.test.tsx
