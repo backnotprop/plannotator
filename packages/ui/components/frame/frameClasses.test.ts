@@ -303,12 +303,17 @@ describe('card layout rules in frame.css', () => {
     for (const value of columns) expect(value).not.toMatch(/ (160|180)px( |$)/);
   });
 
-  test('a list narrower than 560 px drops the project and sizes the trailing text to its content, by the list\'s own width, above the phone layout', () => {
+  test('a list shows a project whole or not at all: under the width where 160 px of project and the title at 40% fit, it drops the project and keeps the trailing text aligned', () => {
     expect(block('[data-frame-card-rows]')).toContain('container: frame-card-rows / inline-size;');
-    const at = css.indexOf('@media (min-width: 768px) {\n  @container frame-card-rows (width < 560px) {');
+    const rowPadding = 6 + 10, thumb = 36, project = 160, trailing = 180, gaps = 3 * 14, titleShare = 0.4;
+    const threshold = Math.ceil(rowPadding + (thumb + project + trailing + gaps) / (1 - titleShare));
+    expect(threshold).toBe(713);
+    const at = css.indexOf(`@media (min-width: 768px) {\n  @container frame-card-rows (width < ${threshold}px) {`);
     expect(at).toBeGreaterThan(-1);
     const narrow = css.slice(at, css.indexOf('\n}\n', at));
-    expect(block('    [data-frame-card-row],\n    [data-frame-card-row][data-frame-card-columns~="secondary"]', narrow)).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) fit-content(180px);');
+    expect(block('    [data-frame-card-row][data-frame-card-columns~="secondary"]', narrow)).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(block('[data-frame-card-row]')).toContain('grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);');
+    expect(narrow).not.toMatch(/fit-content|auto\b|min-content|max-content/);
     expect(block('    [data-frame-card-row] [data-frame-card-secondary]', narrow)).toContain('display: none;');
     expect(block('    [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2)', narrow)).toContain('padding-inline-end: 20px;');
     expect(narrow).not.toMatch(/hover|focus|pinned|action-rest/);
