@@ -295,26 +295,46 @@ describe("Amp and OpenCode: created only where that hides nothing", () => {
     expect(addInboxNote("opencode", dataDir, env(), undefined, { config: {} })).toMatchObject({ ok: true, action: "created" });
     expect(removeInboxNote("opencode", dataDir, env())).toMatchObject({ ok: true, action: "deleted" });
     expect(existsSync(agents)).toBe(false);
+    // Where OpenCode 1 shows, Settings gives the OpenCode 1 reason; where it may not be there, never that.
+    const saysOpenCode1 = () => noteStatus("opencode", dataDir, env()).reason?.includes("OpenCode 1") === true;
     // Both versions in one config (V1's `plugin` beside V2's `plugins`): creating it would hide CLAUDE.md from V1.
     config({ plugins: [], plugin: [] });
     expect(creates()).toBe(false);
+    expect(saysOpenCode1()).toBe(true);
     expect(addInboxNote("opencode", dataDir, env()).ok).toBe(false);
     expect(existsSync(agents)).toBe(false);
     // V1 only.
     config({ plugin: [] });
     expect(creates()).toBe(false);
     expect(noteStatus("opencode", dataDir, env()).state).toBe("unavailable");
-    // V2 only by `opencode2` on PATH; with V1's `opencode` there too, not.
+    expect(saysOpenCode1()).toBe(true);
+    // V2 only by `opencode2` on PATH.
     rmSync(file(".config", "opencode", "opencode.json"));
     writeFileSync(join(fake.bin, "opencode2"), "#!/bin/sh\n");
     chmodSync(join(fake.bin, "opencode2"), 0o755);
     expect(creates()).toBe(true);
+    // `opencode` beside it (V2's own copy, or a real OpenCode 1: nothing read tells): not created, and no OpenCode 1 claim.
     fake.install("opencode");
     expect(creates()).toBe(false);
+    expect(noteStatus("opencode", dataDir, env()).state).toBe("unavailable");
+    expect(saysOpenCode1()).toBe(false);
+    config({ plugins: [] });
+    expect(creates()).toBe(false);
+    expect(saysOpenCode1()).toBe(false);
+    rmSync(file(".config", "opencode", "opencode.json"));
     rmSync(join(fake.bin, "opencode"));
-    // V2 only, but the person has a ~/.claude/CLAUDE.md (or one in CLAUDE_CONFIG_DIR): not created.
+    // `opencode` alone: OpenCode 1.
+    rmSync(join(fake.bin, "opencode2"));
+    fake.install("opencode");
+    expect(creates()).toBe(false);
+    expect(saysOpenCode1()).toBe(true);
+    rmSync(join(fake.bin, "opencode"));
+    writeFileSync(join(fake.bin, "opencode2"), "#!/bin/sh\n");
+    chmodSync(join(fake.bin, "opencode2"), 0o755);
+    // V2 only, but the person has a ~/.claude/CLAUDE.md (or one in CLAUDE_CONFIG_DIR): not created, no OpenCode 1 claim.
     write(file(".claude", "CLAUDE.md"), "Mine.\n");
     expect(creates()).toBe(false);
+    expect(saysOpenCode1()).toBe(false);
     rmSync(file(".claude", "CLAUDE.md"));
     write(join(fake.root, "claude-config", "CLAUDE.md"), "Mine.\n");
     expect(noteTarget("opencode", env({ CLAUDE_CONFIG_DIR: join(fake.root, "claude-config") })).create).toBe(false);

@@ -713,12 +713,16 @@ export function openCodeGeneration(e: AgentEnvironment): "1" | "2" | undefined {
 }
 
 /**
- * Every sign of each OpenCode version here, not just the first (openCodeGeneration stops at one): the
- * global config's V2 `plugins` and V1 `plugin` keys, `opencode2` (V2) and `opencode` (V1, or V2's own
- * copy: read as V1, the side that can lose something) on PATH.
+ * Every sign of each OpenCode version here, not just the first (openCodeGeneration stops at one).
+ * V2: the global config's `plugins` key, or `opencode2` on PATH. V1: the `plugin` key, or `opencode`
+ * on PATH without `opencode2`. `unsure`: `opencode` beside `opencode2` with no `plugin` key. V2's own
+ * package ships `opencode` too, and nothing Plannotator reads (without running it) tells that copy
+ * from a real OpenCode 1.
  */
-export function openCodeVersionsSeen(e: AgentEnvironment): { v1: boolean; v2: boolean } {
-  const seen = { v1: !!e.which("opencode"), v2: !!e.which("opencode2") };
+export function openCodeVersionsSeen(e: AgentEnvironment): { v1: boolean; v2: boolean; unsure: boolean } {
+  const bin1 = !!e.which("opencode");
+  const bin2 = !!e.which("opencode2");
+  const seen = { v1: bin1 && !bin2, v2: bin2, unsure: false };
   const dir = openCodeConfigDir(e);
   for (const name of ["opencode.json", "opencode.jsonc", "config.json"]) {
     const read = readAgentFile(join(dir, name));
@@ -731,6 +735,7 @@ export function openCodeVersionsSeen(e: AgentEnvironment): { v1: boolean; v2: bo
       // Unreadable: no evidence here.
     }
   }
+  seen.unsure = bin1 && bin2 && !seen.v1;
   return seen;
 }
 

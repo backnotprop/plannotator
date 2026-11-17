@@ -106,7 +106,7 @@ When the Inbox starts, and each time `plannotator inbox` connects an agent, Plan
 | Gemini CLI | `~/.gemini/GEMINI.md` (or your `context.fileName`) |
 | Qwen Code | `~/.qwen/rules/plannotator-inbox.md` (a file of its own; in `$QWEN_HOME` when set). A note an older version put in `~/.qwen/QWEN.md` (or your `context.fileName`) stays there |
 | Pi | the one instructions file Pi reads in `~/.pi/agent/` |
-| OpenCode | `~/.config/opencode/AGENTS.md`. Created only for OpenCode 2 when there is no sign of OpenCode 1 and no `~/.claude/CLAUDE.md`; otherwise only when you already have it: creating it would stop OpenCode 1 reading your `~/.claude/CLAUDE.md` |
+| OpenCode | `~/.config/opencode/AGENTS.md`. Created only for OpenCode 2 when Plannotator can tell OpenCode 1 is not here and there is no `~/.claude/CLAUDE.md`; otherwise only when you already have it: creating it would stop OpenCode 1 reading your `~/.claude/CLAUDE.md` |
 | Cursor | `~/.cursor/plugins/local/plannotator-inbox/` (a local plugin of its own) when Cursor's editor is on this computer; with only the Cursor CLI, Customize → Rules in the Cursor app (you copy it by hand) |
 | Kiro | `~/.kiro/steering/plannotator-inbox.md` (a file of its own) |
 | Windsurf / Devin | `~/.devin/rules/plannotator-inbox.md` (a file of its own) |

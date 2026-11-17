@@ -25,7 +25,7 @@
  *    whitespace), else `AGENTS.md` (created when missing). An empty override is
  *    skipped by Codex; writing into it would hide the person's AGENTS.md.
  *  - OpenCode: `~/.config/opencode/AGENTS.md`; created only with OpenCode 2
- *    here (no CLAUDE.md fallback), no sign of OpenCode 1 (`openCodeVersionsSeen`)
+ *    here (no CLAUDE.md fallback), OpenCode 1 known not to be (`openCodeVersionsSeen`)
  *    and no `~/.claude/CLAUDE.md`: creating it would stop OpenCode 1 reading it.
  *  - Pi: the first that exists of `AGENTS.override.md`, `AGENTS.md`,
  *    `AGENTS.MD`, `CLAUDE.md`, `CLAUDE.MD` (Pi reads only one); `AGENTS.md`
@@ -700,12 +700,16 @@ export function noteTarget(agent: InboxNoteAgentId, e: AgentEnvironment): NoteTa
       const file = join(openCodeConfigDir(e), "AGENTS.md");
       if (exists(file)) return { path: file, create: false, reason: null };
       // https://opencode.ai/v2/docs/instructions/: "OpenCode V2 recognizes `AGENTS.md` only. It does not use `CLAUDE.md` as a
-      // fallback." Created only where that hides nothing: OpenCode 2 here, no sign of OpenCode 1 at all, and no CLAUDE.md
-      // OpenCode 1 would stop reading.
+      // fallback." Created only where that hides nothing: OpenCode 2 here, OpenCode 1 known not to be (not `unsure`), and no
+      // CLAUDE.md OpenCode 1 would stop reading.
       const seen = openCodeVersionsSeen(e);
       const claudeMd = [join(e.homeDir, ".claude", "CLAUDE.md"), join(claudeConfigDir(e), "CLAUDE.md")];
-      if (seen.v2 && !seen.v1 && !claudeMd.some(exists)) return { path: file, create: true, reason: null };
-      return { path: file, create: false, reason: "Creating this file would stop OpenCode 1 from reading your ~/.claude/CLAUDE.md, so Plannotator adds the note only to an AGENTS.md you already have." };
+      if (seen.v2 && !seen.v1 && !seen.unsure && !claudeMd.some(exists)) return { path: file, create: true, reason: null };
+      // The OpenCode 1 reason only where OpenCode 1 shows (or no version does, as before); else only what is true.
+      if (seen.v1 || (!seen.v2 && !seen.unsure)) {
+        return { path: file, create: false, reason: "Creating this file would stop OpenCode 1 from reading your ~/.claude/CLAUDE.md, so Plannotator adds the note only to an AGENTS.md you already have." };
+      }
+      return { path: file, create: false, reason: `${displayPath(file, e)} does not exist` };
     }
     case "pi": {
       const dir = piAgentDir(e);
