@@ -106,9 +106,10 @@ export function ReaderPart({ diff, children }: { diff: string; children: ReactNo
 }
 
 export const GuideReaderPart = lazyPart(() => import('#guide-reader'));
-/** The PR page's All files (the review app's tree and file view), from the reader's own chunk. */
+/** The PR page's rail (the review app's trees and file view), from the reader's own chunk. */
 export const PullAllFilesPart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullAllFiles })));
 export const PullRepoFilePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullRepoFile })));
+export const PullChangesTreePart = lazyPart(() => import('#guide-reader').then((mod) => ({ default: mod.PullChangesTree })));
 export const ShapeBoardPart = lazyPart(() => import('#shape-board'));
 export const SearchPalettePart = lazyPart(() => import('#search-palette'));
 export const PlatformPostPart = lazyPart(() => import('#platform-post'));

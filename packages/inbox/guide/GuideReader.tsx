@@ -600,5 +600,6 @@ function Reader({
 // Held to the shape the window's strict typecheck reads (reader-module.d.ts).
 GuideReader satisfies typeof ReaderShape;
 
-// The PR page's All files rides this chunk: the review app's tree and file view (PullRepoParts.tsx).
+// The PR page's rail rides this chunk: the review app's trees and file view (PullRepoParts.tsx, PullChangesTree.tsx).
 export { PullAllFiles, PullRepoFile } from './PullRepoParts';
+export { PullChangesTree } from './PullChangesTree';

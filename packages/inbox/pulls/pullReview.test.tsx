@@ -45,7 +45,10 @@ let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<
 /** The reader's Collapse all as the review last gave it. */
 let readerCollapse: { collapsed: boolean; token: number } | undefined;
 if (hasDom) {
+  const seam: string = '../guide/PullChangesTree.tsx';
+  const { PullChangesTree } = (await import(seam)) as Record<string, unknown>;
   mock.module('#guide-reader', () => ({
+    PullChangesTree,
     default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles; lineNotes?: typeof readerNotes; wholeFileNotes?: typeof readerWhole; collapseAll?: typeof readerCollapse }) => {
       readerComments = props.comments;
       readerNotes = props.lineNotes;
@@ -311,7 +314,8 @@ test.skipIf(!hasDom)("others' threads from the details go on their lines in this
   await act(async () => bandRoot.unmount());
   bandBox.remove();
   // Open threads only: the resolved one is drawn but not counted.
-  expect(el('[data-review-file="src/a.ts"] [data-pull-file-threads]').textContent).toBe('3');
+  const railRow = [...(document.querySelector('[data-review-files] [data-changes-tree]')?.shadowRoot?.querySelectorAll<HTMLElement>('[data-type="item"]') ?? [])].find((row) => row.getAttribute('title') === 'src/a.ts');
+  expect(railRow?.querySelector('[data-item-section="trail"] [title="3 open threads"]')?.textContent).toBe('3');
   await act(async () => el('[data-pull-layer-all]').click());
   await settle();
   // The whole stack's diff is the top layer's answer: this layer's threads are not on it.

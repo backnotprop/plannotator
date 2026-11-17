@@ -1,7 +1,7 @@
 /**
  * The PR page rail's Changes | All files (the owner's take A on #2639): the review app's switch over its file tree
  * (review-editor's `ScopeSwitch`, its classes and words), at the head of the rail. Changes is the PR's own files
- * (`RailTree`); All files the repository at the head the patch on screen was read at, from the Inbox's
+ * (`guide/PullChangesTree.tsx`, the review app's Changes tree); All files the repository at the head the patch on screen was read at, from the Inbox's
  * `/api/inbox/pulls/repo-files`, drawn by the review app's own tree (`guide/PullRepoParts.tsx`).
  */
 import type { TreeScope } from '@plannotator/ui/hooks/useTreeScope';

@@ -43,6 +43,7 @@ let reader: ReaderProps | undefined;
 let readerMounts = 0;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
+    PullChangesTree: () => null,
     default: (props: ReaderProps) => {
       reader = props;
       useEffect(() => {
