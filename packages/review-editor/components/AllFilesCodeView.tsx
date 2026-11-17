@@ -950,6 +950,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 }) => {
   const mountCollapsedRef = useRef(mountCollapsed);
   const seedCollapsed = mountCollapsedRef.current ?? defaultCollapsed;
+  const guideMount = mountCollapsedRef.current !== undefined;
 
   // showFileHeader: true suppresses usePierreTheme's `[data-title]` hide rule.
   // With renderCustomHeader the built-in header runs in 'custom' mode (only the
@@ -2399,6 +2400,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   });
 
   const revealOnArrival = useStableCallback((itemId: string) => {
+    if (guideMount) return;
     const waiting = revealOnArrivalRef.current.has(itemId);
     revealOnArrivalRef.current.set(itemId, performance.now() + REVEAL_ON_ARRIVAL_MS);
     if (!waiting) requestAnimationFrame(() => revealWhenDrawn(itemId));
@@ -2463,7 +2465,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       prefetchWholeFile(context.id);
       const itemId = context.id;
       requestAnimationFrame(() => applyItemHighlights(node, itemId));
-      if (!hasScrolledRef.current && !firstChangeShownRef.current.has(itemId)) {
+      if (!guideMount && !hasScrolledRef.current && !firstChangeShownRef.current.has(itemId)) {
         firstChangeShownRef.current.add(itemId);
         requestAnimationFrame(() => {
           if (!hasScrolledRef.current) revealFirstChange(node);
