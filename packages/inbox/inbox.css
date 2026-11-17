@@ -9979,6 +9979,24 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-pr-foldbtn:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
 .pn-inbox .ib-pr-foldbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-pr-foldbtn .ib-n { color: var(--muted-foreground); }
+/* Hidden pull requests (pulls/hiddenPulls.ts): the rows' menu draws no box of its own; a row whose menu is open takes the hover fill. */
+.ib-pr-rows { display: contents; }
+.ib-nrow.ib-prrow[data-menu]::before { background: var(--ib-hover) !important; }
+.ib-nrow.ib-prrow.ib-sel[data-menu]::before { background: var(--ib-sel-hover) !important; }
+/* Reviews' Hidden fold: one quiet line per hidden PR (its number, title and repository, a link to the forge), and Show again. */
+.ib-pr-hid { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 2px 8px 2px 12px; }
+.pn-inbox .ib-pr-hid-t { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); text-decoration: none; }
+.pn-inbox .ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: underline; }
+.pn-inbox .ib-pr-hid-t:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 4px; }
+.ib-pr-hid-n { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-pr-hid-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-pr-hid-repo { flex: none; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-pr-hid-show { flex: none; height: 28px; padding: 0 10px; border-radius: 7px; color: var(--foreground); font-size: var(--ib-fs-13, 13px); font-weight: 500; }
+.pn-inbox .ib-pr-hid-show:hover { background: var(--ib-hover-s, var(--muted)); }
+.pn-inbox .ib-pr-hid-show:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+@media (pointer: coarse) {
+  .pn-inbox .ib-pr-hid-show { min-height: 44px; }
+}
 .ib-pr-foot { display: flex; align-items: center; gap: 6px; flex: none; min-height: 40px; padding: 4px 14px 8px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-pr-foot-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-pr-refresh[data-refreshing] .ib-ic { animation: ib-pr-spin 0.9s linear infinite; }

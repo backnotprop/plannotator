@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxPullsAnswer, InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { rememberFarBranches } from './branchReviews';
+import { onHiddenWritten, pullsShown, reviewsShown, settleHidden, useHiddenChanges } from './hiddenPulls';
 
 /** The window got its focus back: the list is read again, at most this often. */
 export const PULLS_FOCUS_MS = 20_000;
@@ -66,6 +67,7 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
         .then(([answer, rows]) => {
           if (controller.signal.aborted) return;
           setModel(answer);
+          settleHidden(answer.hidden);
           // A linked machine's reported branch: its thread opens there (Branch reviews).
           rememberFarBranches(rows);
           setReviews(rows);
@@ -139,6 +141,9 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
     [],
   );
 
+  // A PR hidden or shown again here (hiddenPulls.ts): read again from the server's cache, the list and the count.
+  useEffect(() => onHiddenWritten(() => readRef.current(false)), []);
+
   const refresh = useCallback(() => read(true), [read]);
   const reload = useCallback(() => read(false), [read]);
   const reloadRows = useCallback(() => {
@@ -159,5 +164,9 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
       },
     );
   }, [enabled, counted]);
-  return { model, reviews, error, loading, refresh, reload, reloadRows };
+  // What was hidden here leaves at once, before the server's next answer says so.
+  const changes = useHiddenChanges();
+  const shownModel = useMemo(() => pullsShown(model, changes), [model, changes]);
+  const shownReviews = useMemo(() => reviewsShown(reviews, changes), [reviews, changes]);
+  return { model: shownModel, reviews: shownReviews, error, loading, refresh, reload, reloadRows };
 }

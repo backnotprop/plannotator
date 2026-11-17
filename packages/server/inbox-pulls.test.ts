@@ -30,7 +30,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { INBOX_REPO_TTL_MS, inboxId, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, inboxId, type InboxPullHidden, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer, type InboxReviewsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
@@ -492,6 +492,54 @@ describe("merge (the Pull requests page)", () => {
     expect(((await res.json()) as { code: string }).code).toBe("pull_merge_unknown");
     expect(w.forge.calls.some((c) => c.args.includes("repos/northwind/billing-svc/pulls/412"))).toBe(true);
     expect(puts(w)).toEqual([]);
+  });
+});
+
+describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
+  const KEY = "github.com/northwind/billing-svc#412";
+  const call = (base: string, fields: Record<string, unknown>, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/inbox/pulls/hidden`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(fields) });
+  const reviews = async (base: string) => (await (await fetch(`${base}/api/inbox/reviews`)).json()) as InboxReviewsAnswer;
+  const listed = async (w: { pulls: (query?: string) => Promise<Response> }, query = "") => (await (await w.pulls(query)).json()) as InboxPullsAnswer;
+
+  test("Code review off: refused before anything runs", async () => {
+    const w = await world();
+    const before = w.forge.calls.length;
+    const res = await call(w.base, { show: [KEY] });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("code_review_off");
+    expect(w.forge.calls.length).toBe(before);
+  });
+
+  test("a hidden PR leaves the list, the board and Reviews' rows, runs nothing on the forge, and Show again brings it back", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Working.", "retries");
+    const pr = (await listed(w)).pulls.find((p) => p.key === KEY)!;
+    expect(pr).toBeDefined();
+    expect((await reviews(w.base)).rows.some((row) => row.pull_keys.includes(KEY))).toBe(true);
+    const before = w.forge.calls.length;
+    const hid = await call(w.base, { hide: [{ key: KEY, title: pr.title, url: pr.url }] });
+    expect(hid.status).toBe(200);
+    expect(((await hid.json()) as { hidden: InboxPullHidden[] }).hidden.map((h) => [h.key, h.title, h.url])).toEqual([[KEY, pr.title, pr.url]]);
+    // Nothing goes to the forge about it: no close, no comment, no read of the PR (a background Others read may run).
+    expect(w.forge.calls.slice(before).filter((c) => c.args.some((arg) => /PATCH|POST|pulls\/412|issues\/412/.test(arg)))).toEqual([]);
+    const after = await listed(w);
+    expect(after.pulls.some((p) => p.key === KEY)).toBe(false);
+    expect(after.hidden?.map((h) => h.key)).toEqual([KEY]);
+    expect((await listed(w, "?everywhere=1")).pulls.some((p) => p.key === KEY)).toBe(false);
+    const rows = await reviews(w.base);
+    expect(rows.rows.some((row) => row.pull_keys.includes(KEY) || row.stacks.some((s) => s.layers.some((l) => l.key === KEY)))).toBe(false);
+    expect(rows.hidden?.map((h) => h.key)).toEqual([KEY]);
+    expect((await call(w.base, { show: [KEY] })).status).toBe(200);
+    expect((await listed(w)).pulls.some((p) => p.key === KEY)).toBe(true);
+    expect((await reviews(w.base)).rows.some((row) => row.pull_keys.includes(KEY))).toBe(true);
+  });
+
+  test("refuses another site, a link that is not https and an empty write", async () => {
+    const w = await world({ codeReview: true });
+    expect((await call(w.base, { show: [KEY] }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await call(w.base, { hide: [{ key: KEY, title: "x", url: "javascript:alert(1)" }] })).status).toBe(422);
+    expect((await call(w.base, {})).status).toBe(422);
   });
 });
 

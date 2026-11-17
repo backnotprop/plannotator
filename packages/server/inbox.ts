@@ -330,6 +330,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
+import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
@@ -1432,6 +1433,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
   const pullLooked = createInboxPullLooked(dataDir);
+  // PRs the person hid from Reviews and the PR board (inbox-pull-hidden.ts): nothing is done on the forge.
+  const pullHidden = createInboxPullHidden(dataDir);
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
   const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), ...options.pullRisk });
   // Branch reviews (inbox-branch-service.ts): agents report a branch ready for review; nothing in it runs by itself.
@@ -5649,6 +5652,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ serverSession, looked: pullLooked.mark(pullLookedSeenOf(body, Date.now())) });
       }
+      // Hide a PR from Reviews, the PR board and their counts, or show it again (inbox-pull-hidden.ts). Kept on this
+      // machine only, never sent to the forge; same guards as the list. Inbox-only (Bun).
+      if (path === "/api/inbox/pulls/hidden") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json({ serverSession, hidden: pullHidden.change(pullHiddenBodyOf(body), new Date()) });
+      }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -5759,9 +5774,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]));
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
+        // Hidden PRs leave the window's lists (a linked machine reading this board gets them all: its window hides by its own).
+        const byWindow = fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM;
+        pullHidden.settle(listed.pulls);
         const own = { ...listed, pulls: pullLooked.on(listed.pulls), links, projects: Object.fromEntries(projectsByRepo), cards };
         const farBoards = far ? far() : [];
-        return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
+        const board = farBoards.length > 0 ? mergePullBoards(own, farBoards) : own;
+        if (farBoards.length > 0) pullHidden.settle(board.pulls);
+        // The board's whole read no longer lists a hidden PR: it closed. Only with every linked machine's board in hand.
+        if (everywhere && byWindow && farBoards.every((entry) => entry.board && !entry.pending)) pullHidden.forgetGone(board.pulls, listed.hosts);
+        return json({ serverSession, ...board, ...(byWindow ? { pulls: pullHidden.shown(board.pulls), hidden: pullHidden.list() } : {}) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
       // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
@@ -5786,7 +5808,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const branchOwners = await branchService.owners(listed.pulls, projectsByRepo);
         const owners = new Map([...branchOwners, ...pullOwnersNow()]);
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, owners);
-        const stacks = inboxPullStacks(listed.pulls);
+        // Hidden PRs (inbox-pull-hidden.ts) are left out of the rows, never out of the records below; a linked machine's read gets them all.
+        const byWindow = fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM;
+        if (!cached) pullHidden.settle(listed.pulls);
+        const shownPulls = byWindow ? pullHidden.shown(listed.pulls) : listed.pulls;
+        const hiddenKeys = byWindow ? listed.pulls.filter((pull) => pullHidden.has(pull.key)).map((pull) => pull.key) : [];
+        const stacks = inboxPullStacks(shownPulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
         const threads = reviewIndex.threads();
         const changes = inboxReviewLandingChanges({ threads, pulls: listed.pulls, links, landed: pullOwners.landings() });
@@ -5800,13 +5827,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const row = store.listRow(threadId);
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
-        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: new Map([...branchOwners, ...pullOwners.all()]), posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
+        const allOwners = new Map([...branchOwners, ...pullOwners.all()]);
+        const rows = reviewRowsShown(
+          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true }),
+          hiddenKeys,
+          (key) => links[key]?.thread_id ?? allOwners.get(key)?.thread_id ?? null,
+        );
         // Branch reviews: the branches agents reported on each linked machine, as last read (never waited for). A
         // linked machine reading this list gets this machine's own rows only.
         const branchesOn = branchReviewsOn();
         const farBranches = branchesOn && fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM ? machines.branchLists()() : null;
         if (farBranches) rows.push(...farBranches.rows.map(inboxFarBranchReviewRow));
-        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}) });
+        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}), ...(byWindow ? { hidden: pullHidden.list() } : {}) });
       }
       // New review's Pull request link: what a pasted link is. One read of that one PR, unless the list already has it.
       if (path === "/api/inbox/reviews/link") {

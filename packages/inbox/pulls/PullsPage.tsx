@@ -78,6 +78,8 @@ import type { SystemProjectRow } from '@plannotator/core/inbox-system';
 import { SystemButton } from '../system/SystemButton';
 import { SystemPane } from '../system/SystemPane';
 import type { ReactNode } from 'react';
+import type { InboxToastModel } from '../components/Toast';
+import { hiddenLabel, hideWithUndo, showWithToast } from './hiddenPulls';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -143,6 +145,8 @@ export interface PullsPageProps {
   prBoard?: ReactNode;
   onPullRequests?: () => void;
   prsSummary?: { open: number; needYou: number } | null;
+  /** The window's one toast: Hide's count with Undo (hiddenPulls.ts). Absent: no toast. */
+  onToast?: (toast: Omit<InboxToastModel, 'id'>, ms: number) => void;
 }
 
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -281,6 +285,12 @@ export function PullsPage(given: PullsPageProps) {
               else props.onOpenStack(row.stacks[0]?.id ?? null);
             }}
             onNew={props.onNew}
+            onHide={(pulls) => {
+              // The PR open beside the list leaves with its row.
+              if (open && pulls.some((pull) => open.stack.layers.some((layer) => layer.key === pull.key))) props.onOpenStack(null);
+              void hideWithUndo(pulls, props.onToast);
+            }}
+            onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
             project={props.project}
             onReviewBranch={props.onReviewBranch ? (branch, opener) => props.onReviewBranch!({ name: branch.branch, projectId: branch.project_id }, opener) : undefined}
           />
@@ -533,6 +543,10 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         onThread={props.onOpenThread}
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
         onShape={(shape) => props.onOpenShape?.(shape)}
+        onHide={() => {
+          props.onClose();
+          void hideWithUndo([start], props.onToast);
+        }}
         foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}
       />
     );

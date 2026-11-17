@@ -176,6 +176,19 @@ export interface InboxPullsAnswer {
   machines?: Record<string, { read_at: string | null; pending: boolean; name?: string; looked?: true }>;
   /** The merged board only: the linked machines' risk judgments of the PRs they list, by pull key. */
   far_risk?: Record<string, InboxPullRiskJudgment>;
+  /**
+   * The PRs the person hid on this machine (server's inbox-pull-hidden.ts), newest first: left out of `pulls`, kept
+   * here so Reviews can list them with Show again. Absent from an older Inbox.
+   */
+  hidden?: InboxPullHidden[];
+}
+
+/** A PR the person hid from their lists: nothing is done on the forge. `at`: when, ISO. */
+export interface InboxPullHidden {
+  key: string;
+  title: string;
+  url: string;
+  at: string;
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */

@@ -5170,6 +5170,7 @@ function Inbox() {
       shapes={shapeOn ? shapes.byThread : null}
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       prsSummary={sheetHead}
+      onToast={showToast}
       onPullRequests={() => go({ page: 'prs', project: null, thread: null })}
       prBoard={
         <SheetPage
