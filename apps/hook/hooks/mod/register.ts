@@ -542,7 +542,7 @@ async function launchReminderFor($: Engine, sessionId: string): Promise<InboxLau
   const recorded = await withinMs($, LAUNCH_REMINDER_MS, () => reminderRecorded($, sessionId))
   if (recorded !== false) return null
   return {
-    text: inboxReminderFor(settings.inboxReminderCustom, toolName),
+    text: inboxReminderFor(settings.inboxReminderCustom, toolName, { rules: settings.inboxReminderRules }),
     entered: async () => {
       state.delivered = true
       await recordReminder($, sessionId).catch(() => undefined)
