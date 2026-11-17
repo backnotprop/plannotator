@@ -227,6 +227,8 @@ export interface GitCommandOptions {
    * the argument vector.
    */
   config?: Record<string, string>;
+  /** Extra environment for this one command (e.g. `GIT_NO_LAZY_FETCH`), set last. */
+  env?: Record<string, string>;
 }
 
 /** Runtime-neutral Git arguments and subprocess policy produced at the process boundary. */
@@ -421,7 +423,7 @@ export function prepareGitCommand(
   if (interaction === "allow") {
     return {
       args: [...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", ...args],
-      ...(configEnv ? { env: { ...environment, ...configEnv } } : {}),
+      ...(configEnv || options?.env ? { env: { ...environment, ...configEnv, ...options?.env } } : {}),
       isolateProcessGroup: false,
     };
   }
@@ -447,6 +449,7 @@ export function prepareGitCommand(
       GIT_TERMINAL_PROMPT: "0",
       GIT_SSH_COMMAND: `${sshCommand} ${sshBatchOptions}`,
       SSH_ASKPASS_REQUIRE: "never",
+      ...options?.env,
     },
     isolateProcessGroup: true,
   };

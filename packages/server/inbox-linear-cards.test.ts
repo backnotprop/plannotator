@@ -160,12 +160,42 @@ test("teams for bare identifiers, and the route with its guard", async () => {
   expect(parseLinearTeamsAnswer({ data: {} })).toBeNull();
   const json = (body: unknown, status = 200) => Response.json(body, { status });
   const ok = await linearRefsRoute(new Request("http://127.0.0.1:1/api/inbox/linear-refs", { headers: { host: "127.0.0.1:1" } }), "/api/inbox/linear-refs", linear, "sess", json);
-  expect(await ok!.json()).toEqual({ serverSession: "sess", workspace: "acme", teams: ["ENG"] });
+  expect(await ok!.json()).toEqual({ serverSession: "sess", workspace: "acme", teams: ["ENG"], key: "accepted" });
   const cross = await linearRefsRoute(new Request("http://127.0.0.1:1/api/inbox/linear-refs", { headers: { host: "127.0.0.1:1", origin: "https://evil.example", "sec-fetch-site": "cross-site" } }), "/api/inbox/linear-refs", linear, "sess", json);
   expect(cross!.status).toBe(403);
   const off = await linearRefsRoute(new Request("http://127.0.0.1:1/api/inbox/linear-refs", { headers: { host: "127.0.0.1:1" } }), "/api/inbox/linear-refs", null, "sess", json);
-  expect(await off!.json()).toEqual({ serverSession: "sess", workspace: null, teams: [] });
+  expect(await off!.json()).toEqual({ serverSession: "sess", workspace: null, teams: [], key: "none" });
   expect(await linearRefsRoute(new Request("http://127.0.0.1:1/x"), "/x", linear, "sess", json)).toBeNull();
+});
+
+test("the route says whether Linear took the key: refused on a 401 or an auth error, none without one, unknown until Linear answers", async () => {
+  const json = (body: unknown, status = 200) => Response.json(body, { status });
+  const refsOf = async (linear: ReturnType<typeof createLinearCards>) =>
+    (await (await linearRefsRoute(new Request("http://127.0.0.1:1/api/inbox/linear-refs", { headers: { host: "127.0.0.1:1" } }), "/api/inbox/linear-refs", linear, "sess", json))!.json()) as { key: string; teams: string[] };
+  const refused = stub(() => ({ status: 401, body: { errors: [{ message: "Authentication required", extensions: { code: "AUTHENTICATION_ERROR" } }] } }));
+  expect(await refsOf(createLinearCards({ apiKey: () => "not-a-key", fetch: refused.fetchImpl }))).toMatchObject({ key: "refused", teams: [] });
+  // Linear's GraphQL can answer 200 with an auth error.
+  const authError = stub(() => ({ body: { errors: [{ message: "x", extensions: { code: "AUTHENTICATION_ERROR" } }] } }));
+  expect(await refsOf(createLinearCards({ apiKey: () => "k", fetch: authError.fetchImpl }))).toMatchObject({ key: "refused" });
+  expect(await refsOf(createLinearCards({ apiKey: () => null, fetch: refused.fetchImpl }))).toMatchObject({ key: "none" });
+  const down = createLinearCards({ apiKey: () => "k", fetch: (async () => { throw new Error("offline"); }) as unknown as typeof fetch });
+  expect(await refsOf(down)).toMatchObject({ key: "unknown" });
+  // A key that reads the teams but is refused one team's issue (403 / FORBIDDEN) is still accepted.
+  const partial = stub((body) => (body.query.includes("organization") ? { body: { data: { organization: { urlKey: "acme" }, teams: { nodes: [{ key: "ENG" }] } } } } : { status: 403, body: { errors: [{ message: "Forbidden", extensions: { code: "FORBIDDEN" } }] } }));
+  const scoped = createLinearCards({ apiKey: () => "k", fetch: partial.fetchImpl, avatar: async () => null });
+  expect(await refsOf(scoped)).toMatchObject({ key: "accepted" });
+  expect(await scoped.get(LINK)).toMatchObject({ ok: false });
+  expect(await refsOf(scoped)).toMatchObject({ key: "accepted", teams: ["ENG"] });
+  // A new key starts over: the old key's refusal is not the new one's.
+  let key = "bad";
+  let ok = false;
+  const switching = stub((body) => (ok ? { body: body.query.includes("organization") ? { data: { organization: { urlKey: "acme" }, teams: { nodes: [{ key: "ENG" }] } } } : ISSUE } : { status: 401, body: {} }));
+  const linear = createLinearCards({ apiKey: () => key, fetch: switching.fetchImpl });
+  expect(await refsOf(linear)).toMatchObject({ key: "refused" });
+  key = "good";
+  ok = true;
+  linear.forget();
+  expect(await refsOf(linear)).toMatchObject({ key: "accepted", teams: ["ENG"] });
 });
 
 test("the key goes only to api.linear.app's authorization header: never in an avatar fetch, an answer, a route body or a log line", async () => {

@@ -9934,8 +9934,11 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-cp[data-phone][data-review-box] .ib-cp-to .ib-cp-tol { min-width: 64px; }
 .ib-rvasked { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-rvcurating { margin: 14px 0 0 34px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+/* Branch reviews: a reported branch's thread, until a review is in. No fill and no border: words and one button. */
+.ib-rvbranch { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 14px 0 0 34px; }
+.ib-rvbranch-reach, .ib-rvbranch-asked { margin: 0; max-width: 62ch; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .ib-rvcurating { margin-left: 0; }
+  .ib-rvcurating, .ib-rvbranch { margin-left: 0; }
 }
 .ib-rvfrom { margin: -6px 0 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .pn-inbox .ib-rvc-link { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
@@ -10200,6 +10203,13 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-risk[data-risk="low"] { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 72%, transparent); }
 .ib-risk[data-risk="high"] { padding: 0 7px; border-radius: 999px; font-weight: 600; background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
 .ib-pr-risknote { margin: 8px 0 0; padding: 4px 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+/* Branch reviews' "Branches nobody reported": a plain row of words and one button; the fill is the row's hover only. */
+.ib-pr-unrep { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; color: var(--muted-foreground); }
+.ib-pr-unrep:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
+.ib-pr-unrep-t { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.ib-pr-unrep-name { overflow: hidden; color: var(--foreground); font-size: var(--ib-fs-14, 14px); text-overflow: ellipsis; white-space: nowrap; }
+.ib-pr-unrep-line { font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pr-unrep .ib-btn { flex: none; }
 .ib-pr-empty .ib-pr-risknote { margin: 0; padding: 0; }
 .ib-pr-riskline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
 .ib-pr-l1 .ib-risk { margin-left: 2px; }
@@ -10328,16 +10338,21 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-shape-layer > * { flex: 1; min-height: 0; }
 .ib-shape-layer[hidden] { display: none; }
 .ib-review > .ib-shape-layer { inset: 0; }
+/* In its thread (the owner, 2026-11-16: "It should just fit within the thread view"): the board takes the messages'
+   and the reply's place under the thread's header, as the Artifacts view does, on the thread's own background. */
+.ib-pane > .ib-shape-layer.ib-shape-inthread {
+  position: relative; inset: auto; z-index: auto; flex: 1; min-height: 0; background: transparent;
+  border-radius: 0; border-bottom-left-radius: inherit; border-bottom-right-radius: inherit;
+}
+.ib-shape-inthread .shp-root { --shp-paper: var(--card); }
+/* Not a window layer: its head is no window-dragging band (the thread's header, above it, is). */
+.ib-shape-inthread .shp-head { -webkit-app-region: no-drag; }
 .ib-shape-loading { flex: 1; }
 /* The board's sidebar toggle sits alone in the gutter, 22px from the pane's edge where every full page's head has it;
    the title and the claim share one left edge after it (the board's own phone layout: 10px, its padding). */
 .ib-shape-layer .shp-root:not(.phone) .shp-head-start { margin-left: -18px; }
 .ib-shape-layer .shp-root:not(.phone) .shp-head:has(.shp-head-start) .shp-claim { margin-left: 24px; }
 .ib-shape-layer .shp-root.phone .shp-head:has(.shp-head-start) .shp-claim { margin-left: 42px; }
-.ib-shape-thread { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
-.ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
-.ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }
-.ib-shape-who span { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-shape-page .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
 .ib-shape-find { display: flex; align-items: center; gap: 8px; height: 36px; width: 300px; max-width: 40vw; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted-foreground); background: transparent; }
 .ib-shape-find input { all: unset; flex: 1; min-width: 0; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }
@@ -12473,3 +12488,5 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-pempty[data-thread-drop="over"] { background-image: linear-gradient(color-mix(in oklch, var(--primary) 14%, transparent), color-mix(in oklch, var(--primary) 14%, transparent)); }
 .ib-topen { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 999px; background: var(--popover); box-shadow: var(--ib-float-shadow); color: var(--primary); font-weight: 600; font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
 .ib-topen[data-thread-drop-label="refuse"] { color: var(--muted-foreground); }
+/* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
+.ib-topen[data-ghost-says] { visibility: hidden; }

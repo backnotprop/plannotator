@@ -328,6 +328,153 @@ describe.skipIf(!hasDom)('the ways that are not a drag', () => {
   });
 });
 
+/** The browser's undo or redo putting the field's words back to `text` (its input event says which). */
+function history(text: string, kind: 'historyUndo' | 'historyRedo') {
+  act(() => {
+    const el = field();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, text);
+    const event = new Event('input', { bubbles: true });
+    Object.defineProperty(event, 'inputType', { value: kind });
+    el.dispatchEvent(event);
+  });
+}
+
+/** The caret put at `at` by a click or a key: the field hears it as the browser tells it (the release of the click). */
+function caretMoved(at: number) {
+  act(() => {
+    field().focus();
+    field().setSelectionRange(at, at);
+    field().dispatchEvent(new MouseEvent('mouseup', { bubbles: true }));
+  });
+}
+
+/** A paste of `text` with the caret at `at`. */
+function pasteAt(text: string, at: number) {
+  const event = new Event('paste', { bubbles: true, cancelable: true });
+  Object.defineProperty(event, 'clipboardData', { value: { getData: () => text, files: [], items: [], types: ['text/plain'] } });
+  act(() => {
+    field().focus();
+    field().setSelectionRange(at, at);
+    field().dispatchEvent(event);
+  });
+}
+
+describe.skipIf(!hasDom)('undo, redo and the caret never lose a mention silently', () => {
+  test('⌘Z after Backspace took a mention brings the mention back, not only its words; redo takes it again', () => {
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    const withIt = words;
+    const end = withIt.indexOf(FLAKY.title) + FLAKY.title.length;
+    act(() => {
+      field().focus();
+      field().setSelectionRange(end, end);
+      field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+    });
+    const without = words;
+    expect(tokens()).toEqual([]);
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
+    expect(replyWordsWithMentions(HERE, words.trim())).toContain(W.inline(1, FLAKY.id));
+    history(without, 'historyRedo');
+    expect(tokens()).toEqual([]);
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
+  });
+
+  test('undo of a mention put in takes it out, and redo brings it back as a mention; the same words typed by hand stay words', () => {
+    draw(<Box initial="See " />);
+    const before = words;
+    act(() => requestMention(HERE, [FLAKY]));
+    const withIt = words;
+    history(before, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    history(withIt, 'historyRedo');
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
+    // Typed, not undone: words never become a mention.
+    type(before);
+    type(withIt);
+    expect(tokens()).toEqual([]);
+  });
+
+  test('words retyped by hand after Backspace took the mention stay words when undo or redo comes back to them', () => {
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    const withIt = words;
+    const end = withIt.indexOf(FLAKY.title) + FLAKY.title.length;
+    act(() => {
+      field().focus();
+      field().setSelectionRange(end, end);
+      field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+    });
+    expect(tokens()).toEqual([]);
+    // The same title, typed by hand: the same words as when they held the mention.
+    type(withIt);
+    type(`${withIt}ok`);
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    history(`${withIt}ok`, 'historyRedo');
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    expect(replyWordsWithMentions(HERE, words.trim())).not.toContain(FLAKY.id);
+  });
+
+  test('two threads with the same label, one after the other at the same place: undo to those words brings back neither, never the wrong one', () => {
+    const TWIN: MentionRef = { id: idOf('01JD5TW1N'), title: FLAKY.title, project: null };
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    const withIt = words;
+    const end = withIt.indexOf(FLAKY.title) + FLAKY.title.length;
+    act(() => {
+      field().focus();
+      field().setSelectionRange(end, end);
+      field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true, cancelable: true }));
+    });
+    const without = words;
+    act(() => requestMention(HERE, [TWIN]));
+    expect(words).toBe(withIt);
+    expect(tokens()).toEqual([[`ib-mention:${TWIN.id}`, TWIN.title]]);
+    // Back past the twin to the first mention's words: they held two threads, so neither comes back.
+    history(without, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    history(withIt, 'historyUndo');
+    expect(tokens()).toEqual([]);
+    expect(replyWordsWithMentions(HERE, words.trim())).not.toContain(TWIN.id);
+  });
+
+  test('a caret put inside a mention goes to its nearer edge, and from an edge a step in goes across it; typing then lands beside it', () => {
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    const start = words.indexOf(FLAKY.title);
+    const end = start + FLAKY.title.length;
+    caretMoved(start + 3);
+    expect(field().selectionStart).toBe(start);
+    caretMoved(end - 2);
+    expect(field().selectionStart).toBe(end);
+    // From its start edge one step right goes across it; from its end one step left goes back across it.
+    caretMoved(start);
+    caretMoved(start + 1);
+    expect(field().selectionStart).toBe(end);
+    caretMoved(end - 1);
+    expect(field().selectionStart).toBe(start);
+    // Typing where the caret now is (its start) puts the words before it; the mention stands.
+    const at = field().selectionStart;
+    type(`${words.slice(0, at)}X${words.slice(at)}`);
+    expect(tokens()).toEqual([[`ib-mention:${FLAKY.id}`, FLAKY.title]]);
+  });
+
+  test('a thread link pasted with the caret inside a mention goes in beside it, and every other mention stands', () => {
+    draw(<Box initial="See " />);
+    act(() => requestMention(HERE, [FLAKY]));
+    act(() => requestMention(HERE, [RATE]));
+    // Four letters into it: its start is the nearer edge, so the new one goes in before it.
+    const inside = words.indexOf(FLAKY.title) + 4;
+    pasteAt(`http://localhost:19432/#thread=${OLD.id}`, inside);
+    expect(tokens().map(([, label]) => label)).toEqual([OLD.title, FLAKY.title, RATE.title]);
+    const sent = replyWordsWithMentions(HERE, words.trim());
+    for (const ref of [FLAKY, OLD, RATE]) expect(sent).toContain(ref.id);
+  });
+});
+
 describe.skipIf(!hasDom)('what else the box takes', () => {
   test('a file dropped on the box still reaches the box (thread drags never use native drag events)', () => {
     let dropped = 0;

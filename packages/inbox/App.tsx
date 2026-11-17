@@ -45,7 +45,7 @@ import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullStacks, type InboxDecision, type InboxHealth, type InboxListRow, type InboxListSection, type InboxQuestion, type InboxAgentRow, type InboxAgentsModel, type InboxPull, type InboxPullStack, type InboxTourChange, type InboxComposeLaunch, type InboxReaction, type InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill } from './decisions/entry';
 import {
@@ -57,7 +57,7 @@ import {
   setPageSession,
   subscribeInboxEvents,
   inboxAskOn,
-  type InboxEvent,
+  type InboxEvent, type CardsModel, type DraftView, type InboxRevealId, type InboxStorageModel, type UpdateCheckFailing,
   type ListModel,
   type OutboxView,
   type SettingsModel,
@@ -141,8 +141,8 @@ import { useSystemProjects } from './system/projects';
 import { systemDropped, systemEscapeTo, systemKept } from './system/route';
 import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { connectLineNews, noteQuestionRows } from './agents';
-import type { InboxAgentRow, InboxAgentsModel, InboxPull, InboxPullStack, InboxTourChange } from '@plannotator/core/inbox-types';
 import { ScheduledRoute, useScheduledOn } from './scheduled/ScheduledPage';
+import { PlansRoute, usePlansOn } from './plans/PlansPage';
 import { SettingsPage } from './components/Settings';
 import { createStepsBus } from './steps/useThreadSteps';
 import { ArchivedBlock } from './components/Archived';
@@ -229,7 +229,6 @@ import { sheetModel, tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
 import { useSheetPulls } from './prs/useSheetPulls';
 import { type SheetLayout } from './prs/tableModel';
-import { inboxPullIsOpen, inboxPullStacks } from '@plannotator/core/inbox-types';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
 import { reviewRowProject, reviewsOnYou, reviewViewOf } from './pulls/reviewsModel';
@@ -259,9 +258,7 @@ import { useComposerOpener } from './compose/openComposer';
 import { COMPOSE_CLONE_EVENT, composeActions, composeTargets, hostLabel, lastLaunchAgent, launchHistory, projectCanStart, projectPlusOn, SCRATCH_PICK, type ComposeAction, type ComposeCloneRequest } from './compose/model';
 import { machineLaunchesKept } from './compose/useMachineLaunches';
 import { reviewBoxPulls } from './compose/reviewBox';
-import type { CardsModel, DraftView, InboxRevealId, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
-import type { InboxComposeLaunch, InboxReaction, InboxRestartAgents } from '@plannotator/core/inbox-types';
 import { reactionSpeech } from './components/ReactionTray';
 import { inboxTabCount, setAppBadge, useTabCount } from './tabCount';
 import { pageOffersUpdates, pageOffersWhatsNew, sidebarUpdateNotice, updateForPage } from './updateNotice';
@@ -1116,7 +1113,6 @@ function Inbox() {
     [lookPoster, paneReads],
   );
 
-
   const refreshThread = paneReads.refreshThread;
   const shownReads = useShownReads(paneReads, { latest: () => latestRef.current, filesSignals, split: windowPanes.allowed, open: () => routeRef.current.thread ?? null }, queryClient);
 
@@ -1693,11 +1689,11 @@ function Inbox() {
         },
         // The pinned artifacts changed (another window, a phone): read them again (artifactPins.ts).
         onArtifactPins: () => void readArtifactPins(),
-        // `plannotator inbox --open <thread>` (a tool on this computer): the window the person used last shows the
-        // thread as a row click would. A new history entry, so Back returns; the reply being typed is kept as its draft.
-        onShow: (threadId, target) => {
+        // `plannotator inbox --open <thread>` / `plannotator plans` (this computer): the window used last shows the thread as a row click would (Back returns, the reply being typed kept as its draft), or the Plans page.
+        onShow: (threadId, target, page) => {
           if (target !== windowReport().id) return;
           const now = routeRef.current;
+          if (page === 'plans') return void (now.page !== 'plans' && writeRoute({ page: 'plans', project: null, thread: null }));
           if (now.page === 'inbox' && now.thread === threadId && !now.file && !now.guide) return;
           writeRoute({ page: 'inbox', project: now.page === 'inbox' && !now.machine ? now.project : null, thread: threadId });
         },
@@ -3336,7 +3332,6 @@ function Inbox() {
     return deleteAgentNow(agentDelete, archive);
   };
 
-
   // E marks the open thread (or the focused row) read, and again moves it
   // back; Z undoes while the toast is up. Never while typing, never with a
   // modifier (so the reply box keeps its own ⌘Z).
@@ -3708,6 +3703,7 @@ function Inbox() {
   const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
   const scheduledOn = useScheduledOn(settings);
+  const plansOn = usePlansOn(settings);
 
   const projects = latest?.projects ?? [];
   /**
@@ -4792,7 +4788,7 @@ function Inbox() {
         })),
     [shapes.shapes, shapeOn],
   );
-  // The board open over its thread or over the grid. A review draws its own, over the review (ReviewPane).
+  // The board open over the grid (in `main`) or in its thread's own pane (ThreadSlot's `board`). A review draws its own (ReviewPane).
   const shapeLayerId = boardsOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
@@ -4812,6 +4808,26 @@ function Inbox() {
     say,
   });
   showMeThreadRef.current = threadShowMe.threadId;
+  const boardLayer = (inThread: boolean, sidebarToggle: boolean) => shapeLayerId && !reviewPaneOpen && (
+    <ThreadShapeLayer
+      host={shapeHost}
+      id={shapeLayerId}
+      thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
+      shapes={shapes} threadShowMe={threadShowMe}
+      onClose={() => close({ ...routeRef.current, shape: null })}
+      onBoard={(id) => go({ ...routeRef.current, shape: id })}
+      // Its review opens at the place a link names: the full-window review (ReviewPane), the board its corner card.
+      onOpenReview={(messageId, at) => {
+        setBoardLink(messageId);
+        boardPlaces.leave(shapeLayerId);
+        go({ ...routeRef.current, guide: messageId, guideAt: at });
+      }}
+      onAddToReply={addShapeReply}
+      place={boardPlaces.placeOf(shapeLayerId)}
+      onNavigate={(place) => boardPlaces.moved(shapeLayerId, place)}
+      inThread={inThread} sidebarToggle={sidebarToggle}
+    />
+  );
   reviewPaneOpenRef.current = reviewPaneOpen;
   // The review is at the place a board's link named: the address lets it go, so a reload opens it at the top.
   const landGuide = () => {
@@ -5149,7 +5165,7 @@ function Inbox() {
       }
       onOpenThread={(id) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id })}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
-      onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)}
+      onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
       onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })}
       shapes={shapeOn ? shapes.byThread : null}
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
@@ -5492,13 +5508,15 @@ function Inbox() {
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
   } else if (route.page === 'shapes') {
-    // The grid (the sidebar's Shape row). A board with a thread opens over its thread; one with none, over the grid.
+    // The grid (the sidebar's Shape row). A board with a thread opens in its thread; one with none, over the grid.
     main = (
       <ShapeGridPage
         shapes={shapeOn ? shapes.shapes : null}
         onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
+  } else if (route.page === 'plans') {
+    main = <PlansRoute route={route} on={plansOn} settingsKnown={settings !== null} phone={phone} />;
   } else if (route.page === 'scheduled') {
     main = <ScheduledRoute route={route} settings={settings} rows={windowRows} phone={phone} stacked={stack.thread} onToast={showToast} />;
   } else if (route.page === 'artifacts') {
@@ -5700,7 +5718,7 @@ function Inbox() {
             shapeReply, setShapeReply, patchQuestions, onPickSaves, afterWrite, rowPatches, decideInThread, searchLanding, decideLanding, landed,
             seenOnSight, panesOnScreen, setOpenThreadCovered, listTitle, setThreadFull, leaveFull, showToast, toastNow, dismissToast,
             covered: !!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null,
-            fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile,
+            fullSidebar: sidebarOpen && !sidebarHeld, inboxLink, holdSidebarIfTight, backFromFile, board: route.page === 'inbox' ? boardLayer : null,
           }}
         />
       </>
@@ -5753,7 +5771,7 @@ function Inbox() {
       {/* The sidebar's Customize panel (approval "inbox-sidebar-customize"): one for the window, beside the sidebar or, on a phone, a bottom sheet. */}
       {!tourOn && (
         <SidebarCustomizer
-          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), reviews: Boolean(pullsShown), shape: Boolean(shapeOn && shapes.rowShown), usage: settings?.cswap === true, phone })}
+          drawn={drawnSidebarItems({ board: Boolean(boardEnabled), plans: plansOn, reviews: Boolean(pullsShown), shape: Boolean(shapeOn && shapes.rowShown), usage: settings?.cswap === true, phone })}
           machines={machines.all.length > 0}
           // Opened from Settings on a desktop, where the sidebar is closed: it opens, so the person sees each change.
           onOpen={() => {
@@ -5879,6 +5897,7 @@ function Inbox() {
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            onPlans={plansOn ? () => leave({ page: 'plans', project: null, thread: null }) : undefined}
             onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
@@ -5913,29 +5932,9 @@ function Inbox() {
           )
         }
       >
-        <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
+        <main className="ib-main" data-shape-open={route.page === 'shapes' && shapeLayerId && !reviewPaneOpen ? '' : undefined}>
           {main}
-          {shapeLayerId && !reviewPaneOpen && (
-            <ThreadShapeLayer
-              host={shapeHost}
-              id={shapeLayerId}
-              thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
-              shapes={shapes}
-              threadShowMe={threadShowMe}
-              onClose={() => close({ ...routeRef.current, shape: null })}
-              onBoard={(id) => go({ ...routeRef.current, shape: id })}
-              // Its review opens at the place a link names: the full-window review (ReviewPane), the board its corner card.
-              onOpenReview={(messageId, at) => {
-                setBoardLink(messageId);
-                boardPlaces.leave(shapeLayerId);
-                go({ ...routeRef.current, guide: messageId, guideAt: at });
-              }}
-              covered={!!guideMessage}
-              onAddToReply={addShapeReply}
-              place={boardPlaces.placeOf(shapeLayerId)}
-              onNavigate={(place) => boardPlaces.moved(shapeLayerId, place)}
-            />
-          )}
+          {route.page === 'shapes' && boardLayer(false, true)}
           {!reviewPaneOpen && <ThreadShowMeBox threadShowMe={threadShowMe} />}
         </main>
       </SidebarShell>

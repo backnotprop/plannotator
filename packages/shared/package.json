@@ -8,6 +8,7 @@
     "./annotatable": "./annotatable.ts",
     "./annotate-bundle": "./annotate-bundle.ts",
     "./diff-files": "./diff-files.ts",
+    "./direct-edits": "./direct-edits.ts",
     "./stack-layers": "./stack-layers.ts",
     "./file-browser-files": "./file-browser-files.ts",
     "./app-html": "./app-html.ts",
@@ -222,6 +223,7 @@
     "@joplin/turndown-plugin-gfm": "^1.0.68",
     "@plannotator/core": "workspace:*",
     "chokidar": "^5.0.0",
+    "diff": "^8.0.4",
     "parse5": "^7.3.0",
     "turndown": "^7.2.4"
   },

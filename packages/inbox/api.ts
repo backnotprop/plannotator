@@ -918,7 +918,7 @@ async function localInstead(response: Response): Promise<boolean> {
   return true;
 }
 
-async function get<T>(path: string, signal?: AbortSignal, arriving?: (response: Response) => Promise<Response>): Promise<T> {
+export async function get<T>(path: string, signal?: AbortSignal, arriving?: (response: Response) => Promise<Response>): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   resumeDebugLog();
@@ -1980,7 +1980,7 @@ export const inboxApi = {
   reviewsCached: (signal?: AbortSignal) => get<InboxReviewsAnswer | { cold: true }>(inboxUrl('/reviews?cached=1'), signal),
   /** PR risk ranking: the rules, the risk agent and the judgments of the listed PRs (inbox-pull-risk.ts). */
   pullRisk: (signal?: AbortSignal) => get<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), signal),
-  savePullRisk: (input: { rules: string; provider: string | null; model: string | null }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
+  savePullRisk: (input: { rules: string; provider: string | null; model: string | null; branches?: boolean }) => post<InboxPullRiskAnswer>(inboxUrl('/pulls/risk'), input),
   pullRiskModels: (provider: string, signal?: AbortSignal) => get<InboxPullRiskModels>(inboxUrl(`/pulls/risk/models?provider=${encodeURIComponent(provider)}`), signal),
   pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(pullUrl('/pulls/details', key), signal),
   pullMediaSizes: (key: string, signal?: AbortSignal) => get<{ sizes: Record<string, { width: number; height: number }> }>(pullUrl('/pulls/media/sizes', key), signal),
@@ -1990,7 +1990,7 @@ export const inboxApi = {
   /** New review's Pull request link: what the pasted link is. */
   reviewLink: (ref: string, signal?: AbortSignal) => get<InboxReviewLinkAnswer>(inboxUrl(`/reviews/link?ref=${encodeURIComponent(ref)}`), signal),
   /** New review's change summary for a project's local changes. */
-  reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}`), signal),
+  reviewChanges: (project: string, changes: InboxReviewChanges, signal?: AbortSignal, branch?: string) => get<InboxReviewChangesAnswer>(inboxUrl(`/reviews/changes?project=${encodeURIComponent(project)}&changes=${changes}${branch ? `&branch=${encodeURIComponent(branch)}` : ''}`), signal),
   /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
   pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal, from?: string) =>
     get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
