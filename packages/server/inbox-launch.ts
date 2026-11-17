@@ -89,6 +89,7 @@ import { readLastLaunchChoice, withinLaunchWait, writeLastLaunchChoice } from ".
 import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-claude-settings-file";
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import type { InboxRex } from "./inbox-rex";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
 import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
@@ -242,6 +243,8 @@ export function createInboxLaunch(options: {
   folderReadTimeoutMs?: number;
   /** macOS's folder dialog ("Choose in Finder…"): the folder picked, or null when the person cancelled (tests stand in). */
   chooseFolder?: () => Promise<string | null>;
+  /** This computer's Rex (inbox-rex.ts): Open in Terminal opens a Rex tab while Rex's app is attached here. Absent: Terminal only. */
+  rex?: Pick<InboxRex, "opensHere" | "open">;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -1404,13 +1407,22 @@ ${result.text}`);
       case "open": {
         if (via === "tailnet") return localOnly();
         const e = await environment();
+        // Rex, where the person works in it (its app is attached here, inbox-rex.ts): a new Rex tab instead of Terminal.
+        const rex = options.rex && (await options.rex.opensHere()) ? options.rex : null;
         // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
         // first: `terminal` may hand a session over, and a refused Open must change nothing.
         const osascript = e.which("osascript");
-        if (!osascript) throw new InboxError("open_unavailable", options.platform === "darwin" ? "osascript is not on PATH; copy the command instead." : "Open in Terminal is for macOS; copy the command instead.");
+        const unavailable = () => new InboxError("open_unavailable", options.platform === "darwin" ? "osascript is not on PATH; copy the command instead." : "Open in Terminal is for macOS; copy the command instead.");
+        if (!osascript && !rex) throw unavailable();
         // A start or restart the agent refused for trust: the host's command where trust is accepted.
         const untrusted = !!launch.error || respawnUntrustedOf(memoOf(launch));
         const command = host.terminal(launch, untrusted);
+        // The tab runs the command itself (nothing is typed), in the Rex session named for the project.
+        if (rex && (await rex.open({ project: store.project(root.project_id)?.name ?? basename(launch.folder), tab: host.name, command }))) return json({ ok: true, command, opened: "rex" });
+        if (!osascript) {
+          host.terminalFailed?.(launch, command);
+          throw unavailable();
+        }
         // `on run argv`: the command is an argument, never part of the script's text.
         const script = ["on run argv", 'tell application "Terminal"', "activate", "do script (item 1 of argv)", "end tell", "end run"];
         const result = await e.run([osascript, ...script.flatMap((line) => ["-e", line]), command], { timeoutMs: 15_000 });

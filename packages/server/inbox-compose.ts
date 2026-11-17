@@ -99,6 +99,8 @@ export function createInboxCompose(options: {
   machine?: () => string;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
   onDraftsChange?: () => void;
+  /** Where live sessions live, as this computer's Rex confirms now (inbox-rex.ts): one line each, never kept. Absent: none. */
+  places?: (sessions: string[]) => Promise<ReadonlyMap<string, { line: string }>>;
 }) {
   const { store, serverSession, live, json } = options;
   const boardOn = options.boardOn ?? (() => false);
@@ -114,6 +116,20 @@ export function createInboxCompose(options: {
   };
 
   /** Every live session, grouped by project: the most recently active project first, and inside one the most recently active session first. */
+  /** The To picker's sessions with where Rex says they live (the line only: To offers no Rex action). */
+  const withPlaces = async (projects: InboxComposeProject[]): Promise<InboxComposeProject[]> => {
+    if (!options.places) return projects;
+    const shown = await options.places(projects.flatMap((group) => group.sessions.map((s) => s.session)));
+    if (shown.size === 0) return projects;
+    return projects.map((group) => ({
+      ...group,
+      sessions: group.sessions.map((s) => {
+        const place = shown.get(s.session);
+        return place ? { ...s, place: { kind: "rex" as const, line: place.line } } : s;
+      }),
+    }));
+  };
+
   const sessionsModel = (): InboxComposeProject[] => {
     const lastThreads = store.lastThreadsBySession();
     const groups = new Map<string, { project: InboxComposeProject["project"]; sessions: (InboxComposeSession & { activity: number })[] }>();
@@ -316,7 +332,7 @@ export function createInboxCompose(options: {
         serverSession,
         ...(options.machine ? { machine: options.machine() } : {}),
         home: homedir(),
-        projects: sessionsModel(),
+        projects: await withPlaces(sessionsModel()),
         ...(session ? { session: { session, live: live.askerLive(session) } } : {}),
         // Launch (only while `inboxLaunch.enabled`, on unless false; read live): the agents To offers to start and the folder menu's projects.
         ...(options.launch ? { launch: await options.launch.composeBlock(owner && !isCrossSiteRequest(req) ? { pick: trustPick(url) } : null) } : {}),

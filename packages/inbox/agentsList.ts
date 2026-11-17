@@ -34,7 +34,8 @@ export function setInboxAgents(next: unknown): void {
     ? next
         .filter((group): group is InboxAgentsGroup => !!group && typeof group === 'object' && Array.isArray((group as InboxAgentsGroup).agents))
         .map((group) => {
-          const agents = group.agents.filter(isAgent).map(inboxAgentNamesChecked);
+          // `show` as this Inbox sent it: it never passes one on from a linked machine (inboxPeerAgentsGroup).
+          const agents = group.agents.filter(isAgent).map((agent) => inboxAgentNamesChecked(agent, { show: true }));
           return {
             ...(typeof group.machine === 'string' ? { machine: group.machine } : {}),
             agents,
@@ -44,6 +45,8 @@ export function setInboxAgents(next: unknown): void {
             ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
             // And whether it keeps a tile choice (agents/projectFace.tsx): only when it says so.
             ...(typeof group.machine === 'string' && group.faces !== undefined && group.face_tiles === true ? { face_tiles: true as const } : {}),
+            // This computer's Open in Terminal opens a Rex tab (its own group only, for a window on this computer).
+            ...(group.open_in === 'rex' ? { open_in: 'rex' as const } : {}),
           };
         })
     : null;
@@ -72,6 +75,18 @@ export function subscribeInboxAgents(listener: () => void): () => void {
 }
 
 const snapshot = () => current;
+
+/** Whether this computer's Open in Terminal opens a Rex tab now (its own group's `open_in`, as the last read said). */
+export function useOpensInRex(): boolean {
+  const opens = () => current?.some((group) => group.open_in === 'rex') === true;
+  const [on, setOn] = useState(opens);
+  useEffect(() => {
+    const read = () => setOn(opens());
+    read();
+    return onInboxAgentsSet(read);
+  }, []);
+  return on;
+}
 
 /** A named agent (its given name as `label`) → the agent as the list read it. */
 const asListed = new WeakMap<InboxAgent, InboxAgent>();

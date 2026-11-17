@@ -1623,6 +1623,50 @@ export const INBOX_HELD_POLL_FIELD = 'held'
  */
 export const INBOX_CONTINUES_POLL_FIELD = 'continues'
 
+/**
+ * The poll field by which a connection says where its session lives: the ids
+ * of the terminal pane it runs in, read from the environment the session
+ * started with (`inboxPlaceFromEnv`). Set by the host, never by the model.
+ * One kind today, Rex (superlogical.com/rex): `{ kind: 'rex', session, block }`.
+ * A hint only: the Inbox checks it against Rex on its own computer before it
+ * shows anything, and shows nothing when Rex does not confirm it. Ids only,
+ * never a name. An older Inbox ignores it; an older connection never sends it.
+ */
+export const INBOX_PLACE_POLL_FIELD = 'place'
+
+/** Where a session lives (INBOX_PLACE_POLL_FIELD): a Rex pane, by its server's ids. */
+export interface InboxPlace {
+  kind: 'rex'
+  /** `session:<uuid>`, Rex's REX_SESSION. */
+  session: string
+  /** `block:<uuid>`, Rex's REX_BLOCK. */
+  block: string
+}
+
+const REX_ID_UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}'
+const REX_SESSION_ID = new RegExp(`^session:${REX_ID_UUID}$`)
+const REX_BLOCK_ID = new RegExp(`^block:${REX_ID_UUID}$`)
+
+/** A place as a poll carried it: exactly the two Rex ids, else null. */
+export function parseInboxPlace(value: unknown): InboxPlace | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const place = value as Record<string, unknown>
+  if (place.kind !== 'rex' || typeof place.session !== 'string' || typeof place.block !== 'string') return null
+  if (!REX_SESSION_ID.test(place.session) || !REX_BLOCK_ID.test(place.block)) return null
+  return { kind: 'rex', session: place.session, block: place.block }
+}
+
+/**
+ * Where the session lives, from the environment it started with: a Rex pane
+ * when Rex's terminal runs it directly (TERM_PROGRAM is `rex`; a tmux or
+ * another terminal inside Rex sets its own, and then nothing is said), with
+ * REX_SESSION and REX_BLOCK. REX_SERVER is never read. Null otherwise.
+ */
+export function inboxPlaceFromEnv(env: { TERM_PROGRAM?: string | undefined; REX_SESSION?: string | undefined; REX_BLOCK?: string | undefined }): InboxPlace | null {
+  if (env.TERM_PROGRAM !== 'rex') return null
+  return parseInboxPlace({ kind: 'rex', session: env.REX_SESSION, block: env.REX_BLOCK })
+}
+
 /** Kept apart from `label`: only list rows show a generated title. Empty or absent clears it. */
 export const INBOX_TITLE_POLL_FIELD = 'title'
 

@@ -187,6 +187,7 @@ import {
   INBOX_TAGS_POLL_FIELD,
   inboxStopNoticeId,
   inboxReminderRulesText,
+  type InboxPlace,
   type InboxReplyCommand,
 } from "@plannotator/shared/inbox/connection";
 import {
@@ -263,6 +264,7 @@ import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxLiveReview } from "./inbox-live-review";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
+import { createInboxRex, inboxRexSocketPath, type InboxRex } from "./inbox-rex";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
@@ -488,6 +490,8 @@ function isPageOrigin(value: string): boolean {
 export interface InboxServerOptions {
   /** Default: `getPlannotatorDataDir()`. */
   dataDir?: string;
+  /** This computer's Rex (inbox-rex.ts). Default: the app's server socket on macOS (under a sandboxed test, its own home's). */
+  rex?: InboxRex;
   liveReviewCommand?: string[];
   /** The running binary's version; `dev` for a source run. */
   version?: string;
@@ -4741,7 +4745,49 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The plain env launch finds agents on: this Inbox's own, or a sandboxed test's fakes.
   const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
     process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
+  // Rex (superlogical.com/rex): where agents live, Open in Rex, Show in Rex. Only an existing server is ever reached.
+  const rex =
+    options.rex ??
+    createInboxRex({ socketPath: inboxRexSocketPath(process.platform, process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir()), version });
+  /**
+   * Where the given live sessions say they live (their polls' place hints), but for the ones the Inbox launched: those
+   * run in the background, whatever pane the Inbox itself was started from (Open in Rex is their way in).
+   */
+  const rexHints = (sessions: Iterable<string>): Map<string, InboxPlace> => {
+    const hints = new Map<string, InboxPlace>();
+    let launched: Set<string> | null = null;
+    for (const session of sessions) {
+      const place = live.placeOf(session);
+      if (!place) continue;
+      launched ??= new Set(launch.agents().map((agent) => agent.session));
+      if (!launched.has(session)) hints.set(session, place);
+    }
+    return hints;
+  };
+  /**
+   * This Inbox's agents with where they live (inbox-rex.ts): each place Rex confirms now, as one line (Rex's own names,
+   * read for this answer and never kept), and `show` for a window on this computer (`here`); and, for such a window,
+   * `open_in: "rex"` while Open in Terminal opens a Rex tab. With no hint and no launch listed, Rex is never asked.
+   */
+  const withRexPlaces = async (groups: InboxAgentsGroup[], here: boolean): Promise<InboxAgentsGroup[]> => {
+    const at = groups.findIndex((group) => !group.machine || group.machine === machines.selfId);
+    const own = at >= 0 ? groups[at]! : null;
+    if (!own) return groups;
+    const hints = rexHints(own.agents.filter((agent) => agent.live && !agent.launch).map((agent) => agent.session));
+    const launched = here && own.agents.some((agent) => agent.launch);
+    if (hints.size === 0 && !launched) return groups;
+    const [shown, opens] = await Promise.all([rex.places(hints, here), launched ? rex.opensHere() : Promise.resolve(false)]);
+    if (shown.size === 0 && !opens) return groups;
+    const agents = own.agents.map((agent) => {
+      const place = agent.launch ? undefined : shown.get(agent.session);
+      return place ? { ...agent, place: { kind: "rex" as const, line: place.line, ...(place.show ? { show: true as const } : {}) } } : agent;
+    });
+    const out = [...groups];
+    out[at] = { ...own, agents, ...(opens ? { open_in: "rex" as const } : {}) };
+    return out;
+  };
   const launch = createInboxLaunch({
+    rex,
     store,
     live,
     dataDir,
@@ -4854,6 +4900,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
     launch,
     machine: () => machines.selfId,
+    places: (sessions) => rex.places(rexHints(sessions), false),
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
@@ -5521,7 +5568,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const fromMachine = door?.platform === MACHINE_PLATFORM;
         const faces = fromMachine ? agentFacesFile.wire() : null;
         const phone = door !== undefined && !fromMachine;
-        const agents = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
+        const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
+        // Where this computer's agents live, as Rex says now; Show in Rex and Open in Rex only for a window on this computer.
+        const agents = await withRexPlaces(listed, via === "local" && door === undefined);
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
         const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
@@ -5529,6 +5578,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
         return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
+      }
+      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in. This computer's own
+      // window only: never the tailnet, a phone or a linked machine (their Rex is not this one), never an agent's call.
+      if (path === "/api/inbox/rex/show") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (via !== "local" || fromDeviceDoor.has(req) || req.headers.get("sec-fetch-site") !== "same-origin") {
+          return json({ error: "Rex opens from this computer's own Inbox window only.", code: "window_only" }, 403);
+        }
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const session = typeof body.session === "string" ? body.session : "";
+        const place = session ? rexHints([session]).get(session) : undefined;
+        if (!place) return json({ error: "That session isn't in Rex.", code: "not_in_rex" }, 404);
+        return json({ shown: await rex.show(place) });
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
@@ -7724,6 +7787,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     unsubscribeWaits();
     scheduled.stop();
     launch.stop();
+    rex.close();
     unsubscribeLaunchTip();
     unsubscribeAgentWork();
     combine.close();

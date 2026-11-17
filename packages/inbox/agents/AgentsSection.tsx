@@ -77,6 +77,11 @@ export interface AgentsSectionProps {
    */
   onStop?: (agent: InboxAgent, machine: string | null) => void;
   onDelete?: (agent: InboxAgent, machine: string | null) => void;
+  /**
+   * Show in Rex: Rex's app goes to the pane this computer's agent lives in. Offered on an agent whose place says so
+   * (`place.show`: Rex's app performs actions, and this window is on this computer). Absent: not offered.
+   */
+  onShowInRex?: (agent: InboxAgent) => void;
   /** Says a line in the window's live region (the rename field's refusals). */
   announce?: (text: string) => void;
 }
@@ -110,6 +115,12 @@ function AgentTip({ entry, machine }: { entry: AgentEntry; machine: MachineView 
     <span className="ib-agtip" data-agent-tip="">
       <bdi className="ib-agtip-t">{facts.title}</bdi>
       <span className="ib-agtip-s">{facts.sub}</span>
+      {/* Where it lives (a Rex pane, as Rex named it at the list's read): one more quiet line, the card's own. */}
+      {facts.place && (
+        <bdi className="ib-agtip-s" data-agent-place="">
+          {facts.place}
+        </bdi>
+      )}
       <span className="ib-agtip-st">{facts.state}</span>
       {facts.rows.length > 0 && (
         <span className="ib-agtip-dl">
@@ -144,6 +155,7 @@ const AgentRow = memo(
     onRename?: (entry: AgentEntry, name: string | null) => Promise<boolean>;
     onStop?: (entry: AgentEntry) => void;
     onDelete?: (entry: AgentEntry) => void;
+    onShowInRex?: (entry: AgentEntry) => void;
     announce?: (text: string) => void;
     picks: AgentMarkPicks;
   }) {
@@ -168,7 +180,9 @@ const AgentRow = memo(
     const launch = entry.agent.launch;
     const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null) ? props.onStop : undefined;
     const onDelete = launch ? props.onDelete : undefined;
-    const hasMenu = !!(onRename || onStop || onDelete);
+    // Show in Rex only where it works now (the list said so for this window): never a dead item.
+    const onShowInRex = entry.agent.place?.show === true && !props.phone ? props.onShowInRex : undefined;
+    const hasMenu = !!(onRename || onStop || onDelete || onShowInRex);
     const launchName = agentHostName(entry.agent.host);
     const row = (children: ReactNode) => (
       <div
@@ -206,7 +220,7 @@ const AgentRow = memo(
         />,
       );
     }
-    const act = (action: 'rename' | 'reset' | 'stop' | 'delete') => {
+    const act = (action: 'rename' | 'reset' | 'stop' | 'delete' | 'rex') => {
       setMenuOpen(false);
       setContextOpen(false);
       if (action === 'rename') {
@@ -214,6 +228,7 @@ const AgentRow = memo(
         setRenaming(true);
         return;
       }
+      if (action === 'rex') return onShowInRex?.(entry);
       if (action === 'stop') return onStop?.(entry);
       if (action === 'delete') return onDelete?.(entry);
       void onRename?.(entry, null);
@@ -236,7 +251,13 @@ const AgentRow = memo(
             Reset name
           </Menu.Item>
         )}
-        {onRename && (onStop || onDelete) && <Menu.Separator className="ib-pm-sep" />}
+        {onShowInRex && (
+          <Menu.Item className="ib-pmi" label="Show in Rex" onClick={() => act('rex')} data-agent-action="rex">
+            <Icon name="terminal" size={15} />
+            Show in Rex
+          </Menu.Item>
+        )}
+        {(onRename || onShowInRex) && (onStop || onDelete) && <Menu.Separator className="ib-pm-sep" />}
         {onStop && (
           <Menu.Item className="ib-pmi" label={`Stop ${launchName}`} onClick={() => act('stop')} data-agent-action="stop">
             <Icon name="xCircle" size={15} />
@@ -268,7 +289,10 @@ const AgentRow = memo(
             <span className="ib-name" dir="auto">
               {entry.name}
             </span>
-            <span className="ib-sr">, {agentHostName(entry.agent.host)}</span>
+            <span className="ib-sr">
+              , {agentHostName(entry.agent.host)}
+              {entry.agent.place ? `, ${entry.agent.place.line}` : ''}
+            </span>
           </button>
         </Tip>
         <AgentMark id={entry.agent.id} host={entry.agent.host} name={entry.name} agent={entry.agent} picks={props.picks} />
@@ -319,6 +343,7 @@ const AgentRow = memo(
     a.onRename === b.onRename &&
     a.onStop === b.onStop &&
     a.onDelete === b.onDelete &&
+    a.onShowInRex === b.onShowInRex &&
     a.announce === b.announce &&
     a.picks === b.picks,
 );
@@ -362,6 +387,11 @@ export function AgentsSection(props: AgentsSectionProps) {
   const canDelete = props.onDelete !== undefined;
   const onStop = useMemo(() => (canStop ? (entry: AgentEntry) => stopNow.current?.(entry.agent, entry.machine === props.machines.self ? null : entry.machine) : undefined), [canStop, props.machines.self]);
   const onDelete = useMemo(() => (canDelete ? (entry: AgentEntry) => deleteNow.current?.(entry.agent, entry.machine === props.machines.self ? null : entry.machine) : undefined), [canDelete, props.machines.self]);
+  const rexNow = useRef(props.onShowInRex);
+  rexNow.current = props.onShowInRex;
+  const canShowInRex = props.onShowInRex !== undefined;
+  // This computer's agents only: a linked machine's Rex is not this one.
+  const onShowInRex = useMemo(() => (canShowInRex ? (entry: AgentEntry) => (entry.machine === null || entry.machine === props.machines.self ? rexNow.current?.(entry.agent) : undefined) : undefined), [canShowInRex, props.machines.self]);
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
     // background"). Its heading carries Add machine, then Add agent (under Tags' New tag); closed, nothing under it.
@@ -430,6 +460,7 @@ export function AgentsSection(props: AgentsSectionProps) {
                   onRename={names ? onRename : undefined}
                   onStop={onStop}
                   onDelete={onDelete}
+                  onShowInRex={!linked ? onShowInRex : undefined}
                   picks={picks}
                   announce={props.announce}
                 />

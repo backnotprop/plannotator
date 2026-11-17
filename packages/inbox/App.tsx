@@ -5871,6 +5871,8 @@ function Inbox() {
             onProjectRename={renameProject}
             onAgentRename={renameAgent}
             onAgentStop={(agent, machine) => void stopAgent(agent, machine)}
+            // Rex's app moves to the pane; nothing else changes here. A refusal is silent: the next read drops the item.
+            onAgentShowInRex={(agent) => void inboxApi.rexShow(agent.session).then((answer) => !answer.shown && void refreshList(false), () => void refreshList(false))}
             onAgentDelete={askAgentDelete}
             onProjectPicture={setProjectPicture}
             onProjectCombine={async (pair) => (await combineProjects([pair])) === null}

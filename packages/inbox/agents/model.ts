@@ -183,6 +183,8 @@ export interface AgentFacts {
   title: string;
   /** "Claude Code · billing-svc · Studio" */
   sub: string;
+  /** Where it lives, as Rex confirmed it at the list's read ("Rex · work / api"); null when nothing says. */
+  place: string | null;
   state: string;
   rows: [string, string][];
 }
@@ -207,7 +209,7 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
-  return { title: entry.name, sub, state, rows };
+  return { title: entry.name, sub, place: agent.place?.line ?? null, state, rows };
 }
 
 /**

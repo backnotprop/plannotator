@@ -13,7 +13,7 @@ import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type
 import { PromptDropped, type Host, type HttpResult } from './host'
 import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder, type InboxOwnerAnswer } from './inbox'
 import { isAbsolutePath } from './paths'
-import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
+import { inboxCommandBriefing, type InboxPlace, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
   CLAIM_EXIT,
@@ -333,6 +333,8 @@ export interface SessionInfo {
   firstStart?: (startedAt: number) => Promise<number>
   /** The session ids this conversation continues, read for each Inbox poll (`InboxLinkOptions.continues`). */
   continues?: () => Promise<readonly string[]>
+  /** Where the session lives (a Rex pane), read for each Inbox poll (`InboxLinkOptions.place`). */
+  place?: () => Promise<InboxPlace | null>
   /** The Inbox reminder a launched session's first wake carries (`InboxLinkOptions.launchReminder`). */
   launchReminder?: () => Promise<InboxLaunchReminder | null>
   /**
@@ -433,6 +435,7 @@ export class PlannotatorMod {
           ...(session.title ? { title: session.title } : {}),
           ...(session.firstStart ? { firstStart: session.firstStart } : {}),
           ...(session.continues ? { continues: session.continues } : {}),
+          ...(session.place ? { place: session.place } : {}),
           instanceId: this.instanceId,
           ...(session.inboxAs ? { agent: session.inboxAs } : {}),
           ...(session.inboxWake === false ? { wake: false } : {}),

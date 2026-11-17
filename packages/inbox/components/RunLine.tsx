@@ -3,6 +3,7 @@ import type { InboxRun } from '@plannotator/core/inbox-types';
 import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
+import { useOpensInRex } from '../agentsList';
 import { whenTime } from '../format';
 import { Icon } from '../icons';
 import { hostLabel } from '../compose/model';
@@ -76,6 +77,8 @@ export function RunLine({
   const ticking = run.state === 'working' || run.state === 'waiting_answer' || run.state === 'waiting_terminal';
   const now = useMinuteClock(ticking);
   const name = hostLabel(run.agent);
+  // Rex is where the person works here (the list's `open_in`): the same button opens a Rex tab.
+  const inRex = useOpensInRex();
   const minutes = ticking ? minutesSince(run.since, now) : null;
 
   const act = async (what: 'stop' | 'open' | 'retry' | 'trust') => {
@@ -119,9 +122,9 @@ export function RunLine({
     </Tip>
   );
   const openTerminal = (
-    <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('open')} data-run-open="">
+    <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('open')} data-run-open={inRex ? 'rex' : ''}>
       <Icon name="terminal" size={14} />
-      Open in Terminal
+      {inRex ? 'Open in Rex' : 'Open in Terminal'}
     </button>
   );
   const attach = run.attach_command && (

@@ -3478,6 +3478,32 @@ export interface InboxComposeSession {
   root?: string;
   /** Its title as its host keeps it (a poll's `label`, cleaned): the To picker's name for it, display only. Absent when it has none. Additive. */
   label?: string;
+  /** Where it lives, as Rex confirmed it for this answer (`InboxAgentPlace`, never with `show`). Additive. */
+  place?: InboxAgentPlace;
+}
+
+/**
+ * Where an agent lives, as this computer's Rex confirmed it for this answer (packages/server/inbox-rex.ts): one quiet
+ * line, "Rex · <session> / <tab>" in Rex's own names, read then and never kept. `show`: Show in Rex is offered (the
+ * window asking is on this computer, and Rex's app performs actions). Additive: absent from an older Inbox, and for an
+ * agent whose place Rex does not confirm.
+ */
+export interface InboxAgentPlace {
+  kind: "rex";
+  line: string;
+  show?: true;
+}
+
+/** The longest place line kept from another machine's list. */
+const INBOX_AGENT_PLACE_LINE_MAX = 200;
+
+/** A place as an Inbox sent it: its line, and `show` only when `show` is allowed (never from another machine: its Rex is not here). */
+export function inboxAgentPlaceChecked(value: unknown, options: { show: boolean }): InboxAgentPlace | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const place = value as Record<string, unknown>;
+  if (place.kind !== "rex" || typeof place.line !== "string") return undefined;
+  const line = place.line.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, " ").trim().slice(0, INBOX_AGENT_PLACE_LINE_MAX);
+  return line ? { kind: "rex", line, ...(options.show && place.show === true ? { show: true as const } : {}) } : undefined;
 }
 
 /** Live sessions grouped by the project they work in; `id` null for a folder the Inbox has not seen yet. */
@@ -3537,6 +3563,8 @@ export interface InboxAgent {
   started_at: string | null;
   /** When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never. */
   last_seen_at: string | null;
+  /** Where it lives (`InboxAgentPlace`): a Rex pane Rex confirmed for this read. Absent when none. Additive. */
+  place?: InboxAgentPlace;
 }
 
 /** The most agents a list names per machine; `total` says how many there are past that. */
@@ -3546,11 +3574,13 @@ export const INBOX_AGENTS_LISTED_MAX = 40;
  * An agent as another machine (or an older or newer Inbox) sent it, with its names checked: a `label`, `title` or
  * `first_thread` that is not text is dropped, the rest of the agent kept.
  */
-export function inboxAgentNamesChecked(agent: InboxAgent): InboxAgent {
-  const { label, title, first_thread, ...rest } = agent as InboxAgent & Record<string, unknown>;
+export function inboxAgentNamesChecked(agent: InboxAgent, options: { show: boolean } = { show: false }): InboxAgent {
+  const { label, title, first_thread, place, ...rest } = agent as InboxAgent & Record<string, unknown>;
   const thread = first_thread as unknown as Record<string, unknown> | null | undefined;
+  const where = inboxAgentPlaceChecked(place, options);
   return {
     ...rest,
+    ...(where ? { place: where } : {}),
     ...(typeof label === "string" ? { label } : {}),
     ...(typeof title === "string" ? { title } : {}),
     ...(thread && typeof thread === "object" && typeof thread.id === "string" && typeof thread.name === "string" ? { first_thread: { id: thread.id, name: thread.name } } : {}),
@@ -3582,6 +3612,11 @@ export interface InboxAgentsGroup {
    * an Inbox from before tiles: the window then draws and offers that machine's agents what it can keep (no tile).
    */
   face_tiles?: true;
+  /**
+   * `rex`: this machine's Open in Terminal opens a Rex tab instead (Rex's app is attached here; packages/server/inbox-rex.ts),
+   * so the window words it "Open in Rex". Only on this computer's own group, for a window on this computer. Additive.
+   */
+  open_in?: "rex";
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
