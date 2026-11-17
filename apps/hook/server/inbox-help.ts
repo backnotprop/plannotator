@@ -40,7 +40,7 @@ import { INBOX_BRANCH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-branch-r
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
-import { noteTarget } from "@plannotator/server/inbox-agent-notes";
+import { noteCopiedByHand, noteTarget } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_NOTE_AGENT_IDS, INBOX_NOTE_AUTO_AGENT_IDS } from "@plannotator/core/inbox-types";
 
 export type InboxMcpToolName = (typeof INBOX_MCP_TOOLS)[number];
@@ -342,10 +342,13 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
   const noteLines = INBOX_NOTE_AGENT_IDS.map((id) => {
     const target = noteTarget(id, agents);
     const shown = displayPath(target.path, agents);
-    if (id === "cursor") return `- ${INBOX_AGENT_LABELS[id]} (\`${id}\`): copied by hand into Customize → Rules in Cursor (Cursor keeps its rules in the app, so nothing is written). \`plannotator inbox --notes cursor\` prints the note to copy; Plannotator can't see, update or remove that copy.`;
+    if (noteCopiedByHand(id, agents)) return `- ${INBOX_AGENT_LABELS[id]} (\`${id}\`): copied by hand into Customize → Rules in Cursor (Cursor keeps its rules in the app, so nothing is written). \`plannotator inbox --notes cursor\` prints the note to copy; Plannotator can't see, update or remove that copy.`;
     if (target.reason) return `- ${INBOX_AGENT_LABELS[id]} (\`${id}\`): none. ${target.reason}`;
     return `- ${INBOX_AGENT_LABELS[id]} (\`${id}\`): ${code(shown ?? "")}, ${target.create ? "creates the file" : "adds a marked section"}.`;
   });
+  // Cursor's note is written by itself only where its editor is found; copied by hand, it is asked about.
+  const autoNotes = INBOX_NOTE_AUTO_AGENT_IDS.filter((id) => !noteCopiedByHand(id, agents));
+  const handCopied = noteCopiedByHand("cursor", agents);
   const on = INBOX_TOOL_HOSTS.filter((host) => INBOX_TOOL_DEFAULTS[host]).map(hostLabel);
   const off = INBOX_TOOL_HOSTS.filter((host) => !INBOX_TOOL_DEFAULTS[host]).map(hostLabel);
   const words = (names: string[]) => (names.length > 1 ? `${names.slice(0, -1).join(", ")} and ${names.at(-1)}` : names.join(""));
@@ -537,7 +540,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     "## A note in each agent's instructions",
     "",
-    `Plannotator adds a short note about the Inbox to an agent's instructions, so it sends decisions and finished work here while the person is away. The Inbox adds it by itself for ${words(INBOX_NOTE_AUTO_AGENT_IDS.map((id) => INBOX_AGENT_LABELS[id]))}: don't ask about those. For ${words(INBOX_NOTE_AGENT_IDS.filter((id) => !INBOX_NOTE_AUTO_AGENT_IDS.includes(id)).map((id) => INBOX_AGENT_LABELS[id]))}, only with the person's yes: show them those rows, then run \`plannotator inbox --notes <ids>\` with only the agents they agreed to (comma-separated). A written note never overwrites a note the person edited, and the Inbox's Settings and \`plannotator uninstall\` remove it; Cursor's note is copied by hand instead, and Plannotator cannot see or remove that copy. On this computer:`,
+    `Plannotator adds a short note about the Inbox to an agent's instructions, so it sends decisions and finished work here while the person is away. The Inbox adds it by itself for ${words(autoNotes.map((id) => INBOX_AGENT_LABELS[id]))}: don't ask about those. For ${words(INBOX_NOTE_AGENT_IDS.filter((id) => !autoNotes.includes(id)).map((id) => INBOX_AGENT_LABELS[id]))}, only with the person's yes: show them those rows, then run \`plannotator inbox --notes <ids>\` with only the agents they agreed to (comma-separated). A written note never overwrites a note the person edited, and the Inbox's Settings and \`plannotator uninstall\` remove it${handCopied ? "; Cursor's note is copied by hand instead, and Plannotator cannot see or remove that copy" : ""}. On this computer:`,
     "",
     ...noteLines,
     "",

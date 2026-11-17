@@ -1,8 +1,8 @@
 /**
  * The note written by itself (autoAddInboxNotes in inbox-agent-notes.ts;
  * approval "inbox-agent-note-auto", which superseded the one-time dialog):
- * for every connected agent proven to load it, once per agent; never for Qwen
- * Code (offered) or Cursor (copied by hand); never for an agent already asked
+ * for every connected agent in INBOX_NOTE_AUTO_AGENT_IDS, once per agent; never
+ * for Cursor copied by hand (its editor not found); never for an agent already asked
  * (an old dialog's Not now, a 0.28.18 config), one turned off, or with
  * PLANNOTATOR_INBOX_NOTES=0; and what the window's line says. Fake agent CLIs
  * in a scratch home (tests/helpers/fake-agents.ts); config.json lives in a
@@ -80,13 +80,15 @@ test("an agent that connects later gets its note then, and the line lists it wit
   expect(unsaidAutoNotes().map((note) => note.agent)).toEqual(["codex", "gemini"]);
 });
 
-test("Qwen Code (not proven) and Cursor (copied by hand) are never written by themselves", async () => {
+test("Cursor without its editor (copied by hand) is never written by itself; Qwen Code is, into its own rules file, never QWEN.md", async () => {
   fake.install("qwen", "cursor-agent");
   await connect();
-  expect(await autoAddInboxNotes(options())).toEqual([]);
+  expect(await autoAddInboxNotes(options())).toEqual([{ agent: "qwen", path: "~/.qwen/rules/plannotator-inbox.md" }]);
+  expect(read(file(".qwen", "rules", "plannotator-inbox.md"))).toBe(`${INBOX_NOTE_BLOCK}\n`);
   expect(existsSync(file(".qwen", "QWEN.md"))).toBe(false);
-  // Still not asked: the window's question offers them.
-  expect(loadConfig().inboxAgentNotes?.asked ?? []).toEqual([]);
+  expect(existsSync(file(".cursor", "plugins"))).toBe(false);
+  // Cursor is still not asked: the window's question offers its copy.
+  expect(loadConfig().inboxAgentNotes?.asked ?? []).toEqual(["qwen"]);
 });
 
 test("an agent not connected to the Inbox gets nothing, even when found", async () => {

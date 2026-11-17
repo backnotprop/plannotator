@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { INBOX_AGENT_LABELS, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import {
+  CURSOR_NOTE_REASON,
   addInboxNote,
   INBOX_NOTE_BLOCK,
   INBOX_NOTE_EARLIER_BLOCKS,
@@ -112,23 +113,29 @@ describe("where each agent's note goes", () => {
     expect(noteTarget("gemini", e).path).toBe(file(".gemini", "AGENTS.md"));
   });
 
-  test("Qwen Code: its context.fileName, QWEN.md by default, in $QWEN_HOME (the folder itself)", () => {
-    expect(noteTarget("qwen", e)).toEqual({ path: file(".qwen", "QWEN.md"), create: true, reason: null });
-    write(file(".qwen", "settings.json"), '{ // mine\n "context": { "fileName": "CONTEXT.md" } }');
-    expect(noteTarget("qwen", e).path).toBe(file(".qwen", "CONTEXT.md"));
-    // A name with a folder in it is not a file name: the default.
-    write(file(".qwen", "settings.json"), '{ "context": { "fileName": ["../escape.md"] } }');
-    expect(noteTarget("qwen", e).path).toBe(file(".qwen", "QWEN.md"));
+  test("Qwen Code: its own rules file in $QWEN_HOME/rules (the folder itself); a note an older Inbox put in its context file stays there", () => {
+    expect(noteTarget("qwen", e)).toEqual({ path: file(".qwen", "rules", "plannotator-inbox.md"), create: true, reason: null });
     // QWEN_HOME replaces ~/.qwen (Gemini's GEMINI_CLI_HOME is a parent folder; Qwen's is not).
     const home = join(fake.root, "qwen-home");
     const moved = createAgentEnvironmentFor({ platform: "linux", homeDir: fake.home, env: { ...fake.env, QWEN_HOME: home } });
-    write(join(home, "settings.json"), '{ "context": { "fileName": ["AGENTS.md", "QWEN.md"] } }');
-    expect(noteTarget("qwen", moved).path).toBe(join(home, "AGENTS.md"));
+    const own = join(home, "rules", "plannotator-inbox.md");
+    expect(noteTarget("qwen", moved).path).toBe(own);
+    // No front matter: "a rule with no frontmatter at all is a baseline rule" (always loaded).
     expect(addInboxNote("qwen", dataDir, moved)).toMatchObject({ ok: true, action: "created" });
-    expect(read(join(home, "AGENTS.md"))).toBe(`${INBOX_NOTE_BLOCK}\n`);
-    expect(existsSync(file(".qwen", "AGENTS.md"))).toBe(false);
+    expect(read(own)).toBe(`${INBOX_NOTE_BLOCK}\n`);
+    expect(existsSync(file(".qwen", "rules"))).toBe(false);
     expect(removeInboxNote("qwen", dataDir, moved)).toMatchObject({ ok: true, action: "deleted" });
-    expect(existsSync(join(home, "AGENTS.md"))).toBe(false);
+    expect(existsSync(own)).toBe(false);
+    // The context file (context.fileName, else QWEN.md) holding an older Inbox's note stays the note's file.
+    write(join(home, "settings.json"), '{ // mine\n "context": { "fileName": ["AGENTS.md", "QWEN.md"] } }');
+    write(join(home, "AGENTS.md"), `Mine.\n\n${INBOX_NOTE_BLOCK}\n`);
+    expect(noteTarget("qwen", moved)).toEqual({ path: join(home, "AGENTS.md"), create: false, reason: null });
+    // A name with a folder in it is not a file name: the default.
+    write(join(home, "settings.json"), '{ "context": { "fileName": ["../escape.md"] } }');
+    write(join(home, "QWEN.md"), `${INBOX_NOTE_BLOCK}\n`);
+    expect(noteTarget("qwen", moved).path).toBe(join(home, "QWEN.md"));
+    // Removal takes it from there, and uninstall finds it with the record gone.
+    expect(planInboxNoteRemoval(dataDir, moved, INBOX_AGENT_LABELS).items.map((item) => item.path)).toEqual([join(home, "QWEN.md")]);
   });
 });
 
@@ -202,10 +209,10 @@ describe("above a Gemini CLI or Qwen Code memory section", () => {
     }
   });
 
-  test("Qwen Code's section the same way", () => {
+  test("Qwen Code's section the same way (a note an older Inbox put in QWEN.md, after it)", () => {
     const path = file(".qwen", "QWEN.md");
-    write(path, "Mine.\n\n## Qwen Added Memories\n- a fact\n");
-    expect(addInboxNote("qwen", dataDir, e)).toMatchObject({ ok: true, action: "added" });
+    write(path, `Mine.\n\n## Qwen Added Memories\n- a fact\n\n${INBOX_NOTE_BLOCK}\n`);
+    expect(addInboxNote("qwen", dataDir, e)).toMatchObject({ ok: true, action: "updated" });
     expect(read(path)).toBe(`Mine.\n\n${INBOX_NOTE_BLOCK}\n\n## Qwen Added Memories\n- a fact\n`);
   });
 
@@ -320,7 +327,8 @@ describe("the marked section", () => {
     const targets: [InboxNoteAgentId, string][] = [
       ["codex", file(".codex", "AGENTS.md")],
       ["gemini", file(".gemini", "GEMINI.md")],
-      ["qwen", file(".qwen", "QWEN.md")],
+      ["amp", file(".config", "amp", "AGENTS.md")],
+      ["dsh", file(".dsh", "AGENTS.md")],
       ["pi", file(".pi", "agent", "AGENTS.md")],
       ["opencode", file(".config", "opencode", "AGENTS.md")],
     ];
@@ -619,10 +627,10 @@ describe("review follow-ups", () => {
   });
 });
 
-test("Cursor keeps its rules in the app: its note is copied by hand, with no file, nothing written and no record", () => {
+test("Cursor without its editor here (the CLI alone): its note is copied by hand, with no file, nothing written and no record", () => {
   const status = noteStatus("cursor", dataDir, e);
   expect(status).toMatchObject({ agent: "cursor", path: null, target: null, state: "manual", create: false, created: false, shared_with: [] });
-  expect(status.reason).toBe("Cursor keeps its rules in the app: copy the note into Customize → Rules yourself. Plannotator can't see, update or remove that copy.");
+  expect(status.reason).toBe(CURSOR_NOTE_REASON);
   expect(noteTarget("cursor", e).path).toBeNull();
   expect(existsSync(file(".cursor"))).toBe(false);
   expect(readInboxAgentNotes(dataDir).notes.cursor).toBeUndefined();
