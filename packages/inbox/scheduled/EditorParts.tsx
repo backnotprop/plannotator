@@ -5,7 +5,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import { usePhone } from '../phone';
-import { INBOX_HOST_NAMES, type InboxComposeLaunch } from '@plannotator/core/inbox-types';
+import { INBOX_HOST_NAMES, INBOX_LAUNCH_APP_OWNED, type InboxComposeLaunch } from '@plannotator/core/inbox-types';
 import type { InboxScheduledFolder } from '@plannotator/core/inbox-scheduled-types';
 import { inboxApi } from '../api';
 import { FolderMenu } from '../compose/FolderMenu';
@@ -47,7 +47,9 @@ function usePortal() {
 export function RunsAs({ block, agent, model, effort, phone, onChange }: { block: LaunchBlock | null; agent: string; model?: string; effort?: string; phone: boolean; onChange: (next: { agent: string; model?: string; effort?: string }) => void }) {
   const { anchor, portal, sheet } = usePortal();
   const [choiceOpen, setChoiceOpen] = useState(false);
-  const agents = block?.launch?.agents ?? [];
+  // Not an agent whose own app runs its threads (T3 Code): it starts only in a project's repository, in a new
+  // worktree, and a routine's folder may be a scratch folder. Not offered for routines yet.
+  const agents = (block?.launch?.agents ?? []).filter((a) => !INBOX_LAUNCH_APP_OWNED.includes(a.agent));
   const current = agents.find((a) => a.agent === agent);
   const name = current?.name ?? INBOX_HOST_NAMES[agent] ?? agent;
   const choices = current?.choices;

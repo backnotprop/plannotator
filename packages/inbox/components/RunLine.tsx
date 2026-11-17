@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { InboxRun } from '@plannotator/core/inbox-types';
+import { INBOX_LAUNCH_APP_OWNED, type InboxRun } from '@plannotator/core/inbox-types';
 import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
@@ -111,7 +111,8 @@ export function RunLine({
     else setError('Could not copy; select the command and copy it.');
   };
 
-  const stop = (
+  // An agent whose own app runs the session (T3 Code): the Inbox has no way to stop it, so no Stop.
+  const stop = INBOX_LAUNCH_APP_OWNED.includes(run.agent) ? null : (
     <Tip content={STOP_TIP}>
       <button type="button" className="ib-run-btn" disabled={busy !== null} onClick={() => void act('stop')} data-run-stop="">
         Stop

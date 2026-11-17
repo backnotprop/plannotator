@@ -9,8 +9,10 @@
  *   inbox-launch-pi.ts                 Pi (`pi --mode rpc`, one process per session, owned by the Inbox)
  *   inbox-launch-codex.ts              Codex (`codex app-server`, one process per thread, owned by the Inbox)
  *   inbox-launch-codex-permission.ts   Codex's approval requests on the permission card
+ *   inbox-launch-opencode.ts           OpenCode 2 (`opencode2 serve`, one per session, owned by the Inbox)
+ *   inbox-launch-t3.ts                 T3 Code (`t3 thread start`, a thread T3 owns, in a new worktree)
  *
- * The engine holds `{ "claude-code": claude, pi, codex }`. Adding an agent is one host
+ * The engine holds `{ "claude-code": claude, pi, codex, opencode, t3 }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
  * outside a host names its CLI.
  */
@@ -269,10 +271,26 @@ export interface LaunchHost {
   /** The launch's folder is the file-system root, or its trust would land on a repository rooted at home: accepting the agent's own prompt there would trust all of home (or `/`), so the how-to steers away from it. */
   trustCoversHome?(target: LaunchTrustTarget): boolean;
   /**
-   * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
-   * session (`settleLaunch`) and its own channel delivers it. It writes its own start.log entries.
+   * Only an agent that cannot make a session without its first message (T3 Code's `t3 thread start`): `start` gets
+   * the wake text of the launched message (`firstTurn`, what the agent's own wake would send it) and puts it in as
+   * the session's first turn. On success the engine records the root as delivered to the session in the same step
+   * that moves it there, so no wake sends it again.
    */
-  start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
+  readonly startsWithTurn?: boolean;
+  /**
+   * Only an agent that starts in some folders alone (T3 Code: a git repository, in a new worktree): why it can't
+   * start in `folder`, in words for the person, or null when it can. `folder` null: a folder still to be made (a
+   * scratch folder, Create a folder, a clone). Cheap and synchronous: the launch block asks it for every project.
+   * No member: any folder.
+   */
+  startsIn?(folder: string | null): string | null;
+  /** Every session it starts works in a new git worktree its own app makes (the launch block's `worktree`). */
+  readonly worktree?: boolean;
+  /**
+   * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
+   * session (`settleLaunch`) and its own channel delivers it (but see `startsWithTurn`). It writes its own start.log entries.
+   */
+  start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; firstTurn?: string }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */

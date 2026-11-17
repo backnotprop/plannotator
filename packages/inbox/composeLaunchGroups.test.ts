@@ -184,3 +184,13 @@ test("an agent only another machine has, picked for this computer's project: it 
   expect(projectWithAgent(groupsFor(true), { root: '/Users/me/code/web-app', name: 'web-app' })).toMatchObject({ id: 'prj_site', machine: STUDIO });
   expect(projectWithAgent([], { root: '/Users/me/code/web-app', name: 'web-app' })).toBeNull();
 });
+
+test('T3 Code (#3590): the folder menu lists only the projects it starts in, and no scratch folder; the others keep them all', () => {
+  const withT3: InboxComposeLaunch = { ...here, agents: [...AGENTS, { agent: 't3', name: 'T3 Code', starts_in: ['prj_bill_a'], worktree: true }] };
+  const t3 = launchGroups({ agent: 't3', self: { ...self, launch: withT3 }, machines: [SELF_VIEW], reads: new Map() });
+  expect(t3.groups[0]!.projects.map((p) => p.id)).toEqual(['prj_bill_a']);
+  expect(t3.groups[0]!.scratch).toBeNull();
+  const claude = launchGroups({ agent: 'claude-code', self: { ...self, launch: withT3 }, machines: [SELF_VIEW], reads: new Map() });
+  expect(claude.groups[0]!.projects.map((p) => p.id)).toEqual(['prj_web', 'prj_bill_a']);
+  expect(claude.groups[0]!.scratch).toEqual(here.scratch!);
+});

@@ -166,7 +166,7 @@ const AgentRow = memo(
     const named = agentIsNamed(entry.agent);
     // Stop and Delete as the launch's thread offers them (Thread.tsx `launchMenu`), for an agent the Inbox launched.
     const launch = entry.agent.launch;
-    const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null) ? props.onStop : undefined;
+    const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null, entry.agent.host) ? props.onStop : undefined;
     const onDelete = launch ? props.onDelete : undefined;
     const hasMenu = !!(onRename || onStop || onDelete);
     const launchName = agentHostName(entry.agent.host);

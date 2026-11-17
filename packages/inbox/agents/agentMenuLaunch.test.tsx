@@ -165,6 +165,16 @@ test.skipIf(!hasDom)('this Inbox: a running launch has Rename…, a separator, S
   expect(await itemsOf('ses_own')).toEqual(['Rename…']);
 });
 
+test.skipIf(!hasDom)('a T3 Code launch (#3590) never has Stop, working or not: T3 Code runs its thread; Delete stays', async () => {
+  mount([group([launched('lch_t3w', 'working', true, { host: 't3' }), launched('lch_t3r', null, true, { host: 't3' })])]);
+  await settle();
+  for (const id of ['lch_t3w', 'lch_t3r']) {
+    const items = (await itemsOf(id))!;
+    expect(items.some((item) => item.startsWith('Stop'))).toBe(false);
+    expect(items.some((item) => item.startsWith('Delete'))).toBe(true);
+  }
+});
+
 test.skipIf(!hasDom)('a named launch: Rename…, Reset name, then Stop and Delete; each calls its action for this Inbox (no machine)', async () => {
   // The Inbox keeps the name with the agent's face (agents/agentFaces.ts).
   globalThis.fetch = (async () => Response.json({ faces: { lch_a: { face: 'agent', sessions: ['ses_lch_a'], name: 'Retry worker' } }, rev: 1 })) as unknown as typeof fetch;

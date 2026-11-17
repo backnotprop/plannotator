@@ -176,3 +176,23 @@ describe('the switch on a computer: who keeps a button', () => {
     expect(fitMachineSwitch({ keys, widths: [190, 190, 180, 190, 190], avail: 534, moreWidth: 90, chosen: HERE }).shown).toEqual([HERE, ATLAS]);
   });
 });
+
+describe('T3 Code: only the projects it starts in (#3590)', () => {
+  const T3 = { agent: 't3' as const, name: 'T3 Code' };
+  const withT3 = (startsIn: string[]) => lumen({ launch: { ...lumen().launch!, agents: [CLAUDE, CODEX, PI, { ...T3, starts_in: startsIn, worktree: true }] } });
+
+  test('Start new offers it in its own default among the git repositories, says it works in a new worktree, and offers no row when there is none', () => {
+    const items = browse([withT3(['prj_ha'])]);
+    expect(read(items).filter((w) => w.startsWith('+'))).toEqual(['+ Claude Code in lantern-web', '+ Codex in lantern-web', '+ Pi in lantern-web', '+ T3 Code in harbor-api']);
+    const t3 = items.find((i) => i.type === 'start' && i.start.agent === 't3');
+    expect(t3?.type === 'start' && t3.start.worktree).toBe(true);
+    expect(items.some((i) => i.type === 'start' && i.start.agent === 'claude-code' && i.start.worktree)).toBe(false);
+    // No git repository among the projects: no T3 row, and no "Not on" line either (it is on this computer).
+    expect(read(browse([withT3([])])).filter((w) => w.includes('T3'))).toEqual([]);
+  });
+
+  test("typing a project T3 Code doesn't start in finds the others there, never T3 Code", () => {
+    expect(read(typed([withT3(['prj_ha'])], 'lantern')).filter((w) => w.startsWith('+'))).toEqual(['+ Claude Code in lantern-web', '+ Codex in lantern-web', '+ Pi in lantern-web']);
+    expect(read(typed([withT3(['prj_ha'])], 'harbor')).filter((w) => w.startsWith('+'))).toContain('+ T3 Code in harbor-api');
+  });
+});

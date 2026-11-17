@@ -103,6 +103,7 @@ import { createClaudeLaunchHost } from "./inbox-launch-claude";
 import { createPiLaunchHost } from "./inbox-launch-pi";
 import { createCodexLaunchHost } from "./inbox-launch-codex";
 import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
+import { createT3LaunchHost } from "./inbox-launch-t3";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
 import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchTrustOffer } from "./inbox-launch-host";
@@ -232,6 +233,12 @@ export function createInboxLaunch(options: {
   selfCommand: readonly string[];
   /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
   hosts?: (context: LaunchHostContext) => LaunchHost[];
+  /**
+   * The wake text a launched message's session would get from its agent's own wake (inbox.ts: the bridge command,
+   * as `codexQueueMessage` words it), for a host that must send it as the session's first turn (`startsWithTurn`,
+   * T3 Code). Without it such a host gets the message's own words.
+   */
+  firstTurn?: (root: InboxMessage) => string;
   /** This Inbox was started over SSH (`SSH_CONNECTION` at start): macOS keeps Claude Code's login locked there, so the launch block names that cause. */
   startedOverSsh?: boolean;
   /** This computer's name as linked machines know it: a launch another machine sends is refused in words that name it. */
@@ -487,6 +494,7 @@ export function createInboxLaunch(options: {
     createPiLaunchHost(context),
     createCodexLaunchHost(context),
     createOpenCodeLaunchHost(context),
+    createT3LaunchHost(context),
   ];
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts: Record<string, LaunchHost> = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host]));
@@ -816,7 +824,9 @@ export function createInboxLaunch(options: {
       // A reply's launch takes its thread's name.
       const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
       const name = head.thread_name ?? head.subject ?? "Inbox";
-      const result = await host.start(launch, { name, login });
+      // An agent that can't make a session without its first message (T3 Code): the wake its own wake would send.
+      const firstTurn = host.startsWithTurn ? (options.firstTurn?.(store.message(root.id) ?? root) ?? root.body) : undefined;
+      const result = await host.start(launch, { name, login, ...(firstTurn !== undefined ? { firstTurn } : {}) });
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
         if (result.ok) {
@@ -828,8 +838,18 @@ export function createInboxLaunch(options: {
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         return;
       }
-      if (result.ok) store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref });
-      else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() } });
+      if (result.ok) {
+        store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref });
+        // The start put the message in as the session's first turn: delivered, in the same step (no wake runs in
+        // between), so the agent's own wake never sends it again.
+        if (host.startsWithTurn) {
+          try {
+            store.recordDelivery(root.id, { host: launch.agent, session: result.session });
+          } catch (error) {
+            log(`Inbox launch ${launch.id}: the first turn went in, but its delivery was not recorded: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
+      } else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() } });
       log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.ref}` : `did not start (${result.code})`}`);
     } catch (error) {
       const text = error instanceof Error ? error.message : String(error);
@@ -1760,6 +1780,9 @@ ${result.text}`);
       // In the folder it will start in, with that folder's own settings (a project can turn Claude Code's plugin on or
       // off for itself). A scratch folder or one still to be made has none: the machine's own setup.
       const startsIn = chosen ? chosen.root : toMake ? null : folderTarget;
+      // An agent that starts only in some folders (T3 Code: a git repository): said before anything is made.
+      const refused = host.startsIn?.(startsIn) ?? null;
+      if (refused) throw new InboxError("validation_error", `${refused} Nothing was sent.`, { field: "to.launch" });
       const ok = startsIn ? await availableIn(host, [startsIn]) : await available(host, true);
       stateOf(host).lastAvailable = ok;
       if (!ok.ok) {
@@ -1955,7 +1978,21 @@ ${result.text}`);
           const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
           const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
           const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
-          return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
+          // An agent that starts only in some folders (T3 Code: a git repository): the projects it starts in, here now, and
+          // never a new folder. A project on a network drive is never read in this process (projectThere): not offered.
+          const onNetwork = (at: string) => mounted.some((d) => d.network && (at === d.path || at.startsWith(`${d.path}/`)));
+          const startsIn = host.startsIn ? projects.filter((p) => p.exists && !onNetwork(p.root) && host.startsIn!(p.root) === null).map((p) => p.id) : null;
+          return [
+            {
+              agent: host.agent,
+              name: host.name,
+              scratch_trusted: host.trusts(root),
+              ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}),
+              ...(choices ? { choices } : {}),
+              ...(startsIn ? { starts_in: startsIn } : {}),
+              ...(host.worktree ? { worktree: true as const } : {}),
+            },
+          ];
         }),
       );
       // Why the others can't start now, for a linked machine's window to say with this machine's name (remote launch).

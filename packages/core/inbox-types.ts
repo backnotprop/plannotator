@@ -1103,13 +1103,22 @@ export interface InboxAddressee {
 /**
  * Launch (start an agent from compose): the agents the Inbox can start a
  * session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Codex
- * (`codex app-server`, owned by the Inbox).
+ * (`codex app-server`, owned by the Inbox), OpenCode 2 (`opencode2 serve`, owned by the Inbox), T3 Code
+ * (`t3 thread start`, a thread T3 owns, always in a new git worktree; its id is `INBOX_T3_HOST`).
  */
 export type InboxLaunchAgent =
   | "claude-code"
   | "pi"
   | "codex"
-  | "opencode";
+  | "opencode"
+  | "t3";
+
+/**
+ * The launch agents whose session the agent's own app runs, not the Inbox (T3 Code: T3 keeps the thread, its turns
+ * and its permission prompts). The Inbox starts it and sends the person's replies; it cannot stop it, so Stop is not
+ * offered for it.
+ */
+export const INBOX_LAUNCH_APP_OWNED: readonly InboxLaunchAgent[] = ["t3"];
 
 /** One Codex usage limit (`account/rateLimits/read`): how much of it is used, its length, and when it resets. */
 export interface InboxCodexLimit {
@@ -1229,7 +1238,9 @@ export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting
  * Whether Stop is offered for a launch: it started (the host gave it a session) and it runs, at rest (no line) or
  * starting, working or at a prompt in Terminal. A prompt in the window has its own Stop on the permission card.
  */
-export function inboxLaunchStops(started: boolean, run: InboxRunState | null): boolean {
+export function inboxLaunchStops(started: boolean, run: InboxRunState | null, agent?: string | null): boolean {
+  // An agent whose own app runs the session (T3 Code): the Inbox has no way to stop it.
+  if (agent && (INBOX_LAUNCH_APP_OWNED as readonly string[]).includes(agent)) return false;
   return started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
 }
 
@@ -3617,7 +3628,20 @@ export interface InboxComposeLaunch {
    * the folders the agent does not trust and the owner can trust from here, by project id, the scratch root under
    * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
    */
-  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted>; choices?: InboxLaunchChoices }[];
+  agents: {
+    agent: InboxLaunchAgent;
+    name: string;
+    scratch_trusted?: boolean;
+    untrusted?: Record<string, InboxLaunchUntrusted>;
+    choices?: InboxLaunchChoices;
+    /**
+     * Additive (T3 Code): the only projects it starts in, by id (each a git repository that is there now). Absent: any
+     * project. Present: never a scratch folder, another folder, a new folder or a clone.
+     */
+    starts_in?: string[];
+    /** Additive (T3 Code): every session it starts works in a new git worktree of the project, made by the agent's own app. */
+    worktree?: true;
+  }[];
   /** `slow`: the project is on a network drive that isn't answering now (approval "inbox-launch-any-folder"). */
   projects: { id: string; name: string; root: string; exists: boolean; slow?: true }[];
   /**

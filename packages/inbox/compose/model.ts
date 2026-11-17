@@ -381,6 +381,8 @@ export interface ComposeStart {
   create?: true;
   /** With `folder`: Clone from a git URL (approval "launch-create-clone"): the Send clones the repo into it, then starts. */
   clone?: ComposeClone;
+  /** The agent works in a new git worktree of the project its own app makes (T3 Code, the launch block's `worktree`). */
+  worktree?: true;
 }
 
 /** A clone pick: the URL as pasted (the server reads it again), and what the words name (`acme/billing-api` on github.com). */
@@ -477,7 +479,25 @@ export function filterLaunchProjects(projects: readonly LaunchProject[], query: 
 export function startStatusLine(start: ComposeStart): string {
   if (!start.project.exists) return 'Pick a folder to start in.';
   // C13, decision 11a: what the Send does first.
-  return start.clone ? `Clones ${start.clone.slug}, then starts ${start.name}.` : '';
+  if (start.clone) return `Clones ${start.clone.slug}, then starts ${start.name}.`;
+  // T3 Code (#3590): new work, apart from the project's own checkout.
+  return start.worktree ? `${start.name} starts in a new worktree, from the branch ${start.project.name} is on now.` : '';
+}
+
+/** A launch block's agent entry (`InboxComposeLaunch.agents`). */
+export type LaunchAgentEntry = InboxComposeLaunch['agents'][number];
+
+/** Whether the agent starts in this project: any project, unless its entry names the only ones (`starts_in`, T3 Code). */
+export function agentStartsIn(agent: Pick<LaunchAgentEntry, 'starts_in'> | undefined, projectId: string): boolean {
+  return !agent?.starts_in || agent.starts_in.includes(projectId);
+}
+
+/** A launch block as one agent sees it: only the projects it starts in, and no scratch folder when it names them. */
+export function launchForAgent<T extends { agents: readonly LaunchAgentEntry[]; projects: readonly LaunchProject[]; scratch?: { root: string } }>(launch: T, agent: string): T {
+  const entry = launch.agents.find((a) => a.agent === agent);
+  if (!entry?.starts_in) return launch;
+  const { scratch: _scratch, ...rest } = launch;
+  return { ...rest, projects: launch.projects.filter((p) => entry.starts_in!.includes(p.id)) } as unknown as T;
 }
 
 // ── Remote launch: the folder menu grouped by machine (approval "remote-launch", the picker's A) ──
@@ -616,11 +636,13 @@ export function launchGroups(input: {
     const base = { machine, name, self: isSelf, asleep, quiet, home, projects: [] as MachineLaunchProject[], last: null, scratch: null, notice: null };
     if (words) return { ...base, notice: { line: words, command: null, fix: null } };
     if (!block || !agent) return null;
-    if (block.agents.some((a) => a.agent === agent)) {
+    const entry = block.agents.find((a) => a.agent === agent);
+    if (entry) {
       const seen = history.get((isSelf ? self.id : machine) ?? '');
-      const listed = block.projects.map((p) => (machine ? { ...p, machine, machine_name: name } : { ...p }));
+      // An agent that names the projects it starts in (T3 Code): those alone, and no scratch folder.
+      const listed = block.projects.filter((p) => agentStartsIn(entry, p.id)).map((p) => (machine ? { ...p, machine, machine_name: name } : { ...p }));
       const last = seen && listed.some((p) => p.id === seen.project) ? seen.project : null;
-      return { ...base, projects: listed, last, scratch: block.scratch ?? null };
+      return { ...base, projects: listed, last, scratch: entry.starts_in ? null : (block.scratch ?? null) };
     }
     const not = block.not_ready?.find((n) => n.agent === agent);
     if (!not) return null;

@@ -19,7 +19,6 @@
  * A send is idempotent by `clientRequestId`, as T3's is: a retry under the
  * same id returns the first receipt and records no second turn.
  */
-import { Database } from "bun:sqlite";
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -87,9 +86,20 @@ export function t3ScopeOf(access: T3Access): string {
  *   server running, "stale" as with a runtime file whose server does not
  *   answer, "gone" as for a thread T3 deleted, "fail" with another failure,
  *   "hang" never answers.
+ * - `thread start . - --worktree <base> [--title <t>] --json` (the Inbox's T3
+ *   Code launch, inbox-launch-t3.ts), as T3's cli/thread.ts answers it: run in
+ *   a folder inside one of `projects` (T3's projects, by folder), it makes a
+ *   new thread (`thread:project:<uuid>:<uuid>`, the form a real
+ *   `t3 thread start` gave), takes the message from stdin as its first turn
+ *   and prints `{ threadId, projectId, runId }`; in any other folder it says
+ *   "No T3 Code project matches '.'. …", exit 1. A base named
+ *   "no-such-branch" is refused in T3's words. `starts()` lists what it made.
+ *   A thread it made is one `send` and `show` know.
  *
  * `threads` maps a Codex thread to the T3 thread that runs it; `t3Threads`
- * are T3's other threads (a Claude one's id is T3's own). No T3 is ever run.
+ * are T3's other threads (a Claude one's id is T3's own). `db: false` makes no
+ * state database (an e2e spec, which runs under Node: no `bun:sqlite`). No T3
+ * is ever run.
  */
 /**
  * - "up": sends start a turn; "down": no runtime file, as T3 closed; "starting": a runtime file written now, and every
@@ -112,15 +122,16 @@ export interface FakeT3Home {
   turns(): [string, string][];
   /** The environment each call ran with. */
   envs(): Record<string, string>[];
+  /** Every thread `thread start` made: its id, the folder it ran in, the base, the title and the message. */
+  starts(): { id: string; cwd: string; base: string | null; title: string | null; text: string }[];
   setState(state: FakeT3HomeState): void;
 }
 
-export function makeFakeT3Home(home: string, threads: Record<string, string>, options: { t3Threads?: string[]; schema?: "0.1.9" | "unknown" } = {}): FakeT3Home {
-  const dir = join(home, ".t3");
-  mkdirSync(join(dir, "userdata"), { recursive: true });
-  mkdirSync(join(dir, "bin"), { recursive: true });
+/** T3's state database (`userdata/statev2.sqlite`), one provider thread row per Codex thread. Bun only (`bun:sqlite`). */
+function writeStateDb(dir: string, threads: Record<string, string>, schema: "0.1.9" | "unknown" | undefined): void {
+  const { Database } = require("bun:sqlite") as typeof import("bun:sqlite");
   const db = new Database(join(dir, "userdata", "statev2.sqlite"));
-  if (options.schema === "unknown") {
+  if (schema === "unknown") {
     db.run(`CREATE TABLE orchestration_v2_projection_provider_threads (provider_thread_id TEXT PRIMARY KEY, thread_id TEXT, driver TEXT, native_id TEXT)`);
     for (const [codexThread, t3Thread] of Object.entries(threads)) db.query(`INSERT INTO orchestration_v2_projection_provider_threads VALUES (?, ?, 'codex', ?)`).run(`provider-thread:${t3Thread}`, t3Thread, codexThread);
   } else {
@@ -132,10 +143,18 @@ export function makeFakeT3Home(home: string, threads: Record<string, string>, op
     }
   }
   db.close();
+}
+
+export function makeFakeT3Home(home: string, threads: Record<string, string>, options: { t3Threads?: string[]; schema?: "0.1.9" | "unknown"; projects?: string[]; db?: false } = {}): FakeT3Home {
+  const dir = join(home, ".t3");
+  mkdirSync(join(dir, "userdata"), { recursive: true });
+  mkdirSync(join(dir, "bin"), { recursive: true });
+  if (options.db !== false) writeStateDb(dir, threads, options.schema);
   const log = join(dir, "calls.log");
   const envLog = join(dir, "envs.log");
   const turnsLog = join(dir, "turns.log");
   const stateFile = join(dir, "fake-state");
+  const startsLog = join(dir, "starts.log");
   const runtimeFile = join(dir, "userdata", "server-runtime.json");
   writeFileSync(log, "");
   const setState = (state: FakeT3HomeState) => {
@@ -157,7 +176,10 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + "\\n");
 fs.appendFileSync(${JSON.stringify(envLog)}, JSON.stringify(process.env) + "\\n");
 const state = fs.readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
-const known = ${JSON.stringify([...Object.values(threads), ...(options.t3Threads ?? [])])};
+const startsFile = ${JSON.stringify(startsLog)};
+const started = () => fs.existsSync(startsFile) ? fs.readFileSync(startsFile, "utf8").split("\\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
+const known = [...${JSON.stringify([...Object.values(threads), ...(options.t3Threads ?? [])])}, ...started().map((s) => s.id)];
+const projects = ${JSON.stringify(options.projects ?? [])};
 const turnsFile = ${JSON.stringify(turnsLog)};
 const turns = () => fs.existsSync(turnsFile) ? fs.readFileSync(turnsFile, "utf8").split("\\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const say = (line, code) => { process.stderr.write(line + "\\n"); process.exit(code); };
@@ -168,7 +190,20 @@ if (state === "hang") setTimeout(() => {}, 60000);
 else if (state === "down") say("No running T3 Code server uses ${dir}. Start T3 Code, then retry.", 1);
 else if (state === "stale") say("Could not reach the T3 Code server at http://127.0.0.1:9. connect ECONNREFUSED", 1);
 else if (state === "fail") say("Something went wrong.", 1);
-else if (args[0] === "thread" && args[1] === "send") {
+else if (args[0] === "thread" && args[1] === "start") {
+  const cwd = fs.realpathSync(process.cwd());
+  const project = projects.find((root) => cwd === root || cwd.startsWith(root + "/"));
+  if (args[2] !== "." || !project) say("No T3 Code project matches '" + args[2] + "'. Pass a project id or a path inside a project.", 1);
+  const text = args[3] === "-" ? fs.readFileSync(0, "utf8") : args[3];
+  if (!text.trim()) say("The message is empty.", 1);
+  const base = flag("--worktree") ?? null;
+  if (base === "no-such-branch") say('Base ref "no-such-branch" does not resolve to a commit in project "' + require("node:path").basename(project) + '" (' + project + ').', 1);
+  const { randomUUID } = require("node:crypto");
+  const id = "thread:project:" + randomUUID() + ":" + randomUUID();
+  fs.appendFileSync(startsFile, JSON.stringify({ id, cwd, base, title: flag("--title") ?? null, text }) + "\\n");
+  fs.appendFileSync(turnsFile, JSON.stringify([id, text]) + "\\n");
+  process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
+} else if (args[0] === "thread" && args[1] === "send") {
   if (state === "gone" || !known.includes(thread)) say("Thread " + thread + " was not found.", 1);
   if (state === "starting") say("Thread " + thread + " was not found.", 1);
   const text = args[3] === "-" ? fs.readFileSync(0, "utf8") : args[3];
@@ -195,6 +230,7 @@ else if (args[0] === "thread" && args[1] === "send") {
     sends: () => calls().filter((args) => args[0] === "thread" && args[1] === "send"),
     turns: () => (existsSync(turnsLog) ? readFileSync(turnsLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as [string, string]) : []),
     envs: () => (existsSync(envLog) ? readFileSync(envLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as Record<string, string>) : []),
+    starts: () => (existsSync(startsLog) ? readFileSync(startsLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as ReturnType<FakeT3Home["starts"]>[number]) : []),
     setState,
   };
 }
