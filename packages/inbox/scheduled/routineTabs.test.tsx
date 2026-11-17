@@ -186,8 +186,7 @@ test.skipIf(!hasDom)("a last run that didn't start: a red dot on Runs, the outco
   expect(tabs).toEqual(['runs']);
   expect(document.activeElement).toBe(tabEl('runs'));
   expect([...panel('runs').querySelectorAll('[data-run-outcome]')].map((el) => el.getAttribute('data-run-outcome'))).toEqual(['didnt_start', 'replied']);
-  // Runs has the foot too. The last-run line keeps its place, so the panel does not move, but unseen and out of the
-  // Tab order (its first row is that run).
+  // Runs has the foot too. The last-run line is off: unheard and out of the Tab order (its first row is that run).
   expect(last.isConnected).toBe(true);
   expect(last.hasAttribute('data-off')).toBe(true);
   expect(last.getAttribute('aria-hidden')).toBe('true');

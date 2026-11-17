@@ -101,7 +101,7 @@ export function RoutineTabs({ uid, tab, onTab, record }: { uid: string; tab: Rou
             );
           })}
         </div>
-        {/* On Runs the line keeps its place, unseen, so a switch never moves the panel below. */}
+        {/* Off Edit (`data-off`): beside the tabs it keeps its place unseen; under them it takes no space. */}
         <LastRun record={record} shown={tab === 'edit'} onRuns={() => go('runs')} />
       </div>
     </div>
@@ -124,7 +124,7 @@ function LastRun({ record, shown, onRuns }: { record: InboxScheduledRow | null; 
     );
   else return null;
   return (
-    // `visibility: hidden` off Edit: out of the Tab order and unheard, its height kept.
+    // Off Edit: out of the Tab order and unheard; the CSS hides it (scheduled.css `.st-lastrun[data-off]`).
     <button type="button" className="st-lastrun" onClick={onRuns} data-off={shown ? undefined : ''} aria-hidden={!shown || undefined} tabIndex={shown ? undefined : -1} data-scheduled-last-run={live ? 'running' : record.last_run!.outcome}>
       {words}
       <Icon name="chevR" size={12} />

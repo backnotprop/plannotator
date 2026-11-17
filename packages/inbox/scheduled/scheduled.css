@@ -224,14 +224,16 @@ button.st-foot-mark:hover { background: var(--muted); }
   .st-pfoot .ib-btn { flex: 1; }
 }
 
-/* The editor's tabs under the routine's name (RoutineTabs.tsx): the Inbox's segmented control, and beside it on Edit
-   one quiet line with the last run, which opens Runs. The pane's width (the row is a container) puts the line beside
-   the tabs, on one line, or under them; on Runs it keeps its place unseen. So neither a tab switch nor a run ending
-   moves the panel. */
+/* The editor's tabs under the routine's name (RoutineTabs.tsx): the Inbox's segmented control, and on Edit one quiet
+   line with the last run, which opens Runs. The pane's width (the row is a container) puts the line beside the tabs,
+   where on Runs it keeps its place unseen, or under them, where on Runs it takes no space (the runs below say it).
+   Always one line, so a run ending never changes its height; the tabs never move on a switch. */
 .st-tabsrow { container-type: inline-size; margin-top: 18px; }
 .st-tabsin { display: flex; align-items: center; gap: 8px 14px; }
 @container (max-width: 560px) {
   .st-tabsin { flex-direction: column; align-items: flex-start; }
+  .st-tabsin .st-lastrun { max-width: 100%; }
+  .st-tabsin .st-lastrun[data-off] { display: none; }
 }
 .st-tabs .ib-seg-o { gap: 7px; }
 .st-tabs .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
