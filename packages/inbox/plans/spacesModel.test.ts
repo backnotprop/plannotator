@@ -3,9 +3,10 @@
  * - the fact: "Your move" on a version the person already decided on, made themselves, or on a plan not active; an
  *   agent "is working" without a known live link to that very plan (never guessed from a project or a time);
  * - the unread dot on what the person read, decided on or wrote; none on a version that came since;
- * - "Now" (`NOW_RULE` "fresh") holding a plan that waits on no one, an old plan that waits and was read (it keeps
- *   "Your move" in Recent), or losing a fresh one that waits, an unread one, or one a linked agent is on; Recent not
- *   newest first;
+ * - "Now" (`NOW_RULE` "fresh") holding a plan that waits on no one, or an old one (older than 3 days by its newest
+ *   version's own time, not when it was imported) even unread (old imported plans never opened would fill it; it keeps
+ *   "Your move" and its dot in Recent), or losing a fresh one that waits or one a linked agent is on; Recent not newest
+ *   first;
  * - a project's scope taking another project's plans, or losing one known only by its name or folder, or one filed
  *   under a project combined into it;
  * - search missing a title that holds every word, or matching one that does not;
@@ -98,7 +99,7 @@ test('the kind: an HTML main page is a page; Markdown and diagrams are documents
 
 test('Now holds only what waits (on the person, or a linked agent); Recent is the rest, newest first', () => {
   const at = Date.parse('2026-11-04T12:00:00.000Z');
-  const waits = summary({ updated_at: '2026-11-03T09:00:00.000Z' });
+  const waits = summary({ updated_at: '2026-11-03T09:00:00.000Z', head_at: '2026-11-03T09:00:00.000Z' });
   const done = summary({ decided_versions: [2], updated_at: '2026-11-09T09:00:00.000Z' });
   const older = summary({ decided_versions: [2], updated_at: '2026-11-04T09:00:00.000Z' });
   const worked = summary({ decided_versions: [2], updated_at: '2026-11-02T09:00:00.000Z' });
@@ -108,24 +109,28 @@ test('Now holds only what waits (on the person, or a linked agent); Recent is th
   expect(homeSections([older, worked, waits, done], null, at).now.map((p) => p.id)).toEqual([waits.id]);
 });
 
-test('Now ("fresh"): a version that waits stays 3 days; older and read, it keeps "Your move" in Recent; unread stays', () => {
+test('Now ("fresh"): a newest version from the last 3 days that waits or is unread; older ones keep "Your move" and the dot in Recent', () => {
   expect(NOW_RULE).toBe('fresh');
   const at = Date.parse('2026-11-20T12:00:00.000Z');
   const ago = (ms: number) => new Date(at - ms).toISOString();
   // Read (seen v2) and undecided: in Now for 3 days from when v2 came (`head_at`, not a later change).
   const fresh = summary({ seen_version_number: 2, head_at: ago(NOW_FRESH_MS - 60_000), updated_at: ago(1000) });
   const stale = summary({ seen_version_number: 2, head_at: ago(NOW_FRESH_MS + 60_000), updated_at: ago(1000) });
-  // An older line without `head_at`: its last change stands in.
-  const staleOld = summary({ seen_version_number: 2, head_at: undefined, updated_at: ago(NOW_FRESH_MS * 2) });
-  // A version came the person has not seen: in Now however old.
-  const unread = summary({ seen_version_number: 1, head_at: ago(NOW_FRESH_MS * 5), updated_at: ago(NOW_FRESH_MS * 5) });
+  // Unread and fresh: in Now. Unread and old: not, however long it waits (a library of old plans never opened).
+  const unread = summary({ seen_version_number: 1, head_at: ago(60_000), updated_at: ago(60_000) });
+  const unreadOld = summary({ seen_version_number: 1, head_at: ago(NOW_FRESH_MS * 5), updated_at: ago(NOW_FRESH_MS * 5) });
+  // Imported a minute ago from old history: its version's own time counts, not the import's.
+  const imported = summary({ head_at: ago(NOW_FRESH_MS * 30), updated_at: ago(60_000), created_at: ago(60_000) });
+  // No newest version time known: not fresh.
+  const unknown = summary({ head_at: undefined, updated_at: ago(1000) });
   const decided = summary({ seen_version_number: 2, decided_versions: [2], head_at: ago(1000) });
-  expect([fresh, stale, staleOld, unread, decided].map((p) => isNow(p, null, at))).toEqual([true, false, false, true, false]);
-  // Out of Now, the fact still says whose move it is.
+  expect([fresh, stale, unread, unreadOld, imported, unknown, decided].map((p) => isNow(p, null, at))).toEqual([true, false, true, false, false, false, false]);
+  // Out of Now, the fact still says whose move it is, and the dot stays.
   expect(factWords(spaceFact(stale, null))).toBe('Your move');
-  const { now, recent } = homeSections([fresh, stale, unread, decided], null, at);
+  expect(spaceUnread(unreadOld)).toBe(true);
+  const { now, recent } = homeSections([fresh, stale, unread, unreadOld, imported, decided], null, at);
   expect(now.map((p) => p.id).sort()).toEqual([fresh.id, unread.id].sort());
-  expect(recent.map((p) => p.id).sort()).toEqual([stale.id, decided.id].sort());
+  expect(recent.map((p) => p.id).sort()).toEqual([stale.id, unreadOld.id, imported.id, decided.id].sort());
   // A live session known to be on it: in Now, whatever else.
   expect(isNow(decided, work(decided.id), at)).toBe(true);
 });
@@ -195,7 +200,7 @@ describe('the held layout', () => {
     const { top, mid, low, held } = base();
     const sameTop = { ...top, head_version_number: 3, decided_versions: [2, 3], updated_at: '2026-11-12T09:00:00.000Z' };
     expect(heldLayout(held, [sameTop, mid, low]).pending).toBe(0);
-    const toNow = { ...mid, head_version_number: 3, updated_at: '2026-11-08T10:00:00.000Z' };
+    const toNow = { ...mid, head_version_number: 3, updated_at: '2026-11-08T10:00:00.000Z', head_at: new Date().toISOString() };
     expect(heldLayout(held, [top, toNow, low]).pending).toBe(1);
   });
 

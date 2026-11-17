@@ -153,8 +153,9 @@ afterEach(() => {
 });
 
 let clock = 0;
-/** Each plan a little newer than the one before. */
-const next = () => new Date(Date.UTC(2026, 10, 1, 9) + ++clock * 60_000).toISOString();
+/** Each plan a little newer than the one before, all within Now's 3 days (from 2 days ago, a minute apart). */
+const CLOCK_START = Date.now() - 2 * 86_400_000;
+const next = () => new Date(CLOCK_START + ++clock * 60_000).toISOString();
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 /** A plan with `versions` versions; `decided`: the person decided on its newest (so it waits on no one). */

@@ -69,13 +69,15 @@ export function spaceUnread(plan: PlanSummary): boolean {
   return plan.head_version_number > seen;
 }
 
-/** How long a newest version that waits on the person keeps its plan in "Now" under the `fresh` rule. */
+/** How long a newest version keeps its plan in "Now" under the `fresh` rule. */
 export const NOW_FRESH_MS = 3 * 86_400_000;
 
 /**
  * What belongs in "Now", decided here only (the owner was asked; the answer is this one line):
- * - `fresh`: a live session is known to be on it, or something came the person has not seen (unread), or its newest
- *   version came in the last 3 days and waits on the person. An older plan that waits keeps "Your move" in Recent.
+ * - `fresh`: a live session is known to be on it, or its newest main-page version came in the last 3 days (by the
+ *   version's own time, `head_at`: an imported version keeps its history file's time, not the import's) and it waits
+ *   on the person or is unread. Older plans sit in Recent, keeping "Your move" and the unread dot (else a library of
+ *   old imported plans never opened would fill "Now").
  * - `waiting`: every plan that waits on the person, however old (the first build: old plan reviews filled "Now").
  */
 export const NOW_RULE = 'fresh' as 'fresh' | 'waiting';
@@ -84,8 +86,8 @@ export const NOW_RULE = 'fresh' as 'fresh' | 'waiting';
 export function isNow(plan: PlanSummary, work: SpaceWork | null, now = Date.now()): boolean {
   if (work && work.plan === plan.id) return true;
   if (NOW_RULE === 'waiting') return isYourMove(plan);
-  if (plan.status === 'active' && spaceUnread(plan)) return true;
-  return isYourMove(plan) && now - Date.parse(plan.head_at ?? plan.updated_at) < NOW_FRESH_MS;
+  const fresh = plan.head_at != null && now - Date.parse(plan.head_at) < NOW_FRESH_MS;
+  return fresh && (isYourMove(plan) || (plan.status === 'active' && spaceUnread(plan)));
 }
 
 const newestFirst = (a: PlanSummary, b: PlanSummary) => b.updated_at.localeCompare(a.updated_at) || b.id.localeCompare(a.id);

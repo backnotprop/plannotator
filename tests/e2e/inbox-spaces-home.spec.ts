@@ -38,17 +38,20 @@ test('the Spaces home: Now and Recent, the list kept for the person, a pin in th
   const configFile = join(dataDir, 'config.json');
   writeFileSync(configFile, JSON.stringify({ ...JSON.parse(readFileSync(configFile, 'utf8')), inboxPlans: true }));
   const store = createPlanStore({ dataDir });
-  const seed = (name: string, project: string, day: number, decided: boolean) => {
-    const { plan, document } = store.createPlan({ name, project_name: project, created_at: `2026-11-${day}T09:00:00.000Z`, document: { title: name } });
-    const v1 = store.addVersion(plan.id, document.id, { bytes: new TextEncoder().encode(`# ${name}\n\n## Context\n\nWhy ${name.toLowerCase()} now.\n`), committed_at: `2026-11-${day}T09:00:00.000Z`, source: 'plan-review', author_via: 'plan-review' });
-    if (decided) store.addEvent(plan.id, { ...NO_ACTOR, author_via: 'person', kind: 'decision', at: `2026-11-${day}T10:00:00.000Z`, subject: { document_id: document.id, version_number: 1 }, decision: { document_id: document.id, version: v1.version, version_number: 1, decision: 'approved', at: `2026-11-${day}T10:00:00.000Z`, feedback: null, feedback_record: null, snapshot: null }, legacy: null });
+  // Times from the run's own clock, all within Now's 3 days (a plan that waits is in Now only while its version is new):
+  // a higher `slot` is newer, an hour apart; `later` minutes after it.
+  const at = (slot: number, later = 0) => new Date(Date.now() - (20 - slot) * 3_600_000 + later * 60_000).toISOString();
+  const seed = (name: string, project: string, slot: number, decided: boolean) => {
+    const { plan, document } = store.createPlan({ name, project_name: project, created_at: at(slot), document: { title: name } });
+    const v1 = store.addVersion(plan.id, document.id, { bytes: new TextEncoder().encode(`# ${name}\n\n## Context\n\nWhy ${name.toLowerCase()} now.\n`), committed_at: at(slot), source: 'plan-review', author_via: 'plan-review' });
+    if (decided) store.addEvent(plan.id, { ...NO_ACTOR, author_via: 'person', kind: 'decision', at: at(slot, 1), subject: { document_id: document.id, version_number: 1 }, decision: { document_id: document.id, version: v1.version, version_number: 1, decision: 'approved', at: at(slot, 1), feedback: null, feedback_record: null, snapshot: null }, legacy: null });
     return plan.id;
   };
   const waiting = seed('Rate limits per API key', 'ledger', 14, false);
   // An HTML main page whose own CSS animates (and says so with !important): its face must not move.
-  const mockup = store.createPlan({ name: 'Pricing page mockup', project_name: 'ledger', created_at: '2026-11-13T09:00:00.000Z', document: { title: 'Pricing page mockup', kind: 'html' } });
+  const mockup = store.createPlan({ name: 'Pricing page mockup', project_name: 'ledger', created_at: at(13), document: { title: 'Pricing page mockup', kind: 'html' } });
   const spinning = '<style>.spin { animation: spin 1s linear infinite !important; } @keyframes spin { to { transform: rotate(1turn); } }</style><h1>Pricing</h1><div class="spin" style="animation: spin 2s infinite">Loading</div>';
-  store.addVersion(mockup.plan.id, mockup.document.id, { bytes: new TextEncoder().encode(spinning), committed_at: '2026-11-13T09:00:00.000Z', source: 'plan-review', author_via: 'plan-review' });
+  store.addVersion(mockup.plan.id, mockup.document.id, { bytes: new TextEncoder().encode(spinning), committed_at: at(13), source: 'plan-review', author_via: 'plan-review' });
   const done = ['Nightly export in batches', 'Checkout on one page', 'Sessions in Redis', 'Offline drafts'].map((name, i) => seed(name, i % 2 ? 'ledger' : 'field-notes', 10 + i, true));
 
   const env = { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9', PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_BROWSER: NO_BROWSER, PLANNOTATOR_INBOX_CONNECT: '0' };
