@@ -216,3 +216,43 @@ test('a new routine keeps focus and words while it is being made', async ({ page
   await expect(page.locator(`[data-scheduled-row="${id}"]`)).toHaveCount(1);
   expect(errors).toEqual([]);
 });
+
+test("a routine's Runs tab is in the address: a reload lands on it, and a switch mid-edit keeps the words", async ({ page }) => {
+  const errors = pageErrors(page);
+  const routine = (await routines()).find((r) => r.name === 'Weekly dependency check');
+  expect(routine, 'made by the test above').toBeTruthy();
+  const id = routine!.id;
+  const tab = (which: 'edit' | 'runs') => editor(page).locator(`[data-scheduled-tab="${which}"]`);
+  const panel = (which: 'edit' | 'runs') => editor(page).locator(`[data-scheduled-panel="${which}"]`);
+  await page.goto(`${url}#routine=${encodeURIComponent(id)}`);
+  await expect(tab('edit')).toHaveAttribute('aria-selected', 'true', { timeout: 10_000 });
+
+  // Words typed, then Runs at once, inside the typing pause: the words save, and the header says so on Runs.
+  const MORE = ' Skip the dev dependencies.';
+  // The saved words, and the box showing them before typing: opened by its link, the editor draws (tabs and all)
+  // before the routine is read, with the box empty until then.
+  const before = (await savedPrompt(id)) ?? '';
+  expect(before, 'the routine has a prompt').not.toBe('');
+  await expect(promptBox(page)).toHaveValue(before, { timeout: 10_000 });
+  await promptBox(page).click();
+  await promptBox(page).press('End');
+  await promptBox(page).pressSequentially(MORE);
+  await tab('runs').click();
+  await expect.poll(() => hashOf(page), { timeout: 5_000 }).toBe(`#routine=${id}&runs`);
+  await expect(panel('runs')).toBeVisible();
+  await expect(panel('edit')).toBeHidden();
+  await expect(panel('runs').locator('[data-scheduled-no-runs]')).toBeVisible();
+  await expect(status(page)).toHaveAttribute('data-scheduled-status', 'saved', { timeout: 10_000 });
+  await expect.poll(() => savedPrompt(id), { timeout: 10_000 }).toBe(before + MORE);
+
+  // A reload (and so a shared link) opens on Runs.
+  await page.reload();
+  await expect(tab('runs')).toHaveAttribute('aria-selected', 'true', { timeout: 10_000 });
+  await expect(panel('runs')).toBeVisible();
+
+  // Back to Edit: the address drops `&runs` in place, and the words are there.
+  await tab('edit').click();
+  await expect.poll(() => hashOf(page), { timeout: 5_000 }).toBe(`#routine=${id}`);
+  await expect(promptBox(page)).toHaveValue(before + MORE);
+  expect(errors).toEqual([]);
+});
