@@ -5,6 +5,13 @@ name: Browser smoke
 # (Inbox window e2e, inbox-e2e.yml) runs on main every two hours instead, and on
 # a PR only on demand (the `ci:e2e` label, or a manual run on the branch).
 #
+# On a PR it runs when the change can reach the binary or the app pages: a file
+# in the import closure of the binary entry and the app entries (SMOKE_ROOTS in
+# scripts/ci-affected.ts), the full suite's path list in inbox-e2e.yml, or
+# anything the picker cannot decide (scripts/ci-affected.ts gate browser-smoke). Otherwise the smoke job is
+# skipped. A manual run runs it (given as_if_changed, it plans as if a PR
+# changed those paths); a failed gate runs it too.
+#
 # The specs are SMOKE_SPECS in scripts/ci-e2e-shard.ts: inbox.spec.ts (the
 # agents' threads land in the list, a row opens the thread, picks and words go
 # out with Send and the agent reads them, Settings opens) and
@@ -17,6 +24,12 @@ name: Browser smoke
 
 on:
   workflow_dispatch:
+    inputs:
+      as_if_changed:
+        description: "Preview a PR's run: plan as if a PR changed only these paths (space-separated). Empty runs everything."
+        required: false
+        default: ""
+        type: string
   pull_request:
     branches:
       - main
@@ -30,60 +43,71 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gate:
+    name: Browser smoke (path gate)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      smoke: ${{ steps.gate.outputs.smoke }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          # The merge commit and both parents: HEAD^1..HEAD is the PR's change.
+          fetch-depth: 2
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+
+      # The gate walks the binary's imports, which resolve through the workspace links.
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Does this change reach the binary or the app pages?
+        id: gate
+        env:
+          CI_AFFECTED: ${{ vars.CI_AFFECTED }}
+          CI_AFFECTED_AS_IF: ${{ inputs.as_if_changed }}
+        run: bun run scripts/ci-affected.ts gate browser-smoke
+
   smoke:
     name: Browser smoke (Inbox core paths against the compiled binary)
+    needs: gate
+    if: ${{ !cancelled() && needs.gate.outputs.smoke != 'false' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-          # The merge commit and both parents, for the docs-only gate below.
-          fetch-depth: 2
-
-      # Docs-only gate (scripts/ci-docs-only.sh), as in test.yml: on a PR
-      # that changes only plain files on its allowlist (root docs, LICENSE-*,
-      # docs/*.md, .md and image files under .github/assets, adr/ and
-      # docs/releases), every later
-      # step skips and the job passes under its usual name. Anything else,
-      # this step failing included, runs them.
-      - name: Is this a docs-only change?
-        id: docs
-        continue-on-error: true
-        run: bash scripts/ci-docs-only.sh
 
       # In the background: the image is ready by the time the build is.
       - name: Pull the Playwright image while the apps build
-        if: steps.docs.outputs.skip != 'true'
         run: |
           version="$(jq -r '.devDependencies["@playwright/test"]' package.json)"
           nohup docker pull --quiet "mcr.microsoft.com/playwright:v${version}-noble" > "$RUNNER_TEMP/playwright-pull.log" 2>&1 &
 
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        if: steps.docs.outputs.skip != 'true'
         with:
           bun-version: 1.4.4
 
       - name: Install dependencies
-        if: steps.docs.outputs.skip != 'true'
         run: bun install --frozen-lockfile
 
       - name: Build the apps
-        if: steps.docs.outputs.skip != 'true'
         run: bun run build:review && bun run build:hook
 
       - name: Compile the binary
-        if: steps.docs.outputs.skip != 'true'
         run: >-
           bun build apps/hook/server/index.ts --compile --no-compile-autoload-bunfig
           --define '__CLI_VERSION__="0.0.0-dev"' --outfile .local/plannotator
 
       - name: Run the smoke specs in the Playwright image
-        if: steps.docs.outputs.skip != 'true'
         run: bash scripts/ci-e2e-in-image.sh . bun run scripts/ci-e2e-shard.ts smoke
 
       - name: Keep the screenshots
-        if: always() && steps.docs.outputs.skip != 'true'
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: browser-smoke-proof
