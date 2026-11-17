@@ -76,7 +76,8 @@ beforeAll(async () => {
   mkdirSync(join(dir, 'bin'));
   writeFileSync(join(dir, 'bin', 'tailscale'), '#!/bin/sh\nexit 1\n');
   chmodSync(join(dir, 'bin', 'tailscale'), 0o755);
-  child = Bun.spawn(['bun', SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), String(TESTS)], {
+  // This Bun by its own path: the PATH below has no `bun` on it.
+  child = Bun.spawn([process.execPath, SERVER_SCRIPT, join(dir, 'data'), join(dir, 'projects'), String(TESTS)], {
     // No agent CLI on PATH: the Inbox can start nothing.
     env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: join(dir, 'data'), PLANNOTATOR_TEST_SANDBOX: '1', HOME: dir, PATH: `${join(dir, 'bin')}:/usr/bin:/bin` },
     stdin: 'pipe',
