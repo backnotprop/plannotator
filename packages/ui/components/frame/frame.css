@@ -394,13 +394,37 @@
  * shows it at rest; with "never" it shows only on keyboard focus. Hover
  * styles apply only where the screen has hover, so a tap leaves none behind. A pinned row's resting mark
  * is the card's pin after the title, never drawn while the action shows.
+ *
+ * The title is what a row must show: it keeps at least 40% of the row (112 px
+ * at the least). When the room runs short the project gives way first, then
+ * the trailing text. In a CardRows narrower than 560 px the project is not
+ * shown and the trailing text takes only the room it needs, up to 180 px; a
+ * phone keeps its own layout below.
  */
+[data-frame-card-rows] {
+  container: frame-card-rows / inline-size;
+}
 [data-frame-card-row] {
+  --frame-card-row-title-min: max(112px, 40%);
   height: 44px;
-  grid-template-columns: 36px minmax(0, 1fr) 180px;
+  grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(clamp(0px, 100% - 64px - var(--frame-card-row-title-min), 180px), 180px);
 }
 [data-frame-card-row][data-frame-card-columns~="secondary"] {
-  grid-template-columns: 36px minmax(0, 1fr) 160px 180px;
+  grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) minmax(20px, 160px) minmax(clamp(0px, 100% - 98px - var(--frame-card-row-title-min), 180px), 180px);
+}
+@media (min-width: 768px) {
+  @container frame-card-rows (width < 560px) {
+    [data-frame-card-row],
+    [data-frame-card-row][data-frame-card-columns~="secondary"] {
+      grid-template-columns: 36px minmax(var(--frame-card-row-title-min), 1fr) fit-content(180px);
+    }
+    [data-frame-card-row] [data-frame-card-secondary] {
+      display: none;
+    }
+    [data-frame-card-row][data-frame-card-columns~="action"] > :nth-child(2) {
+      padding-inline-end: 20px;
+    }
+  }
 }
 [data-frame-card-trail] > [data-frame-card-action] {
   position: absolute;
