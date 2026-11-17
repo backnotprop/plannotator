@@ -143,13 +143,13 @@ function BatchesFace() {
 function CsvFace() {
   const rows = [
     ["Date", "Amount", "Payee", "Ref"],
-    ["2026-11-02", "1,240.00", "Harbor Co", "INV-311"],
-    ["2026-11-03", "86.40", "Linen Lab", "ORD-88"],
-    ["2026-11-03", "412.00", "Northfield", "INV-312"],
-    ["2026-11-04", "18.00", "Acme Retail", "ORD-91"],
-    ["2026-11-05", "2,005.10", "Tidewater", "INV-313"],
-    ["2026-11-06", "64.00", "Kestrel", "ORD-95"],
-    ["2026-11-06", "310.00", "Quayside", "INV-314"],
+    ["2026-11-02", "1,240.00", "Cloud hosting", "INV-311"],
+    ["2026-11-03", "86.40", "Office supplies", "ORD-88"],
+    ["2026-11-03", "412.00", "Contractor", "INV-312"],
+    ["2026-11-04", "18.00", "Software", "ORD-91"],
+    ["2026-11-05", "2,005.10", "Office rent", "INV-313"],
+    ["2026-11-06", "64.00", "Travel", "ORD-95"],
+    ["2026-11-06", "310.00", "Training", "INV-314"],
   ];
   const muted = "bg-[color-mix(in_oklch,var(--foreground)_4%,transparent)] text-center font-normal text-[var(--frame-ink-2)]";
   const cell = "px-2 py-1.5 text-left whitespace-nowrap shadow-[inset_-1px_-1px_0_color-mix(in_oklch,var(--foreground)_9%,transparent)]";
@@ -249,7 +249,7 @@ const NOW: readonly Plan[] = [
     id: "redis",
     kind: "document",
     title: "Move sessions from signed cookies to Redis",
-    project: "tidepool-api",
+    project: "payments",
     fact: "Your move",
     factTone: "action",
     face: <RedisFace />,
@@ -258,7 +258,7 @@ const NOW: readonly Plan[] = [
     id: "checkout",
     kind: "page",
     title: "Rebuild checkout as one page, with the order summary pinned beside the payment form",
-    project: "kestrel-web",
+    project: "web-app",
     fact: "Maya Chen is working",
     working: true,
     face: <CheckoutFace />,
@@ -267,7 +267,7 @@ const NOW: readonly Plan[] = [
     id: "limits",
     kind: "image",
     title: "Rate limits per API key",
-    project: "tidepool-api",
+    project: "payments",
     fact: "Alex Rivera is working",
     working: true,
     face: <LimitsFace />,
@@ -275,10 +275,10 @@ const NOW: readonly Plan[] = [
 ];
 
 const RECENT: readonly Plan[] = [
-  { id: "batches", kind: "image", title: "Nightly batches for the ledger export", project: "ledgerline", unread: true, time: ago(0), face: <BatchesFace /> },
-  { id: "csv", kind: "data", title: "CSV import with column mapping", project: "ledgerline", unread: true, time: ago(0), face: <CsvFace /> },
-  { id: "retry", kind: "document", title: "Retry policy for webhook delivery", project: "tidepool-api", unread: true, time: ago(0), face: <RetryFace /> },
-  { id: "offline", kind: "page", title: "Offline mode for the field app", project: "birch-mobile", time: ago(1), face: <OfflineFace /> },
+  { id: "batches", kind: "image", title: "Nightly batches for the ledger export", project: "billing", unread: true, time: ago(0), face: <BatchesFace /> },
+  { id: "csv", kind: "data", title: "CSV import with column mapping", project: "billing", unread: true, time: ago(0), face: <CsvFace /> },
+  { id: "retry", kind: "document", title: "Retry policy for webhook delivery", project: "payments", unread: true, time: ago(0), face: <RetryFace /> },
+  { id: "offline", kind: "page", title: "Offline mode for the field app", project: "mobile-app", time: ago(1), face: <OfflineFace /> },
 ];
 
 const EARLIER: readonly Plan[] = [
@@ -286,7 +286,7 @@ const EARLIER: readonly Plan[] = [
     id: "flags",
     kind: "document",
     title: "Per-tenant feature flags, so a beta can ship to one customer without reaching every other tenant on the shared cluster",
-    project: "kestrel-web",
+    project: "web-app",
     time: ago(1),
     face: (
       <CardFaceDocument title="Per-tenant feature flags, so a beta can ship to one customer">
@@ -304,12 +304,12 @@ const EARLIER: readonly Plan[] = [
     id: "tokens",
     kind: "image",
     title: "Dark mode tokens for the dashboard",
-    project: "kestrel-web",
+    project: "web-app",
     time: ago(4),
     face: { src: SWATCHES },
     thumb: { src: SWATCHES, fit: "cover" },
   },
-  { id: "search", kind: "document", title: "Search index for the docs site", project: "kestrel-web", time: ago(6) },
+  { id: "search", kind: "document", title: "Search index for the docs site", project: "web-app", time: ago(6) },
 ];
 
 function PinMark({ on }: { readonly on: boolean }) {
@@ -406,7 +406,7 @@ export function PlansHomeCardsExample() {
       </section>
       <CardGroups>
         <CardGroup label="Recent">{RECENT.map((plan) => card(plan, "regular"))}</CardGroup>
-        <CardGroup label="kestrel-web">{EARLIER.map((plan) => card(plan, "regular"))}</CardGroup>
+        <CardGroup label="web-app">{EARLIER.map((plan) => card(plan, "regular"))}</CardGroup>
       </CardGroups>
       <section className="flex flex-col gap-1">
         <h2 className="px-2 text-[13px] font-medium leading-7 text-frame-muted-fg">The same plans as a list</h2>
