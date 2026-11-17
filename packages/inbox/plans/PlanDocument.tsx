@@ -6,17 +6,19 @@
  * is fetched but one written into the plan, no link but a web one does anything, and a diagram that could load
  * something is shown as its source.
  */
-import { useLayoutEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
-import type { PlanDocumentKind } from '@plannotator/core/plans';
+import { planPictureTypeOf, type PlanDocumentKind } from '@plannotator/core/plans';
 import { PlanContentRules, PlanHtmlFrame, planBlocks, resolvePlanLink } from './planContent';
 import { ScrollViewportProvider } from '@plannotator/ui/hooks/useScrollViewport';
 import { diagramDocumentBlocks, parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
 import { ContentsHide, ContentsPanel } from '../components/ContentsPanel';
 import { useVersionText } from './store';
+import { plansApi } from './client';
+import { tableRows } from '../wallFaceText';
 
 /** The reader's column, as a file beside a thread (AttachmentPane's Side by side). */
 const READER_COLUMN = 640;
@@ -24,11 +26,125 @@ const READER_COLUMN = 640;
 const noop = () => {};
 const NO_ANNOTATIONS: [] = [];
 
+/** A data page's table on the plan page: its first rows and columns (a spreadsheet's top, read only). */
+const DATA_ROWS = 500;
+const DATA_COLS = 40;
+
+type PlanDocumentProps = { id: string; version: number; doc?: string | null; kind?: PlanDocumentKind; title?: string; phone?: boolean };
+
 /**
  * `doc` null: the plan's main page. A document's kind sets how it is drawn: Markdown by the Viewer; a Mermaid or
- * Graphviz file as its one diagram (under the same diagram rules); an HTML page in a frame that runs nothing.
+ * Graphviz file as its one diagram (under the same diagram rules); an HTML page in a frame that runs nothing; a
+ * picture as a picture (its type read from its bytes; an SVG drawn as a picture, so it runs nothing); a table as cells.
  */
-export function PlanDocument({ id, version, doc = null, kind = 'markdown', title = '', phone = false }: { id: string; version: number; doc?: string | null; kind?: PlanDocumentKind; title?: string; phone?: boolean }) {
+export function PlanDocument(props: PlanDocumentProps) {
+  if (props.kind === 'image') return <PlanPicture key={`${props.id}:${props.doc ?? ''}:${props.version}`} {...props} />;
+  if (props.kind === 'data') return <PlanData {...props} />;
+  return <PlanTextDocument {...props} />;
+}
+
+/** A picture page: its bytes as a picture of the type they are (never the type a name claims). */
+export function PlanPicture({ id, version, doc = null, title = '' }: PlanDocumentProps) {
+  const [state, setState] = useState<{ src: string | null; error: string | null }>({ src: null, error: null });
+  const [retry, setRetry] = useState(0);
+  useEffect(() => {
+    let live = true;
+    let url: string | null = null;
+    void fetch(plansApi.versionUrl(id, version, doc))
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`The Inbox answered ${res.status}.`);
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        const type = planPictureTypeOf(bytes);
+        if (!type) throw new Error('It is not a picture this window draws.');
+        url = URL.createObjectURL(new Blob([bytes], { type }));
+        if (live) setState({ src: url, error: null });
+        else URL.revokeObjectURL(url);
+      })
+      .catch((error: unknown) => live && setState({ src: null, error: error instanceof Error ? error.message : String(error) }));
+    return () => {
+      live = false;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [id, version, doc, retry]);
+  if (state.error) {
+    return (
+      <div className="ib-plan-docstate" role="alert">
+        <p>Version {version} could not be read. {state.error}</p>
+        <button type="button" className="ib-plans-quiet" onClick={() => setRetry((n) => n + 1)}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (!state.src) {
+    return (
+      <div className="ib-plan-docstate" role="status" aria-busy="true">
+        <p>Loading v{version}…</p>
+      </div>
+    );
+  }
+  return (
+    <div className="ib-plan-docscroll ib-plan-picture" data-plan-document={version}>
+      <img src={state.src} alt={title || `Version ${version}`} draggable={false} />
+    </div>
+  );
+}
+
+/** A data page (CSV or TSV): its rows as cells, the first as the header, row numbers down the side. */
+function PlanData({ id, version, doc = null, title = '' }: PlanDocumentProps) {
+  const [retry, setRetry] = useState(0);
+  const { text, error } = useVersionText(id, version, retry, doc);
+  const rows = useMemo(() => (text === null ? [] : tableRows(text, (text.split('\n', 1)[0] ?? '').includes('\t'), DATA_ROWS + 1, DATA_COLS)), [text]);
+  if (error) {
+    return (
+      <div className="ib-plan-docstate" role="alert">
+        <p>Version {version} could not be read. {error}</p>
+        <button type="button" className="ib-plans-quiet" onClick={() => setRetry((n) => n + 1)}>
+          Try again
+        </button>
+      </div>
+    );
+  }
+  if (text === null) {
+    return (
+      <div className="ib-plan-docstate" role="status" aria-busy="true">
+        <p>Loading v{version}…</p>
+      </div>
+    );
+  }
+  const [head = [], ...body] = rows;
+  const width = Math.max(head.length, ...body.map((r) => r.length));
+  return (
+    <div className="ib-plan-docscroll ib-plan-data" data-plan-document={version}>
+      <table aria-label={title || `Version ${version}`}>
+        <thead>
+          <tr>
+            <th />
+            {Array.from({ length: width }, (_, c) => (
+              <th key={c} scope="col" dir="auto">
+                {head[c] ?? ''}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, r) => (
+            <tr key={r}>
+              <th scope="row">{r + 1}</th>
+              {Array.from({ length: width }, (_, c) => (
+                <td key={c} dir="auto">
+                  {row[c] ?? ''}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function PlanTextDocument({ id, version, doc = null, kind = 'markdown', title = '', phone = false }: PlanDocumentProps) {
   const [retry, setRetry] = useState(0);
   const { text, error } = useVersionText(id, version, retry, doc);
   const [viewport, setViewport] = useState<HTMLDivElement | null>(null);

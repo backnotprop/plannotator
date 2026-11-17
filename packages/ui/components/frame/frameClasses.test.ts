@@ -319,6 +319,10 @@ describe('card layout rules in frame.css', () => {
     expect(block('[data-frame-card-groups]')).toMatch(/repeat\(auto-fill, minmax\(var\(--frame-card-column-min\), 1fr\)\)/);
   });
 
+  test('focus on the link draws a 2 px gap in the card colour, then a 2 px primary ring', () => {
+    expect(block('[data-frame-card]:has(:focus-visible:not([data-frame-card-action] *))')).toContain('box-shadow: 0 0 0 2px var(--card), 0 0 0 4px var(--primary);');
+  });
+
   test('focus on the host action draws no card ring and does not fan the sheet', () => {
     const ring = /\[data-frame-card\]:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\) \{/;
     expect(css).toMatch(ring);

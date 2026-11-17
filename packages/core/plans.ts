@@ -37,8 +37,13 @@ export function isPlanId(prefix: PlanIdPrefix, value: unknown): value is string 
 export type PlanStatus = "active" | "done" | "archived";
 export const PLAN_STATUSES: readonly PlanStatus[] = ["active", "done", "archived"];
 
-export type PlanDocumentKind = "markdown" | "html" | "mermaid" | "graphviz";
-export const PLAN_DOCUMENT_KINDS: readonly PlanDocumentKind[] = ["markdown", "html", "mermaid", "graphviz"];
+/**
+ * A page's kind. `image`: a picture (PNG, JPEG, GIF, WebP, AVIF or SVG; its type is read from its bytes,
+ * `planPictureTypeOf`); `data`: a table as CSV or TSV text. Both are read-only on the plan page, as a diagram or an
+ * HTML page is.
+ */
+export type PlanDocumentKind = "markdown" | "html" | "mermaid" | "graphviz" | "image" | "data";
+export const PLAN_DOCUMENT_KINDS: readonly PlanDocumentKind[] = ["markdown", "html", "mermaid", "graphviz", "image", "data"];
 
 /** Where a version came from. Imported history versions are `plan-review`: plan review wrote them. */
 export type PlanVersionSource = "plan-review" | "agent-tool" | "annotate-live" | "person";
@@ -229,6 +234,66 @@ export interface PlanIndexLine {
   /** Where the main page's approval stands on its newest version (`planApprovalState`); absent from an older line. */
   approval?: PlanApprovalState;
   counts: { documents: number; versions: number; comments: number; artifacts: number; events: number };
+  /** The main page's kind (its face on the Spaces home); absent from an older line: read as Markdown. */
+  primary_kind?: PlanDocumentKind;
+  /** Who wrote the main page's newest version (`person`: the person's own edit or Restore); absent from an older line. */
+  head_source?: PlanVersionSource | null;
+  /** The main page's version numbers that hold a decision of the person's (approved or changes asked), oldest first. */
+  decided_versions?: number[];
+  /** When the main page's newest version came (its `committed_at`); absent from an older line (read `updated_at`). */
+  head_at?: string | null;
+  /**
+   * The agent session that wrote the main page's newest version, when it said so (plan review records the session it
+   * ran in: `history/{project}/{slug}/NNN.agent.json`); null when none is known. The Spaces home says "<agent> is
+   * working" only while this session is live in the Inbox and this is the newest plan it submitted.
+   */
+  head_agent?: PlanHeadAgent | null;
+}
+
+/** An agent session as a version records it: its host (`claude-code`, `codex`, …), its session id and its name. */
+export interface PlanHeadAgent {
+  host: string;
+  session: string;
+  name: string | null;
+}
+
+/** The person's pinned plans, in their order (`pins.json`, written whole), and the Spaces home's view. */
+export interface PlanPins {
+  v: 1;
+  ids: string[];
+}
+
+/** The Spaces home's two views (config.json `inboxSpacesView`, the person's): cards, or a list of rows. */
+export type SpacesView = "cards" | "list";
+export const SPACES_VIEWS: readonly SpacesView[] = ["cards", "list"];
+
+/** `POST /api/plans/pins`: pin a plan (at `index`, else last), move it, or unpin it. */
+export function checkPlanPinInput(input: unknown): { ok: true; id: string; pinned: boolean; index: number | null } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { id, pinned, index? }" };
+  const unknown = Object.keys(input).find((key) => !["id", "pinned", "index", "serverSession"].includes(key));
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  if (!isPlanId("pln", input.id)) return { ok: false, error: "id is a plan id (pln_…)" };
+  if (typeof input.pinned !== "boolean") return { ok: false, error: "pinned is true or false" };
+  if (input.index !== undefined && input.index !== null && !(typeof input.index === "number" && Number.isSafeInteger(input.index) && input.index >= 0)) return { ok: false, error: "index is a place from 0" };
+  return { ok: true, id: input.id, pinned: input.pinned, index: typeof input.index === "number" ? input.index : null };
+}
+
+/** `POST /api/plans/view`: the Spaces home's view. */
+export function checkSpacesViewInput(input: unknown): { ok: true; view: SpacesView } | { ok: false; error: string } {
+  if (!isObject(input)) return { ok: false, error: "the body is { view }" };
+  const unknown = Object.keys(input).find((key) => key !== "view" && key !== "serverSession");
+  if (unknown) return { ok: false, error: `unknown field ${unknown}` };
+  if (!SPACES_VIEWS.includes(input.view as SpacesView)) return { ok: false, error: "view is cards or list" };
+  return { ok: true, view: input.view as SpacesView };
+}
+
+/** A pin list with `id` put at `index` (else last; already pinned, where it is), or taken out; every other id keeps its order. */
+export function planPinsWith(ids: readonly string[], id: string, pinned: boolean, index: number | null): string[] {
+  const rest = ids.filter((one) => one !== id);
+  if (!pinned) return rest;
+  if (index === null && rest.length < ids.length) return [...ids];
+  const at = index === null ? rest.length : Math.min(index, rest.length);
+  return [...rest.slice(0, at), id, ...rest.slice(at)];
 }
 
 /** A plan in the list: its index line and the person's look. */
@@ -449,6 +514,84 @@ export function checkPlanCommentInput(input: unknown): { ok: true; doc: string |
 export const PLAN_TEXT_MAX = 2 * 1024 * 1024;
 
 /**
+ * A face on the Spaces home reads only the top of a version (`GET /api/plans/:id/versions/:n?face=1`): a document's
+ * first `PLAN_FACE_TEXT_BYTES`, cut at a line's end; an HTML page whole, or nothing above `PLAN_FACE_HTML_MAX` (the
+ * card shows its kind's ground).
+ */
+export const PLAN_FACE_TEXT_BYTES = 16 * 1024;
+export const PLAN_FACE_HTML_MAX = 512 * 1024;
+/** A picture page's face is the picture itself, up to this size (above it, the card shows its kind's ground). */
+export const PLAN_FACE_PICTURE_MAX = 2 * 1024 * 1024;
+/** ...and up to this many pixels, read from its header (a picture small in bytes can be huge once decoded). */
+export const PLAN_FACE_PICTURE_PIXELS = 4096 * 4096;
+
+/**
+ * A raster picture's size from its header, without decoding it: PNG, GIF, WebP (lossy, lossless, extended) and JPEG
+ * (its first frame header); null when the header does not say (SVG, AVIF, a cut or odd file).
+ */
+export function planPictureSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const type = planPictureTypeOf(bytes);
+  const at = (i: number) => bytes[i] ?? 0;
+  const be16 = (i: number) => (at(i) << 8) | at(i + 1);
+  const le16 = (i: number) => at(i) | (at(i + 1) << 8);
+  const le24 = (i: number) => at(i) | (at(i + 1) << 8) | (at(i + 2) << 16);
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (type === "image/png" && bytes.length >= 24 && ascii(12, 16) === "IHDR") return { width: ((at(16) << 24) >>> 0) + (at(17) << 16) + (at(18) << 8) + at(19), height: ((at(20) << 24) >>> 0) + (at(21) << 16) + (at(22) << 8) + at(23) };
+  if (type === "image/gif" && bytes.length >= 10) return { width: le16(6), height: le16(8) };
+  if (type === "image/webp" && bytes.length >= 30) {
+    const chunk = ascii(12, 16);
+    if (chunk === "VP8 ") return { width: le16(26) & 0x3fff, height: le16(28) & 0x3fff };
+    if (chunk === "VP8L") return { width: 1 + (at(21) | ((at(22) & 0x3f) << 8)), height: 1 + ((at(22) >> 6) | (at(23) << 2) | ((at(24) & 0x0f) << 10)) };
+    if (chunk === "VP8X") return { width: 1 + le24(24), height: 1 + le24(27) };
+    return null;
+  }
+  if (type === "image/jpeg") {
+    let i = 2;
+    while (i + 9 < bytes.length) {
+      if (at(i) !== 0xff) return null;
+      const marker = at(i + 1);
+      if (marker === 0xff) {
+        i++;
+        continue;
+      }
+      // A frame header (SOF0 to SOF15, but not DHT, JPG or DAC): its height, then its width.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) return { width: be16(i + 7), height: be16(i + 5) };
+      if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+        i += 2;
+        continue;
+      }
+      i += 2 + be16(i + 2);
+    }
+  }
+  return null;
+}
+
+/** `GET /api/plans/:id/versions/:n?face=1`: the top of a version for its face; `text` null when it is too big to draw. */
+export interface PlanFaceText {
+  text: string | null;
+  /** The text is the version's first part only. */
+  cut: boolean;
+  /** A picture page: the picture as a `data:` URL (null when it is too big, or not a picture this list draws). */
+  picture?: string | null;
+}
+
+/** The picture types a picture page may hold: the raster ones every browser draws, and SVG (drawn as a picture). */
+export const PLAN_PAGE_PICTURE_TYPES: readonly string[] = [...PLAN_PICTURE_TYPES, "image/svg+xml"];
+
+/** A picture's type from its first bytes (never its name): PNG, JPEG, GIF, WebP, AVIF or SVG; else null. */
+export function planPictureTypeOf(bytes: Uint8Array): string | null {
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (bytes.length >= 8 && bytes[0] === 0x89 && ascii(1, 4) === "PNG") return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 && /^GIF8[79]a$/.test(ascii(0, 6))) return "image/gif";
+  if (bytes.length >= 12 && ascii(0, 4) === "RIFF" && ascii(8, 12) === "WEBP") return "image/webp";
+  if (bytes.length >= 12 && ascii(4, 8) === "ftyp" && /^avi[fs]$/.test(ascii(8, 12))) return "image/avif";
+  const head = new TextDecoder().decode(bytes.subarray(0, 1024)).replace(/^\uFEFF/, "").trimStart();
+  if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(head)) return "image/svg+xml";
+  return null;
+}
+
+/**
  * The body of `POST /api/plans/:id/versions`: a new newest version the person made, either their edit of the newest
  * (`text`) or a Restore of an older one (`restore`, its number). `base` is the version number on screen when they
  * started: the Inbox refuses it once a newer version came (the plan moved on), so nothing is written over unseen.
@@ -575,7 +718,7 @@ export function planApprovalState(events: readonly PlanEvent[], docId: string, h
   return held.length > 0 ? { kind: "cleared", version_number: head, from_version_number: older, names: held.map((a) => a.name) } : { kind: "undecided", version_number: head, from_version_number: older };
 }
 
-const PLAN_KIND_EXTENSION: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot" };
+const PLAN_KIND_EXTENSION: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot", image: "png", data: "csv" };
 
 /** A page's file name: the last part of its `doc_path`, else its title with its kind's extension ("Rollout.md"). */
 export function planDocumentFileName(doc: Pick<PlanDocument, "doc_path" | "title" | "kind">): string {

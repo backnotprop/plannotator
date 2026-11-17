@@ -11,6 +11,7 @@ import { computePlanDiff } from '@plannotator/ui/utils/planDiffEngine';
 import { PlanCleanDiffView } from '@plannotator/ui/components/plan-diff/PlanCleanDiffView';
 import { usePlanDiff } from './store';
 import { PlanContentRules } from './planContent';
+import { PlanPicture } from './PlanDocument';
 
 /** A file that is not Markdown (an HTML page, a diagram's source) is compared as its source, in a code block. */
 function asCompared(text: string, kind: PlanDocumentKind): string {
@@ -20,7 +21,25 @@ function asCompared(text: string, kind: PlanDocumentKind): string {
   return `${fence}text\n${text}\n${fence}\n`;
 }
 
-export function PlanDiffView({ id, from, to, doc = null, kind = 'markdown' }: { id: string; from: number; to: number; doc?: string | null; kind?: PlanDocumentKind }) {
+type PlanDiffProps = { id: string; from: number; to: number; doc?: string | null; kind?: PlanDocumentKind };
+
+/** A picture page has no text to compare: the two versions side by side, the older first. */
+export function PlanDiffView(props: PlanDiffProps) {
+  if (props.kind !== 'image') return <PlanTextDiff {...props} />;
+  const { id, from, to, doc = null } = props;
+  return (
+    <div className="ib-plan-docscroll ib-plan-picdiff" data-plan-diff={`${from}-${to}`}>
+      {[from, to].map((n) => (
+        <figure key={n}>
+          <PlanPicture key={`${id}:${doc ?? ''}:${n}`} id={id} version={n} doc={doc} title={`Version ${n}`} />
+          <figcaption>v{n}</figcaption>
+        </figure>
+      ))}
+    </div>
+  );
+}
+
+function PlanTextDiff({ id, from, to, doc = null, kind = 'markdown' }: PlanDiffProps) {
   const [retry, setRetry] = useState(0);
   const { diff, error } = usePlanDiff(id, from, to, retry, doc);
   const computed = useMemo(() => (diff?.from && diff.to ? computePlanDiff(asCompared(diff.from.text, kind), asCompared(diff.to.text, kind)) : null), [diff, kind]);

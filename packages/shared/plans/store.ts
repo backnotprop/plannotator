@@ -3,6 +3,7 @@
  *
  *   index.jsonl                one line per plan change (the last line per id wins), for a fast list
  *   looks.json                 the person's looks (outside the logs, written whole)
+ *   pins.json                  the person's pinned plans, in their order (written whole)
  *   legacy-map.json            what the import took from where (written whole)
  *   <pln_id>/
  *     plan.jsonl               the plan record, one snapshot per change
@@ -24,7 +25,7 @@
  *
  * Nothing here runs unless a caller asks: creating the store reads and writes nothing.
  */
-import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, appendFileSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, renameSync, appendFileSync, statSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import {
@@ -44,6 +45,15 @@ import {
   planCommentAnnotationId,
   planId,
   planApprovalState,
+  planPinsWith,
+  planDecisionVersion,
+  PLAN_FACE_HTML_MAX,
+  PLAN_FACE_PICTURE_MAX,
+  PLAN_FACE_PICTURE_PIXELS,
+  planPictureSize,
+  PLAN_FACE_TEXT_BYTES,
+  planPictureTypeOf,
+  type PlanFaceText,
   type PlanActor,
   type PlanArtifact,
   type PlanComment,
@@ -54,6 +64,7 @@ import {
   type PlanLegacy,
   type PlanLook,
   type PlanLooks,
+  type PlanPins,
   type PlanRecord,
   type PlanSummary,
   type PlanVersion,
@@ -63,6 +74,7 @@ import {
 export const PLAN_LIBRARY_DIR = "plan-library";
 export const PLAN_INDEX_FILE = "index.jsonl";
 export const PLAN_LOOKS_FILE = "looks.json";
+export const PLAN_PINS_FILE = "pins.json";
 export const PLAN_LEGACY_MAP_FILE = "legacy-map.json";
 const PLAN_FILE = "plan.jsonl";
 const DOCS_FILE = "docs.jsonl";
@@ -71,7 +83,7 @@ const ARTIFACTS_FILE = "artifacts.jsonl";
 const COMMENTS_FILE = "comments.jsonl";
 const FILES_DIR = "files";
 
-const EXT: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot" };
+const EXT: Record<PlanDocumentKind, string> = { markdown: "md", html: "html", mermaid: "mmd", graphviz: "dot", image: "img", data: "csv" };
 
 export function planLibraryDir(dataDir: string): string {
   return join(dataDir, PLAN_LIBRARY_DIR);
@@ -180,8 +192,19 @@ export interface PlanStore {
   /** A version's file on disk, or null. */
   versionPath(id: string, docId: string, n: number): string | null;
   versionBytes(id: string, docId: string, n: number): Uint8Array | null;
+  /** The top of a version for its face on the Spaces home (`PlanFaceText`), or null when there is no such version. */
+  versionFace(id: string, docId: string, n: number): PlanFaceText | null;
+  /**
+   * A stamp of the files the list and the pins are read from (each one's inode, size and time): equal stamps, equal
+   * answers. Cheap: three stats, no read.
+   */
+  listStamp(): string;
   events(id: string): PlanEvent[];
   looks(): PlanLooks;
+  /** The person's pinned plans, in their order (a plan no longer here is left out). */
+  pins(): string[];
+  /** Pin a plan at `index` (else last), move it there, or unpin it; the order after. */
+  setPin(id: string, pinned: boolean, index?: number | null): string[];
   /** The person looked at a plan (and saw version `seen` of `doc`, the primary document when absent). */
   recordLook(id: string, input?: { doc?: string | null; seen?: number | null; at?: string }): PlanLook;
   createPlan(input: NewPlanInput): { plan: PlanRecord; document: PlanDocument };
@@ -362,6 +385,9 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
     const decisions = events.filter((event) => event.kind === "decision" && event.decision);
     const latest = decisions[decisions.length - 1]?.decision;
     const head = primary?.head_version ?? 0;
+    const headVersion = versions.find((v) => v.document_id === plan.primary_doc_id && v.version_number === head);
+    // The main page's versions that hold one of the person's decisions (an old decision with no number is on v1).
+    const decided = [...new Set(decisions.filter((e) => e.decision!.document_id === plan.primary_doc_id).map((e) => planDecisionVersion(e.decision!)))].sort((a, b) => a - b);
     const times = [plan.updated_at, ...versions.map((v) => v.committed_at), ...events.map((e) => e.at)].sort();
     return {
       id,
@@ -376,7 +402,18 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       decision: latest ? { decision: latest.decision, version_number: latest.version_number, at: latest.at } : null,
       approval: planApprovalState(events, plan.primary_doc_id, head, { cleared: plan.last_approval_cleared, moved: plan.last_approval_moved }),
       counts: { documents: documents.length, versions: versions.length, comments: 0, artifacts: artifactsOf(id).length, events: events.length },
+      primary_kind: primary?.kind ?? "markdown",
+      head_source: headVersion?.source ?? null,
+      decided_versions: decided,
+      head_at: headVersion?.committed_at ?? null,
+      head_agent: headVersion?.agent_host && headVersion.agent_session ? { host: headVersion.agent_host, session: headVersion.agent_session, name: headVersion.agent_name } : null,
     };
+  };
+
+  const pinsRead = (): string[] => {
+    const value = readJson(join(root, PLAN_PINS_FILE)) as Partial<PlanPins> | null;
+    if (!value || value.v !== 1 || !Array.isArray(value.ids)) return [];
+    return [...new Set(value.ids.filter((id): id is string => isPlanId("pln", id)))];
   };
 
   const appendIndex = (id: string) => {
@@ -437,8 +474,66 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
       }
     },
 
+    versionFace(id, docId, n) {
+      const path = this.versionPath(id, docId, n);
+      if (!path) return null;
+      try {
+        const size = statSync(path).size;
+        if (path.endsWith(".html")) return size > PLAN_FACE_HTML_MAX ? { text: null, cut: false } : { text: readFileSync(path, "utf8"), cut: false };
+        // A picture page: the picture itself, as a data: URL, when it is a picture the window draws and not too big.
+        if (path.endsWith(".img")) {
+          if (size > PLAN_FACE_PICTURE_MAX) return { text: null, cut: false, picture: null };
+          const bytes = new Uint8Array(readFileSync(path));
+          const type = planPictureTypeOf(bytes);
+          // Huge once decoded (small in bytes): the kind's ground, never a decode of hundreds of megabytes.
+          const pixels = planPictureSize(bytes);
+          if (pixels && pixels.width * pixels.height > PLAN_FACE_PICTURE_PIXELS) return { text: null, cut: false, picture: null };
+          return { text: null, cut: false, picture: type ? `data:${type};base64,${Buffer.from(bytes).toString("base64")}` : null };
+        }
+        if (size <= PLAN_FACE_TEXT_BYTES) return { text: readFileSync(path, "utf8"), cut: false };
+        const fd = openSync(path, "r");
+        try {
+          const bytes = Buffer.alloc(PLAN_FACE_TEXT_BYTES);
+          const got = readSync(fd, bytes, 0, PLAN_FACE_TEXT_BYTES, 0);
+          // Cut at the last line's end, so no character is cut in two (a newline is never inside one in UTF-8).
+          const end = bytes.subarray(0, got).lastIndexOf(0x0a);
+          return { text: bytes.subarray(0, end > 0 ? end : got).toString("utf8"), cut: true };
+        } finally {
+          closeSync(fd);
+        }
+      } catch {
+        return null;
+      }
+    },
+
+    listStamp() {
+      const stamp = (name: string) => {
+        try {
+          const s = statSync(join(root, name));
+          return `${s.ino}:${s.size}:${s.mtimeMs}`;
+        } catch {
+          return "-";
+        }
+      };
+      return [PLAN_INDEX_FILE, PLAN_LOOKS_FILE, PLAN_PINS_FILE].map(stamp).join("|");
+    },
+
     events: eventsOf,
     looks,
+
+    pins() {
+      return pinsRead().filter((id) => planOf(id) !== null);
+    },
+
+    setPin(id, pinned, index = null) {
+      if (pinned && !planOf(id)) throw new Error(`No plan ${id}.`);
+      // The order among the plans still here: a pin of a plan that is gone is dropped on the next write.
+      const ids = planPinsWith(this.pins(), id, pinned, index);
+      ensureRoot();
+      const file: PlanPins = { v: 1, ids };
+      writeWhole(join(root, PLAN_PINS_FILE), `${JSON.stringify(file, null, 2)}\n`);
+      return ids;
+    },
 
     recordLook(id, input = {}) {
       const plan = planOf(id);

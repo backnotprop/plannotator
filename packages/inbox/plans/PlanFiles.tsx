@@ -22,7 +22,7 @@ export type PlanFileRef = { kind: 'doc'; id: string } | { kind: 'artifact'; path
 export const PLAN_FILES_OPEN_KEY = 'plannotator-inbox-plan-files-open';
 export const PLAN_FILES_WIDTH_KEY = 'plannotator-inbox-plan-files-width';
 
-const DOC_ICON: Record<PlanDocumentKind, FileIconKind> = { markdown: 'markdown', html: 'html', mermaid: 'mermaid', graphviz: 'graphviz' };
+const DOC_ICON: Record<PlanDocumentKind, FileIconKind> = { markdown: 'markdown', html: 'html', mermaid: 'mermaid', graphviz: 'graphviz', image: 'image', data: 'other' };
 const ARTIFACT_ICON: Record<PlanArtifactKind, FileIconKind> = { image: 'image', svg: 'image', html: 'html', pdf: 'pdf', video: 'video', other: 'other' };
 
 interface FileRowData {
