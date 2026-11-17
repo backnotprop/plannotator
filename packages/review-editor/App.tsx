@@ -205,7 +205,7 @@ import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
 import { ReviewLoadError } from './components/ReviewLoadError';
-import { diffLoadFailureFromResponse, diffLoadFailureMessage, diffLoadUnreachable } from './utils/diffLoadFailure';
+import { diffLoadFailureFromResponse, diffLoadFailureInfo, diffLoadUnreachable, type DiffLoadFailureInfo } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
 import { parseDiffToFiles } from './utils/diffParser';
 import {
@@ -574,7 +574,7 @@ const ReviewApp: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   // A real session whose first /api/diff failed: the load error state, never
   // the demo diff (ReviewLoadError). Retry bumps the attempt to load again.
-  const [diffLoadFailure, setDiffLoadFailure] = useState<string | null>(null);
+  const [diffLoadFailure, setDiffLoadFailure] = useState<DiffLoadFailureInfo | null>(null);
   const [diffLoadAttempt, setDiffLoadAttempt] = useState(0);
   const [isRetryingDiffLoad, setIsRetryingDiffLoad] = useState(false);
   const diffStyle = useConfigValue('diffStyle');
@@ -3039,7 +3039,7 @@ const ReviewApp: React.FC = () => {
           // isLoading stays true: the review mounts for the first time only
           // once a Retry loads the diff, so nothing latches on this state.
           console.error('Failed to load the diff:', error);
-          setDiffLoadFailure(diffLoadFailureMessage(error));
+          setDiffLoadFailure(diffLoadFailureInfo(error));
           return;
         }
         // Standalone dev page: no server, so show the demo content.
@@ -5918,7 +5918,7 @@ const ReviewApp: React.FC = () => {
     return (
       <ThemeProvider defaultTheme="dark" manageFavicon>
         <ReviewLoadError
-          message={diffLoadFailure}
+          failure={diffLoadFailure}
           retrying={isRetryingDiffLoad}
           onRetry={() => {
             setIsRetryingDiffLoad(true);
@@ -5926,6 +5926,7 @@ const ReviewApp: React.FC = () => {
           }}
           feedbackUrl={feedbackUrl}
           exitUrl={exitUrl}
+          getAgentSwitch={() => getEffectiveAgentName(getAgentSwitchSettings('review')) || undefined}
         />
       </ThemeProvider>
     );

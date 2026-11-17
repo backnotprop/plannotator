@@ -6,9 +6,16 @@
  * decision controls need the session's origin), so the review could not be
  * answered (#940: the server ran out of memory building the diff). Guards:
  *  - a failed load shows the load error state with the server's reason, and
- *    no demo file;
+ *    no demo file; the alert holds the reason only, and focus lands on
+ *    Retry (on the heading once feedback is sent);
  *  - Retry loads the diff again and the review opens on the real files;
- *  - feedback and Close still reach the server from the error state.
+ *  - after a 5xx (a live review server that failed to build the diff),
+ *    feedback and Close still reach the server; feedback carries
+ *    draftGeneration 0, so a saved server draft is kept, and the agent switch
+ *    a normal decision sends;
+ *  - an unreachable server or a 404 offers no decision: those requests carry
+ *    no session nonce and could end a different session on a reused port;
+ *  - an "already decided" answer says so instead of blaming a stopped server.
  */
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import React, { act } from "react";
@@ -19,6 +26,7 @@ import {
   type StorageBackend,
 } from "@plannotator/ui/utils/storage";
 import { configStore } from "@plannotator/ui/config";
+import { saveAgentSwitchSettings } from "@plannotator/ui/utils/agentSwitch";
 import { DEMO_DIFF } from "./demoData";
 
 // Vite-only virtual module (`?worker&inline`), stubbed like App.panelView.test.tsx.
@@ -71,10 +79,17 @@ class StubEventSource {
   close(): void {}
 }
 
-interface Posted { path: string; body: unknown }
+interface Posted { path: string; search: string; body: unknown }
 
-/** /api/diff answers each scripted response in turn (the last one repeats). */
-function makeFetch(diffAnswers: Array<() => Response>, posted: Posted[]): typeof fetch {
+/**
+ * /api/diff answers each scripted response in turn (the last one repeats); a
+ * throwing answer is a network error. Decisions answer `decisionAnswer`.
+ */
+function makeFetch(
+  diffAnswers: Array<() => Response>,
+  posted: Posted[],
+  decisionAnswer: () => Response,
+): typeof fetch {
   let diffCalls = 0;
   // SAFETY: the app only ever calls fetch(input, init); the double implements
   // that call signature and not `fetch.preconnect`.
@@ -83,8 +98,8 @@ function makeFetch(diffAnswers: Array<() => Response>, posted: Posted[]): typeof
     if (rawUrl.startsWith("https://")) return new Response(null, { status: 404 });
     const url = new URL(rawUrl, "http://localhost");
     if (init?.method === "POST") {
-      posted.push({ path: url.pathname, body: typeof init.body === "string" ? JSON.parse(init.body) : null });
-      return Response.json({ ok: true });
+      posted.push({ path: url.pathname, search: url.search, body: typeof init.body === "string" ? JSON.parse(init.body) : null });
+      return url.pathname === "/api/feedback" || url.pathname === "/api/exit" ? decisionAnswer() : Response.json({ ok: true });
     }
     if (url.pathname === "/api/diff") {
       const answer = diffAnswers[Math.min(diffCalls, diffAnswers.length - 1)];
@@ -100,6 +115,8 @@ function makeFetch(diffAnswers: Array<() => Response>, posted: Posted[]): typeof
 }
 
 const failing = () => new Response("Internal Server Error: Out of memory", { status: 500, headers: { "Content-Type": "text/plain" } });
+const notFound = () => Response.json({ error: "Not found" }, { status: 404 });
+const unreachable = (): Response => { throw new TypeError("Failed to fetch"); };
 const serving = (rawPatch: string) => () => Response.json({
   rawPatch,
   gitRef: "uncommitted",
@@ -109,6 +126,8 @@ const serving = (rawPatch: string) => () => Response.json({
   hideWhitespace: false,
   repoInfo: { display: "acme/payments-service", branch: "add-refund-flow" },
 });
+const accepted = () => Response.json({ ok: true });
+const alreadyDecided = () => Response.json({ error: "Review already decided", code: "already_decided" }, { status: 409 });
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -135,11 +154,17 @@ function seedUnrelatedAnnouncementsSeen(): void {
   memory.set("plannotator-review-dest-spotlight-seen", "1");
 }
 
-async function mount(diffAnswers: Array<() => Response>, posted: Posted[] = []): Promise<void> {
+const errorState = () => document.querySelector("[data-review-load-error='']");
+
+async function mount(
+  diffAnswers: Array<() => Response>,
+  posted: Posted[] = [],
+  decisionAnswer: () => Response = accepted,
+): Promise<void> {
   setStorageBackend(memoryBackend);
   seedUnrelatedAnnouncementsSeen();
   configStore.loadFromBackend();
-  globalThis.fetch = makeFetch(diffAnswers, posted);
+  globalThis.fetch = makeFetch(diffAnswers, posted, decisionAnswer);
   // SAFETY: the App only uses EventSource's constructor, handlers, and close.
   globalThis.EventSource = StubEventSource as unknown as typeof EventSource;
   host = document.createElement("div");
@@ -150,13 +175,31 @@ async function mount(diffAnswers: Array<() => Response>, posted: Posted[] = []):
   });
 }
 
-function button(label: string): HTMLButtonElement {
-  const found = [...document.querySelectorAll("button")].find((el) => el.textContent?.trim() === label);
-  if (!found) throw new Error(`no ${label} button`);
-  return found as HTMLButtonElement;
+async function mountFailed(diffAnswers: Array<() => Response>, posted: Posted[] = [], decisionAnswer?: () => Response): Promise<void> {
+  await mount(diffAnswers, posted, decisionAnswer);
+  await waitFor(() => errorState() !== null, "the load error state");
 }
 
-const errorState = () => document.querySelector("[data-review-load-error='']");
+function findButton(label: string): HTMLButtonElement | undefined {
+  return [...document.querySelectorAll("button")].find((el) => el.textContent?.trim() === label) as HTMLButtonElement | undefined;
+}
+
+function button(label: string): HTMLButtonElement {
+  const found = findButton(label);
+  if (!found) throw new Error(`no ${label} button`);
+  return found;
+}
+
+async function typeNote(text: string): Promise<void> {
+  const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+  await act(async () => {
+    // React tracks the value through the native setter.
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, text);
+    textarea.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
+
+const decisions = (posted: Posted[]) => posted.filter((p) => p.path === "/api/feedback" || p.path === "/api/exit");
 
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
@@ -175,45 +218,76 @@ afterAll(() => {
 });
 
 describe.if(hasDom)("review: the diff fails to load", () => {
-  test("shows the server's reason and never the demo diff", async () => {
+  test("shows the server's reason, never the demo diff, and focuses Retry", async () => {
     expect(DEMO_PATH).not.toBe("");
-    await mount([failing]);
-    await waitFor(() => errorState() !== null, "the load error state");
-    expect(document.querySelector("[data-review-load-error-message]")?.textContent).toContain("Out of memory");
+    await mountFailed([failing]);
+    expect(document.querySelector("[data-review-load-error-detail]")?.textContent).toContain("Out of memory");
     expect(document.body.textContent).not.toContain(DEMO_PATH);
+    // The alert carries the reason only, never the form under it.
+    const alert = document.querySelector("[data-review-load-error] [role='alert']");
+    expect(alert?.querySelector("button, textarea")).toBeNull();
+    expect(document.activeElement?.textContent?.trim()).toBe("Retry");
   });
 
   test("Retry loads the diff and opens the review on the real files", async () => {
-    await mount([failing, serving(PATCH)]);
-    await waitFor(() => errorState() !== null, "the load error state");
+    await mountFailed([failing, serving(PATCH)]);
     await act(async () => button("Retry").click());
     await waitFor(() => document.body.textContent?.includes("add-refund-flow") ?? false, "the review to load");
     expect(errorState()).toBeNull();
     expect(document.body.textContent).not.toContain(DEMO_PATH);
   });
 
-  test("feedback and Close still reach the server", async () => {
+  test("after a 5xx, feedback reaches the server with draftGeneration 0 and the agent switch", async () => {
     const posted: Posted[] = [];
-    await mount([failing], posted);
-    await waitFor(() => errorState() !== null, "the load error state");
-    const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
-    await act(async () => {
-      // React tracks the value through the native setter.
-      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set?.call(textarea, "The diff broke; add dist/ to .gitignore");
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    });
+    await mountFailed([failing], posted);
+    saveAgentSwitchSettings({ switchTo: "build" });
+    await typeNote("The diff broke; add dist/ to .gitignore");
     await act(async () => button("Send Feedback").click());
-    await waitFor(() => posted.length === 1, "the feedback post");
-    expect(posted[0].path).toBe("/api/feedback");
-    expect(posted[0].body).toMatchObject({ approved: false, feedback: "The diff broke; add dist/ to .gitignore", annotations: [] });
+    await waitFor(() => decisions(posted).length === 1, "the feedback post");
+    const [sent] = decisions(posted);
+    expect(sent.path).toBe("/api/feedback");
+    // Without a generation the server deletes a saved draft unchecked.
+    expect(sent.body).toMatchObject({
+      draftGeneration: 0,
+      approved: false,
+      feedback: "The diff broke; add dist/ to .gitignore",
+      annotations: [],
+      agentSwitch: "build",
+    });
+    await waitFor(() => document.querySelector("[data-review-load-error='done'] [role='status']") !== null, "the sent state");
+    expect(document.activeElement?.tagName).toBe("H1");
+  });
 
-    if (root) await act(async () => root?.unmount());
-    document.body.replaceChildren();
-    posted.length = 0;
-    await mount([failing], posted);
-    await waitFor(() => errorState() !== null, "the load error state");
+  test("after a 5xx, Close reaches the server with draftGeneration 0", async () => {
+    const posted: Posted[] = [];
+    await mountFailed([failing], posted);
     await act(async () => button("Close review").click());
-    await waitFor(() => posted.length === 1, "the exit post");
-    expect(posted[0].path).toBe("/api/exit");
+    await waitFor(() => decisions(posted).length === 1, "the exit post");
+    expect(decisions(posted)[0].path).toBe("/api/exit");
+    expect(new URLSearchParams(decisions(posted)[0].search).get("draftGeneration")).toBe("0");
+  });
+
+  test("an unreachable server offers Retry only", async () => {
+    await mountFailed([unreachable]);
+    expect(findButton("Retry")).toBeDefined();
+    expect(findButton("Send Feedback")).toBeUndefined();
+    expect(findButton("Close review")).toBeUndefined();
+  });
+
+  test("a 404 (maybe another session on this port) offers Retry only", async () => {
+    await mountFailed([notFound]);
+    expect(findButton("Retry")).toBeDefined();
+    expect(findButton("Send Feedback")).toBeUndefined();
+    expect(findButton("Close review")).toBeUndefined();
+  });
+
+  test("an already decided review says so", async () => {
+    const posted: Posted[] = [];
+    await mountFailed([failing], posted, alreadyDecided);
+    await act(async () => button("Close review").click());
+    await waitFor(() => decisions(posted).length === 1, "the exit post");
+    await waitFor(() => /already decided/i.test(document.body.textContent ?? ""), "the decided message");
+    expect(document.body.textContent).not.toMatch(/may have stopped|isn't running/);
+    expect(errorState()).not.toBeNull();
   });
 });
