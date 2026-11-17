@@ -157,6 +157,22 @@ async function backspace(el: HTMLTextAreaElement) {
   await edit(el, el.value.slice(0, at - 1) + el.value.slice(at), at - 1, 'deleteContentBackward');
 }
 
+/** A row picked with the pointer, then the caret the pick places. */
+async function pick(row: Element | null, type: 'pointerdown' | 'mousedown') {
+  expect(row).not.toBeNull();
+  await act(async () => {
+    if (type === 'pointerdown') row!.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true }));
+    else {
+      row!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+      row!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+    }
+  });
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 0));
+    document.dispatchEvent(new Event('selectionchange'));
+  });
+}
+
 /** Words already in the box (a draft, a paste): no list is open, the caret at the end. */
 async function words(el: HTMLTextAreaElement, text: string) {
   await edit(el, text, text.length, 'insertFromPaste');
@@ -208,6 +224,21 @@ for (const box of [
       await backspace(el);
       expect(skillList()).toBeNull();
     });
+
+    test('a Backspace after picking a skill opens no list', async () => {
+      const el = await box.open();
+      await typeKeys(el, 'use /wri');
+      await pick(document.querySelector('[data-skill-item="write-better"]'), 'pointerdown');
+      expect(el.value).toBe('use /write-better ');
+      expect(skillList()).toBeNull();
+      await backspace(el);
+      expect(el.value).toBe('use /write-better');
+      expect(skillList()).toBeNull();
+      // Typed again at the name, the list is there.
+      await typeKeys(el, 'x');
+      await backspace(el);
+      expect(skillList()).not.toBeNull();
+    });
   });
 }
 
@@ -233,5 +264,26 @@ describe.if(hasDom)('the reply box, @', () => {
     expect(tagList()).not.toBeNull();
     await typeKeys(el, 'la');
     expect(tagList()).not.toBeNull();
+  });
+
+  test('a Backspace that lands back on a picked agent opens no list', async () => {
+    const el = await openReply();
+    await edit(el, 'ping ,', 6, 'insertFromPaste');
+    await act(async () => {
+      el.setSelectionRange(5, 5);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    await typeKeys(el, '@cl');
+    await pick(document.querySelector('[data-tag-option="ses_a"]'), 'mousedown');
+    expect(el.value).toBe('ping @Claude Code ,');
+    // The caret goes past the comma, then one Backspace brings it back to "@Claude Code ", which "Claude Code 2" matches.
+    await act(async () => {
+      el.setSelectionRange(el.value.length, el.value.length);
+      document.dispatchEvent(new Event('selectionchange'));
+    });
+    expect(tagList()).toBeNull();
+    await backspace(el);
+    expect(el.value).toBe('ping @Claude Code ');
+    expect(tagList()).toBeNull();
   });
 });

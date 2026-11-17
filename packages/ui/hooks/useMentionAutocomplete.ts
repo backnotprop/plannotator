@@ -218,6 +218,8 @@ export function useMentionAutocomplete(options: {
         setDismissedStart(trigger.from);
         return;
       }
+      // A picked name is no longer the one being typed: a Backspace after the pick reaches it as a deletion.
+      typedStart.current = null;
       const result = applyMentionPick(text, trigger, person);
       setText(result.text);
       setCaret(result.caret);

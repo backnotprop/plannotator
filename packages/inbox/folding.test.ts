@@ -7,7 +7,7 @@ import { expect, test } from 'bun:test';
 import type { InboxAuthor, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { QUESTION_ANSWERS_HEADING } from '@plannotator/core/question-block';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
-import { SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, keptFirstWords, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
+import { KEPT_CHARS_MAX, SNIPPET_PROMPT_MAX, answerWords, cleanInline, cutAtWord, firstWords, foldSnippet, keptFirstWords, keptFirstWordsChars, lookBoundary, newSinceLook, plainLabel, planFolds, replyWords, snippetText } from './folding';
 
 const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a', name: null };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -276,4 +276,18 @@ test('a long thread’s folded lines read through keptFirstWords say what a fres
   const edited = { ...messages[1]!, body: `Fixed: one charge now.\n${long}` };
   expect(snippetText(foldSnippet(edited, messages, keptFirstWords))).toBe(snippetText(foldSnippet(edited, messages)));
   expect(snippetText(foldSnippet(edited, messages, keptFirstWords)).startsWith('Fixed: one charge now.')).toBe(true);
+});
+
+test('keptFirstWords holds no more than its character cap, however many long bodies a window reads', () => {
+  const plan = (i: number) => `Plan ${i}: move the retry worker.\n${'A long step of the plan, read once. '.repeat(30_000)}`;
+  const count = Math.ceil((3 * KEPT_CHARS_MAX) / plan(0).length);
+  for (let i = 0; i < count; i++) {
+    expect(keptFirstWords(plan(i))).toBe(firstWords(plan(i)));
+    expect(keptFirstWordsChars()).toBeLessThanOrEqual(KEPT_CHARS_MAX);
+  }
+  // A body longer than the cap on its own still gets its words, and is not kept.
+  const huge = `Huge.\n${'x '.repeat(KEPT_CHARS_MAX)}`;
+  const before = keptFirstWordsChars();
+  expect(keptFirstWords(huge)).toBe(firstWords(huge));
+  expect(keptFirstWordsChars()).toBe(before);
 });

@@ -51,12 +51,6 @@ export function useReplyText(store: ReplyText): string {
   return useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 
-/** The words while `on` (null otherwise): the caller re-renders on every change only while it draws them. */
-export function useReplyTextWhile(store: ReplyText, on: boolean): string | null {
-  const read = () => (on ? store.get() : null);
-  return useSyncExternalStore(store.subscribe, read, read);
-}
-
 const holdsWords = (text: string) => text.trim() !== '';
 
 /** Whether the words are more than spaces: re-renders the caller only when that flips. */

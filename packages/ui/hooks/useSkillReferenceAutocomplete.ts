@@ -225,6 +225,8 @@ export function useSkillReferenceAutocomplete(options: {
       if (!trigger || !el) return;
       const item = items[index];
       if (!item) return;
+      // A picked name is no longer the one being typed: a Backspace after the pick reaches it as a deletion.
+      typedStart.current = null;
       if (commands?.includes(item)) {
         // A command: the typed trigger goes, nothing is inserted, and focus is the host's to place.
         const rest = text.slice(0, trigger.start) + text.slice(el.selectionStart);
