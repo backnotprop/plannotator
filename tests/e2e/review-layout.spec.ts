@@ -193,10 +193,38 @@ test('tabs live in the panes: the header never changes, and one tab row from the
     await expect.poll(() => fileHeaderTop(page)).toBe(below);
     expect(await headerShape(page)).toBe(header);
 
-    await row(page, 'routes.ts').click({ button: 'right' });
+    await row(page, 'routes.ts').click();
+    await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toHaveText('routes.ts');
+    await row(page, 'README.md').click({ button: 'right' });
     await page.locator('[data-tree-open-to-side]').click();
     await expect(page.locator('[data-pane="1"] [data-pane-tab]')).toHaveCount(1);
+    await expect(page.locator('[data-pane="1"] [data-pane-tab]')).toHaveText('README.md');
+    await expect(page.locator('[data-pane="1"] [data-file-header]').filter({ visible: true }).first()).toContainText('README.md');
+    await expect(page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]')).toHaveText('routes.ts');
+    await expect(page.locator('[data-pane="0"] [data-file-header]').filter({ visible: true }).first()).toContainText('routes.ts');
     expect(await headerShape(page)).toBe(header);
+  });
+});
+
+test('All changes: after ] and End, Home goes back to the first file', async ({ browser }) => {
+  await withReview(browser, 900, async (page) => {
+    await expect.poll(() => firstCodeTop(page)).not.toBeNull();
+    const scrollTop = () =>
+      page.evaluate(() => {
+        const scroller = [...document.querySelectorAll<HTMLElement>('[data-pane="0"] [data-pane-panel] *')]
+          .filter((el) => el.clientHeight > 0 && el.scrollHeight > el.clientHeight + 10 && /(auto|scroll)/.test(getComputedStyle(el).overflowY))
+          .sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
+        return scroller ? Math.round(scroller.scrollTop) : -1;
+      });
+    const activeTab = page.locator('[data-pane="0"] [data-pane-tab][aria-selected="true"]');
+    await page.locator('[data-pane="0"] [data-pane-panel] diffs-container').first().click({ position: { x: 400, y: 60 } });
+    await page.keyboard.press(']');
+    await expect.poll(scrollTop).toBeGreaterThan(0);
+    await page.keyboard.press('End');
+    await expect(activeTab).toHaveText('bun.lock');
+    await page.keyboard.press('Home');
+    await expect(activeTab).toHaveText('routes.ts');
+    await expect(page.locator('[data-pane="0"] [data-file-header]').filter({ visible: true }).first()).toContainText('routes.ts');
   });
 });
 
@@ -272,9 +300,15 @@ test('two files side by side, the original next to the current, and the layout b
   });
 });
 
-test('closing a tab keeps focus in the window: the next tab, or the tree', async ({ browser }) => {
+test('a double click keeps one tab per file, and closing a tab keeps focus in the window: the next tab, or the tree', async ({ browser }) => {
   await withReview(browser, 900, async (page) => {
+    const tabs = (name: string) => page.locator('[data-pane-tab]', { hasText: new RegExp(`^${name.replace('.', '\\.')}$`) });
     await row(page, 'routes.ts').dblclick();
+    await expect(tabs('routes.ts')).toHaveCount(1);
+    await expect(page.locator('[data-pane-tab][data-preview-tab]')).toHaveCount(0);
+    await row(page, 'README.md').dblclick();
+    await expect(tabs('README.md')).toHaveCount(1);
+    await expect(tabs('routes.ts')).toHaveCount(1);
     await expect.poll(() => page.locator('[data-pane-tab]').count()).toBeGreaterThan(1);
     await page.locator('[data-pane-tab-close]').last().click();
     await expect.poll(() => page.evaluate(() => document.activeElement?.tagName ?? 'BODY')).not.toBe('BODY');

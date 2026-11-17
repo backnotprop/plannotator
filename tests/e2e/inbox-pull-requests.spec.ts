@@ -2114,6 +2114,53 @@ test('the row after the last hunk (approval pr-view-one-surface, 11-07 19:08): n
   }
 });
 
+test('a deleted comment leaves every file flush under the one above, its last line clear of the next header; the diffs follow the rail, a doc first', async ({ browser }) => {
+  await setCodeReview(true);
+  const file = (path: string, name: string) =>
+    `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,23 +1,24 @@\n export function ${name}() {\n-  return null;\n+  const shown = 1;\n+  return shown;\n${Array.from({ length: 20 }, (_, i) => `   // ${name} ${i}\n`).join('')} }\n`;
+  const { context, page } = await stubbedReview(browser, 1440, file('docs/notes.md', 'notes') + file('src/Layout.tsx', 'Layout') + file('src/Profile.tsx', 'Profile') + file('src/Settings.tsx', 'Settings'));
+  try {
+    const review = page.locator('[data-pull-review]');
+    const scroller = review.locator('.ib-gbody');
+    await expect(review.locator('[data-guide-file-shell]')).toHaveCount(4);
+    const railOrder = await review.locator('[data-review-file]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-review-file')!));
+    expect(railOrder).toEqual(['docs/notes.md', 'src/Layout.tsx', 'src/Profile.tsx', 'src/Settings.tsx']);
+    expect(await review.locator('[data-guide-file-shell]').evaluateAll((shells) => shells.map((shell) => shell.getAttribute('data-guide-file-shell')!))).toEqual(railOrder);
+
+    const under = () =>
+      review.locator('[data-guide-file-shell]').evaluateAll((shells) => {
+        const view = shells[0]!.closest('.ib-gbody')!.getBoundingClientRect();
+        const out: Record<string, number> = {};
+        shells.forEach((shell, index) => {
+          const rows = [...(shell.querySelector('diffs-container')?.shadowRoot?.querySelectorAll('[data-line]') ?? [])].map((row) => row.getBoundingClientRect()).filter((box) => box.height > 0);
+          const below = index + 1 < shells.length ? shells[index + 1]!.querySelector('[slot="header-custom"]')?.getBoundingClientRect().top : shell.getBoundingClientRect().bottom;
+          if (rows.length && below !== undefined && below > view.top + 60 && below <= view.bottom + 1) out[shell.getAttribute('data-guide-file-shell')!] = Math.round(below - Math.max(...rows.map((box) => box.bottom)));
+        });
+        const end = shells.at(-1)!.getBoundingClientRect().bottom;
+        if (end <= view.bottom + 1) out.end = Math.round(view.bottom - end);
+        return out;
+      });
+    await expect.poll(async () => Object.values(await under())).toEqual([8]);
+    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await expect.poll(async () => Object.values(await under())).toEqual([8, 8, 0]);
+    await scroller.evaluate((el) => { el.scrollTop = 0; });
+
+    await commentOn(page, 'src/Layout.tsx', 3, 'Name this after what it shows.');
+    await commentOn(page, 'src/Profile.tsx', 2, 'Is one always right here?');
+    await scroller.evaluate((el) => {
+      const shell = el.querySelector('[data-guide-file-shell="src/Profile.tsx"]')!;
+      el.scrollTop += shell.getBoundingClientRect().top - el.getBoundingClientRect().top - 150;
+    });
+    const profile = review.locator('[data-guide-file-shell="src/Profile.tsx"]');
+    await profile.getByText('Is one always right here?').hover();
+    await profile.locator('button[title="Delete"]').filter({ visible: true }).click();
+    await expect(profile.getByText('Is one always right here?')).toHaveCount(0);
+    await expect.poll(under).toEqual({ 'src/Layout.tsx': 8, 'src/Profile.tsx': 8 });
+  } finally {
+    await context.close();
+  }
+});
+
 test("a tooltip on screen does not take a sheet's Escape: ui's on the rail's Viewed circle", async ({ browser }) => {
   const { context, page } = await stubbedReview(browser, 1100, COLLIDING_PATHS_DIFF);
   try {
@@ -2722,7 +2769,9 @@ function seams(review: Locator): Promise<(number | null)[]> {
     shells.slice(1).map((shell, index) => {
       const head = shell.querySelector('[slot="header-custom"]');
       const code = shells[index]!.querySelector('diffs-container');
-      return head && code ? head.getBoundingClientRect().top - code.getBoundingClientRect().bottom : null;
+      const hidden = code?.shadowRoot?.querySelector<HTMLElement>('[data-separator-last]');
+      const room = hidden && getComputedStyle(hidden).visibility === 'hidden' ? hidden.getBoundingClientRect().height : 0;
+      return head && code ? head.getBoundingClientRect().top - (code.getBoundingClientRect().bottom - room) : null;
     }),
   );
 }
