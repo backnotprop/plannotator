@@ -1,8 +1,8 @@
 /*
- * The card's motions, in one place. Each is named and exported (motions.ts):
+ * The card's motions, in one place. Each is named and exported (motions.tsx):
  *   arrive  a change landing in the preview: the new line opens in place, tinted for a moment
  *   breathe the agent mark while it works; the only loop, in phase across cards
- *   settle  a new card comes to rest once, and its unread dot appears
+ *   settle  a new card comes to rest once, and its unread dot appears; settleBatch slides a re-sort
  *   fan     hover or focus fans the sheet behind a document a little further; the front lifts
  *   open    the preview grows into the page, as a shared-element view transition
  * Idle, nothing moves except `breathe`. Under reduced motion nothing moves at all.

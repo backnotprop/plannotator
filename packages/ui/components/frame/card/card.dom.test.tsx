@@ -11,6 +11,8 @@ import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
 const cardModule = hasDom ? await import('./Card') : null;
+const motionModule = hasDom ? await import('./motions') : null;
+const pillModule = hasDom ? await import('./CardUpdatesPill') : null;
 
 let root: Root | null = null;
 let host: HTMLDivElement | null = null;
@@ -288,5 +290,190 @@ describe.skipIf(!hasDom)('CardGrid', () => {
     expect(regular!.className.split(' ')).toContain('max-sm:w-full');
     expect(frame.querySelector('section')!.getAttribute('aria-label')).toBe('tidepool-api');
     void CardGrid;
+  });
+});
+
+describe.skipIf(!hasDom)('action and pinned', () => {
+  test('the action is a sibling of the link in the card and the row, never inside it, and comes after it in tab order', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <Card kind="document" size="regular" title="Plan" href="/p" action={<button type="button">Pin</button>} />
+        <CardRow kind="document" title="Plan" href="/p" action={<button type="button">Pin</button>} />
+      </>,
+    );
+    for (const box of frame.querySelectorAll('[data-frame-card], [data-frame-card-row]')) {
+      const link = box.querySelector('a')!;
+      const button = box.querySelector('button')!;
+      expect(link.contains(button)).toBe(false);
+      expect(button.closest('a')).toBeNull();
+      expect(button.closest('[data-frame-card-action]')).not.toBeNull();
+      expect(link.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(button.closest('[inert]')).toBeNull();
+    }
+  });
+
+  test('pinned adds "pinned" to the spoken name and marks the box, on the card and the row', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <Card kind="document" size="regular" title="Plan" href="/p" fact="Your move" unread pinned />
+        <CardRow kind="document" title="Plan" href="/p" fact="Your move" pinned />
+        <CardRow kind="document" title="Other" href="/o" fact="Your move" />
+      </>,
+    );
+    const [card, row, other] = [...frame.querySelectorAll('a')];
+    expect(card!.getAttribute('aria-label')).toBe('Plan, Your move, new, pinned');
+    expect(row!.getAttribute('aria-label')).toBe('Plan, Your move, pinned');
+    expect(other!.getAttribute('aria-label')).toBe('Other, Your move');
+    expect(frame.querySelectorAll('[data-frame-card-pinned]').length).toBe(2);
+  });
+});
+
+describe.skipIf(!hasDom)('CardRow', () => {
+  test('44 px tall, 52 on a phone; one link; the title on one line, the card title up to two', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="page" title="Rebuild checkout as one page" href="/c" secondary="kestrel-web" time="2026-11-15T10:00:00Z" />
+        <Card kind="page" size="regular" title="Rebuild checkout as one page" href="/c" />
+      </>,
+    );
+    const row = frame.querySelector<HTMLElement>('[data-frame-card-row]')!;
+    const classes = row.className.split(' ');
+    expect(classes).toContain('h-11');
+    expect(classes).toContain('max-sm:h-13');
+    expect(row.querySelectorAll('a').length).toBe(1);
+    expect(row.querySelector('[data-frame-card-title]')!.className.split(' ')).toContain('truncate');
+    expect(row.querySelector('[data-frame-card-secondary]')!.textContent).toBe('kestrel-web');
+    expect(row.querySelector('time')).not.toBeNull();
+    const cardTitle = frame.querySelector('[data-frame-card] [data-frame-card-title]')!;
+    expect(cardTitle.className.split(' ')).toContain('line-clamp-2');
+  });
+
+  test('the thumbnail is 36x27 on the kind ground: the given thumb as is, else the face drawn small with no sheet behind', () => {
+    const { CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <CardRow kind="document" title="Own thumb" href="/a" thumb={<b data-testid="thumb">t</b>} face={<p>face</p>} />
+        <CardRow kind="document" title="Small face" href="/b" face={<p data-testid="small">face</p>} />
+      </>,
+    );
+    nearScreen();
+    const [own, small] = [...frame.querySelectorAll('[data-frame-card-thumb]')];
+    for (const thumb of [own, small]) {
+      expect(thumb!.className).toContain('h-[27px]');
+      expect(thumb!.className).toContain('w-9');
+      expect(thumb!.hasAttribute('inert')).toBe(true);
+    }
+    expect(own!.querySelector('[data-testid="thumb"]')).not.toBeNull();
+    expect(own!.querySelector('[data-frame-card-stage]')).toBeNull();
+    expect(small!.querySelector('[data-testid="small"]')).not.toBeNull();
+    expect(small!.querySelector('[data-frame-card-back]')).toBeNull();
+    expect((small as HTMLElement).style.getPropertyValue('--frame-card-scale')).toBe(String(36 / 420));
+  });
+});
+
+describe.skipIf(!hasDom)('motion API', () => {
+  const realAnimate = hasDom ? Element.prototype.animate : undefined;
+  const realMatch = hasDom ? window.matchMedia : undefined;
+  let animated: Element[] = [];
+
+  function reduce(on: boolean) {
+    window.matchMedia = ((query: string) => ({
+      matches: on && query.includes('reduce'),
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    })) as unknown as typeof window.matchMedia;
+  }
+
+  beforeEach(() => {
+    animated = [];
+    Element.prototype.animate = function (this: Element) {
+      animated.push(this);
+      return { cancel() {}, finished: Promise.resolve() } as unknown as Animation;
+    } as typeof Element.prototype.animate;
+  });
+
+  afterEach(() => {
+    Element.prototype.animate = realAnimate!;
+    window.matchMedia = realMatch!;
+  });
+
+  function list(order: string[]) {
+    const ul = document.createElement('ul');
+    for (const name of order) {
+      const li = document.createElement('li');
+      li.dataset.name = name;
+      ul.appendChild(li);
+    }
+    document.body.appendChild(ul);
+    return ul;
+  }
+
+  test('settleBatch measures, runs mutate once, and slides what moved', () => {
+    reduce(false);
+    const { settleBatch } = motionModule!;
+    const ul = list(['a', 'b', 'c']);
+    let tops: Record<string, number> = { a: 0, b: 50, c: 100 };
+    for (const li of ul.children) (li as HTMLElement).getBoundingClientRect = () => ({ left: 0, top: tops[(li as HTMLElement).dataset.name!]! }) as DOMRect;
+    let calls = 0;
+    settleBatch(ul, () => {
+      calls += 1;
+      ul.prepend(ul.lastElementChild!);
+      tops = { c: 0, a: 50, b: 100 };
+    });
+    expect(calls).toBe(1);
+    expect(animated.length).toBe(3);
+    ul.remove();
+  });
+
+  test('under reduced motion settleBatch only runs mutate, and arrive does nothing', () => {
+    reduce(true);
+    const { settleBatch, arrive } = motionModule!;
+    const ul = list(['a', 'b']);
+    let calls = 0;
+    settleBatch(ul, () => {
+      calls += 1;
+      ul.prepend(ul.lastElementChild!);
+    });
+    arrive(ul.firstElementChild as HTMLElement);
+    expect(calls).toBe(1);
+    expect([...ul.children].map((li) => (li as HTMLElement).dataset.name)).toEqual(['b', 'a']);
+    expect(animated).toEqual([]);
+    ul.remove();
+  });
+
+  test('arrive animates only the element that landed, never the card around it', () => {
+    reduce(false);
+    const { Card } = cardModule!;
+    const { arrive } = motionModule!;
+    const frame = mount(<Card kind="page" size="regular" title="Checkout" href="/c" face={<div><span data-testid="row">Socks</span></div>} />);
+    nearScreen();
+    const row = frame.querySelector<HTMLElement>('[data-testid="row"]')!;
+    arrive(row);
+    expect(animated.length).toBeGreaterThan(0);
+    expect(animated.every((element) => element === row)).toBe(true);
+  });
+});
+
+describe.skipIf(!hasDom)('CardUpdatesPill', () => {
+  test('a real button reading "1 update · Show" or "N updates · Show", announced politely; nothing with no updates', () => {
+    const { CardUpdatesPill } = pillModule!;
+    let shown = 0;
+    const frame = mount(<CardUpdatesPill count={1} onShow={() => (shown += 1)} />);
+    const button = frame.querySelector('button')!;
+    expect(button.getAttribute('type')).toBe('button');
+    expect(button.textContent).toBe('1 update·Show');
+    const live = frame.querySelector('[aria-live="polite"]')!;
+    expect(live.textContent).toBe('1 update');
+    act(() => button.click());
+    expect(shown).toBe(1);
+    act(() => root!.render(<CardUpdatesPill count={3} onShow={() => {}} />));
+    expect(frame.querySelector('button')!.textContent).toBe('3 updates·Show');
+    expect(frame.querySelector('[aria-live="polite"]')!.textContent).toBe('3 updates');
+    act(() => root!.render(<CardUpdatesPill count={0} onShow={() => {}} />));
+    expect(frame.querySelector('button')).toBeNull();
   });
 });

@@ -63,6 +63,7 @@ export { Button as FrameButton, buttonVariants as frameButtonVariants } from "./
 export {
   Card,
   CardFaceDocument,
+  CardRow,
   CardGrid,
   CardGroup,
   CardGroups,
@@ -74,6 +75,8 @@ export {
   type CardKind,
   type CardLinkProps,
   type CardProps,
+  type CardRowProps,
   type CardSize,
 } from "./card/Card";
-export { CARD_MOTIONS, CardArrival, flipReorder, type CardMotion } from "./card/motions";
+export { CARD_MOTIONS, CardArrival, arrive, settleBatch, type CardMotion } from "./card/motions";
+export { CardUpdatesPill } from "./card/CardUpdatesPill";

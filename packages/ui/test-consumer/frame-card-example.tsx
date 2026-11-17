@@ -1,9 +1,25 @@
-import { Card, CardArrival, CardFaceDocument, CardGroup, CardGroups, CardGrid } from "../components/frame";
+import { useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
+
+import {
+  Card,
+  CardArrival,
+  CardFaceDocument,
+  CardGroup,
+  CardGroups,
+  CardGrid,
+  CardRow,
+  CardUpdatesPill,
+  settleBatch,
+  type CardImageFace,
+  type CardKind,
+} from "../components/frame";
 
 /**
  * A home of plans drawn with the frame's card: the work in progress as large
- * cards, then each project's plans as regular ones. Every face here is made
- * up; a host draws a face only from what the viewer may read.
+ * cards, then each project's plans as regular ones, and the same plans as a
+ * list. Every face here is made up; a host draws a face only from what the
+ * viewer may read.
  */
 
 const ago = (days: number) => new Date(Date.UTC(2026, 10, 15 - days, 10, 0));
@@ -141,65 +157,170 @@ function RetryFace() {
   );
 }
 
+interface Plan {
+  readonly id: string;
+  readonly kind: CardKind;
+  readonly title: string;
+  readonly project: string;
+  readonly face?: ReactNode | CardImageFace;
+  readonly fact?: string;
+  readonly working?: boolean;
+  readonly unread?: boolean;
+  readonly time?: Date;
+}
+
+const NOW: readonly Plan[] = [
+  {
+    id: "redis",
+    kind: "document",
+    title: "Move sessions from signed cookies to Redis",
+    project: "tidepool-api",
+    fact: "Your move",
+    unread: true,
+    face: <RedisFace />,
+  },
+  {
+    id: "checkout",
+    kind: "page",
+    title: "Rebuild checkout as one page, with the order summary beside the form",
+    project: "kestrel-web",
+    fact: "Maya Chen is working",
+    working: true,
+    face: <CheckoutFace />,
+  },
+  {
+    id: "limits",
+    kind: "data",
+    title: "Rate limits per API key",
+    project: "tidepool-api",
+    fact: "Alex Rivera is working",
+    working: true,
+    face: <RowsFace />,
+  },
+];
+
+const EARLIER: readonly Plan[] = [
+  { id: "retry", kind: "document", title: "Retry policy for webhook delivery", project: "tidepool-api", unread: true, time: ago(0), face: <RetryFace /> },
+  {
+    id: "flags",
+    kind: "document",
+    title: "Per-tenant feature flags, so a beta can ship to one customer without reaching every other tenant on the shared cluster",
+    project: "kestrel-web",
+    time: ago(1),
+    face: (
+      <CardFaceDocument title="Per-tenant feature flags">
+        <h1>Per-tenant feature flags</h1>
+        <p>A beta should reach one customer without touching every other tenant on the shared cluster.</p>
+      </CardFaceDocument>
+    ),
+  },
+  { id: "tokens", kind: "image", title: "Dark mode tokens for the dashboard", project: "kestrel-web", time: ago(4), face: { src: SWATCHES } },
+  { id: "search", kind: "document", title: "Search index for the docs site", project: "kestrel-web", time: ago(6) },
+];
+
+function PinMark({ on }: { readonly on: boolean }) {
+  return (
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.4">
+      <path d="M6 2h4l-.5 4 2.5 2.5V10H4V8.5L6.5 6 6 2Zm2 8v4" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function PinButton({ title, pinned, onToggle }: { readonly title: string; readonly pinned: boolean; readonly onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Pin ${title}`}
+      aria-pressed={pinned}
+      onClick={onToggle}
+      className="grid size-7 place-items-center rounded-md bg-card text-frame-muted-fg shadow-[0_0_0_1px_var(--frame-card-ring)] hover:text-foreground aria-pressed:text-primary"
+    >
+      <PinMark on={pinned} />
+    </button>
+  );
+}
+
 export function PlansHomeCardsExample() {
+  const [pins, setPins] = useState<ReadonlySet<string>>(() => new Set(["limits"]));
+  const [updates, setUpdates] = useState(2);
+  const [now, setNow] = useState<readonly Plan[]>(NOW);
+  const grid = useRef<HTMLUListElement>(null);
+  const pinned = (plan: Plan) => pins.has(plan.id);
+  const togglePin = (id: string) =>
+    setPins((current) => {
+      const next = new Set(current);
+      if (!next.delete(id)) next.add(id);
+      return next;
+    });
+  const action = (plan: Plan) => <PinButton title={plan.title} pinned={pinned(plan)} onToggle={() => togglePin(plan.id)} />;
+  const showUpdates = () => {
+    const apply = () =>
+      flushSync(() => {
+        setNow((current) => [...current.slice(1), current[0]!]);
+        setUpdates(0);
+      });
+    if (grid.current === null) apply();
+    else settleBatch(grid.current, apply);
+  };
+  const card = (plan: Plan, size: "large" | "regular") => (
+    <Card
+      key={plan.id}
+      kind={plan.kind}
+      size={size}
+      title={plan.title}
+      href={`#${plan.id}`}
+      fact={plan.fact}
+      factMark={plan.working ? <AgentMark /> : undefined}
+      working={plan.working}
+      unread={plan.unread}
+      time={plan.time}
+      face={plan.face}
+      pinned={pinned(plan)}
+      action={action(plan)}
+    />
+  );
+  const row = (plan: Plan) => (
+    <CardRow
+      key={plan.id}
+      kind={plan.kind}
+      title={plan.title}
+      href={`#${plan.id}`}
+      fact={plan.fact}
+      factMark={plan.working ? <AgentMark /> : undefined}
+      working={plan.working}
+      unread={plan.unread}
+      time={plan.time}
+      face={plan.face}
+      secondary={plan.project}
+      pinned={pinned(plan)}
+      action={action(plan)}
+    />
+  );
   return (
     <div className="flex flex-col gap-14 p-6 sm:p-12">
       <section className="flex flex-col gap-4">
-        <h2 className="text-[13px] font-medium leading-5 text-frame-muted-fg">Now</h2>
-        <CardGrid label="Now">
-          <Card
-            kind="document"
-            size="large"
-            title="Move sessions from signed cookies to Redis"
-            href="#redis"
-            fact="Your move"
-            unread
-            face={<RedisFace />}
-          />
-          <Card
-            kind="page"
-            size="large"
-            title="Rebuild checkout as one page, with the order summary beside the form"
-            href="#checkout"
-            fact="Maya Chen is working"
-            factMark={<AgentMark />}
-            working
-            face={<CheckoutFace />}
-          />
-          <Card
-            kind="data"
-            size="large"
-            title="Rate limits per API key"
-            href="#limits"
-            fact="Alex Rivera is working"
-            factMark={<AgentMark />}
-            working
-            face={<RowsFace />}
-          />
+        <div className="flex items-center justify-between gap-4">
+          <h2 className="text-[13px] font-medium leading-5 text-frame-muted-fg">Now</h2>
+          <CardUpdatesPill count={updates} onShow={showUpdates} />
+        </div>
+        <CardGrid label="Now" ref={grid}>
+          {now.map((plan) => card(plan, "large"))}
         </CardGrid>
       </section>
       <CardGroups>
-        <CardGroup label="tidepool-api">
-          <Card kind="document" size="regular" title="Retry policy for webhook delivery" href="#retry" unread time={ago(0)} face={<RetryFace />} />
-        </CardGroup>
-        <CardGroup label="kestrel-web">
-          <Card
-            kind="document"
-            size="regular"
-            title="Per-tenant feature flags, so a beta can ship to one customer without reaching every other tenant on the shared cluster"
-            href="#flags"
-            time={ago(1)}
-            face={
-              <CardFaceDocument title="Per-tenant feature flags">
-                <h1>Per-tenant feature flags</h1>
-                <p>A beta should reach one customer without touching every other tenant on the shared cluster.</p>
-              </CardFaceDocument>
-            }
-          />
-          <Card kind="image" size="regular" title="Dark mode tokens for the dashboard" href="#tokens" time={ago(4)} face={{ src: SWATCHES }} />
-          <Card kind="document" size="regular" title="Search index for the docs site" href="#search" time={ago(6)} />
-        </CardGroup>
+        <CardGroup label="tidepool-api">{EARLIER.filter((plan) => plan.project === "tidepool-api").map((plan) => card(plan, "regular"))}</CardGroup>
+        <CardGroup label="kestrel-web">{EARLIER.filter((plan) => plan.project === "kestrel-web").map((plan) => card(plan, "regular"))}</CardGroup>
       </CardGroups>
+      <section className="flex max-w-[960px] flex-col gap-1">
+        <h2 className="px-2 text-[13px] font-medium leading-7 text-frame-muted-fg">The same plans as a list</h2>
+        <div role="list" aria-label="All plans" className="flex flex-col">
+          {[...NOW, ...EARLIER].map((plan) => (
+            <div role="listitem" key={plan.id}>
+              {row(plan)}
+            </div>
+          ))}
+        </div>
+      </section>
     </div>
   );
 }

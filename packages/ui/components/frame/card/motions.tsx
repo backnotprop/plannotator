@@ -26,30 +26,66 @@ export function cardDurationMs(value: string, fallback: number): number {
   return text.endsWith("ms") ? number : text.endsWith("s") ? number * 1000 : number;
 }
 
+function cardTiming(element: Element, name: string, fallback: number) {
+  const style = getComputedStyle(element);
+  return {
+    duration: cardDurationMs(style.getPropertyValue(name), fallback),
+    easing: style.getPropertyValue("--frame-card-ease").trim() || "cubic-bezier(0.22, 1, 0.36, 1)",
+  };
+}
+
 /**
- * Re-sort without a jump (FLIP). Call it with the list element before the
- * order changes, and call what it returns once the new order is in the DOM
- * (a layout effect): each child that moved slides from its old place, with
- * `settle`'s duration and ease. Under reduced motion the returned call does nothing.
+ * `settle` for a batch of changes (a re-sort, new cards, cards leaving):
+ * measures every child of `container`, runs the host's `mutate` once, then
+ * slides each child that moved from its old place and brings each new one
+ * down from just above, with `settle`'s duration and ease (FLIP). `mutate`
+ * must leave the new order in the DOM when it returns (in React, wrap the
+ * state change in `flushSync`). Under reduced motion it only runs `mutate`.
+ * The card never re-sorts itself.
  */
-export function flipReorder(container: HTMLElement): () => void {
+export function settleBatch(container: HTMLElement, mutate: () => void): void {
+  if (reducedMotion()) {
+    mutate();
+    return;
+  }
   const first = new Map<Element, DOMRect>();
   for (const child of container.children) first.set(child, child.getBoundingClientRect());
-  return () => {
-    if (reducedMotion()) return;
-    const style = getComputedStyle(container);
-    const duration = cardDurationMs(style.getPropertyValue("--frame-card-settle-duration"), 320);
-    const easing = style.getPropertyValue("--frame-card-ease").trim() || "cubic-bezier(0.22, 1, 0.36, 1)";
-    for (const child of container.children) {
-      const before = first.get(child);
-      if (before === undefined || typeof child.animate !== "function") continue;
-      const after = child.getBoundingClientRect();
-      const dx = before.left - after.left;
-      const dy = before.top - after.top;
-      if (dx === 0 && dy === 0) continue;
-      child.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration, easing });
+  mutate();
+  const { duration, easing } = cardTiming(container, "--frame-card-settle-duration", 320);
+  const offset = cardDurationMs(getComputedStyle(container).getPropertyValue("--frame-card-settle-offset"), -4);
+  for (const child of container.children) {
+    if (typeof child.animate !== "function") continue;
+    const before = first.get(child);
+    if (before === undefined) {
+      child.animate([{ transform: `translateY(${offset}px)` }, { transform: "none" }], { duration, easing });
+      continue;
     }
-  };
+    const after = child.getBoundingClientRect();
+    const dx = before.left - after.left;
+    const dy = before.top - after.top;
+    if (dx === 0 && dy === 0) continue;
+    child.animate([{ transform: `translate(${dx}px, ${dy}px)` }, { transform: "none" }], { duration, easing });
+  }
+}
+
+/**
+ * `arrive` for one element the host just put inside a face (a line, a row):
+ * it opens in place and is tinted for a moment where it landed. Only that
+ * element animates; the card never moves. Under reduced motion it does nothing.
+ */
+export function arrive(element: HTMLElement): void {
+  if (reducedMotion() || typeof element.animate !== "function") return;
+  const style = getComputedStyle(element);
+  const ease = style.getPropertyValue("--frame-card-ease").trim() || "cubic-bezier(0.22, 1, 0.36, 1)";
+  const open = cardDurationMs(style.getPropertyValue("--frame-card-arrive-open-duration"), 260);
+  const fade = cardDurationMs(style.getPropertyValue("--frame-card-arrive-fade-duration"), 200);
+  const delay = cardDurationMs(style.getPropertyValue("--frame-card-arrive-fade-delay"), 60);
+  const tint = cardDurationMs(style.getPropertyValue("--frame-card-arrive-tint-duration"), 1600);
+  const color = style.getPropertyValue("--frame-card-arrive-tint").trim() || "color-mix(in oklch, var(--primary) 18%, transparent)";
+  const height = element.getBoundingClientRect().height;
+  element.animate([{ height: "0px", overflow: "hidden" }, { height: `${height}px`, overflow: "hidden" }], { duration: open, easing: ease });
+  element.animate([{ opacity: 0 }, { opacity: 1 }], { duration: fade, delay, easing: "ease-out", fill: "backwards" });
+  element.animate([{ backgroundColor: color }, { backgroundColor: "transparent" }], { duration: tint, easing: "ease-out" });
 }
 
 /** `arrive`: wrap a line or row the agent just wrote into a face; it opens in place and is tinted for a moment. */

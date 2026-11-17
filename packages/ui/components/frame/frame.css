@@ -291,6 +291,30 @@
   bottom: -10px;
   border-radius: 6px 6px 0 0;
 }
+[data-frame-card-thumb] {
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 7%, transparent);
+}
+
+[data-frame-card-row]:hover {
+  background: var(--frame-surface-hover);
+}
+[data-frame-card-row]:has(:is(a, [href]):focus-visible) {
+  background: color-mix(in oklch, var(--primary) 12%, transparent);
+}
+
+/* The host's action: shown on hover and focus, always on touch and while pinned */
+[data-frame-card-action] {
+  opacity: 0;
+}
+:is([data-frame-card], [data-frame-card-row]):is(:hover, :focus-within, [data-frame-card-pinned]) [data-frame-card-action] {
+  opacity: 1;
+}
+@media (hover: none) {
+  [data-frame-card-action] {
+    opacity: 1;
+  }
+}
+
 [data-frame-card-blank] {
   background: transparent;
   box-shadow: none;
