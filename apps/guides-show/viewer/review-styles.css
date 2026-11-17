@@ -12,6 +12,6 @@
 @source not "../../../packages/review-editor/components/FileTree.tsx";
 @source not "../../../packages/review-editor/components/ChangesTreeView.tsx";
 @source not "../../../packages/review-editor/components/RepoTreeView.tsx";
-@source not "../../../packages/review-editor/components/pierreRows.tsx";
+@source not "../../../packages/review-editor/components/treeRows.tsx";
 @source not "../../../packages/review-editor/components/SectionsPanel.tsx";
 @source not "../../../packages/review-editor/components/CommitsPanel.tsx";

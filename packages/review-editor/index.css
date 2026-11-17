@@ -2152,6 +2152,7 @@ diffs-container {
   --sidebar-fill-strong: color-mix(in oklab, var(--foreground) 9%, transparent);
   --sidebar-line: color-mix(in oklab, var(--foreground) 9%, transparent);
   --sidebar-text-tertiary: var(--muted-foreground);
+  --sidebar-row-fg: color-mix(in oklab, var(--foreground) 88%, var(--background));
   background: var(--background);
   border-right-color: color-mix(in oklab, var(--border) 50%, transparent);
 }
@@ -2417,6 +2418,145 @@ diffs-container {
   .panel-heading-chevron {
     transition: none;
   }
+}
+
+.review-sidebar :is([data-review-panel-header], [data-review-views-nav], [data-panel-controls-row], [data-panel-search-field]) .font-mono {
+  font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
+
+.review-sidebar [data-go-to-file-button],
+.review-sidebar .panel-utility-button {
+  border-radius: 4px;
+}
+
+.review-sidebar :is([data-go-to-file-button], [data-panel-view], .panel-utility-button) svg {
+  width: 16px;
+  height: 16px;
+}
+
+.review-sidebar [data-panel-sentence] {
+  margin-top: 4px;
+  padding-inline: 0;
+  column-gap: 0;
+  line-height: 28px;
+  font-size: 13px;
+  color: var(--muted-foreground);
+}
+
+.review-sidebar [data-panel-sentence] button {
+  height: 28px;
+  min-height: 28px;
+  margin: 0;
+  padding-inline: 8px;
+  gap: 4px;
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 28px;
+  font-weight: 500;
+  color: var(--foreground);
+  text-decoration-line: none;
+}
+
+.review-sidebar [data-panel-sentence] button[data-popup-open] {
+  background: var(--sidebar-fill-strong);
+}
+
+.review-sidebar [data-panel-sentence] button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.review-sidebar [data-nav-row] {
+  height: 28px;
+  padding-inline: 8px;
+  gap: 4px;
+  border-radius: 4px;
+  font-weight: 400;
+}
+
+.review-sidebar [data-nav-row]:not([aria-current]):not(:hover) {
+  color: var(--sidebar-row-fg);
+}
+
+.review-sidebar [data-nav-row] > :first-child {
+  width: 16px;
+  height: 16px;
+  color: var(--muted-foreground);
+}
+
+.review-sidebar [data-nav-count] {
+  margin-left: auto;
+  padding: 0;
+  background: none;
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.review-sidebar [data-nav-count]:not(.text-warning) {
+  color: var(--muted-foreground);
+}
+
+.review-sidebar [data-review-panel-list] {
+  padding-bottom: 4px;
+}
+
+.review-sidebar [data-review-sticky-tools] {
+  padding-bottom: 0;
+}
+
+.review-sidebar [data-panel-controls-row] {
+  min-height: 28px;
+}
+
+.review-sidebar [data-tree-scope] {
+  height: 28px;
+  padding-left: 8px;
+  padding-right: 8px;
+  border-radius: 4px;
+  font-weight: 400;
+}
+
+.review-sidebar [data-tree-scope="all"] {
+  padding-right: 10px;
+}
+
+.review-sidebar [data-tree-scope="all"] [data-repo-listing-dot] {
+  top: 6px;
+  right: 3px;
+}
+
+.review-sidebar [data-tree-scope]:not([aria-pressed="true"]):not(:hover) {
+  color: var(--sidebar-row-fg);
+}
+
+.review-sidebar [data-panel-tools] {
+  margin-right: 4px;
+}
+
+.review-sidebar [data-panel-search-field] {
+  --panel-header-h: 28px;
+  margin-top: 4px;
+  padding-inline: 0;
+  border-bottom: 0;
+}
+
+.review-sidebar [data-panel-search-field] input {
+  height: 28px;
+  padding-left: 28px;
+  border-radius: 4px;
+  background: var(--sidebar-fill);
+  font-size: 13px;
+}
+
+.review-sidebar [data-panel-search-field] input + div {
+  right: 6px;
+}
+
+.review-sidebar [data-panel-search-field] .relative > svg:first-child {
+  width: 16px;
+  height: 16px;
 }
 
 html:has([data-pn-compact-touch-layout='true']) :is(.review-sidebar .file-tree-item, .review-sidebar .review-folder-row, .review-sidebar .panel-section-heading, .review-sidebar [data-nav-row]) {

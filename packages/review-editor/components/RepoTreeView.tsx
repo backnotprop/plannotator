@@ -6,7 +6,8 @@ import type { DiffFile } from '../types';
 import type { RepoFilesState } from '../hooks/useRepoFiles';
 import { initialRepoExpansion } from '../utils/repoTree';
 import { prefetchRepoFile } from '../hooks/useRepoFileText';
-import { ROW_ICONS, TREE_ROW_HEIGHT, TreeRowMenu, leadColumnsFor, ancestorsOf, fileRowParts, gitStatusFor, hasBadge, observeTreeName, stageColumnShown, tightRow, type FileRowState } from './pierreRows';
+import { TreeRowMenu, ancestorsOf, countParts, fileRowParts, folderLineCounts, gitStatusFor, notePart, type FileRowState } from './treeRows';
+import { treeLook } from './treeLook';
 
 type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 
@@ -16,13 +17,10 @@ export interface RepoTreeHandle {
 
 interface RepoTreeViewProps extends FileRowState {
   touch?: boolean;
-  compact?: boolean;
   repo: ReadyRepoFiles;
   loadDir: (dir: string) => void;
   files: DiffFile[];
   activePath: string | null;
-  showStageControls: boolean;
-  onToggleViewed?: (path: string) => void;
   onSelectFile: (index: number) => void;
   onDoubleClickFile?: (index: number) => void;
   onOpenRepoFile?: (path: string, options: { pin: boolean }) => void;
@@ -60,23 +58,12 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
   const changedPaths = useMemo(() => files.map((file) => file.path), [files]);
   const [loading, setLoading] = useState<ReadonlySet<string>>(() => new Set());
   const paths = useMemo(() => listPaths(repo, changedPaths, loading), [repo, changedPaths, loading]);
-  const stageColumn = stageColumnShown(props, props.showStageControls);
-  const columns = useMemo(() => {
-    let add = 0;
-    let del = 0;
-    let badge = Object.keys(repo.onDisk).length > 0;
-    for (const file of files) {
-      add = Math.max(add, file.additions);
-      del = Math.max(del, file.deletions);
-      if (!badge && hasBadge(file, props)) badge = true;
-    }
-    if (!badge) for (const count of props.annotationCounts.values()) if (count > 0) badge = true;
-    return { add, del, badge };
-  }, [files, repo.onDisk, props.annotationCounts, props.markdownPreviewedPaths, props.threadCount]);
 
+  const folderCounts = useRef(new Map<string, { additions: number; deletions: number }>());
+  folderCounts.current = useMemo(() => folderLineCounts(files), [files]);
   const lastOpened = useRef<string | null>(null);
-  const live = useRef({ props, changedIndex, stageColumn, badge: columns.badge });
-  live.current = { props, changedIndex, stageColumn, badge: columns.badge };
+  const live = useRef({ props, changedIndex });
+  live.current = { props, changedIndex };
 
   const ensureLoaded = useCallback((dir: string) => {
     const { props: p } = live.current;
@@ -94,36 +81,20 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     });
   }, [repo.dirs]);
 
-  const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null =>
-    tightRow(rowParts(context)), []);
+  const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null => rowParts(context), []);
 
   const rowParts = ({ row }: FileTreeRowDecorationContext): FileTreeRowParts | null => {
-    if (row.kind === 'directory') return null;
-    const { props: p, changedIndex: index, stageColumn: withStage } = live.current;
+    const { props: p, changedIndex: index } = live.current;
+    if (row.kind === 'directory') {
+      const counts = folderCounts.current.get(dirPath(row.path));
+      return counts ? { trail: countParts(counts.additions, counts.deletions) } : null;
+    }
     if (row.name === LOADING) return { tone: 'loading' };
     const at = index.get(row.path);
     const onDisk = p.repo.onDisk[row.path];
-    if (at !== undefined) {
-      const parts = fileRowParts(p.files[at], p, withStage, withStage && !!p.compact);
-      if (onDisk && parts.trail) parts.trail = [{ text: '\u25cf', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] }, ...parts.trail.slice(1)];
-      return parts;
-    }
-    const notes = p.annotationCounts.get(row.path) ?? 0;
-    const lead = [...(p.showViewedControls ? [null] : []), ...(withStage && p.compact ? [null] : [])];
-    return {
-      tone: 'repo',
-      title: row.path,
-      lead,
-      trail: [
-        onDisk
-          ? { text: '●', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] }
-          : notes > 0
-            ? { text: String(notes), color: 'var(--primary)', title: `${notes} comment${notes === 1 ? '' : 's'}` }
-            : null,
-        null,
-        null,
-      ],
-    };
+    const mark = onDisk ? { text: '\u25cf', color: 'var(--warning)', title: ON_DISK_TITLES[onDisk] } : notePart(row.path, p);
+    if (at !== undefined) return fileRowParts(p.files[at], p, mark);
+    return { tone: 'repo', title: row.path, trail: mark ? [mark] : [] };
   };
 
   const gitStatus = useMemo(() => {
@@ -144,13 +115,9 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     initialExpansion: 'closed',
     flattenEmptyDirectories: false,
     initialExpandedPaths: initialExpanded,
-    itemHeight: props.touch ? 44 : TREE_ROW_HEIGHT,
-    icons: { set: 'minimal', colored: false, spriteSheet: ROW_ICONS },
+    ...treeLook(!!props.touch),
     gitStatus,
-    composition: { contextMenu: { triggerMode: 'right-click' } },
     onDirectoryExpand: ensureLoaded,
-    search: true,
-    fileTreeSearchMode: 'expand-matches',
     onSelectionChange: (selected) => {
       const { props: p, changedIndex: index } = live.current;
       const last = selected[selected.length - 1];
@@ -164,15 +131,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       }
     },
     rows: {
-      gitStatusPlacement: 'end',
-      nameTruncation: 'keep-tail',
-      observeName: observeTreeName,
       renderParts,
-      onPartClick: ({ partId, path }) => {
-        const { props: p } = live.current;
-        if (partId === 'viewed') p.onToggleViewed?.(path);
-        if (partId === 'stage' || partId === 'unstage') p.onStageFile?.(path);
-      },
       onDoubleClick: ({ path }) => {
         const { props: p, changedIndex: index } = live.current;
         const at = index.get(path);
@@ -212,7 +171,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
 
   useEffect(() => {
     model.refreshRows();
-  }, [model, props.viewedFiles, props.stagedFiles, props.stagingFile, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.showStageControls, repo.onDisk, columns, props.compact]);
+  }, [model, props.viewedFiles, props.annotationCounts, props.markdownPreviewedPaths, props.showViewedControls, props.threadCount, repo.onDisk, files]);
 
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
@@ -276,15 +235,13 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     },
   }), [model, gitStatus, ensureLoaded]);
 
-  const leadColumns = leadColumnsFor(props.showViewedControls, stageColumn && !!props.compact);
-
   return (
     <PierreFileTree
       model={model}
-      className="review-changes-tree"
+      className="review-file-tree"
       data-repo-file-tree=""
       aria-label="All files"
-      style={{ '--trees-row-lead-columns': leadColumns, height: '100%' } as React.CSSProperties}
+      style={{ height: '100%' }}
       renderContextMenu={(item, context) =>
         item.kind === 'file' ? <TreeRowMenu path={item.path} repoRoot={live.current.props.repoRoot} close={context.close} anchor={context.anchorRect} /> : null
       }

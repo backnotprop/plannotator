@@ -6229,7 +6229,6 @@ const ReviewApp: React.FC = () => {
                 onDoubleClickFile={(index) => completeNavigatorSelection(() => handleFilePinned(index))}
                 annotations={allAnnotations}
                 viewedFiles={viewedFiles}
-                onToggleViewed={handleToggleViewed}
                 hideViewedFiles={hideViewedFiles}
                 onToggleHideViewed={() => setHideViewedFiles(prev => !prev)}
                 showViewedControls={reviewShowViewedControls}
@@ -6270,8 +6269,6 @@ const ReviewApp: React.FC = () => {
                 onStepSearchMatch={hasSearchableFiles ? stepSearchMatch : undefined}
                 repoRoot={prMetadata ? null : (activeWorktreePath ?? agentCwd ?? gitContext?.cwd ?? null)}
                 sinceBaseSections={activeDiffBase === 'since-base' ? sections : null}
-                onStageFile={canStageFiles ? stageFile : undefined}
-                stagingFile={stagingFile}
                 snapshotId={snapshotId}
               />
             </ReviewNavigatorContainer>

@@ -4,8 +4,8 @@
  * header itself is covered by ReviewPanelHeader.test.tsx).
  *
  * Regressions guarded:
- *  - All files losing the changed files' own rows (viewed circle, letter,
- *    +/-), or a changed file the new side deletes dropping out of the tree;
+ *  - All files losing the changed files' own rows (letter, +/-, folder
+ *    totals), or a changed file the new side deletes dropping out of the tree;
  *  - folders opening anything but the paths that lead to changes;
  *  - the list rendering every row of a big repository (it must be virtual);
  *  - a lazy listing never asking for a folder that is opened;
@@ -103,7 +103,7 @@ const visibleRows = (el: HTMLElement) =>
   [...repoShadow(el).querySelectorAll<HTMLElement>('[data-type="item"]')].map((row) => {
     const path = row.dataset.itemPath!;
     if (row.dataset.itemType === 'folder') return `dir:${path.replace(/\/$/, '')}`;
-    return `${row.querySelector('[data-item-part-id="viewed"]') ? 'changed' : 'file'}:${path}`;
+    return `${row.dataset.itemGitStatus ? 'changed' : 'file'}:${path}`;
   });
 
 afterEach(async () => {
@@ -159,6 +159,7 @@ describe.skipIf(!hasDom)('FileTree: Changes | All files', () => {
       'file:README.md',
     ]);
     expect(repoRow(el, 'packages/review-editor/utils/fileKindTree.ts').textContent).toContain('+2');
+    expect(repoRow(el, 'packages/').querySelector('[data-item-section="trail"]')?.textContent).toBe('+14');
   });
 
   test('folders open and close; a changed row selects its diff, an unchanged one opens the file', async () => {

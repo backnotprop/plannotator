@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, describe, expect, mock, test } from 'bun:test';
+import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
@@ -7,7 +7,6 @@ import { markFirstCodePainted } from '../utils/firstCodePaint';
 markFirstCodePainted();
 import type { DiffFile } from '../types';
 import type { SinceBaseSections } from '@plannotator/shared/types';
-import { installFakeTextLayout, type FakeTextLayout } from '../../../tests/helpers/fake-text-layout';
 
 const hasDom = typeof document !== 'undefined';
 let host: HTMLDivElement | null = null;
@@ -86,21 +85,9 @@ const shadow = (el: HTMLElement) => el.querySelector<HTMLElement>('[data-changes
 const rowEls = (el: HTMLElement) => [...shadow(el).querySelectorAll<HTMLElement>('[data-type="item"]')];
 const rows = (el: HTMLElement) => rowEls(el).map((row) => row.dataset.itemPath);
 const row = (el: HTMLElement, path: string) => rowEls(el).find((r) => r.dataset.itemPath === path)!;
-const part = (el: HTMLElement, path: string, id: string) => row(el, path).querySelector<HTMLElement>(`[data-item-part-id="${id}"]`)!;
 const trail = (el: HTMLElement, path: string) =>
   [...row(el, path).querySelectorAll('[data-item-section="trail"] > span')].map((cell) => cell.textContent);
 const selected = (el: HTMLElement) => rowEls(el).filter((r) => r.dataset.itemSelected === 'true').map((r) => r.dataset.itemPath);
-
-let layout: FakeTextLayout | null = null;
-beforeAll(() => {
-  if (hasDom) layout = installFakeTextLayout();
-});
-afterAll(() => layout?.restore());
-
-async function resizeNames(width: number) {
-  await act(async () => layout!.resize((element) => (element.hasAttribute('data-item-name') ? width : undefined)));
-  await settle();
-}
 
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
@@ -140,64 +127,59 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(selected(el)).toEqual(['Generated/bun.lock']);
   });
 
-  test('the viewed circle and the git add button act on their file and leave the selection alone', async () => {
-    const onToggleViewed = mock((_path: string) => {});
-    const onStageFile = mock((_path: string) => {});
-    const onSelectFile = mock((_index: number) => {});
+  test('rows carry no viewed or git add button; a viewed file is dimmed and its group counts it', async () => {
     const el = await mount(
-      <Tree
-        files={working}
-        activeFileIndex={0}
-        sinceBaseSections={sections}
-        stagedFiles={new Set(['src/staged.ts'])}
-        onToggleViewed={onToggleViewed}
-        onStageFile={onStageFile}
-        onSelectFile={onSelectFile}
-      />,
+      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} viewedFiles={new Set(['src/edited.ts'])} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable />,
     );
-    await act(async () => part(el, 'edited.ts', 'viewed').click());
-    expect(onToggleViewed).toHaveBeenCalledWith('src/edited.ts');
-    await act(async () => part(el, 'edited.ts', 'stage').click());
-    expect(onStageFile).toHaveBeenCalledWith('src/edited.ts');
-    await act(async () => part(el, 'staged.ts', 'unstage').click());
-    expect(onStageFile).toHaveBeenLastCalledWith('src/staged.ts');
-    expect(onSelectFile).not.toHaveBeenCalled();
-    expect(row(el, 'committed.ts').querySelector('[data-item-part-id="stage"]')).toBeNull();
-    await rerender(
-      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} viewedFiles={new Set(['src/edited.ts'])} onStageFile={onStageFile} />,
-    );
-    expect(part(el, 'edited.ts', 'viewed').getAttribute('aria-pressed')).toBe('true');
-    expect(row(el, 'edited.ts').dataset.itemMuted).toBe('true');
+    expect(rowEls(el).some((r) => r.querySelector('[data-item-part-id]'))).toBe(false);
+    expect(row(el, 'Unstaged/edited.ts').dataset.itemMuted).toBe('true');
+    expect(row(el, 'Staged/staged.ts').dataset.itemMuted).toBeUndefined();
+    expect(trail(el, 'Unstaged/')[0]).toBe('1/1');
   });
 
-  test('a file row reads viewed mark, name, then git add, its numbers and its status letter at the right edge', async () => {
-    const el = await mount(<Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} onStageFile={() => {}} />);
+  test('a file row reads name, its comment count, its numbers and its status letter at the right edge', async () => {
+    const annotations = [{ filePath: 'src/edited.ts' }, { filePath: 'src/edited.ts' }] as React.ComponentProps<typeof FileTree>['annotations'];
+    const el = await mount(<Tree files={working} activeFileIndex={0} sinceBaseSections={sections} annotations={annotations} />);
     const sectionsOf = (path: string) =>
       [...row(el, path).querySelectorAll<HTMLElement>('[data-item-section]')]
         .map((section) => section.dataset.itemSection)
         .filter((name) => name === 'lead' || name === 'content' || name === 'trail' || name === 'git');
-    expect(sectionsOf('edited.ts')).toEqual(['lead', 'content', 'trail', 'git']);
+    expect(sectionsOf('edited.ts')).toEqual(['content', 'trail', 'git']);
     expect(row(el, 'edited.ts').querySelector('[data-item-section="git"]')?.textContent).toBe('M');
     expect(row(el, 'new.ts').querySelector('[data-item-section="git"]')?.textContent).toBe('U');
-    expect(trail(el, 'edited.ts')).toEqual(['', '+3', '-2']);
-    expect(part(el, 'edited.ts', 'stage').closest('[data-item-section]')?.getAttribute('data-item-section')).toBe('trail');
-    expect(part(el, 'edited.ts', 'viewed').closest('[data-item-section]')?.getAttribute('data-item-section')).toBe('lead');
+    expect(trail(el, 'edited.ts')).toEqual(['2', '+3', '−2']);
+    expect(row(el, 'edited.ts').querySelector('[title="2 comments"]')).not.toBeNull();
+    expect(trail(el, 'committed.ts')).toEqual(['+1']);
   });
 
-  test('a narrow panel hides the numbers but keeps git add on every stageable row', async () => {
-    const onStageFile = mock((_path: string) => {});
-    const el = await mount(<Tree width={200} files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(['src/staged.ts'])} onStageFile={onStageFile} />);
-    expect(el.querySelector('[data-compact-rows]')).not.toBeNull();
-    const section = (path: string, id: string) => part(el, path, id).closest('[data-item-section]')?.getAttribute('data-item-section');
-    expect(section('edited.ts', 'stage')).toBe('lead');
-    expect(section('staged.ts', 'unstage')).toBe('lead');
-    await act(async () => part(el, 'edited.ts', 'stage').click());
-    expect(onStageFile).toHaveBeenCalledWith('src/edited.ts');
+  test('a renamed file names its old path on hover', async () => {
+    const el = await mount(<Tree files={[{ ...file('docs/setup.md'), status: 'renamed', oldPath: 'docs/old-setup.md' }, file('src/a.ts')]} activeFileIndex={1} />);
+    const path = rows(el).find((p) => p?.endsWith('setup.md'))!;
+    expect(row(el, path).getAttribute('title')).toBe('Renamed from docs/old-setup.md');
   });
 
-  test('group by git status: staging a file from its row moves it to Staged', async () => {
+  test('hide viewed files drops viewed rows but keeps the open one', async () => {
+    const files = [file('src/a.ts'), file('src/b.ts'), file('src/c.ts')];
+    const el = await mount(<Tree files={files} activeFileIndex={0} viewedFiles={new Set(['src/a.ts', 'src/b.ts'])} hideViewedFiles />);
+    const names = rows(el).filter((p) => !p?.endsWith('/')).map((p) => p?.split('/').pop());
+    expect(names).toEqual(['a.ts', 'c.ts']);
+  });
+
+  test('double-click keeps a file open; right-click offers the copy items', async () => {
+    const onDoubleClickFile = mock((_index: number) => {});
+    const el = await mount(<Tree files={[file('src/a.ts'), file('src/b.ts')]} activeFileIndex={0} onDoubleClickFile={onDoubleClickFile} repoRoot="/repo" />);
+    const b = rows(el).find((p) => p?.endsWith('b.ts'))!;
+    await act(async () => row(el, b).dispatchEvent(new MouseEvent('dblclick', { bubbles: true, composed: true })));
+    expect(onDoubleClickFile).toHaveBeenCalledWith(1);
+    await act(async () => row(el, b).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, composed: true, cancelable: true, button: 2, clientX: 10, clientY: 10 })));
+    await settle();
+    const items = [...document.querySelectorAll('.review-tree-menu [role="menuitem"]')].map((item) => item.textContent);
+    expect(items).toEqual(['Copy path', 'Copy filename', 'Copy full path']);
+  });
+
+  test('group by git status: a file staged from its header moves to Staged', async () => {
     const tree = (staged: string[]) => (
-      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(staged)} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable onStageFile={() => {}} />
+      <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(staged)} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable />
     );
     const el = await mount(tree(['src/staged.ts']));
     expect(rows(el).filter((path) => path?.endsWith('/') && !path.slice(0, -1).includes('/'))).toEqual(['Committed/', 'Staged/', 'Unstaged/', 'Untracked/']);
@@ -244,24 +226,12 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(row(el, 'Generated/').getAttribute('aria-expanded')).toBe('true');
   });
 
-  test('a file name too long for its row keeps its start, one ellipsis and a tail of three letters plus the extension, cut by whole letters', async () => {
-    const el = await mount(<Tree files={[file('src/an-extremely-long-file-name.ts'), file('legacy/step0.py'), file('legacy/step1.py'), file('src/a.ts')]} activeFileIndex={0} />);
-    await resizeNames(70);
-    const name = (end: string) => row(el, rows(el).find((p) => p?.endsWith(end))!).querySelector<HTMLElement>('[data-item-name]')!;
-    expect(name('file-name.ts').textContent).toBe('an…ame.ts');
-    expect(name('file-name.ts').getAttribute('aria-label')).toBe('an-extremely-long-file-name.ts');
-    expect(name('step0.py').textContent).toBe('step0.py');
-    expect(name('a.ts').textContent).toBe('a.ts');
-    await resizeNames(400);
-    expect(name('file-name.ts').textContent).toBe('an-extremely-long-file-name.ts');
-  });
-
   test('each row carries its own tight counts: nothing reserved from other rows, a huge count reads 12.3k with the exact number in its tooltip', async () => {
     const el = await mount(<Tree groupByKind files={[file('src/huge.ts', 12345, 9876), file('src/small.ts', 7, 0), file('README.md', 1, 1)]} activeFileIndex={0} />);
     const host = el.querySelector<HTMLElement>('[data-changes-tree]')!;
     expect(host.style.getPropertyValue('--trees-row-trail-columns')).toBe('');
     const path = (name: string) => rows(el).find((p) => p?.endsWith(name))!;
-    expect(trail(el, path('huge.ts'))).toEqual(['+12.3k', '-9,876']);
+    expect(trail(el, path('huge.ts'))).toEqual(['+12.3k', '\u22129,876']);
     expect(trail(el, path('small.ts'))).toEqual(['+7']);
     const added = row(el, path('huge.ts')).querySelector<HTMLElement>('[data-item-section="trail"] > span')!;
     expect(added.getAttribute('title') ?? added.querySelector('[title]')?.getAttribute('title')).toBe('12,345 lines added');

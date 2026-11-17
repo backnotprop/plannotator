@@ -142,7 +142,7 @@ const treeRows = (page: Page) =>
     [...tree.shadowRoot!.querySelectorAll<HTMLElement>('[data-type="item"]')].map((row) => {
       const path = row.dataset.itemPath!;
       if (row.dataset.itemType === 'folder') return `dir:${path.replace(/\/$/, '')}`;
-      return `${row.querySelector('[data-item-part-id="viewed"]') ? 'changed' : 'file'}:${path}`;
+      return `${(row as HTMLElement).dataset.itemGitStatus ? 'changed' : 'file'}:${path}`;
     }),
   );
 const repoRow = (page: Page, path: string) => page.locator(`[data-repo-file-tree] [data-item-path="${path}"]`);

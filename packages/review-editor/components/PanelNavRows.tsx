@@ -1,5 +1,5 @@
 import React from 'react';
-import { Diff } from 'lucide-react';
+import { Diff, GitFork } from 'lucide-react';
 import { useDiffCountColors } from '../hooks/useDiffCountColors';
 import { CountColumns } from './FileRowBits';
 
@@ -49,7 +49,7 @@ export function SemanticDiffRow({ active, onClick, count }: { active: boolean; o
       <Diff className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" data-semantic-diff-icon="" />
       <span>Semantic diff</span>
       {count !== undefined && (
-        <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground" data-semantic-diff-count="">
+        <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground" data-semantic-diff-count="" data-nav-count="">
           {count}<span className="sr-only"> semantic changes</span>
         </span>
       )}
@@ -76,10 +76,11 @@ export function CallFlowRow({
       onClick={onClick}
       title={error ? 'Call flow setup needs attention' : 'Trace how changed calls affect entry paths'}
     >
-      <span className="w-3.5 h-3.5 flex flex-shrink-0 items-center justify-center font-mono" aria-hidden="true">⑂</span>
+      <GitFork className="w-3.5 h-3.5 flex-shrink-0" aria-hidden="true" />
       <span>Call flow</span>
       <span
         className={`ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums ${error ? 'text-warning' : 'text-muted-foreground'}`}
+        data-nav-count=""
       >
         {error ? (
           <><span aria-hidden="true">!</span><span className="sr-only">Call flow setup needs attention</span></>

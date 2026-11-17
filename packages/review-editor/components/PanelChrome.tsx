@@ -322,7 +322,7 @@ export function PanelControlsRow(props: PanelControlsProps) {
         data-panel-controls-row=""
       >
         {scope ?? <span className="px-2 text-[13px] font-medium text-muted-foreground">Files</span>}
-        <div className="ml-auto flex flex-shrink-0 items-center">
+        <div className="ml-auto flex flex-shrink-0 items-center" data-panel-tools="">
           {onToggleFilesCollapsed && (
             <button
               type="button"

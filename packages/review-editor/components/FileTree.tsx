@@ -29,7 +29,7 @@ import type { OverlayScrollAreaHandle } from '@plannotator/ui/components/Overlay
 
 import { SidebarActionRow, SemanticDiffRow, CallFlowRow, AllChangesRow } from './PanelNavRows';
 import { PanelControlsRow, PanelSearchField } from './PanelChrome';
-import { COMPACT_ROWS_WIDTH, countColumnVars, compactRowsProps } from './FileRowBits';
+import { countColumnVars, compactRowsProps } from './FileRowBits';
 import { useHiddenViewedFiles } from '../hooks/useHiddenViewedFiles';
 import { useReviewStateOptional } from '../dock/ReviewStateContext';
 
@@ -64,7 +64,6 @@ interface FileTreeProps {
   onDoubleClickFile?: (index: number) => void;
   annotations: CodeAnnotation[];
   viewedFiles: Set<string>;
-  onToggleViewed?: (filePath: string) => void;
   hideViewedFiles?: boolean;
   onToggleHideViewed?: () => void;
   showViewedControls?: boolean;
@@ -136,11 +135,9 @@ interface FileTreeProps {
   scrollHighlightIndex?: number;
   /** Absolute repo root for the "Copy full path" context menu item. Null/undefined hides the option (e.g. PR review mode). */
   repoRoot?: string | null;
-  /** Sections sidecar while the since-base diff is displayed as a tree —
-   * powers per-row U/staged markers and the stage button. */
+  /** Sections sidecar while the since-base diff is displayed as a tree:
+   * untracked letters and the git status groups. */
   sinceBaseSections?: SinceBaseSections | null;
-  onStageFile?: (filePath: string) => void;
-  stagingFile?: string | null;
   snapshotId?: string;
 }
 
@@ -163,7 +160,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
   onDoubleClickFile,
   annotations,
   viewedFiles,
-  onToggleViewed,
   hideViewedFiles = false,
   onToggleHideViewed,
   showViewedControls = true,
@@ -225,8 +221,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
   scrollHighlightIndex,
   repoRoot,
   sinceBaseSections,
-  onStageFile,
-  stagingFile,
   snapshotId,
 }) => {
   const isSearchVisible = !!onSearchChange && (isSearchOpen || !!searchQuery.trim());
@@ -507,6 +501,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
       <OverlayScrollArea ref={scrollAreaRef} className={showChangesTree || showRepoTree ? 'flex-none' : 'flex-1 min-h-0'}>
         <div
           {...reviewPanelBodyProps(header)}
+          data-review-panel-list=""
           className="px-2 pb-2"
           style={countColumnVars(totalAdditions, totalDeletions)}
         >
@@ -538,7 +533,7 @@ export const FileTree: React.FC<FileTreeProps> = ({
             >
               <Paperclip className="w-3.5 h-3.5 flex-shrink-0" />
               <span>Artifacts</span>
-              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground">
+              <span className="ml-auto rounded bg-muted px-1.5 py-0.5 font-mono text-xs tabular-nums text-muted-foreground" data-nav-count="">
                 {prArtifactCount}
               </span>
             </SidebarActionRow>
@@ -589,7 +584,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
           {treeMounts && <ChangesTreeView
             key={touchRows ? 'touch' : 'pointer'}
             touch={touchRows}
-            compact={panelWidth < COMPACT_ROWS_WIDTH}
             handleRef={changesTreeRef}
             grouping={blocks ? effectiveGroupBy : 'none'}
             tree={plainTree}
@@ -600,11 +594,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
             hiddenFiles={hiddenFiles}
             hideViewedFiles={hideViewedFiles}
             showViewedControls={showViewedControls}
-            onToggleViewed={onToggleViewed}
-            stagedFiles={stagedFiles}
-            stagingFile={stagingFile}
-            showStageControls={showStageControls}
-            onStageFile={onStageFile}
             getSectionEntry={getSectionEntry}
             annotationCounts={annotationCounts}
             markdownPreviewedPaths={markdownPreviewedPaths}
@@ -622,7 +611,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
             <RepoTreeView
               key={touchRows ? 'touch' : 'pointer'}
               touch={touchRows}
-              compact={panelWidth < COMPACT_ROWS_WIDTH}
               handleRef={repoTreeRef}
               repo={repoReady}
               loadDir={repoFiles!.loadDir}
@@ -630,11 +618,6 @@ export const FileTree: React.FC<FileTreeProps> = ({
               activePath={activeRepoPath ?? treeActivePath}
               viewedFiles={viewedFiles}
               showViewedControls={showViewedControls}
-              onToggleViewed={onToggleViewed}
-              stagedFiles={stagedFiles}
-              stagingFile={stagingFile}
-              showStageControls={showStageControls}
-              onStageFile={onStageFile}
               getSectionEntry={getSectionEntry}
               annotationCounts={annotationCounts}
               markdownPreviewedPaths={markdownPreviewedPaths}

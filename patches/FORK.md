@@ -24,6 +24,10 @@ Our review tree puts controls and numbers in its rows. Upstream rows take one no
 
 The patch is about 125 added lines. Files touched (all under `dist/`): `render/FileTreeView.js` (rendering and clicks), `render/FileTree.js` (passing `rows`, `refreshRows`), `model/FileTreeController.js` (`onDirectoryExpand`), `style.js` (the grid CSS, appended as its own string), `model/publicTypes.d.ts`, `render/FileTree.d.ts`, `index.d.ts` (types). Source maps are not updated.
 
+## What Plannotator uses today
+
+Since the tree took Pierre's own look (2026-11-17), Plannotator passes only `rows.renderParts` (trail parts, `muted`, `tone`, `title`; `lead` only for a group heading's icon), `rows.onDoubleClick`, `rows.onActivate`, `onDirectoryExpand` and `refreshRows()`. Clickable parts (`id`, `onPartClick`), `gitStatusPlacement: 'start'`, `nameTruncation: 'end' | 'keep-tail'` with `observeName`, and the lead and trail column variables are unused; they stay in the patch because removing them would touch the same lines the used options share. `observeTreeName` was deleted with the old rows.
+
 ## Re-sync with a new upstream version
 
 1. Bump `@pierre/trees` in `packages/review-editor/package.json` (and every other package that lists it) and rename the `patchedDependencies` key and file to the new version.

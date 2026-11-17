@@ -15,11 +15,10 @@ import { useRepoFiles } from '@plannotator/review-editor/hooks/useRepoFiles';
 import { pullRepoFetch } from '../pulls/RailScope';
 import type { PullAllFilesProps, PullRepoFileProps } from './pullRepoTypes';
 
-const NONE = new Set<string>();
 const NO_COMMENTS: CodeAnnotation[] = [];
 const noop = () => {};
 
-export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath, openPath, head, onSelect, onOpen, onToggleViewed }: PullAllFilesProps) {
+export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath, openPath, head, onSelect, onOpen }: PullAllFilesProps) {
   const fetchImpl = useMemo(() => pullRepoFetch(pullKey), [pullKey]);
   const repo = useRepoFiles({ enabled: true, snapshotId: sha, fetchImpl });
   const list = files as DiffFile[];
@@ -44,10 +43,7 @@ export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath
           onOpenRepoFile={(path) => onOpen(path)}
           viewedFiles={viewed as Set<string>}
           showViewedControls
-          onToggleViewed={onToggleViewed}
           annotationCounts={counts}
-          stagedFiles={NONE}
-          showStageControls={false}
         />
       ) : (
         <RepoListingPlaceholder state={repo.state} onRetry={repo.reload} />
