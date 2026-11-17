@@ -69,6 +69,8 @@ export interface FullScreenReply {
    * thread pane that builds this. Absent: `value`.
    */
   words?: ReplyText;
+  /** Whether the reply holds more than spaces (the toolbar's draft dot), kept by the pane as the words change. Absent: from `value`. */
+  hasWords?: boolean;
   /** The reply box's own change: the box takes the words and the draft saves them. */
   onChange: (text: string) => void;
   /** What can be done about `error`, drawn after its words. */

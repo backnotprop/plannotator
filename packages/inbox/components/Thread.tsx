@@ -3928,8 +3928,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       </button>
     </>
   );
-  // The card draws the words: it reads the open box's from `replyText` itself (`words`), so a key re-renders the card,
-  // never this pane and its messages.
+  // The card reads the open box's words from `replyText` itself (`words`): a key re-renders the card, never this pane.
   const composer: FullScreenComposerValue | null =
     composerShown
       ? {
@@ -3938,7 +3937,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           reply: {
             to: replyTo,
             value: box.open ? '' : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
-            words: box.open ? replyText : undefined,
+            words: box.open ? replyText : undefined, hasWords,
             onChange: (text) => changeReply(text, true),
             quote: quote && quotedMessage ? { message: quotedMessage, words: quote.words, onRemove: () => setQuote(null) } : null,
             onLateVoice,

@@ -72,7 +72,6 @@ import { ArtifactPinButton } from './ArtifactPinButton';
 import { ReuseButton } from '../reuse';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, useComposerFolded } from '../fullScreenComposer';
-import { useReplyHasWordsOr } from '../replyText';
 import { HtmlPageCommentRow, useHtmlPageComment, type PageCommentParking } from './HtmlPageComment';
 import { anchorKeyOf, draftHasWords, FileDraftContext, fileDraftKey, keepFileDrafts, peekFileDrafts, takeFileDrafts, type FileCommentDraft, type FileDraftSeat, type RowDraft } from '../fileCommentDrafts';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
@@ -1716,8 +1715,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', covered: phone && sheet, onGather: gatherFromComposer, fileKey: composerFileKey } : null),
     [hasComposer, props.composer, shownToolbar, phone, sheet, gatherFromComposer, composerFileKey],
   );
-  // Whether the reply holds words (the toolbar's draft dot): re-renders this pane only when that flips, not per key.
-  const composerHasWords = useReplyHasWordsOr(props.composer?.reply.words, props.composer?.reply.value ?? '');
   /**
    * A phone's composer folded to its pill shares the toolbar's row (an HTML page opens that way): the bar draws
    * no reuse button until the card opens. Not drawn rather than hidden, so every button in the bar is a 44 px target.
@@ -2360,7 +2357,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             if (pinchTucks) setPinchShown(true);
             if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
           }}
-          draft={hasComposer && !!props.composer && (composerHasWords || props.composer.reply.files.length > 0)}
+          draft={hasComposer && !!props.composer && ((props.composer.reply.hasWords ?? props.composer.reply.value.trim() !== '') || props.composer.reply.files.length > 0)}
           commentDraft={commentWaits}
           restoreTarget={restoreTarget}
           announce={announce}
