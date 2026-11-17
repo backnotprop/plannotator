@@ -122,6 +122,11 @@ describe.skipIf(!hasDom)('VersionsPanel folds', () => {
     expect(frame.querySelectorAll('[aria-current="true"]').length).toBe(1);
     expect(frame.querySelector('[data-version="v3"] a')!.getAttribute('aria-label')).toContain('Version 3, compared');
     expect(frame.querySelector('[data-version="v5"] a')!.getAttribute('aria-label')).not.toContain('compared');
+    const toggle = frame.querySelector<HTMLButtonElement>('[data-version-fold-toggle]')!;
+    expect(toggle.getAttribute('aria-label')).not.toContain('compared');
+    act(() => toggle.click());
+    expect(frame.querySelector('[data-version-fold]')!.hasAttribute('data-version-fold-open')).toBe(false);
+    expect(frame.querySelector('[data-version-fold-toggle]')!.getAttribute('aria-label')).toContain('Version 3 compared');
   });
 
   test('an author of kind "none" draws no author line and is not named; "unnamed" still says so', () => {
