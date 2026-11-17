@@ -11,6 +11,7 @@
  */
 
 import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
+import { hiddenChangedElsewhere, hideThreadsWithUndo } from './pulls/hiddenPulls';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfUntilNextFrame } from './perfMarks';
 import { machineOf, selfMachineId } from './inboxUrl';
@@ -1680,6 +1681,11 @@ function Inbox() {
         onAsk: emitAskChange,
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => listAfterEvents(60),
+        // Hidden PRs changed (here, another window, or a read saw one merged): the list, Reviews and the board read again.
+        onPullsHidden: () => {
+          listAfterEvents(60);
+          hiddenChangedElsewhere();
+        },
         // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
         onTags: () => listAfterEvents(60),
         // A linked machine's cards changed (its Board was read again here): the merged Board is read, as for a card record.
@@ -3238,6 +3244,10 @@ function Inbox() {
     if (action === 'unsnooze') return void unsnooze(row);
     if (action === 'archive') return archive(row.thread_id, row.thread_id, true);
     if (action === 'unarchive') return archivedHost.unarchive(row);
+    // Its open PRs hidden (pulls/hiddenPulls.ts): the thread leaves the list until one is shown again, merged or closed.
+    if (action === 'hide-pulls') return void hideThreadsWithUndo([row.thread_id], showToast).then((hid) => {
+      if (hid) void afterWrite([row.thread_id]);
+    });
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
     void copyTextToClipboard(text).then((ok) =>

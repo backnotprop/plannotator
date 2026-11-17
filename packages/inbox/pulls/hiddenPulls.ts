@@ -1,13 +1,14 @@
 /**
  * Hide a pull request (the owner's ask, 2026-11-17: "dismiss PRs that need me without closing them … hide them from
  * my inbox … also the bulk action selector"). A hidden PR leaves Reviews, the PR board and every count drawn from
- * them (the sidebar's On you, the board's "need you"); nothing is done on the forge. The server keeps it
- * (`POST /api/inbox/pulls/hidden`, server's inbox-pull-hidden.ts) and leaves it out of both lists, listing it under
+ * them (the sidebar's On you, the board's "need you"); a thread whose open PRs are all hidden leaves the Inbox list
+ * and its counts (the server's list model). Nothing is done on the forge. The server keeps it
+ * (`POST /api/inbox/pulls/hidden`, server's inbox-pull-hidden.ts) and leaves it out of the lists, listing it under
  * `hidden`, which Reviews' Hidden fold shows with Show again. It stays hidden until shown again or merged or closed.
  *
- * The window drops it at once (`pending`, applied by usePulls and useSheetPulls over each answer) and reads both lists
- * again from the server's cache once the write lands; an answer that already says so settles the pending change. A
- * write that fails puts the PR back. One toast with Undo, as the board's Close.
+ * The window drops it at once (`pending`, applied by usePulls and useSheetPulls over each answer) and reads the lists
+ * again once the write lands; an answer that already says so settles the pending change. A write that fails puts the
+ * PR back. One toast with Undo, as the board's Close.
  */
 import { useSyncExternalStore } from 'react';
 import { inboxPullLabel, type InboxPull, type InboxPullHidden, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
@@ -15,6 +16,7 @@ import { formatCount } from '@plannotator/core/inbox-format';
 import { inboxApi } from '../api';
 import type { InboxToastModel } from '../components/Toast';
 import { forgeName } from './labels';
+import { rowInSlot } from '../settle';
 
 /** A change made here that the lists may not show yet: hidden (with its record) or shown again; `since`, when (ms). */
 export type HiddenChange = ({ hide: true; record: InboxPullHidden } | { hide: false }) & { since: number };
@@ -40,6 +42,11 @@ export function forgetHiddenChanges(): void {
   setPending(NONE);
 }
 
+/** The changes not yet in the lists, now (outside React). */
+export function hiddenChangesNow(): HiddenChanges {
+  return pending;
+}
+
 /** The changes not yet in the lists, for a list to apply over its answer. */
 export function useHiddenChanges(): HiddenChanges {
   return useSyncExternalStore(subscribe, read, read);
@@ -56,12 +63,23 @@ export function onHiddenWritten(reload: () => void): () => void {
  * first never brings the PR back into the other for a moment.
  */
 export const HIDDEN_SETTLE_MS = 10_000;
+/**
+ * After this long the server's answer is taken as it is, even when it disagrees (the PR merged meanwhile, so its
+ * record went): a change made here never holds for the rest of the session.
+ */
+export const HIDDEN_GIVE_UP_MS = 60_000;
 
 /** An answer came: a change it already shows is settled (an answer read before the write landed settles nothing). */
 export function settleHidden(hidden: readonly InboxPullHidden[] | undefined, now = Date.now()): void {
   if (!hidden || pending.size === 0) return;
   const keys = new Set(hidden.map((h) => h.key));
-  const next = new Map([...pending].filter(([key, change]) => now - change.since < HIDDEN_SETTLE_MS || (change.hide ? !keys.has(key) : keys.has(key))));
+  const holds = (key: string, change: HiddenChange) => {
+    const age = now - change.since;
+    if (age < HIDDEN_SETTLE_MS) return true;
+    if (age >= HIDDEN_GIVE_UP_MS) return false;
+    return change.hide ? !keys.has(key) : keys.has(key);
+  };
+  const next = new Map([...pending].filter(([key, change]) => holds(key, change)));
   if (next.size !== pending.size) setPending(next.size === 0 ? NONE : next);
 }
 
@@ -101,6 +119,20 @@ const written = () => {
   for (const reload of reloaders) reload();
 };
 
+/** Another window (or a read that saw a hidden PR merged) changed what is hidden: the lists read again. */
+export function hiddenChangedElsewhere(): void {
+  written();
+}
+
+/** The server takes this many at once (its PULL_HIDDEN_MAX): more go in parts, one after another. */
+export const HIDE_AT_ONCE = 200;
+
+const inParts = <T,>(items: readonly T[]): T[][] => {
+  const parts: T[][] = [];
+  for (let i = 0; i < items.length; i += HIDE_AT_ONCE) parts.push(items.slice(i, i + HIDE_AT_ONCE));
+  return parts;
+};
+
 function change(keys: readonly string[], to: (key: string) => HiddenChange): HiddenChanges {
   const was = pending;
   const next = new Map(pending);
@@ -129,7 +161,7 @@ export async function hidePulls(pulls: readonly HidePick[], now = new Date()): P
   const byKey = new Map(pulls.map((pull) => [pull.key, pull]));
   const was = change(keys, (key) => ({ hide: true, record: { key, title: byKey.get(key)!.title, url: byKey.get(key)!.url, at }, since: now.getTime() }));
   try {
-    await inboxApi.pullsHidden({ hide: pulls.map(({ key, title, url }) => ({ key, title, url })) });
+    for (const part of inParts(pulls)) await inboxApi.pullsHidden({ hide: part.map(({ key, title, url }) => ({ key, title, url })) });
   } catch (cause) {
     putBack(keys, was);
     throw cause;
@@ -142,7 +174,7 @@ export async function showPulls(keys: readonly string[]): Promise<void> {
   if (keys.length === 0) return;
   const was = change(keys, () => ({ hide: false, since: Date.now() }));
   try {
-    await inboxApi.pullsHidden({ show: keys });
+    for (const part of inParts(keys)) await inboxApi.pullsHidden({ show: part });
   } catch (cause) {
     putBack(keys, was);
     throw cause;
@@ -150,9 +182,32 @@ export async function showPulls(keys: readonly string[]): Promise<void> {
   written();
 }
 
+/**
+ * Hide the open PRs of these Inbox threads (the list's row menu and picks): the server names them (`hid`), and the
+ * lists drop them at once. Resolves the keys it hid; a refused write throws.
+ */
+export async function hideThreadPulls(threadIds: readonly string[], now = new Date()): Promise<string[]> {
+  const hid: string[] = [];
+  const records = new Map<string, InboxPullHidden>();
+  for (const part of inParts(threadIds)) {
+    const answer = await inboxApi.pullsHidden({ threads: part });
+    hid.push(...(answer.hid ?? []));
+    for (const record of answer.hidden) records.set(record.key, record);
+  }
+  if (hid.length > 0) change(hid, (key) => ({ hide: true, record: records.get(key) ?? { key, title: key, url: '', at: now.toISOString() }, since: now.getTime() }));
+  written();
+  return hid;
+}
+
 /** "Hid #12" for one, "Hid 3 pull requests" for several. */
 export function hidToast(pulls: readonly Pick<InboxPull, 'number' | 'platform'>[]): string {
   return pulls.length === 1 ? `Hid ${inboxPullLabel(pulls[0]!)}` : `Hid ${formatCount(pulls.length)} pull requests`;
+}
+
+/** The Inbox list's Hide item: "Hide pull request", "Hide merge request" (GitLab), "Hide 3 pull requests". */
+export function hideKeysWords(keys: readonly string[]): string {
+  const noun = keys.length > 0 && keys.every((key) => key.endsWith(':pull')) ? 'merge request' : 'pull request';
+  return keys.length === 1 ? `Hide ${noun}` : `Hide ${formatCount(keys.length)} ${noun}s`;
 }
 
 /** "Showing #12 again", "Showing 3 again". */
@@ -203,6 +258,39 @@ export async function hideWithUndo(pulls: readonly InboxPull[], toast: Toast | u
   return true;
 }
 
+/** Where a hidden PR is still open, from its keys: "GitHub", "GitLab" or both. */
+function stillOpenOn(keys: readonly string[]): string {
+  const gitlab = keys.filter((key) => key.endsWith(':pull')).length;
+  return gitlab === 0 ? 'GitHub' : gitlab === keys.length ? 'GitLab' : 'GitHub and GitLab';
+}
+
+/**
+ * The Inbox list's Hide (a row's menu, or the picks): its open PRs hidden, the one toast with Undo, which shows exactly
+ * those again. Resolves true when any were hidden.
+ */
+export async function hideThreadsWithUndo(threadIds: readonly string[], toast: Toast | undefined): Promise<boolean> {
+  let hid: string[];
+  try {
+    hid = await hideThreadPulls(threadIds);
+  } catch (cause) {
+    toast?.({ icon: 'warn', lead: 'Couldn’t hide', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS);
+    return false;
+  }
+  if (hid.length === 0) return false;
+  const labels = hid.map((key) => hiddenLabel({ key }));
+  toast?.(
+    {
+      icon: 'check',
+      lead: hid.length === 1 ? `Hid ${labels[0]}` : `Hid ${formatCount(hid.length)} pull requests`,
+      detail: `Still open on ${stillOpenOn(hid)}`,
+      onUndo: () => void showWithToast(hid, labels, toast),
+      noKey: true,
+    },
+    HIDE_UNDO_MS,
+  );
+  return true;
+}
+
 /** Show again (Hidden's button, or Undo), with its toast. */
 export async function showWithToast(keys: readonly string[], labels: readonly string[], toast: Toast | undefined): Promise<void> {
   try {
@@ -212,4 +300,34 @@ export async function showWithToast(keys: readonly string[], labels: readonly st
     return;
   }
   toast?.({ icon: 'check', lead: shownToast(labels) }, HIDE_UNDO_MS);
+}
+
+/** How many frames focus waits for a hidden item to leave the screen before it gives up (a refused write keeps it). */
+const LEAVE_FRAMES = 30;
+
+/**
+ * Focus after Hide or Show again takes an item off the screen (the board's tile, a Reviews row, a Hidden row): once it
+ * has left, and only if focus fell to the page with it, the item now in its slot takes focus, else `fallback`. Call it
+ * before the change. `items`: the items on screen in order, each with its id.
+ */
+export function focusWhenGone(items: () => readonly { id: string; el: HTMLElement }[], gone: string, fallback: () => HTMLElement | null = () => null): void {
+  const order = items().map((item) => item.id);
+  let frames = 0;
+  const step = () => {
+    const now = new Map(items().map((item) => [item.id, item.el] as const));
+    if (now.has(gone)) {
+      if (frames++ < LEAVE_FRAMES) requestAnimationFrame(step);
+      return;
+    }
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const next = rowInSlot(order, gone, (id) => now.has(id));
+    (next ? now.get(next)! : fallback())?.focus({ preventScroll: true });
+  };
+  requestAnimationFrame(step);
+}
+
+/** The items under `root` that carry `attr`, in order, by its value. */
+export function itemsBy(root: () => ParentNode | null, attr: string): () => { id: string; el: HTMLElement }[] {
+  return () => [...(root()?.querySelectorAll<HTMLElement>(`[${attr}]`) ?? [])].map((el) => ({ id: el.getAttribute(attr) ?? '', el }));
 }

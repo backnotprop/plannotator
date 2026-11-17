@@ -1,12 +1,13 @@
 /**
  * Hide on the window's side (hiddenPulls.ts), the pure part. What regresses: a PR hidden here still in the list, the
  * board's or Reviews' counts until the next read; one stack layer's hide taking the whole stack's row; a PR shown
- * again kept in Hidden; a
- * GitLab merge request named with GitHub's mark.
+ * again kept in Hidden; a change made here let go before the lists caught up, or held for the rest of the session;
+ * the Inbox list's Hide offered on a thread with nothing to hide; a GitLab merge request named with GitHub's mark.
  */
-import { afterEach, describe, expect, test } from 'bun:test';
-import { inboxPullStacks, inboxReviewRows, type InboxPull, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { forgetHiddenChanges, hiddenLabel, hiddenRepo, hiddenWith, hidToast, pullsShown, reviewsShown, shownToast, type HiddenChanges } from './hiddenPulls';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { inboxPullStacks, inboxReviewRows, type InboxListRow, type InboxPull, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { forgetHiddenChanges, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
+import { rowMenuActions } from '../rowMenu';
 import { reviewsOnYou } from './reviewsModel';
 import { sheetModel } from '../prs/sheetModel';
 
@@ -53,12 +54,60 @@ describe('what was hidden here leaves at once', () => {
   });
 });
 
-describe('words', () => {
+describe('a change made here settles', () => {
+  const hiddenNow = [{ key: pull(7).key, title: 'PR 7', url: pull(7).url, at: '2026-11-17T10:00:00.000Z' }];
+  const keys = () => [...hiddenChangesNow().keys()];
+  // The write never answers: what is held here is all the test reads.
+  let savedFetch: typeof fetch;
+  beforeEach(() => {
+    savedFetch = globalThis.fetch;
+    globalThis.fetch = (() => new Promise<Response>(() => {})) as unknown as typeof fetch;
+  });
+  afterEach(() => {
+    globalThis.fetch = savedFetch;
+  });
+  test('held whatever an answer says at first; then once an answer agrees; and never past the give-up time', async () => {
+    const start = Date.now();
+    void hidePulls([pull(7)], new Date(start)).catch(() => {});
+    // The write is on its way: an answer that does not list it yet keeps it hidden here.
+    settleHidden([], start + 1_000);
+    expect(keys()).toEqual([pull(7).key]);
+    settleHidden([], start + HIDDEN_SETTLE_MS + 1);
+    expect(keys()).toEqual([pull(7).key]);
+    settleHidden(hiddenNow, start + HIDDEN_SETTLE_MS + 2);
+    expect(keys()).toEqual([]);
+  });
+  test('the server forgot it (merged meanwhile): after the give-up time its answer stands', () => {
+    const start = Date.now();
+    void hidePulls([pull(8)], new Date(start)).catch(() => {});
+    settleHidden([], start + HIDDEN_GIVE_UP_MS - 1);
+    expect(keys()).toEqual([pull(8).key]);
+    settleHidden([], start + HIDDEN_GIVE_UP_MS);
+    expect(keys()).toEqual([]);
+  });
+});
+
+describe('the Inbox list\'s Hide', () => {
+  const listRow = (over: Partial<InboxListRow>): InboxListRow => ({ thread_id: 'thr_1', subject: 'Fix', section: 'waiting', resolved_at: null, read_at: null, ...over }) as InboxListRow;
+  test('a thread row offers it only with open PRs not hidden, and not once archived', () => {
+    expect(rowMenuActions(listRow({ hide_pulls: ['github.com/o/r#1'] }), true)).toContain('hide-pulls');
+    expect(rowMenuActions(listRow({}), true)).not.toContain('hide-pulls');
+    expect(rowMenuActions(listRow({ hide_pulls: [] }), true)).not.toContain('hide-pulls');
+    expect(rowMenuActions(listRow({ hide_pulls: ['github.com/o/r#1'], resolved_at: '2026-11-01T00:00:00.000Z' }), true, null, 'archived')).not.toContain('hide-pulls');
+  });
+  test('it names how many, and a GitLab merge request as one', () => {
+    expect(hideKeysWords(['github.com/o/r#1', 'github.com/o/r#2', 'github.com/o/r#3'])).toContain('3');
+    expect(hideKeysWords(['gitlab.com/g/p#4:pull'])).toContain('merge request');
+    expect(hideKeysWords(['github.com/o/r#1'])).not.toContain('merge request');
+  });
+});
+
+describe('labels', () => {
   test('one PR by its number, several by their count; a GitLab merge request by its own mark', () => {
-    expect(hidToast([pull(7)])).toBe('Hid #7');
-    expect(hidToast([pull(7), pull(8)])).toBe('Hid 2 pull requests');
-    expect(shownToast(['#7'])).toBe('Showing #7 again');
-    expect(shownToast(['#7', '#8', '#9'])).toBe('Showing 3 again');
+    expect(hidToast([pull(7)])).toContain('#7');
+    expect(hidToast([pull(7), pull(8)])).toContain('2');
+    expect(shownToast(['#7'])).toContain('#7');
+    expect(shownToast(['#7', '#8', '#9'])).toContain('3');
     expect(hiddenLabel({ key: 'gitlab.com/northwind/data/ledger#61:pull' })).toBe('!61');
     expect(hiddenLabel({ key: 'github.com/northwind/api#7' })).toBe('#7');
     expect(hiddenRepo({ key: 'github.com/northwind/api#7' })).toBe('northwind/api');

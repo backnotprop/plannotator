@@ -9979,12 +9979,12 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-pr-foldbtn:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
 .pn-inbox .ib-pr-foldbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-pr-foldbtn .ib-n { color: var(--muted-foreground); }
-/* Hidden pull requests (pulls/hiddenPulls.ts): the rows' menu draws no box of its own; a row whose menu is open takes the hover fill. */
-.ib-pr-rows { display: contents; }
+/* Hidden pull requests (pulls/hiddenPulls.ts): a Reviews row whose menu is open takes the hover fill. */
 .ib-nrow.ib-prrow[data-menu]::before { background: var(--ib-hover) !important; }
 .ib-nrow.ib-prrow.ib-sel[data-menu]::before { background: var(--ib-sel-hover) !important; }
 /* Reviews' Hidden fold: one quiet line per hidden PR (its number, title and repository, a link to the forge), and Show again. */
 .ib-pr-hid { display: flex; align-items: center; gap: 8px; min-height: 36px; padding: 2px 8px 2px 12px; }
+.pn-inbox button.ib-pr-hid-t { padding: 0; border: 0; background: none; font-family: inherit; line-height: inherit; text-align: start; cursor: pointer; }
 .pn-inbox .ib-pr-hid-t { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); text-decoration: none; }
 .pn-inbox .ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: underline; }
 .pn-inbox .ib-pr-hid-t:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; border-radius: 4px; }

@@ -29,7 +29,7 @@
  */
 import { reviewBoxPull, type ReviewBoxBranch, type ReviewBoxPull } from '../compose/reviewBox';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack, type InboxReviewRow } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type InboxShapeSummary, type ProjectFolder } from '../api';
 import { Icon } from '../icons';
@@ -59,7 +59,7 @@ import {
   type PullFilter,
 } from './model';
 import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
-import { ReviewsList } from './ReviewsList';
+import { ReviewsList, ReviewsMenu, reviewLinksOf } from './ReviewsList';
 import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsModel';
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
@@ -79,7 +79,7 @@ import { SystemButton } from '../system/SystemButton';
 import { SystemPane } from '../system/SystemPane';
 import type { ReactNode } from 'react';
 import type { InboxToastModel } from '../components/Toast';
-import { hiddenLabel, hideWithUndo, showWithToast } from './hiddenPulls';
+import { focusWhenGone, hiddenLabel, hideWithUndo, itemsBy, showWithToast } from './hiddenPulls';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -150,6 +150,8 @@ export interface PullsPageProps {
 }
 
 const NO_JUDGMENTS: RiskJudgments = {};
+const NO_ROWS: readonly InboxReviewRow[] = [];
+const NO_LINKS: InboxPullsAnswer['links'] = {};
 const NO_FAILURES: RiskFailures = {};
 
 export function PullsPage(given: PullsPageProps) {
@@ -179,6 +181,8 @@ export function PullsPage(given: PullsPageProps) {
   const riskFailed: RiskFailures = risk.answer?.failed ?? NO_FAILURES;
   const [riskFilter, setRiskFilter] = useState<RiskFilterValue>(readRiskFilter);
   const [rulesOpen, setRulesOpen] = useState(false);
+  /** The Reviews row whose menu is open (ReviewsMenu). */
+  const [menuRow, setMenuRow] = useState<string | null>(null);
   const activeRisk = rulesSet ? riskFilter : 'all';
   const ranked = useMemo(() => (rows ? filterReviewRows(rows, activeRisk, judgments, riskFailed) : null), [rows, activeRisk, judgments, riskFailed]);
   const trigger = useFilterTrigger();
@@ -243,7 +247,19 @@ export function PullsPage(given: PullsPageProps) {
         </Tip>
       </div>
       {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
-      <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
+      <ReviewsMenu
+        className="ib-lbody"
+        busy={state.loading && !model}
+        rows={model && answer && ranked ? [...ranked.rows, ...ranked.notRanked] : NO_ROWS}
+        links={model && answer ? reviewLinksOf(model, answer) : NO_LINKS}
+        phone={phone}
+        onTarget={setMenuRow}
+        onHide={(pulls) => {
+          // The PR open beside the list leaves with its row.
+          if (open && pulls.some((pull) => open.stack.layers.some((layer) => layer.key === pull.key))) props.onOpenStack(null);
+          void hideWithUndo(pulls, props.onToast);
+        }}
+      >
         {!model && state.error && (
           <div className="ib-error" role="alert" style={{ margin: '8px 2px' }}>
             {state.error}
@@ -285,17 +301,14 @@ export function PullsPage(given: PullsPageProps) {
               else props.onOpenStack(row.stacks[0]?.id ?? null);
             }}
             onNew={props.onNew}
-            onHide={(pulls) => {
-              // The PR open beside the list leaves with its row.
-              if (open && pulls.some((pull) => open.stack.layers.some((layer) => layer.key === pull.key))) props.onOpenStack(null);
-              void hideWithUndo(pulls, props.onToast);
-            }}
+            menuRow={menuRow}
             onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
+            onOpenThread={props.onOpenThread}
             project={props.project}
             onReviewBranch={props.onReviewBranch ? (branch, opener) => props.onReviewBranch!({ name: branch.branch, projectId: branch.project_id }, opener) : undefined}
           />
         )}
-      </div>
+      </ReviewsMenu>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge onCollapse={props.threadId ? props.onHide : undefined} />}
       {rulesOpen && risk.answer && (
@@ -544,6 +557,10 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
         onShape={(shape) => props.onOpenShape?.(shape)}
         onHide={() => {
+          // The pane closes onto a row that leaves with it: focus goes to the Reviews row now in its place.
+          const list = () => document.querySelector('.pn-inbox .ib-lbody');
+          const gone = list()?.querySelector(`[data-pulls-row="${CSS.escape(props.item.stack.id)}"]`)?.getAttribute('data-reviews-row');
+          if (gone) focusWhenGone(itemsBy(list, 'data-reviews-row'), gone, () => document.querySelector<HTMLElement>('[data-pulls-heading]'));
           props.onClose();
           void hideWithUndo([start], props.onToast);
         }}

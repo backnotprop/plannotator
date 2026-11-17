@@ -1,18 +1,27 @@
 /**
  * Hidden pull requests on the machine whose window hid them (inbox-pull-hidden.ts). What regresses: a hide lost across
- * a restart or readable by others, a PR that merged or closed kept hidden forever (or an open one forgotten), a hidden
- * PR still listed, a write that is no PR (a link that is not https), the records growing without end, and a review
- * thread's row left in Reviews with no PR because its PRs are hidden (or a local review taken away with it).
+ * a restart or readable by others, a PR that merged or closed kept hidden forever, an open one forgotten (a read that
+ * does not list it is no sign it closed), a hidden PR still listed, a write that is no PR (a link that is not a web
+ * link), the records growing without end, a review thread's row left in Reviews with no PR because its PRs are hidden
+ * (or a local review taken away with it), and the Inbox list keeping a thread whose PRs are all hidden (or dropping
+ * one with a PR still shown).
  */
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, statSync, writeFileSync, mkdirSync } from "node:fs";
+import { afterEach, describe, expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPull, InboxReviewRow } from "@plannotator/core/inbox-types";
-import { createInboxPullHidden, INBOX_PULL_HIDDEN_FILE, PULL_HIDDEN_KEPT, pullHiddenBodyOf, reviewRowsShown } from "./inbox-pull-hidden";
+import { createInboxPullHidden, INBOX_PULL_HIDDEN_FILE, PULL_HIDDEN_KEPT, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, type PullToHide } from "./inbox-pull-hidden";
 
-// Under the run's own data folder when it has one (the sandbox), else the system's temp folder.
-const scratch = () => mkdtempSync(join(process.env.PLANNOTATOR_DATA_DIR || tmpdir(), "plannotator-pull-hidden-"));
+const dirs: string[] = [];
+afterEach(() => {
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+const scratch = () => {
+  const dir = mkdtempSync(join(tmpdir(), "plannotator-pull-hidden-"));
+  dirs.push(dir);
+  return dir;
+};
 
 const KEY = "github.com/northwind/api#7";
 const pull = (number: number, over: Partial<InboxPull> = {}): InboxPull =>
@@ -48,15 +57,22 @@ describe("the PRs a machine keeps hidden", () => {
     expect(hidden.list().map((h) => h.key)).toEqual([pull(9).key]);
   });
 
-  test("the board's whole read that no longer lists it (closed) forgets it; a host that did not answer whole keeps it", () => {
+  test("a read that does not list it forgets nothing: only a read that sees it merged or closed does", () => {
     const hidden = createInboxPullHidden(scratch());
-    hidden.change({ hide: [hide(7), hide(8), { key: "gitlab.com/northwind/data#3:pull", title: "MR 3", url: "https://gitlab.com/northwind/data/-/merge_requests/3" }], show: [] }, new Date());
-    const github = { cli: "gh" as const, host: "github.com", login: "dana" };
-    hidden.forgetGone([pull(8)], [{ ...github, others_pending: true }]);
-    hidden.forgetGone([pull(8)], [{ ...github, capped: { shown: 100, total: 140 } }]);
-    expect(hidden.list()).toHaveLength(3);
-    hidden.forgetGone([pull(8)], [github, { cli: "glab", host: "gitlab.com", login: "dana", error: "unavailable" }]);
-    expect(hidden.list().map((h) => h.key).sort()).toEqual([pull(8).key, "gitlab.com/northwind/data#3:pull"]);
+    hidden.change({ hide: [hide(7), hide(8)], show: [] }, new Date());
+    expect(hidden.settle([])).toBe(false);
+    expect(hidden.settle([pull(9, { state: "closed" })])).toBe(false);
+    expect(hidden.list()).toHaveLength(2);
+    expect(hidden.settle([pull(8, { state: "closed" })])).toBe(true);
+    expect(hidden.list().map((h) => h.key)).toEqual([pull(7).key]);
+  });
+
+  test("the thread a hidden PR belongs to is kept with it", () => {
+    const dataDir = scratch();
+    createInboxPullHidden(dataDir).change({ hide: [{ ...hide(7), thread_id: "thr_a" }, { ...hide(8), thread_id: null }], show: [] }, new Date("2026-11-17T10:00:00Z"));
+    const list = createInboxPullHidden(dataDir).list();
+    expect(list.find((h) => h.key === pull(7).key)!.thread_id).toBe("thr_a");
+    expect(list.find((h) => h.key === pull(8).key)!.thread_id).toBeUndefined();
   });
 
   test("only the newest are kept", () => {
@@ -80,9 +96,13 @@ describe("the PRs a machine keeps hidden", () => {
     expect(JSON.parse(readFileSync(join(dataDir, "inbox", INBOX_PULL_HIDDEN_FILE), "utf8")).hidden[KEY].title).toBe("PR 7");
   });
 
-  test("a write names PRs by key, with their title and https link; anything else is refused", () => {
-    expect(pullHiddenBodyOf({ hide: [hide(7)], show: [pull(8).key] })).toEqual({ hide: [hide(7)], show: [pull(8).key] });
-    for (const body of [{}, { hide: [] }, { hide: [{ ...hide(7), url: "javascript:alert(1)" }] }, { hide: [{ key: KEY }] }, { show: [""] }, { hide: "x" }, { show: Array.from({ length: 201 }, (_, i) => `k${i}`) }]) {
+  test("a write names PRs by key, with their title and web link, or threads by id; anything else is refused", () => {
+    expect(pullHiddenBodyOf({ hide: [hide(7)], show: [pull(8).key] })).toEqual({ hide: [hide(7)], threads: [], show: [pull(8).key] });
+    expect(pullHiddenBodyOf({ threads: ["thr_a"] })).toEqual({ hide: [], threads: ["thr_a"], show: [] });
+    // A self-hosted forge on plain http, as a linked machine's list may carry.
+    const plain = { key: "git.lan/team/app#4:pull", title: "MR 4", url: "http://git.lan/team/app/-/merge_requests/4" };
+    expect(pullHiddenBodyOf({ hide: [plain] }).hide).toEqual([plain]);
+    for (const body of [{}, { hide: [] }, { hide: [{ ...hide(7), url: "javascript:alert(1)" }] }, { hide: [{ key: KEY }] }, { show: [""] }, { threads: [3] }, { hide: "x" }, { show: Array.from({ length: 201 }, (_, i) => `k${i}`) }]) {
       expect(() => pullHiddenBodyOf(body as Record<string, unknown>)).toThrow();
     }
   });
@@ -101,5 +121,24 @@ describe("Reviews' rows with hidden PRs", () => {
     const shown = reviewRowsShown([owned, local, other, withPr], [KEY, pull(8).key, pull(10).key], (key) => owners[key] ?? null);
     expect(shown.map((r) => r.id)).toEqual(["thr_b", "thr_c", "thr_d"]);
     expect(reviewRowsShown([owned], [], () => "thr_a").map((r) => r.id)).toEqual(["thr_a"]);
+  });
+});
+
+describe("the Inbox list's threads with hidden PRs", () => {
+  const inPlay = (threads: Record<string, number[]>) =>
+    new Map(Object.entries(threads).map(([id, numbers]) => [id, new Map<string, PullToHide>(numbers.map((n) => [pull(n).key, { ...hide(n), thread_id: id }]))]));
+
+  test("a thread whose PRs in play are all hidden leaves; one with a PR still shown stays and offers that one", () => {
+    const hiddenKeys = new Set([pull(7).key, pull(8).key]);
+    const { gone, hideable } = threadPullsHidden(inPlay({ thr_a: [7], thr_b: [8, 9], thr_c: [10], thr_d: [] }), (key) => hiddenKeys.has(key));
+    expect([...gone]).toEqual(["thr_a"]);
+    expect(hideable.get("thr_b")!.map((p) => p.key)).toEqual([pull(9).key]);
+    expect(hideable.get("thr_c")!.map((p) => p.key)).toEqual([pull(10).key]);
+    // A thread with no PR in play is neither.
+    expect(hideable.has("thr_d")).toBe(false);
+  });
+
+  test("nothing hidden: no thread leaves", () => {
+    expect(threadPullsHidden(inPlay({ thr_a: [7] }), () => false).gone.size).toBe(0);
   });
 });

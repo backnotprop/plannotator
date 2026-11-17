@@ -189,6 +189,8 @@ export interface InboxPullHidden {
   title: string;
   url: string;
   at: string;
+  /** The Inbox thread it belongs to (its review, hand-off or the thread's own PR list), when one does: Hidden opens it. */
+  thread_id?: string;
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */

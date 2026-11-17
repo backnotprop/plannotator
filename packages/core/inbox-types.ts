@@ -1860,6 +1860,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * from an older Inbox.
    */
   pulls?: InboxThreadPullsSummary;
+  /**
+   * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
+   * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.
+   * A thread whose open PRs are all hidden is left out of that list (it stays in search and in Reviews' Hidden).
+   */
+  hide_pulls?: string[];
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as

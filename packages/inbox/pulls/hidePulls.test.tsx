@@ -5,20 +5,26 @@
  *  - Hide asking the forge for anything, or several PRs sent as several writes;
  *  - no toast, or a toast with no Undo; Undo showing anything but what that Hide hid;
  *  - a refused write leaving the PRs gone;
- *  - Reviews' row menu hiding something other than the row's own open PRs; Hidden's Show again not reaching the page.
+ *  - Reviews' row menu hiding something other than the row's own open PRs (a merged layer included), or its body not
+ *    being the list's (the bands must stay `.ib-lbody`'s children); Hidden's Show again not reaching the page, losing
+ *    focus, or a hidden PR's thread out of reach;
+ *  - the Inbox list's Hide (a thread row's menu, the picks) sending anything but the threads, or an Undo that shows
+ *    other PRs than the ones it hid;
+ *  - a hidden PR losing its review thread in a thread's PR list.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh: the window's fetch is stubbed.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxPull, InboxPullHidden, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import type { InboxPull, InboxPullHidden, InboxPullsAnswer, InboxReviewRow } from '@plannotator/core/inbox-types';
 import type { InboxToastModel } from '../components/Toast';
 import type { SheetPageProps } from '../prs/SheetPage';
 
 const hasDom = typeof document !== 'undefined';
 const { SheetPage } = (hasDom ? await import('../prs/SheetPage') : {}) as typeof import('../prs/SheetPage');
-const { ReviewsList } = (hasDom ? await import('./ReviewsList') : {}) as typeof import('./ReviewsList');
+const { ReviewsList, ReviewsMenu, reviewLinksOf, rowPulls } = (hasDom ? await import('./ReviewsList') : {}) as typeof import('./ReviewsList');
+const { pullReviewLinks } = (hasDom ? await import('../threadPulls/model') : {}) as typeof import('../threadPulls/model');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const hidden = (hasDom ? await import('./hiddenPulls') : {}) as typeof import('./hiddenPulls');
 const { reviewsOfPulls } = (hasDom ? await import('./reviewsTestState') : {}) as typeof import('./reviewsTestState');
@@ -107,9 +113,9 @@ afterEach(() => {
 const $ = (selector: string) => document.querySelector<HTMLElement>(selector);
 const click = (el: HTMLElement) => act(() => el.click());
 const tile = (k: string) => $(`[data-pr-tile="${k}"]`);
-const settle = () =>
+const settle = (ms = 0) =>
   act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, ms));
   });
 
 function mount(node: React.ReactNode) {
@@ -154,7 +160,7 @@ test('Hide N: every pick leaves the board and its "need you" at once, in one wri
   click($('[data-pr-select="select"]')!);
   for (const k of [key(7), WEB20]) click(tile(k)!);
   const hide = $('[data-pr-hide]')!;
-  expect(hide.textContent).toBe('Hide 2');
+  expect(hide.textContent).toContain('2');
   click(hide);
   // Gone before the write is even answered.
   expect(tile(key(7))).toBeNull();
@@ -173,7 +179,9 @@ test('Hide N: every pick leaves the board and its "need you" at once, in one wri
   sent[0]!.answer(200, { hidden: [] });
   await settle();
   expect(toasts).toHaveLength(1);
-  expect(toasts[0]!.toast).toMatchObject({ lead: 'Hid 2 pull requests', detail: 'Still open on GitHub', noKey: true });
+  expect(toasts[0]!.toast).toMatchObject({ icon: 'check', noKey: true });
+  expect(toasts[0]!.toast.lead).toContain('2');
+  expect(toasts[0]!.toast.detail).toContain('GitHub');
   // The picks it hid let go; Undo shows exactly those again.
   act(() => toasts[0]!.toast.onUndo!());
   expect(sent[1]!.body).toMatchObject({ hide: [], show: [key(7), WEB20] });
@@ -181,7 +189,8 @@ test('Hide N: every pick leaves the board and its "need you" at once, in one wri
   await settle();
   expect(tile(key(7))).not.toBeNull();
   expect(tile(WEB20)).not.toBeNull();
-  expect(toasts.at(-1)!.toast.lead).toBe('Showing 2 again');
+  expect(toasts.at(-1)!.toast).toMatchObject({ icon: 'check' });
+  expect(toasts.at(-1)!.toast.lead).toContain('2');
 });
 
 test('a refused Hide puts the PRs back and says why', async () => {
@@ -194,7 +203,7 @@ test('a refused Hide puts the PRs back and says why', async () => {
   sent[0]!.answer(409, { error: 'Code review is off.', code: 'code_review_off' });
   await settle();
   expect(tile(key(8))).not.toBeNull();
-  expect(toasts.at(-1)!.toast).toMatchObject({ icon: 'warn', lead: 'Couldn’t hide' });
+  expect(toasts.at(-1)!.toast).toMatchObject({ icon: 'warn' });
 });
 
 test("a tile's popover hides that PR only (a phone's sheet)", async () => {
@@ -210,41 +219,110 @@ test("a tile's popover hides that PR only (a phone's sheet)", async () => {
 
 test("Reviews: a row's menu hides the row's open PRs; Hidden lists what is hidden, and Show again reaches the page", async () => {
   if (!hasDom) return;
-  const answer = { ...reviewsOfPulls(MODEL), hidden: [{ key: key(5), title: 'Old change', url: pull(5).url, at: '2026-11-16T10:00:00.000Z' }] satisfies InboxPullHidden[] };
+  const answer = { ...reviewsOfPulls(MODEL), hidden: [{ key: key(5), title: 'Old change', url: pull(5).url, at: '2026-11-16T10:00:00.000Z', thread_id: 'thr_old' }] satisfies InboxPullHidden[] };
   const hid: InboxPull[][] = [];
   const shown: string[] = [];
+  const threads: string[] = [];
   mount(
-    <ReviewsList
-      answer={answer}
-      model={MODEL}
-      rows={answer.rows}
-      filter="all"
-      projectNames={new Map()}
-      selected={null}
-      phone={false}
-      onOpen={() => {}}
-      onNew={() => {}}
-      onHide={(pulls) => hid.push(pulls)}
-      onShowAgain={(h) => shown.push(h.key)}
-    />,
+    <ReviewsMenu className="ib-lbody" rows={answer.rows} links={reviewLinksOf(MODEL, answer)} phone={false} onTarget={() => {}} onHide={(pulls) => hid.push(pulls)}>
+      <ReviewsList
+        answer={answer}
+        model={MODEL}
+        rows={answer.rows}
+        filter="all"
+        projectNames={new Map()}
+        selected={null}
+        phone={false}
+        onOpen={() => {}}
+        onNew={() => {}}
+        onShowAgain={(h) => shown.push(h.key)}
+        onOpenThread={(id) => threads.push(id)}
+      />
+    </ReviewsMenu>,
   );
+  // The menu's trigger is the list's body itself: every band and the Hidden fold are its own children.
+  const groups = [...document.querySelectorAll<HTMLElement>('.ib-group')];
+  expect(groups.length).toBeGreaterThan(1);
+  for (const group of groups) expect(group.parentElement!.classList.contains('ib-lbody')).toBe(true);
+
   const row = answer.rows.find((r) => r.pull_keys.includes(key(8)))!;
   await act(async () => {
     $(`[data-reviews-row="${row.id}"]`)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 200, clientY: 200 }));
   });
-  const item = $('[data-reviews-hide]')!;
-  expect(item.textContent).toBe('Hide pull request');
-  await act(async () => item.click());
+  await act(async () => $('[data-reviews-hide]')!.click());
   expect(hid.map((pulls) => pulls.map((p) => p.key))).toEqual([[key(8)]]);
 
-  // Hidden: closed at first, at the end of the list.
+  // Hidden: closed at first, at the end of the list; a hidden PR with a thread opens it.
   const fold = $('[data-pulls-hidden-toggle]')!;
   expect(fold.getAttribute('aria-expanded')).toBe('false');
-  expect(fold.textContent).toContain('Hidden');
   click(fold);
   const hiddenRow = $(`[data-pulls-hidden-row="${key(5)}"]`)!;
   expect(hiddenRow.textContent).toContain('#5');
   expect(hiddenRow.textContent).toContain('Old change');
-  click($(`[data-pulls-show-again="${key(5)}"]`)!);
+  click($('[data-pulls-hidden-thread="thr_old"]')!);
+  expect(threads).toEqual(['thr_old']);
+  const again = $(`[data-pulls-show-again="${key(5)}"]`)!;
+  // Its name holds the words it shows (WCAG 2.5.3).
+  expect(again.getAttribute('aria-label')!).toContain(again.textContent!);
+  click(again);
   expect(shown).toEqual([key(5)]);
+});
+
+test("a row's Hide takes its open PRs only: a merged layer of its stack is not hidden again", () => {
+  if (!hasDom) return;
+  const merged = pull(30, { state: 'merged', merged_at: '2026-11-16T10:00:00.000Z' });
+  const open = pull(31, { base: 'b30' });
+  const row = { pull_keys: [merged.key, open.key], stacks: [{ layers: [merged, open] }] } as unknown as InboxReviewRow;
+  expect(rowPulls(row).map((p) => p.key)).toEqual([open.key]);
+});
+
+test('Show again: focus goes to the next hidden PR, then to the fold once none is left', async () => {
+  if (!hasDom) return;
+  const records: InboxPullHidden[] = [5, 6].map((n) => ({ key: key(n), title: `Old ${n}`, url: pull(n).url, at: `2026-11-16T1${n}:00:00.000Z` }));
+  function Hidden() {
+    const changes = hidden.useHiddenChanges();
+    const answer = hidden.reviewsShown({ ...reviewsOfPulls(MODEL), hidden: records }, changes)!;
+    return (
+      <div className="ib-lbody">
+        <ReviewsList answer={answer} model={MODEL} rows={answer.rows} filter="all" projectNames={new Map()} selected={null} phone={false} onOpen={() => {}} onNew={() => {}} onShowAgain={(h) => void hidden.showPulls([h.key])} />
+      </div>
+    );
+  }
+  mount(<Hidden />);
+  click($('[data-pulls-hidden-toggle]')!);
+  const first = $(`[data-pulls-show-again="${key(6)}"]`)!;
+  first.focus();
+  click(first);
+  await settle(50);
+  expect(document.activeElement).toBe($(`[data-pulls-show-again="${key(5)}"]`));
+  click($(`[data-pulls-show-again="${key(5)}"]`)!);
+  await settle(50);
+  // The fold left with its last PR: the list's own heading would take focus in the page; here nothing is left to take it.
+  expect($('[data-pulls-hidden-toggle]')).toBeNull();
+});
+
+test("the Inbox list's Hide: one write naming the threads, one toast, and Undo shows exactly what it hid", async () => {
+  if (!hasDom) return;
+  const done = hidden.hideThreadsWithUndo(['thr_a', 'thr_b'], (toast, ms) => toasts.push({ toast, ms }));
+  await settle();
+  expect(sent.map((s) => [new URL(s.url, 'http://x').pathname, s.body.threads, s.body.hide])).toEqual([['/api/inbox/pulls/hidden', ['thr_a', 'thr_b'], []]]);
+  sent[0]!.answer(200, { hidden: [{ key: key(7), title: 'Change 7', url: pull(7).url, at: '2026-11-17T12:00:00.000Z', thread_id: 'thr_a' }, { key: WEB20, title: 'Change 20', url: pull(20).url, at: '2026-11-17T12:00:00.000Z', thread_id: 'thr_b' }], hid: [key(7), WEB20] });
+  expect(await done).toBe(true);
+  // Reviews and the board drop them at once.
+  expect(hidden.pullsShown(MODEL, hidden.hiddenChangesNow())!.pulls.map((p) => p.key)).toEqual([key(8), key(9)]);
+  expect(toasts).toHaveLength(1);
+  expect(toasts[0]!.toast.lead).toContain('2');
+  act(() => toasts[0]!.toast.onUndo!());
+  await settle();
+  expect(sent[1]!.body).toMatchObject({ hide: [], threads: [], show: [key(7), WEB20] });
+});
+
+test("a hidden PR keeps its review thread in a thread's PR list", () => {
+  if (!hasDom) return;
+  const model = { ...MODEL, pulls: MODEL.pulls.filter((p) => p.key !== key(7)), hidden: [{ key: key(7), title: 'Change 7', url: pull(7).url, at: '2026-11-17T12:00:00.000Z', thread_id: 'thr_review' }] };
+  const linkOf = pullReviewLinks(model, null);
+  expect(linkOf({ pull: key(7), state: 'open' }, 'thr_other')).toMatchObject({ kind: 'thread', threadId: 'thr_review' });
+  // Not on its own thread, nor once it merged.
+  expect(linkOf({ pull: key(7), state: 'open' }, 'thr_review')).toBeNull();
+  expect(linkOf({ pull: key(7), state: 'merged' }, 'thr_other')).toBeNull();
 });

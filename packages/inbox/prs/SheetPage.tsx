@@ -38,7 +38,7 @@ import { retryTies, startReview } from './startReviews';
 import { untiedStarts } from './reviewStarts';
 import type { InboxToastModel } from '../components/Toast';
 import { useToastAbove } from '../toastAbove';
-import { hideWithUndo } from '../pulls/hiddenPulls';
+import { focusWhenGone, hideWithUndo } from '../pulls/hiddenPulls';
 import { SheetTable, type TableSection } from './SheetTable';
 import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
 import {
@@ -692,6 +692,16 @@ export function SheetPage(props: SheetPageProps) {
         props.onOpenThread!(threadOf(pop.pull.key)!);
       } : undefined}
       onHide={() => {
+        // The tile leaves with the popover: focus goes to the PR now in its place.
+        const root = pop.anchor.closest('.pn-inbox');
+        focusWhenGone(
+          () =>
+            [...(root?.querySelectorAll<HTMLElement>('[data-pr-tile], [data-pr-row]') ?? [])].flatMap((el) => {
+              const target = el.matches('[data-pr-tile]') ? el : el.querySelector<HTMLElement>('[data-pr-open]');
+              return target ? [{ id: el.getAttribute('data-pr-tile') ?? el.getAttribute('data-pr-row') ?? '', el: target }] : [];
+            }),
+          pop.pull.key,
+        );
         hide(false);
         void hideWithUndo([pop.pull], props.onToast);
       }}
