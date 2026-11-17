@@ -199,6 +199,8 @@ export function ScheduledEditor(props: EditorProps) {
           {!props.narrow && <span className="ib-phsubj-t">{name}</span>}
         </span>
         <SaveStatus status={autosave.status} />
+        {/* Title and status at the left, ⋯ and × at the right edge, as the thread pane's header. */}
+        <span className="ib-sp" />
         <MoreMenu on={record?.state === 'done' ? null : on} onTurn={() => void turn(!on)} onRun={record && record.state !== 'running' ? () => void runOnce() : null} onDelete={remove} />
         {!props.narrow && (
           <>
