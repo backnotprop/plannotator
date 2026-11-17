@@ -369,12 +369,28 @@ describe('review entry assets', () => {
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
+  // The thread canvas's whiteboard (Excalidraw) carries live WebAssembly in three chunks it loads only when used:
+  // font subsetting for an SVG copy, and picture resizing on paste. Only the Inbox window packs them, and the window's
+  // own test below holds them out of what loads up front.
+  const CANVAS_WASM_CHUNK = /^\/assets\/(subset-shared\.chunk|pica|image-blob-reduce\.esm)-[\w-]+\.js$/;
+  const withoutCanvasWasm = (path: string, bundle: string) => {
+    if (path !== 'apps/hook/dist/inbox.html') return bundle;
+    const indexAt = bundle.indexOf(PACKED_ASSETS_MARKER) + PACKED_ASSETS_MARKER.length;
+    const dataAt = bundle.indexOf('\n', indexAt) + 1;
+    const index = JSON.parse(bundle.slice(indexAt, dataAt - 1)) as Record<string, { start: number; end: number }>;
+    const held = Object.entries(index)
+      .filter(([asset]) => CANVAS_WASM_CHUNK.test(asset))
+      .sort(([, a], [, b]) => b.start - a.start);
+    let out = bundle;
+    for (const [, at] of held) out = out.slice(0, dataAt + at.start) + out.slice(dataAt + at.end);
+    return out;
+  };
   const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html', 'apps/hook/dist/shape.html'];
   for (const path of bundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
       // Asserted on a boolean, not the string: these bundles are ~20MB and a
       // `toContain` failure would print all of it.
-      const inlinedWasm = readFileSync(resolve(root, path), 'utf8').includes('AGFzbQ');
+      const inlinedWasm = withoutCanvasWasm(path, readFileSync(resolve(root, path), 'utf8')).includes('AGFzbQ');
       expect({ path, inlinedWasm }).toEqual({ path, inlinedWasm: false });
     });
   }
@@ -445,6 +461,8 @@ describe('review entry assets', () => {
     Mermaid: 'flowchart-v2',
     Graphviz: 'viz_set_y_invert',
     KaTeX: 'katex-display',
+    'thread canvas (Excalidraw)': 'EXCALIDRAW_ASSET_PATH',
+    'canvas wasm (font subsetting)': 'AGFzbQ',
   };
   test.skipIf(!existsSync(resolve(root, inboxWindow)))(`${inboxWindow} loads its entry script up front and the review, diagrams and grammars on first use`, async () => {
     const bundle = readFileSync(resolve(root, inboxWindow), 'utf8');
@@ -476,12 +494,13 @@ describe('review entry assets', () => {
     const facts = {
       // The stylesheet stays in the page, so it paints as the single-file page did; only scripts are packed.
       stylesheetInline: app.html.includes('<style') && !/<link rel="stylesheet"/.test(app.html),
-      onlyScriptsPacked: packed.every((asset) => asset.endsWith('.js')),
+      // The canvas's own fonts (packed, fetched only by the canvas, never from a CDN) are the one exception.
+      onlyScriptsPacked: packed.every((asset) => asset.endsWith('.js') || /^\/assets\/excalidraw\/fonts\/\w+\/[\w-]+\.woff2$/.test(asset)),
       entryScripts: [...app.html.matchAll(/<script type="module"[^>]*\ssrc="\/assets\//g)].length,
       preloadPlaceholder: bundle.includes('__VITE_PRELOAD__'),
       lazyPartsPacked: Object.entries(INBOX_LAZY_MARKERS).filter(([, marker]) => !has(all.values(), marker)).map(([part]) => part),
       lazyPartsUpFront: Object.entries(INBOX_LAZY_MARKERS).filter(([, marker]) => has(upFront.values(), marker)).map(([part]) => part),
-      nonAsciiScripts: [...all].filter(([, code]) => /[^\x00-\x7f]/.test(code)).map(([asset]) => asset),
+      nonAsciiScripts: [...all].filter(([asset, code]) => asset.endsWith('.js') && /[^\x00-\x7f]/.test(code)).map(([asset]) => asset),
       upFrontUnderAThird: upFrontBytes / bundle.length < 1 / 3,
     };
     expect(facts).toEqual({

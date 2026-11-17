@@ -131,6 +131,8 @@ describe("Plans off costs nothing", () => {
       "packages/shared/plans/switch.ts",
       "packages/server/inbox-capability.ts",
       "packages/server/plans-capability.ts",
+      // The thread canvas, the seam's other capability: it takes the seam's types, never Plans' modules.
+      "packages/server/canvas-capability.ts",
       "packages/server/inbox.ts",
       "apps/hook/server/plans-command.ts",
       "apps/hook/server/index.ts",

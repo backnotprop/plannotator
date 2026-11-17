@@ -256,14 +256,23 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
     .map(([id, pin]) => ({ el: byId(id), pin, id }))
     .filter((x): x is { el: HTMLElement; pin: BoardPin; id: string } => !!x.el && !x.el.matches("a[data-arrow]"))
     .sort((a, b) => depthOf(a.el) - depthOf(b.el));
+  // A pinned part leaves the flow, and a blank box of its laid-out size holds its place, so the size the person gave
+  // it never moves the parts around it (a widened button would widen its whole column).
   for (const { el, pin } of pinned) {
-    if (paintedBox(el) || !hasIdChildren(el)) {
-      if (pin.w > 0) {
-        el.style.width = `${pin.w}px`;
-        el.style.flex = "none";
-      }
-      if (pin.h > 0) el.style.height = `${pin.h}px`;
-    }
+    const was = el.getBoundingClientRect();
+    const cs = getComputedStyle(el);
+    const hold = el.ownerDocument.createElement("div");
+    hold.setAttribute("aria-hidden", "true");
+    hold.style.cssText = `display:${cs.display.startsWith("inline") ? "inline-block" : "block"};flex:none;width:${was.width}px;height:${was.height}px;margin:${cs.margin};align-self:${cs.alignSelf}`;
+    el.before(hold);
+    el.style.position = "absolute";
+    el.style.margin = "0";
+    el.style.left = "0px";
+    el.style.top = "0px";
+    el.style.flex = "none";
+    const sized = paintedBox(el) || !hasIdChildren(el);
+    el.style.width = `${sized && pin.w > 0 ? pin.w : was.width}px`;
+    el.style.height = `${sized && pin.h > 0 ? pin.h : was.height}px`;
   }
   for (const { el, pin } of pinned) {
     const now = unionBox(el, R, cv);
@@ -271,7 +280,6 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
     const dx = pin.x - now.x;
     const dy = pin.y - now.y;
     if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-    el.style.position = "relative";
     el.style.left = `${(parseFloat(el.style.left) || 0) + dx}px`;
     el.style.top = `${(parseFloat(el.style.top) || 0) + dy}px`;
   }

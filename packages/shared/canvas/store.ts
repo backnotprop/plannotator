@@ -23,6 +23,9 @@ import { readJson, withLock, writeJsonAtomic } from "../store-files";
 
 export const CANVAS_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
+/** Only these pictures are kept (by their bytes, whatever their name says): never an SVG, which can carry script. */
+const RASTER = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+const isRaster = (bytes: Uint8Array) => RASTER.has(sniffImageContentType(bytes) ?? "");
 /** A canvas's id: a thread's root message id (a space's id later). */
 export const CANVAS_ID_RE = /^msg_[0-9A-HJKMNP-TV-Z]{26}$/;
 /** A person's saves within this long of the last, with no agent version between, are one version. */
@@ -166,7 +169,7 @@ export function createCanvasStore(options: { dataDir: string; now?: () => number
     if (!IMAGE_EXT.has(extname(real).toLowerCase())) return { ok: false, error: `${path} is not a png, jpg, gif or webp picture` };
     if (size > CANVAS_IMAGE_MAX_BYTES) return { ok: false, error: `${path} is ${size} bytes; a picture is at most ${CANVAS_IMAGE_MAX_BYTES}` };
     const bytes = readFileSync(real);
-    if (!sniffImageContentType(bytes)) return { ok: false, error: `${path} is not a png, jpg, gif or webp picture` };
+    if (!isRaster(bytes)) return { ok: false, error: `${path} is not a png, jpg, gif or webp picture` };
     const name = `${createHash("sha256").update(bytes).digest("hex").slice(0, 10)}-${basename(real).replace(/[^\w.-]+/g, "_")}`;
     const files = join(folder(id), "files");
     ensureDir(files);
@@ -261,7 +264,7 @@ export function createCanvasStore(options: { dataDir: string; now?: () => number
           for (const [fileId, up] of Object.entries(input.uploads)) {
             const ref = input.files[fileId];
             if (!ref || !/^[\w.-]+$/.test(ref.name) || ref.name.startsWith(".")) continue;
-            if (up.bytes.byteLength > CANVAS_IMAGE_MAX_BYTES || !sniffImageContentType(up.bytes)) continue;
+            if (up.bytes.byteLength > CANVAS_IMAGE_MAX_BYTES || !isRaster(up.bytes)) continue;
             const dest = join(files, ref.name);
             if (!existsSync(dest)) writeFileSync(dest, up.bytes, { mode: 0o600 });
           }
@@ -292,7 +295,7 @@ export function createCanvasStore(options: { dataDir: string; now?: () => number
     },
 
     savePicture(id, input) {
-      if (!sniffImageContentType(input.bytes) || input.bytes.byteLength > CANVAS_IMAGE_MAX_BYTES) return false;
+      if (!isRaster(input.bytes) || input.bytes.byteLength > CANVAS_IMAGE_MAX_BYTES) return false;
       return locked(id, () => {
         const s = read(id);
         if (input.rev < (s.png?.rev ?? -1)) return false;

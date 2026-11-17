@@ -146,7 +146,7 @@ export function CanvasPane({ threadId, canvas, view, version, phone, theme, agen
               fileUrl={(name) => canvasApi.fileUrl(threadId, name)}
               theme={theme}
               readOnly={!!version}
-              dockAtTop={full && !phone}
+              dockAtTop={full}
               penWhenEmpty
               flash={flash}
               onChange={version ? undefined : (change) => canvas.save(change)}
@@ -167,7 +167,7 @@ export function CanvasPane({ threadId, canvas, view, version, phone, theme, agen
           </div>
         ) : null}
         {!version && line ? (
-          <div className={`ib-cv-line${full && !phone ? ' ib-cv-line-top' : ''}`} role="status" data-canvas-changed="">
+          <div className={`ib-cv-line${full ? ' ib-cv-line-top' : ''}`} role="status" data-canvas-changed="">
             <span>
               <b>{agent}</b> changed {line.changed} {line.changed === 1 ? 'part' : 'parts'} just now
             </span>
