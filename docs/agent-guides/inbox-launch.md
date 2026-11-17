@@ -71,6 +71,8 @@ A reply to a session that ended can start a new one (the reply box's start row; 
 | `waiting_answer` | Claude Code is waiting for your permission · N min, Stop: the header of the permission card itself (no separate line) | the row goes to Stopped on you, unread |
 
 "· N min" shows from the first full minute (never "1 min" a few seconds in).
+
+**Open in Rex.** When Rex's app is attached to its server on this computer (`inbox-rex.ts`; "Where an agent lives: Rex" in `inbox-notifications-and-agents.md`), the list's own group says `open_in: "rex"` to a window on this computer and the run line's button reads Open in Rex. The same `POST …/open` then opens the host's `terminal` command as a new Rex tab named for the agent (`host.name`), in the Rex session named for the project (made when there is none): the command is the tab's program, nothing is typed. With Remote Control on, Rex's app also goes to the new tab. When Rex says no, it opens Terminal as before; from a linked machine's window or the tailnet, Rex is never asked. Without Rex nothing changes.
 | `stopped` | You stopped Claude Code at <time>. Your reply starts it again. | none |
 | `failed` | Claude Code didn't start. <cause> Your message is kept. Try again (Open in Terminal for an untrusted folder or a session that exists; phone or tailnet: no Open) | Not delivered |
 | `failed`, `turn_error` | Claude Code couldn't answer. Your message is kept. Try again (its turn ended in an API error; the error is the note above) | none |

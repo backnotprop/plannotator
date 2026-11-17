@@ -1408,7 +1408,8 @@ ${result.text}`);
         if (via === "tailnet") return localOnly();
         const e = await environment();
         // Rex, where the person works in it (its app is attached here, inbox-rex.ts): a new Rex tab instead of Terminal.
-        const rex = options.rex && (await options.rex.opensHere()) ? options.rex : null;
+        // Only for a window on this computer, never a linked machine's (its window offers Terminal).
+        const rex = !door && options.rex && (await options.rex.opensHere()) ? options.rex : null;
         // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
         // first: `terminal` may hand a session over, and a refused Open must change nothing.
         const osascript = e.which("osascript");
