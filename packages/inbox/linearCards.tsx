@@ -7,11 +7,14 @@
  * - A bare `ENG-123` of one of the workspace's teams links to its issue, so the card opens on it too. The teams come
  *   from `GET /api/inbox/linear-refs` (read with this computer's Linear key), asked once prose on screen shows a
  *   candidate identifier, never on page load; no key, no teams, nothing linked.
+ * - The same answer's `key` says whether Linear took the key: a card Linear answered `signed_out` then says the key
+ *   was refused (and where to replace it) instead of asking for one, and Settings → Accounts → Linear says it too.
  */
 import { findLinearIdentifiers, isLinearRef, linearAsForgeRef, linearIssueUrl, parseLinearRefUrl, type LinearIssueRefs } from '@plannotator/core/linear-ref-card';
 import { LinearRefCardView } from '@plannotator/ui/components/LinearRefCardView';
 import { registerPlainTextLinker, registerRefCardProvider, type PlainTextLinker, type RefCardProvider } from '@plannotator/ui/utils/refCardProviders';
 import { getRefCardTransport, setRefCardTransport } from '@plannotator/ui/utils/refCard';
+import { useSyncExternalStore } from 'react';
 import { inboxUrl } from './inboxUrl';
 
 /** The linker for bare identifiers of these teams. */
@@ -31,6 +34,29 @@ export function linearIdentifierLinker(refs: LinearIssueRefs): PlainTextLinker {
 }
 
 export const NO_KEY_TEXT = 'Add your Linear API key in Settings → Accounts to see details here.';
+export const REFUSED_KEY_TEXT = 'Linear refused the API key. Replace it in Settings → Accounts → Linear.';
+
+/** The server's `LinearKeyVerdict` from the last teams read; null before one. */
+export type LinearKeyVerdict = 'accepted' | 'refused' | 'unknown' | 'none';
+let verdict: LinearKeyVerdict | null = null;
+const verdictSeen = new Set<() => void>();
+function setVerdict(next: LinearKeyVerdict | null): void {
+  if (next === verdict) return;
+  verdict = next;
+  for (const seen of verdictSeen) seen();
+}
+const watchVerdict = (seen: () => void) => {
+  verdictSeen.add(seen);
+  return () => verdictSeen.delete(seen);
+};
+/** The key's verdict, redrawn when a teams read changes it. */
+export function useLinearKeyVerdict(): LinearKeyVerdict | null {
+  return useSyncExternalStore(watchVerdict, () => verdict, () => verdict);
+}
+
+function LinearCardView(props: Parameters<typeof LinearRefCardView>[0]) {
+  return <LinearRefCardView {...props} noKeyText={useLinearKeyVerdict() === 'refused' ? REFUSED_KEY_TEXT : NO_KEY_TEXT} />;
+}
 
 /**
  * The provider: Linear issue links, Linear's own card, and the identifier as the card's accessible name. A link to
@@ -45,7 +71,7 @@ export const linearRefCardProvider: RefCardProvider = {
     return keyWorkspace && ref.owner !== keyWorkspace ? null : linearAsForgeRef(ref);
   },
   owns: (ref) => isLinearRef(ref),
-  View: (props) => <LinearRefCardView {...props} noKeyText={NO_KEY_TEXT} />,
+  View: LinearCardView,
   label: (ref) => `Linear issue ${ref.repo}-${ref.number}`,
 };
 
@@ -60,12 +86,21 @@ let unlink: (() => void) | null = null;
 /** The key's workspace (its URL key), once read; null with no key or before. */
 let keyWorkspace: string | null = null;
 
+const VERDICTS: readonly string[] = ['accepted', 'refused', 'unknown', 'none'];
+
+/** Bumped per read: an older read's answer (under the key before a save) is dropped. */
+let reads = 0;
+
 function linkTeams(): Promise<void> {
   if (!installed) return Promise.resolve();
+  const read = ++reads;
   return installed
     .fetchTeams(inboxUrl('/linear-refs'), { headers: { accept: 'application/json' } })
-    .then((res) => (res.ok ? (res.json() as Promise<{ workspace?: string | null; teams?: string[] }>) : null))
+    .then((res) => (res.ok ? (res.json() as Promise<{ workspace?: string | null; teams?: string[]; key?: string }>) : null))
     .then((body) => {
+      if (read !== reads) return;
+      // An older Inbox's answer has no `key`: not known.
+      setVerdict(body && VERDICTS.includes(body.key ?? '') ? (body.key as LinearKeyVerdict) : null);
       unlink?.();
       unlink = null;
       keyWorkspace = installed && body?.workspace ? body.workspace.toLowerCase() : null;
@@ -102,13 +137,23 @@ export function installLinearCards(fetchImpl?: FetchTeams): () => void {
     installed = null;
     teamsAsked = false;
     keyWorkspace = null;
+    setVerdict(null);
   };
 }
 
-/** After the key changes: drop the cached cards, and read the teams again if prose already asked for them. */
+/** After the key changes: drop the cached cards and the verdict, and read the teams (and so the verdict) again. */
 export function refreshLinearCards(): Promise<void> {
   if (!installed) return Promise.resolve();
   setRefCardTransport(getRefCardTransport());
   keyWorkspace = null;
-  return teamsAsked ? linkTeams() : Promise.resolve();
+  setVerdict(null);
+  teamsAsked = true;
+  return linkTeams();
+}
+
+/** Settings asks once for the verdict of a key it shows, when no read has said it yet. */
+export function checkLinearKey(): Promise<void> {
+  if (!installed || verdict !== null) return Promise.resolve();
+  teamsAsked = true;
+  return linkTeams();
 }

@@ -1,9 +1,9 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import type { InboxLinearKeyState } from '@plannotator/core/inbox-types';
 import { post } from '../api';
 import { Icon } from '../icons';
 import { inboxUrl } from '../inboxUrl';
-import { refreshLinearCards } from '../linearCards';
+import { checkLinearKey, refreshLinearCards, useLinearKeyVerdict, type LinearKeyVerdict } from '../linearCards';
 
 declare module '../api' {
   interface SettingsModel {
@@ -16,6 +16,13 @@ declare module '../api' {
 const saveLinearKey = (key: string | null) => post<{ key: InboxLinearKeyState }>(inboxUrl('/linear/key'), { key });
 
 const HINT = 'Shows Linear issues when you hover their links.';
+
+/** What the last Linear answer said of the key shown; nothing until one did (no gate: a key saves either way). */
+function verdictText(verdict: LinearKeyVerdict | null): string | null {
+  if (verdict === 'accepted') return 'Linear accepted it.';
+  if (verdict === 'refused') return 'Linear refused it, so cards cannot load. Replace it with a working key.';
+  return null;
+}
 
 /**
  * The last save's answer, and the settings read it replaced: the page's settings model is not reread after a save, so
@@ -33,6 +40,11 @@ export function LinearKeySettings({ initial, where }: { initial: InboxLinearKeyS
   const [typed, setTyped] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const verdict = useLinearKeyVerdict();
+  const told = verdictText(verdict);
+  useEffect(() => {
+    if (key.source) void checkLinearKey();
+  }, [key.source]);
   const save = async (next: string | null) => {
     setSaving(true);
     setError(null);
@@ -58,7 +70,10 @@ export function LinearKeySettings({ initial, where }: { initial: InboxLinearKeyS
       <div className="ib-prow" data-linear-key="env">
         <span className="ib-txt">
           <span className="ib-l">Using LINEAR_API_KEY</span>
-          <span className="ib-desc">{HINT} It is set in this Inbox’s environment.</span>
+          <span className="ib-desc" data-linear-key-verdict={verdict ?? undefined}>
+            {told ? `${told} ` : ''}
+            {HINT} It is set in this Inbox’s environment.
+          </span>
         </span>
       </div>
     );
@@ -68,11 +83,14 @@ export function LinearKeySettings({ initial, where }: { initial: InboxLinearKeyS
         <span className="ib-txt">
           <span className="ib-l">
             <span className="ib-paired">
-              <Icon name="check" size={14} />
+              {verdict !== 'refused' && <Icon name="check" size={14} />}
               Key saved, ending in {key.last4}
             </span>
           </span>
-          <span className="ib-desc">{HINT}</span>
+          <span className="ib-desc" data-linear-key-verdict={verdict ?? undefined}>
+            {told ? `${told} ` : ''}
+            {HINT}
+          </span>
         </span>
         <span className="ib-ctl">
           <button type="button" className="ib-btn" onClick={() => setReplacing(true)} data-linear-key-replace="">

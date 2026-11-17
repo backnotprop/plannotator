@@ -67,8 +67,8 @@ export interface Route {
   sheet?: string | null;
   full?: boolean;
   /**
-   * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
-   * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
+   * Shape (approval "shape-inbox-placement"): the board open in its thread's pane (`#thread=…&shape=shp_…`), or
+   * over the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
    */
   shape?: string | null;
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */

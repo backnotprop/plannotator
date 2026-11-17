@@ -364,6 +364,7 @@ packages/review-editor/App.guideViewed.test.tsx
 packages/review-editor/App.commitsJj.test.tsx
 packages/review-editor/App.emptyDiffSwitch.test.tsx
 packages/review-editor/App.sessionTitle.test.tsx
+packages/review-editor/App.diffLoadFailure.test.tsx
 packages/review-editor/App.planLookTwoTabs.test.tsx
 packages/review-editor/components/AnnotationToolbar.placement.test.tsx
 packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
@@ -679,6 +680,7 @@ packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/inbox/shape/ShapeBoard.test.tsx
 packages/inbox/shape/boardFocus.test.ts
+packages/inbox/shape/boardInThread.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeFollow.test.tsx
 packages/ui/components/shape/followPainter.pan.test.ts
@@ -692,6 +694,7 @@ packages/inbox/lazyRecovery.test.tsx
 packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
 packages/review-editor/utils/scrollWithPage.test.ts
 packages/ui/components/shape/ShapeSurface.board.test.tsx
+packages/ui/components/shape/ShapeSurface.panel.test.tsx
 packages/ui/components/shape/ShapeSurface.onCode.test.tsx
 packages/ui/components/AnnotationToolstrip.hideActionModes.test.tsx
 packages/ui/components/CommentPopover.extraAction.test.tsx
@@ -804,4 +807,6 @@ packages/inbox/replyMentionsField.test.tsx
 packages/inbox/components/listDrops.test.tsx
 packages/inbox/agents/projectFaceMarks.test.tsx
 packages/ui/components/frame/frame.dom.test.tsx
+packages/ui/components/frame/card/card.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
+packages/inbox/pulls/branchReviews.test.tsx

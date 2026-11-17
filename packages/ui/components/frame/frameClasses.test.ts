@@ -12,12 +12,33 @@ import { compile } from 'tailwindcss';
 import ts from 'typescript';
 import { cn } from './lib/utils';
 import { fileIcon } from './rail/fileIcons';
+import { CARD_MOTIONS } from './card/motions';
 
 const folder = import.meta.dir;
 const frameCss = readFileSync(join(folder, 'frame.css'), 'utf8');
+const motionsCss = readFileSync(join(folder, 'card', 'motions.css'), 'utf8');
 
 /** Plain classes frame.css styles itself, and Tailwind group markers: no utility rule is expected. */
-const NOT_UTILITIES = new Set(['frame-scrim', 'frame-sheet', 'frame-sheet-overlay', 'frame-tooltip', 'collapsible-edge']);
+const NOT_UTILITIES = new Set([
+  'frame-scrim',
+  'frame-sheet',
+  'frame-sheet-overlay',
+  'frame-tooltip',
+  'collapsible-edge',
+  'frame-card-sheet',
+  'frame-card-window',
+  'frame-card-window-bar',
+  'frame-card-window-body',
+  'frame-card-panel',
+  'frame-card-panel-rows',
+  'frame-card-document',
+  'frame-card-arrive',
+  'frame-card-arrive-tint',
+  'frame-card-breathe',
+  'frame-card-settle',
+  'frame-card-fan',
+  'frame-card-open',
+]);
 
 async function loadStylesheet(id: string, base: string) {
   const path = id.startsWith('.')
@@ -125,7 +146,7 @@ describe('frame classes compile with theme.css and frame.css', () => {
   });
 
   test('the plain classes left out above are styled by frame.css', () => {
-    for (const name of NOT_UTILITIES) expect(frameCss).toContain(`.${name}`);
+    for (const name of NOT_UTILITIES) expect(frameCss + motionsCss).toContain(`.${name}`);
   });
 
   test('a made-up frame class is caught, so a pass below means something', async () => {
@@ -187,9 +208,59 @@ describe('the versions sheet', () => {
   });
 });
 
+describe('card motions', () => {
+  const css = motionsCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  const reduced = css.slice(css.indexOf('@media (prefers-reduced-motion: reduce)'));
+
+  test('every named motion is a class in motions.css, and under reduced motion none of them moves', () => {
+    expect(reduced.length).toBeGreaterThan(100);
+    for (const name of Object.values(CARD_MOTIONS)) {
+      expect(css).toContain(`.${name}`);
+      expect(reduced).toContain(name);
+    }
+    expect(reduced).toMatch(/\.frame-card-breathe,[\s\S]*?\{\s*animation: none;\s*\}/);
+    expect(reduced).toMatch(/\.frame-card-fan,\s*\[data-frame-card-hero\],\s*\[data-frame-card\] \{\s*transition: none;\s*\}/);
+    expect(reduced).toMatch(/::view-transition-new\(\*\.frame-card-open\) \{\s*animation: none;\s*\}/);
+    const animated = [...reduced.matchAll(/([^{}]+)\{\s*animation: none;/g)].map(([, selectors]) => selectors).join(',');
+    for (const name of ['.frame-card-breathe', '.frame-card-settle', '.frame-card-arrive,', '.frame-card-arrive > *', '.frame-card-arrive-tint']) expect(animated).toContain(name);
+  });
+
+  test('arrive ends at the line\'s own state: it is shown by default and only its animations start hidden', () => {
+    const rule = (selector: string) => css.match(new RegExp(`(?:^|\\})\\s*${selector.replace(/[.*>]/g, (c) => `\\${c}`)} \\{([^}]*)\\}`))?.[1] ?? '';
+    expect(rule('.frame-card-arrive')).toContain('grid-template-rows: 1fr;');
+    expect(rule('.frame-card-arrive')).toMatch(/animation: frame-card-arrive-open [^;]* both;/);
+    expect(rule('.frame-card-arrive > *')).not.toContain('opacity');
+    expect(rule('.frame-card-arrive > *')).toMatch(/animation: frame-card-fade-in [^;]* both;/);
+    expect(css).not.toMatch(/\.frame-card-arrive[^{]*\{[^}]*(opacity: 0|grid-template-rows: 0fr)/);
+  });
+
+  test('idle, only breathe loops, and its timings are custom properties in one place', () => {
+    const loops = [...css.matchAll(/animation:[^;]*infinite/g)];
+    expect(loops.length).toBe(1);
+    expect(loops[0]![0]).toContain('frame-card-breathe');
+    for (const name of ['--frame-card-ease', '--frame-card-fan-duration', '--frame-card-breathe-duration', '--frame-card-arrive-open-duration', '--frame-card-arrive-tint-duration', '--frame-card-settle-duration', '--frame-card-open-duration']) {
+      expect([...css.matchAll(new RegExp(`${name}:`, 'g'))].length).toBe(1);
+    }
+    expect(css).toContain('--frame-card-ease: cubic-bezier(0.22, 1, 0.36, 1);');
+  });
+
+  test('the card styles only its own data-frame-card attributes, so a host attribute such as data-card-back is left alone', () => {
+    expect(frameCss + motionsCss).not.toMatch(/\[data-card[-\]=]/);
+    expect(frameCss + motionsCss).toContain('[data-frame-card-back]');
+  });
+
+  test('frame.css brings the card styles and motions with it, so a host scanning only frame.css gets them', async () => {
+    const { build } = await compileHost();
+    const out = build([]);
+    expect(out).toContain('frame-card-breathe');
+    expect(out).toContain('.frame-card-document');
+    expect(out).toContain('[data-frame-card-back]');
+  });
+});
+
 describe('host tokens', () => {
   test('frame.css sets only --frame-* properties and frame-* theme names, never a host token', () => {
-    const names = [...frameCss.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name);
+    const names = [...(frameCss + motionsCss).replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/(--[\w-]+)\s*:/g)].map(([, name]) => name);
     expect(names.length).toBeGreaterThan(40);
     const foreign = names.filter((name) => !/^--frame-/.test(name) && !/^--(text|spacing|ease|color|shadow|radius)-frame-/.test(name));
     expect(foreign).toEqual([]);
@@ -209,5 +280,54 @@ describe('layout and icons for host requests', () => {
     expect(fileIcon({ path: 'site/index.html' })).toBe(marks[0]);
     expect(fileIcon({ path: 'flow.mmd' })).toBe(marks[1]);
     expect(fileIcon({ path: 'graph.dot' })).toBe(marks[2]);
+  });
+});
+
+describe('card layout rules in frame.css', () => {
+  const css = frameCss.replace(/\/\*[\s\S]*?\*\//g, '');
+  const block = (selector: string, from = css) => {
+    const at = from.indexOf(`${selector} {`);
+    return at < 0 ? '' : from.slice(at, from.indexOf('}', at));
+  };
+  const phone = (() => {
+    const blocks = [...css.matchAll(/@media \(max-width: 767px\) \{([\s\S]*?\n)\}/g)].map(([, body]) => body!);
+    return blocks.join('\n');
+  })();
+
+  test('a row is 44 px tall and 52 on a phone; under 768 px the secondary text is hidden', () => {
+    expect(block('[data-frame-card-row]')).toContain('height: 44px;');
+    expect(block('[data-frame-card-row]', phone)).toContain('height: 52px;');
+    expect(block('[data-frame-card-row] [data-frame-card-secondary]', phone)).toContain('display: none;');
+    expect(css).not.toMatch(/max-width: 639px|max-width: 640px/);
+  });
+
+  test('a card title takes two lines then an ellipsis; a row title one line', () => {
+    expect(block('[data-frame-card] [data-frame-card-title]')).toContain('-webkit-line-clamp: 2;');
+    const row = block('[data-frame-card-row] [data-frame-card-title]');
+    expect(row).toContain('white-space: nowrap;');
+    expect(row).toContain('text-overflow: ellipsis;');
+  });
+
+  test('cards fill fluid columns with a minimum width, and a phone shows one column', () => {
+    expect(block('[data-frame-card-grid="large"]')).toMatch(/repeat\(auto-fill, minmax\(280px, 1fr\)\)/);
+    expect(block('[data-frame-card-grid="regular"]')).toMatch(/repeat\(auto-fill, minmax\(230px, 1fr\)\)/);
+    expect(phone).toMatch(/\[data-frame-card-groups\] \{\s*grid-template-columns: minmax\(0, 1fr\);/);
+    expect(block('[data-frame-card-groups]')).toContain('gap: 44px 24px;');
+    expect(block('[data-frame-card-groups]')).toContain('--frame-card-column-min: 230px;');
+    expect(block('[data-frame-card-groups]')).toContain('grid-auto-flow: row;');
+    expect(css).not.toMatch(/grid-auto-flow:[^;]*dense/);
+    expect(block('[data-frame-card-groups]')).toMatch(/repeat\(auto-fill, minmax\(var\(--frame-card-column-min\), 1fr\)\)/);
+  });
+
+  test('focus on the host action draws no card ring and does not fan the sheet', () => {
+    const ring = /\[data-frame-card\]:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\) \{/;
+    expect(css).toMatch(ring);
+    expect(css).not.toMatch(/\[data-frame-card\]:has\(:focus-visible\)/);
+    expect(motionsCss).not.toMatch(/:has\(:focus-visible\)/);
+    expect(motionsCss).toMatch(/:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\)\) \.frame-card-fan/);
+  });
+
+  test('the updates pill shows a pointer', () => {
+    expect(block('[data-frame-card-updates]')).toContain('cursor: pointer;');
   });
 });

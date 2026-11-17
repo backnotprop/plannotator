@@ -259,6 +259,8 @@ for (const world of ['off', 'on'] as const)
     await carryTo(page, centre(await settledBox(empty)));
     await expect(empty).toHaveAttribute('data-thread-drop', 'over');
     await expect(page.locator('[data-thread-ghost] .ib-tdrag-w').last()).toHaveText('Open here');
+    // One label: the drag's says it, so the panel's own pill steps out of sight (QA 0.28.67, 056: the two overlapped).
+    await expect(empty.locator('.ib-topen')).toBeHidden();
     await page.mouse.up();
     await expect(page.locator(`section.ib-pane[data-thread-id="${id}"]`)).toBeVisible();
     await expect(page).toHaveURL(new RegExp(`#thread=${id}`));

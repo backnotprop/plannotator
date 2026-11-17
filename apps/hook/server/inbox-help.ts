@@ -36,6 +36,7 @@ import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_PRIORITY_FIELD_DESCRIPTION, INBOX_PULLS_FIELD_DESCRIPTION, INBOX_STEPS_LEAD, INBOX_STEPS_START_WAKE_LINE } from "@plannotator/shared/inbox/connection";
 import { INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_WALKTHROUGH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
+import { INBOX_BRANCH_FIELD_DESCRIPTION } from "@plannotator/core/inbox-branch-reports";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_ANSWERS_WAKE_LINE, INBOX_ASK_RECOGNISE_RULE, INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE, INBOX_DELEGATED_OPTIONS_RULE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_PROTOTYPE_TRY_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_REREAD_RULE, INBOX_SEARCH_FIRST_RULE, INBOX_SHOWING_RULE, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_NEW_ISSUE_RULE, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
@@ -295,23 +296,31 @@ export interface InboxHelpOptions {
    * "inbox-code-review-direction").
    */
   codeReview?: boolean;
+  /**
+   * The person turned Branch reviews on (config.json `inboxBranchReviews`, with Code review). Off (the default), the
+   * guide says nothing of it: no `branch` field on send_message, as the Inbox serves none then.
+   */
+  branchReviews?: boolean;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
   return platform === "win32" ? "windows" : platform === "darwin" ? "mac" : "linux";
 }
 
-function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false): string[] {
+function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false, branchReviews = false): string[] {
   const guide = TOOL_GUIDE[name];
   // send_message's `steps` field exists only while steps are on.
   const withSteps = steps && name === "send_message";
   // submit_guide's `review` and `walkthrough` fields exist only while code review is on (the tool's own words, as served).
   const withReview = codeReview && name === "submit_guide";
-  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review", "walkthrough"] : [])];
+  // send_message's `branch` field exists only while Branch reviews is on (and Code review).
+  const withBranch = branchReviews && codeReview && name === "send_message";
+  const extra = [...(withSteps ? ["steps"] : []), ...(withBranch ? ["branch"] : []), ...(withReview ? ["review", "walkthrough"] : [])];
   const args = guide.args.length > 0 ? [`Arguments: ${[...guide.args, ...extra].map(code).join(", ")}.`, ""] : [];
   const lines = [
     ...guide.lines,
     ...(withSteps ? ["- `steps`: your steps in the thread this message lands in, sent with it (see steps)."] : []),
+    ...(withBranch ? [`- \`branch\`: ${INBOX_BRANCH_FIELD_DESCRIPTION}`] : []),
     ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`, `- \`walkthrough\`: ${INBOX_WALKTHROUGH_FIELD_DESCRIPTION}`] : []),
   ];
   return [`### ${name}`, "", ...args, ...lines, ""];
@@ -322,6 +331,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
   const steps = options.steps === true;
   const scheduled = options.scheduled === true;
   const codeReview = options.codeReview === true;
+  const branchReviews = codeReview && options.branchReviews === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
   const self = shellLine(options.command);
@@ -418,7 +428,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
     // `steps` only while the person has thread steps on.
-    ...inboxServedTools({ board, steps, scheduled }).flatMap((name) => toolBlock(name, steps, codeReview)),
+    ...inboxServedTools({ board, steps, scheduled }).flatMap((name) => toolBlock(name, steps, codeReview, branchReviews)),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",
