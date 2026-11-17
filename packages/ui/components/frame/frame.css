@@ -333,7 +333,7 @@
   --frame-card-column-min: 230px;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(var(--frame-card-column-min), 1fr));
-  grid-auto-flow: row dense;
+  grid-auto-flow: row;
   gap: 44px 24px;
 }
 [data-frame-card-group="shared"] {
@@ -420,6 +420,7 @@
 
 /* "3 updates · Show" */
 [data-frame-card-updates] {
+  cursor: pointer;
   height: 24px;
   padding: 0 10px;
   border-radius: 999px;

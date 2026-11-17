@@ -314,6 +314,8 @@ describe('card layout rules in frame.css', () => {
     expect(phone).toMatch(/\[data-frame-card-groups\] \{\s*grid-template-columns: minmax\(0, 1fr\);/);
     expect(block('[data-frame-card-groups]')).toContain('gap: 44px 24px;');
     expect(block('[data-frame-card-groups]')).toContain('--frame-card-column-min: 230px;');
+    expect(block('[data-frame-card-groups]')).toContain('grid-auto-flow: row;');
+    expect(css).not.toMatch(/grid-auto-flow:[^;]*dense/);
     expect(block('[data-frame-card-groups]')).toMatch(/repeat\(auto-fill, minmax\(var\(--frame-card-column-min\), 1fr\)\)/);
   });
 
@@ -323,5 +325,9 @@ describe('card layout rules in frame.css', () => {
     expect(css).not.toMatch(/\[data-frame-card\]:has\(:focus-visible\)/);
     expect(motionsCss).not.toMatch(/:has\(:focus-visible\)/);
     expect(motionsCss).toMatch(/:has\(:focus-visible:not\(\[data-frame-card-action\] \*\)\)\) \.frame-card-fan/);
+  });
+
+  test('the updates pill shows a pointer', () => {
+    expect(block('[data-frame-card-updates]')).toContain('cursor: pointer;');
   });
 });

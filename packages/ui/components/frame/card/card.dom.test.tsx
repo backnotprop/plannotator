@@ -224,6 +224,34 @@ describe.skipIf(!hasDom)('Card', () => {
     expect(FakeObserver.made.every((observer) => observer.options.root === scroller)).toBe(true);
   });
 
+  test('every kind lays its face out at the same width, which a caller can read', () => {
+    const { Card, CARD_FACE_WIDTH } = cardModule!;
+    const frame = mount(
+      <>
+        {(['document', 'page', 'image', 'data'] as const).map((kind) => (
+          <Card key={kind} kind={kind} size="regular" title={kind} href={`/${kind}`} face={<b>{kind}</b>} />
+        ))}
+      </>,
+    );
+    nearScreen();
+    const widths = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-stage]')].map((stage) => stage.style.width);
+    expect(CARD_FACE_WIDTH).toBe(420);
+    expect(widths).toEqual(['420px', '420px', '420px', '420px']);
+  });
+
+  test('titles take their direction from their own text', () => {
+    const { Card, CardRow } = cardModule!;
+    const frame = mount(
+      <>
+        <Card kind="document" size="regular" title="خطة الجلسات" href="/a" />
+        <CardRow kind="document" title="خطة الجلسات" href="/b" />
+      </>,
+    );
+    const titles = [...frame.querySelectorAll('[data-frame-card-title]')];
+    expect(titles.length).toBe(2);
+    for (const title of titles) expect(title.getAttribute('dir')).toBe('auto');
+  });
+
   test('a picture face is fitted inside its panel by default, and fills it with fit cover', () => {
     const { Card } = cardModule!;
     const frame = mount(
@@ -246,9 +274,18 @@ describe.skipIf(!hasDom)('Card', () => {
         <Card kind="data" size="regular" title="Rate limits" href="/r" fact="Your move" factMark={<svg />} />
       </>,
     );
-    const [working, still] = [...frame.querySelectorAll('[data-frame-card-mark]')];
-    expect(working!.hasAttribute('data-frame-card-working')).toBe(true);
-    expect(still!.hasAttribute('data-frame-card-working')).toBe(false);
+    const [working, still] = [...frame.querySelectorAll<HTMLElement>('[data-frame-card-mark]')];
+    expect(working!.style.animationDelay).toMatch(/^-\d+ms$/);
+    expect(still!.style.animationDelay).toBe('');
+    act(() =>
+      root!.render(
+        <>
+          <Card kind="data" size="regular" title="Rate limits" href="/r" fact="Pi is working" factMark={<svg />} />
+          <Card kind="data" size="regular" title="Rate limits" href="/r" fact="Your move" factMark={<svg />} />
+        </>,
+      ),
+    );
+    expect(frame.querySelector<HTMLElement>('[data-frame-card-mark]')!.style.animationDelay).toBe('');
   });
 
   test('settle and the view transition name are opt-in', () => {
@@ -345,6 +382,38 @@ describe.skipIf(!hasDom)('CardGrid and CardGroups', () => {
     expect(two!.style.gridColumn).toBe('span 2');
     expect(six!.style.gridColumn).toBe('span 4');
     expect(six!.querySelectorAll('li').length).toBe(6);
+  });
+
+  test('groups of 2, 4 and 1 cards in 4 columns span 2, 4 and 1, in reading order', () => {
+    const { Card, CardGroup, CardGroups } = cardModule!;
+    const cards = (n: number, at: string) => Array.from({ length: n }, (_, i) => <Card key={i} kind="document" size="regular" title={`${at}${i}`} href={`/${at}${i}`} />);
+    const frame = mount(
+      <CardGroups>
+        <CardGroup label="a">{cards(2, 'a')}</CardGroup>
+        <CardGroup label="b">{cards(4, 'b')}</CardGroup>
+        <CardGroup label="c">{cards(1, 'c')}</CardGroup>
+      </CardGroups>,
+    );
+    const groups = [...frame.querySelectorAll<HTMLElement>('section')];
+    expect(groups.map((group) => group.style.gridColumn)).toEqual(['span 2', 'span 4', 'span 1']);
+    expect([...frame.querySelectorAll('a')].map((link) => link.getAttribute('href'))).toEqual(['/a0', '/a1', '/b0', '/b1', '/b2', '/b3', '/c0']);
+  });
+
+  test('a grid puts 44 px between rows unless told otherwise', () => {
+    const { Card, CardGrid } = cardModule!;
+    const frame = mount(
+      <>
+        <CardGrid size="large">
+          <Card kind="document" size="large" title="One" href="/1" />
+        </CardGrid>
+        <CardGrid size="regular" gap={28}>
+          <Card kind="document" size="regular" title="Two" href="/2" />
+        </CardGrid>
+      </>,
+    );
+    const [home, tight] = [...frame.querySelectorAll<HTMLElement>('ul')];
+    expect(home!.style.rowGap).toBe('44px');
+    expect(tight!.style.rowGap).toBe('28px');
   });
 
   test('a group on its own lays out its cards in its own grid', () => {

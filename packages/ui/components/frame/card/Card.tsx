@@ -81,8 +81,11 @@ export interface CardRowProps extends CardCommonProps {
   readonly thumb?: ReactNode | CardImageFace;
 }
 
-/** The width each kind's face is laid out at, before it is scaled to fit its sheet, window or panel. */
-export const CARD_FACE_WIDTH: Record<CardKind, number> = { document: 420, page: 400, image: 320, data: 400 };
+/**
+ * The width every face is laid out at, in CSS pixels, before it is scaled to fit its sheet, window or panel.
+ * A caller sizes its face for this width.
+ */
+export const CARD_FACE_WIDTH = 420;
 
 /** A first guess at a card's width, used only until the card has been measured. */
 const CARD_WIDTH_GUESS: Record<CardSize, number> = { large: 350, regular: 256 };
@@ -202,7 +205,7 @@ function useFaceScale(ref: { readonly current: HTMLElement | null }, faceWidth: 
 /** The face, laid out at its kind's page width and scaled to fit the content box it sits in. */
 function Stage({ kind, wellWidth, children }: { readonly kind: CardKind; readonly wellWidth: number; readonly children: ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
-  const faceWidth = CARD_FACE_WIDTH[kind];
+  const faceWidth = CARD_FACE_WIDTH;
   useFaceScale(ref, faceWidth);
   return (
     <div
@@ -509,7 +512,7 @@ export function Card({
           aria-label={cardName(title, line, unread, pinned)}
           className="outline-none before:absolute before:inset-0 before:z-10 before:rounded-[12px] before:content-['']"
         >
-          <span data-frame-card-title="">
+          <span data-frame-card-title="" dir="auto">
             {unread && <Dot />}
             {title}
           </span>
@@ -566,7 +569,9 @@ export function CardRow({
         className="flex min-w-0 items-center outline-none before:absolute before:inset-0 before:z-10 before:rounded-[8px] before:content-['']"
       >
         {unread && <Dot />}
-        <span data-frame-card-title="">{title}</span>
+        <span data-frame-card-title="" dir="auto">
+          {title}
+        </span>
       </Link>
       {secondary !== undefined && (
         <span data-frame-card-secondary="" aria-hidden="true" className="truncate text-[13px] text-muted-foreground">
@@ -653,16 +658,19 @@ const GridColumns = createContext<number | null>(null);
 export function CardGrid({
   children,
   size,
+  gap = 44,
   label,
   ref,
 }: {
   readonly children: ReactNode;
   readonly size: CardSize;
+  /** The space between rows of cards, in CSS pixels. Default 44, as on the home. */
+  readonly gap?: number;
   readonly label?: string;
   readonly ref?: Ref<HTMLUListElement>;
 }) {
   return (
-    <ul ref={ref} aria-label={label} data-frame-card-grid={size}>
+    <ul ref={ref} aria-label={label} data-frame-card-grid={size} style={{ rowGap: gap }}>
       {Children.map(children, (child) => (present(child) ? <li className="flex min-w-0">{child}</li> : null))}
     </ul>
   );
