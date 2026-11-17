@@ -60,7 +60,7 @@ export interface CardProps extends CardCommon {
 }
 
 export interface CardRowProps extends CardCommon {
-  /** The project, in "Now" only. */
+  /** The project (absent within a project's own page). */
   secondary?: ReactNode;
   thumb?: CardFace;
   face?: CardFace;
@@ -150,7 +150,7 @@ function Well({ kind, face, small }: { kind: CardKind; face: CardFace; small?: b
     <div className={`fc-well fc-k-${kind}${small ? ' fc-small' : ''}`} ref={ref} aria-hidden="true" inert data-card-face="">
       {kind === 'document' && !small && <div className="fc-sheet fc-back" />}
       <div className={kind === 'document' ? 'fc-sheet fc-front' : kind === 'page' ? 'fc-win' : kind === 'data' ? 'fc-panel fc-cells' : 'fc-panel'}>
-        {kind === 'page' && !small && (
+        {kind === 'page' && (
           <div className="fc-wbar">
             <i />
             <i />
@@ -327,6 +327,11 @@ const CSS = `
 .fc-small { width: 36px; height: 27px; aspect-ratio: auto; }
 .fc-small .fc-sheet { left: 12%; right: 12%; top: 14%; bottom: -2px; border-radius: 2px 2px 0 0; }
 .fc-small :is(.fc-win, .fc-panel) { border-radius: 2px; }
+.fc-small .fc-wbar { height: 5px; gap: 1.5px; padding: 0 2.5px; }
+.fc-small .fc-wbar i { width: 2px; height: 2px; }
+.fc-small .fc-win .fc-body { top: 5px; }
+/* A page's row: no frame in a row, so its shape: a few lines under the bar. */
+.fc-small.fc-k-page .fc-win::after { content: ''; position: absolute; left: 3px; top: 8px; width: 55%; height: 1.5px; border-radius: 1px; background: color-mix(in oklch, var(--foreground) 22%, transparent); box-shadow: 0 3.5px 0 color-mix(in oklch, var(--foreground) 12%, transparent), 4px 7px 0 color-mix(in oklch, var(--foreground) 12%, transparent); }
 .fc-small .fc-panel.fc-cells { bottom: -2px; border-radius: 2px 2px 0 0; }
 .fc-rname { display: flex; align-items: center; min-width: 0; font-size: 14px; line-height: 20px; color: var(--foreground); }
 .fc-rtitle { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }

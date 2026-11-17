@@ -49,6 +49,8 @@ import {
   planDecisionVersion,
   PLAN_FACE_HTML_MAX,
   PLAN_FACE_PICTURE_MAX,
+  PLAN_FACE_PICTURE_PIXELS,
+  planPictureSize,
   PLAN_FACE_TEXT_BYTES,
   planPictureTypeOf,
   type PlanFaceText,
@@ -483,6 +485,9 @@ export function createPlanStore(options: { dataDir: string; now?: () => number }
           if (size > PLAN_FACE_PICTURE_MAX) return { text: null, cut: false, picture: null };
           const bytes = new Uint8Array(readFileSync(path));
           const type = planPictureTypeOf(bytes);
+          // Huge once decoded (small in bytes): the kind's ground, never a decode of hundreds of megabytes.
+          const pixels = planPictureSize(bytes);
+          if (pixels && pixels.width * pixels.height > PLAN_FACE_PICTURE_PIXELS) return { text: null, cut: false, picture: null };
           return { text: null, cut: false, picture: type ? `data:${type};base64,${Buffer.from(bytes).toString("base64")}` : null };
         }
         if (size <= PLAN_FACE_TEXT_BYTES) return { text: readFileSync(path, "utf8"), cut: false };

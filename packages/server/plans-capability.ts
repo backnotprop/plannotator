@@ -23,9 +23,26 @@ import { importPlanLibraryInSteps, type PlanImportReport } from "@plannotator/sh
 import { handlePlanRoute, PLANS_ROUTE_PREFIX } from "@plannotator/shared/plans/routes";
 import { plansOn, setPlansSwitch, setSpacesView, spacesView } from "@plannotator/shared/plans/switch";
 import { PLAN_IMPORT_SETTLE_MS } from "@plannotator/shared/plans/import";
-import { existsSync, watch, type FSWatcher } from "node:fs";
+import { existsSync, readdirSync, watch, type FSWatcher } from "node:fs";
 import { join } from "node:path";
 import type { InboxCapability, InboxCore } from "./inbox-capability";
+
+/** On Linux, the most folders (projects and plans) in history/ the Inbox watches; above it, the 30 s pickup alone. */
+export const PLAN_HISTORY_WATCH_FOLDERS = 2000;
+
+/** The folders in history/ two levels down (projects, then plans), counted up to just past `most`. */
+function historyFolders(dir: string, most: number): number {
+  let count = 0;
+  for (const project of readdirSync(dir, { withFileTypes: true })) {
+    if (!project.isDirectory()) continue;
+    count++;
+    for (const plan of readdirSync(join(dir, project.name), { withFileTypes: true })) {
+      if (plan.isDirectory()) count++;
+      if (count > most) return count;
+    }
+  }
+  return count;
+}
 
 const NO_STORE = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } as const;
 
@@ -43,6 +60,8 @@ export interface PlansCapabilityOptions extends InboxCore {
   retryMaxMs?: number;
   /** Where a failed import is logged (once per distinct message). */
   log?: (line: string) => void;
+  /** Tests: the platform the history watch is bounded for (default: this process's). */
+  platform?: NodeJS.Platform;
   /** Tests: how long a heard history write must be still before the poll picks it up (default: the import's settle). */
   settleMs?: number;
 }
@@ -64,22 +83,34 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
   let heard = 0;
   let taken = 0;
   let watcher: FSWatcher | null = null;
+  // A watch that failed (or would cost too much) is not tried again until Plans is turned on again: the poll's 30 s
+  // pickup finds new versions without it.
+  let gaveUp = false;
   const stopWatch = () => {
     watcher?.close();
     watcher = null;
   };
+  const giveUp = () => {
+    stopWatch();
+    gaveUp = true;
+  };
   const watchHistory = () => {
-    if (watcher) return;
+    if (watcher || gaveUp) return;
     const dir = join(options.dataDir, "history");
     if (!existsSync(dir)) return;
     try {
+      // On Linux a recursive watch takes one inotify watch per folder, from a limit the whole machine shares: a large
+      // history is left to the 30 s pickup. (macOS and Windows watch a tree as one.)
+      if ((options.platform ?? process.platform) === "linux" && historyFolders(dir, PLAN_HISTORY_WATCH_FOLDERS) > PLAN_HISTORY_WATCH_FOLDERS) {
+        gaveUp = true;
+        return;
+      }
       watcher = watch(dir, { recursive: true, persistent: false }, () => {
         heard = Date.now();
       });
-      watcher.on("error", stopWatch);
+      watcher.on("error", giveUp);
     } catch {
-      // No watch here: the poll's 30 s pickup still finds it.
-      watcher = null;
+      giveUp();
     }
   };
   // A whole import finished (or failed) since the Inbox started or Plans was turned on. Until then the list says
@@ -137,6 +168,7 @@ export function createPlansCapability(options: PlansCapabilityOptions): PlansCap
       if (next && !was) {
         caughtUp = false;
         notBefore = 0;
+        gaveUp = false;
         background(true);
       }
       if (!next) stopWatch();

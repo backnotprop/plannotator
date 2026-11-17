@@ -30,8 +30,7 @@ import { HostMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { writeRoute } from '../app/writeRoute';
 import { startStillField, reducedMotion } from './dither';
-import { useComposeSessions, type ComposeSessionsLoader } from '../compose/useComposeSessions';
-import { inboxApi } from '../api';
+import { useInboxAgents } from '../agentsList';
 import { Card, CardRow, CardStyles, CardUpdatesPill, settleBatch, type CardLinkProps } from './frameCardStandIn';
 import { SpaceFace, SpaceThumb } from './SpaceFace';
 import { readPlans, setPlanPin, setSpacesView } from './store';
@@ -197,7 +196,7 @@ export function SpacesHome(props: SpacesHomeProps) {
     sections.push(
       <section key="recent" className="ib-spc-sec" aria-labelledby={`${headId}-recent`} data-spaces-section="recent">
         {head('Recent', `${headId}-recent`)}
-        {items(recent.slice(0, list ? RECENT_ROWS : cols), 'regular')}
+        {items(recent.slice(0, list ? RECENT_ROWS : cols), 'regular', true)}
         <button type="button" className="ib-spc-more ib-spc-all" onClick={() => writeRoute({ page: 'plans', project: null, thread: null, planAll: true })} data-spaces-all="">
           All plans
         </button>
@@ -513,18 +512,13 @@ export function useLooking(root: RefObject<HTMLElement | null>): boolean {
 }
 
 /**
- * The works the home shows: the Inbox's live sessions (read every few seconds, as compose reads them) against each
- * plan's `head_agent`. The same array while nothing changed, so no card redraws for a read that brought nothing.
+ * The works the home shows: the live agents the Inbox's own list read already holds (the sidebar's Agents; no read of
+ * its own) against each plan's `head_agent`. The same array while nothing changed, so no card redraws for a read that
+ * brought nothing.
  */
-// An answer that is not a sessions list (an older Inbox, an error page) is no live session, never a broken home.
-const readLiveSessions: ComposeSessionsLoader = async (trust) => {
-  const model = await inboxApi.composeSessions(null, trust);
-  return model && Array.isArray(model.projects) ? model : { serverSession: '', home: '', projects: [] };
-};
-
 function useWorks(plans: readonly PlanSummary[]): SpaceWork[] {
-  const { model } = useComposeSessions(true, readLiveSessions);
-  const live = useMemo(() => new Set(model?.projects.flatMap((group) => (Array.isArray(group.sessions) ? group.sessions : []).map((s) => `${s.host}:${s.session}`)) ?? []), [model]);
+  const groups = useInboxAgents();
+  const live = useMemo(() => new Set((groups ?? []).flatMap((group) => group.agents.filter((agent) => agent.live && agent.host).map((agent) => `${agent.host}:${agent.session}`))), [groups]);
   const next = useMemo(() => spaceWorks(plans, live), [plans, live]);
   const kept = useRef(next);
   const key = (works: readonly SpaceWork[]) => works.map((w) => `${w.plan}|${w.host}:${w.session}|${w.agent}`).join(',');

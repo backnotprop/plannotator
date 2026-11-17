@@ -9,6 +9,7 @@
  */
 import { describe, expect, test } from "bun:test";
 import {
+  planPictureSize,
   planPictureTypeOf,
   checkPlanLookInput,
   gitBlobSha,
@@ -150,4 +151,18 @@ test("a picture page's type comes from its bytes, never its name", () => {
   // An HTML page that holds an SVG is no picture; nor is text.
   expect(planPictureTypeOf(new TextEncoder().encode("<html><svg></svg></html>"))).toBeNull();
   expect(planPictureTypeOf(new TextEncoder().encode("tier,rate"))).toBeNull();
+});
+
+test("a picture's size comes from its header, never a decode; a header that does not say is null", () => {
+  const bytes = (...parts: (number | string)[]) => Uint8Array.from(parts.flatMap((p) => (typeof p === "number" ? [p] : [...p].map((c) => c.charCodeAt(0)))));
+  const png = bytes(0x89, "PNG\r\n\x1a\n", 0, 0, 0, 13, "IHDR", 0, 0, 0x27, 0x10, 0, 0, 0x4e, 0x20);
+  expect(planPictureSize(png)).toEqual({ width: 10000, height: 20000 });
+  expect(planPictureSize(bytes("GIF89a", 0x40, 0x01, 0xf0, 0x00))).toEqual({ width: 320, height: 240 });
+  // A JPEG: an APP0 segment first, then the frame header (height 600, width 800).
+  const jpeg = bytes(0xff, 0xd8, 0xff, 0xe0, 0, 4, 0, 0, 0xff, 0xc0, 0, 11, 8, 0x02, 0x58, 0x03, 0x20, 3, 0, 0, 0);
+  expect(planPictureSize(jpeg)).toEqual({ width: 800, height: 600 });
+  const webp = bytes("RIFF", 0, 0, 0, 0, "WEBPVP8X", 10, 0, 0, 0, 0, 0, 0, 0, 0x1f, 0x4e, 0, 0x1f, 0x4e, 0);
+  expect(planPictureSize(webp)).toEqual({ width: 20000, height: 20000 });
+  expect(planPictureSize(new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" width="99999">'))).toBeNull();
+  expect(planPictureSize(bytes(0xff, 0xd8, 0xff))).toBeNull();
 });

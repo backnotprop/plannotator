@@ -469,6 +469,10 @@ describe("Plans' routes", () => {
     expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/1?face=1`))).toEqual({ text: null, cut: false, picture: `data:image/png;base64,${btoa(String.fromCharCode(...png))}` });
     expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/2?face=1`))!.picture).toStartWith("data:image/svg+xml;base64,");
     expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/3?face=1`))).toEqual({ text: null, cut: false, picture: null });
+    // Small in bytes, huge once decoded (a 20000 x 20000 PNG header): no picture in the face, the kind's ground.
+    const huge = Uint8Array.from([0x89, ...[..."PNG\r\n\x1a\n"].map((c) => c.charCodeAt(0)), 0, 0, 0, 13, ...[..."IHDR"].map((c) => c.charCodeAt(0)), 0, 0, 0x4e, 0x20, 0, 0, 0x4e, 0x20, 8, 6, 0, 0, 0]);
+    store.addVersion(page.plan.id, page.document.id, { bytes: huge, committed_at: "2026-11-06T13:00:00.000Z", source: "plan-review" });
+    expect(body(await call("GET", `/api/plans/${page.plan.id}/versions/4?face=1`))).toEqual({ text: null, cut: false, picture: null });
     const served = async (n: number) => {
       const answer = await call("GET", `/api/plans/${page.plan.id}/versions/${n}`);
       return answer && "file" in answer ? answer.file.contentType : null;

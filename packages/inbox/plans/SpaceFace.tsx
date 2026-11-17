@@ -26,7 +26,7 @@ import { RenderedMarkdown } from '@plannotator/ui/components/RenderedMarkdown';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { renderDiagram } from '@plannotator/ui/utils/diagram-render';
-import { PlanContentRules, acceptPlanDiagramSvg, isMovingDataImage, planFaceSrcdoc, resolvePlanImage, resolvePlanLink } from './planContent';
+import { PlanContentRules, acceptPlanDiagramSvg, isMovingDataImage, mermaidMayLoad, planFaceSrcdoc, resolvePlanImage, resolvePlanLink } from './planContent';
 import { faceParts, type FaceParts } from './spacesModel';
 import { useFaceText } from './store';
 import { arrive } from './frameCardStandIn';
@@ -58,7 +58,7 @@ export const SpaceThumb = memo(function SpaceThumb({ plan }: { plan: PlanSummary
   const kind = plan.primary_kind ?? 'markdown';
   const theme = useThemeKey();
   if (!face || kind === 'html') return null;
-  if (kind === 'image') return face.picture ? <StillPicture picture={pictureOf(`${plan.id}:${plan.head_version_number}`, () => loadPicture(face.picture!))} /> : null;
+  if (kind === 'image') return face.picture ? <StillPicture picture={pictureOf(`${plan.id}:${plan.head_version_number}`, () => loadPicture(face.picture!))} own /> : null;
   if (face.text === null) return null;
   if (kind === 'mermaid' || kind === 'graphviz') {
     const key = `${plan.id}:${plan.head_version_number}:${theme}`;
@@ -226,9 +226,15 @@ function withVariables(css: string, root: CSSStyleDeclaration): string {
   return out;
 }
 
-/** A diagram drawn by the plan page's renderer, as a still picture (null: it does not draw, or is refused). */
+/**
+ * A diagram drawn by the plan page's renderer, as a still picture (null: it does not draw, or is refused). Mermaid
+ * draws in the live page, so a source that could load something (`mermaidMayLoad`, the plan page's rule) is never
+ * handed to it: the face shows the source, a row the kind's shape. Graphviz lays out in its engine and is parsed inert
+ * (no `image=`, and `acceptPlanDiagramSvg` checks the result), so it needs no source rule.
+ */
 async function drawDiagram(kind: 'mermaid' | 'graphviz', source: string, themeKey: string): Promise<HTMLImageElement | null> {
   if (typeof document === 'undefined' || typeof XMLSerializer === 'undefined') return null;
+  if (kind === 'mermaid' && mermaidMayLoad(source)) return null;
   const [colorTheme, mode] = themeKey.split(':');
   const result = await renderDiagram(kind, `ib-face-${Math.random().toString(36).slice(2, 10)}`, source, { colorTheme: colorTheme ?? 'plannotator', mode: mode === 'light' ? 'light' : 'dark' }, { accept: acceptPlanDiagramSvg });
   if (!result.ok) return null;
@@ -245,7 +251,8 @@ async function drawDiagram(kind: 'mermaid' | 'graphviz', source: string, themeKe
 }
 
 /** A picture drawn once into a canvas, fitted whole: nothing in it can move. */
-function StillPicture({ picture, pad = 0 }: { picture: Promise<HTMLImageElement | null>; pad?: number }) {
+/** `own`: the plan's own picture (not one drawn here in the theme's colours): dimmed in dark on the home. */
+function StillPicture({ picture, pad = 0, own = false }: { picture: Promise<HTMLImageElement | null>; pad?: number; own?: boolean }) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
   useLayoutEffect(() => {
@@ -283,14 +290,14 @@ function StillPicture({ picture, pad = 0 }: { picture: Promise<HTMLImageElement 
     };
   }, [picture, pad]);
   if (failed) return null;
-  return <canvas ref={canvas} className="ib-spc-still" aria-hidden="true" />;
+  return <canvas ref={canvas} className={own ? 'ib-spc-still ib-spc-own' : 'ib-spc-still'} aria-hidden="true" />;
 }
 
 function PictureFace({ picture, keyOf }: { picture: Promise<HTMLImageElement | null>; keyOf: string }) {
   const box = useArrival(keyOf);
   return (
     <div className="ib-spc-picface" data-space-face="image" ref={box}>
-      <StillPicture picture={picture} />
+      <StillPicture picture={picture} own />
     </div>
   );
 }

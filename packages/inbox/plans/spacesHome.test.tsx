@@ -50,6 +50,9 @@ const { resetSpacesMotionForTests } = (hasDom ? await import('./spacesMotion') :
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
 const { planHtmlSrcdoc, planFaceSrcdoc } = (hasDom ? await import('./planContent') : {}) as typeof import('./planContent');
 const { resetSpaceFacesForTests } = (hasDom ? await import('./SpaceFace') : {}) as typeof import('./SpaceFace');
+const { setInboxAgents } = (hasDom ? await import('../agentsList') : {}) as typeof import('../agentsList');
+const mermaid = hasDom ? await import('@plannotator/ui/utils/mermaid') : null;
+const diagramSvg = hasDom ? await import('@plannotator/ui/test-setup/diagramSvg') : null;
 const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
 
 let root: Root | null = null;
@@ -82,8 +85,8 @@ let holdList: Promise<void> | null = null;
 let holdFaces: Promise<void> | null = null;
 /** A pin write the Inbox refuses. */
 let pinFails = false;
-/** The sessions live in the Inbox (`GET /api/inbox/sessions`). */
-let liveSessions: { host: string; session: string }[] = [];
+/** How often the page read `GET /api/inbox/sessions` (the home reads the Inbox's own agents list instead). */
+let sessionReads = 0;
 /** The person's reduced-motion choice (on unless a test says otherwise). */
 let reduce = true;
 /** What the list answered: 200 or 304. */
@@ -103,7 +106,8 @@ beforeEach(() => {
   observers = [];
   holdList = holdFaces = null;
   pinFails = false;
-  liveSessions = [];
+  sessionReads = 0;
+  setInboxAgents(null);
   reduce = true;
   resetSpaceFacesForTests();
   listAnswers = [];
@@ -137,8 +141,8 @@ beforeEach(() => {
     const hold = url.pathname === '/api/plans' ? holdList : url.searchParams.get('face') === '1' ? holdFaces : null;
     if (pinFails && url.pathname === '/api/plans/pins') return Response.json({ error: 'The pins could not be saved.', code: 'io' }, { status: 500 });
     if (url.pathname === '/api/inbox/sessions') {
-      const at = new Date().toISOString();
-      return Response.json({ serverSession: 'srv', home: '/home', projects: [{ project: { id: 'prj_harbor', name: 'harbor-api', root: '/work/harbor-api' }, sessions: liveSessions.map((s) => ({ ...s, started_at: at, last_seen_at: at, busy: true, idle_since: null, last_thread: null })) }] });
+      sessionReads++;
+      return Response.json({ serverSession: 'srv', home: '/home', projects: [] });
     }
     const answer = await handlePlanRoute(
       { method: init?.method ?? 'GET', pathname: url.pathname, params: url.searchParams, json: async () => JSON.parse(String(init?.body ?? '{}')), ifNoneMatch: new Headers(init?.headers).get('If-None-Match') },
@@ -175,7 +179,7 @@ const next = () => new Date(CLOCK_START + ++clock * 60_000).toISOString();
 const bytes = (text: string) => new TextEncoder().encode(text);
 
 /** A plan with `versions` versions; `decided`: the person decided on its newest (so it waits on no one). */
-function plan(name: string, project: string | null, options: { versions?: number; decided?: boolean; text?: string; data?: Uint8Array; kind?: 'markdown' | 'html' | 'image' | 'data'; projectId?: string; agent?: { host: string; session: string } } = {}) {
+function plan(name: string, project: string | null, options: { versions?: number; decided?: boolean; text?: string; data?: Uint8Array; kind?: 'markdown' | 'html' | 'image' | 'data' | 'mermaid'; projectId?: string; agent?: { host: string; session: string } } = {}) {
   const { plan: record, document } = store.createPlan({ name, project_name: project, project_id: options.projectId ?? null, created_at: next(), document: { title: name, kind: options.kind ?? 'markdown' } });
   const count = options.versions ?? 1;
   const agent = options.agent ? { agent_host: options.agent.host, agent_session: options.agent.session, agent_name: 'Codex' } : {};
@@ -310,9 +314,9 @@ test.skipIf(!hasDom)('Now holds what waits on the person, never cut; Recent is o
   expect(host.querySelector('[data-spaces-home]')?.getAttribute('data-spaces-view')).toBe('list');
   expect(ids(section(host, 'now'))).toHaveLength(6);
   expect(ids(section(host, 'recent'))).toEqual([...done].reverse().slice(0, 8));
-  // In the list the project shows only in Now.
+  // In the list every row says its project, in Now and in Recent.
   expect(text(section(host, 'now')!.querySelector('.fc-rsec'))).toBe('harbor-api');
-  expect(section(host, 'recent')!.querySelector('.fc-rsec')).toBeNull();
+  expect([...section(host, 'recent')!.querySelectorAll('[data-space]')].every((row) => !!text(row.querySelector('.fc-rsec')))).toBe(true);
 
   // Another window (a fresh read) opens on the person's view.
   host = redraw();
@@ -749,7 +753,9 @@ test.skipIf(!hasDom)('"<agent> is working", with its mark, only while the sessio
   const worked = plan('Worked on', 'harbor-api', { decided: true, agent });
   const other = plan('Someone else\'s', 'harbor-api', { decided: true, agent: { host: 'codex', session: 'ses_01JD0000000000000000000002' } });
   window.location.hash = '#plans';
-  liveSessions = [agent];
+  // Live as the Inbox's list read says (the sidebar's Agents); an ended agent is not working.
+  const listed = (session: string, live: boolean) => ({ id: session, session, host: 'codex', state: live ? 'working' : 'ended', waiting: 0, live, project: null, started_at: null, last_seen_at: null });
+  setInboxAgents([{ agents: [listed(agent.session, true), listed('ses_01JD0000000000000000000002', false)], total: 2, ended_today: 1 }]);
   const host = draw();
   await settle();
   const fact = (id: string) => text(host.querySelector(`[data-space="${id}"] .fc-fact`));
@@ -761,6 +767,12 @@ test.skipIf(!hasDom)('"<agent> is working", with its mark, only while the sessio
   expect(ids(section(host, 'now'))).toEqual([worked]);
   expect(fact(other)).not.toContain('is working');
   expect(host.querySelector(`[data-space="${other}"] .fc-mark`)).toBeNull();
+  // No read of its own: the home adds no second poll of the live sessions.
+  expect(sessionReads).toBe(0);
+  // The agent ends: its plan is no longer worked on.
+  setInboxAgents([{ agents: [listed(agent.session, false)], total: 1, ended_today: 1 }]);
+  await settle();
+  expect(fact(worked)).not.toContain('is working');
 });
 
 test.skipIf(!hasDom)('a change landing in a face tints the block it landed in, once; nothing tints under reduced motion', async () => {
@@ -795,6 +807,35 @@ test.skipIf(!hasDom)('a picture page\'s face is the picture; a data page\'s face
   expect(host.querySelector(`[data-space="${picture}"] [data-space-face="image"]`)).not.toBeNull();
   const cells = [...host.querySelectorAll(`[data-space="${table}"] [data-space-face="data"] tr`)].map((tr) => [...tr.children].map(text));
   expect(cells).toEqual([['', 'tier', 'per minute'], ['1', 'free', '60'], ['2', 'team', '600']]);
+});
+
+test.skipIf(!hasDom)('a Mermaid plan whose source could load something is never handed to the renderer, as a face or a thumbnail: its source shows', async () => {
+  // Mermaid draws in the live page, so a source that could fetch must never reach it; a plain one still draws.
+  const rendered: string[] = [];
+  const restoreParser = diagramSvg!.installInertDiagramSvgParser();
+  mermaid!.__setMermaidRuntimeLoaderForTests(async () => ({ initialize() {}, render: async (_id: string, source: string) => (rendered.push(source.trim()), { svg: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><path d="M0 0L9 9"/></svg>' }) }) as never);
+  try {
+    const loading = 'flowchart TD\n  A["<img src=\'https://tracker.example/p.png\'>"] --> B';
+    const plain = 'flowchart TD\n  Plain --> Draws';
+    const hostile = plan('Hostile flow', 'harbor-api', { kind: 'mermaid', text: loading });
+    plan('Plain flow', 'harbor-api', { kind: 'mermaid', text: plain });
+    window.location.hash = '#plans';
+    const host = draw();
+    await settle();
+    nearAll();
+    await settle();
+    await settle();
+    expect(host.querySelector(`[data-space="${hostile}"] [data-space-face="diagram-source"]`)).not.toBeNull();
+    await click(host.querySelector('[data-spaces-view-pick="list"]'));
+    nearAll();
+    await settle();
+    await settle();
+    expect(rendered).toContain(plain);
+    expect(rendered.some((source) => source.includes('tracker.example'))).toBe(false);
+  } finally {
+    mermaid!.__setMermaidRuntimeLoaderForTests(undefined);
+    restoreParser();
+  }
 });
 
 test.skipIf(!hasDom)('a search from a project\'s scope looks through every title, that project\'s first; the scope chip\'s × goes Home', async () => {

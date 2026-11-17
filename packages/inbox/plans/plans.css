@@ -247,6 +247,9 @@
 /* A picture or a drawn diagram: drawn once into a canvas, fitted whole on the flat panel. */
 .ib-spc-picface { width: 420px; height: 307px; }
 .ib-spc-still { display: block; width: 100%; height: 100%; }
+/* Dark: what the plan brought (its picture, its HTML page) is lit for a light page; on the home it is dimmed, never
+   recoloured (the colours stay its own), so it is no bright slab. The plan's page shows it as it is. */
+:root:not(.light) :is(.ib-spc-own, .ib-spc-pageface iframe) { filter: brightness(0.78); }
 /* Data: a spreadsheet's top, mono 12/16, the header and the row numbers tinted (home-5's `.fx-cells`). */
 .ib-spc-dataface { width: 420px; overflow: hidden; }
 .ib-spc-cells { width: 100%; border-collapse: collapse; table-layout: fixed; font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; line-height: 16px; color: color-mix(in oklch, var(--foreground) 82%, transparent); }

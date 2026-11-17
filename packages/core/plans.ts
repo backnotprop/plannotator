@@ -522,6 +522,49 @@ export const PLAN_FACE_TEXT_BYTES = 16 * 1024;
 export const PLAN_FACE_HTML_MAX = 512 * 1024;
 /** A picture page's face is the picture itself, up to this size (above it, the card shows its kind's ground). */
 export const PLAN_FACE_PICTURE_MAX = 2 * 1024 * 1024;
+/** ...and up to this many pixels, read from its header (a picture small in bytes can be huge once decoded). */
+export const PLAN_FACE_PICTURE_PIXELS = 4096 * 4096;
+
+/**
+ * A raster picture's size from its header, without decoding it: PNG, GIF, WebP (lossy, lossless, extended) and JPEG
+ * (its first frame header); null when the header does not say (SVG, AVIF, a cut or odd file).
+ */
+export function planPictureSize(bytes: Uint8Array): { width: number; height: number } | null {
+  const type = planPictureTypeOf(bytes);
+  const at = (i: number) => bytes[i] ?? 0;
+  const be16 = (i: number) => (at(i) << 8) | at(i + 1);
+  const le16 = (i: number) => at(i) | (at(i + 1) << 8);
+  const le24 = (i: number) => at(i) | (at(i + 1) << 8) | (at(i + 2) << 16);
+  const ascii = (from: number, to: number) => String.fromCharCode(...bytes.subarray(from, to));
+  if (type === "image/png" && bytes.length >= 24 && ascii(12, 16) === "IHDR") return { width: ((at(16) << 24) >>> 0) + (at(17) << 16) + (at(18) << 8) + at(19), height: ((at(20) << 24) >>> 0) + (at(21) << 16) + (at(22) << 8) + at(23) };
+  if (type === "image/gif" && bytes.length >= 10) return { width: le16(6), height: le16(8) };
+  if (type === "image/webp" && bytes.length >= 30) {
+    const chunk = ascii(12, 16);
+    if (chunk === "VP8 ") return { width: le16(26) & 0x3fff, height: le16(28) & 0x3fff };
+    if (chunk === "VP8L") return { width: 1 + (at(21) | ((at(22) & 0x3f) << 8)), height: 1 + ((at(22) >> 6) | (at(23) << 2) | ((at(24) & 0x0f) << 10)) };
+    if (chunk === "VP8X") return { width: 1 + le24(24), height: 1 + le24(27) };
+    return null;
+  }
+  if (type === "image/jpeg") {
+    let i = 2;
+    while (i + 9 < bytes.length) {
+      if (at(i) !== 0xff) return null;
+      const marker = at(i + 1);
+      if (marker === 0xff) {
+        i++;
+        continue;
+      }
+      // A frame header (SOF0 to SOF15, but not DHT, JPG or DAC): its height, then its width.
+      if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) return { width: be16(i + 7), height: be16(i + 5) };
+      if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01) {
+        i += 2;
+        continue;
+      }
+      i += 2 + be16(i + 2);
+    }
+  }
+  return null;
+}
 
 /** `GET /api/plans/:id/versions/:n?face=1`: the top of a version for its face; `text` null when it is too big to draw. */
 export interface PlanFaceText {
