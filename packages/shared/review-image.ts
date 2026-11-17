@@ -198,8 +198,10 @@ function svgLength(value: string | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
+const SVG_COMMENT = new RegExp("<!--[\\s\\S]*?-->", "g");
+
 export function svgDimensions(b: Uint8Array): ImageDimensions {
-  const text = new TextDecoder().decode(b.subarray(0, 8192)).replace(/<!--[\s\S]*?-->/g, "");
+  const text = new TextDecoder().decode(b.subarray(0, 8192)).replace(SVG_COMMENT, "");
   const tag = /<svg\b([^>]*)>/i.exec(text)?.[1] ?? "";
   const attr = (name: string) => new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, "i").exec(tag)?.[2];
   const width = svgLength(attr("width"));
