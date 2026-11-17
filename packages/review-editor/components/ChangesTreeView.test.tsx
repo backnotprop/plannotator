@@ -2,6 +2,8 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { FileTree } from './FileTree';
+import { ChangesTreeView, type ChangesTreeHandle } from './ChangesTreeView';
+import { buildFileTree } from '../utils/buildFileTree';
 import { markFirstCodePainted } from '../utils/firstCodePaint';
 
 markFirstCodePainted();
@@ -253,7 +255,7 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     await settle();
     expect(onSelectFile).toHaveBeenCalledTimes(1);
     expect(rows(el).slice(0, 2)).toEqual(['committed.ts', 'edited.ts']);
-    expect(onSelectFile).toHaveBeenCalledWith(2);
+    expect(onSelectFile.mock.calls[0]?.[0]).toBe(2);
   });
 
   test('picking another file keeps every drawn row element and draws only the rows in view', async () => {
@@ -309,3 +311,49 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
   });
 });
 
+
+describe.skipIf(!hasDom)('The Changes tree outside the review app', () => {
+  const plain = (files: DiffFile[], props: Partial<React.ComponentProps<typeof ChangesTreeView>> = {}) => (
+    <ChangesTreeView
+      tree={buildFileTree(files)}
+      groups={null}
+      activePath={null}
+      viewedFiles={new Set()}
+      hiddenFiles={new Set()}
+      hideViewedFiles={false}
+      showViewedControls={false}
+      annotationCounts={new Map()}
+      onSelectFile={() => {}}
+      {...props}
+    />
+  );
+
+  test('files the tree cannot place get rows of their own after it, each opening its own index', async () => {
+    const onSelectFile = mock((_index: number) => {});
+    const files = [file('docs/index.md'), file('src/a.ts'), file('docs'), file('src/a.ts', 0, 1, 'deleted')];
+    const el = await mount(plain(files.slice(0, 2), { onSelectFile, extraFiles: [{ file: files[2]!, index: 2 }, { file: files[3]!, index: 3 }] }));
+    const paths = rows(el);
+    expect(paths.slice(-2).map((p) => p?.replace(/\u200b/g, ''))).toEqual(['docs', 'src\u2215a.ts']);
+    await act(async () => row(el, paths.at(-1)!).click());
+    expect(onSelectFile.mock.calls.at(-1)?.[0]).toBe(3);
+    await act(async () => row(el, paths.at(-2)!).click());
+    expect(onSelectFile.mock.calls.at(-1)?.[0]).toBe(2);
+  });
+
+  test('arrowing to a row picks it as a focus move; a click picks it outright; focus() lands on the open row', async () => {
+    const picks: unknown[][] = [];
+    const handle = React.createRef<ChangesTreeHandle>();
+    const files = [file('a.ts'), file('b.ts'), file('c.ts')];
+    const el = await mount(plain(files, { onSelectFile: (...args: unknown[]) => void picks.push(args), handleRef: handle, activePath: 'b.ts' }));
+    await act(async () => handle.current!.focus());
+    await settle();
+    expect(shadow(el).activeElement).toBe(row(el, 'b.ts'));
+    expect(picks).toEqual([]);
+    await act(async () => key(row(el, 'b.ts'), 'ArrowDown'));
+    await settle();
+    expect(picks).toEqual([[2, { via: 'focus' }]]);
+    await act(async () => row(el, 'a.ts').click());
+    await settle();
+    expect(picks.slice(1)).toEqual([[0]]);
+  });
+});
