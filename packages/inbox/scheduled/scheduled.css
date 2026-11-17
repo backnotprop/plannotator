@@ -225,3 +225,26 @@ button.st-foot-mark:hover { background: var(--muted); }
   .st-footline { flex-basis: 100%; }
   .st-pfoot .ib-btn { flex: 1; }
 }
+
+/* The editor's tabs under the routine's name (RoutineTabs.tsx): the Inbox's segmented control, and beside it on Edit
+   one quiet line with the last run, which opens Runs. */
+.st-tabsrow { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-top: 18px; }
+.st-tabs .ib-seg-o { gap: 7px; }
+.st-tabs .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-tabs .ib-n { font-weight: 500; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.st-tabdot { width: 6px; height: 6px; border-radius: 3px; flex: none; background: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-lastrun { display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 28px; padding: 0 8px; margin-left: -8px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; cursor: pointer; }
+.st-lastrun:hover { background: var(--muted); color: var(--foreground); }
+.st-lastrun > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-lastrun svg.ib-ic { flex: none; }
+.st-lastrun:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-runspanel { margin-top: 14px; }
+.st-runrow .st-dots { margin-right: 7px; vertical-align: -1px; }
+.st-norun { padding: 22px 0 8px; font-size: var(--ib-fs-13-5, 13.5px); }
+.st-norun p { margin: 0; }
+.st-norun p + p { margin-top: 4px; }
+@media (max-width: 760px) {
+  /* The tabs span the screen, a thumb's height each half (Feedback's sheet); the last run goes under them. */
+  .st-tabs.ib-seg { display: flex; flex-wrap: nowrap; flex-basis: 100%; }
+  .st-tabs .ib-seg-o { flex: 1; justify-content: center; font-size: var(--ib-fs-15, 15px); }
+}
