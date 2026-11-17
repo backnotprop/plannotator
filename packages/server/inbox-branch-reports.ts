@@ -120,8 +120,34 @@ export function offlineGitVersionOk(text: string): boolean {
   return major > OFFLINE_GIT_MIN[0] || (major === OFFLINE_GIT_MIN[0] && minor >= OFFLINE_GIT_MIN[1]);
 }
 
-/** Each runtime's git, checked once it passes (`git --version`, guarded too); a failed check is made again next time. */
-const versionChecks = new WeakMap<ReviewGitRuntime, Promise<boolean>>();
+/**
+ * Each runtime's git, checked once for the process (`git --version`, guarded too). Only a check that could not run (git
+ * missing, killed) is made again on the next read.
+ */
+const versionChecks = new WeakMap<ReviewGitRuntime, Promise<boolean | null>>();
+
+const guardedRun = (runtime: ReviewGitRuntime): ReviewGitRuntime["runGit"] => (args, options) =>
+  runtime.runGit(args, {
+    timeoutMs: BRANCH_GIT_TIMEOUT_MS,
+    ...options,
+    interaction: "forbid",
+    config: { ...options?.config, "protocol.allow": "never" },
+    env: { ...options?.env, GIT_NO_LAZY_FETCH: "1" },
+  });
+
+async function versionAnswer(runtime: ReviewGitRuntime, cwd?: string): Promise<boolean | null> {
+  let check = versionChecks.get(runtime);
+  if (!check) {
+    check = guardedRun(runtime)(["--version"], { cwd }).then(
+      (answer) => (answer.exitCode === 0 ? offlineGitVersionOk(answer.stdout) : null),
+      () => null,
+    );
+    versionChecks.set(runtime, check);
+  }
+  const ok = await check;
+  if (ok === null && versionChecks.get(runtime) === check) versionChecks.delete(runtime);
+  return ok;
+}
 
 /**
  * The runtime every read here goes through, the shared helpers' too (`getDefaultBranch`, `getWorktrees`): no prompt, a
@@ -129,29 +155,11 @@ const versionChecks = new WeakMap<ReviewGitRuntime, Promise<boolean>>();
  * the guards (checked once) runs nothing: every read fails closed, never unguarded.
  */
 export function offlineGit(runtime: ReviewGitRuntime): ReviewGitRuntime {
-  const guarded: ReviewGitRuntime["runGit"] = (args, options) =>
-    runtime.runGit(args, {
-      timeoutMs: BRANCH_GIT_TIMEOUT_MS,
-      ...options,
-      interaction: "forbid",
-      config: { ...options?.config, "protocol.allow": "never" },
-      env: { ...options?.env, GIT_NO_LAZY_FETCH: "1" },
-    });
+  const guarded = guardedRun(runtime);
   return {
     ...runtime,
     runGit: async (args, options) => {
-      let check = versionChecks.get(runtime);
-      if (!check) {
-        check = guarded(["--version"], { cwd: options?.cwd }).then(
-          (answer) => answer.exitCode === 0 && offlineGitVersionOk(answer.stdout),
-          () => false,
-        );
-        versionChecks.set(runtime, check);
-      }
-      if (!(await check)) {
-        versionChecks.delete(runtime);
-        return { stdout: "", stderr: OFFLINE_GIT_TOO_OLD, exitCode: 1 };
-      }
+      if ((await versionAnswer(runtime, options?.cwd)) !== true) return { stdout: "", stderr: OFFLINE_GIT_TOO_OLD, exitCode: 1 };
       return guarded(args, options);
     },
   };
@@ -232,6 +240,25 @@ export async function branchHeadHere(runtime: ReviewGitRuntime, root: string | n
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether `head` is contained in `merged` here (`merge-base --is-ancestor`): true or false when git can say, null when it
+ * can't (a commit not here, a git too old). Local and offline, as every read here.
+ */
+export async function commitContains(runtime: ReviewGitRuntime, root: string | null, head: string, merged: string): Promise<boolean | null> {
+  if (!root || !/^[0-9a-f]{7,64}$/i.test(head) || !/^[0-9a-f]{7,64}$/i.test(merged)) return null;
+  try {
+    const answer = await git(runtime, root, ["merge-base", "--is-ancestor", "--end-of-options", head, merged]);
+    return answer.exitCode === 0 ? true : answer.exitCode === 1 && answer.stderr.trim() === "" ? false : null;
+  } catch {
+    return null;
+  }
+}
+
+/** This computer's git answered a version older than the guards need (`offlineGit`): checked once per process. */
+export async function offlineGitTooOld(runtime: ReviewGitRuntime): Promise<boolean> {
+  return (await versionAnswer(runtime)) === false;
 }
 
 /** The ref a base names here: the local branch, else origin's. Null when neither is a commit. */

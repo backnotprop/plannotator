@@ -8,7 +8,8 @@
  *    losing a real branch behind branches with nothing of their own;
  *  - any read running anything but the exact local read-only commands, or without the guards that keep git off the
  *    network (no transport, no lazy fetch), from asking, and short;
- *  - a git too old to take those guards running a read anyway, unguarded.
+ *  - a git too old to take those guards running a read anyway, unguarded, or its version asked on every read;
+ *  - a reported commit counted as in what a PR merged when git can't show it is.
  */
 import { describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -16,7 +17,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { BRANCH_GIT_TIMEOUT_MS, createInboxBranchReports, OFFLINE_GIT_TOO_OLD, offlineGit, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
+import { BRANCH_GIT_TIMEOUT_MS, commitContains, createInboxBranchReports, OFFLINE_GIT_TOO_OLD, offlineGit, offlineGitTooOld, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
 import { runtime } from "./git";
 
 const DAY = 86_400;
@@ -83,6 +84,7 @@ const READ_SHAPES: RegExp[] = [
   /^worktree list --porcelain$/,
   /^config --get-regexp -- \^remote\\\.\.\*\\\.url\$$/,
   /^for-each-ref --count=1 --format=%\(refname\) --contains=[0-9a-f]+ refs\/remotes\/[\w.-]+\/$/,
+  /^merge-base --is-ancestor --end-of-options [0-9a-f]+ [0-9a-f]+$/,
 ];
 function onlyGuardedReads(seen: ReturnType<typeof watched>) {
   expect(seen.commands.length).toBeGreaterThan(0);
@@ -160,6 +162,19 @@ describe("git for a report", () => {
     expect(await pushedHere(runtime, repo, head, null)).toBe(false);
     expect(await pushedHere(runtime, repo, head, "https://evil.example/acme/app.git")).toBe(false);
   });
+
+  test("a reported commit is in what merged only when git here shows it; a commit not here answers nothing", async () => {
+    const now = Math.floor(Date.now() / 1000);
+    const { repo, head } = scratchRepo(now);
+    const base = git(repo, ["rev-parse", "main"]);
+    const seen = watched();
+    expect(await commitContains(seen.runtime, repo, base, head)).toBe(true);
+    expect(await commitContains(seen.runtime, repo, head, base)).toBe(false);
+    onlyGuardedReads(seen);
+    expect(await commitContains(runtime, repo, head, "e".repeat(40))).toBeNull();
+    expect(await commitContains(runtime, repo, "--all", head)).toBeNull();
+    expect(await commitContains(runtime, null, head, base)).toBeNull();
+  });
 });
 
 describe("the safety net: branches nobody reported", () => {
@@ -213,5 +228,9 @@ describe("a git too old for the guards", () => {
     expect(await readReportedBranch(old, "/tmp", { name: "retry-jitter" })).toMatchObject({ head: null, reachable: false });
     await expect(readUnreportedBranches(old, "/tmp", "prj_1", () => false)).rejects.toThrow(OFFLINE_GIT_TOO_OLD);
     expect(asked.every((args) => args[0] === "--version")).toBe(true);
+    // Asked once for the process, not again on each read.
+    expect(asked).toHaveLength(1);
+    expect(await offlineGitTooOld(old)).toBe(true);
+    expect(await offlineGitTooOld(runtime)).toBe(false);
   });
 });

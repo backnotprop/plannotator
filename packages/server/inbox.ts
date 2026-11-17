@@ -5728,7 +5728,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, new Map([...branchService.owners(listed.pulls, projectsByRepo), ...pullOwnersNow()]));
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]));
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         const own = { ...listed, pulls: pullLooked.on(listed.pulls), links, projects: Object.fromEntries(projectsByRepo), cards };
@@ -5755,7 +5755,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         lastReviewsRead = { projectsByRepo, wanted, listed };
         pullRisk.assess(listed.pulls);
         // A reported branch's thread owns the person's own PR on that branch (the person's own choice still wins).
-        const owners = new Map([...branchService.owners(listed.pulls, projectsByRepo), ...pullOwnersNow()]);
+        const branchOwners = await branchService.owners(listed.pulls, projectsByRepo);
+        const owners = new Map([...branchOwners, ...pullOwnersNow()]);
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, owners);
         const stacks = inboxPullStacks(listed.pulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
@@ -5771,7 +5772,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const row = store.listRow(threadId);
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
-        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: new Map([...branchService.owners(listed.pulls, projectsByRepo), ...pullOwners.all()]), posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
+        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: new Map([...branchOwners, ...pullOwners.all()]), posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
         // Branch reviews: the branches agents reported on each linked machine, as last read (never waited for). A
         // linked machine reading this list gets this machine's own rows only.
         const branchesOn = branchReviewsOn();

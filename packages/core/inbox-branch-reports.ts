@@ -148,6 +148,7 @@ export function inboxBranchReportOwners(
   reports: Iterable<Pick<InboxBranchReport, "project_id" | "branch" | "thread_id" | "head" | "at">>,
   pulls: Iterable<InboxPull>,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
+  contains?: InboxBranchContains,
 ): Map<string, { thread_id: string }> {
   const byBranch = new Map<string, Pick<InboxBranchReport, "project_id" | "branch" | "thread_id" | "head" | "at">[]>();
   for (const report of reports) {
@@ -160,18 +161,28 @@ export function inboxBranchReportOwners(
     if (pull.head_repo !== null && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase()) continue;
     const projects = projectsByRepo.get(inboxPullRepoKey(pull.host, pull.repo)) ?? [];
     const report = byBranch.get(pull.head)?.find((one) => projects.includes(one.project_id));
-    // A merged one only when it is this report's work (the thread then lands and leaves Reviews): its head is the
-    // commit reported, or it merged after the latest report. A name reused for new work, or work reported after the
-    // merge, is not that PR's.
-    if (report && pull.state === "merged" && !inboxBranchReportMerged(report, pull)) continue;
+    // A merged one only when it is this report's work (the thread then lands and leaves Reviews). A name reused for new
+    // work, work reported after the merge, or a reported commit the merge did not contain, is not that PR's.
+    if (report && pull.state === "merged" && !inboxBranchReportMerged(report, pull, contains)) continue;
     if (report) owners.set(pull.key, { thread_id: report.thread_id });
   }
   return owners;
 }
 
-/** A merged PR is the report's own work: it merged at the reported commit, or after the latest report. */
-export function inboxBranchReportMerged(report: Pick<InboxBranchReport, "head" | "at">, pull: Pick<InboxPull, "head_sha" | "merged_at">): boolean {
-  if (report.head && pull.head_sha && sameCommit(pull.head_sha, report.head)) return true;
+/** Whether git here proves `head` is contained in `merged` (an ancestor of it, or it): false when it can't say. */
+export type InboxBranchContains = (report: Pick<InboxBranchReport, "project_id" | "branch" | "head">, merged: string) => boolean;
+
+/**
+ * A merged PR is the report's own work. Its merged commit known: it is the reported commit, or git here proves the
+ * reported commit is contained in it (`contains`); anything else is newer work than what merged, and keeps its row.
+ * Unknown: it merged after the latest report.
+ */
+export function inboxBranchReportMerged(
+  report: Pick<InboxBranchReport, "project_id" | "branch" | "head" | "at">,
+  pull: Pick<InboxPull, "head_sha" | "merged_at">,
+  contains?: InboxBranchContains,
+): boolean {
+  if (pull.head_sha) return !!report.head && (sameCommit(pull.head_sha, report.head) || contains?.(report, pull.head_sha) === true);
   const merged = pull.merged_at ? Date.parse(pull.merged_at) : NaN;
   return !Number.isNaN(merged) && merged > Date.parse(report.at);
 }
@@ -193,6 +204,8 @@ export interface InboxBranchReportRow {
   reachable: boolean;
   /** A cloud agent's remote is the origin of a project on the computer that took the report. */
   remote_known?: boolean;
+  /** This computer's git is older than the branch reads need (2.31), so none of them ran. */
+  git_too_old?: true;
   /** Its risk can be ranked now by hand: risk is on, the commit is here (pushed, for a cloud agent's) and no judgment is kept or under way at this head under today's rules. */
   rankable?: boolean;
   /** Its risk, once judged at this head (never Low from nothing: no judgment, no mark). */
@@ -240,9 +253,10 @@ export function inboxBranchPlaceWords(row: Pick<InboxBranchReportRow, "place" | 
  * What the thread says about opening the code, when it can't be opened here: a linked machine's branch is reviewed
  * there; a cloud agent's branch needs pushing, or fetching into a checkout here. Null: the code is here.
  */
-export function inboxBranchReachWords(row: Pick<InboxBranchReportRow, "place" | "machine" | "reachable" | "remote_url" | "branch" | "remote_known">): string | null {
+export function inboxBranchReachWords(row: Pick<InboxBranchReportRow, "place" | "machine" | "reachable" | "remote_url" | "branch" | "remote_known" | "git_too_old">): string | null {
   if (row.machine) return `This branch is on ${row.machine.name ?? "another computer"}. Its review runs there: start it from this thread, and an agent on that computer writes it.`;
   if (row.reachable) return null;
+  if (row.git_too_old) return "This computer's git is too old to read branches safely.";
   if (row.place === "cloud") {
     // What the agent says, never a link: the person decides whether it is their repository.
     const where = inboxBranchRemoteWords(row.remote_url);

@@ -22,7 +22,7 @@ import { inboxGitRemoteKey } from "@plannotator/core/inbox-git-url";
 import { inboxRowArchived, type InboxProject, type InboxPull, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
-import { branchHeadHere, createInboxBranchReports, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
+import { branchHeadHere, commitContains, createInboxBranchReports, offlineGitTooOld, pushedHere, readBranchDiff, readReportedBranch, readUnreportedBranches } from "./inbox-branch-reports";
 import type { InboxBranchMcp } from "./inbox-mcp-branch";
 import type { PullRisk } from "./inbox-pull-risk";
 
@@ -52,6 +52,11 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
    */
   const reach = new Map<string, { here: boolean; at: number }>();
   const reachKey = (kind: "here" | "pushed", folder: string | null, head: string) => `${kind}\u0000${folder ?? ""}\u0000${head}`;
+  /**
+   * Whether a report's head is contained in the commit a PR merged at, by folder, head and merged commit: a true or false
+   * git gave is kept (commits don't change); one git couldn't answer is asked again after a while.
+   */
+  const contained = new Map<string, { in: boolean | null; at: number }>();
   /** A failed judgment is tried once more on a later Reviews read: by risk key and head. */
   const retried = new Set<string>();
 
@@ -184,6 +189,8 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
       agent: report.agent,
       reachable: await codeHere(report),
       ...(report.place === "cloud" ? { remote_known: remoteKnown(report.remote_url) } : {}),
+      // Git's version is checked once per process, not on each read.
+      ...((await offlineGitTooOld(runtime)) ? { git_too_old: true as const } : {}),
       risk: judgment,
       risk_failed: failed,
       ...(canRun && !retrying && (!failed || retried.has(once)) ? { rankable: true } : {}),
@@ -223,13 +230,32 @@ export function createInboxBranchService(options: InboxBranchServiceOptions) {
       return out;
     },
     /** The PRs the reported branches' threads own (the person's own PR on that branch): one thread from report to PR. */
-    owners(pulls: readonly InboxPull[], projectsByRepo: ReadonlyMap<string, readonly string[]>): Map<string, { thread_id: string }> {
+    async owners(pulls: readonly InboxPull[], projectsByRepo: ReadonlyMap<string, readonly string[]>): Promise<Map<string, { thread_id: string }>> {
       if (!options.on()) return new Map();
-      return inboxBranchReportOwners(
-        listed().map(({ report }) => report),
-        pulls,
-        projectsByRepo,
+      const listedReports = listed().map(({ report }) => report);
+      const fullOf = (report: Pick<InboxBranchReport, "project_id" | "branch">) =>
+        listedReports.find((one) => one.project_id === report.project_id && one.branch === report.branch);
+      const keyOf = (report: Pick<InboxBranchReport, "project_id" | "branch" | "head">, merged: string): string => {
+        const full = fullOf(report);
+        return `${full ? (folderOf(full) ?? "") : ""}\u0000${report.head ?? ""}\u0000${merged}`;
+      };
+      // First pass: the PRs that merged at a known commit other than the reported one, whose answer git must give.
+      const asks = new Map<string, { folder: string | null; head: string; merged: string }>();
+      inboxBranchReportOwners(listedReports, pulls, projectsByRepo, (report, merged) => {
+        const key = keyOf(report, merged);
+        const seen = contained.get(key);
+        const full = fullOf(report);
+        if (full && report.head && (!seen || (seen.in === null && now() - seen.at >= UNREACHABLE_RECHECK_MS))) {
+          asks.set(key, { folder: folderOf(full), head: report.head, merged });
+        }
+        return false;
+      });
+      await Promise.all(
+        [...asks].map(async ([key, ask]) => {
+          contained.set(key, { in: await commitContains(runtime, ask.folder, ask.head, ask.merged), at: now() });
+        }),
       );
+      return inboxBranchReportOwners(listedReports, pulls, projectsByRepo, (report, merged) => contained.get(keyOf(report, merged))?.in === true);
     },
     /**
      * Rank a reported branch now, by hand (its Rank action): the one way, beside its report, a branch is judged. Only

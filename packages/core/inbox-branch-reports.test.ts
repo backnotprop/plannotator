@@ -11,7 +11,10 @@
  *  - HEAD taken as a branch's name;
  *  - a reported branch whose PR merged read as "Ready for review" again;
  *  - a merged PR claimed by a report of other work (a reused branch name, work reported after the merge), hiding it;
- *  - a closed, unmerged PR taking a reported branch out of Reviews.
+ *  - a closed, unmerged PR taking a reported branch out of Reviews;
+ *  - a PR merged at a known commit claiming a report of a commit it doesn't hold (a local-only commit after the push);
+ *  - a first report made after its PR merged, at the merged commit, read as "Ready for review";
+ *  - an old git's report read as a commit gone from the checkout.
  */
 import { describe, expect, test } from "bun:test";
 import { checkInboxBranchField, INBOX_BRANCH_NAME_NOT_BASE, inboxBranchPlaceWords, inboxBranchReachWords, inboxBranchReportOwners, inboxBranchReportStep, inboxFarBranchReviewRow, type InboxBranchReportRow } from "./inbox-branch-reports";
@@ -156,9 +159,45 @@ describe("one thread from report to PR", () => {
     expect(inboxBranchReportOwners([row], [old], projects).size).toBe(0);
     const started = new Map([[row.thread_id, startOf(row)]]);
     expect(inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [old], owners: new Map(), started }).map((r) => r.reason)).toEqual(["branch_ready"]);
-    // Merged after the latest report, or at the very commit reported: this report's work.
-    expect(inboxBranchReportOwners([row], [{ ...old, merged_at: "2026-11-16T12:00:00.000Z" }], projects).size).toBe(1);
+    // At the very commit reported, before or after the report: this report's work.
     expect(inboxBranchReportOwners([row], [{ ...old, head_sha: row.head!.slice(0, 12) }], projects).size).toBe(1);
+    // Merged commit unknown: only a merge after the latest report is this report's.
+    expect(inboxBranchReportOwners([row], [{ ...old, head_sha: null }], projects).size).toBe(0);
+    expect(inboxBranchReportOwners([row], [{ ...old, head_sha: null, merged_at: "2026-11-16T12:00:00.000Z" }], projects).size).toBe(1);
+  });
+
+  test("a PR merged at a known commit is claimed only when it holds the reported commit, however late it merged", () => {
+    const projects = new Map([[`github.com/${REPO}`, ["prj_billing"]]]);
+    // H1 pushed and in the PR; the agent then reports H2, a commit only on this computer; the PR merges at H1 later.
+    const h1 = "1".repeat(40);
+    const row = reportRow({ head: "2".repeat(40), at: "2026-11-16T10:00:00.000Z" });
+    const merged = pr({ number: 412, state: "merged", merged_at: "2026-11-16T12:00:00.000Z", head_sha: h1 });
+    expect(inboxBranchReportOwners([row], [merged], projects).size).toBe(0);
+    expect(inboxBranchReportOwners([row], [merged], projects, () => false).size).toBe(0);
+    // Git here says H2 is in what merged (the PR merged at a later commit on top of it): this report's work.
+    const asked: [string | null, string][] = [];
+    const owners = inboxBranchReportOwners([row], [merged], projects, (report, mergedAt) => {
+      asked.push([report.head, mergedAt]);
+      return true;
+    });
+    expect([...owners.keys()]).toEqual([merged.key]);
+    expect(asked).toEqual([[row.head, h1]]);
+  });
+
+  test("a first report made after its PR merged, at the merged commit, shows no Ready for review row", () => {
+    const merged = pr({ number: 412, state: "merged", merged_at: "2026-11-16T09:00:00.000Z" });
+    const row = reportRow({ at: "2026-11-16T10:00:00.000Z", head: "3a9f2c1d0e9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f" });
+    const atHead = { ...merged, head_sha: row.head!.slice(0, 12) };
+    const projects = new Map([[`github.com/${REPO}`, ["prj_billing"]]]);
+    const owners = inboxBranchReportOwners([row], [atHead], projects);
+    expect([...owners.keys()]).toEqual([atHead.key]);
+    const link: InboxPullLink = { via: "owner", thread_id: row.thread_id, thread_subject: null, project_id: "prj_billing", agent: null, last: null, guide: null };
+    const { record } = inboxReviewLandingChanges({ threads: [], pulls: [atHead], links: { [atHead.key]: link }, landed: [] });
+    expect(record.map((landing) => landing.head_sha)).toEqual([atHead.head_sha]);
+    const started = new Map([[row.thread_id, startOf(row)]]);
+    expect(inboxReviewRows({ threads: [], stacks: [], links: { [atHead.key]: link }, pulls: [atHead], owners, landed: record, started })).toEqual([]);
+    // Later the list no longer reads the PR: the recorded landing still keeps the thread out.
+    expect(inboxReviewRows({ threads: [], stacks: [], links: {}, pulls: [], landed: record, started })).toEqual([]);
   });
 
   test("a closed, unmerged PR is not claimed: the reported branch stays Ready for review", () => {
@@ -209,5 +248,11 @@ describe("a linked machine's report", () => {
     );
     // A remote that is no repository's URL (an older or far record) is never shown.
     expect(inboxBranchReachWords({ ...cloud, remote_url: "https://bot:pw@evil.example" })).toBe("This computer doesn't have retry-jitter. Ask the agent to push it, then fetch it here.");
+  });
+
+  test("a report this computer's git is too old to read says so, never that the commit left the checkout", () => {
+    const old = reportRow({ reachable: false, head: null, git_too_old: true });
+    expect(inboxBranchReachWords(old)).toBe("This computer's git is too old to read branches safely.");
+    expect(inboxBranchReachWords(reportRow({ reachable: false }))).toContain("isn't in the project's checkout");
   });
 });

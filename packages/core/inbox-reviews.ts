@@ -21,7 +21,7 @@
  * teammate or the forge is Waiting on others.
  */
 
-import type { InboxBranchReportRow } from "./inbox-branch-reports";
+import { sameCommit, type InboxBranchReportRow } from "./inbox-branch-reports";
 import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
@@ -194,6 +194,8 @@ export interface InboxReviewLanding {
   platform: InboxPull["platform"];
   /** The PR's head branch, when known: a review of that branch is a review of this PR. */
   head: string | null;
+  /** The commit it merged or closed at, when the list said: a report of that very commit is that PR's work. */
+  head_sha?: string | null;
   /**
    * The thread's latest review when this was first seen, when that review was not newer than the landing; else null.
    * Later on the row compares review ids, never clocks: a review with another id came after the record.
@@ -214,13 +216,13 @@ export function inboxReviewLandingId(landing: Pick<InboxReviewLanding, "key" | "
 
 /** The record for a PR seen merged or closed now, against the thread's review as it stands. */
 export function inboxReviewLandingOf(
-  pull: Pick<InboxReviewLanding, "key" | "url" | "number" | "title" | "platform" | "state" | "at" | "head">,
+  pull: Pick<InboxReviewLanding, "key" | "url" | "number" | "title" | "platform" | "state" | "at" | "head" | "head_sha">,
   threadId: string,
   review: Pick<InboxReviewThread, "latest_review_id" | "reviewed_at"> | null,
 ): InboxReviewLanding {
   const landedAt = pull.at ? Date.parse(pull.at) : NaN;
   const newer = !!review && !Number.isNaN(landedAt) && Date.parse(review.reviewed_at) > landedAt + INBOX_REVIEW_CLOCK_SKEW_MS;
-  return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, head: pull.head, through_review: review && !newer ? review.latest_review_id : null };
+  return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, head: pull.head, ...(pull.head_sha ? { head_sha: pull.head_sha } : {}), through_review: review && !newer ? review.latest_review_id : null };
 }
 
 /** Which local changes a New review is of. */
@@ -488,6 +490,7 @@ const landingFields = (pull: InboxPull) => ({
   state: pull.state === "closed" ? ("closed" as const) : ("merged" as const),
   at: pull.merged_at ?? pull.updated_at,
   head: pull.head,
+  head_sha: pull.head_sha ?? null,
 });
 
 /** The review is of a landed PR: its source names it or its branch; a review with no source is taken to be of it. */
@@ -586,13 +589,15 @@ export function inboxReviewRows(input: {
     return [...(ownersOf.get(threadId) ?? []), ...(owned.get(threadId)?.pulls.map((pull) => pull.key) ?? []), ...(named ? [named] : [])];
   };
   // A reported branch's thread: a landing from before its latest report is earlier work (a report after a merge is new
-  // work, and brings the row back).
-  const reportedAt = (threadId: string): number => {
-    const start = input.started?.get(threadId);
-    return start?.kind === "branch" && start.report ? Date.parse(start.report.at) : NaN;
+  // work, and brings the row back), unless it merged at the very commit reported (that report is of merged code).
+  const earlierWork = (landing: InboxReviewLanding): boolean => {
+    const start = input.started?.get(landing.thread_id);
+    const report = start?.kind === "branch" ? start.report : undefined;
+    if (!report || !landing.at || !(Date.parse(landing.at) < Date.parse(report.at))) return false;
+    return !(landing.head_sha && report.head && sameCommit(landing.head_sha, report.head));
   };
   const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => [
-    ...recorded.filter((landing) => landing.thread_id === threadId && !(landing.at && Date.parse(landing.at) < reportedAt(threadId))),
+    ...recorded.filter((landing) => landing.thread_id === threadId && !earlierWork(landing)),
     ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key && landing.thread_id === threadId)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
   ];
   const stacksOf = (pulls: readonly InboxPull[]) => input.stacks.filter((stack) => stack.layers.some((layer) => inboxPullIsOpen(layer) && pulls.some((p) => p.key === layer.key)));

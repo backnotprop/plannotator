@@ -18,7 +18,9 @@
  *  - a project made for a folder a client names;
  *  - a cloud agent's local-only commit offered for a review as if it were what it pushed;
  *  - new work on a branch whose PR merged going into the landed (hidden) thread;
- *  - a report's own new thread left untitled.
+ *  - a report's own new thread left untitled;
+ *  - a PR merged at an older pushed commit taking a later, local-only report out of Reviews;
+ *  - an old git's report reading as a commit gone from the checkout, or git's version asked on every read.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
@@ -29,7 +31,9 @@ import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxBranchService } from "./inbox-branch-service";
 import { createInboxMcpServer, type InboxMcpContext } from "./inbox-mcp";
 import { INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
-import { INBOX_BRANCH_NAME_NOT_BASE } from "@plannotator/core/inbox-branch-reports";
+import { INBOX_BRANCH_NAME_NOT_BASE, inboxBranchReachWords } from "@plannotator/core/inbox-branch-reports";
+import type { InboxPull } from "@plannotator/core/inbox-pulls";
+import type { ReviewGitRuntime } from "@plannotator/shared/review-core";
 import { inboxRowArchived } from "@plannotator/core/inbox-types";
 import type { RiskBranch } from "./inbox-pull-risk";
 import { runtime } from "./git";
@@ -58,7 +62,36 @@ function commit(repo: string, file: string): string {
 /** The service's background reads (a report's risk waits on git) are done. */
 const quiet = () => new Promise((resolve) => setTimeout(resolve, 400));
 
-function world(options: { on?: boolean; cloud?: boolean } = {}) {
+/** The person's own merged PR on retry-jitter, merged at `head_sha`. */
+function mergedPr(head_sha: string): InboxPull {
+  return {
+    key: "github.com/northwind/billing-svc#412",
+    platform: "github",
+    host: "github.com",
+    repo: "northwind/billing-svc",
+    url: "https://github.com/northwind/billing-svc/pull/412",
+    title: "Retry jitter",
+    author: "dana",
+    mine: true,
+    requested: false,
+    state: "merged",
+    base: "main",
+    head: "retry-jitter",
+    head_repo: "northwind/billing-svc",
+    head_sha,
+    additions: 1,
+    deletions: 1,
+    files: 1,
+    review: "approved",
+    approved_by: null,
+    reviewers: [],
+    checks: "success",
+    updated_at: new Date(Date.now() + 60_000).toISOString(),
+    merged_at: new Date(Date.now() + 60_000).toISOString(),
+  };
+}
+
+function world(options: { on?: boolean; cloud?: boolean; runtime?: ReviewGitRuntime } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-branch-mcp-")));
   roots.push(root);
   const repo = join(root, "billing");
@@ -87,7 +120,7 @@ function world(options: { on?: boolean; cloud?: boolean } = {}) {
   const service = createInboxBranchService({
     store,
     dataDir: join(root, "data"),
-    runtime,
+    runtime: options.runtime ?? runtime,
     on: () => gate.on,
     risk: {
       assessBranch: (branch) => void judged.push(branch),
@@ -372,5 +405,45 @@ describe("send_message's branch", () => {
     const detached = await w.send({ body: "Ready.", subject: "Second piece of work", reply_to: String(named.structured.message_id), branch: { name: "second-branch" } });
     expect(detached.structured.thread_id).not.toBe(named.structured.thread_id);
     expect(w.store.threadSubject(String(detached.structured.thread_id))).toBe("Second piece of work");
+  });
+
+  test("a PR merged at an older pushed commit leaves a later report's row; one merged at a commit holding it claims it", async () => {
+    const w = world();
+    const pushed = w.head;
+    // The agent commits more, only here, and reports that; the PR then merges at the commit that was pushed.
+    const local = commit(w.repo, "local-only.txt");
+    const sent = await w.send({ body: "Ready.", subject: "retry-jitter", branch: { name: "retry-jitter" } });
+    expect(w.service.mcp.get(w.project.id, "retry-jitter")?.head).toBe(local);
+    const projects = new Map([["github.com/northwind/billing-svc", [w.project.id]]]);
+    expect((await w.service.owners([mergedPr(pushed)], projects)).size).toBe(0);
+    // Merged at a commit on top of the reported one: the report's work, claimed into its thread.
+    const onTop = commit(w.repo, "review-fixes.txt");
+    const owners = await w.service.owners([mergedPr(onTop)], projects);
+    expect([...owners.values()].map((owner) => owner.thread_id)).toEqual([String(sent.structured.thread_id)]);
+    // A merged commit this computer doesn't have: nothing to prove, so the row stays.
+    expect((await w.service.owners([mergedPr("e".repeat(40))], projects)).size).toBe(0);
+  });
+
+  test("a report on a computer whose git is too old says so, and git's version is asked once", async () => {
+    const versions: string[][] = [];
+    const old: ReviewGitRuntime = {
+      ...runtime,
+      runGit: async (args, given) => {
+        if (args[0] === "--version") {
+          versions.push(args);
+          return { stdout: "git version 2.30.9\n", stderr: "", exitCode: 0 };
+        }
+        return runtime.runGit(args, given);
+      },
+    };
+    const w = world({ runtime: old });
+    const sent = await w.send({ body: "Ready.", subject: "retry-jitter", branch: { name: "retry-jitter", head: w.head } });
+    expect(sent.error).toBe(false);
+    const [row] = await w.service.rows();
+    expect(row).toMatchObject({ reachable: false, git_too_old: true });
+    expect(inboxBranchReachWords(row!)).toBe("This computer's git is too old to read branches safely.");
+    await w.service.rows();
+    await w.service.started(true);
+    expect(versions).toHaveLength(1);
   });
 });
