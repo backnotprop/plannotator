@@ -132,6 +132,32 @@ describe("executeCallback", () => {
     expect(result?.message).toBe("Callback failed.");
   });
 
+  test("2xx with an https return_url hands it back", async () => {
+    const back = "https://github.com/owner/repo/issues/42";
+    globalThis.fetch = mock(async () => new Response(JSON.stringify({ return_url: back }), { status: 200 })) as any;
+    const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
+    expect(result?.type).toBe("success");
+    expect(result?.type === "success" && result.returnUrl).toBe(back);
+  });
+
+  test("2xx with a non-http return_url sends nobody anywhere", async () => {
+    for (const bad of ["javascript:alert(1)", "data:text/html,hi", "not a url", ""]) {
+      globalThis.fetch = mock(async () => new Response(JSON.stringify({ return_url: bad }), { status: 200 })) as any;
+      const result = await executeCallback(CallbackAction.Approve, mockConfig, mockAnnotatedUrl);
+      expect(result?.type).toBe("success");
+      expect(result?.type === "success" ? result.returnUrl : "unexpected").toBeUndefined();
+    }
+  });
+
+  test("2xx with an empty or non-JSON body still counts as sent", async () => {
+    for (const body of [null, "ok", "[1]"]) {
+      globalThis.fetch = mock(async () => new Response(body, { status: body === null ? 204 : 200 })) as any;
+      const result = await executeCallback(CallbackAction.Feedback, mockConfig, mockAnnotatedUrl);
+      expect(result?.type).toBe("success");
+      expect(result?.type === "success" ? result.returnUrl : "unexpected").toBeUndefined();
+    }
+  });
+
   test("POSTs correct JSON body for approve", async () => {
     let capturedBody: string | null = null;
     globalThis.fetch = mock(async (_url: string, init: RequestInit) => {

@@ -65,7 +65,7 @@ import { TaterSpriteRunning } from '@plannotator/ui/components/TaterSpriteRunnin
 import { TaterSpritePullup } from '@plannotator/ui/components/TaterSpritePullup';
 import { useSharing } from '@plannotator/ui/hooks/useSharing';
 import { shareableDocumentMarkdown } from '@plannotator/ui/utils/sharing';
-import { getCallbackConfig, CallbackAction, executeCallback } from '@plannotator/ui/utils/callback';
+import { getCallbackConfig, CallbackAction, executeCallback, CALLBACK_RETURN_DELAY_MS } from '@plannotator/ui/utils/callback';
 import { useAgents } from '@plannotator/ui/hooks/useAgents';
 import { useActiveSection } from '@plannotator/ui/hooks/useActiveSection';
 import { tocHeadings } from '@plannotator/ui/utils/annotationHelpers';
@@ -5946,6 +5946,12 @@ const App: React.FC = () => {
         if (result.type === 'success') {
           toast.success(result.message);
           setSubmitted(action === CallbackAction.Approve ? 'approved' : 'denied');
+          // The bot named the page the link came from: go back there once
+          // the done screen has been seen.
+          const returnUrl = result.returnUrl;
+          if (returnUrl) {
+            window.setTimeout(() => window.location.assign(returnUrl), CALLBACK_RETURN_DELAY_MS);
+          }
         } else {
           toast.error(result.message);
         }

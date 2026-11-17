@@ -3,6 +3,8 @@
  *
  * When the bot posts a plan URL with ?cb=<encoded_url>&ct=<token>,
  * these utilities parse the config and POST the user's decision back.
+ * A 2xx answer may carry `{ "return_url": "<http(s) url>" }`: the page then
+ * goes there after the done screen (back to the issue the link came from).
  */
 
 /** Actions the user can trigger via the in-Plannotator callback buttons. */
@@ -17,9 +19,22 @@ export interface CallbackConfig {
   token: string;
 }
 
-export interface ToastSuccess { readonly type: 'success'; readonly message: string }
+export interface ToastSuccess {
+  readonly type: 'success';
+  readonly message: string;
+  /**
+   * Where the bot wants the person to go after the decision landed (the
+   * issue or work item the link came from). Read from `return_url` in the
+   * callback's 2xx JSON answer; only http: and https: are kept. Absent when
+   * the answer names none.
+   */
+  readonly returnUrl?: string;
+}
 export interface ToastError   { readonly type: 'error';   readonly message: string }
 export type ToastPayload = ToastSuccess | ToastError | null;
+
+/** How long the done screen shows before the page goes to `returnUrl`. */
+export const CALLBACK_RETURN_DELAY_MS = 1500;
 
 /**
  * Parse callback configuration from URL search params.
@@ -61,6 +76,29 @@ export function getCallbackConfig(
 }
 
 /**
+ * Read an optional `return_url` from a callback's 2xx answer. Any other
+ * answer (empty, not JSON, no string field, a scheme other than http: or
+ * https:) gives undefined, so the decision still counts as sent.
+ */
+async function readReturnUrl(res: Response): Promise<string | undefined> {
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    return undefined;
+  }
+  if (!body || typeof body !== "object") return undefined;
+  const raw = (body as { return_url?: unknown }).return_url;
+  if (typeof raw !== "string" || raw === "") return undefined;
+  try {
+    const { protocol } = new URL(raw);
+    return protocol === "https:" || protocol === "http:" ? raw : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Execute a bot callback POST request.
  *
  * Pure function (no React deps) — testable without a DOM.
@@ -92,7 +130,10 @@ export async function executeCallback(
           : "Callback failed.",
       };
     }
-    return { type: "success", message: successMsg };
+    const returnUrl = await readReturnUrl(res);
+    return returnUrl
+      ? { type: "success", message: successMsg, returnUrl }
+      : { type: "success", message: successMsg };
   } catch {
     return { type: "error", message: "Callback failed." };
   }
