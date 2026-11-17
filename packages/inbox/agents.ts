@@ -8,6 +8,7 @@
  */
 import {
   INBOX_AGENT_LABELS,
+  INBOX_CODEX_HOOK_HINT,
   INBOX_NOTE_AGENT_IDS,
   INBOX_NOTE_AUTO_AGENT_IDS,
   inboxElsewhereText,
@@ -91,11 +92,14 @@ export function notesAddedParts(notes: readonly InboxNoteAutoAdd[]): {
   names: { agent: InboxNoteAgentId; label: string; path: string }[];
   after: string;
   files: string;
+  /** Said after the line's full stop, once: the Codex reminder hook added with the note waits for the person's approval in Codex. */
+  hint: string | null;
 } {
   const names = notes.map((note) => ({ agent: note.agent, label: INBOX_AGENT_LABELS[note.agent], path: note.path }));
+  const hint = notes.some((note) => note.agent === 'codex' && note.hook_review) ? INBOX_CODEX_HOOK_HINT : null;
   return names.length === 1
-    ? { before: 'Added the Inbox note to ', names, after: "'s instructions", files: names[0]!.path }
-    : { before: 'Added the Inbox note to the instructions of ', names, after: '', files: names.map((name) => `${name.label}: ${name.path}`).join('; ') };
+    ? { before: 'Added the Inbox note to ', names, after: "'s instructions", files: names[0]!.path, hint }
+    : { before: 'Added the Inbox note to the instructions of ', names, after: '', files: names.map((name) => `${name.label}: ${name.path}`).join('; '), hint };
 }
 
 /** The band's lines (option A of the approved dialog): what was connected, who needs a person, what failed, whose entry is someone else's. */

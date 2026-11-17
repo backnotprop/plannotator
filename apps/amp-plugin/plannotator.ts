@@ -185,6 +185,47 @@ export default function plannotatorAmpPlugin(amp: PluginAPI) {
       await ctx.ui.notify(inboxOpenedMessage(result));
     },
   );
+
+  // The Plannotator Inbox reminder, on a thread's first prompt only: `agent.start` fires on every prompt, and its
+  // message stays in the thread, so once per thread is the reminder a session start gets elsewhere.
+  // An Amp without plugin events still gets the commands above.
+  if (typeof amp.on === "function") amp.on("agent.start", inboxReminderHandler(() => inboxReminderText()));
+}
+
+/** A thread's first `agent.start` seen here: the reminder as a hidden message after the person's prompt; later ones nothing. */
+export function inboxReminderHandler(read: () => Promise<string | null>) {
+  const reminded = new Set<string>();
+  return async (event: { thread?: { id?: unknown } } | undefined) => {
+    const thread = event?.thread?.id;
+    if (typeof thread !== "string" || reminded.has(thread)) return undefined;
+    reminded.add(thread);
+    const text = await read().catch(() => null);
+    return text ? { message: { content: text, display: false } } : undefined;
+  };
+}
+
+/** What `plannotator inbox reminder --agent amp` prints (nothing when the reminder is off), or null. Bounded: a prompt never waits long on it. */
+async function inboxReminderText(): Promise<string | null> {
+  const runtime = await getPlannotatorRuntime();
+  let proc: Bun.Subprocess<"ignore", "pipe", "ignore">;
+  try {
+    proc = Bun.spawn([...runtime.command, "inbox", "reminder", "--agent", "amp"], { stdin: "ignore", stdout: "pipe", stderr: "ignore", env: { ...process.env }, windowsHide: true });
+  } catch {
+    return null;
+  }
+  const timer = setTimeout(() => {
+    try {
+      proc.kill();
+    } catch {
+      // Already gone.
+    }
+  }, 5_000);
+  try {
+    const [stdout, status] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
+    return status === 0 && stdout.trim() ? stdout.replace(/\n$/, "") : null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** What /plannotator-inbox shows for the CLI's answer. */

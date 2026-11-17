@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_LABELS, INBOX_PROMPT_HOSTS, type InboxPromptHost, type InboxPromptsChange, type InboxPromptsSettings } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { RULES_COUNT_WITHIN, takeRulesEditorWish } from '../agentRules';
 import { HostMark, Icon } from '../icons';
@@ -9,8 +9,9 @@ import { Modal } from './Updates';
 type Rules = NonNullable<InboxPromptsSettings['rules']>;
 type Slot = 'shared' | InboxPromptHost;
 
-const AGENT_NAME: Record<InboxPromptHost, string> = { 'claude-code': 'Claude Code', pi: 'Pi', opencode: 'OpenCode' };
-const SLOTS: Slot[] = ['shared', ...INBOX_PROMPT_HOSTS];
+const AGENT_NAME: Record<InboxPromptHost, string> = INBOX_AGENT_LABELS;
+/** The slots the Inbox serves rules for: All agents, then each agent it carries (an agent is left out where the model has none). */
+const slotsOf = (rules: Rules): Slot[] => ['shared', ...INBOX_PROMPT_HOSTS.filter((host) => host in rules.runtimes)];
 const slotName = (slot: Slot) => (slot === 'shared' ? 'All agents' : AGENT_NAME[slot]);
 
 export function AgentRulesSection({
@@ -23,7 +24,7 @@ export function AgentRulesSection({
   const id = useId();
   const [editing, setEditing] = useState<Slot | null>(null);
   const textOf = (slot: Slot) => (slot === 'shared' ? rules.shared : rules.runtimes[slot]);
-  const set = SLOTS.filter((slot) => textOf(slot) !== null);
+  const set = slotsOf(rules).filter((slot) => textOf(slot) !== null);
   useEffect(() => {
     if (takeRulesEditorWish()) setEditing('shared');
   }, []);
@@ -129,7 +130,7 @@ function RulesEditor({ rules, first, onClose, onPrompts }: { rules: Rules; first
         />
         <div className="ar-lbl" id="ar-for">For</div>
         <div className="ar-seg" role="group" aria-labelledby="ar-for">
-          {SLOTS.map((which) => (
+          {slotsOf(rules).map((which) => (
             <button type="button" key={which} aria-pressed={which === slot} onClick={() => pick(which)} data-rules-for={which}>
               {slotName(which)}
             </button>

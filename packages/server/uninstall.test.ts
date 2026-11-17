@@ -19,6 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, parse } from "node:path";
 import { quoteHookWord, t3HookCommand } from "@plannotator/shared/t3-hook-command";
+import { addInboxReminderHook, inboxReminderHookCommand } from "./inbox-reminder-hooks";
 import {
   formatPurgeWarning,
   runPlannotatorUninstall,
@@ -3246,5 +3247,49 @@ describe("Qwen Code", () => {
     );
 
     expect(fixture.commandCalls.filter((call) => call.command === "/fake/qwen")).toEqual([]);
+  });
+});
+
+describe("the Inbox reminder hooks (inbox-reminder-hooks.ts)", () => {
+  /** Codex's, Gemini CLI's and Kiro's hook, written and recorded as the Inbox writes them, beside the person's own config. */
+  function withReminderHooks(fixture: Fixture) {
+    const e = { platform: "linux" as const, homeDir: fixture.homeDir, env: {}, which: () => null, run: async () => ({ exitCode: 0, timedOut: false, stdout: "", stderr: "" }) };
+    const codexMine = `${JSON.stringify({ hooks: { Stop: [{ hooks: [{ type: "command", command: "my-stop.sh" }] }] } }, null, 2)}\n`;
+    // Strict JSON: uninstall's own Gemini cleanup refuses comments.
+    const geminiMine = '{\n  "theme": "dark"\n}\n';
+    writeText(join(fixture.homeDir, ".codex", "hooks.json"), codexMine);
+    writeText(join(fixture.homeDir, ".gemini", "settings.json"), geminiMine);
+    const hooks: Record<string, unknown> = {};
+    for (const agent of ["gemini", "kiro", "codex"] as const) {
+      const change = addInboxReminderHook(agent, inboxReminderHookCommand(["plannotator"], agent, "linux"), e, "2026-11-17T00:00:00.000Z");
+      if (!change.ok || !change.record) throw new Error(change.ok ? change.action : change.reason);
+      hooks[agent] = change.record;
+    }
+    writeJson(join(fixture.dataDir, "inbox", "reminder-hooks.json"), { v: 1, hooks });
+    return { codexMine, geminiMine };
+  }
+
+  test("a plain uninstall takes each one out: the person's files back byte for byte, our own file gone", async () => {
+    const fixture = createFixture();
+    const { codexMine, geminiMine } = withReminderHooks(fixture);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: false }, fixture.environment);
+    expect(result.ok, JSON.stringify(result)).toBe(true);
+    expect(readFileSync(join(fixture.homeDir, ".codex", "hooks.json"), "utf8")).toBe(codexMine);
+    expect(readFileSync(join(fixture.homeDir, ".gemini", "settings.json"), "utf8")).toBe(geminiMine);
+    expect(existsSync(join(fixture.homeDir, ".kiro", "hooks", "plannotator-inbox.json"))).toBe(false);
+    expect(result.removed.filter((line) => line.startsWith("Plannotator's Inbox reminder hook in "))).toEqual([
+      "Plannotator's Inbox reminder hook in ~/.gemini/settings.json",
+      "Plannotator's Inbox reminder hook in ~/.kiro/hooks/plannotator-inbox.json",
+      "Plannotator's Inbox reminder hook in ~/.codex/hooks.json",
+    ]);
+  });
+
+  test("a dry run lists them and changes nothing", async () => {
+    const fixture = createFixture();
+    withReminderHooks(fixture);
+    const before = snapshotTree(fixture.homeDir);
+    const result = await runPlannotatorUninstall({ purge: false, dryRun: true }, fixture.environment);
+    expect(result.planned.filter((line) => line.startsWith("Plannotator's Inbox reminder hook in "))).toHaveLength(3);
+    expect(snapshotTree(fixture.homeDir)).toEqual(before);
   });
 });

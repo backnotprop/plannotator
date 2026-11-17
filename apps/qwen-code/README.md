@@ -2,9 +2,10 @@
 
 Plan review, code review, annotation and annotate-last for [Qwen Code](https://github.com/QwenLM/qwen-code).
 
-- `extension/` is the `plannotator` Qwen extension. It holds two hooks:
+- `extension/` is the `plannotator` Qwen extension. It holds three hooks:
   - `PermissionRequest` on `exit_plan_mode` opens the plan in Plannotator and waits for your decision.
   - `PreToolUse` on `enter_plan_mode` adds Plannotator's planning context when you turned it on (it prints nothing otherwise).
+  - `SessionStart` adds the Plannotator Inbox reminder when a session starts and after each compaction, once Qwen Code reaches your Inbox and while its reminder is on in the Inbox's Settings → Agents (it prints nothing otherwise).
 - `skills/` holds `/plannotator-review`, `/plannotator-annotate` and `/plannotator-last` for Qwen Code. They go in `~/.qwen/skills` (or `$QWEN_HOME/skills`), where they take the place of the shared copies in `~/.agents/skills`.
 
 ## Plan review in Qwen Code

@@ -31,6 +31,7 @@ function hooks(): Record<string, HookGroup[]> {
 // Each released version of the extension folder, by its tree hash.
 const EXTENSION_TREE_HASHES: Record<string, string> = {
   "1.0.0": "df0905f26b1717f8ad89aa6b4235fb48e1e6b9bdcf6c282f29f07285eaa5efaa",
+  "1.1.0": "47dcd1cd9ce3fd90c5c6d77fbf7fe9c160109e54a7924eaeca245082bec48485",
 };
 
 // Paths and contents of every file under extension/ (line endings as LF, so
@@ -94,6 +95,16 @@ describe("Qwen Code extension", () => {
     const context = hooks().PreToolUse!.find((g) => g.matcher === "enter_plan_mode")!.hooks[0]!;
     expect(context.command).toBe("plannotator improve-context");
     expect(context.timeout).toBe(5000);
+  });
+
+  test("the Inbox reminder runs at every session start, compaction included, and never more often", () => {
+    // No matcher: every SessionStart source (startup, resume, clear, compact). Not UserPromptSubmit,
+    // which would leave one copy per prompt in the history.
+    const groups = hooks().SessionStart!;
+    expect(groups).toHaveLength(1);
+    expect(groups[0]!.matcher).toBeUndefined();
+    expect(groups[0]!.hooks.map((hook) => hook.command)).toEqual(["plannotator inbox reminder --agent qwen"]);
+    expect(hooks().UserPromptSubmit).toBeUndefined();
   });
 
   test("every hook names an origin Plannotator knows", () => {

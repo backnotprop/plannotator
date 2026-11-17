@@ -1223,6 +1223,19 @@ export function unsaidAutoNotes(): InboxNoteAutoAdd[] {
 }
 
 /**
+ * The pass that wrote Codex's note also added Codex's reminder hook (inbox-reminder-hooks.ts), which Codex runs only
+ * once the person approves it in /hooks: the note line not said yet says so too, once (INBOX_CODEX_HOOK_HINT). A Codex
+ * note said earlier gets no line of its own; Codex itself points to /hooks at its next start.
+ */
+export function markCodexHookReview(): boolean {
+  const saved = loadConfig().inboxAgentNotes;
+  const auto = Array.isArray(saved?.auto) ? saved!.auto : [];
+  if (!auto.some((entry) => entry?.agent === "codex" && !entry.hook_review)) return false;
+  saveConfig({ inboxAgentNotes: { ...saved, auto: auto.map((entry) => (entry?.agent === "codex" ? { ...entry, hook_review: true as const } : entry)) } });
+  return true;
+}
+
+/**
  * The window said them (POST /api/inbox/agents/seen): the notes its line showed, so one written by a pass
  * that ended after the window read the agents is still said next time. `shown` absent (an older window): all.
  */

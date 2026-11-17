@@ -2691,7 +2691,15 @@ export const INBOX_NOTE_AUTO_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-c
 export interface InboxNoteAutoAdd {
   agent: InboxNoteAgentId;
   path: string;
+  /**
+   * Codex: the same pass added Plannotator's reminder hook to its hooks.json, which Codex runs only once the
+   * person approves it in its own /hooks screen. The line says so once, with the note (INBOX_CODEX_HOOK_HINT).
+   */
+  hook_review?: true;
 }
+
+/** Said once after the note line when the pass also added the Codex reminder hook (`InboxNoteAutoAdd.hook_review`). */
+export const INBOX_CODEX_HOOK_HINT = "Approve Plannotator's new hook in Codex with /hooks.";
 
 /**
  * Where an agent's note would go and how it stands:
@@ -3700,7 +3708,9 @@ export function inboxEngineTooOldForSendNow(version: string | null | undefined):
  * Settings → Prompts (approval "inbox-prompts-page", #2194): what Plannotator
  * tells agents, as `GET /api/inbox/settings` carries it in `prompts`.
  */
-export const INBOX_PROMPT_HOSTS = ["claude-code", "pi", "opencode"] as const;
+// The three hosts that register the tool, then the ones whose reminder comes from a hook
+// (INBOX_HOOK_REMINDER_HOSTS in packages/shared/config.ts, in the same order).
+export const INBOX_PROMPT_HOSTS = ["claude-code", "pi", "opencode", "qwen", "gemini", "amp", "kiro", "codex"] as const;
 export type InboxPromptHost = (typeof INBOX_PROMPT_HOSTS)[number];
 
 /** One of the plan, review and annotate prompts (config.json `prompts.<group>.<name>`), read-only in the window. */

@@ -11,6 +11,10 @@ This is a native Amp plugin for the manual Plannotator workflows:
 Amp commands live in the command palette, not as slash commands. This plugin does
 not intercept Amp's planning flow.
 
+On a thread's first prompt, the plugin also adds the Plannotator Inbox reminder,
+hidden, after your message, once Amp reaches your Inbox and while its reminder is
+on in the Inbox's Settings → Agents. It adds nothing otherwise.
+
 ## Install
 
 Install the `plannotator` CLI first:

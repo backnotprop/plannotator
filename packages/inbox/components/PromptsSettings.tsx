@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import {
+  INBOX_AGENT_LABELS,
   INBOX_PROMPT_HOSTS,
   type InboxPromptHost,
   type InboxPromptItem,
@@ -30,7 +31,7 @@ import { Tip } from './Tip';
  * Then the plan, review and annotate prompts, read-only, folded into one row.
  */
 
-const AGENT_NAME: Record<InboxPromptHost, string> = { 'claude-code': 'Claude Code', pi: 'Pi', opencode: 'OpenCode' };
+const AGENT_NAME: Record<InboxPromptHost, string> = INBOX_AGENT_LABELS;
 
 /** The count shows from here; past `max` Save is refused. */
 export const PROMPT_COUNT_FROM = 8000;
@@ -43,13 +44,13 @@ type Slot = ReminderSlot | 'guide';
 /** The phone's list of sections: Default, or Custom once any reminder text or guide instructions are the person's own. */
 export function promptsSummary(prompts: InboxPromptsSettings): string {
   const rules = prompts.rules;
-  const ruled = rules ? rules.shared !== null || INBOX_PROMPT_HOSTS.some((host) => rules.runtimes[host] !== null) : false;
+  const ruled = rules ? rules.shared !== null || INBOX_PROMPT_HOSTS.some((host) => rules.runtimes[host] != null) : false;
   return reminderCustom(prompts) || ruled || Boolean(prompts.guide?.text) ? 'Custom' : 'Default';
 }
 
 function reminderCustom(prompts: InboxPromptsSettings): boolean {
   const { shared, runtimes } = prompts.reminder;
-  return shared !== null || INBOX_PROMPT_HOSTS.some((host) => runtimes[host] !== null);
+  return shared !== null || INBOX_PROMPT_HOSTS.some((host) => runtimes[host] != null);
 }
 
 function Chip({ custom }: { custom: boolean }) {
@@ -272,8 +273,9 @@ export function PromptsSection({
     const name = AGENT_NAME[host];
     const over = own === null ? (reminder.over?.runtimes[host] ?? null) : null;
     // OpenCode 1 with nothing custom: its own default (the no-wake line), shown, since it differs from the one above.
+    // So for an agent whose reply never comes back by itself (Gemini CLI, Amp, Kiro).
     const ownDefault = own === null && reminder.shared === null && !wakes(host);
-    const status = own !== null ? 'Own text' : ownDefault ? 'Uses the default for OpenCode 1' : 'Uses the shared text';
+    const status = own !== null ? 'Own text' : ownDefault ? `Uses the default for ${host === 'opencode' ? 'OpenCode 1' : name}` : 'Uses the shared text';
     return (
       <div className="pm-ag" data-agent={host} data-prompt-slot={host} key={host}>
         <div className="ib-prow">
@@ -356,7 +358,7 @@ export function PromptsSection({
           {reminderOpen && (
             <div id={`${id}-rem-body`} className="pm-rem-body" data-prompts-reminder="">
               {shared}
-              {INBOX_PROMPT_HOSTS.map(agent)}
+              {INBOX_PROMPT_HOSTS.filter((host) => host in reminder.runtimes).map(agent)}
             </div>
           )}
         </div>

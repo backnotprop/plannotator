@@ -152,6 +152,7 @@
     "./plannotator-ports": "./plannotator-ports.ts",
     "./live-proxy-node": "./live-proxy-node.ts",
     "./inbox/snoozes": "./inbox/snoozes.ts",
+    "./inbox/reminder-hook": "./inbox/reminder-hook.ts",
     "./inbox/agent-faces": "./inbox/agent-faces.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/network-paths": "./inbox/network-paths.ts",

@@ -19,6 +19,9 @@ import { tooltipOf } from './testing/tooltip';
 const hasDom = typeof document !== 'undefined';
 const { PromptsSection, promptsSummary } = (hasDom ? await import('./components/PromptsSettings') : {}) as typeof import('./components/PromptsSettings');
 
+/** A per-agent map for the three agents these fixtures carry: the page shows the agents the model carries, no others. */
+const hosts = <T,>(value: { 'claude-code': T; pi: T; opencode: T }) => value as Record<InboxPromptHost, T>;
+
 /** The built-in line as the Inbox serves it (a fixture: the settings page shows whatever it is given). */
 const WAKE = 'Plannotator Inbox is on: … Their reply comes back here.';
 
@@ -37,10 +40,10 @@ function model(over: Partial<InboxPromptsSettings['reminder']> = {}): InboxPromp
   return {
     reminder: {
       shared: null,
-      runtimes: { 'claude-code': null, pi: null, opencode: null },
+      runtimes: hosts({ 'claude-code': null, pi: null, opencode: null }),
       defaults: { wake: WAKE, no_wake: 'no wake' },
       max: 9000,
-      on: { 'claude-code': true, pi: true, opencode: false },
+      on: hosts({ 'claude-code': true, pi: true, opencode: false }),
       ...over,
     },
     others: [
@@ -186,7 +189,7 @@ test.skipIf(!hasDom)("an agent's own text: Edit starts from the shared text, Sav
   expect(sent).toEqual([{ inbox: { runtimes: { pi: { reminder: 'Pi: report upstream first.' } } } }]);
   expect(q(pi, '[data-prompt-status="pi"]')?.textContent).toBe('Own text');
   expect(q(pi, '[data-prompt-text="pi"]')?.textContent).toBe('Pi: report upstream first.');
-  expect(promptsSummary(model({ runtimes: { 'claude-code': null, pi: 'x', opencode: null } }))).toBe('Custom');
+  expect(promptsSummary(model({ runtimes: hosts({ 'claude-code': null, pi: 'x', opencode: null }) }))).toBe('Custom');
 
   await click(q(pi, '[data-prompt-use-shared="pi"]'));
   expect(sent.at(-1)).toEqual({ inbox: { runtimes: { pi: { reminder: null } } } });
@@ -246,7 +249,7 @@ test.skipIf(!hasDom)('the plan, review and annotate prompts: one folded row, ope
 
 test.skipIf(!hasDom)('text over the limit in config.json: the default stays marked, a calm line says it is ignored, and Reset to default / Use shared delete it', async () => {
   const start = model({
-    over: { shared: 9200, runtimes: { 'claude-code': null, pi: 10000, opencode: null } },
+    over: { shared: 9200, runtimes: hosts({ 'claude-code': null, pi: 10000, opencode: null }) },
   });
   const sent = server(start);
   const el = mount(start);
@@ -266,7 +269,7 @@ test.skipIf(!hasDom)('text over the limit in config.json: the default stays mark
 test.skipIf(!hasDom)("OpenCode 1: its row shows the default it really gets (the no-wake line), and Edit starts from it; a shared text replaces it", async () => {
   const NO_WAKE = 'Plannotator Inbox is on: … Read the thread later with read_thread.';
   const start: InboxPromptsSettings = {
-    ...model({ wakes: { 'claude-code': true, pi: true, opencode: false } }),
+    ...model({ wakes: hosts({ 'claude-code': true, pi: true, opencode: false }) }),
   };
   start.reminder.defaults.no_wake = NO_WAKE;
   server(start);
@@ -279,7 +282,7 @@ test.skipIf(!hasDom)("OpenCode 1: its row shows the default it really gets (the 
   expect(q<HTMLTextAreaElement>(el, '[data-prompt-field="opencode"]')!.value).toBe(NO_WAKE);
   await click(q(el, '[data-prompt-cancel="opencode"]'));
   act(() => root!.unmount());
-  const shared = model({ shared: 'Shared.', wakes: { 'claude-code': true, pi: true, opencode: false } });
+  const shared = model({ shared: 'Shared.', wakes: hosts({ 'claude-code': true, pi: true, opencode: false }) });
   act(() => {
     root = createRoot(host!);
     root.render(<PromptsSection prompts={shared} />);
@@ -340,8 +343,8 @@ function withRules(rules: Partial<NonNullable<InboxPromptsSettings['rules']>> = 
     ...model(),
     rules: {
       shared: null,
-      runtimes: { 'claude-code': null, pi: null, opencode: null },
-      room: { shared: 8000, runtimes: { 'claude-code': 8000, pi: 8000, opencode: 8000 } },
+      runtimes: hosts({ 'claude-code': null, pi: null, opencode: null }),
+      room: { shared: 8000, runtimes: hosts({ 'claude-code': 8000, pi: 8000, opencode: 8000 }) },
       dropped: [],
       ...rules,
     },
@@ -376,4 +379,27 @@ test.skipIf(!hasDom)("Rules for one agent: For picks the agent's own box; Save w
   expect(sent.at(-1)).toEqual({ inbox: { runtimes: { pi: { rules: 'Never send from reviewer sessions.' } } } });
   expect(q(el, '[data-rules-text="pi"]')?.textContent).toBe('Never send from reviewer sessions.');
   expect(q(el, '[data-rules-text="shared"]')?.textContent).toBe('Keep messages short.');
+});
+
+test.skipIf(!hasDom)('the agents whose reminder comes from a hook: a row each; one whose reply never comes back shows its own default; each has its own rules box', async () => {
+  const all = <T,>(value: T, over: Partial<Record<InboxPromptHost, T>> = {}) =>
+    ({ 'claude-code': value, pi: value, opencode: value, qwen: value, gemini: value, amp: value, kiro: value, codex: value, ...over }) as Record<InboxPromptHost, T>;
+  const NO_WAKE = 'Plannotator Inbox is on: … Read the thread later with read_thread.';
+  const start: InboxPromptsSettings = {
+    ...model({ runtimes: all(null), on: all(true, { codex: false }), wakes: all(true, { gemini: false, amp: false, kiro: false }) }),
+    rules: { shared: 'Keep messages short.', runtimes: all(null), room: { shared: 8000, runtimes: all(8000) }, dropped: [] },
+  };
+  start.reminder.defaults.no_wake = NO_WAKE;
+  const sent = server(start);
+  const el = mount(start);
+  expect([...el.querySelectorAll('.pm-ag[data-agent]')].map((row) => row.getAttribute('data-agent'))).toEqual(['claude-code', 'pi', 'opencode', 'qwen', 'gemini', 'amp', 'kiro', 'codex']);
+  expect(q(el, '[data-prompt-status="gemini"]')?.textContent).toBe('Uses the default for Gemini CLI');
+  expect(q(el, '[data-prompt-text="gemini"]')?.textContent).toBe(NO_WAKE);
+  expect(q(el, '[data-prompt-status="qwen"]')?.textContent).toBe('Uses the shared text');
+  expect(q(el, '[data-prompt-status="codex"]')?.textContent).toBe('Uses the shared text · Reminder off in Agents');
+  await click(q(el, '[data-rules-edit="shared"]'));
+  await click(q(document.body, '[data-rules-for="kiro"]'));
+  type(q<HTMLTextAreaElement>(document.body, '[data-rules-field]')!, 'Only for Kiro.');
+  await click(q(document.body, '[data-rules-save]'));
+  expect(sent.at(-1)).toEqual({ inbox: { runtimes: { kiro: { rules: 'Only for Kiro.' } } } });
 });

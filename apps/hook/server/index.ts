@@ -485,6 +485,16 @@ if (isReviewDrawCommand(rawArgs, () => {
     );
   }
 }
+// `plannotator inbox reminder --agent <id>`: the Inbox reminder for an agent's own hook (Qwen Code, Gemini CLI,
+// Amp, Kiro, Codex) at session start and after a compaction (packages/shared/inbox/reminder-hook.ts). Reads three
+// small files, never starts the Inbox; prints nothing and exits 0 when the reminder is off or anything fails.
+if (rawArgs[0] === "inbox" && rawArgs[1] === "reminder" && !hasHelpFlag(rawArgs.slice(2))) {
+  const { runInboxHookReminder } = await import("@plannotator/shared/inbox/reminder-hook");
+  // The agents pipe their hook event on stdin: read and set aside, bounded, so a writer never sees a closed pipe.
+  if (!process.stdin.isTTY) await Promise.race([Bun.stdin.text().catch(() => ""), Bun.sleep(500)]);
+  process.stdout.write(runInboxHookReminder(rawArgs.slice(2), { dataDir: getPlannotatorDataDir(), env: process.env }));
+  process.exit(0);
+}
 // `plannotator inbox call …`: the Inbox tool from a script (inbox-call-command.ts).
 // Here, like the card command: it takes its own flags, and JSON is not ours to scan.
 {

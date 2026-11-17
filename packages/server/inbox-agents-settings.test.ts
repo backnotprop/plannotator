@@ -254,6 +254,23 @@ test("the reminder switch per host, and the tool switch for Pi's extension", asy
   expect(loadConfig()).toMatchObject({ inboxTool: { pi: true }, inboxReminder: { pi: false } });
 });
 
+test("Codex's reminder comes from its hook: a switch once it reaches the Inbox, the hook written then; its switch saved; reach off takes the hook out", async () => {
+  fake.install("codex");
+  const hooks = join(fake.env.CODEX_HOME!, "hooks.json");
+  const s = await start();
+  expect(row(await get(s), "codex").reminder).toBeNull();
+  await post(s, "/api/inbox/agents", { agent: "codex", reach: true });
+  // The model waits for the pass that writes the hook.
+  expect(row(await get(s), "codex").reminder).toEqual({ on: true, locked: false, needs_tool: false });
+  expect(readFileSync(hooks, "utf8")).toContain("inbox reminder --agent codex");
+  const model = (await (await post(s, "/api/inbox/agents", { agent: "codex", reminder: false })).json()) as Model;
+  expect(row(model, "codex").reminder?.on).toBe(false);
+  expect(loadConfig().inboxReminder).toEqual({ codex: false });
+  await post(s, "/api/inbox/agents", { agent: "codex", reach: false });
+  // Plannotator created hooks.json for it: gone with our entry.
+  expect(existsSync(hooks)).toBe(false);
+});
+
 // DSH has no slot for a hidden reminder yet (a context message would read as the person's own words).
 test("DeepSeek Harness: the tool switch turns its plugin's tool on, and it has no reminder switch", async () => {
   mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
