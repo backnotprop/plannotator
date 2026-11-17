@@ -76,12 +76,36 @@ test("an agent opens its launch's thread, else its own thread on its machine, on
   expect(agentThread(agent('ses_to'), null, null, [row('t_to', 'x', { author: { kind: 'person' }, addressee: { host: 'pi', session: 'ses_to' } } as Partial<InboxListRow>)])!.id).toBe('t_to');
 });
 
-test("an agent's name: its title, else its thread's name, else its project, else its host, never its session", () => {
-  expect(agentRowName(agent('ses_a', { label: 'Fix login redirect' }), { id: 't', subject: 'Other' })).toBe('Fix login redirect');
-  expect(agentRowName(agent('ses_a'), { id: 't', subject: 'Invoice retries' })).toBe('Invoice retries');
-  expect(agentRowName(agent('ses_a'), null)).toBe('billing-svc');
-  expect(agentRowName(agent('ses_a', { project: null, host: 'pi' }), null)).toBe('Pi');
-  expect(agentRowName(agent('ses_a', { project: null, host: null }), null)).toBe('An agent');
+test("an agent's name, one rung at a time: its own name, its host's title, the thread it got first, its project, its host; never its session", () => {
+  const first = { id: 't_first', name: 'Invoice retries' };
+  expect(agentRowName(agent('ses_a', { label: 'Fix login redirect', title: 'Login redirect loop', first_thread: first }))).toBe('Fix login redirect');
+  expect(agentRowName(agent('ses_a', { title: 'Login redirect loop', first_thread: first }))).toBe('Login redirect loop');
+  expect(agentRowName(agent('ses_a', { first_thread: first }))).toBe('Invoice retries');
+  expect(agentRowName(agent('ses_a'))).toBe('billing-svc');
+  expect(agentRowName(agent('ses_a', { project: null, host: 'pi' }))).toBe('Pi');
+  expect(agentRowName(agent('ses_a', { project: null, host: null }))).toBe('An agent');
+});
+
+test("inside a thread an agent is named by its own name, else its agent's name: never the thread it got first, nor its project", () => {
+  const first = { id: 't_first', name: 'Retry policy for the nightly ledger sync' };
+  expect(agentRowName(agent('ses_a', { label: 'Fix login redirect', title: 'Login redirect loop', first_thread: first }), 'thread')).toBe('Fix login redirect');
+  expect(agentRowName(agent('ses_a', { title: 'Login redirect loop', first_thread: first }), 'thread')).toBe('Login redirect loop');
+  expect(agentRowName(agent('ses_a', { host: 'pi', first_thread: first }), 'thread')).toBe('Pi');
+  expect(agentRowName(agent('ses_a', { host: 'pi', first_thread: first }), 'list')).toBe('Retry policy for the nightly ledger sync');
+  expect(agentRowName(agent('ses_a', { host: null }), 'thread')).toBe('An agent');
+});
+
+test("an unnamed agent's row keeps its first thread's name while another thread waits on the person or gets newer activity", () => {
+  const rows = [
+    row('t_first', 'ses_a', { subject: 'Invoice retries', last_at: '2026-11-09T08:00:00.000Z' }),
+    row('t_waits', 'ses_a', { subject: 'Semantic diffs', last_at: '2026-11-09T09:00:00.000Z', waiting_on_person: true }),
+    row('t_newest', 'ses_a', { subject: 'Release notes', last_at: '2026-11-09T10:00:00.000Z' }),
+  ];
+  const listed = [group([agent('ses_a', { state: 'waiting', waiting: 1, first_thread: { id: 't_first', name: 'Invoice retries' } })])];
+  const entry = agentsGroups(listed, machinesModel(null), rows)[0]!.agents[0]!;
+  expect(entry.name).toBe('Invoice retries');
+  // The row still opens the thread that waits.
+  expect(entry.thread?.id).toBe('t_waits');
 });
 
 test('the hover card says where and when from what the window has, and leaves out what it does not', () => {
@@ -123,7 +147,7 @@ test('a sidebar cookie from before Agents keeps its choice: Machines closed is A
 test('an agent finds its thread under the session id its conversation had before', () => {
   const rows = [row('msg_old', 'ses_old', { subject: 'better-pierre' })];
   const [flat] = agentsGroups([group([agent('ses_new', { continues: ['ses_old'] })])], machinesModel(null), rows);
-  expect(flat!.agents.map((e) => [e.agent.id, e.name, e.thread?.id])).toEqual([['ses_new', 'better-pierre', 'msg_old']]);
+  expect(flat!.agents.map((e) => [e.agent.id, e.thread?.id])).toEqual([['ses_new', 'msg_old']]);
 });
 
 test('an old session id that still polls is not a second row when both open the same thread', () => {
@@ -161,10 +185,10 @@ test("an agent's filter lists every thread of its, not only the one its row woul
     // The same session id on another machine is another agent.
     row('t_mac', 'ses_a', { machine: MAC }),
   ];
-  const filter = agentListFilter('ses_a', [group([agent('ses_a'), agent('ses_b')], SELF), group([], MAC)], machines, rows);
+  const filter = agentListFilter('ses_a', [group([agent('ses_a', { first_thread: { id: 't_wrote', name: 'Subject t_wrote' } }), agent('ses_b')], SELF), group([], MAC)], machines, rows);
   expect(filter.machine).toBe(SELF);
   expect(ids(filterAgentRows(listOf(rows), filter, SELF))).toEqual(['t_wrote', 't_newest', 't_to', 't_with']);
-  // Its name is its row's name (the thread its row opens).
+  // Its name is its row's name.
   expect(filter.name).toBe('Subject t_wrote');
   // The sections stay, an emptied one included, as a machine's filter leaves them.
   const none = filterAgentRows(listOf([row('t_b', 'ses_b')]), filter, SELF);
@@ -193,7 +217,7 @@ test("an agent's filter follows its row: a continued conversation is one agent, 
 test("a launched agent's filter has its launch's thread before it writes; an agent the list no longer names is matched by its session", () => {
   const flat = machinesModel(null);
   const rows = [row('t_launch', 'nobody', { subject: 'Invoice retries' }), row('t_other', 'ses_x')];
-  const launched = agentListFilter('lch_1', [group([agent('lch_1', { session: 'launch:lch_1', launch: { id: 'lch_1', thread_id: 't_launch' } })])], flat, rows);
+  const launched = agentListFilter('lch_1', [group([agent('lch_1', { session: 'launch:lch_1', launch: { id: 'lch_1', thread_id: 't_launch' }, first_thread: { id: 't_launch', name: 'Invoice retries' } })])], flat, rows);
   expect([launched.name, ids(filterAgentRows(listOf(rows), launched, null))]).toEqual(['Invoice retries', ['t_launch']]);
   // A link from before: the agent ended and is not listed.
   const ended = agentListFilter('ses_x', [group([])], flat, rows);

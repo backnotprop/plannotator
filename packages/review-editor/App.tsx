@@ -204,6 +204,8 @@ import { needsAutoViewedNotice, markAutoViewedNoticeSeen, turnOffAutoViewed, tog
 import { usePRSession, type PRSessionUpdate } from './hooks/usePRSession';
 import { useAnnotationFactory } from './hooks/useAnnotationFactory';
 import { DEMO_DIFF } from './demoData';
+import { ReviewLoadError } from './components/ReviewLoadError';
+import { diffLoadFailureFromResponse, diffLoadFailureInfo, diffLoadUnreachable, type DiffLoadFailureInfo } from './utils/diffLoadFailure';
 import { exportReviewFeedback, buildProseFeedback, commitShaFromMode } from './utils/exportFeedback';
 import { parseDiffToFiles } from './utils/diffParser';
 import {
@@ -570,6 +572,11 @@ const ReviewApp: React.FC = () => {
   const [openSettingsMenu, setOpenSettingsMenu] = useState(false);
   const [showNoAnnotationsDialog, setShowNoAnnotationsDialog] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  // A real session whose first /api/diff failed: the load error state, never
+  // the demo diff (ReviewLoadError). Retry bumps the attempt to load again.
+  const [diffLoadFailure, setDiffLoadFailure] = useState<DiffLoadFailureInfo | null>(null);
+  const [diffLoadAttempt, setDiffLoadAttempt] = useState(0);
+  const [isRetryingDiffLoad, setIsRetryingDiffLoad] = useState(false);
   const diffStyle = useConfigValue('diffStyle');
   const [compactDiffStyle, setCompactDiffStyle] = useState<'split' | 'unified'>('unified');
   const effectiveDiffStyle = isCompactTouchLayout ? compactDiffStyle : diffStyle;
@@ -2872,11 +2879,14 @@ const ReviewApp: React.FC = () => {
   }, [showExportModal, showDestinationMenu, isSearchOpen, searchQuery, searchMatches, isSearchPending, openSearch, stepSearchMatch, clearSearch, closeSearch, aiUIEnabled, hasSearchableFiles, showCommitsPanel, reviewSidebar.isOpen, reviewSidebar.open, reviewSidebar.close, isFileTreeOpen, guideOpen, isCompactTouchLayout, isCompactNavigatorOpen, toggleNavigator]);
 
 
-  // Load diff content - try API first, fall back to demo
+  // Load diff content from the review server. Only the standalone dev page
+  // (`bun run dev:review`, no server behind it) falls back to the demo diff;
+  // a real session that fails shows the load error state with a Retry.
   useEffect(() => {
     fetch('/api/diff')
-      .then(res => {
-        if (!res.ok) throw new Error('Not in API mode');
+      .catch(() => { throw diffLoadUnreachable(); })
+      .then(async res => {
+        if (!res.ok) throw await diffLoadFailureFromResponse(res);
         return res.json();
       })
       .then((data: {
@@ -3021,9 +3031,18 @@ const ReviewApp: React.FC = () => {
         setGeneratedFiles(new Set(data.generatedFiles ?? []));
         setBaseBehindRemote(data.baseBehindRemote === true);
         setOpenStatePinned(data.openStatePinned === true);
+        setDiffLoadFailure(null);
+        setIsLoading(false);
       })
-      .catch(() => {
-        // Not in API mode - use demo content
+      .catch((error: unknown) => {
+        if (!import.meta.env.DEV) {
+          // isLoading stays true: the review mounts for the first time only
+          // once a Retry loads the diff, so nothing latches on this state.
+          console.error('Failed to load the diff:', error);
+          setDiffLoadFailure(diffLoadFailureInfo(error));
+          return;
+        }
+        // Standalone dev page: no server, so show the demo content.
         setAiEnabled(true);
         const demoFiles = parseDiffToFiles(DEMO_DIFF);
         setDiffData({
@@ -3042,9 +3061,10 @@ const ReviewApp: React.FC = () => {
           reason: 'demo-mode',
           message: 'Call flow requires a live Git review session.',
         });
+        setIsLoading(false);
       })
-      .finally(() => setIsLoading(false));
-  }, []);
+      .finally(() => setIsRetryingDiffLoad(false));
+  }, [diffLoadAttempt]);
 
   // Handle line selection from diff viewer
   const handleLineSelection = useCallback((range: SelectedLineRange | null) => {
@@ -5082,6 +5102,9 @@ const ReviewApp: React.FC = () => {
   // Mod+Enter handler, and the compact primary row all call this. Platform
   // (PR) mode keeps its own row until PR6.
   const busyWithDecision = isSendingFeedback || isApproving || isExiting;
+  // Bumped by Mod+Shift+Enter so the note composer opens without the caret
+  // (#2913, which brought the chord to plan review and annotate).
+  const [decisionNoteRequest, setDecisionNoteRequest] = useState(0);
 
   const noteDispatchInFlightRef = useRef(false);
   const dispatchPendingNote = useCallback(() => {
@@ -5659,8 +5682,14 @@ const ReviewApp: React.FC = () => {
       if (platformMode) {
         // Platform mode (PR6): Mod+Enter is the header's visible primary,
         // always — including the muted self-approval no-op. Same
-        // runPlatformDecisionAction the header and compact rows call.
+        // runPlatformDecisionAction the header and compact rows call. Shift
+        // changes nothing here: this side has no composer, every action opens
+        // the submission dialog, whose own field is the note.
         runPlatformDecisionAction('primary');
+      } else if (e.shiftKey) {
+        // Mod+Shift+Enter opens the note composer instead of submitting, the
+        // same chord plan review and annotate took in #2913.
+        setDecisionNoteRequest((n) => n + 1);
       } else {
         // Agent mode: Mod+Enter is the header's visible primary, always —
         // the same submitPrimaryDecision the button and compact row call.
@@ -5884,6 +5913,24 @@ const ReviewApp: React.FC = () => {
     onGoToFile: dockApi ? () => setGoToFileOpen(true) : undefined,
     searching: hasSearchableFiles && !!searchQuery.trim(),
   };
+
+  if (diffLoadFailure !== null) {
+    return (
+      <ThemeProvider defaultTheme="dark" manageFavicon>
+        <ReviewLoadError
+          failure={diffLoadFailure}
+          retrying={isRetryingDiffLoad}
+          onRetry={() => {
+            setIsRetryingDiffLoad(true);
+            setDiffLoadAttempt((attempt) => attempt + 1);
+          }}
+          feedbackUrl={feedbackUrl}
+          exitUrl={exitUrl}
+          getAgentSwitch={() => getEffectiveAgentName(getAgentSwitchSettings('review')) || undefined}
+        />
+      </ThemeProvider>
+    );
+  }
 
   if (isLoading) {
     return (
@@ -6261,6 +6308,7 @@ const ReviewApp: React.FC = () => {
                       busy={busyWithDecision}
                       isLoading={isSendingFeedback || isApproving}
                       labelBreakpoint="lg"
+                      openNoteRequest={decisionNoteRequest}
                     />
                   </>
                 ) : (

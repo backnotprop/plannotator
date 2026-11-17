@@ -34,6 +34,9 @@ function world(
     dropPrompt?: (text: string) => boolean
     /** Holds the engine's own session start (the mod decides after it) until it settles. */
     sessionStarted?: Promise<void>
+    /** Holds every `$.tool.register` until it settles; `onRegister` runs as each one arrives. */
+    toolRegistered?: Promise<void>
+    onRegister?: (name: string) => void
   } = {},
 ) {
   const files = options.files ?? new Map<string, string>()
@@ -54,7 +57,9 @@ function world(
     return { value: { command: e.name } }
   })
   const tools: { name: string; inputSchema: any }[] = []
-  on('tool.register', ($: any, e: any) => {
+  on('tool.register', async ($: any, e: any) => {
+    options.onRegister?.(e.name)
+    await options.toolRegistered
     if (options.refuseTools?.includes(e.name)) return { deny: `no tool registrar for ${e.name}` }
     tools.push({ name: e.name, inputSchema: e.inputSchema })
     return { value: { tool: `${TOOL_PREFIX}${e.name}` } }
@@ -79,10 +84,12 @@ function world(
   })
   on('store.keys', () => ({ value: [...store.keys()] }))
   const clock = mock.clock(on)
-  on('fs.exists', ($: any, e: any) => ({ value: files.has(e.path) || e.path === '/bin/sh' }))
-  on('fs.read', ($: any, e: any) => (files.has(e.path) ? { value: files.get(e.path) } : { deny: `ENOENT: ${e.path}` }))
+  // On Windows the engine hands `/home/me/x` to these hooks as `C:\home\me\x`.
+  const posix = (path: string) => path.replace(/^[A-Za-z]:/, '').replace(/\\/g, '/')
+  on('fs.exists', ($: any, e: any) => ({ value: files.has(posix(e.path)) || posix(e.path) === '/bin/sh' }))
+  on('fs.read', ($: any, e: any) => (files.has(posix(e.path)) ? { value: files.get(posix(e.path)) } : { deny: `ENOENT: ${e.path}` }))
   on('fs.write', ($: any, e: any) => {
-    files.set(e.path, e.text)
+    files.set(posix(e.path), e.text)
     return { value: undefined }
   })
   on('process.run', ($: any, e: any) => {
@@ -429,7 +436,7 @@ describe('register', () => {
     expect(w.logs.filter((line) => line.includes('classic review'))).toHaveLength(1)
   })
 
-  test('a -p session keeps the classic flow: ExitPlanMode is not touched', async ($: any, on: any) => {
+  test('a -p session keeps the classic flow: ExitPlanMode is not touched; it gets the Inbox tool alone', async ($: any, on: any) => {
     const w = world(on)
     on('tool.call', () => ({ result: 'the classic flow ran' }))
     await $.session.start({ ...SESSION, surface: null, isInteractive: false })
@@ -437,8 +444,22 @@ describe('register', () => {
     const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
 
     expect(answer.result).toBe('the classic flow ran')
-    // No plannotator tool either: a later plugin turn would have nowhere to land.
-    expect(w.tools).toEqual([])
+    // No plannotator tool: a one-shot run may end before a decision comes back; the CLI waits for it inside the run.
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox'])
+  })
+
+  // T3 Code hosts Claude Code through the Agent SDK too: CLAUDE_CODE_ENTRYPOINT=t3-code, and T3CODE_THREAD_ID for a
+  // thread's Claude. The mod runs there as the thread; T3 owns Plan mode.
+  test('a T3 Code thread runs the mod as the thread: both tools, the session tagged t3:<thread>, ExitPlanMode left to T3', async ($: any, on: any) => {
+    const w = world(on, { env: { CLAUDE_CODE_ENTRYPOINT: 't3-code', T3CODE_THREAD_ID: 'a1b2c3d4-0000-4000-8000-000000000001' } })
+    on('tool.call', () => ({ result: 'the classic flow ran' }))
+    await $.session.start({ ...SESSION, surface: null, isInteractive: false })
+
+    const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
+
+    expect(answer.result).toBe('the classic flow ran')
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
+    expect(w.env.get('PLANNOTATOR_SESSION_TAG')).toBe('t3:a1b2c3d4-0000-4000-8000-000000000001')
   })
 
   // The VS Code extension hosts Claude Code through the Agent SDK (not interactive, no surface at start) and
@@ -463,7 +484,7 @@ describe('register', () => {
     const answer = await $.tool.call({ tool: 'ExitPlanMode', plan: '# Plan\n' })
 
     expect(answer.result).toBe('the classic flow ran')
-    expect(w.tools).toEqual([])
+    expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox'])
   })
 
   test('Claude running the CLI through Bash gets the tool: answered at once, the command never runs', async ($: any, on: any) => {
@@ -612,7 +633,7 @@ describe('register', () => {
     expect(w.tools.map((t) => t.name)).toEqual(['plannotator_inbox', 'plannotator'])
     const registered = w.tools.find((t) => t.name === 'plannotator_inbox')
     // Every action a real Inbox offers, in the contract's order (INBOX_TOOL_ACTIONS).
-    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'submit_guide', 'get_guide_brief'])
+    expect(registered?.inputSchema.properties.action.enum).toEqual(['send_message', 'read_thread', 'search', 'resolve_message', 'snooze_thread', 'thread_pulls', 'submit_guide', 'get_guide_brief'])
     expect(calls).toEqual([])
     expect([...w.files.keys()].filter((path) => path.includes('/inbox'))).toEqual([])
     expect(w.runs.filter((argv) => argv.includes('inbox'))).toEqual([])
@@ -634,6 +655,31 @@ describe('register', () => {
     expect(answer.result).toContain('Sent to the Plannotator Inbox')
     expect(w.runs.some((argv) => argv.join(' ') === 'plannotator inbox --background')).toBe(true)
     expect(calls.some((c) => c.body?.method === 'tools/call')).toBe(true)
+  })
+
+  // A --reply-on-resume launch starts its turn while session.start still registers the tools.
+  test('a turn that starts while plannotator_inbox registers still gets the Inbox link', async ($: any, on: any) => {
+    const calls: { url: string; body: any }[] = []
+    let release: () => void = () => undefined
+    let registering: () => void = () => undefined
+    const entered = new Promise<void>((resolve) => (registering = resolve))
+    const w = world(on, {
+      files: withRegistry(),
+      fetch: inbox(TOOLS, calls),
+      toolRegistered: new Promise<void>((resolve) => (release = resolve)),
+      onRegister: (name) => name === 'plannotator_inbox' && registering(),
+    })
+    on('turn.start', (_$: any, e: any) => ({ turnId: e.turnId }))
+    const started = $.session.start(SESSION)
+    await entered
+    await $.turn.start({ text: 'go on', turnId: 'turn-1' })
+    release()
+    await started
+
+    const answer = await $.tool.call({ tool: INBOX_TOOL, action: 'send_message', body: 'Ship it?' })
+    expect(answer.deny).toBeUndefined()
+    expect(answer.result).toContain('Sent to the Plannotator Inbox')
+    expect(w.tools.map((t) => t.name)).toContain('plannotator_inbox')
   })
 
   // --- The Inbox reminder: the first prompt's context (#2243) ---
@@ -937,13 +983,13 @@ describe('register', () => {
     expect(w.env.has('PLANNOTATOR_INBOX_REMINDER')).toBe(false)
   })
 
-  test('a -p session: no tool, no context and nothing set', { plugins: [GUARD] }, async ($: any, on: any) => {
+  test('a -p session: the Inbox tool, and no reminder (nothing wakes a run that may end with its turn)', { plugins: [GUARD] }, async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
     await $.session.start({ ...SESSION, surface: null, isInteractive: false })
     await $.prompt.submit({ text: 'Refactor the handler.' })
-    expect(w.tools).toEqual([])
+    expect(w.tools.map((t: any) => t.name)).toEqual(['plannotator_inbox'])
     expect(w.contexts).toEqual([null])
-    expect(w.env.has('PLANNOTATOR_INBOX_REMINDER')).toBe(false)
+    expect(w.env.get('PLANNOTATOR_INBOX_REMINDER')).toBeUndefined()
   })
 
   // --- The session's open threads after a compaction and on a resume (the misfiled-thread AAR) ---
@@ -1282,7 +1328,7 @@ describe('register', () => {
     for (let second = 0; second < 6; second++) await w.clock.advance(1_000)
 
     expect(w.submits).toEqual([
-      'Plannotator Inbox: Ship it? (msg_reply)\nThis is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n\nYes.\n\nAfter the 3pm freeze.' +
+      'Plannotator Inbox: Ship it? (msg_reply)\nThis is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above.\n[Thread msg_1]\n\nYes.\n\nAfter the 3pm freeze.' +
         `\n\n[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]`,
     ])
     expect(delivered).toBe(true)

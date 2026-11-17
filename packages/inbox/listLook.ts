@@ -82,6 +82,11 @@ export interface ListLook {
    * (`RowPullsMark`). Off by default, so a look saved before it shows them. The thread's own PR button stays.
    */
   hidePulls: boolean;
+  /**
+   * Settings → Rows only: Agent icons "From the project name" (approval "inbox-generated-agent-icons"): an agent with
+   * no face picked shows its project's tile (agents/projectFace.tsx) wherever its icon is drawn. Never with `hideAgents`.
+   */
+  agentProjectIcons: boolean;
 }
 
 export type ListLookKey = keyof ListLook;
@@ -112,6 +117,7 @@ export const LIST_LOOK_OFF: ListLook = {
   statusMark: false,
   boldNames: false,
   hidePulls: false,
+  agentProjectIcons: false,
 };
 
 /** The look for someone who chose none (core `INBOX_ROWS_DEFAULT`): smaller thread names on, every other option off. */
@@ -170,6 +176,7 @@ export function lookWithChange(look: ListLook, change: Partial<ListLook>): ListL
   if (change.smallNames === false) next.unreadDot = false;
   if (change.markInline) next.markDot = false;
   if (change.markDot) next.markInline = false;
+  if (change.agentProjectIcons) next.hideAgents = false;
   // A picture switch turned on while no project marks show turns them on (Off becomes Projects, Threads becomes
   // Both), so the switch never does nothing.
   if (change.repoLogo || change.githubPictures) next.marksProjects = true;

@@ -317,6 +317,33 @@ test.skipIf(!hasDom)('a phone: "Read" for "Marked read", no Reply and no Z hint,
   expect(undone).toBe(1);
 });
 
+// A browser can drop the click of a tap that comes right after a flick (a row's swipe): one tap on Undo still undoes,
+// from the touch itself, and the click that may follow it undoes nothing more. A finger that slides off is no tap.
+test.skipIf(!hasDom)('a phone: one tap of a finger on Undo undoes, with or without its click', () => {
+  phoneWindow(true);
+  let undone = 0;
+  const toast = show({ icon: 'check', lead: 'Marked read', phoneLead: 'Read', onUndo: () => undone++ }, true, undefined, () => {});
+  const undo = toast.querySelector('[data-toast-undo]') as HTMLButtonElement;
+  const finger = (type: string, x: number, y: number) => {
+    const point = { identifier: 1, clientX: x, clientY: y, pageX: x, pageY: y, target: undo };
+    const event = new Event(type, { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'touches', { value: type === 'touchend' ? [] : [point] });
+    Object.defineProperty(event, 'changedTouches', { value: [point] });
+    act(() => void undo.dispatchEvent(event));
+    return event;
+  };
+  finger('touchstart', 20, 10);
+  const lift = finger('touchend', 22, 11);
+  expect(undone).toBe(1);
+  expect(lift.defaultPrevented).toBe(true);
+  act(() => undo.click());
+  expect(undone).toBe(1);
+  finger('touchstart', 20, 10);
+  finger('touchmove', 60, 10);
+  finger('touchend', 60, 10);
+  expect(undone).toBe(1);
+});
+
 test.skipIf(!hasDom)('a narrow desktop window (the phone layout, a mouse) keeps Reply and Undo\'s Z: no foot holds Reply there, and the keys work', () => {
   phoneWindow(false);
   let replied = 0;
@@ -359,6 +386,31 @@ test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and mo
     await new Promise((resolve) => setTimeout(resolve, 50));
   });
   expect(toast.style.bottom).toBe('108px');
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
+test.skipIf(!hasDom)("a phone toast sits above a Shape board's dock in its thread, whose foot is hidden under the board", () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  // The thread's foot is display:none while the board shows (it measures 0): the board's dock (y 790) is the floor.
+  const pane = document.createElement('section');
+  pane.className = 'ib-pane';
+  const foot = document.createElement('div');
+  foot.className = 'ib-pfoot';
+  boxAt(foot, 0, 0, 0, 0);
+  const board = document.createElement('section');
+  board.setAttribute('data-shape-layer', '');
+  const dock = document.createElement('div');
+  dock.className = 'shp-dock';
+  boxAt(dock, 55, 790, 280, 42);
+  board.appendChild(dock);
+  pane.append(foot, board);
+  page.appendChild(pane);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe('62px');
   delete (window as { innerHeight?: number }).innerHeight;
 });
 

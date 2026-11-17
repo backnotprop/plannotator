@@ -18,7 +18,7 @@
  */
 
 import { markTourDecided } from '../helpers/tour-decided';
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -584,7 +584,7 @@ test('Settings: in sections; Settings → Agents switches apply to the next sess
   // A focused page (design of record inbox-settings-tabs): General first, the section nav beside it.
   await expect(page.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
   const nav = page.getByRole('navigation', { name: 'Settings sections' });
-  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
+  await expect(nav.getByRole('link')).toHaveText(['General', 'Rows', 'Agents', 'Prompts', 'Remote devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Activity', 'Archived', 'Storage', 'About']);
   await nav.getByRole('link', { name: 'Agents', exact: true }).click();
   await expect(page).toHaveURL(/#settings\/agents$/);
   await expect(nav.getByRole('link', { name: 'Agents', exact: true })).toHaveAttribute('aria-current', 'page');

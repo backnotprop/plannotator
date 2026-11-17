@@ -15,7 +15,7 @@ import { INBOX_HOST_NAMES, type InboxMessageWire, type InboxParticipant, type In
 import { sanitizeMentionLabel, type MentionPerson } from '@plannotator/ui/utils/mentions';
 import type { TagMode, TaggableModel, TaggableSession } from './api';
 import { shortLabel } from './sessionLabels';
-import { deliveryLine, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
+import { deliveryLine, handedItem, uncertainItem, waitInputs, type DeliveryLine, type RecipientConnection } from './deliveryLine';
 
 /** The longest session label an `@` token carries, in characters; a longer one is cut in the middle. */
 export const TAG_LABEL_MAX = 40;
@@ -30,6 +30,10 @@ export interface TagOption {
   host: string | null;
   /** Its readable label: the `@<label>` token and the chip. */
   label: string;
+  /** The name the person gave it in the Inbox: what the picker row leads with. Never in the token (an agent never sees it). */
+  name?: string;
+  /** The label with its session's whole title, for the row's hover: `label` cuts a long one. Null when untitled. */
+  full?: string | null;
   /** The agent's own name ("Claude Code", "Pi", an MCP agent's name). */
   agent: string;
   /** The picker row's second line: "billing-api · working · since 9:14 AM". */
@@ -120,6 +124,7 @@ export function tagOptions(model: TaggableModel | null, ownerSession: string | n
       id: s.session,
       host: s.host,
       label,
+      full: own ? sanitizeMentionLabel(s.label as string) + label.slice(own.length) : null,
       agent,
       detail: stateWords(s, time),
       group: groupOf(s),
@@ -307,6 +312,7 @@ export function tagDeliveryLine(
     wakes: true,
     sendingNow: !!tag.deliver_now_at,
     connection,
+    handed: !!messageId && handedItem(connection, messageId),
     ...(messageId ? waitInputs(connection, messageId, { ...tag, into_turn: tag.delivery?.into_turn ?? null }) : {}),
   });
 }

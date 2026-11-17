@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.30",
+  "version": "0.25.32",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -40,6 +40,9 @@
     "./favicon-style": "./favicon-style.ts",
     "./forge-refs": "./forge-refs.ts",
     "./forge-ref-card": "./forge-ref-card.ts",
+    "./problem": "./problem.ts",
+    "./problem-words": "./problem-words.ts",
+    "./linear-ref-card": "./linear-ref-card.ts",
     "./feedback-templates": "./feedback-templates.ts",
     "./goal-setup": "./goal-setup.ts",
     "./question-block": "./question-block.ts",
@@ -54,16 +57,22 @@
     "./inbox-hermes": "./inbox-hermes.ts",
     "./inbox-project-labels": "./inbox-project-labels.ts",
     "./inbox-questions": "./inbox-questions.ts",
+    "./inbox-file-question-twin": "./inbox-file-question-twin.ts",
+    "./inbox-choice-twins": "./inbox-choice-twins.ts",
     "./inbox-actions": "./inbox-actions.ts",
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-reply-quote": "./inbox-reply-quote.ts",
+    "./inbox-thread-mention": "./inbox-thread-mention.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
+    "./inbox-scheduled": "./inbox-scheduled.ts",
+    "./inbox-scheduled-types": "./inbox-scheduled-types.ts",
     "./inbox-launch-choice": "./inbox-launch-choice.ts",
     "./inbox-launch-ready": "./inbox-launch-ready.ts",
     "./inbox-scratch": "./inbox-scratch.ts",
     "./inbox-git-url": "./inbox-git-url.ts",
+    "./inbox-branch-reports": "./inbox-branch-reports.ts",
     "./inbox-permission": "./inbox-permission.ts",
     "./inbox-open-questions": "./inbox-open-questions.ts",
     "./inbox-format": "./inbox-format.ts",
@@ -72,6 +81,7 @@
     "./inbox-artifact-pins": "./inbox-artifact-pins.ts",
     "./inbox-list-delta": "./inbox-list-delta.ts",
     "./shape": "./shape.ts",
+    "./plans": "./plans.ts",
     "./shape-scene": "./shape-scene.ts",
     "./shape-animate": "./shape-animate.ts",
     "./shape-skill": "./shape-skill.ts",
@@ -105,7 +115,9 @@
   "scripts": {
     "prepack": "bun run --cwd ../.. build:viewer-pin"
   },
-  "dependencies": {},
+  "dependencies": {
+    "croner": "11.0.0"
+  },
   "devDependencies": {
     "typescript": "~5.8.2"
   }

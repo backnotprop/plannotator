@@ -11,7 +11,7 @@
  * the agent as read, and `inboxAgentsNow` is the list as read.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxListRow } from '@plannotator/core/inbox-types';
+import { inboxAgentNamesChecked, readInboxAgentFaces, type InboxAgent, type InboxAgentsGroup, type InboxListRow } from '@plannotator/core/inbox-types';
 import { agentListFilter, type AgentListFilter } from './agents/model';
 import { givenName, useAgentNames, type AgentNames } from './agents/agentNames';
 import type { MachinesModel } from './machines';
@@ -34,7 +34,7 @@ export function setInboxAgents(next: unknown): void {
     ? next
         .filter((group): group is InboxAgentsGroup => !!group && typeof group === 'object' && Array.isArray((group as InboxAgentsGroup).agents))
         .map((group) => {
-          const agents = group.agents.filter(isAgent);
+          const agents = group.agents.filter(isAgent).map(inboxAgentNamesChecked);
           return {
             ...(typeof group.machine === 'string' ? { machine: group.machine } : {}),
             agents,
@@ -42,6 +42,8 @@ export function setInboxAgents(next: unknown): void {
             ended_today: typeof group.ended_today === 'number' && group.ended_today >= 0 ? group.ended_today : 0,
             // A linked machine's faces and given names, kept there (agents/agentFaces.ts draws them).
             ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
+            // And whether it keeps a tile choice (agents/projectFace.tsx): only when it says so.
+            ...(typeof group.machine === 'string' && group.faces !== undefined && group.face_tiles === true ? { face_tiles: true as const } : {}),
           };
         })
     : null;
@@ -136,7 +138,7 @@ export function useInboxAgents(): readonly InboxAgentsGroup[] | null {
  * list's agent filter and its title read (agents/model.ts `agentListFilter`).
  */
 const whoKey = (groups: readonly InboxAgentsGroup[] | null): string =>
-  JSON.stringify((groups ?? []).map((g) => [g.machine ?? null, g.agents.map((a) => [a.id, a.session, a.continues ?? null, a.launch?.thread_id ?? null, a.label ?? null, a.project?.name ?? null, a.host, a.state === 'ended'])]));
+  JSON.stringify((groups ?? []).map((g) => [g.machine ?? null, g.agents.map((a) => [a.id, a.session, a.continues ?? null, a.launch?.thread_id ?? null, a.label ?? null, a.title ?? null, a.first_thread?.name ?? null, a.project?.name ?? null, a.host, a.state === 'ended'])]));
 
 /**
  * The agents while `on` (the list is filtered to one agent; null otherwise), drawn again only when who they are

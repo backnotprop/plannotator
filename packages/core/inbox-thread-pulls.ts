@@ -17,6 +17,7 @@
 
 import { forgePullRefText, forgePullUrl, forgeRefKey, forgeRefLabel, parseForgePullRef, type ForgeRef } from "./forge-ref-card";
 import { inboxPullStacks, type InboxPull } from "./inbox-pulls";
+import type { Problem } from "./problem";
 
 /** The most PRs a thread holds at once (removed ones do not count). */
 export const INBOX_THREAD_PULLS_MAX = 20;
@@ -70,6 +71,11 @@ export interface InboxThreadPullWire extends InboxThreadPull {
   ref: string;
   checks: InboxThreadPullChecks | null;
   review: InboxThreadPullReview | null;
+  /**
+   * Why its last read failed (newer servers; the card shows it under what is known): gh or glab missing, not signed
+   * in, timed out, refused, rate limited or failed, in the one table's words. Absent when its last read answered.
+   */
+  problem?: Problem;
 }
 
 /** The stack and related groups, in the order they show: each stack base first, then related PRs in the order they were added. */
@@ -128,7 +134,7 @@ export function parseInboxThreadPullRefs(values: unknown, field: string, project
 
 /** A stored key's parts (`host/owner/repo#n`, GitLab and Bitbucket with `:pull`), or null. */
 export function inboxThreadPullRefOfKey(key: string, url: string): ForgeRef | null {
-  const match = /^([a-z0-9.-]+)\/(.+)#(\d+)(:pull)?$/.exec(key);
+  const match = /^([a-z0-9.-]+(?::\d+)?)\/(.+)#(\d+)(:pull)?$/.exec(key);
   if (!match) return null;
   // The key is lowercased; the URL keeps the forge's own spelling, so the parts come from it when they agree.
   const fromUrl = parseForgePullRef(url);
@@ -149,7 +155,7 @@ export function inboxThreadPullText(pull: Pick<InboxThreadPull, "pull" | "url">)
 /** A record as the window and the tools show it, with what the reader knows now. */
 export function inboxThreadPullWire(
   pull: InboxThreadPull,
-  live: { checks?: InboxThreadPullChecks | null; review?: InboxThreadPullReview | null } = {},
+  live: { checks?: InboxThreadPullChecks | null; review?: InboxThreadPullReview | null; problem?: Problem } = {},
 ): InboxThreadPullWire {
   const ref = inboxThreadPullRefOfKey(pull.pull, pull.url);
   return {
@@ -162,6 +168,7 @@ export function inboxThreadPullWire(
     ref: ref ? forgePullRefText(ref) : pull.url,
     checks: live.checks ?? null,
     review: live.review ?? null,
+    ...(live.problem ? { problem: live.problem } : {}),
   };
 }
 

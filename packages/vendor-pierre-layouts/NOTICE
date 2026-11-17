@@ -1,0 +1,10 @@
+This folder contains a copy of @pierre/layouts (upstream/), unmodified.
+
+@pierre/layouts
+Copyright 2025 Pierre Computer Company
+Licensed under the Apache License, Version 2.0: upstream/LICENSE.md.
+Source: https://github.com/pierrecomputer/pierre, packages/layouts,
+commit a745a6171d256822f895a06d5a3f0fdafda77d58 (branch necolas/layout).
+
+The files outside upstream/ (src/, patches/, README.md, UPSTREAM.md) are
+Plannotator's, under this repository's licenses.

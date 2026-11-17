@@ -6,14 +6,16 @@ import { imageReferenceIndex, imageSourceLine, regionOf } from './ImageRegions';
 import { AnnotationType, type Block, type Annotation, type EditorMode, type InputMethod, type ImageAttachment, type ActionsLabelMode, type HostDraft } from '../types';
 import { applyHighlight, codeBlockClassName, onCodeHighlightSwap } from '../utils/codeHighlight';
 import { paintCodeBlockMark } from '../utils/codeBlockMark';
+import { documentOpenInLine } from '../utils/openInLine';
 import { useFenceTheme } from '../hooks/useFenceTheme';
-import { computeListIndices, groupBlocks, selectionSourceLines, type Frontmatter, type FrontmatterValue } from '../utils/parser';
+import { computeListIndices, extractFrontmatter, groupBlocks, selectionSourceLines, type Frontmatter, type FrontmatterValue } from '../utils/parser';
 import { buildHeadingSlugMap } from '../utils/slugify';
 import { copyTextToClipboard } from '../utils/clipboard';
 import { getRichCopyEnabled } from '../utils/richCopyPolicy';
 import { BlockRenderer } from './BlockRenderer';
+import { sourceLineAttrs } from '../utils/sourceLineAttrs';
 import { BELOW_TITLE_SLOT_MARKER } from '../utils/belowTitleSlot';
-import { indexQuestionBlocks, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
+import { indexQuestionBlocks, isQuestionDirectiveKind, type IndexedQuestion, type ParsedQuestion, type QuestionAnswer } from '@plannotator/core/question-block';
 import { diagramTargetText, type DiagramAnchor } from '@plannotator/core/diagram-anchor';
 import type { QuestionAcceptBehavior, QuestionBlockProps } from './blocks/QuestionBlock';
 import { resolveQuestionAnswers } from '../utils/questionAnswers';
@@ -73,7 +75,7 @@ class ToolbarErrorBoundary extends React.Component<
 }
 
 import { CommentPopover, hasCommentDraft, type CommentAskAIHandler } from './CommentPopover';
-import { TaterSpriteSitting } from './TaterSpriteSitting';
+import { TaterSittingSlot } from './TaterSpriteSlots';
 import { AttachmentsButton } from './AttachmentsButton';
 import { MessagesIcon } from './icons/MessagesIcon';
 import { DiagramAnchorClaims, DiagramAnchorClaimsContext } from './diagram/anchorClaims';
@@ -113,6 +115,8 @@ import {
   resolveCompactHeaderGeometry,
   snapCompactHeaderWidth,
 } from './compactHeaderLayout';
+
+const asksQuestion = (block: Block): boolean => block.type === 'directive' && isQuestionDirectiveKind(block.directiveKind || 'note');
 
 /** Typed controls required for Viewer's opt-in, in-flow annotation header. */
 export interface ViewerAnnotationHeaderConfig {
@@ -658,12 +662,14 @@ const FrontmatterRow: React.FC<{ field: string; value: FrontmatterValue }> = ({ 
 /**
  * Renders YAML frontmatter as a styled metadata card.
  */
-const FrontmatterCard: React.FC<{ frontmatter: Frontmatter }> = ({ frontmatter }) => {
+const FrontmatterCard: React.FC<{ frontmatter: Frontmatter; markdown: string }> = ({ frontmatter, markdown }) => {
   const entries = Object.entries(frontmatter);
   if (entries.length === 0) return null;
+  const { contentStartLine } = extractFrontmatter(markdown);
+  const end = Math.max(1, contentStartLine - 1);
 
   return (
-    <div className="mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg" data-doc-text="">
+    <div className="relative mt-4 mb-6 p-4 bg-muted/30 border border-border/50 rounded-lg" data-doc-text="" {...sourceLineAttrs(undefined, { startLine: 1, endLine: end })}>
       <div className="grid gap-2 text-sm">
         {entries.map(([key, value]) => (
           <FrontmatterRow key={key} field={key} value={value} />
@@ -1002,6 +1008,9 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
     setLightboxState(imageLightboxStepping || imageRegionComments ? { ...image, images: documentImages() } : image);
   };
+  const setLightboxRef = useRef(setLightbox);
+  setLightboxRef.current = setLightbox;
+  const onBlockImageClick = useCallback((src: string, alt: string) => setLightboxRef.current({ src, alt }), []);
   // Region comments made in the lightbox are selected by the host as they are
   // added; that selection must not reopen or refocus the lightbox.
   const regionCreatedHere = useRef(new Set<string>());
@@ -1022,6 +1031,17 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
     }
   };
   const containerRef = useRef<HTMLDivElement>(null);
+  // "Open in" opens the document's file at the picked comment's line, else the
+  // selected text's, read at the click (documentOpenInLine). A plan diff view's
+  // blocks are not the file's lines, so it sends none.
+  const openInLineRef = useRef({ blocks, annotations, selectedAnnotationId, isPlanDiffActive });
+  openInLineRef.current = { blocks, annotations, selectedAnnotationId, isPlanDiffActive };
+  const openInAppLine = useCallback((): number | undefined => {
+    const now = openInLineRef.current;
+    if (now.isPlanDiffActive) return undefined;
+    const selection = typeof window === 'undefined' ? null : window.getSelection();
+    return documentOpenInLine(containerRef.current, now.blocks, now.annotations, now.selectedAnnotationId, selection);
+  }, []);
   // The element that actually scrolls; shared by the Vim scroll math, the
   // sticky-header observer, and the reticle geometry.
   const scrollViewport = useScrollViewport();
@@ -1937,11 +1957,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
       data-viewer-fill-height={fillHeight ? '' : undefined}
       style={maxWidth === null ? undefined : { maxWidth: maxWidth ?? 832 }}
     >
-      {taterMode && <TaterSpriteSitting />}
+      {taterMode && <TaterSittingSlot />}
       <article
         ref={containerRef}
         data-print-region="article"
         data-doc-text-root=""
+        data-doc-source-root={gridEnabled ? 'grid' : 'clean'}
         data-vim-mode={vimModeActive ? 'enabled' : undefined}
         data-vim-phase={vimModeActive ? vim.state.phase : undefined}
         data-vim-focused={vimModeActive ? String(vim.focused) : undefined}
@@ -1978,6 +1999,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               linkedDocInfo={linkedDocInfo}
               sourceInfo={sourceInfo}
               openInAppPath={openInAppPath}
+              openInAppLine={openInAppLine}
             />
           </div>
         )}
@@ -2004,6 +2026,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               linkedDocInfo,
               sourceInfo,
               openInAppPath,
+              openInAppLine,
             }}
             actions={documentActions}
           />
@@ -2022,7 +2045,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             )}
           </>
         )}
-        {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} /></>}
+        {frontmatter && <><div className="clear-right md:hidden" /><FrontmatterCard frontmatter={frontmatter} markdown={markdown} /></>}
         {!frontmatter && blocks.length > 0 && blocks[0].type !== 'heading' && <div className="mt-4" />}
         {withBelowTitle(groupBlocks(blocks).map(group =>
           group.type === 'list-group' ? (
@@ -2033,7 +2056,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   {group.blocks.map((block, i) => (
                     <BlockRenderer
                       imageBaseDir={imageBaseDir}
-                      onImageClick={(src, alt) => setLightbox({ src, alt })}
+                      onImageClick={onBlockImageClick}
                       key={block.id}
                       block={block}
                       orderedIndex={indices[i]}
@@ -2103,7 +2126,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               key={group.block.id}
               block={group.block}
               imageBaseDir={imageBaseDir}
-              onImageClick={(src, alt) => setLightbox({ src, alt })}
+              onImageClick={onBlockImageClick}
               onOpenLinkedDoc={onOpenLinkedDoc}
               onOpenCodeFile={onOpenCodeFile}
               githubRepo={linkRepo?.display}
@@ -2183,7 +2206,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   : undefined;
               if (hostCard !== undefined) {
                 return (
-                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive" className={textCommentsOnly ? 'annotation-exclude' : undefined}>
+                  <div key={group.block.id} data-block-id={group.block.id} data-block-type="directive" className={textCommentsOnly ? 'relative annotation-exclude' : 'relative'} {...sourceLineAttrs(group.block)}>
                     {hostCard}
                   </div>
                 );
@@ -2191,7 +2214,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
               const rendered = (
                 <BlockRenderer
                   imageBaseDir={imageBaseDir}
-                  onImageClick={(src, alt) => setLightbox({ src, alt })}
+                  onImageClick={onBlockImageClick}
                   key={group.block.id}
                   block={group.block}
                   onOpenLinkedDoc={onOpenLinkedDoc}
@@ -2208,7 +2231,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   onAnswerQuestion={readOnly || (question && questionReadOnly?.(question)) ? undefined : onAnswerQuestion}
                   onSaveQuestionAnswer={readOnly || (question && questionReadOnly?.(question)) ? undefined : onSaveQuestionAnswer}
                   saveQuestionAnswerLabel={saveQuestionAnswerLabel}
-                  renderQuestionFooter={renderQuestionFooter}
+                  renderQuestionFooter={asksQuestion(group.block) ? renderQuestionFooter : undefined}
                   questionDecisionRecording={question ? questionDecisionRecording?.(question) : undefined}
                   questionDecisionScope={questionDecisionScope}
                   onToggleQuestionDecisionRecording={readOnly || (question && (questionDecisionLocked?.(question) || questionReadOnly?.(question))) ? undefined : onToggleQuestionDecisionRecording}
@@ -2350,7 +2373,7 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
             onClose={() => setPopoutTable(null)}
             container={containerRef.current}
             imageBaseDir={imageBaseDir}
-            onImageClick={(src, alt) => setLightbox({ src, alt })}
+            onImageClick={onBlockImageClick}
             onOpenLinkedDoc={onOpenLinkedDoc}
             onOpenCodeFile={onOpenCodeFile}
             githubRepo={linkRepo?.display}

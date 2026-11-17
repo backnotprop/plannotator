@@ -126,6 +126,15 @@ function refuse(status: number, code: string, error: string, details: Record<str
 }
 
 /**
+ * A path the door does not open to this caller: `404 device_route_not_found`. Clients act on the code (a linked
+ * machine reads it as "needs an update"), never the words. A linked machine's own Inbox gets words for a computer;
+ * a phone, and a caller not known yet, "Not a phone route."
+ */
+function routeNotFound(device: Pick<InboxDevice, "platform"> | null = null): Response {
+  return refuse(404, "device_route_not_found", device?.platform === MACHINE_PLATFORM ? "This isn't available from another computer." : "Not a phone route.");
+}
+
+/**
  * The allowlist (contract section 2): door route to the window's route. A
  * door path outside it is `404 device_route_not_found`; the window, `/mcp`,
  * the bridge, control, settings, restart, the raw text route
@@ -185,10 +194,40 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^threads\/([^/]+)\/priority$/, window: (m) => `/api/inbox/threads/${m[1]}/priority` },
   // An agent's face or given name (approval "inbox-linked-marks"): a linked machine's window sets them for this Inbox's agents.
   { method: "POST", route: /^agent-faces$/, window: () => "/api/inbox/agent-faces", machineOnly: true },
+  // A thread's tags, and a tag's rename, delete and Undo (approval "inbox-thread-tags"): a linked machine's window
+  // tags this Inbox's threads by a tag's name and changes the tag of that name here. Phones do not take tags.
+  { method: "POST", route: /^threads\/([^/]+)\/tags$/, window: (m) => `/api/inbox/threads/${m[1]}/tags`, machineOnly: true },
+  { method: "POST", route: /^initiatives\/([^/]+)$/, window: (m) => `/api/inbox/initiatives/${m[1]}`, machineOnly: true },
+  // A tag's row colour and "Show tag colors" (mark `tag-colours`): a linked machine's window sets them here too, so
+  // every machine shows the same colours, and a phone sets them as the window does (its list ⋮ has the switch).
+  { method: "POST", route: /^tag-colours$/, window: () => "/api/inbox/tag-colours" },
+  // The Board's cards (mark `cards`): a linked machine's window lists this Inbox's cards, opens one, and moves,
+  // edits, links and tags it here; the look and "Got it" are this store's too. Phones have no Board.
+  { method: "GET", route: /^cards$/, window: () => "/api/inbox/cards", machineOnly: true },
+  { method: "GET", route: /^cards\/(crd_[^/]+)$/, window: (m) => `/api/inbox/cards/${m[1]}`, machineOnly: true },
+  { method: "GET", route: /^cards\/(crd_[^/]+)\/refs$/, window: (m) => `/api/inbox/cards/${m[1]}/refs`, machineOnly: true },
+  { method: "POST", route: /^cards\/(crd_[^/]+)$/, window: (m) => `/api/inbox/cards/${m[1]}`, machineOnly: true },
+  { method: "POST", route: /^cards\/seen$/, window: () => "/api/inbox/cards/seen", machineOnly: true },
+  { method: "POST", route: /^cards\/dropped\/seen$/, window: () => "/api/inbox/cards/dropped/seen", machineOnly: true },
+  // The PR board (mark `pulls`): a linked machine's window lists the PRs this Inbox's gh / glab lists, opens one (its
+  // diff, files, details, pictures), closes, reopens or merges one of them here, as this computer's signed-in
+  // account, and ties PRs to a review thread it started here (`owner`, after the thread's start through
+  // `messages`). Those four run only with the window's mark (`window`), which stops a bare call, the relay and a phone
+  // (no PR board), not a program on that machine that imitates its window (inbox-launch.md "Accepted, not defended").
+  { method: "GET", route: /^pulls$/, window: () => "/api/inbox/pulls", machineOnly: true },
+  // Branch reviews (mark `branches`): a linked machine's Reviews lists the branches agents reported here.
+  { method: "GET", route: /^reviews\/branches$/, window: () => "/api/inbox/reviews/branches", machineOnly: true },
+  { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
+  { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
+  // "Changed since you looked" (approval "inbox-pr-dashboard"): the look at a PR lives on the machine that lists it.
+  { method: "POST", route: /^pulls\/looked$/, window: () => "/api/inbox/pulls/looked", machineOnly: true },
+  // A thread's PRs (approval "inbox-pr-binding"): read, added and removed on the thread's own machine.
+  { method: "GET", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
+  { method: "POST", route: /^threads\/([^/]+)\/pulls$/, window: (m) => `/api/inbox/threads/${m[1]}/pulls`, machineOnly: true },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).
-  { method: "POST", route: /^messages\/([^/]+)\/(picks|reply|resolve|to|ack|send-now|reask)$/, window: (m) => `/api/inbox/messages/${m[1]}/${m[2]}` },
+  { method: "POST", route: /^messages\/([^/]+)\/(picks|reply|resolve|to|ack|send-now|take-back|reask)$/, window: (m) => `/api/inbox/messages/${m[1]}/${m[2]}` },
   // A hand-off's Undo inside its window (approval "inbox-tag-handoff", contract 7.64): the reply goes as an Ask.
   { method: "POST", route: /^messages\/([^/]+)\/handoff\/undo$/, window: (m) => `/api/inbox/messages/${m[1]}/handoff/undo` },
   // An action item's Done or Can't do it, and its Undo (approval "inbox-next-actions", contract 7.63).
@@ -205,6 +244,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // sniffed type and headers. Of the phone's request headers the door forwards
   // Range, If-Range and If-None-Match (and Last-Event-ID to the event stream).
   { method: "GET", route: /^attachments\/([^/]+)\/(image|video|audio|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
+  // A Markdown file's own pictures and a document next to an attached file (approval "linked computers only",
+  // 2026-11-16): a linked machine's window shows them as for a file of its own. The window's own routes, so the same
+  // rules (by the attachment's id, inside its folder, pictures the file shows, sniffed, capped) and headers. Not a
+  // phone's: a phone reads them through the tailnet as the owner.
+  { method: "GET", route: /^attachments\/([^/]+)\/(markdown-image|linked-page)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}`, machineOnly: true },
   { method: "GET", route: /^markups\/([^/]+)$/, window: (m) => `/api/inbox/markups/${m[1]}` },
   // An image a message's body shows (`?path=<src as written>`, a question
   // block's context included): the window's own route, so the phone gets the
@@ -249,9 +293,22 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // window puts a long paste back in a reply to this machine's thread, as it uploaded it here.
   { method: "GET", route: /^uploads\/([^/]+)\/text$/, window: (m) => `/api/inbox/uploads/${m[1]}/text` },
   { method: "GET", route: /^uploads\/([^/]+)\/image$/, window: (m) => `/api/inbox/uploads/${m[1]}/image` },
+  // Tidy and Combine on this Inbox's threads from a linked machine's window (approval "inbox-multi-select", marks `tidy`
+  // and `combine`): its own sessions are asked, since only they can read its threads. Phones have no Tidy.
+  { method: "GET", route: /^tidy$/, window: () => "/api/inbox/tidy", machineOnly: true },
+  { method: "POST", route: /^tidy$/, window: () => "/api/inbox/tidy", machineOnly: true },
+  { method: "GET", route: /^combine$/, window: () => "/api/inbox/combine", machineOnly: true },
+  { method: "POST", route: /^combine$/, window: () => "/api/inbox/combine", machineOnly: true },
+  { method: "POST", route: /^combine\/(cmb_[^/]+)\/(cancel|undo)$/, window: (m) => `/api/inbox/combine/${m[1]}/${m[2]}`, machineOnly: true },
   // A launched agent's Stop, Try again, Trust folder and Delete from a linked machine's window (remote launch). Open in
   // Terminal and the launch settings never cross: they are this computer's.
   { method: "POST", route: /^launch\/([^/]+)\/(stop|retry|trust|delete)$/, window: (m) => `/api/inbox/launch/${m[1]}/${m[2]}`, machineOnly: true },
+  // A file an agent's message names, read only (approval "inbox-file-refs-open-viewer"): its view and an image's or a
+  // film's bytes (by Range), for a linked machine's window. The window's own routes, so the same refusals and headers.
+  // Not a phone's: a phone reads them through the tailnet as the owner.
+  { method: "GET", route: /^open-in\/file\/(view|raw)$/, window: (m) => `/api/inbox/open-in/file/${m[1]}`, machineOnly: true },
+  // And attached to its message there when the person comments on it from a linked machine's window.
+  { method: "POST", route: /^open-in\/file\/attach$/, window: () => "/api/inbox/open-in/file/attach", machineOnly: true },
   // "Another folder on <machine>…": folder names under that machine's home, for a linked machine's window only.
   { method: "GET", route: /^launch\/folders$/, window: () => "/api/inbox/launch/folders", machineOnly: true },
   // Clone from a git URL: where a URL would be cloned on that machine, and whether its git can read it.
@@ -264,6 +321,20 @@ const MACHINE_DOOR_WRITES = ["link-back", "unlink", "update"] as const;
 const MACHINE_DOOR_UPDATE = "update";
 /** This computer's accounts, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches them. */
 const MACHINE_DOOR_ACCOUNTS = "accounts";
+
+/**
+ * The window route a door request goes to, or null: the allowlist's first entry for its method and route, skipping a
+ * linked machine's own entries for a phone.
+ */
+export function doorRouteOf(method: string, route: string, machine: boolean): { entry: (typeof ALLOWLIST)[number]; windowPath: string } | null {
+  for (const entry of ALLOWLIST) {
+    if (entry.method !== method) continue;
+    if (entry.machineOnly && !machine) continue;
+    const match = entry.route.exec(route);
+    if (match) return { entry, windowPath: entry.window(match) };
+  }
+  return null;
+}
 
 /** For rule 8's test (inbox-outbox.test.ts): every door route in words (`GET threads`, `POST messages/:id/(picks|reply|…)`). */
 export function doorRouteNames(): string[] {
@@ -911,12 +982,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
       if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
     }
-    for (const entry of ALLOWLIST) {
-      if (entry.method !== req.method) continue;
-      if (entry.machineOnly && device.platform !== MACHINE_PLATFORM) continue;
-      const match = entry.route.exec(route);
-      if (!match) continue;
-      const windowPath = entry.window(match);
+    const door = doorRouteOf(req.method, route, device.platform === MACHINE_PLATFORM);
+    if (door) {
+      const { entry, windowPath } = door;
       if (req.method === "POST") return await command(req, device, url, windowPath, entry);
       if (route !== "events") return await toWindow(req, device, windowPath, url.search, null, req.signal);
       // The event stream lives until the phone leaves or is removed.
@@ -928,7 +996,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       stream.signal.addEventListener("abort", () => open.delete(stream));
       return await toWindow(req, device, windowPath, url.search, null, stream.signal);
     }
-    return refuse(404, "device_route_not_found", "Not a phone route.");
+    return routeNotFound(device);
   };
 
   /**
@@ -993,16 +1061,16 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
       if (device.revoked_at !== null) return refuse(401, "device_revoked", "This phone was removed from the Inbox. Pair it again.");
       if (device.platform === AGENT_PLATFORM) return refuse(403, "agent_not_accepted_here", "A cloud agent's pairing opens the agent door only.");
-      if (input.method !== "GET" && input.method !== "POST") return refuse(404, "device_route_not_found", "Not a phone route.");
+      if (input.method !== "GET" && input.method !== "POST") return routeNotFound(device);
       let url: URL;
       try {
         url = new URL(input.path, `http://127.0.0.1:${context.port()}`);
       } catch {
-        return refuse(404, "device_route_not_found", "Not a phone route.");
+        return routeNotFound(device);
       }
       const route = url.pathname.startsWith(DOOR_PREFIX) ? url.pathname.slice(DOOR_PREFIX.length) : "";
       if (!route || route === "pair" || route === "events" || url.origin !== `http://127.0.0.1:${context.port()}`) {
-        return refuse(404, "device_route_not_found", "Not a phone route.");
+        return routeNotFound(device);
       }
       // A file (an upload, a drawing) is not carried: a sealed command's body is JSON, and a file in it would be
       // base64 inside the envelope, past Cloudflare's message limit well under the 100 MB cap. v1: the Wi-Fi or the tailnet.
@@ -1038,10 +1106,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
       try {
         url = new URL(req.url, "http://127.0.0.1");
       } catch {
-        return refuse(404, "device_route_not_found", "Not a phone route.");
+        return routeNotFound();
       }
-      if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return refuse(404, "device_route_not_found", "Not a phone route.");
-      return door(req, url, via).then((answer) => answer ?? refuse(404, "device_route_not_found", "Not a phone route."));
+      if (url.pathname !== "/api/inbox/device" && !url.pathname.startsWith(DOOR_PREFIX)) return routeNotFound();
+      return door(req, url, via).then((answer) => answer ?? routeNotFound());
     };
 
   // ── The Wi-Fi (contract section 3): the same door-only handler, over TLS on every interface. ──

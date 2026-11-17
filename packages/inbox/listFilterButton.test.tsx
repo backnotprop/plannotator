@@ -272,7 +272,7 @@ describe.skipIf(!hasDom)('the funnel', () => {
     await press(funnel());
     expect($('[data-list-filter-project]')).toBeNull();
     await click($('[data-list-filter-clear]')!);
-    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [], pulls: [], notSeen: false });
+    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [], pulls: [], notSeen: false, tags: [] });
   });
 
   test('the menu: Not seen, Updated, Agent, Pull request, then Project last; a Pull request pick narrows by the row\'s PR', async () => {

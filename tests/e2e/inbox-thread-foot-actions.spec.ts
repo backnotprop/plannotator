@@ -20,7 +20,7 @@
  * PLANNOTATOR_THREAD_FOOT_ACTIONS_SHOTS, or .local/proof/thread-foot-actions/.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';

@@ -24,7 +24,8 @@ import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry 
  * row's (AgentMark.tsx: a click or a rest of the pointer opens its face picker). A machine that has no agent shows nothing.
  * While agents show from more than one machine, each machine's name is a small quiet grey caption above its agents
  * (still the machine's filter, as its Machines row was) and the agents sit a small step in; with one machine there is
- * no caption, only the agents. No counts and no state marks; no lines; roomier gaps between machines. A click on an
+ * no caption, only the agents, in the server's fixed order (inbox-agents-list.ts). No counts and no state marks; no
+ * lines; roomier gaps between machines. A click on an
  * agent filters the list to its threads, as a machine's caption does, and opens none of them; a second click shows
  * everything again. An agent with no thread in the window has nothing to filter: a click messages it (New message).
  * Its hover card says where and when it started, and its project.
@@ -190,7 +191,7 @@ const AgentRow = memo(
       return row(
         <ProjectNameField
           name={entry.name}
-          folder={agentRowName(agentAsListed(entry.agent), entry.thread)}
+          folder={agentRowName(agentAsListed(entry.agent))}
           label="Agent name"
           emptyResets
           announce={props.announce}
@@ -350,7 +351,7 @@ export function AgentsSection(props: AgentsSectionProps) {
   renameNow.current = props.onRename;
   const canRename = props.onRename !== undefined;
   const onRename = useMemo(
-    () => (canRename ? (entry: AgentEntry, name: string | null) => renameNow.current?.(entry.agent, name, agentRowName(agentAsListed(entry.agent), entry.thread)) ?? Promise.resolve(false) : undefined),
+    () => (canRename ? (entry: AgentEntry, name: string | null) => renameNow.current?.(entry.agent, name, agentRowName(agentAsListed(entry.agent))) ?? Promise.resolve(false) : undefined),
     [canRename],
   );
   const stopNow = useRef(props.onStop);
@@ -363,24 +364,22 @@ export function AgentsSection(props: AgentsSectionProps) {
   const onDelete = useMemo(() => (canDelete ? (entry: AgentEntry) => deleteNow.current?.(entry.agent, entry.machine === props.machines.self ? null : entry.machine) : undefined), [canDelete, props.machines.self]);
   return (
     // A section like Projects, straight on the sidebar's ground (the owner, 2026-11-09: "I like it without
-    // background"). Closed: its heading only. Open: its heading carries Add agent and Add machine.
+    // background"). Its heading carries Add machine, then Add agent (under Tags' New tag); closed, nothing under it.
     <div className="ib-agentsec" data-agents-surface="" data-closed={props.closed ? '' : undefined}>
       <div className="ib-secrow" data-agents-head="" data-one-add={props.onAddMachine ? undefined : ""}>
         {props.header(<GogglesMark />)}
-        {!props.closed && (
-          <Tip content="Add agent">
-            <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add agent" aria-haspopup="dialog" data-agents-add="agent" onClick={(event) => props.pick(() => props.onAddAgent(event.currentTarget))()}>
-              <Icon name="plus" />
-            </button>
-          </Tip>
-        )}
-        {!props.closed && props.onAddMachine && (
+        {props.onAddMachine && (
           <Tip content="Add machine">
             <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add machine" data-agents-add="machine" onClick={props.pick(() => props.onAddMachine?.())}>
               <LaptopPlus />
             </button>
           </Tip>
         )}
+        <Tip content="Add agent">
+          <button type="button" className="ib-proj-sort ib-agents-add" aria-label="Add agent" aria-haspopup="dialog" data-agents-add="agent" onClick={(event) => props.pick(() => props.onAddAgent(event.currentTarget))()}>
+            <Icon name="plus" />
+          </button>
+        </Tip>
       </div>
       <div className="ib-agents-body" id={props.bodyId} role="group" aria-labelledby={props.labelId} data-agents-section="" data-flat={captions ? undefined : ''} data-closed={props.closed ? '' : undefined}>
         {empty && !props.closed && <div className="ib-side-empty ib-agents-empty">Agents show here while they run.</div>}

@@ -4,7 +4,7 @@ You are Muse, Meta's personal agent, on your own cloud computer. The person uses
 
 Three rules, always:
 
-- Never print, echo, log or repeat the pairing string. Never put it in a message, a memory, a connector, a repository or a file other than the one in step 2. Anyone holding it can read your threads and post as you.
+- Never print, echo, log or repeat the pairing string. Never put it in a message, a memory, a connector, a repository or a file other than the one in step 2. Anyone holding it can read the person's Inbox and post as you.
 - Never ask the person for a key, token or password. Plannotator needs none from them.
 - Answer the person's Inbox messages in the Inbox (step 7), not in this chat. In this chat, say only what this page tells you to say.
 
@@ -126,11 +126,12 @@ plannotator inbox call send_message '{"reply_to":"<their latest message id>","bo
 
 - If read_thread says `name_this_thread: true`, add `"thread": "<a few words>"` to that reply: it names the thread.
 - To start a new thread yourself: `send_message` with `"subject"` and `"body"` and no `reply_to`.
+- Any thread, any project: `read_thread '{"asked_by":"anyone"}'` lists every thread with its project, `search '{"query":"<words>"}'` finds messages in every project, and `"project": "<its name>"` on `send_message` starts the thread in that project (without it, it goes in the project `whoami` names: the one the person chose, or a place of your own, named after you, made with your first thread).
 - Files: `"attachments": ["report.md", "shot.png"]`, paths on your computer; they are sent as bytes and show below your message.
 - If `send_message` prints `"queued": true`, the person's computer is asleep. It is posted once when the computer is back. Do not send it again.
 - `computer_asleep` on a read, or `too_many_waiting` on a send (many of your messages already wait for the person's computer): end quietly and send nothing more; the next change wakes you again.
 - `pairing_removed` or `invalid_pairing` at any time: disable the `plannotator-inbox` hook or delete the "Plannotator Inbox" task, and tell the person once in this chat that you were unpaired and they can make a new pairing in Plannotator's Settings.
-- You can never answer the person's own questions, approve anything for them, or see threads they did not give you. That is by design.
+- You can never answer the person's own questions or approve anything for them. That is by design.
 - `plannotator inbox call --help` lists everything you can do.
 
 ## 8. Tell the person

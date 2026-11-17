@@ -25,12 +25,13 @@
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-board-reveal.spec.ts`. PNGs land in
  * PLANNOTATOR_E2E_PROOF_DIR/board-reveal, or .local/proof/board-reveal/.
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { savedConfig } from '../helpers/saved-config';
 
 const repo = resolve(__dirname, '../..');
 const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'board-reveal');
@@ -126,7 +127,7 @@ async function world(): Promise<World> {
   return { url, dataDir, ids };
 }
 
-const config = (w: World) => JSON.parse(readFileSync(join(w.dataDir, 'config.json'), 'utf8')) as Record<string, any>;
+const config = (w: World) => savedConfig(w.dataDir);
 
 /**
  * This spec proves the leave moment ("back on the list"), so the page is never idle (idleClock.ts: 20 s without input

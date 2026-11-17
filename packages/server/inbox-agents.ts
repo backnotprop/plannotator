@@ -41,6 +41,7 @@ import { envPathOf, foldEnvPath } from "./env-path";
 import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,
+  INBOX_ANTIGRAVITY_DATA_DIRS,
   inboxAgentList,
   inboxElsewhereText,
   inboxGrantText,
@@ -116,7 +117,11 @@ export interface AgentEnvironment {
    * limit or exit kill only the CLI itself, never its group (launch: a call
    * may be the one that starts the person's shared Claude supervisor).
    */
-  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>>; killGroup?: boolean }): Promise<AgentRunResult>;
+  /**
+   * `cleanEnv`: the child gets `env` alone (PATH folded in), none of this process's. `stdin`: written to the child's
+   * stdin, which is then closed (without it, stdin is ignored). `outputCap`: what is kept of each stream (default 64 KiB).
+   */
+  run(argv: readonly string[], options: { timeoutMs: number; signal?: AbortSignal; cwd?: string; env?: Readonly<Record<string, string>>; cleanEnv?: boolean; stdin?: string; outputCap?: number; killGroup?: boolean }): Promise<AgentRunResult>;
 }
 
 /** The real boundary: this process's home, environment and PATH. */
@@ -139,10 +144,10 @@ export function createAgentEnvironmentFor(input: {
     env,
     which,
     run: (argv, options) => {
-      const runEnv = options.env ? foldEnvPath({ ...env, ...options.env }, platform) : env;
+      const runEnv = options.cleanEnv ? foldEnvPath({ ...options.env }, platform) : options.env ? foldEnvPath({ ...env, ...options.env }, platform) : env;
       const shim = windowsShimOf(argv, platform, which);
       if (shim && "refused" in shim) return Promise.resolve({ exitCode: 127, timedOut: false, stdout: "", stderr: shim.refused });
-      return spawnRun(shim ? shim.argv : argv, runEnv, options.timeoutMs, options.signal, options.cwd, false, options.killGroup ?? true, shim !== null);
+      return spawnRun(shim ? shim.argv : argv, runEnv, options.timeoutMs, options.signal, options.cwd, false, options.killGroup ?? true, shim !== null, options.stdin, options.outputCap);
     },
   };
 }
@@ -234,6 +239,8 @@ function spawnRun(
   killGroup = true,
   /** Windows: `argv` is a cmd.exe line already quoted (`windowsShimOf`); a kill ends its tree when `killGroup`. */
   viaCmd = false,
+  stdin?: string,
+  outputCap = 64 * 1024,
 ): Promise<AgentRunResult> {
   return new Promise((done) => {
     if (signal?.aborted) {
@@ -243,7 +250,7 @@ function spawnRun(
     let child: ReturnType<typeof spawnChild>;
     try {
       child = spawnChild(argv[0]!, argv.slice(1), {
-        stdio: ["ignore", "pipe", outlivesThisProcess ? "ignore" : "pipe"],
+        stdio: [stdin === undefined ? "ignore" : "pipe", "pipe", outlivesThisProcess ? "ignore" : "pipe"],
         env: { ...env } as NodeJS.ProcessEnv,
         ...(cwd ? { cwd } : {}),
         detached: process.platform !== "win32",
@@ -254,11 +261,16 @@ function spawnRun(
       done({ exitCode: 127, timedOut: false, stdout: "", stderr: error instanceof Error ? error.message : String(error) });
       return;
     }
+    if (stdin !== undefined && child.stdin) {
+      // A child that exits without reading it closes the pipe: that is its answer, not this process's error.
+      child.stdin.on("error", () => {});
+      child.stdin.end(stdin);
+    }
     let stdout = "";
     let stderr = "";
     let settled = false;
     let exited = false;
-    const cap = (text: string) => (text.length > 64 * 1024 ? text.slice(0, 64 * 1024) : text);
+    const cap = (text: string) => (text.length > outputCap ? text.slice(0, outputCap) : text);
     child.stdout?.on("data", (chunk: Buffer) => (stdout = cap(stdout + chunk.toString("utf8"))));
     child.stderr?.on("data", (chunk: Buffer) => (stderr = cap(stderr + chunk.toString("utf8"))));
     const kill = () => {
@@ -413,6 +425,11 @@ function museKeys(path: string | null): string[] {
 }
 export function openCodeConfigDir(e: AgentEnvironment): string {
   return envDir(e, "OPENCODE_CONFIG_DIR") ?? join(xdgConfigHome(e), "opencode");
+}
+const ANTIGRAVITY_DATA_FOLDERS = Object.values(INBOX_ANTIGRAVITY_DATA_DIRS);
+/** Antigravity's MCP file, read by the CLI, the App and the IDE alike. */
+export function antigravityMcpConfig(e: AgentEnvironment): string {
+  return join(e.homeDir, ".gemini", "config", "mcp_config.json");
 }
 /** Gemini CLI's folder: `.gemini` under `$GEMINI_CLI_HOME` when set, else under the home folder. */
 export function geminiDir(e: AgentEnvironment): string {
@@ -1330,6 +1347,15 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     raw: () => null,
   },
   {
+    // Antigravity: the agy CLI, the App and the IDE all read one MCP file. Each product makes its own data folder
+    // under ~/.gemini at its first run. The file is plain JSON (it may be there and empty).
+    id: "antigravity",
+    detect: (e) => !!e.which("agy") || ANTIGRAVITY_DATA_FOLDERS.some((name) => isDir(join(e.homeDir, ".gemini", name))),
+    way: async () => ({ kind: "json", keys: ["mcpServers"] }),
+    file: (e) => antigravityMcpConfig(e),
+    raw: (e, read) => rawJsonEntry(antigravityMcpConfig(e), ["mcpServers"], false, read),
+  },
+  {
     id: "claude-app",
     detect: (e) => isDir(claudeAppDir(e)),
     way: async () => ({ kind: "json", keys: ["mcpServers"] }),
@@ -1870,6 +1896,7 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
       lines.push(`Connected ${inboxAgentList(report.added)} to the Inbox (new on this computer).`);
     }
     if (report.added.includes("claude-app")) lines.push("Restart the Claude app to use it there.");
+    if (report.added.includes("antigravity")) lines.push("Restart the Antigravity App or IDE to use it there; a new agy session has it at once.");
   }
   if (report.trusted?.length) {
     lines.push(
@@ -2033,7 +2060,7 @@ export function planInboxAgentRemoval(dataDir: string, e: AgentEnvironment, ourC
 function jsonFileFor(id: InboxAgentId, path: string | null = null): { keys: readonly string[]; rules: JsonFileRules } | null {
   if (id === "qwen") return { keys: ["mcpServers"], rules: QWEN_SETTINGS_RULES };
   if (id === "muse") return { keys: museKeys(path), rules: MUSE_SETTINGS_RULES };
-  return id === "cursor" || id === "kiro" || id === "claude-app" ? { keys: ["mcpServers"], rules: {} } : null;
+  return id === "cursor" || id === "kiro" || id === "claude-app" || id === "antigravity" ? { keys: ["mcpServers"], rules: {} } : null;
 }
 
 /**

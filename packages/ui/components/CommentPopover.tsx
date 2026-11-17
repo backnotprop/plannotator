@@ -19,6 +19,7 @@ import { MentionAutocompleteMenu, mentionActiveOptionId } from './MentionAutocom
 import type { MentionSource } from '../utils/mentions';
 import {
   hasPrimaryCoarsePointer,
+  layoutViewportHeight,
   shouldUseExpandedComposer,
   useVisibleViewportBounds,
   type VisibleViewportBounds,
@@ -156,10 +157,17 @@ interface CommentPopoverProps {
   /** Opt-in: why the last submit failed (Shape: a Change it that did not reach the server), shown under the
    *  header with `role="alert"` while the person's words stay in the box. Absent → nothing, as always. */
   errorText?: string;
+  /** Opt-in: drawn under the header, above the words (Shape: what was asked or changed on this part, and the
+   *  answers). Absent → nothing, as always. */
+  before?: React.ReactNode;
   /** Opt-in: `side` opens the popover beside the anchor (right, else left),
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
   placement?: 'below' | 'side';
+  /** Opt-in: the box the popover stays inside (Shape: the board, in a thread's pane), placed and clamped by its
+   *  edges rather than only the window's; with no room above or below it there, a sheet at the box's foot rather
+   *  than the window's dialog. Absent → the window, as always. */
+  within?: HTMLElement | null;
   /** Opt-in: the stacking level, for a composer over a surface that is
    *  itself above the page (the image viewer is z-200). Absent → 100. */
   zIndex?: number;
@@ -208,6 +216,23 @@ interface CommentPopoverPosition {
   width: number;
   maxHeight: number;
   requiresExpanded: boolean;
+}
+
+/** `bounds` cut to `el`'s box, `inset` in from its edges (the window's bounds when `el` is absent or not laid out). */
+export function boundsWithin(bounds: VisibleViewportBounds, el: HTMLElement | null | undefined, inset = 8): VisibleViewportBounds {
+  const r = el?.getBoundingClientRect();
+  if (!r || r.width <= 0 || r.height <= 0) return bounds;
+  const top = Math.max(bounds.top, r.top + inset);
+  const left = Math.max(bounds.left, r.left + inset);
+  const right = Math.max(left, Math.min(bounds.right, r.right - inset));
+  const bottom = Math.max(top, Math.min(bounds.bottom, r.bottom - inset));
+  return { top, left, right, bottom, width: right - left, height: bottom - top };
+}
+
+/** A popover with no room by its anchor inside `bounds`: a sheet at their foot, as wide as a popover may be. */
+export function sheetWithin(bounds: VisibleViewportBounds): CommentPopoverPosition {
+  const width = Math.min(MAX_POPOVER_WIDTH, bounds.width);
+  return { top: bounds.bottom, left: bounds.left + (bounds.width - width) / 2, flipAbove: true, width, maxHeight: Math.max(0, bounds.height * 0.75), requiresExpanded: false };
 }
 
 export function computeCommentPopoverPosition(
@@ -271,6 +296,7 @@ export function computeCommentCardGeometry(
     phone: boolean;
     expanded: boolean;
     pane: Pick<DOMRect, 'left' | 'right' | 'bottom' | 'width'> | null;
+    /** The layout viewport's height (`layoutViewportHeight`), which a docked card's `bottom` is measured from. */
     viewportHeight: number;
     footTop?: number | null;
     aimX?: number | null;
@@ -283,7 +309,7 @@ export function computeCommentCardGeometry(
   }
   const dock = (): CommentCardGeometry => {
     if (opts.phone) {
-      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.max(160, bounds.height * 0.6) } };
+      return { docked: true, above: false, style: { left: bounds.left + 8, width: bounds.width - 16, bottom: opts.viewportHeight - bounds.bottom + 8, maxHeight: Math.min(bounds.height, Math.max(160, bounds.height * 0.6)) } };
     }
     const pane = opts.pane ?? { left: bounds.left, right: bounds.right, bottom: bounds.bottom, width: bounds.width };
     const width = Math.min(pane.width - 24, opts.expanded ? 760 : 680);
@@ -370,7 +396,9 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   yieldState,
   headerText,
   errorText,
+  before,
   placement = 'below',
+  within,
   zIndex,
   autoFocus = true,
 }) => {
@@ -448,7 +476,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         : [];
       const footTop = feet.length ? Math.min(...feet.map((r) => r.top)) - 4 : null;
       setCardGeo(computeCommentCardGeometry(rect, visibleBounds, {
-        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: window.innerHeight, footTop, aimX: cardAim.current, placement,
+        phone: cardPhone, expanded: cardExpanded, pane, viewportHeight: layoutViewportHeight(window), footTop, aimX: cardAim.current, placement,
       }));
     };
     update();
@@ -508,7 +536,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     const update = () => {
       const rect = anchorEl?.getBoundingClientRect() ?? anchorRect;
       if (!rect) return;
-      const nextPosition = computeCommentPopoverPosition(rect, visibleBounds, placement);
+      const bounds = within ? boundsWithin(visibleBounds, within) : visibleBounds;
+      const nextPosition = computeCommentPopoverPosition(rect, bounds, placement);
+      if (nextPosition.requiresExpanded && within) {
+        setPosition(sheetWithin(bounds));
+        return;
+      }
       if (nextPosition.requiresExpanded) {
         setDialogIsForced(true);
         setMode('dialog');
@@ -522,7 +555,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     return () => {
       window.removeEventListener('scroll', update, true);
     };
-  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card]);
+  }, [anchorEl, anchorRect, mode, visibleBounds, wasDragged, placement, card, within]);
 
   // Surface a "jump back" arrow when an open popover scrolls out of view.
   // Re-measures whenever the popover repositions (position updates every scroll
@@ -1019,6 +1052,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             {isGlobal ? 'Global comment' : on ?? 'Comment'}
           </div>
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
           <div className="pn-cbox-field">
@@ -1184,6 +1218,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           </div>
 
           {errorRow}
+          {before}
           {draftConflictRow}
           {chipsRow}
 
@@ -1356,6 +1391,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       </div>
 
       {errorRow}
+      {before}
           {draftConflictRow}
       {chipsRow}
 

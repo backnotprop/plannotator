@@ -89,6 +89,7 @@ import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
+import { verdictRecheckBlock } from '../skills';
 import { useGuideState } from './useGuideState';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
 import { onPullDiff, postedSignature, postedWords } from '../pulls/postRules';
@@ -123,8 +124,6 @@ const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;
-  /** A tailnet guest's page: the routes behind the arrows refuse it, so no reader. */
-  guest?: boolean;
   message: InboxMessageWire;
   /** Back to the thread. */
   onBack: () => void;
@@ -179,7 +178,7 @@ const NO_VIEWED: ReadonlySet<string> = new Set();
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onPosted, onAsk, codeReview, shape = false, chapterDiagrams = true, onWriteReply, shapeHost, shapes, board: boardIn, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted, onAsk, codeReview, shape = false, chapterDiagrams = true, onWriteReply, shapeHost, shapes, board: boardIn, onBoard, boardShrunk = false, boardPlace = null, onBoardNavigate, at = null, onLanded, onSay }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, commentsRead, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // Code review's own review: the agent sent it as one (`review: true`) while Code review is on. A guide, or a review
@@ -884,7 +883,9 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
           for (const record of carried) await inboxApi.removeAnnotation(record.id);
           setRecords([]);
         }
-        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : carried, note);
+        // Only the session that wrote this review is asked for just what changed since it: no other one saw it.
+        const toReviewer = asking !== null && !to && !askerEnded;
+        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : carried, note, verdictRecheckBlock(plan.verdict, toReviewer));
         const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), ...(parts.uploads ? { uploads: parts.uploads } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
         await inboxApi.reply(message.id, { idempotency_key: keys.current.keyFor(input), ...input });
         keys.current.done();
@@ -1275,7 +1276,7 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
-                {...(guest ? {} : { fileContents })}
+                fileContents={fileContents}
                 {...(codeReview ? { fileOpenIn } : {})}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}

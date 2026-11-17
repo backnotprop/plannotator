@@ -30,8 +30,8 @@
  */
 
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxAuthor, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
-import { InboxApiError, InboxHeldError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
+import { INBOX_DRAFT_BODY_MAX, INBOX_PULL_OWNER_KEYS_MAX, inboxId, type InboxDraft, type InboxDraftTo, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
+import { InboxApiError, InboxHeldError, inboxApi, type DraftView, type StartThreadInput } from '../api';
 import { tildePath, whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import type { ReuseSource } from '../reuse';
@@ -45,9 +45,12 @@ import { unpluggedDrive } from './homeFolders';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
 import { TrustDetails } from './TrustDetails';
 import { isLongPaste } from './pastedText';
-import { useComposeSessions, withGivenSessionNames, type ComposeSessionsLoader } from './useComposeSessions';
-import { useAgentNames } from '../agents/agentNames';
+import { useComposeSessions, type ComposeSessionsLoader } from './useComposeSessions';
 import { useMachineLaunches } from './useMachineLaunches';
+import { linkedToMachines } from './linkedToMachines';
+import { useLinkedTarget } from './useLinkedTarget';
+import type { ComposeHeld, ComposeJoined, ComposeSent } from './composeResults';
+export type { ComposeHeld, ComposeJoined, ComposeSent };
 import { InboxComposerField, type CaretMenuOptions } from '../components/ComposerField';
 import { ARM_MS } from '../components/PermissionCard';
 import { VoiceFoot } from '../components/VoiceMic';
@@ -58,8 +61,8 @@ import { fetchSkillCatalog, getCachedSkillCatalog } from '@plannotator/ui/utils/
 import { useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
-import { wordsMessage } from '../sendTargets';
-import { pinnedState, type PinnedState } from '../pins';
+import { THREAD_NAME_TAKEN, threadNameHolder, type ThreadNameHolder } from './threadNameHolder';
+import { BoardChip } from './BoardChip';
 import { ThreadPill } from './ThreadPill';
 import { registerReloadFlush } from '../stalePage';
 import {
@@ -70,7 +73,6 @@ import {
   draftSnapshot,
   draftThreadName,
   draftTo,
-  findTarget,
   hostLabel,
   isDirty,
   composeOpening,
@@ -94,7 +96,6 @@ import {
   cloneOfUrl,
   defaultStartProject,
   launchGroups,
-  machineLaunchNotice,
   projectWithAgent,
   type LaunchHistory,
   type MachineLaunchProject,
@@ -154,95 +155,8 @@ export interface ComposeRequest {
   files?: readonly File[];
   /** To opens on its own list at once: the person picks a running agent or a new session (compose/openComposer.ts). */
   pickTo?: boolean;
-}
-
-/** What the chip says when another open thread of the project has the typed name. */
-const THREAD_NAME_TAKEN = 'Another open thread in this project has this name.';
-
-/** The open thread that has the name the person typed, and the message a reply typed in it answers. */
-interface ThreadNameHolder {
-  threadId: string;
-  messageId: string;
-  /** Its name as that thread has it (the typed one may differ in case or spaces). */
-  name: string;
-  /** Who a reply typed in it reaches: "Claude Code". */
-  agent: string;
-  /** That agent, for its mark. */
-  author: InboxAuthor;
-  /** The thread's state as its list row has it (Stopped, Holds N, open questions); null when the read carried no row. */
-  state: PinnedState | null;
-}
-
-/** Read the thread that has the name; null when it can't be read (the notice then offers nothing). */
-async function threadNameHolder(threadId: string): Promise<ThreadNameHolder | null> {
-  try {
-    const { thread, row } = await inboxApi.thread(threadId, 5000);
-    if (thread.resolved_at !== null || thread.thread_name === null) return null;
-    const target = wordsMessage(thread);
-    // A thread no agent wrote in yet is its addressee's.
-    const author: InboxAuthor = target.author.kind === 'agent' ? target.author : { kind: 'agent', host: target.to?.host ?? null, session: target.to?.session ?? null, name: null };
-    const agent = (author.kind === 'agent' ? author.name : null) ?? (author.kind === 'agent' && author.host ? hostLabel(author.host) : 'That thread’s agent');
-    return { threadId, messageId: target.id, name: thread.thread_name, agent, author, state: row ? pinnedState(row) : null };
-  } catch {
-    return null;
-  }
-}
-
-/** Compose's message went into an open thread instead of starting one ("Send to that thread"). */
-export interface ComposeJoined {
-  threadId: string;
-  threadName: string;
-  /** Who got it: "Claude Code". */
-  agent: string;
-  /** The draft it was written in (deleted), or null. */
-  draftId: string | null;
-}
-
-export interface ComposeSent {
-  threadId: string;
-  session: string;
-  host: string;
-  projectName: string;
-  /** The draft it was sent from (it is deleted with the Send), or null. */
-  draftId: string | null;
-  /** The Board card the thread was created for (`ComposeRequest.card`): link the thread to it. */
-  cardId?: string | null;
-  /** It started a new agent session (launch), rather than going to a live one. */
-  launched?: boolean;
-  /** The PRs the thread was started for (`ComposeRequest.pulls`): hand them to it. */
-  pullKeys?: readonly string[] | null;
-  /** The linked machine the agent was started on (remote launch), or absent for this computer. */
-  machine?: string | null;
-  /** What the hand-off asked for: its guided-review line still in the words, or the person's own curation. */
-  pullAsk?: 'guide' | 'custom' | null;
-}
-
-/**
- * Where compose reads and sends (tour v2): the live sessions and the new
- * thread, and whether it keeps drafts and takes files. Absent: the Inbox's own
- * routes, drafts and uploads, exactly as always. The onboarding tour passes
- * one that writes nothing (`drafts: false`: closing asks nothing and Save
- * draft is gone; `uploads: false`: no paperclip, drop or paste).
- */
-/**
- * A new session for a linked machine that its Inbox could not take yet (remote launch, `InboxHeldError`): it waits
- * in this Inbox's outbox, and the agent starts there when that machine is back. Cancel takes it back while `queued`.
- */
-export interface ComposeHeld {
-  /** The outbox entry's key (`inboxApi.cancelOutbox`). */
-  key: string;
-  /** It never left yet: Cancel can take it back. */
-  queued: boolean;
-  machineName: string;
-  /** That machine is asleep (offline), not just slow to answer. */
-  asleep: boolean;
-  /** "Claude Code". */
-  agentName: string;
-  /** What that machine does before the agent starts: "clones acme/billing-api", "makes pricing-page" (E9). */
-  first?: string;
-  draftId: string | null;
-  /** What was written, kept so Cancel can put it back in Drafts (the one it was sent from is gone here). */
-  words: { body: string; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true };
+  /** Told once this message is sent, after the window's own `onSent`, or held for another machine (`{ held }`): a plan's Send. */
+  onSent?: (sent: ComposeSent | { held: ComposeHeld }) => void;
 }
 
 export interface ComposeTransport {
@@ -301,25 +215,6 @@ export interface ComposeDialogProps {
   localWindow?: boolean;
 }
 
-/**
- * The Board chip (approval "inbox-compose-board-chip", v3): at the right of
- * the Thread row, a plain toggle (`aria-pressed`) named "Track on Board",
- * with a component tooltip. On, the Send asks the agent to track the work on
- * the Board (`board_request`); the agent makes the card(s). No shortcut.
- */
-function BoardChip(props: { on: boolean; onToggle: () => void }) {
-  return (
-    <Tip content={props.on ? 'On your Board when sent' : 'Track on your Board'}>
-      <button type="button" className="ib-cp-board" aria-pressed={props.on} aria-label="Track on Board" data-compose-board="" onClick={props.onToggle}>
-        <span className="ib-cp-board-box" aria-hidden="true">
-          {props.on && <Icon name="check" size={11} />}
-        </span>
-        Board
-      </button>
-    </Tip>
-  );
-}
-
 export function ComposeDialog(props: ComposeDialogProps) {
   const { request, phone, current, lastSent, home, transport } = props;
   // New review keeps no draft: its words are a few, and what it reviews is chosen again in a moment.
@@ -343,13 +238,13 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
-  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : typed.kind);
+  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : box?.branch ? 'local' : typed.kind);
   // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
   const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
   const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
   const linkKept = useRef(typed.link ?? '');
   const [linkRead, setLinkRead] = useState<InboxReviewLinkAnswer | null>(null);
-  const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
+  const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>(box?.branch ? 'branch' : 'uncommitted'); // Branch reviews' "Start a review": that branch, whole.
   const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
   // A pick kept or opened earlier that has since gone into review (handed elsewhere, say): its thread answers for it now. The words stay.
@@ -448,27 +343,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // To's machine switch (approval "inbox-launcher-machine-switch"): each linked machine's live sessions, from its last
   // read. Not for New review or a pull request's message: those go to an agent on this computer, in their projects.
   const otherMachines = !transport && !box && !onlyProjects;
-  const agentNames = useAgentNames();
-  const linkedSessions = useMemo(() => {
-    const out = new Map<string, ComposeSessionsModel['projects']>();
-    if (!otherMachines) return out;
-    for (const [id, read] of there.reads) out.set(id, withGivenSessionNames({ serverSession: '', home: read.home ?? '', projects: read.projects ?? [] }, agentNames)?.projects ?? []);
-    return out;
-  }, [otherMachines, there.reads, agentNames]);
-  // The session To names: on this computer, else on a linked machine (`targetOn`, its id), whose Inbox it is sent through.
-  const hereTarget = findTarget(projects, chosen);
-  const linkedTarget = useMemo(() => {
-    if (hereTarget || !chosen) return null;
-    for (const m of there.machines) {
-      const found = !m.self && m.state !== 'revoked' ? findTarget(linkedSessions.get(m.id) ?? [], chosen) : null;
-      if (found) return { target: found, machine: m };
-    }
-    return null;
-  }, [hereTarget, chosen, linkedSessions, there.machines]);
-  const target = hereTarget ?? linkedTarget?.target ?? null;
-  const targetOn = linkedTarget?.machine.id ?? null;
-  const targetMachineName = linkedTarget?.machine.name ?? null;
-  const anyLive = composeTargets(projects).length > 0 || [...linkedSessions.values()].some((p) => composeTargets(p).length > 0);
+  const { linkedSessions, target, targetOn, targetMachineName, anyLive } = useLinkedTarget(otherMachines, there, projects, chosen);
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
   // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
   // For a pull request (`pulls`): only its projects and no scratch folder, so the default start is where its agent works and nothing else is offered.
@@ -568,7 +443,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const startAgent = start ? blockOf(start.machine)?.agents.find((a) => a.agent === start.agent) : undefined;
   const launchChoice = useLaunchChoice(start ? `${start.machine ?? ''}:${start.agent}` : null, startAgent?.choices, phone);
   // Trust and start: the folder To names, when the agent does not trust it and the owner can from here. No entry (a
-  // trusted folder, home, a guest): plain Send. Its facts follow the pick by a read, so a press can come before them.
+  // trusted folder, home): plain Send. Its facts follow the pick by a read, so a press can come before them.
   const trust = (start?.project.exists ? startAgent?.untrusted?.[start.project.id] : undefined) ?? null;
   const trustFacts = trust?.facts ?? [];
   // The question circle's details.
@@ -593,7 +468,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
     if (!box || !model || chosen || startPick) return;
-    const to = reviewDefaultTo(composeTargets(projects), launch, current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
+    const to = reviewDefaultTo(composeTargets(projects), launch, box.branch?.projectId ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);
@@ -634,7 +509,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     // Never the last project's: its branch would go into the message if Start came before this read.
     setReviewSummary(null);
     const read = new AbortController();
-    inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal).then(setReviewSummary, () => setReviewSummary(null));
+    inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal, reviewChanges === 'branch' && box.branch?.projectId === reviewProject.id ? box.branch.name : undefined).then(setReviewSummary, () => setReviewSummary(null));
     return () => read.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [!!box, reviewKind, reviewProject?.id, reviewChanges]);
@@ -986,13 +861,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
           }
         : { session: target!.session, host: target!.host, projectName: targetMachineName ? `${target!.project.name} · ${targetMachineName}` : target!.project.name };
       if (box) forgetUnsentReview();
-      props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) });
+      const sent: ComposeSent = { threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: machine ? sentTo.projectName : (result.project?.name ?? sentTo.projectName), draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}), ...(machine ? { machine } : {}) };
+      for (const tell of [props.onSent, request.onSent]) tell?.(sent);
     } catch (cause) {
       if (cause instanceof InboxHeldError && (start?.machine || targetOn) && props.onHeld) {
         // That machine's Inbox could not take it now (asleep, or slow): it waits in this Inbox's outbox and starts there
         // when it is back. Compose closes; the window's toast offers Cancel while it has not left.
         if (draft) void inboxApi.deleteDraft(draft.id).catch(() => {});
-        props.onHeld({
+        [props.onHeld, (held: ComposeHeld) => request.onSent?.({ held })].forEach((tell) => tell?.({
           key: cause.outbox.key,
           queued: cause.outbox.state === 'queued',
           machineName: cause.machine?.name ?? startMachineName ?? targetMachineName ?? 'the other machine',
@@ -1002,7 +878,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           ...(start?.clone ? { first: `clones ${start.clone.slug}` } : start?.create ? { first: `makes ${start.project.name}` } : {}),
           draftId: draft?.id ?? null,
           words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
-        });
+        }));
       } else if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();
         setError('That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.');
@@ -1494,32 +1370,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const toMachines = useMemo<ToMachine[]>(() => {
     const here: ToMachine = { key: HERE, machine: null, name: selfView?.name ?? 'This computer', self: true, asleep: false, since: null, home, groups, launch: toStart ? toStart.launch : null, notice: null };
     if (!otherMachines || !there.machines.some((m) => !m.self && m.state !== 'revoked')) return [here];
-    // A fresh Inbox's scratch folder stands in as its one project, as `startLaunch` does.
-    const withScratch = (block: NonNullable<typeof model>['launch'], machine: { id: string; name: string } | null): ToMachine['launch'] => {
-      if (!block || block.agents.length === 0) return null;
-      const on = (p: MachineLaunchProject): MachineLaunchProject => (machine ? { ...p, machine: machine.id, machine_name: machine.name } : p);
-      const projects = block.projects.length === 0 && block.scratch ? [scratchProject(block.scratch.root)] : block.projects;
-      return projects.length ? { agents: block.agents, projects: projects.map(on) } : null;
-    };
-    const linked = there.machines
-      .filter((m) => !m.self && m.state !== 'revoked')
-      .map((m): ToMachine => {
-        const read = there.reads.get(m.id);
-        const notice = machineLaunchNotice(m, read);
-        return {
-          key: m.id,
-          machine: m.id,
-          name: m.name,
-          self: false,
-          asleep: m.state === 'offline',
-          since: m.since,
-          home: read?.home ?? null,
-          groups: composeGroups(linkedSessions.get(m.id) ?? [], null, lastSent),
-          launch: notice ? null : withScratch(read?.launch, m),
-          notice,
-        };
-      });
-    return [{ ...here, launch: withScratch(model?.launch, null) }, ...linked];
+    return linkedToMachines(here, there.machines, there.reads, linkedSessions, lastSent, model?.launch);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [otherMachines, there.machines, there.reads, linkedSessions, selfView?.name, home, groups, toStart?.launch, model?.launch, lastSent]);
   const toOpensOn = targetOn ?? start?.machine ?? HERE;
@@ -1853,7 +1704,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
                   folder: tildePath(scratchFolder, home),
                   root: tildePath(launch.scratch.root, home),
                   // Trust is the agent's own: an agent that never asks for it (no `scratch_trusted`) trusts it. Trust and
-                  // start says it at the button, so the row speaks only where a press can't (a guest, a root at home).
+                  // start says it at the button, so the row speaks only where a press can't (a root at home).
                   trusted: startAgent?.scratch_trusted !== false || !!startAgent.untrusted?.[SCRATCH_PICK],
                   agentName: start.name,
                 }

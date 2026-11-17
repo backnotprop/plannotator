@@ -25,7 +25,7 @@
  * .local/proof/attachments/ with a contact sheet.
  */
 
-import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type FrameLocator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, rmSync, symlinkSync, writeFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -963,6 +963,10 @@ test('the header says the message has files: its count opens the same tiles unde
   // The keyboard opens it again; a tile there opens the file beside the thread, as the foot's does.
   await page.keyboard.press('Enter');
   await expect(band).toBeVisible();
+  // The band slides in (`ib-hatts-in`, 180 ms). A click while it moves finds the tile "not stable", and Playwright's
+  // fourth try scrolls it to the top of the thread first (`block: 'start'`), the sender row out of view, before the
+  // file opens (#3528 CI: scrollTop 17 to 62, no scroll by the page). Settled, the click is a person's: nothing scrolls.
+  await band.evaluate((el) => Promise.all(el.getAnimations().map((animation) => animation.finished)));
   await band.getByRole('button', { name: 'Open retry-plan.md' }).click();
   const pane = page.locator(`[data-attachment-pane="${world.attachments.plan}"]`);
   await expect(pane).toBeVisible();

@@ -27,7 +27,7 @@
  * PNGs land in PLANNOTATOR_OPTION_CARD_SHOTS (default .local/proof/option-card-phone).
  */
 
-import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from '@playwright/test';
+import { chromium, devices, expect, test, webkit, type Browser, type Locator, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -191,10 +191,12 @@ async function panTo(page: Page, touch: Finger, side: 'top' | 'bottom' | 'left' 
   let last = await layout(page);
   const at = middle(last);
   for (let i = 0; i < 40; i++) {
-    // Sideways, a drag from the edge steps to the next file, and one that reaches the edge hands the rest of itself to
-    // the swipe: slowly, so it is no flick, and long enough for the picture to spring back before it is measured.
+    // No drag past the stop: sideways, a drag from the edge steps to the next file, and down, one at the top of a
+    // picture at Fit closes it (a flick, as these quick drags are once each move carries its own time). Sideways, one
+    // that reaches the edge hands the rest of itself to the swipe: slowly, so it is no flick, and long enough for the
+    // picture to spring back before it is measured.
     const sideways = dx !== 0;
-    const room = side === 'left' ? last.stage.left - last.image.left : side === 'right' ? last.image.right - last.stage.right : Infinity;
+    const room = { left: last.stage.left - last.image.left, right: last.image.right - last.stage.right, top: ceiling(last) - last.image.top, bottom: last.image.bottom - floor(last) }[side];
     if (room <= 0.5) break;
     await touch.down(at.x - dx / 2, at.y - dy / 2, dx, dy, sideways ? 20 : 6);
     await touch.up();

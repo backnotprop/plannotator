@@ -1,6 +1,6 @@
 {
   "name": "plannotator",
-  "version": "0.28.64",
+  "version": "0.28.67",
   "private": true,
   "description": "Interactive Plan Review for Claude Code - annotate plans visually, share with team, automatically send feedback",
   "author": "backnotprop",
@@ -51,6 +51,9 @@
     "build:ui-css": "bun run --cwd packages/ui build:css",
     "test:e2e:inbox": "playwright test -c tests/e2e/playwright.config.ts",
     "test:e2e:quarantine": "bun run scripts/e2e-quarantine.ts",
+    "e2e:slice": "bun run scripts/e2e-slice.ts",
+    "ci:affected": "bun run scripts/ci-affected.ts",
+    "verify:inbox-live": "bun scripts/inbox-live-verify.ts",
     "test:parity:inbox-thread": "bun scripts/inbox-thread-parity.ts"
   },
   "dependencies": {

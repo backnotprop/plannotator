@@ -1,3 +1,4 @@
+/// <reference path="../globals.d.ts" />
 import React from 'react';
 import {
   MarkdownDiff as PackagedMarkdownDiff,

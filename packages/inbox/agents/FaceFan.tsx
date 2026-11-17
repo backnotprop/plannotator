@@ -8,11 +8,13 @@ import { ownIconSrc } from './ownIcons';
 import { isSetFace, setArtStyle, setFaceDrawing } from './iconSets';
 import { FAN_OPTIONS, fanLayout, type FanOptions, type FanSpot } from './fanLayout';
 import { focusBackTo } from './focusBack';
+import { PROJECT_FACE_LABEL, ProjectFaceMark, useAgentProjectTile } from './projectFace';
+import { useAgentTakesTiles } from './agentFaces';
 
 /**
  * The face picker: a half-circle fan of an agent mark's faces round the mark, like a sundial's upper half laid on its
  * side (it opens toward the content; the mark sits at the sidebar's left edge). The inner arc holds the kinds (the
- * agent's own mark, Transparent, Face), the outer one the Glass colours; near the window's edges it turns away and,
+ * agent's own mark, its project's tile, Transparent, Face), the outer one the Glass colours; near the window's edges it turns away and,
  * short of room, the colours split over two short arcs. An overlay (Base UI's Popover, portaled), so the list never
  * moves.
  *
@@ -48,10 +50,12 @@ export const SETS_LABEL = 'Sets';
 
 /**
  * The fan's arcs: the kinds inside, the Glass colours outside (one arc, or two short ones when room is short). `own`:
- * "Your own…" among the kinds (not for a linked machine's agent, AgentMark.tsx).
+ * "Your own…" among the kinds (not for a linked machine's agent, AgentMark.tsx). `project`: "From the project name"
+ * second, after the agent's own mark (approval "inbox-generated-agent-icons"; only for an agent whose project has a
+ * name to draw).
  */
-export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true): { faces: FanChoice[][]; spots: FanSpot[][] } {
-  const kinds: FanChoice[] = own ? ['agent', 'transparent', 'totman', OWN_CHOICE, SETS_CHOICE] : ['agent', 'transparent', 'totman', SETS_CHOICE];
+export function fanArcs(cx: number, cy: number, w: number, h: number, touch = false, own = true, project = false): { faces: FanChoice[][]; spots: FanSpot[][] } {
+  const kinds: FanChoice[] = ['agent', ...(project ? ['project' as const] : []), 'transparent', 'totman', ...(own ? [OWN_CHOICE as FanChoice] : []), SETS_CHOICE];
   const base = { ...FAN_OPTIONS, ...(touch ? FAN_TOUCH : {}) };
   // Near a window's edge the inner arc's five kinds would crowd: it moves out (and the colours with it) until they
   // keep their pitch, a few steps at most.
@@ -79,6 +83,8 @@ export interface FaceFanProps {
   open: boolean;
   openedBy: FanOpenedBy;
   host: string | null;
+  /** The agent's id: its project's tile ("From the project name"). Absent: no such choice. */
+  agent?: string;
   /** The agent's name, for the group's label. */
   name: string;
   face: AgentFace;
@@ -95,7 +101,7 @@ export interface FaceFanProps {
 
 const reduceMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onChoose, onOwn, onSets, onMark, onClose }: FaceFanProps) {
+export function FaceFan({ anchor, open, openedBy, host, agent, name, face, sources, onChoose, onOwn, onSets, onMark, onClose }: FaceFanProps) {
   const chosen: FanChoice = isOwnFace(face) ? OWN_CHOICE : isSetFace(face) ? SETS_CHOICE : face;
   // Measured once as it opens: the mark's box and the window (nothing is read while the pointer moves).
   const [place, setPlace] = useState<{ rect: DOMRect; w: number; h: number } | null>(null);
@@ -104,7 +110,10 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
   }, [open, anchor]);
   const touch = openedBy === 'touch';
   const own = onOwn !== undefined;
-  const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch, own) : null), [place, touch, own]);
+  // Offered for an agent with a project, on a machine that keeps a tile (a linked one from before tiles keeps none).
+  const takesTiles = useAgentTakesTiles(agent);
+  const project = useAgentProjectTile(agent) !== null && takesTiles;
+  const arcs = useMemo(() => (place ? fanArcs(place.rect.left + place.rect.width / 2, place.rect.top + place.rect.height / 2, place.w, place.h, touch, own, project) : null), [place, touch, own, project]);
   const order = useMemo<FanChoice[]>(() => arcs?.faces.flat() ?? [], [arcs]);
   // The dial's plate: a half disc out past the farthest choice, turned the way the fan opens.
   const dial = useMemo(() => {
@@ -114,15 +123,43 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
     return { reach, aim };
   }, [arcs, touch]);
   const [active, setActive] = useState(0);
-  // The first moments of an opening, while the choices travel out.
+  // An opening, until the choices rest in their places: they take no pointer (CSS), and a press that began meanwhile
+  // chooses nothing when it lands on one. Settled is the fan's box still for a frame with Base UI's starting style gone,
+  // then every choice's travel finished: a slow device's frames, not a clock, decide it.
   const [opening, setOpening] = useState(false);
-  useEffect(() => {
-    if (!open) return;
-    setOpening(true);
-    const done = setTimeout(() => setOpening(false), 240);
-    return () => clearTimeout(done);
-  }, [open]);
+  const settled = useRef(false);
+  const pressSettled = useRef(false);
   const items = useRef<(HTMLButtonElement | null)[]>([]);
+  useEffect(() => {
+    if (!open || !arcs) return;
+    settled.current = false;
+    setOpening(true);
+    let gone = false;
+    let frame = 0;
+    let box = '';
+    const settle = () => {
+      if (gone) return;
+      settled.current = true;
+      setOpening(false);
+    };
+    const look = () => {
+      const popup = items.current.find(Boolean)?.closest<HTMLElement>('.am-fan');
+      const rect = popup?.getBoundingClientRect();
+      const now = rect ? `${rect.left},${rect.top},${rect.width},${rect.height}` : '';
+      if (!popup || popup.hasAttribute('data-starting-style') || now !== box) {
+        box = now;
+        frame = requestAnimationFrame(look);
+        return;
+      }
+      const travel = items.current.slice(0, order.length).flatMap((el) => el?.getAnimations?.() ?? []);
+      void Promise.all(travel.map((animation) => animation.finished)).then(settle, settle);
+    };
+    frame = requestAnimationFrame(look);
+    return () => {
+      gone = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [open, arcs, order]);
   useEffect(() => {
     if (open) setActive(Math.max(0, order.indexOf(chosen)));
     // Only as it opens: a choice made while it is open moves nothing.
@@ -210,7 +247,7 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
 
   const still = reduceMotion();
   const container = tooltipContainerOf(anchor) ?? anchor.closest<HTMLElement>('.pn-inbox') ?? undefined;
-  const label = (f: FanChoice) => (f === 'agent' ? agentHostName(host) : f === OWN_CHOICE ? OWN_LABEL : f === SETS_CHOICE ? SETS_LABEL : FACE_LABELS[f]);
+  const label = (f: FanChoice) => (f === 'agent' || f === 'mark' ? agentHostName(host) : f === 'project' ? PROJECT_FACE_LABEL : f === OWN_CHOICE ? OWN_LABEL : f === SETS_CHOICE ? SETS_LABEL : FACE_LABELS[f]);
   let index = -1;
   return (
     <Popover.Root
@@ -240,8 +277,13 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
             aria-label={`Icon for ${name}`}
             initialFocus={openedBy === 'keyboard' ? () => items.current[Math.max(0, order.indexOf(chosen))] ?? true : false}
             finalFocus={openedBy === 'keyboard' ? focusBackTo(anchor, '.am-fan') : false}
+            onPointerDownCapture={() => {
+              pressSettled.current = settled.current;
+            }}
             onClick={(event) => {
-              if (!place || (event.target instanceof Element && event.target.closest('[data-face-choice]'))) return;
+              // A choice took the click, unless a pointer pressed before the choices rested (detail 0 is a key's click).
+              const onChoice = event.target instanceof Element && event.target.closest('[data-face-choice]');
+              if (!place || (onChoice && (event.detail === 0 || pressSettled.current))) return;
               const box = place.rect;
               if (event.clientX >= box.left && event.clientX <= box.right && event.clientY >= box.top && event.clientY <= box.bottom) onMark();
             }}
@@ -260,7 +302,7 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                   index++;
                   const at = index;
                   const spot = arcs.spots[r]![i]!;
-                  const src = f === 'agent' || f === OWN_CHOICE || f === SETS_CHOICE ? null : sources?.[f];
+                  const src = f === 'agent' || f === 'mark' || f === 'project' || f === OWN_CHOICE || f === SETS_CHOICE ? null : sources?.[f];
                   const style = { '--x': `${spot.x}px`, '--y': `${spot.y}px`, '--d': `${at * 5}ms`, '--dr': `${(order.length - 1 - at) * 3}ms` } as CSSProperties;
                   return (
                     <button
@@ -272,6 +314,7 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                       role="radio"
                       aria-checked={f === chosen}
                       aria-label={label(f)}
+                      title={f === 'project' ? label(f) : undefined}
                       tabIndex={at === active ? 0 : -1}
                       className="am-fan-i"
                       data-face-choice={f}
@@ -281,11 +324,18 @@ export function FaceFan({ anchor, open, openedBy, host, name, face, sources, onC
                       onPointerDown={(event: ReactPointerEvent) => {
                         if (event.pointerType !== 'touch') event.preventDefault();
                       }}
-                      onClick={() => (f === OWN_CHOICE ? onOwn?.() : f === SETS_CHOICE ? onSets() : onChoose(f))}
+                      onClick={(event) => {
+                        if (event.detail !== 0 && !pressSettled.current) return;
+                        if (f === OWN_CHOICE) onOwn?.();
+                        else if (f === SETS_CHOICE) onSets();
+                        else onChoose(f);
+                      }}
                     >
-                      <span className="am-fan-f" data-kind={f === 'agent' ? 'agent' : f.startsWith('glass') || f === 'yellow' ? 'glass' : f} aria-hidden="true">
+                      <span className="am-fan-f" data-kind={f === 'agent' || f === 'project' ? f : f.startsWith('glass') || f === 'yellow' ? 'glass' : f} aria-hidden="true">
                         {f === 'agent' ? (
                           <HostMark host={host} />
+                        ) : f === 'project' ? (
+                          <ProjectFaceMark agent={agent} host={host} badge={false} />
                         ) : f === OWN_CHOICE ? (
                           // The agent's own picture when it shows one (a still), else a dashed "+".
                           isOwnFace(face) ? (

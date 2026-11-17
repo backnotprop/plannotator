@@ -1,6 +1,6 @@
 /**
  * Settings → About's Privacy part (the daily ping, packages/shared/daily-ping.ts):
- * on the computer's own page and on a tailnet guest's, below the version; the
+ * on a page with and without the update controls, below the version; the
  * one off switch (NO_ANON_PING) as code; the privacy policy in a new tab; and
  * no switch, since the environment is the only way to turn it off.
  */
@@ -45,7 +45,7 @@ function render(updates: boolean) {
 
 for (const [page, updates] of [
   ["the computer's own page", true],
-  ["a tailnet guest's page", false],
+  ["a page that offers no updates", false],
 ] as const) {
   test.skipIf(!hasDom)(`${page}: Privacy below the version, NO_ANON_PING as code, the policy in a new tab, no switch`, () => {
     const el = render(updates);

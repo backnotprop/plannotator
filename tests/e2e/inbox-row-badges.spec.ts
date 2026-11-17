@@ -34,7 +34,7 @@
  * an iPhone) land in PLANNOTATOR_ROW_BADGES_SHOTS, or .local/proof/row-badges/.
  */
 
-import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from './inbox-test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -92,7 +92,23 @@ async function hoverBadge(page: Page, threadId: string): Promise<void> {
   await page.mouse.move(5, 5);
   await expect(card(page)).toHaveCount(0);
   const words = page.locator(`[data-thread-id="${threadId}"] [data-wait-words]`);
-  await ((await words.count()) ? words : filled(page, threadId)).hover();
+  // A line above the list (the notification line waits for the agents' read) can land after the rows draw and push
+  // them down, out from under a pointer already resting there. And the words come a moment after the rows (they wait
+  // for the list's width: `FULL_WORDS_MIN_LIST_WIDTH`), so a row read just after a load has only its marks, which the
+  // hover action covers once the row is hovered. Only in those two cases is the row hovered again, on the words where
+  // they came: a target that stayed under the pointer must open the card.
+  for (let attempt = 1; ; attempt++) {
+    const onWords = (await words.count()) > 0;
+    const target = onWords ? words : filled(page, threadId);
+    await target.hover();
+    const rested = await target.boundingBox();
+    if (await card(page).waitFor({ state: 'visible', timeout: 3_000 }).then(() => true, () => false)) return;
+    const now = await target.boundingBox();
+    const stayed = rested !== null && now !== null && Math.abs(rested.x - now.x) < 1 && Math.abs(rested.y - now.y) < 1;
+    const wordsCame = !onWords && (await words.count()) > 0;
+    if ((stayed && !wordsCame) || attempt === 3) break;
+    await page.mouse.move(5, 5);
+  }
   await expect(card(page)).toBeVisible();
 }
 
@@ -199,8 +215,10 @@ test('desktop: one question mark in its fill step, the words in full-width mode,
   }
   // One accessible name per row, its words short; the card's words as its description.
   const row = page.locator(`.ib-row[data-thread-id="${world.stopped}"]`);
-  const described = await row.getAttribute('aria-describedby');
+  // The row's description: the card's words, then the drag help every wide and three-line row has (listDrops.tsx).
+  const [described, help] = (await row.getAttribute('aria-describedby'))?.split(' ') ?? [];
   expect(described).toBeTruthy();
+  expect(help).toBe('ib-thread-drag-help');
   await expect(page.locator(`[id="${described}"]`)).toHaveText(/^Stopped: The retry worker cannot ship without this\. Also holds up: The retry worker; The admin retry view\.$/);
 
   // Left to right: the agents' marks and the project, the title cell, then the words, the badge, the count and the

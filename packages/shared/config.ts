@@ -16,6 +16,8 @@ import {
   openSync,
   writeSync,
   closeSync,
+  fsyncSync,
+  utimesSync,
   statSync,
   unlinkSync,
   renameSync,
@@ -29,6 +31,7 @@ import { isAnnotateAgentTerminalSide, type AnnotateAgentTerminalSide } from './a
 import { parseAgentSwitchConfig, agentSwitchConfigValue, type AgentSwitchConfigValue } from './agent-switch';
 import { isLocalhostSubdomain } from './loopback-host';
 import { INBOX_TOOL_NAME, inboxReminderCustomText, inboxReminderFor, inboxReminderRulesText } from './inbox/connection';
+import { parseAnnotateView, type AnnotateView } from '@plannotator/core/config-types';
 export type { DefaultDiffType, DiffLineBgIntensity, DiffOptions, JjDefaultDiffType, ReviewDefaults, ThemeConfig, FaviconStyle };
 
 /** Single conventional comment label entry stored in config.json */
@@ -269,6 +272,14 @@ export interface PlannotatorConfig {
    */
   annotateHistory?: boolean;
   /**
+   * The view an annotate session opens in: "wide", "focus" or "edit" (the
+   * document toolbar's Wide | Focus | Edit). Unset or invalid keeps today's
+   * default (panels as they are, not editing); a view the document cannot
+   * use falls back to that default too. Config only: a click in the toolbar
+   * changes the view for that session and is never written back here.
+   */
+  annotateView?: AnnotateView;
+  /**
    * Durably archive every submitted review under ~/.plannotator/feedback/
    * (or PLANNOTATOR_DATA_DIR): one append-only JSONL record per submission
    * plus a markdown sidecar for the ones that carry content. NOTE: this
@@ -381,13 +392,6 @@ export interface PlannotatorConfig {
    */
   inboxDebug?: boolean;
   /**
-   * The Plannotator Inbox keeps its records in SQLite (`inbox/inbox.db`) instead of the JSONL files, as
-   * `PLANNOTATOR_INBOX_SQLITE=1`. Off by default, for everyone. Config-only, read when the Inbox starts: on moves
-   * the files into the database (kept as a dated backup); turned off again, everything goes back into the files
-   * (`packages/shared/inbox/store-log/sqlite/open-store.ts`).
-   */
-  inboxSqlite?: boolean;
-  /**
    * The Plannotator Inbox's browser notifications, set from the Inbox page
    * (its one-time ask and its Settings), kept here rather than in the page's
    * localStorage so they survive the Inbox moving to another port (another
@@ -439,6 +443,11 @@ export interface PlannotatorConfig {
   inboxRows?: string[];
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
+  /**
+   * The list's "Show archived" switch (⋮ menu, POST /api/inbox/settings `{ show_archived }`), kept the same on every
+   * linked machine: `rev` counts saves across them, `by` is the machine that saved it. Unset: off.
+   */
+  inboxShowArchived?: { on: boolean; rev: number; by: string | null };
   /**
    * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
    * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
@@ -526,6 +535,8 @@ export interface PlannotatorConfig {
    * 2026-11-04).
    */
   inboxBoard?: boolean;
+  /** Routines (packages/server/inbox-scheduled.ts): off unless the person turned them on. Not offered on Windows. */
+  inboxScheduledThreads?: boolean;
   /**
    * Thread steps (approval "inbox-thread-steps", 2026-11-03): something the
    * person turns on, off by default. On: the thread's steps button, the
@@ -597,8 +608,9 @@ export interface PlannotatorConfig {
    * each new pull request against them. Empty or unset `rules`: nothing runs.
    * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
    * The rules are the person's own words: never logged, never sent in telemetry.
+   * `branches` (Branch reviews): rank the branches agents report too; off unless `true`.
    */
-  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null };
+  inboxPullRisk?: { rules?: string; provider?: string | null; model?: string | null; branches?: boolean };
   /**
    * Chapter diagrams, under Code review (Settings → Capabilities → Chapter diagrams): on unless `false`. On, the
    * guide brief and the review skills offer agents one diagram per chapter (`sections[].diagram`). Off, no agent
@@ -617,11 +629,33 @@ export interface PlannotatorConfig {
    */
   inboxShape?: boolean;
   /**
+   * Plans in the Inbox (packages/shared/plans/switch.ts): the plan library of every plan plan review handled. Off
+   * unless the person turns it on (`plannotator plans`, or `POST /api/inbox/settings` `{ plans: { on } }` from the
+   * window); `plannotator plans off` turns it off and keeps the library. Off: no `/api/plans` route, no import and
+   * no read of the library. Read on every request.
+   */
+  inboxPlans?: boolean;
+  /** The Spaces home's view, the person's choice (`POST /api/plans/view`): "cards" unless they chose "list". */
+  inboxSpacesView?: "cards" | "list";
+  /**
    * System in the Inbox (approval "system-inbox"): a drawing of each project's code, kept current by an agent.
    * Shown only while Code review is on. Off unless turned on; config only until Settings → Capabilities' switch
    * lands. Read on every request.
    */
   inboxSystem?: boolean;
+  /**
+   * A preview of the Inbox's second thread pane ("Open to the side" in a row's menu): off unless `true`. Config only, no
+   * Settings row; the settings read carries `split_view` only while on. Read on every request.
+   */
+  inboxSplitView?: boolean;
+  /**
+   * Branch reviews in the Inbox (docs/agent-guides/inbox-files-and-guides.md, "Branch reviews"): agents report a branch
+   * ready for review (`send_message`'s `branch`), each report one review thread per project and branch in Reviews, and
+   * the by-hand list of branches nobody reported. Off unless `true`, and only while Code review is on. Config only, no
+   * Settings row; the Reviews read (`GET /api/inbox/reviews`) carries `branch_reviews` only while on. Read on every
+   * request.
+   */
+  inboxBranchReviews?: boolean;
   /**
    * Who the one-time "themes" dialog is for (approval "inbox-theme-chooser";
    * packages/shared/inbox/theme-chooser.ts). Written only by the Inbox server,
@@ -689,6 +723,7 @@ export interface PlannotatorConfig {
     /** The Sidebar tip (packages/shared/inbox/sidebar-tip.ts): stamped once when shown, outside the line. */
     sidebar_tip?: { shownAt?: string; key?: string };
   };
+  /** `enabled` / `volume` are settings (config.json); `dialogDueFor` / `dialogShownFor` are machine state (state.json). */
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
@@ -740,6 +775,29 @@ export interface PlannotatorConfig {
    * a tagged machine, which has no owner. Config only. Default: none.
    */
   inboxTailscaleAllow?: string[];
+  inboxCloudflareAccess?: {
+    on?: boolean;
+    host?: string;
+    team?: string;
+    aud?: string;
+    allow?: string[];
+    port?: number;
+    account?: string;
+    zone?: string;
+    tunnel?: string;
+    app?: string;
+    dnsRecord?: string;
+  };
+  /**
+   * Exact origins of an app on this computer that may show the Plannotator
+   * Inbox window in a frame (#3299), e.g. "app://myapp" or
+   * "http://localhost:5173": loopback http(s) (no port means the default port only), or an app scheme.
+   * Anything else is dropped (packages/server/inbox-framing.ts). Applies to
+   * the window's own port only, never the tailnet. Config only, read once
+   * when the Inbox starts. Default: none (nothing may frame it).
+   */
+  inboxFrameAncestors?: string[];
+  gitlabHosts?: string[];
   /**
    * Launch agents from the Inbox (New message's "New session" rows;
    * packages/server/inbox-launch.ts). `enabled`: Settings → Agents' "Start
@@ -954,6 +1012,203 @@ function getConfigDir(): string {
 function getConfigPath(): string {
   return join(getConfigDir(), "config.json");
 }
+function getStatePath(): string {
+  return join(getConfigDir(), "state.json");
+}
+
+/**
+ * Machine state (#2852): records the server writes by itself (one-time dialogs, their claims and version
+ * stamps), kept in `state.json` beside config.json so config.json changes only when the person changes a
+ * setting and can live in a dotfiles repo. loadConfig returns both files as one; saveConfig writes these keys
+ * to state.json only. A copy still in config.json (an older version, another machine sharing the file, a test
+ * seed) is never removed or rewritten: other machines and older versions keep reading it, and loadConfig merges
+ * it with state.json's (mergeMachineRecord).
+ */
+const MACHINE_STATE_KEYS = [
+  "inboxAgentNotes", "inboxTour", "inboxBoardIntro", "inboxListIntro", "inboxVoiceIntro", "inboxSnoozeIntro",
+  "inboxReveals", "starAsk", "inboxThemeChooser", "inboxPriorityIntro",
+] as const;
+type MachineStateKey = (typeof MACHINE_STATE_KEYS)[number];
+/** Machine-state fields inside a key whose other fields are settings (`inboxSound.enabled` / `volume`). */
+const MACHINE_STATE_FIELDS: Readonly<Record<string, readonly string[]>> = { inboxSound: ["dialogDueFor", "dialogShownFor"] };
+
+function pickFields(value: Record<string, unknown>, fields: readonly string[], keep: boolean): Record<string, unknown> | undefined {
+  return withoutUndefined(Object.fromEntries(Object.entries(value).filter(([field]) => fields.includes(field) === keep)));
+}
+
+const STATE_IS_FOLDER = "it is a folder";
+
+/**
+ * Write state.json, under saveConfig's lock. One that exists but holds no state this version can read is set aside
+ * first (state.json.corrupt-<time>, never deleted) with one warning, so the records in it can still be recovered; a
+ * folder there is left alone and the write refused with a warning naming it. Returns whether state.json holds `state`.
+ */
+function writeState(state: Record<string, unknown>, read: ReturnType<typeof readState>): boolean {
+  const statePath = getStatePath();
+  try {
+    if (read.problem === STATE_IS_FOLDER) {
+      process.stderr.write(`[plannotator] Warning: not saving state.json because ${read.problem}; remove ${statePath} to save the Inbox's dialog records again.\n`);
+      return false;
+    }
+    if (read.problem) {
+      const aside = `${statePath}.corrupt-${new Date().toISOString().replace(/[:.]/g, "-")}`;
+      renameSync(statePath, aside);
+      process.stderr.write(`[plannotator] Warning: state.json could not be used (${read.problem}); kept it as ${aside} and started a new one.\n`);
+    }
+    const text = JSON.stringify(state, null, 2) + "\n";
+    if (text !== read.raw) writeConfigAtomic(statePath, text);
+    return true;
+  } catch (e) {
+    process.stderr.write(`[plannotator] Warning: failed to write state.json: ${e}\n`);
+    return false;
+  }
+}
+
+/**
+ * state.json as text and object. Missing or empty: no state. `problem`: it exists but holds no state this version
+ * can read (not JSON, not an object, unreadable, a folder); it reads as no state, and a save sets it aside first.
+ */
+function readState(): { raw: string | null; state: Record<string, unknown>; problem?: string } {
+  let raw: string;
+  try {
+    raw = readFileSync(getStatePath(), "utf-8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") return { raw: null, state: {} };
+    return { raw: null, state: {}, problem: code === "EISDIR" ? STATE_IS_FOLDER : `it could not be read (${code ?? String(e)})` };
+  }
+  const text = raw.replace(/^﻿/, "");
+  if (text.trim() === "") return { raw, state: {} };
+  try {
+    const state = plainRecord(JSON.parse(text));
+    return state ? { raw, state } : { raw, state: {}, problem: "it is not a JSON object" };
+  } catch {
+    return { raw, state: {}, problem: "it is not valid JSON" };
+  }
+}
+
+/** An ISO time (`2026-11-06T…`): a stamp, compared as text. */
+const STAMP = /^\d{4}-\d{2}-\d{2}T/;
+/** Stamps whose earliest value is the true one: when a reveal first became next, Snooze's first use. */
+const EARLIEST_STAMPS = new Set(["waitingSince", "firstUseAt"]);
+
+/**
+ * One record that both files hold, field by field, so the more protective copy wins: a list is the union (an agent
+ * asked anywhere stays asked), a stamp beats no stamp (a dialog shown anywhere stays shown) and the later stamp beats
+ * the earlier (the spacing clocks run from the last dialog; EARLIEST_STAMPS the other way), `true` beats `false`,
+ * the larger number wins. Anything else, or two kinds that differ: state.json's.
+ */
+function mergeStamps(fromConfig: unknown, fromState: unknown, earliest = false): unknown {
+  if (fromConfig === undefined || fromConfig === null) return fromState ?? fromConfig;
+  if (fromState === undefined || fromState === null) return fromConfig;
+  if (Array.isArray(fromConfig) && Array.isArray(fromState)) {
+    const seen = new Set(fromState.map((item) => JSON.stringify(item)));
+    return [...fromState, ...fromConfig.filter((item) => !seen.has(JSON.stringify(item)))];
+  }
+  const a = plainRecord(fromConfig);
+  const b = plainRecord(fromState);
+  if (a && b) {
+    const out: Record<string, unknown> = {};
+    for (const key of new Set([...Object.keys(b), ...Object.keys(a)])) out[key] = mergeStamps(a[key], b[key], earliest || EARLIEST_STAMPS.has(key));
+    return out;
+  }
+  if (typeof fromConfig === "string" && typeof fromState === "string" && STAMP.test(fromConfig) && STAMP.test(fromState)) {
+    return (earliest ? fromConfig < fromState : fromConfig > fromState) ? fromConfig : fromState;
+  }
+  if (typeof fromConfig === "boolean" && typeof fromState === "boolean") return fromConfig || fromState;
+  if (typeof fromConfig === "number" && typeof fromState === "number") return Math.max(fromConfig, fromState);
+  return fromState;
+}
+
+/** A record's version (`inboxListIntro`: none is version 1). */
+const recordVersion = (record: Record<string, unknown>, none?: number) => (typeof record.version === "number" ? record.version : none);
+
+/** Which copy a starAsk record is further along in: answered, then shown, then only checked. */
+const starAskRank = (record: Record<string, unknown>) => (record.answer ? 2 : record.shownAt ? 1 : 0);
+const starAskTime = (record: Record<string, unknown>) => String(record.answeredAt ?? record.shownAt ?? record.checkedAt ?? "");
+
+/**
+ * When config.json still holds a record that state.json holds too: an older Plannotator (an older Pi extension, a
+ * downgrade) or another machine sharing config.json may have written it after this one wrote state.json, so neither
+ * copy simply wins. Per key:
+ *
+ * | key                                     | both files hold it                                                      |
+ * | --------------------------------------- | ----------------------------------------------------------------------- |
+ * | inboxAgentNotes                         | `asked` union, `offered` either; `auto` (notes not yet said): state.json |
+ * | inboxTour                               | higher `version` whole; same: stamps (mergeStamps), `notify_again` state |
+ * | inboxListIntro                          | higher `version` whole (none: 1); same: stamps                          |
+ * | starAsk                                 | the copy further along (answered, shown, checked) whole; tie: later     |
+ * | inboxReveals                            | stamps: later spacing clocks, earliest `waitingSince`, `shownFor` union |
+ * | inboxSnoozeIntro                        | stamps, earliest `firstUseAt`                                           |
+ * | inboxBoardIntro, inboxVoiceIntro,       | stamps: shown, skipped, used or not-needed anywhere stays so            |
+ * | inboxThemeChooser, inboxPriorityIntro   |                                                                         |
+ * | inboxSound dialog fields                | newer `dialogShownFor` and `dialogDueFor`; due only while the due       |
+ * |                                         | version is newer than the shown one (soundDialog)                       |
+ */
+function mergeMachineRecord(key: MachineStateKey, fromConfig: unknown, fromState: unknown): unknown {
+  const a = plainRecord(fromConfig);
+  const b = plainRecord(fromState);
+  if (!a || !b) return fromState ?? fromConfig;
+  if (key === "starAsk") {
+    const order = starAskRank(a) - starAskRank(b) || (starAskTime(a) > starAskTime(b) ? 1 : 0);
+    return order > 0 ? a : b;
+  }
+  if (key === "inboxTour" || key === "inboxListIntro") {
+    const none = key === "inboxListIntro" ? 1 : undefined;
+    const va = recordVersion(a, none);
+    const vb = recordVersion(b, none);
+    if (va !== undefined && vb !== undefined && va !== vb) return va > vb ? a : b;
+  }
+  const merged = mergeStamps(a, b) as Record<string, unknown>;
+  if (key === "inboxTour") merged.notify_again = b.notify_again;
+  if (key === "inboxAgentNotes") merged.auto = b.auto;
+  return withoutUndefined(merged) ?? {};
+}
+
+/** `1.2.3` against `1.2.4`: negative, zero or positive; null when either is not a version. */
+function compareVersions(a: string, b: string): number | null {
+  const parse = (v: string) => /^(\d+)\.(\d+)\.(\d+)/.exec(v)?.slice(1).map(Number);
+  const pa = parse(a);
+  const pb = parse(b);
+  if (!pa || !pb) return null;
+  return pa[0] - pb[0] || pa[1] - pb[1] || pa[2] - pb[2];
+}
+function newerVersion(fromConfig: unknown, fromState: unknown): string | undefined {
+  const a = typeof fromConfig === "string" && fromConfig !== "" ? fromConfig : undefined;
+  const b = typeof fromState === "string" && fromState !== "" ? fromState : undefined;
+  if (a === undefined || b === undefined) return b ?? a;
+  return (compareVersions(a, b) ?? 0) > 0 ? a : b;
+}
+
+/**
+ * The sound dialog's fields from both files: the newer of each, and due only while the due version is newer than the
+ * shown one, so an old `dialogShownFor` left in config.json never hides a dialog that is due. Versions that cannot be
+ * compared: state.json's own fields.
+ */
+function soundDialog(fromConfig: Record<string, unknown>, fromState: Record<string, unknown>): Record<string, unknown> {
+  const shown = newerVersion(fromConfig.dialogShownFor, fromState.dialogShownFor);
+  const due = newerVersion(fromConfig.dialogDueFor, fromState.dialogDueFor);
+  if (due === undefined) return shown === undefined ? {} : { dialogShownFor: shown };
+  if (shown === undefined) return { dialogDueFor: due };
+  const order = compareVersions(due, shown);
+  if (order === null) return pickFields(fromState, MACHINE_STATE_FIELDS.inboxSound, true) ?? {};
+  return order > 0 ? { dialogDueFor: due } : { dialogShownFor: shown };
+}
+
+/** config.json's settings with state.json's machine state merged in (mergeMachineRecord). */
+function withMachineState(config: Record<string, unknown>, state: Record<string, unknown>): PlannotatorConfig {
+  const merged: Record<string, unknown> = { ...config };
+  for (const key of MACHINE_STATE_KEYS) {
+    if (state[key] !== undefined) merged[key] = config[key] === undefined ? state[key] : mergeMachineRecord(key, config[key], state[key]);
+  }
+  for (const [key, fields] of Object.entries(MACHINE_STATE_FIELDS)) {
+    const saved = plainRecord(state[key]);
+    if (!saved) continue;
+    const kept = plainRecord(config[key]) ?? {};
+    merged[key] = withoutUndefined({ ...pickFields(kept, fields, false), ...soundDialog(pickFields(kept, fields, true) ?? {}, saved) });
+  }
+  return merged as PlannotatorConfig;
+}
 
 /** Chapter diagrams (config.json `inboxChapterDiagrams`): on unless the person turned it off. */
 export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxChapterDiagrams">): boolean {
@@ -961,19 +1216,23 @@ export function inboxChapterDiagramsOn(config: Pick<PlannotatorConfig, "inboxCha
 }
 
 /**
- * Load config from ~/.plannotator/config.json.
+ * Load config from ~/.plannotator/config.json, with the machine state in
+ * state.json beside it (MACHINE_STATE_KEYS).
  * Returns {} on missing file or malformed JSON. `quiet`: no warning for a
  * malformed file (a read that must not add a line to what a command printed
  * before it existed: a later read in the same command still warns).
  */
 export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig {
+  return withMachineState(loadSettings(options), readState().state);
+}
+
+function loadSettings(options: { quiet?: boolean }): Record<string, unknown> {
   try {
     const configPath = getConfigPath();
     if (!existsSync(configPath)) return {};
     // A UTF-8 BOM (Notepad's "UTF-8 with BOM") is not part of the JSON.
     const raw = readFileSync(configPath, "utf-8").replace(/^\uFEFF/, "");
-    const parsed = JSON.parse(raw);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+    return plainRecord(JSON.parse(raw)) ?? {};
   } catch (e) {
     if (!options.quiet) process.stderr.write(`[plannotator] Warning: failed to read config.json: ${e}\n`);
     return {};
@@ -981,9 +1240,10 @@ export function loadConfig(options: { quiet?: boolean } = {}): PlannotatorConfig
 }
 
 /**
- * config.json as saveConfig reads it before a merge. A missing file (or one
- * holding only whitespace) is an empty config, so a first save creates it as
- * before. A file that exists but cannot be read, or is not a JSON object, is
+ * config.json as saveConfig reads it before a merge. A missing file, or one
+ * holding only whitespace, is an empty config: there is nothing in it to lose,
+ * so a save writes it (writeConfigAtomic never leaves one empty). A file that
+ * exists but cannot be read, or whose content is not a JSON object, is
  * refused: merging onto loadConfig's `{}` and writing would replace every
  * setting in it with the one key being saved.
  */
@@ -1126,12 +1386,42 @@ function releaseConfigLock(lockPath: string): void {
   } catch { /* already gone (stale takeover by another writer): nothing to do */ }
 }
 
+/** Rename errors Windows gives while another program (antivirus, a sync client, an indexer) holds the file for a moment. */
+const RENAME_RETRY_CODES = new Set(["EPERM", "EACCES", "EBUSY"]);
+/** Backoff between rename tries: about 2 s in all. The config lock is touched before each wait so it never looks stale meanwhile. */
+const RENAME_RETRY_DELAYS_MS = [10, 20, 40, 80, 160, 320, 500, 500, 500];
+/** fsync errors that mean "this filesystem has no fsync", not "the data did not reach the disk". */
+const FSYNC_UNSUPPORTED_CODES = new Set(["EINVAL", "ENOTSUP", "EOPNOTSUPP"]);
+
+let renameForWrite: (from: string, to: string) => void = renameSync;
+let fsyncForWrite: (handle: number) => void = fsyncSync;
+let sleepForRetry: (ms: number) => void = sleepSync;
 /**
- * Write config.json in one step so a concurrent reader never observes a
- * half-written file: readers deliberately take no lock, and loadConfig treats
- * malformed JSON as an empty config, which would silently present as "all
- * settings reset". Writes through an existing symlink rather than replacing
- * it, so a dotfile-managed config.json keeps its link.
+ * Test-only seam: replaces the rename, fsync and retry wait writeConfigAtomic uses, so a test can make them fail
+ * (or skip the real waits) without a broken disk. Null, or a field left out, restores the real one.
+ */
+export function __setConfigWriteForTest(
+  seams: { rename?: (from: string, to: string) => void; fsync?: (handle: number) => void; sleep?: (ms: number) => void } | null,
+): void {
+  renameForWrite = seams?.rename ?? renameSync;
+  fsyncForWrite = seams?.fsync ?? fsyncSync;
+  sleepForRetry = seams?.sleep ?? sleepSync;
+}
+
+/**
+ * Write config.json (or state.json) in one step so a concurrent reader never observes a half-written file: readers
+ * deliberately take no lock, and loadConfig treats malformed JSON as an empty config, which would silently present
+ * as "all settings reset". Writes through an existing symlink rather than replacing it, so a dotfile-managed
+ * config.json keeps its link: the temp file goes beside the link's target, in the target's folder, so the rename
+ * never crosses a device.
+ *
+ * The file itself is never written in place. A plain write empties it first, so one that stopped partway (disk full,
+ * an I/O error, the process killed) left config.json empty, and the next save then wrote only its own keys. The temp
+ * file is fsynced before the rename, and an fsync error (a full disk or quota on a network home can show up only
+ * there) stops the write before the rename, unless it only says the filesystem has no fsync. A rename that fails
+ * with a Windows lock error is retried for about 2 s; when the temp file cannot be written, synced or renamed (a
+ * folder that is not writable, a full disk, a file still held after the retries), this throws and the file keeps
+ * its old bytes, and the caller reports the save as failed.
  */
 function writeConfigAtomic(configPath: string, contents: string): void {
   let targetPath = configPath;
@@ -1145,16 +1435,45 @@ function writeConfigAtomic(configPath: string, contents: string): void {
     if (existsSync(targetPath)) mode = statSync(targetPath).mode & 0o777;
   } catch { /* new file: keep the private default */ }
   const tempPath = `${targetPath}.${process.pid}.${Math.random().toString(36).slice(2, 10)}.tmp`;
+  let handle: number | null = null;
   try {
-    writeFileSync(tempPath, contents, { encoding: "utf-8", mode });
-    renameSync(tempPath, targetPath);
-  } catch {
+    handle = openSync(tempPath, "wx", mode);
+    writeFileSync(handle, contents, "utf-8");
+    // On disk before the rename, so a crash right after it cannot leave a renamed but empty file, and a write-back
+    // error (ENOSPC, EDQUOT, EIO) that only fsync reports never renames a short temp file over config.json.
+    try {
+      fsyncForWrite(handle);
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (!code || !FSYNC_UNSUPPORTED_CODES.has(code)) throw e;
+    }
+    closeSync(handle);
+    handle = null;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        renameForWrite(tempPath, targetPath);
+        break;
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (attempt >= RENAME_RETRY_DELAYS_MS.length || !code || !RENAME_RETRY_CODES.has(code)) throw e;
+        // The wait runs under saveConfig's lock: keep it fresh so no other writer takes it over as stale.
+        try {
+          const now = new Date();
+          utimesSync(getConfigLockPath(), now, now);
+        } catch { /* no lock held (writing unlocked): nothing to refresh */ }
+        sleepForRetry(RENAME_RETRY_DELAYS_MS[attempt]);
+      }
+    }
+  } catch (e) {
+    if (handle !== null) {
+      try {
+        closeSync(handle);
+      } catch { /* already closed */ }
+    }
     try {
       unlinkSync(tempPath);
     } catch { /* nothing to clean up */ }
-    // Same-directory rename should not fail, but a write that lands is better
-    // than a settings change that is lost to an exotic filesystem.
-    writeFileSync(targetPath, contents, "utf-8");
+    throw e;
   }
 }
 
@@ -1170,7 +1489,9 @@ function writeConfigAtomic(configPath: string, contents: string): void {
  * A config.json that exists but cannot be read or is not a JSON object is
  * never written over (readConfigForSave): the save is refused with a warning
  * and the file is left in place, so fixing it brings every setting back.
- * Returns whether the file was written; callers that report a save check it
+ * Machine state goes to state.json instead (MACHINE_STATE_KEYS), and
+ * config.json is rewritten only when its settings change.
+ * Returns whether the save landed; callers that report a save check it
  * (or read the value back).
  */
 export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
@@ -1219,8 +1540,37 @@ export function saveConfig(partial: Partial<PlannotatorConfig>): boolean {
       merged[key] = key === "prompts" ? mergePromptConfig(cur as PromptConfig, par as PromptConfig) : { ...cur, ...par };
     };
     for (const key of ["experimental", "diffOptions", "reviewDefaults", "theme", "reviewAnalysis", "prompts", "packageChanges", "inboxLaunch"] as const) nested(key);
-    writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
-    saved = true;
+    // Machine state named by the save goes to state.json only (MACHINE_STATE_KEYS): config.json's copy, if any, is
+    // kept as it is, for other machines and older versions that read it.
+    const stateRead = readState();
+    const state = { ...stateRead.state };
+    let stateNamed = false;
+    for (const key of MACHINE_STATE_KEYS) {
+      if (!(key in partial)) continue;
+      stateNamed = true;
+      state[key] = (partial as Record<string, unknown>)[key];
+      merged[key] = (current as Record<string, unknown>)[key];
+    }
+    for (const [key, fields] of Object.entries(MACHINE_STATE_FIELDS)) {
+      if (!(key in partial)) continue;
+      stateNamed = true;
+      const par = (partial as Record<string, unknown>)[key];
+      const cur = plainRecord((current as Record<string, unknown>)[key]);
+      const parFields = plainRecord(par);
+      state[key] = parFields && pickFields(parFields, fields, true);
+      if (parFields || par === undefined) {
+        // The settings fields from the save, each in its place; config.json's own dialog fields kept.
+        const next: Record<string, unknown> = {};
+        for (const [field, value] of Object.entries(cur ?? {})) next[field] = fields.includes(field) ? value : parFields?.[field];
+        for (const [field, value] of Object.entries(parFields ?? {})) if (!fields.includes(field) && !(field in next)) next[field] = value;
+        merged[key] = withoutUndefined(next);
+      }
+    }
+    let stateSaved = true;
+    if (stateNamed) stateSaved = writeState(state, stateRead);
+    // config.json is written only when its settings change: a save of machine state alone never touches it.
+    if (JSON.stringify(merged) !== JSON.stringify(current)) writeConfigAtomic(getConfigPath(), JSON.stringify(merged, null, 2) + "\n");
+    saved = stateSaved;
   } catch (e) {
     process.stderr.write(`[plannotator] Warning: failed to write config.json: ${e}\n`);
   } finally {
@@ -1264,6 +1614,7 @@ export function getServerConfig(
   agentTerminalSide?: PlannotatorConfig["agentTerminalSide"];
   agentTerminalDefaultAgent?: string;
   agentSwitch?: AgentSwitchConfigValue;
+  annotateView?: AnnotateView;
   autoUpdate: boolean;
   autoUpdateEnv?: boolean;
   updateCheck: boolean;
@@ -1282,6 +1633,7 @@ export function getServerConfig(
   const updateCheckEnv = parseUpdateCheckEnv();
   const agentToolEnv = parseAgentToolEnv();
   const agentToolHost = agentToolHostOf(agentToolIntegration);
+  const annotateView = parseAnnotateView(cfg.annotateView);
   return {
     displayName: cfg.displayName,
     diffOptions: cfg.diffOptions,
@@ -1304,6 +1656,8 @@ export function getServerConfig(
         agentTerminalDefaultAgent: cfg.agentTerminalDefaultAgent,
       }),
     ...agentSwitchAdvert(cfg.agentSwitch),
+    // Only a known view is advertised; a typo leaves the page on today's default.
+    ...(annotateView !== undefined && { annotateView }),
     // Always explicit (the config-file value, default false) so a stale
     // cookie can never show the toggle on while the config says off.
     // autoUpdateEnv carries PLANNOTATOR_AUTO_UPDATE when it overrides the file.
