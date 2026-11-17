@@ -367,7 +367,6 @@ packages/review-editor/App.commitsJj.test.tsx
 packages/review-editor/App.emptyDiffSwitch.test.tsx
 packages/review-editor/App.sessionTitle.test.tsx
 packages/review-editor/App.diffLoadFailure.test.tsx
-packages/review-editor/App.planLookTwoTabs.test.tsx
 packages/review-editor/components/AnnotationToolbar.placement.test.tsx
 packages/review-editor/dock/panels/ReviewPROverviewPanel.ui.test.tsx
 packages/review-editor/components/FileHeader.edit.test.tsx
