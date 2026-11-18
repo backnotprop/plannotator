@@ -18,9 +18,10 @@ export const OUT = {
   door: 'apps/mobile/contract/door.json',
   schema: 'apps/mobile/contract/schema/wire.schema.json',
   swift: 'apps/mobile/contract/generated/swift/Wire.swift',
+  required: 'apps/mobile/contract/schema/required.json',
 } as const;
 
-/** The contract's number (a whole number; it rises when an app built from an older contract would misread the door). */
+/** The contract's number (a whole number; it rises only for a breaking wire change: one an app built from the older contract would misread). VERSION is the one contract file that holds it. */
 export const VERSION_FILE = 'apps/mobile/contract/VERSION';
 
 export function contractVersion(): number {
@@ -35,6 +36,9 @@ export function readRepoText(path: string): string {
 }
 
 export type Output = { path: string; text: string };
+
+/** The one command that brings every generated contract file up to date (scripts/mobile/all.ts). */
+export const REGENERATE = 'bun scripts/mobile/all.ts';
 
 /** JSON with two-space indents and a final newline: the same value always gives the same bytes. */
 export function jsonText(value: unknown): string {
@@ -61,13 +65,13 @@ export function emit(outputs: Output[], check: boolean, root = ROOT): string[] {
   return stale;
 }
 
-/** A generator's command line: `bun scripts/mobile/<name>.ts [--check]`. */
-export function cli(name: string, generate: () => Output[]): void {
+/** A generator's command line: `bun scripts/mobile/<name>.ts [--check]`. A generator may be async. */
+export async function cli(name: string, generate: () => Output[] | Promise<Output[]>): Promise<void> {
   const check = process.argv.includes('--check');
-  const outputs = generate();
+  const outputs = await generate();
   const stale = emit(outputs, check);
   if (check && stale.length) {
-    console.error(`${name}: stale, run \`bun scripts/mobile/${name}.ts\` and commit:\n${stale.map((p) => `  ${p}`).join('\n')}`);
+    console.error(`${name}: stale, run \`${REGENERATE}\` and commit:\n${stale.map((p) => `  ${p}`).join('\n')}`);
     process.exit(1);
   }
   console.log(`${name}: ${check ? 'up to date' : 'wrote'} ${outputs.map((o) => o.path).join(', ')}`);
