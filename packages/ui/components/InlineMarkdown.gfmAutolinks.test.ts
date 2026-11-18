@@ -44,6 +44,18 @@ describe('www. autolinks', () => {
     expect(matchWwwAutolink('www.example.c_m')).toBeNull();
     expect(trimAutolinkTail('www.google.com/search?q=commonmark&hl;')).toBe('www.google.com/search?q=commonmark');
     expect(trimAutolinkTail('www.example.com/a)).')).toBe('www.example.com/a');
+    expect(trimAutolinkTail('www.example.com/(a)&amp;).')).toBe('www.example.com/(a)');
+  });
+
+  test('a link followed by 200 KB of ) or of &a;. pairs is trimmed in one pass, not one recount per character', () => {
+    const parens = 'www.a.co' + ')'.repeat(200_000);
+    const entities = 'www.a.co' + '&a;.'.repeat(50_000);
+    const t0 = performance.now();
+    expect(trimAutolinkTail(parens)).toBe('www.a.co');
+    expect(trimAutolinkTail(entities)).toBe('www.a.co');
+    expect(hrefs(render(`see ${parens}`))).toEqual(['https://www.a.co']);
+    // Linear work is a few milliseconds; the old per-character recount took seconds.
+    expect(performance.now() - t0).toBeLessThan(1000);
   });
 });
 
@@ -101,8 +113,19 @@ describe('HTML character references', () => {
     expect(textOf(html)).toBe('&amp; &copy; and <script>alert(1)</script>');
   });
 
-  test('a numeric reference to no character is U+FFFD, and &#8212 without ; is text', () => {
-    expect(decodeHtmlEntities('&#0;&#xD800;&#1114112;')).toBe('���');
+  test('a reference to no character, or to one that is invisible or reorders text, stays as written', () => {
+    const hidden = [
+      '&#0;', '&#1;', '&#x1F;', '&#x7F;', '&#x85;', '&#9;', '&#10;', // NUL, C0, DEL, C1
+      '&#xAD;', '&shy;', '&#x200B;', '&#x200D;', '&zwj;', '&zwnj;', '&#xFEFF;', '&#x2060;', // soft hyphen, zero-width
+      '&#x200E;', '&#x200F;', '&#x61C;', '&#x202A;', '&#8238;', '&#x2066;', '&#x2069;', // direction marks, overrides, isolates
+      '&#xD800;', '&#xDFFF;', '&#xFDD0;', '&#xFFFE;', '&#x1FFFF;', '&#1114112;', // surrogates, non-characters, past U+10FFFF
+    ];
+    for (const ref of hidden) {
+      expect(decodeHtmlEntities(ref)).toBe(ref);
+      expect(textOf(render(`a ${ref} b`))).toBe(`a ${ref} b`);
+    }
+    // Visible ones still decode, the no-break space included.
+    expect(decodeHtmlEntities('&#x41;&#xE9;&nbsp;&#x1F600;')).toBe('A\u00e9\u00a0\u{1F600}');
     expect(textOf(render('a &#8212 b'))).toBe('a &#8212 b');
   });
 

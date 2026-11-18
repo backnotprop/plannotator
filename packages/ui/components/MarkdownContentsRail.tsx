@@ -59,6 +59,7 @@ import {
   topInsideViewport,
   type HeadingBinding,
 } from '../utils/headingScrollSpy';
+import { footnoteKeysOf, withoutFootnoteRefs } from '../utils/footnotes';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 
 const COLLAPSED_MARKER_LIMIT = 10;
@@ -160,12 +161,13 @@ function buildContentsItems(blocks: readonly Block[]): readonly MarkdownContents
   const listed = new Set(tocHeadings(blocks, CONTENTS_RAIL_MAX_LEVEL));
   const parents: Array<{ level: number; label: string }> = [];
   const items: MarkdownContentsItem[] = [];
+  const notes = footnoteKeysOf(blocks);
 
   for (let index = 0; index < blocks.length; index++) {
     const block = blocks[index];
     if (block.type !== 'heading' || !listed.has(block)) continue;
     const level = Math.min(6, Math.max(1, block.level ?? 1));
-    const label = plainText(block.content) || 'Untitled section';
+    const label = plainText(withoutFootnoteRefs(block.content, notes)) || 'Untitled section';
     while (parents.length > 0 && parents.at(-1)!.level >= level) parents.pop();
     const breadcrumb = [...parents.map((entry) => entry.label), label].join(' / ');
     items.push({

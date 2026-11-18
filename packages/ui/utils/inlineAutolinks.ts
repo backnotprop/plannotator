@@ -27,21 +27,43 @@ export function autolinkMayFollow(previousChar: string): boolean {
  * a `)` with no `(` to close, and an entity-shaped tail like `&hl;`.
  */
 export function trimAutolinkTail(url: string): string {
-  for (;;) {
-    const before = url;
-    url = url.replace(/&[A-Za-z0-9]+;$/, '');
-    const last = url[url.length - 1];
-    if (last && /[?!.,:;*_~"'\]}>]/.test(last)) url = url.slice(0, -1);
-    else if (last === ')') {
-      let opens = 0, closes = 0;
-      for (const c of url) {
-        if (c === '(') opens++;
-        else if (c === ')') closes++;
-      }
-      if (closes > opens) url = url.slice(0, -1);
-    }
-    if (url === before) return url;
+  // One backward pass: the paren balance is counted once and kept up to date,
+  // so a tail of 100k `)` costs 100k steps, not 100k recounts.
+  let opens = 0, closes = 0;
+  for (let i = 0; i < url.length; i++) {
+    if (url.charCodeAt(i) === 40) opens++;
+    else if (url.charCodeAt(i) === 41) closes++;
   }
+  let end = url.length;
+  while (end > 0) {
+    const last = url[end - 1];
+    if (last === ';') {
+      // An entity-shaped tail `&name;` goes whole.
+      let j = end - 2;
+      while (j >= 0 && /[A-Za-z0-9]/.test(url[j])) j--;
+      if (j >= 0 && j < end - 2 && url[j] === '&') {
+        for (let k = j; k < end; k++) {
+          if (url.charCodeAt(k) === 40) opens--;
+          else if (url.charCodeAt(k) === 41) closes--;
+        }
+        end = j;
+        continue;
+      }
+      end--;
+      continue;
+    }
+    if (/[?!.,:*_~"'\]}>]/.test(last)) {
+      end--;
+      continue;
+    }
+    if (last === ')' && closes > opens) {
+      closes--;
+      end--;
+      continue;
+    }
+    break;
+  }
+  return url.slice(0, end);
 }
 
 /**
@@ -157,7 +179,7 @@ const NAMED: Record<string, string> = {
   amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ',
   copy: '©', reg: '®', trade: '™', deg: '°', plusmn: '±', times: '×', divide: '÷',
   micro: 'µ', middot: '·', para: '¶', sect: '§', bull: '•', hellip: '…', prime: '′', Prime: '″',
-  mdash: '—', ndash: '–', minus: '−', shy: '­', thinsp: ' ', ensp: ' ', emsp: ' ', zwj: '‍', zwnj: '‌',
+  mdash: '—', ndash: '–', minus: '−', thinsp: ' ', ensp: ' ', emsp: ' ',
   lsquo: '‘', rsquo: '’', ldquo: '“', rdquo: '”', sbquo: '‚', bdquo: '„', laquo: '«', raquo: '»', lsaquo: '‹', rsaquo: '›',
   iexcl: '¡', iquest: '¿', cent: '¢', pound: '£', yen: '¥', euro: '€', curren: '¤', permil: '‰',
   larr: '←', rarr: '→', uarr: '↑', darr: '↓', harr: '↔', lArr: '⇐', rArr: '⇒', hArr: '⇔', crarr: '↵',
@@ -176,10 +198,32 @@ const NAMED: Record<string, string> = {
 const ENTITY_AT = /^&(?:#([0-9]{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]{1,31}));/;
 
 /**
+ * Code points a numeric reference never turns into: ones that draw nothing or
+ * change how the text around them reads (C0 and C1 controls, NUL, soft
+ * hyphen, zero-width characters and joiners, direction marks, embeddings,
+ * overrides and isolates, invisible operators, the byte-order mark,
+ * interlinear annotation controls), surrogates, non-characters and numbers
+ * past U+10FFFF. The reference stays as written, so the reader sees it.
+ */
+function hiddenCodePoint(code: number): boolean {
+  return (
+    code <= 0x1f || (code >= 0x7f && code <= 0x9f) || code === 0xad ||
+    code === 0x34f || code === 0x61c || code === 0x115f || code === 0x1160 || code === 0x17b4 || code === 0x17b5 ||
+    (code >= 0x180b && code <= 0x180f) ||
+    (code >= 0x200b && code <= 0x200f) || (code >= 0x2028 && code <= 0x202e) || (code >= 0x2060 && code <= 0x206f) ||
+    code === 0x3164 || (code >= 0xfe00 && code <= 0xfe0f) || code === 0xfeff || code === 0xffa0 || (code >= 0xfff9 && code <= 0xfffb) ||
+    (code >= 0xd800 && code <= 0xdfff) ||
+    (code >= 0xfdd0 && code <= 0xfdef) || (code & 0xfffe) === 0xfffe ||
+    (code >= 0xe0000 && code <= 0xe0fff) ||
+    code > 0x10ffff
+  );
+}
+
+/**
  * The character reference at the start of `text`: the characters it stands
- * for and its length, or null (not one, or a name not in the table). A number
- * naming no character (0, a surrogate, past U+10FFFF) is U+FFFD, as
- * CommonMark has it.
+ * for and its length, or null (not one, a name not in the table, or a number
+ * naming a character that would be invisible or would reorder the text, see
+ * `hiddenCodePoint`): those stay as written.
  */
 export function matchHtmlEntity(text: string): { text: string; length: number } | null {
   if (text[0] !== '&') return null;
@@ -190,8 +234,8 @@ export function matchHtmlEntity(text: string): { text: string; length: number } 
     return named === undefined ? null : { text: named, length: m[0].length };
   }
   const code = m[1] !== undefined ? parseInt(m[1], 10) : parseInt(m[2]!, 16);
-  const valid = code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff);
-  return { text: valid ? String.fromCodePoint(code) : '�', length: m[0].length };
+  if (hiddenCodePoint(code)) return null;
+  return { text: String.fromCodePoint(code), length: m[0].length };
 }
 
 /** Every character reference in `text` decoded (the others left as written). */

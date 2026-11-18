@@ -1,17 +1,18 @@
 /**
  * GFM footnotes: `text[^1]` references and `[^1]: note` definitions.
  *
- * The parser (`parseMarkdownToBlocks`) turns each definition into ONE
- * 'paragraph' block tagged with `footnoteLabel`, its `content` the definition
- * as written (marker and indented continuation lines included). A surface
- * that does not know footnotes therefore draws exactly the text it always
- * drew. A footnote-aware surface (the Viewer, RenderedMarkdown) calls
+ * The parser (`parseMarkdownToBlocks`) turns each definition of a note the
+ * document cites into ONE 'paragraph' block tagged with `footnoteLabel`, its
+ * `content` the definition as written (marker and continuation lines
+ * included). A footnote-aware surface (the Viewer, RenderedMarkdown) calls
  * `indexFootnotes` and draws the definitions as a numbered list at the end,
  * and `InlineMarkdown` draws each reference to a defined note as a small
  * superscript link. A reference to a label nothing defines stays literal.
  *
- * A document without a definition is untouched: the parser only acts on a
- * line that matches `FOOTNOTE_DEF_RE`, and `indexFootnotes` returns null.
+ * A `[^label]:` line whose label nothing cites (`[^0-9]: digits` written as
+ * prose) is not a note: it stays an ordinary paragraph where it is written.
+ * A document with no cited note parses exactly as it did before footnotes
+ * were drawn, and in one that has some every other block keeps its id.
  */
 import type { Block } from '../types';
 import { decodeHtmlEntities } from './inlineAutolinks';
@@ -26,37 +27,7 @@ export const FOOTNOTE_REF_RE = /^\[\^([^\]\s]{1,64})\]/;
 export const footnoteKey = (label: string): string => label.toLowerCase();
 
 /** A continuation line of a definition: indented four spaces or a tab. */
-const INDENTED = /^(?: {4}|\t)/;
-
-/**
- * The index of a definition's last line. `startsBlock(j)` says whether an
- * unindented line would start a block of its own (a heading, a list, a fence,
- * another definition…); any other unindented text line right after the note
- * is a lazy continuation of its paragraph. After a blank line only indented
- * lines continue the note, so a note can hold several paragraphs, a list or a
- * fence, indented as GFM wants.
- */
-export function footnoteDefinitionEnd(lines: readonly string[], i: number, startsBlock: (j: number) => boolean): number {
-  let end = i;
-  let j = i + 1;
-  while (j < lines.length) {
-    const line = lines[j];
-    if (line.trim() === '') {
-      let k = j + 1;
-      while (k < lines.length && lines[k].trim() === '') k++;
-      if (k < lines.length && INDENTED.test(lines[k])) {
-        end = k;
-        j = k + 1;
-        continue;
-      }
-      break;
-    }
-    if (!INDENTED.test(line) && startsBlock(j)) break;
-    end = j;
-    j++;
-  }
-  return end;
-}
+export const FOOTNOTE_INDENTED_RE = /^(?: {4}|\t)/;
 
 /**
  * A definition's own markdown: the marker taken off the first line and up to
@@ -76,7 +47,8 @@ export interface FootnoteNote {
   number: number;
   /** The definition block (its id is the note's `data-block-id`). */
   block: Block;
-  /** Whether any reference names it (a note nothing names has no back link). */
+  /** Whether a reference in the document's flow or another note names it (one
+   *  that only cites itself does not; it is listed last, with no back link). */
   referenced: boolean;
 }
 
@@ -92,20 +64,45 @@ export interface FootnoteIndex {
 const REF_SCAN = /\[\^([^\]\s]{1,64})\]/g;
 const CODE_SPAN = /(`+)[\s\S]*?\1/g;
 
-/** Labels referenced in a block's text, in order (code spans skipped). */
+/** Labels referenced in a block's text, in order (code spans and definition markers skipped). */
 function referencedKeys(text: string, out: string[]): void {
   if (!text.includes('[^')) return;
   const prose = text.includes('`') ? text.replace(CODE_SPAN, '') : text;
-  for (const m of prose.matchAll(REF_SCAN)) out.push(footnoteKey(m[1]));
+  for (const line of prose.split('\n')) {
+    for (const m of line.replace(FOOTNOTE_DEF_RE, '').matchAll(REF_SCAN)) out.push(footnoteKey(m[1]));
+  }
 }
 
 const SCANNED_TYPES: ReadonlySet<Block['type']> = new Set(['paragraph', 'heading', 'blockquote', 'list-item', 'table', 'directive']);
 
 /**
+ * The labels (`footnoteKey`) of the `[^label]:` lines in a parse WITHOUT
+ * notes (`blocks`, where every such line is paragraph text) that the
+ * document also cites outside code: the ones the parser makes notes of.
+ * Null when there is none, the usual case, which costs one `includes`.
+ */
+export function referencedDefinitionLabels(blocks: readonly Block[]): Set<string> | null {
+  let defined: Set<string> | null = null;
+  for (const block of blocks) {
+    if (block.type !== 'paragraph' || !block.content.includes(']:')) continue;
+    for (const line of block.content.split('\n')) {
+      const m = FOOTNOTE_DEF_RE.exec(line);
+      if (m) (defined ??= new Set()).add(footnoteKey(m[1]));
+    }
+  }
+  if (!defined) return null;
+  const cited: string[] = [];
+  for (const block of blocks) if (SCANNED_TYPES.has(block.type)) referencedKeys(block.content, cited);
+  const notes = new Set(cited.filter((key) => defined!.has(key)));
+  return notes.size > 0 ? notes : null;
+}
+
+/**
  * The document's notes, or null when it defines none (then nothing about the
  * document's drawing changes). Numbers follow the first reference to each
- * note, as on GitHub; a note nothing references is still listed (after the
- * others), so no written text disappears.
+ * note, as on GitHub. The parser makes notes only of cited labels; a note
+ * cited from nowhere it could be reached (only from itself) is still listed,
+ * last, so no written text disappears.
  */
 export function indexFootnotes(blocks: readonly Block[]): FootnoteIndex | null {
   let defs: Block[] | null = null;
@@ -155,21 +152,54 @@ export function indexFootnotes(blocks: readonly Block[]): FootnoteIndex | null {
 }
 
 /**
- * A quote saved before references and character references were drawn
- * (`text[^1] and &amp;`) as the page shows it now (`text1 and &`), so the
- * annotation restore's text search still finds it. `root` is the document;
- * each `[^label]` becomes the number its reference shows there, and a label
- * the document does not draw stays as written.
+ * The ways a saved quote may read on the page now, for the annotation
+ * restore's text search (after the quote as written has missed):
+ *
+ * - A quote saved before references and character references were drawn
+ *   holds them as written (`claim.[^1] and &amp;`). A reference is a
+ *   superscript the quote leaves out (`annotation-exclude`), so it reads
+ *   `claim. and &`.
+ * - A quote that took a whole old definition paragraph starts a line with
+ *   its marker (`[^1]: The note.`), which the notes list draws as the list's
+ *   number, not text: also tried without it (`The note.`).
+ *
+ * `root` is the document; only labels it draws as references are dropped.
+ * Returns the variants that differ from `quote`, most literal first.
  */
-export function quoteAsRendered(quote: string, root: ParentNode): string {
-  let out = decodeHtmlEntities(quote);
-  if (out.includes('[^')) {
-    const shown = new Map<string, string>();
-    for (const a of root.querySelectorAll('a[data-footnote-ref]')) {
-      const key = footnoteKey(a.getAttribute('data-footnote-ref') ?? '');
-      if (!shown.has(key)) shown.set(key, a.textContent ?? '');
-    }
-    if (shown.size > 0) out = out.replace(REF_SCAN, (whole, label: string) => shown.get(footnoteKey(label)) ?? whole);
+export function quoteVariantsAsRendered(quote: string, root: ParentNode): string[] {
+  const drawn = new Set<string>();
+  if (quote.includes('[^')) {
+    for (const a of root.querySelectorAll('a[data-footnote-ref]')) drawn.add(footnoteKey(a.getAttribute('data-footnote-ref') ?? ''));
   }
-  return out;
+  const render = (text: string): string => {
+    let out = decodeHtmlEntities(text);
+    if (drawn.size > 0) out = out.replace(REF_SCAN, (whole, label: string) => (drawn.has(footnoteKey(label)) ? '' : whole));
+    return out;
+  };
+  const variants: string[] = [];
+  const add = (text: string) => {
+    if (text && text !== quote && !variants.includes(text)) variants.push(text);
+  };
+  add(render(quote));
+  if (FOOTNOTE_DEF_RE.test(quote) || /\n {0,3}\[\^[^\]\s]{1,64}\]:/.test(quote)) {
+    add(render(quote.split('\n').map((line) => line.replace(FOOTNOTE_DEF_RE, '').replace(/^[ \t]+/, '')).join('\n')).trim());
+  }
+  return variants;
+}
+
+/** The labels (`footnoteKey`) of a document's notes, or null when it has none. */
+export function footnoteKeysOf(blocks: readonly { footnoteLabel?: string }[]): ReadonlySet<string> | null {
+  let keys: Set<string> | null = null;
+  for (const block of blocks) if (block.footnoteLabel !== undefined) (keys ??= new Set()).add(footnoteKey(block.footnoteLabel));
+  return keys;
+}
+
+/**
+ * Text without its references to the document's notes (`keys`): a heading's
+ * slug, its line in the outline and the contents rail read `Title`, not
+ * `Title[^1]`. A `[^x]` naming no note is text and stays.
+ */
+export function withoutFootnoteRefs(text: string, keys: ReadonlySet<string> | null): string {
+  if (!keys || !text.includes('[^')) return text;
+  return text.replace(REF_SCAN, (whole, label: string) => (keys.has(footnoteKey(label)) ? '' : whole));
 }

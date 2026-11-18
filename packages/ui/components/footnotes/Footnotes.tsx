@@ -15,7 +15,7 @@
 import React, { useMemo } from 'react';
 import type { Block } from '../../types';
 import { footnoteBody, type FootnoteIndex, type FootnoteNote } from '../../utils/footnotes';
-import { goTo, noteId, useFootnoteScope, type FootnoteScope } from './footnoteScope';
+import { goTo, inPlaceLinkHandlers, noteId, useFootnoteScope, type FootnoteScope } from './footnoteScope';
 import { sourceLineAttrs } from '../../utils/sourceLineAttrs';
 import { InlineMarkdown } from '../InlineMarkdown';
 import { CalloutBlocks, isProseQuote, parseQuoteBody } from '../blocks/BlockquoteBlock';
@@ -30,15 +30,15 @@ const BackLink: React.FC<{ scope: FootnoteScope; note: FootnoteNote }> = ({ scop
     role="doc-backlink"
     aria-label={`Back to reference ${note.number}`}
     className="annotation-exclude ml-1 text-primary no-underline hover:underline focus-visible:underline"
-    onClick={(e) => {
-      e.preventDefault();
-      const root = e.currentTarget.closest('[data-footnotes]')?.parentElement ?? document;
+    {...inPlaceLinkHandlers((link) => {
+      const root = link.closest('[data-footnotes]')?.parentElement ?? document;
       const last = scope.lastRef.current;
       const target = last?.isConnected && last.getAttribute('data-footnote-ref')?.toLowerCase() === note.key
         ? last
         : root.querySelector<HTMLElement>(`a[data-footnote-ref][href="#${noteId(scope, note.number)}"]`);
       if (target) goTo(target);
-    }}
+      return true;
+    })}
   >
     {'\u21a9\ufe0e'}
   </a>

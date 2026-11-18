@@ -1,3 +1,5 @@
+import { footnoteKeysOf, withoutFootnoteRefs } from './footnotes';
+
 /**
  * Convert heading text into a URL-safe anchor id.
  * Strips common inline markdown so `**Install** \`bun\`` → `install-bun`.
@@ -20,13 +22,15 @@ export function slugifyHeading(text: string): string {
  * later duplicate is added.
  */
 export function buildHeadingSlugMap(
-  blocks: Array<{ id: string; type: string; content: string }>,
+  blocks: Array<{ id: string; type: string; content: string; footnoteLabel?: string }>,
 ): Map<string, string> {
   const map = new Map<string, string>();
   const counts = new Map<string, number>();
+  // A reference to a note is not part of the heading's name (`Title[^1]` is `#title`).
+  const notes = footnoteKeysOf(blocks);
   for (const block of blocks) {
     if (block.type !== 'heading') continue;
-    const base = slugifyHeading(block.content);
+    const base = slugifyHeading(withoutFootnoteRefs(block.content, notes));
     if (!base) continue;
     const n = counts.get(base) ?? 0;
     const slug = n === 0 ? base : `${base}-${n}`;

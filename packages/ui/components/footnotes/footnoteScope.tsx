@@ -47,22 +47,45 @@ export const FootnoteProvider: React.FC<{ index: FootnoteIndex | null; children:
   return <FootnoteContext.Provider value={scope}>{children}</FootnoteContext.Provider>;
 };
 
-/** A reference to a defined note: a small superscript number linking to it. */
+/**
+ * Follow an in-document footnote link in place, whatever the click: a
+ * Cmd/Ctrl/Shift click or a middle click would otherwise open a new tab or
+ * window at `#pn…-fn-N`, an address without the page's own hash (a share
+ * link keeps its whole state there).
+ */
+export function inPlaceLinkHandlers(go: (link: HTMLAnchorElement) => boolean): Pick<React.AnchorHTMLAttributes<HTMLAnchorElement>, 'onClick' | 'onAuxClick'> {
+  return {
+    onClick: (e) => {
+      if (go(e.currentTarget)) e.preventDefault();
+    },
+    onAuxClick: (e) => {
+      if (e.button !== 1) return;
+      if (go(e.currentTarget)) e.preventDefault();
+    },
+  };
+}
+
+/**
+ * A reference to a defined note: a small superscript number linking to it.
+ * `annotation-exclude`: a comment's quote leaves the number out (`claim.
+ * More`, not `claim.1 More`), so the agent reads its own words back; the
+ * restore's search skips it the same way.
+ */
 export const FootnoteRef: React.FC<{ scope: FootnoteScope; label: string; number: number }> = ({ scope, label, number }) => (
-  <sup className="pn-footnote-ref">
+  <sup className="pn-footnote-ref annotation-exclude" data-footnote-ref-mark="">
     <a
       href={`#${noteId(scope, number)}`}
       role="doc-noteref"
       aria-label={`Footnote ${number}`}
       data-footnote-ref={label}
       className="px-px font-medium text-primary no-underline hover:underline focus-visible:underline"
-      onClick={(e) => {
+      {...inPlaceLinkHandlers((link) => {
         const target = document.getElementById(noteId(scope, number));
-        if (!target) return;
-        e.preventDefault();
-        scope.lastRef.current = e.currentTarget;
+        if (!target) return false;
+        scope.lastRef.current = link;
         goTo(target);
-      }}
+        return true;
+      })}
     >
       {number}
     </a>

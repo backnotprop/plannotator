@@ -3,20 +3,26 @@
  * the plan Viewer, and the comments people already saved on such text.
  *
  * Before these were drawn, `[^1]`, `www.example.org`, `someone@example.com`
- * and `&amp;` rendered as the literal text. A comment saved then holds
- * web-highlighter metas (`parentTagName`/`parentIndex`/`textOffset`) counted
- * in THAT page, and a quote that may hold `[^1]` or `&amp;` as written. The
- * anchors below are written by hand in that old shape; each must still paint
- * exactly its words. New selections across a link or a reference must make
- * comments that restore too.
+ * and `&amp;` rendered as the literal text. A comment saved then holds its
+ * block id (`block-N`), web-highlighter metas (`parentTagName`/`parentIndex`/
+ * `textOffset`) counted in THAT page, and a quote that may hold `[^1]` or
+ * `&amp;` as written. `tests/test-fixtures/footnote-old-anchors.json` holds
+ * comments made on origin/main's Viewer (see its `generatedFrom`); each must
+ * come back on exactly its words, in its own block, with nothing rewritten,
+ * even where the sentence is written twice. The other anchors below are
+ * written by hand in the same shape. New selections across a link or a
+ * reference must make comments that restore too.
  *
  * Requires DOM (happy-dom) — runs under DOM_TESTS=1.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { AnnotationType, type Annotation } from '../types';
 import { parseMarkdownToBlocks } from '../utils/parser';
+import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 
 const hasDom = typeof document !== 'undefined';
 const viewerMod = hasDom ? await import('./Viewer') : null;
@@ -34,7 +40,11 @@ interface ViewerHandle {
 
 const roots: Root[] = [];
 
-async function mount(onAdd: (a: Annotation) => void = () => {}): Promise<{ ref: React.RefObject<ViewerHandle | null>; host: HTMLElement }> {
+async function mount(
+  onAdd: (a: Annotation) => void = () => {},
+  markdown = MARKDOWN,
+  onRestoreReport?: (report: AnnotationRestoreReport) => void,
+): Promise<{ ref: React.RefObject<ViewerHandle | null>; host: HTMLElement }> {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const ref = React.createRef<ViewerHandle>();
@@ -44,8 +54,8 @@ async function mount(onAdd: (a: Annotation) => void = () => {}): Promise<{ ref: 
     root.render(
       <Viewer
         ref={ref as never}
-        blocks={parseMarkdownToBlocks(MARKDOWN)}
-        markdown={MARKDOWN}
+        blocks={parseMarkdownToBlocks(markdown)}
+        markdown={markdown}
         annotations={[]}
         onAddAnnotation={onAdd}
         onSelectAnnotation={() => {}}
@@ -55,6 +65,7 @@ async function mount(onAdd: (a: Annotation) => void = () => {}): Promise<{ ref: 
         taterMode={false}
         stickyActions={false}
         disableCodePathValidation
+        onRestoreReport={onRestoreReport}
       />,
     );
   });
@@ -99,10 +110,71 @@ function oldAnchor(id: string, parentIndex: number, oldText: string, quote: stri
   };
 }
 
-const painted = (id: string): string =>
-  Array.from(document.querySelectorAll<HTMLElement>(`[data-highlight-id="${id}"], [data-bind-id="${id}"]`))
-    .map((el) => el.textContent ?? '')
-    .join('');
+const marks = (id: string): HTMLElement[] =>
+  Array.from(document.querySelectorAll<HTMLElement>(`[data-highlight-id="${id}"], [data-bind-id="${id}"]`));
+const painted = (id: string): string => marks(id).map((el) => el.textContent ?? '').join('');
+/** The block (`data-block-id`) a comment's highlight sits in. */
+const paintedBlock = (id: string): string | undefined => marks(id)[0]?.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
+
+const OLD = JSON.parse(readFileSync(join(import.meta.dir, '../../../tests/test-fixtures/footnote-old-anchors.json'), 'utf8')) as {
+  docs: { name: string; markdown: string; annotation: Annotation }[];
+};
+/** What each captured comment paints on the page now: its words as drawn (a reference's number is not part of a quote). */
+const NOW: Record<string, { text: string; inNotes?: boolean }> = {
+  'a definition mid-document; the second copy of a repeated sentence': { text: 'Then run the tests.' },
+  'a run of definitions under a line; the second copy of a repeated sentence': { text: 'Then run the tests.' },
+  'a repeated sentence after a character reference in its paragraph': { text: 'Then run the tests.' },
+  'a repeated link after a new www. link in its paragraph': { text: 'the docs' },
+  'a whole old definition paragraph, marker included': { text: 'The first note.', inNotes: true },
+  'a quote across a reference': { text: 'a footnote. And another' },
+};
+
+describe.if(hasDom)('comments made on the page before footnotes, links and references were drawn (captured on origin/main)', () => {
+  test('the fixture covers every case', () => {
+    expect(OLD.docs.map((d) => d.name).sort()).toEqual(Object.keys(NOW).sort());
+  });
+  for (const doc of OLD.docs) {
+    test(doc.name, async () => {
+      const reports: AnnotationRestoreReport[] = [];
+      const { ref } = await mount(() => {}, doc.markdown, (r) => reports.push(r));
+      const ann = doc.annotation;
+      await act(async () => ref.current!.applySharedAnnotations([ann]));
+      await settle();
+      expect(painted(ann.id)).toBe(NOW[doc.name].text);
+      // In the block it was made in (block ids are kept), not the first copy of its words.
+      expect(paintedBlock(ann.id)).toBe(ann.blockId);
+      expect(Boolean(marks(ann.id)[0]?.closest('[data-footnotes]'))).toBe(Boolean(NOW[doc.name].inNotes));
+      // Nothing to write back: the plan editor would otherwise save a new block id and drop the positions.
+      const last = reports.filter((r) => r.attempted.includes(ann.id)).at(-1)!;
+      expect(last.unanchored).toEqual([]);
+      expect(last.moved ?? []).toEqual([]);
+    });
+  }
+
+  test('a comment whose block is gone and whose words are written twice is left unanchored, its block and positions kept', async () => {
+    const doc = OLD.docs.find((d) => d.name.startsWith('a definition mid-document'))!;
+    const reports: AnnotationRestoreReport[] = [];
+    const { ref } = await mount(() => {}, doc.markdown, (r) => reports.push(r));
+    const ann: Annotation = { ...doc.annotation, id: 'gone', blockId: 'block-99', startMeta: { parentTagName: 'P', parentIndex: 40, textOffset: 0 }, endMeta: { parentTagName: 'P', parentIndex: 40, textOffset: 19 } };
+    await act(async () => ref.current!.applySharedAnnotations([ann]));
+    await settle();
+    expect(painted('gone')).toBe('');
+    const last = reports.filter((r) => r.attempted.includes('gone')).at(-1)!;
+    expect(last.unanchored).toEqual(['gone']);
+    expect(last.moved ?? []).toEqual([]);
+  });
+
+  test('a comment whose block is gone and whose words are written once still follows them', async () => {
+    const reports: AnnotationRestoreReport[] = [];
+    const { ref } = await mount(() => {}, MARKDOWN, (r) => reports.push(r));
+    const ann = oldAnchor('once', 40, PARA_C, 'with an entity');
+    await act(async () => ref.current!.applySharedAnnotations([{ ...ann, blockId: 'block-99' }]));
+    await settle();
+    expect(painted('once')).toBe('with an entity');
+    const last = reports.filter((r) => r.attempted.includes('once')).at(-1)!;
+    expect(last.moved?.map((m) => m.id)).toEqual(['once']);
+  });
+});
 
 describe.if(hasDom)('comments saved before footnotes and autolinks were drawn', () => {
   test('a quote after a reference (its offsets moved) restores on its words', async () => {
@@ -116,7 +188,7 @@ describe.if(hasDom)('comments saved before footnotes and autolinks were drawn', 
     const { ref, host } = await mount();
     const old = oldAnchor('acrossRef', oldParagraphIndex(host, 'Here is'), PARA_A, 'a footnote.[^1] And another');
     await act(async () => ref.current!.applySharedAnnotations([old]));
-    expect(painted('acrossRef')).toBe('a footnote.1 And another');
+    expect(painted('acrossRef')).toBe('a footnote. And another');
   });
 
   test('a quote across text that is now a www. link and a mail link restores as it was saved', async () => {
@@ -186,13 +258,14 @@ describe.if(hasDom)('new comments across a reference or a link', () => {
     const first = await mount((a) => added.push(a));
     await selectBetween(first.host, 'with a footnote.', 'footnote.', ' And another claim.', 'And another');
     await selectBetween(first.host, 'Visit ', 'Visit', ' and mail ', 'and mail');
-    expect(added.map((a) => a.originalText)).toEqual(['footnote.1 And another', 'Visit www.example.org and mail']);
+    // The reference's number is not part of the quote: the agent reads its own words back.
+    expect(added.map((a) => a.originalText)).toEqual(['footnote. And another', 'Visit www.example.org and mail']);
 
     for (const root of roots.splice(0)) await act(async () => root.unmount());
     document.body.replaceChildren();
     const second = await mount();
     await act(async () => second.ref.current!.applySharedAnnotations(added));
-    expect(added.map((a) => painted(a.id))).toEqual(['footnote.1 And another', 'Visit www.example.org and mail']);
+    expect(added.map((a) => painted(a.id))).toEqual(['footnote. And another', 'Visit www.example.org and mail']);
   });
 });
 
@@ -212,6 +285,19 @@ describe.if(hasDom)('footnote navigation', () => {
     expect(document.activeElement).toBe(note);
 
     await act(async () => { note.querySelector<HTMLAnchorElement>('a[role="doc-backlink"]')!.click(); });
+    expect(document.activeElement).toBe(refs[1]);
+
+    // A Cmd/Ctrl click and a middle click move in place too: no new tab at an address without the page's hash.
+    for (const init of [{ metaKey: true }, { ctrlKey: true }, { shiftKey: true }]) {
+      (document.activeElement as HTMLElement | null)?.blur();
+      const click = new MouseEvent('click', { bubbles: true, cancelable: true, ...init });
+      await act(async () => { refs[1].dispatchEvent(click); });
+      expect(click.defaultPrevented).toBe(true);
+      expect(document.activeElement).toBe(note);
+    }
+    const middle = new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 });
+    await act(async () => { note.querySelector<HTMLAnchorElement>('a[role="doc-backlink"]')!.dispatchEvent(middle); });
+    expect(middle.defaultPrevented).toBe(true);
     expect(document.activeElement).toBe(refs[1]);
     expect(a.host.contains(document.activeElement)).toBe(false);
   });

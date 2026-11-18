@@ -9,10 +9,15 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { RenderedMarkdown } from '../RenderedMarkdown';
 import { InlineMarkdown } from '../InlineMarkdown';
+import { PlanCleanDiffView } from '../plan-diff/PlanCleanDiffView';
+import { computePlanDiff } from '../../utils/planDiffEngine';
+import { buildHeadingSlugMap } from '../../utils/slugify';
+import { buildTocHierarchy } from '../../utils/annotationHelpers';
+import { parseMarkdownToBlocks } from '../../utils/parser';
 
 const render = (markdown: string): string => renderToStaticMarkup(createElement(RenderedMarkdown, { markdown }));
 const refs = (html: string) =>
-  [...html.matchAll(/<sup class="pn-footnote-ref"><a href="#([^"]+)" role="doc-noteref" aria-label="Footnote (\d+)" data-footnote-ref="([^"]*)"[^>]*>(\d+)<\/a><\/sup>/g)]
+  [...html.matchAll(/<sup class="pn-footnote-ref annotation-exclude" data-footnote-ref-mark=""><a href="#([^"]+)" role="doc-noteref" aria-label="Footnote (\d+)" data-footnote-ref="([^"]*)"[^>]*>(\d+)<\/a><\/sup>/g)]
     .map((m) => ({ target: m[1], number: m[2], label: m[3], shown: m[4] }));
 const noteIds = (html: string) => [...html.matchAll(/<li id="([^"]+)" value="(\d+)"/g)].map((m) => [m[1], m[2]]);
 
@@ -63,5 +68,28 @@ describe('footnotes', () => {
     const found = refs(html);
     // A label with white space is no label: that one stays text.
     expect(found.map((r) => r.label)).toEqual(['&lt;script&gt;alert(1)&lt;/script&gt;', 'a&quot;b&#x27;c']);
+  });
+});
+
+describe('the plan diff stays source', () => {
+  test('a diff that adds a footnote, a www. link, a mail address and &amp; shows them as written', () => {
+    const before = '# Plan\n\nShip it.\n';
+    const after = '# Plan\n\nShip it.[^1] See www.example.com, mail a@example.com, A &amp; B.\n\n[^1]: Care.\n';
+    const html = renderToStaticMarkup(createElement(PlanCleanDiffView, { blocks: computePlanDiff(before, after).blocks, wordLevel: false }));
+    const text = html.replace(/<[^>]*>/g, '');
+    expect(text).toContain('Ship it.[^1] See www.example.com, mail a@example.com, A &amp;amp; B.');
+    expect(text).toContain('[^1]: Care.');
+    expect(html).not.toContain('<sup');
+    expect(html).not.toMatch(/href="(https:\/\/www\.|mailto:)/);
+  });
+});
+
+describe('headings name themselves without their references', () => {
+  test('the slug and the contents read Title, not Title[^1]; an undefined [^x] stays', () => {
+    const blocks = parseMarkdownToBlocks('# Title[^1]\n\n## Other[^x]\n\nText.\n\n[^1]: The note.');
+    expect([...buildHeadingSlugMap(blocks).values()]).toEqual(['title', 'other-x']);
+    const toc = buildTocHierarchy(blocks, new Map());
+    expect(toc[0].content).toBe('Title');
+    expect(toc[0].children[0].content).toBe('Other[^x]');
   });
 });
