@@ -397,6 +397,7 @@ export interface InboxPullStack {
 const LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
 /** A repository's usual trunk names, when the forge did not say its default branch. */
 const TRUNK = /^(main|master)$/;
+const MERGED_STACK_LOOKBACK = 5;
 
 /** A long-lived branch (`main`, `develop`, `release/…`): what a stack's bottom layer lands on. */
 export function inboxPullLongLived(branch: string): boolean {
@@ -438,9 +439,10 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   const parentOf = (pull: InboxPull): { parent: InboxPull; via: InboxPull[] } | null => {
     const via: InboxPull[] = [];
     let base = pull.base;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i <= MERGED_STACK_LOOKBACK; i++) {
       const parent = headOf.get(`${repoKey(pull)}\u0000${base}`);
       if (parent) return parent.key !== pull.key ? { parent, via } : null;
+      if (i === MERGED_STACK_LOOKBACK) return null;
       const between = merged.find((m) => ownHead(m) && repoKey(m) === repoKey(pull) && m.head === base && !LONG_LIVED.test(m.head) && !via.includes(m));
       if (!between) return null;
       via.unshift(between);
@@ -484,7 +486,7 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
     }
     const under: InboxPull[] = [];
     let base = root.base;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < MERGED_STACK_LOOKBACK; i++) {
       const below = merged.find(
         (pull) =>
           ownHead(pull) &&
