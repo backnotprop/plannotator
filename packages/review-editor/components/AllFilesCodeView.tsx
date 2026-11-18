@@ -852,6 +852,9 @@ const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
+const SCROLL_SPEED_FRESH_MS = 100;
+const SWAP_LEAD_MS = 100;
+
 function stickyHeaderHeight(node: HTMLElement | undefined): number {
   return node?.shadowRoot?.querySelector('[data-diffs-header]')?.getBoundingClientRect().height || FILE_HEADER_HEIGHT;
 }
@@ -984,6 +987,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const engagedRef = useRef(false);
   const readingRef = useRef<Reading | null>(null);
   const restoringRef = useRef(false);
+  const scrollSpeedRef = useRef({ pxPerMs: 0, at: 0 });
   const engage = useCallback(() => {
     if (restoringRef.current) return;
     engagedRef.current = true;
@@ -1346,9 +1350,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const types = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
     for (const type of types) document.addEventListener(type, engaged, { capture: true, passive: true });
     document.addEventListener('focusin', focused, true);
+    const moves = page === document.documentElement ? window : page;
+    let last = { top: page?.scrollTop ?? 0, at: performance.now() };
+    const moved = () => {
+      if (!page) return;
+      const now = { top: page.scrollTop, at: performance.now() };
+      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / Math.max(1, now.at - last.at), at: now.at };
+      last = now;
+    };
+    moves?.addEventListener('scroll', moved, { passive: true });
     return () => {
       for (const type of types) document.removeEventListener(type, engaged, { capture: true });
       document.removeEventListener('focusin', focused, true);
+      moves?.removeEventListener('scroll', moved);
       reading?.leave();
       if (readingRef.current === reading) readingRef.current = null;
     };
@@ -2187,7 +2201,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (page.scrollHeight - page.scrollTop - page.clientHeight <= viewBottom - viewTop) return false;
     const node = itemNodeRef.current.get(itemId);
     const anyNode = node?.isConnected ? node : [...itemNodeRef.current.values()].find((candidate) => candidate.isConnected);
-    const margin = Math.max(stickyHeaderHeight(anyNode), (viewBottom - viewTop) / 3);
+    const speed = performance.now() - scrollSpeedRef.current.at < SCROLL_SPEED_FRESH_MS ? scrollSpeedRef.current.pxPerMs : 0;
+    const margin = Math.max(stickyHeaderHeight(anyNode), speed * SWAP_LEAD_MS);
     if (node?.isConnected) return node.getBoundingClientRect().top >= viewBottom + margin;
     const viewer = viewerRef.current?.getInstance();
     const top = viewer?.getTopForItem(itemId);
