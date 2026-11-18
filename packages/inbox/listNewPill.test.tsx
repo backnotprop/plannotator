@@ -104,6 +104,8 @@ const ON_SCREEN = [row('t_wait', 'waiting'), row('t_new', 'new'), row('t_sent', 
 let arrive: (...rows: InboxListRow[]) => void = () => {};
 let setCovered: (covered: boolean) => void = () => {};
 let setUnseen: (rows: UnseenRow[]) => void = () => {};
+/** Another list (its title) in the same render as an arrival: a project or folder switched to. */
+let switchTo: (title: string, ...rows: InboxListRow[]) => void = () => {};
 const shows: string[] = [];
 const goes: string[] = [];
 
@@ -111,7 +113,14 @@ function HeldList() {
   const [shown, setShown] = useState(() => sections(ON_SCREEN));
   const [latest, setLatest] = useState(shown);
   const [covered, cover] = useState(false);
-  arrive = (...rows) => act(() => setLatest((was) => sections([...was.flatMap((s) => s.threads).filter((old) => !rows.some((r) => r.thread_id === old.thread_id)), ...rows])));
+  const [title, setTitle] = useState('Inbox');
+  const add = (rows: InboxListRow[]) => setLatest((was) => sections([...was.flatMap((s) => s.threads).filter((old) => !rows.some((r) => r.thread_id === old.thread_id)), ...rows]));
+  arrive = (...rows) => act(() => add(rows));
+  switchTo = (next, ...rows) =>
+    act(() => {
+      setTitle(next);
+      add(rows);
+    });
   setCovered = (next) => act(() => cover(next));
   const [unseen, see] = useState<UnseenRow[]>([]);
   setUnseen = (next) => act(() => see(next));
@@ -120,7 +129,7 @@ function HeldList() {
     <SidebarProvider>
       <div className="pn-inbox">
         <InboxList
-          title="Inbox"
+          title={title}
           path={null}
           sections={shown}
           filtered={false}
@@ -206,7 +215,8 @@ test.skipIf(!hasDom)('Tab order: the pill, then the bar, then the rows; the bar 
   setUnseen([{ id: 't_x', edge: 'bottom' }]);
   const order = [...host!.querySelectorAll<HTMLElement>('[data-list-new-pill], [data-inbox-notice], [data-thread-id]')].map((el) => (el.hasAttribute('data-list-new-pill') ? 'pill' : el.hasAttribute('data-inbox-notice') ? 'bar' : 'row'));
   expect(order.slice(0, 3)).toEqual(['pill', 'bar', 'row']);
-  expect(line()!.closest('.ib-lbody')).not.toBeNull();
+  // A direct child of the scroll box: inbox.css keys the rows' scroll padding (↑ ↓, J/K, Tab stop below the bar) on it.
+  expect(host!.querySelector('[data-held-bar]')!.parentElement!.classList.contains('ib-lbody')).toBe(true);
 });
 
 test.skipIf(!hasDom)('Show draws the rows and opens the folded group they land in, and asks for no move; the pill comes only for rows that landed out of view', () => {
@@ -325,6 +335,19 @@ test.skipIf(!hasDom)('the bar\'s count is said once per change, politely; a redr
   expect(heard()).toBe('');
   arrive(row('t_c', 'new', later()));
   expect(heard()).toBe('1 new in alpha');
+});
+
+test.skipIf(!hasDom)('switching to another project or folder says nothing: that list\'s count is not news that arrived', () => {
+  draw();
+  arrive(row('t_a', 'new', later()));
+  expect(heard()).toBe('1 new in alpha');
+  // Another list whose bar holds two: nothing is said, and the last words are not left behind.
+  switchTo('alpha', row('t_b', 'new', later()));
+  expect(line()!.textContent).toContain('2 new');
+  expect(heard()).toBe('');
+  // News that arrives there is said.
+  arrive(row('t_c', 'new', later()));
+  expect(heard()).toBe('3 new in alpha');
 });
 
 test.skipIf(!hasDom)('the List view: held news shows the bar and no pill', () => {

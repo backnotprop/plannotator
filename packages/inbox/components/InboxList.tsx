@@ -26,7 +26,7 @@ import { useNarrowerThan } from '../narrower';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
 import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
 import { HeldNoticeLine, HeldNoticeSaid } from './HeldNoticeLine';
-import { listNewState } from '../listNewState';
+import { listBarShows } from '../listNewState';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
 import { ThreadRowMenu, useRowDragA11y } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
@@ -1347,8 +1347,8 @@ export function InboxList(props: InboxListProps) {
     return () => fonts.removeEventListener('loadingdone', refit);
   }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
-  // The list's two signs of news (listNewState.ts): the bar while threads are held, the pill only after Show.
-  const newState = listNewState({ held: props.notice?.count ?? 0, unseen: props.unseenNew ?? NO_UNSEEN, watching: props.covered !== true });
+  // The list's two signs of news (listNewState.ts): the bar while threads are held, the pill (ListNewPill) only after Show.
+  const heldBar = listBarShows(props.notice?.count ?? 0);
   /** Show, from the "N new" line. */
   const showNew = () => {
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
@@ -1621,7 +1621,7 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {newState.bar && props.notice && (
+          {heldBar && props.notice && (
             <HeldNoticeLine
               count={props.notice.count}
               project={props.notice.project ?? null}
@@ -1673,7 +1673,7 @@ export function InboxList(props: InboxListProps) {
         </ThreadRowMenu>
       {pick.sheet}
       {/* The bar's words for a screen reader, once per count (HeldNoticeLine.tsx): never on a scroll. */}
-      <HeldNoticeSaid count={newState.bar ? props.notice!.count : 0} project={props.notice?.project ?? null} />
+      <HeldNoticeSaid count={heldBar ? props.notice!.count : 0} project={props.notice?.project ?? null} place={`${props.scope ?? ''}\n${props.title}`} />
       {props.reconnecting && (
         <p className="ib-relink" data-inbox-reconnecting="">
           Reconnecting…

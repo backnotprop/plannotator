@@ -1419,6 +1419,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-listcol { --ib-held-h: 50px; }
 .ib-notice-stick { position: sticky; top: 0; z-index: 3; padding-bottom: 12px; background: var(--card); }
 .ib-notice-stick > .ib-notice { margin-bottom: 0; }
+/* A row that ↑ ↓, J/K or Tab scrolls to (`scrollIntoView`, block nearest) stops below the stuck bar, never under it. */
+.ib-lbody:has(> .ib-notice-stick) { scroll-padding-top: var(--ib-held-h); }
 .pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 12px); }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
@@ -3713,7 +3715,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
      headers stick under it. */
   .ib-listcol { --ib-held-h: 64px; }
   .ib-notice-stick { padding: 10px 12px; }
+  /* A fixed 44 px (one line, nowrap) so the box is exactly `--ib-held-h`: change one, change the other. */
   .ib-notice-stick > .ib-notice { height: 44px; margin: 0; width: 100%; }
+  /* Below the bar and the group header stuck under it (a band button is 44 px here). */
+  .ib-lbody:has(> .ib-notice-stick) { scroll-padding-top: calc(var(--ib-held-h) + 44px); }
   .ib-lbody:has(.ib-notice-stick) .ib-band { top: var(--ib-held-h); }
   .pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 56px); }
   /* The stale page notice's ×: a finger's width. */

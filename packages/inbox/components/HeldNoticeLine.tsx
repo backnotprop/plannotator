@@ -38,17 +38,19 @@ export function HeldNoticeLine({ count, project, onShow }: { count: number; proj
 /**
  * What a screen reader hears of the bar: its words once each time the count changes, politely. Drawn whether or not
  * the bar is, so a count that appears is said; never on a scroll (the bar sticking says nothing). Show empties it,
- * which says nothing, so the next count is said afresh.
+ * which says nothing, so the next count is said afresh. Another list (`place`: a project, a folder) says nothing:
+ * its count is not news that arrived, it is what that list already holds.
  */
-export function HeldNoticeSaid({ count, project }: { count: number; project: string | null }) {
+export function HeldNoticeSaid({ count, project, place }: { count: number; project: string | null; place: string }) {
   const words = count > 0 ? (project ? `${count} new in ${project}` : `${count} new`) : '';
   const [said, setSaid] = useState('');
-  const last = useRef(words);
+  const last = useRef({ words, place });
   useEffect(() => {
-    if (words === last.current) return;
-    last.current = words;
-    setSaid(words);
-  }, [words]);
+    const was = last.current;
+    if (words === was.words && place === was.place) return;
+    last.current = { words, place };
+    setSaid(place === was.place ? words : '');
+  }, [words, place]);
   return (
     <span className="ib-sr" aria-live="polite" data-held-said="">
       {said}

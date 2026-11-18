@@ -33,8 +33,13 @@ export interface ListNewState {
 
 const NONE: ReadonlySet<string> = new Set();
 
+/** The bar shows while any thread is held behind it, wherever the reader is (it sticks). */
+export function listBarShows(held: number): boolean {
+  return held > 0;
+}
+
 export function listNewState({ held, unseen, dismissed = NONE, watching }: ListNewInput): ListNewState {
-  const bar = held > 0;
+  const bar = listBarShows(held);
   const rest = watching ? unseen.filter((row) => !dismissed.has(row.id)) : [];
   if (rest.length === 0) return { bar, button: null };
   const below = rest.filter((row) => row.edge === 'bottom').length;

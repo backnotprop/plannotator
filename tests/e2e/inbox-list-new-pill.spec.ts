@@ -10,7 +10,7 @@
  * - Show on the bar never scrolls the list. The rows it brought in below the view are counted by the pill, which
  *   appears only then; a press goes there, and each row is lit only once it is in view, for the light's whole 3 s.
  * - With the bar in view at the top there is no pill either, and scrolling to where the rows will land draws and
- *   lights nothing; the bar stays stuck in view while the reader scrolls.
+ *   lights nothing; the bar stays stuck in view while the reader scrolls, and a row reached with ↑ stops below it.
  * - A 390 px phone: the bar sticks above the sticky group header, the pill comes after Show above the list's bottom
  *   edge with a 44 px target, and a tap brings the row in view.
  *
@@ -231,6 +231,24 @@ test('at rest the bar covers no row and shows no pill; it stays stuck while the 
     await barStuck(page);
     await page.waitForTimeout(500);
     await expect(pill(page)).toHaveAttribute('data-off', '');
+    // ↑ from the first row wholly below the stuck bar: each row it reaches is scrolled to below the bar, never under it.
+    const start = await page.evaluate(() => {
+      const bar = document.querySelector('[data-held-bar]')!.getBoundingClientRect();
+      const el = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-thread-id]')].find((node) => node.getBoundingClientRect().top >= bar.bottom - 1)!;
+      el.focus({ preventScroll: true });
+      return el.getAttribute('data-thread-id')!;
+    });
+    await expect(page.locator(`.ib-lbody [data-thread-id="${start}"]`)).toBeFocused();
+    for (let n = 0; n < 3; n++) {
+      await page.keyboard.press('ArrowUp');
+      const place = await page.evaluate(() => {
+        const bar = document.querySelector('[data-held-bar]')!.getBoundingClientRect();
+        const row = (document.activeElement as HTMLElement).getBoundingClientRect();
+        return { moved: (document.activeElement as HTMLElement).getAttribute('data-thread-id'), rowTop: row.top, barBottom: bar.bottom };
+      });
+      expect(place.moved).not.toBe(start);
+      expect(place.rowTop).toBeGreaterThanOrEqual(place.barBottom - 1);
+    }
     // They scroll on to where the row will land: it is still held behind the line, so nothing is drawn or lit.
     await body(page).evaluate((el) => {
       el.scrollTop = el.scrollHeight;
