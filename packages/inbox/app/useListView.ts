@@ -112,7 +112,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
     [listFilterPicks, listFilterScoped, filterTag, listTags, routines.state],
   );
   const routineTest = routines.state === 'ready' ? routines.test : undefined;
-  /** A saved Routine pick while the routines are not read: the list waits. */
+  /** A saved Routine pick while the routines are not read: the list waits, drawing no row and no empty words. */
   const listHeld = routineHold(routines, listFilterApplied);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(

@@ -5671,7 +5671,6 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            // A saved Routine pick waiting for the routines: the list draws nothing, no empty words either.
             listHeld ? null : listFilterEmpty ? (
               <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
