@@ -2096,7 +2096,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   useEffect(() => {
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
-  }, [semanticEnabled, showSemantic]);
+    if (!semanticEnabled) for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
+  }, [semanticEnabled, showSemantic, refreshItem]);
 
   const reportPowerUp = useStableCallback(() => {
     if (!onPowerUpStatus) return;
