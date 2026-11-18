@@ -2184,7 +2184,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semanticWasEnabledRef = useRef(semanticEnabled);
   const semanticAskedForRef = useRef(new Set<string>());
   useEffect(() => {
-    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
+    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].filter((itemId) => !semDiffsRef.current.has(itemId)).map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
     semanticWasEnabledRef.current = semanticEnabled;
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
     for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
@@ -2374,7 +2374,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         const { file, oldText, newText, generation, signal } = texts;
         const stale = () => signal.aborted || fileSetKeyRef.current !== generation;
         void client.diff(file.path, oldText, newText, signal).then((result) => {
-          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+          if (result && !stale()) applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
         });
       }
       powerUpFilesRef.current = new Map();

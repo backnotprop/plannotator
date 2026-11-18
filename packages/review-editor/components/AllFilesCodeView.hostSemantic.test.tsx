@@ -835,6 +835,20 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.textContent).toBe('2 moved');
   });
 
+  test.skipIf(!hasDom)('turning Power Up off after the switch was turned on by hand offers the answer without it, and leaves the drawn file alone', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp });
+    await page.land();
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+    document.dispatchEvent(new Event('wheel'));
+    await act(async () => configStore.set('diffSemantic', false));
+    await act(async () => configStore.set('diffSemantic', true));
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+    await page.rerender({ powerUp: { active: false, rejected: [], provider: 'jev', retry: 0 } as never });
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+  });
+
   test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {
     configStore.set('diffSemantic', false);
     const page = await reading(['a.ts'], { 'a.ts': 100 });
