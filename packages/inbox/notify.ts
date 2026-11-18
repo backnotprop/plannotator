@@ -345,15 +345,18 @@ export function useInboxNotifications(options: {
   /** `questionId`: the question it notified about (`<message id>/<key>`), absent for a new thread. */
   openThread: (threadId: string, questionId?: string) => void;
   openList: () => void;
-  /** New questions arrived (before any notification rule): the sound decides for itself (sound.ts). */
-  onQuestions?: () => void;
   /**
-   * The Inbox's bell owns a question's sound (on, armed, no other Inbox tab in
-   * front). A notice about a question raised while this tab is away is then
-   * silent, so there is one sound on every OS; every other notice (a new
-   * thread that asks nothing, anything raised in front) keeps the system's.
+   * New agent messages arrived (before any notification rule; `asks`: a new question among them, or a snoozed
+   * thread back with one): the sound decides for itself, by the person's choice (sound.ts).
    */
-  bellCovers?: () => boolean;
+  onAgentNews?: (news: { asks: boolean }) => void;
+  /**
+   * The Inbox's bell owns the sound of news that asks (or not): on, armed, it rings for that news under the
+   * person's choice, no other Inbox tab in front. A notice about it raised while this tab is away is then silent,
+   * so there is one sound on every OS; every other notice (anything raised in front, a new thread that asks
+   * nothing under "when an agent asks you") keeps the system's.
+   */
+  bellCovers?: (asks: boolean) => boolean;
   /** Another Inbox tab is in front: it raises what arrives, so this one does not. */
   otherTabInFront?: () => boolean;
   /** The thread is open and visible (its pane mounted and not covered): a question in it raises nothing while in front. */
@@ -376,8 +379,8 @@ export function useInboxNotifications(options: {
   openRef.current = { thread: options.openThread, list: options.openList };
   const onSettingsRef = useRef(options.onSettings);
   onSettingsRef.current = options.onSettings;
-  const soundRef = useRef({ questions: options.onQuestions, bellCovers: options.bellCovers });
-  soundRef.current = { questions: options.onQuestions, bellCovers: options.bellCovers };
+  const soundRef = useRef({ news: options.onAgentNews, bellCovers: options.bellCovers });
+  soundRef.current = { news: options.onAgentNews, bellCovers: options.bellCovers };
   const tabsRef = useRef({ onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront });
   tabsRef.current = { onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront };
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
@@ -390,6 +393,8 @@ export function useInboxNotifications(options: {
   const pending = useRef<{ messageId: string; key: string }[]>([]);
   /** New threads an agent started, waiting for the list read. */
   const pendingThreads = useRef<string[]>([]);
+  /** The threads of new agent messages (each message's first line), waiting for the list read: the sound's news. */
+  const pendingNews = useRef<string[]>([]);
   /** New failed-turn notes (message id and claim key), waiting for the list read. */
   const pendingFailed = useRef<{ messageId: string; key: string }[]>([]);
   /** The threads of the current burst, with their project names and whether they ask. */
@@ -495,6 +500,13 @@ export function useInboxNotifications(options: {
     if (event.kind === 'message' && event.message.author.kind === 'agent') {
       const message = event.message;
       messages.current.set(message.id, { threadId: message.thread_id, author: message.author });
+      // Any new agent message, by its first line (a look, an archive or a catch-up's later line is not news), for the
+      // sound. An agent's routine change line is a note of what it did, not words to the person: never news.
+      const news = `news:${message.id}`;
+      if (event.first === true && !message.scheduled_change && !counted.current.has(news)) {
+        counted.current.add(news);
+        pendingNews.current.push(message.thread_id);
+      }
       const id = `thread:${message.thread_id}`;
       if (!counted.current.has(id) && isNewAgentThread(message, event.first, known.current)) {
         counted.current.add(id);
@@ -559,8 +571,8 @@ export function useInboxNotifications(options: {
       );
       open = () => openRef.current.list();
     }
-    // Silent only when the bell owns this notice's sound: a question, this tab away, the bell on and armed.
-    const silent = !front && items.some((item) => item.asks) && soundRef.current.bellCovers?.() === true;
+    // Silent only when the bell owns this notice's sound: this tab away, the bell on, armed and ringing for this news.
+    const silent = !front && items.some((item) => soundRef.current.bellCovers?.(item.asks) === true);
     try {
       const notification = new Notification(text.title, inboxNotificationOptions(text, { silent }));
       notification.onclick = () => {
@@ -581,9 +593,11 @@ export function useInboxNotifications(options: {
       const questions = pending.current;
       const fresh = pendingThreads.current;
       const failures = pendingFailed.current;
+      const news = pendingNews.current;
       pending.current = [];
       pendingThreads.current = [];
       pendingFailed.current = [];
+      pendingNews.current = [];
       const rowList = list.sections.flatMap((section) => section.threads);
       // Snoozed threads (approval "inbox-snooze") are in no section. They are known threads all the same, and
       // nothing notifies for them; what they asked rings when they come back, by the rule below.
@@ -593,7 +607,9 @@ export function useInboxNotifications(options: {
       if (rowList.length > 0 || snoozed.size > 0 || (list.projects ?? []).some((project) => project.threads > 0)) setHasThreads(true);
       const back = returnedItems(rowList, snoozedSeen.current);
       snoozedSeen.current = snoozed;
-      if (questions.length === 0 && fresh.length === 0 && back.length === 0 && failures.length === 0) return;
+      // Agent messages in a thread that is not snoozed (nothing an agent writes rings a snoozed thread).
+      const heard = news.some((threadId) => !snoozed.has(threadId));
+      if (questions.length === 0 && fresh.length === 0 && back.length === 0 && failures.length === 0 && !heard) return;
       // The threads these items landed in, newest last, with the agent that wrote.
       const threads = new Map<string, NotifyItem>();
       for (const item of back) threads.set(item.threadId, item);
@@ -631,10 +647,11 @@ export function useInboxNotifications(options: {
           keys: [...(before?.keys ?? []), key],
         });
       }
-      if (threads.size === 0) return;
       const asks = [...threads.values()].some((item) => item.asks);
-      // The sound does not depend on notifications (off, not allowed or blocked, it still rings), and rings for questions only.
-      if (asks) soundRef.current.questions?.();
+      // The sound does not depend on notifications (off, not allowed or blocked, it still rings); it hears every
+      // agent message and rings by the person's choice. A plain reply raises no notice, so it ends here.
+      if (heard || threads.size > 0) soundRef.current.news?.({ asks });
+      if (threads.size === 0) return;
       const settings = settingsRef.current;
       if (!settings || !settings.enabled || !supported()) return;
       const now = Notification.permission;

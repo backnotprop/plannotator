@@ -14,8 +14,9 @@
  * check is off and points at a dead port, so nothing asks GitHub.
  *
  * Proves: a question while the tab is hidden rings once; a burst of three
- * rings once; a visible tab rings nothing; a plain message rings nothing; the
- * sound off rings nothing (and notifications stop being silent); two tabs
+ * rings once; a visible tab rings nothing; a plain reply rings under the
+ * default ("for every agent message") and not under "when an agent asks you";
+ * the sound off rings nothing (and notifications stop being silent); two tabs
  * ring once; a fresh install never shows the dialog; after an update the
  * dialog shows once, in one of two tabs, and not again on reload.
  * Screenshots (light and dark) land in PLANNOTATOR_SOUND_SHOTS (default
@@ -295,15 +296,21 @@ test('with the tab visible and focused nothing rings', async () => {
   expect(await rings(page)).toBe(before);
 });
 
-test('a plain message rings nothing; the next question in that burst-free moment does', async () => {
+test('by default a plain reply rings once; a question right after it is in the same burst', async () => {
   await awayAgain(page);
   const before = await rings(page);
-  const plain = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.' });
-  await settled(page, plain.thread_id);
-  expect(await rings(page)).toBe(before);
+  const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Starting the migration now.' });
+  await settled(page, started.thread_id);
+  await expect.poll(() => rings(page)).toBe(before + 1);
+  // A fresh burst, then a plain reply in that thread: it rings.
+  await awayAgain(page);
+  const reply = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.', reply_to: started.thread_id as string });
+  await settled(page, reply.thread_id);
+  await expect.poll(() => rings(page)).toBe(before + 2);
   const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Delete the backup now?') });
   await settled(page, asked.thread_id);
-  await expect.poll(() => rings(page)).toBe(before + 1);
+  await page.waitForTimeout(800);
+  expect(await rings(page)).toBe(before + 2);
 });
 
 test('two Inbox tabs ring once between them; any tab in front keeps both quiet', async () => {
@@ -336,13 +343,14 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   await second.close();
 });
 
-test('Settings: the row, Play always plays, and the switch off silences the next question (notifications ring the system again)', async () => {
+test('Settings: the row, Play always plays, "when an agent asks you" quiets a plain message, and the switch off silences the next question (notifications ring the system again)', async () => {
   await setFront(page, true, true);
   await page.getByRole('button', { name: 'Settings' }).click();
   const block = page.locator('[data-settings-notifications]');
   const row = block.locator('[data-settings-sound]');
   await expect(row).toContainText('Play a sound');
-  await expect(row).toContainText('When an agent asks you');
+  await expect(row.getByRole('radio', { name: 'for every agent message' })).toBeChecked();
+  await expect(row).toContainText('A reply, a new thread or a question, while no Inbox tab is in front');
   await expect(row.getByRole('slider', { name: 'Volume' })).toHaveValue('60');
   await page.locator('.ib-spage').evaluate((el) => el.scrollTo(0, el.scrollHeight));
   await shot(page, 'settings-sound-row');
@@ -350,6 +358,21 @@ test('Settings: the row, Play always plays, and the switch off silences the next
   const before = await rings(page);
   await row.getByRole('button', { name: 'Play the sound' }).click();
   await expect.poll(() => rings(page)).toBe(before + 1);
+
+  // "When an agent asks you": a plain message rings nothing; the next question does.
+  await row.getByRole('radio', { name: 'when an agent asks you' }).check();
+  await expect.poll(() => config(fresh).inboxSound?.when).toBe('asks');
+  await expect(row).toContainText('When an agent asks you, while no Inbox tab is in front');
+  await awayAgain(page);
+  const asks = await rings(page);
+  const plain = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Backups rotated. Nothing needed from you.' });
+  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${plain.thread_id}`)).status()).toBe(200);
+  await page.waitForTimeout(1200);
+  expect(await rings(page)).toBe(asks);
+  const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Keep last week’s backup too?') });
+  await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${asked.thread_id}`)).status()).toBe(200);
+  await expect.poll(() => rings(page)).toBe(asks + 1);
+  await setFront(page, true, true);
 
   const sw = row.getByRole('switch', { name: 'Play a sound' });
   await sw.click();
@@ -384,7 +407,7 @@ test('after an update the dialog shows once: in one of two tabs opened together,
   await other.close();
   const dialog = shown.locator('dialog[data-dialog="sound-intro"]');
   await expect(dialog.getByRole('heading', { name: 'The Inbox can ring now' })).toBeVisible();
-  await expect(dialog).toContainText('A soft doorbell when an agent asks you something and this tab is hidden.');
+  await expect(dialog).toContainText('A soft doorbell when an agent sends you something and this tab is hidden.');
   // This browser has not decided about notifications: the one line says so.
   await expect(dialog.locator('[data-sound-nline="not-allowed"]')).toHaveText("Notifications aren't allowed yet.Allow");
   await expect(dialog.getByRole('button', { name: 'Keep it on' })).toBeFocused();

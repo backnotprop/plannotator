@@ -6,7 +6,10 @@
  * does, a later line of a root (an Unarchive of a thread archived before the
  * page loaded) is never a new thread, a burst collapses into one notice and
  * drops a thread the person opened, a notice is silent only when the bell
- * owns its sound, and two tabs raise each item once. A launched session's
+ * owns its sound, and two tabs raise each item once. The sound hears every
+ * new agent message (a plain reply included, which still raises no notice),
+ * never the person's own, a later line, a routine change line or a snoozed
+ * thread's. A launched session's
  * failed turn (its note, `turn_error`) notifies once per note for Claude
  * Code, Codex and Pi, as "<project>: <agent> couldn't answer", under the
  * same rules as a question: not while its thread is open and visible, not
@@ -80,8 +83,12 @@ let host: HTMLElement | null = null;
 /** One hook per tab: tabs[0] is this tab; a second Probe stands for another tab (same storage). */
 const tabs: InboxNotifications[] = [];
 let onScreen: string | null = null;
-let questionsHeard = 0;
+/** What the sound heard, one entry per list read with agent news: whether a question was among it. */
+let heard: boolean[] = [];
+/** The bell on and armed. */
 let bell = false;
+/** Its choice is "for every agent message" (else "when an agent asks you"). */
+let bellEvery = false;
 let otherTabInFront = false;
 /** Settings → General's notifications switch. */
 let enabled = true;
@@ -95,10 +102,10 @@ function Probe({ index }: { index: number }) {
     onSettings: () => {},
     openThread: (threadId) => onOpenThread(threadId),
     openList: () => onOpenList(),
-    onQuestions: () => {
-      questionsHeard++;
+    onAgentNews: (news) => {
+      heard.push(news.asks);
     },
-    bellCovers: () => bell,
+    bellCovers: (asks) => bell && (asks || bellEvery),
     otherTabInFront: () => otherTabInFront,
     threadOnScreen: (threadId) => threadId === onScreen,
   });
@@ -198,8 +205,9 @@ describe.if(hasDom)('useInboxNotifications', () => {
   beforeEach(async () => {
     front = { visible: true, focused: true };
     onScreen = null;
-    questionsHeard = 0;
+    heard = [];
     bell = false;
+    bellEvery = false;
     otherTabInFront = false;
     enabled = true;
     onOpenThread = () => {};
@@ -220,12 +228,12 @@ describe.if(hasDom)('useInboxNotifications', () => {
     window.localStorage.clear();
   });
 
-  test('a new thread that asks nothing notifies with the tab in front, and the sound hears nothing', async () => {
+  test('a new thread that asks nothing notifies with the tab in front, and the sound hears it as news that asks nothing', async () => {
     await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
     expect(raised).toHaveLength(1);
     expect(raised[0]!.title.startsWith('billing-svc: Claude Code')).toBe(true);
     expect(raised[0]!.body).toBe('Subject t1');
-    expect(questionsHeard).toBe(0);
+    expect(heard).toEqual([false]);
   });
 
   test('an Unarchive of a thread archived before the page loaded is not a new thread', async () => {
@@ -240,7 +248,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     expect(raised).toHaveLength(0);
     // The sound still hears it (it decides for itself, and rings only with no Inbox tab in front).
-    expect(questionsHeard).toBe(1);
+    expect(heard).toEqual([true]);
 
     away();
     await batch([message('m2', 'old'), question('m2', 'q-2')], list([{ id: 'old', section: 'waiting' }]));
@@ -258,6 +266,27 @@ describe.if(hasDom)('useInboxNotifications', () => {
     away();
     await batch([message('m2', 'old')], list([{ id: 'old', section: 'new' }]));
     expect(raised).toHaveLength(0);
+  });
+
+  test("the sound hears each new agent message once, a plain reply included; never the person's own, a later line, a routine change line or a snoozed thread's", async () => {
+    away();
+    const known = list([{ id: 'old', section: 'new' }]);
+    // A plain reply: news that asks nothing (the sound rings for it under "for every agent message").
+    await batch([message('m1', 'old')], known);
+    // The same line again (a catch-up) and a later line of it (a look): not news.
+    await batch([message('m1', 'old'), message('m1', 'old', {}, false)], known);
+    // The person's own reply, from this window or another device.
+    await batch([message('p1', 'old', { author: { kind: 'person' } })], known);
+    // An agent's routine change line: a note of what it did, not words to the person.
+    await batch([message('r1', 'old', { scheduled_change: { scheduled_id: 'sch_1', name: 'Nightly', op: 'paused' } as unknown as InboxMessage['scheduled_change'] })], known);
+    // A reply in a snoozed thread: nothing an agent writes rings it.
+    await batch([message('m2', 'old')], { ...list([]), snoozed: [{ thread_id: 'old' } as unknown as InboxListRow] } as ListModel);
+    expect(heard).toEqual([false]);
+    // Still no notice for plain news.
+    expect(raised).toHaveLength(0);
+    // Five agents writing at once: one list read, one piece of news (the sound's burst makes it one ring).
+    await batch(['a1', 'a2', 'a3', 'a4', 'a5'].map((id) => message(id, 'old', { author: { ...claude, session: `ses_${id}` } })), known);
+    expect(heard).toEqual([false, false]);
   });
 
   test('a later line of a root the page already listed (a look) is never a new thread', async () => {
@@ -304,7 +333,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(raised[1]!.body).toBe('Subject t2');
   });
 
-  test('silent only when the bell owns the sound: a question, this tab away, the bell on', async () => {
+  test('silent only when the bell owns the sound: this tab away, the bell on, and it rings for that news', async () => {
     bell = true;
     // In front: the bell never rings here, so the notice keeps the system's sound.
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
@@ -316,7 +345,13 @@ describe.if(hasDom)('useInboxNotifications', () => {
     // The bell off (or not armed): the system's sound again.
     bell = false;
     await batch([message('t3', 't3'), question('t3', 'q-3')], list([{ id: 't3', section: 'waiting' }]));
-    expect(raised.map((r) => r.silent)).toEqual([false, false, true, false]);
+    // "For every agent message": the bell rings for a new thread that asks nothing too, so its notice is silent.
+    bell = true;
+    bellEvery = true;
+    back();
+    away();
+    await batch([message('t4', 't4')], list([{ id: 't4', section: 'new' }]));
+    expect(raised.map((r) => r.silent)).toEqual([false, false, true, false, true]);
   });
 
   test('two tabs raise each item once; a tab away defers to another tab in front', async () => {
@@ -557,8 +592,8 @@ describe.if(hasDom)('useInboxNotifications', () => {
       expect(raised[0]!.title).toMatch(/^billing-svc: Claude Code couldn't answer$/);
       expect(raised[1]!.title).toBe("billing-svc: Codex couldn't answer");
       expect(raised[2]!.title).toBe("billing-svc: Pi couldn't answer");
-      // Not a question: the bell is not asked to ring.
-      expect(questionsHeard).toBe(0);
+      // Not a question: news that asks nothing (the bell rings for it only under "for every agent message"), once per note.
+      expect(heard).toEqual([false, false, false]);
     });
 
     test('an agent\'s own plain message never notifies, and only the note\'s first line does (a restart\'s catch-up writes no first line)', async () => {

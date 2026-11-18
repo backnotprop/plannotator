@@ -2309,10 +2309,25 @@ export interface InboxSoundSettings {
   enabled: boolean;
   /** 10 to 100; the slider has no 0, because the switch is how the sound goes off. */
   volume: number;
+  /**
+   * What rings it (the owner, 2026-11-18): `messages`, any new message from an agent (the default, also for
+   * everyone who had the sound before and never chose); `asks`, only when an agent asks. Absent from an Inbox before it.
+   */
+  when?: InboxSoundWhen;
   /** The version the one-time "The Inbox can ring now" dialog was shown for (or a fresh install was marked with); null while never. */
   dialog_shown_for: string | null;
   /** The one-time dialog waits for a page on this computer to claim it (POST /api/inbox/sound/dialog). Absent from an Inbox before it. */
   dialog_due?: boolean;
+}
+
+/** What rings the sound: any new agent message, or only an agent asking. */
+export type InboxSoundWhen = "messages" | "asks";
+export const INBOX_SOUND_WHEN: readonly InboxSoundWhen[] = ["asks", "messages"];
+export const INBOX_SOUND_DEFAULT_WHEN: InboxSoundWhen = "messages";
+
+/** The choice as saved; anything else (nothing chosen yet, an unknown value) is the default. */
+export function inboxSoundWhen(value: unknown): InboxSoundWhen {
+  return value === "asks" || value === "messages" ? value : INBOX_SOUND_DEFAULT_WHEN;
 }
 
 export const INBOX_SOUND_DEFAULT_VOLUME = 60;

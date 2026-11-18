@@ -86,6 +86,8 @@ import {
   isCodexThreadId,
   isInboxId,
   isInboxSoundVolume,
+  inboxSoundWhen,
+  INBOX_SOUND_WHEN,
   isInboxTextSize,
   type InboxTextSize,
   isInboxReactionEmoji,
@@ -2690,8 +2692,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
-   * The question sound (the "Ding-dong"), resolved from config.json: on, at
-   * 60, unless set. `dialog_shown_for`: the version the one-time dialog was
+   * The Inbox's sound (the "Ding-dong"), resolved from config.json: on, at
+   * 60, for every agent message, unless set. `dialog_shown_for`: the version the one-time dialog was
    * shown for, or that a fresh install was marked with; null while it never
    * was. `dialog_due`: the dialog waits for a page on this computer to claim it.
    */
@@ -2702,6 +2704,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return {
       enabled: saved.enabled !== false,
       volume: isInboxSoundVolume(saved.volume) ? saved.volume : INBOX_SOUND_DEFAULT_VOLUME,
+      // Nothing chosen yet (an update included): every agent message rings, the owner's default.
+      when: inboxSoundWhen(saved.when),
       dialog_shown_for: shownFor,
       dialog_due: shownFor === null && typeof saved.dialogDueFor === "string" && saved.dialogDueFor !== "",
     };
@@ -2731,14 +2735,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
           next.volume = value;
           break;
+        case "when":
+          if (!INBOX_SOUND_WHEN.includes(value as never)) throw new InboxError("validation_error", 'sound.when: "messages" or "asks".', { field: "sound.when" });
+          next.when = value as NonNullable<typeof next.when>;
+          break;
         default:
           // The dialog's marks are the server's to write (below), never the page's.
-          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume).`, { field: `sound.${field}` });
+          throw new InboxError("validation_error", `sound.${field}: not a setting (enabled, volume, when).`, { field: `sound.${field}` });
       }
     }
     if (validateOnly) return soundState();
     saveConfig({ inboxSound: next });
-    if (loadConfig().inboxSound?.enabled !== next.enabled || loadConfig().inboxSound?.volume !== next.volume) {
+    const kept = loadConfig().inboxSound;
+    if (kept?.enabled !== next.enabled || kept?.volume !== next.volume || kept?.when !== next.when) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
     return soundState();

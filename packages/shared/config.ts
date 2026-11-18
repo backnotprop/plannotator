@@ -728,6 +728,8 @@ export interface PlannotatorConfig {
   inboxSound?: {
     enabled?: boolean;
     volume?: number;
+    /** What rings it: "messages" (any new agent message; the default when absent) or "asks" (only an agent asking). */
+    when?: "messages" | "asks";
     dialogDueFor?: string;
     dialogShownFor?: string;
   };

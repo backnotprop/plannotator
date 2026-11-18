@@ -4,9 +4,11 @@
  * audio files. Design of record: .product/approved/inbox-sound/ (kept
  * privately, not in this repo).
  *
- * When it rings: a new question in an agent's message (the same items
- * notify.ts notifies about; plain messages never ring), only while no Inbox
- * tab is in front, and once per burst: the first question rings, more within
+ * When it rings (the person's choice, `InboxSoundSettings.when`): "for every
+ * agent message" (the default) rings for any new message from an agent (a
+ * reply, a new thread, a question); "when an agent asks you" only for a new
+ * question (the same items notify.ts notifies about). Either way only while no
+ * Inbox tab is in front, and once per burst: the first one rings, more within
  * 30 s of the last one stay silent, and the burst ends when a tab comes to the
  * front. It does not depend on notifications. Several Inbox tabs ring once:
  * they share a BroadcastChannel (who is in front, who rang) and a tab rings
@@ -19,7 +21,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { INBOX_SOUND_DEFAULT_VOLUME, type InboxSoundSettings } from '@plannotator/core/inbox-types';
+import { INBOX_SOUND_DEFAULT_VOLUME, INBOX_SOUND_DEFAULT_WHEN, inboxSoundWhen, type InboxSoundSettings, type InboxSoundWhen } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
 
 // ───────────────────────────── The sound ─────────────────────────────
@@ -137,6 +139,14 @@ export function decideRing(gate: RingGate, input: { now: number; enabled: boolea
   return { ring: true, gate: { lastAt: input.now } };
 }
 
+/**
+ * Whether news of this kind rings under the person's choice: a question always; any other new agent message (a
+ * reply, a new thread that asks nothing, a failed turn's note) only under "for every agent message".
+ */
+export function ringsFor(when: InboxSoundWhen | undefined, asks: boolean): boolean {
+  return asks || inboxSoundWhen(when) === 'messages';
+}
+
 /** Another tab rang at `at`: this tab is in that burst too. */
 export function heardRing(gate: RingGate, at: number): RingGate {
   return { lastAt: gate.lastAt === null ? at : Math.max(gate.lastAt, at) };
@@ -222,21 +232,24 @@ async function withRingLock(ring: () => void): Promise<boolean> {
 // ───────────────────────────── The hook ─────────────────────────────
 
 export interface InboxSound {
-  /** The saved choice (on, at 60, until the Inbox says otherwise). */
-  settings: InboxSoundSettings;
+  /** The saved choice (on, at 60, for every agent message, until the Inbox says otherwise). */
+  settings: InboxSoundSettings & { when: InboxSoundWhen };
   /** The tab has had a click or key press, so a ring can play. */
   armed: boolean;
   /** A preview is playing ("Playing…"). */
   playing: boolean;
   /** Play: always plays, tab in front or not, at `volume` (default: the saved one). */
   preview: (volume?: number) => void;
-  /** New questions arrived (notify.ts's items, after the list read). */
-  questionsArrived: () => void;
+  /** New agent messages arrived (notify.ts, after the list read); `asks`: a new question among them. */
+  arrived: (news: { asks: boolean }) => void;
+  /** The bell owns this news's sound: on, armed, it rings for it, and no other Inbox tab is in front (notify.ts adds: this tab away). */
+  covers: (asks: boolean) => boolean;
   /** Another Inbox tab said it is in front (within the last 15 s): it handles what arrives (notify.ts). */
   otherTabInFront: () => boolean;
   /** Save the switch; false when the Inbox did not keep it (the switch goes back). */
   setEnabled: (next: boolean) => Promise<boolean>;
   setVolume: (next: number) => Promise<boolean>;
+  setWhen: (next: InboxSoundWhen) => Promise<boolean>;
 }
 
 /** The gestures a browser may count as a user activation. */
@@ -253,7 +266,7 @@ function userActivated(): boolean {
   return activation.isActive || activation.hasBeenActive;
 }
 
-const DEFAULT_SETTINGS: InboxSoundSettings = { enabled: true, volume: INBOX_SOUND_DEFAULT_VOLUME, dialog_shown_for: null };
+const DEFAULT_SETTINGS: InboxSoundSettings = { enabled: true, volume: INBOX_SOUND_DEFAULT_VOLUME, when: INBOX_SOUND_DEFAULT_WHEN, dialog_shown_for: null };
 
 function tabId(): string {
   try {
@@ -268,7 +281,9 @@ export function useInboxSound(options: {
   settings: InboxSoundSettings | null | undefined;
   onSettings: (next: InboxSoundSettings) => void;
 }): InboxSound {
-  const settings = options.settings ?? DEFAULT_SETTINGS;
+  const given = options.settings ?? DEFAULT_SETTINGS;
+  // An Inbox that predates the choice sends none: the default.
+  const settings: InboxSound['settings'] = { ...given, when: inboxSoundWhen(given.when) };
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
   const onSettingsRef = useRef(options.onSettings);
@@ -390,7 +405,9 @@ export function useInboxSound(options: {
     return [...others.current.values()].some((tab) => tab.front && now - tab.at < FRONT_FRESH_MS);
   }, []);
 
-  const questionsArrived = useCallback(() => {
+  const arrived = useCallback((news: { asks: boolean }) => {
+    // "When an agent asks you": a reply or a new thread that asks nothing is not part of any burst (as before the choice).
+    if (!ringsFor(settingsRef.current.when, news.asks)) return;
     const now = Date.now();
     const decided = decideRing(gate.current, { now, enabled: settingsRef.current.enabled, inFront: pageInFront(), otherTabInFront: otherTabInFront() });
     gate.current = decided.gate;
@@ -406,6 +423,11 @@ export function useInboxSound(options: {
     });
   }, [otherTabInFront]);
 
+  const covers = useCallback(
+    (asks: boolean) => settingsRef.current.enabled && armedRef.current && ringsFor(settingsRef.current.when, asks) && !otherTabInFront(),
+    [otherTabInFront],
+  );
+
   const preview = useCallback((volume?: number) => {
     // Play is a click: it arms the sound too.
     audio.current?.arm();
@@ -416,7 +438,7 @@ export function useInboxSound(options: {
     playingTimer.current = setTimeout(() => setPlaying(false), DING_DONG_MS);
   }, []);
 
-  const save = useCallback(async (change: { enabled?: boolean; volume?: number }) => {
+  const save = useCallback(async (change: { enabled?: boolean; volume?: number; when?: InboxSoundWhen }) => {
     const before = settingsRef.current;
     onSettingsRef.current({ ...before, ...change });
     try {
@@ -430,6 +452,7 @@ export function useInboxSound(options: {
 
   const setEnabled = useCallback((next: boolean) => save({ enabled: next }), [save]);
   const setVolume = useCallback((next: number) => save({ volume: next }), [save]);
+  const setWhen = useCallback((next: InboxSoundWhen) => save({ when: next }), [save]);
 
-  return { settings, armed, playing, preview, questionsArrived, otherTabInFront, setEnabled, setVolume };
+  return { settings, armed, playing, preview, arrived, covers, otherTabInFront, setEnabled, setVolume, setWhen };
 }

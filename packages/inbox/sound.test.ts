@@ -5,7 +5,7 @@
  * tab reported joins this tab to that burst.
  */
 import { describe, expect, test } from 'bun:test';
-import { DING_DONG, decideRing, heardRing, QUIET_GATE, RING_BURST_MS, type RingGate } from './sound';
+import { DING_DONG, decideRing, heardRing, QUIET_GATE, RING_BURST_MS, ringsFor, type RingGate } from './sound';
 import { inboxNotificationOptions } from './notify';
 
 const away = { enabled: true, inFront: false, otherTabInFront: false };
@@ -56,6 +56,13 @@ describe('decideRing', () => {
     expect(decideRing(gate, { ...away, now: 2500 }).ring).toBe(false);
     // An older report never shortens a later burst.
     expect(heardRing({ lastAt: 9000 }, 1000)).toEqual({ lastAt: 9000 });
+  });
+});
+
+describe('ringsFor: the person\'s choice', () => {
+  test('"for every agent message" (also nothing chosen, or a value this build does not know) rings for a plain reply; "when an agent asks you" only for a question', () => {
+    for (const when of ['messages', undefined, 'sometimes' as never] as const) expect([ringsFor(when, false), ringsFor(when, true)]).toEqual([true, true]);
+    expect([ringsFor('asks', false), ringsFor('asks', true)]).toEqual([false, true]);
   });
 });
 

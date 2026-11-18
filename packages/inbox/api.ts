@@ -1585,7 +1585,7 @@ export const inboxApi = {
         body: JSON.stringify(report),
       }),
     ),
-  saveSound: (change: { enabled?: boolean; volume?: number }) => post<{ sound: InboxSoundSettings }>(inboxUrl('/settings'), { sound: change }),
+  saveSound: (change: { enabled?: boolean; volume?: number; when?: InboxSoundSettings['when'] }) => post<{ sound: InboxSoundSettings }>(inboxUrl('/settings'), { sound: change }),
   /** Ask to show the one-time sound dialog: `show` is true for the first page that ever asks after an update, and only that one. */
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>(inboxUrl('/sound/dialog'), {}),
   /**

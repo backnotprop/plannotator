@@ -2026,6 +2026,13 @@ dialog.ib-dlg.ib-activity-lb[open] { display: flex; flex-direction: column; }
 .ib-sframe .ib-card .ib-connect { margin: 0; }
 .ib-vslider { width: 120px; accent-color: var(--primary); margin: 0; }
 .ib-vslider:disabled { opacity: 0.45; }
+/* Settings → Play a sound: what rings it, under the label (the owner's two choices). */
+.ib-prow .ib-sound-when { align-self: flex-start; max-width: 100%; margin: 6px 0 3px; }
+/* A phone's row is too narrow for the two in a line: one under another, each the row's full width (as Rows' agents). */
+@media (max-width: 480px) {
+  .ib-prow .ib-sound-when { display: flex; flex-direction: column; align-items: stretch; flex-wrap: nowrap; align-self: stretch; }
+  .ib-prow .ib-sound-when .ib-seg-o { justify-content: flex-start; }
+}
 .pn-inbox .ib-sw:disabled { opacity: 0.45; }
 /* Settings → Archived: the archived rows drawn as the section's card rows. */
 .ib-card .ib-arcrow { padding: 10px 16px; border-bottom: 1px solid var(--ib-hair); }

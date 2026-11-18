@@ -617,10 +617,10 @@ describe("the question sound (config.json inboxSound)", () => {
     fetch(`http://127.0.0.1:${server.port}${path}`, { keepalive: false, method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const claim = async (server: InboxServer) => (await (await postJson(server, "/api/inbox/sound/dialog", { serverSession: server.serverSession })).json()).show;
 
-  test("on at 60 unless set; saved field by field; anything else refused with nothing written", async () => {
+  test("on at 60 for every agent message unless set; saved field by field; anything else refused with nothing written", async () => {
     writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
     const server = await start();
-    expect(await settingsOf(server)).toEqual({ enabled: true, volume: 60, dialog_shown_for: null, dialog_due: true });
+    expect(await settingsOf(server)).toEqual({ enabled: true, volume: 60, when: "messages", dialog_shown_for: null, dialog_due: true });
     for (const bad of [
       { enabled: "yes" },
       { volume: 0 },
@@ -631,6 +631,8 @@ describe("the question sound (config.json inboxSound)", () => {
       { dialog_shown_for: "0.28.10" },
       { dialog_due: false },
       { ring: true },
+      { when: "always" },
+      { when: true },
       [true],
     ]) {
       const refused = await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: bad });
@@ -638,10 +640,23 @@ describe("the question sound (config.json inboxSound)", () => {
     }
     expect(loadConfig().inboxSound).toEqual({ dialogDueFor: "0.28.10" });
     const saved = await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { volume: 30 } });
-    expect((await saved.json()).sound).toEqual({ enabled: true, volume: 30, dialog_shown_for: null, dialog_due: true });
+    expect((await saved.json()).sound).toEqual({ enabled: true, volume: 30, when: "messages", dialog_shown_for: null, dialog_due: true });
     await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
-    expect(await settingsOf(server)).toEqual({ enabled: false, volume: 30, dialog_shown_for: null, dialog_due: true });
-    expect(loadConfig().inboxSound).toEqual({ dialogDueFor: "0.28.10", volume: 30, enabled: false });
+    expect(await settingsOf(server)).toEqual({ enabled: false, volume: 30, when: "messages", dialog_shown_for: null, dialog_due: true });
+    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { when: "asks" } });
+    expect(await settingsOf(server)).toEqual({ enabled: false, volume: 30, when: "asks", dialog_shown_for: null, dialog_due: true });
+    expect(loadConfig().inboxSound).toEqual({ dialogDueFor: "0.28.10", volume: 30, enabled: false, when: "asks" });
+  });
+
+  test("an update keeps the sound off for someone who turned it off; everyone who never chose gets every agent message", async () => {
+    // Saved by an Inbox from before the choice: off, and no `when`.
+    writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
+    saveConfig({ inboxSound: { enabled: false, volume: 40 } });
+    const server = await start();
+    expect(await settingsOf(server)).toMatchObject({ enabled: false, volume: 40, when: "messages" });
+    // Nothing is written for it: the default is read, never stored.
+    expect(loadConfig().inboxSound).toMatchObject({ enabled: false, volume: 40 });
+    expect(loadConfig().inboxSound?.when).toBeUndefined();
   });
 
   test("after an update the dialog is claimed once: of two tabs asking together one shows it, and a reload never does", async () => {
