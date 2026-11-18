@@ -60,7 +60,7 @@ export interface InboxAgentLaunch {
   scratch: string | null;
   /** A routine's run (its root is a run divider). */
   scheduled?: boolean;
-  /** It runs in a Rex tab (Rex owns it: no Stop). */
+  /** It runs in a Rex tab whose pane the Inbox never learned, so it offers no Stop. */
   rex?: boolean;
 }
 
@@ -267,11 +267,9 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   const group = Array.isArray(value) ? value[0] : null;
   if (!group || typeof group !== "object" || !Array.isArray((group as InboxAgentsGroup).agents)) return null;
   const raw = group as Partial<InboxAgentsGroup>;
-  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => {
-    // Rex is this computer's own: a linked machine's agent never carries a place, a pane's status or a mark here.
-    const { place: _place, rex_status: _status, rex_mark: _mark, ...rest } = inboxAgentNamesChecked(agent);
-    return rest;
-  });
+  // Where it lives in that machine's Rex, its pane's status and mark, as that machine's Inbox read them (checked as
+  // sent): never Show in Rex, which moves that machine's screen.
+  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => inboxAgentNamesChecked(agent));
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};

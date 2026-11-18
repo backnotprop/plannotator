@@ -6,9 +6,11 @@
  * folder deleted by the Inbox; the person's choice not followed (Rex asked while the Inbox is chosen, or an agent
  * that cannot run in Rex offered); a session that never connects shown as "starting" for ever; a Rex pane blocked on
  * a prompt not said on the line; a reply to an ended Rex session restarted in the background instead of in Rex; a
- * second process started on a session its Rex tab still runs (H1); a routine's run, a phone's or a linked machine's
- * Send started in Rex (H2, M6); Stop, Open in Terminal or an attach command for one in Rex (M1); Rex's "no" taken for
- * a started agent (M2).
+ * second process started on a session its Rex tab still runs (H1), or a wait for nothing when Rex says the tab is gone;
+ * a routine's run started in Rex (a new tab per run), or a phone's or a linked machine's Send kept out of it; Stop
+ * that leaves the agent running or closes another pane; Open in Terminal or an attach command for one in Rex (a
+ * second copy); Rex's "no" taken for a started agent (M2); agents started in Rex losing their place once the setting
+ * goes back to the Inbox.
  *
  * A real launch engine over a temp data dir with the engine's fake host (tests/helpers/fake-launch-host.ts) and a
  * stand-in for inbox-rex.ts's `open` (its own tests cover the calls Rex gets). No Rex is reached.
@@ -44,7 +46,7 @@ async function until(check: () => boolean) {
 }
 
 type OpenRequest = { project: string; projectKey: string; tab: string; command: string; pathPrepend?: readonly string[] };
-const opened: InboxRexOpened = { opened: true, session: "session:x", window: "window:y", line: "Rex · my-app / Fake Agent" };
+const opened: InboxRexOpened = { opened: true, session: "session:x", window: "window:y", block: "block:z", line: "Rex · my-app / Fake Agent" };
 
 function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequest) => Promise<InboxRexOpened>; attached?: boolean; scratch?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-rex-"));
@@ -67,6 +69,10 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
   const processes = { listing: "  1     0 /sbin/launchd\n" as string | null };
   // How often Rex was asked whether its app is attached (each ask is a connection to the person's Rex).
   const asked = { attached: 0 };
+  // Rex's word on a pane (null: no answer), whether it closes one, and the panes it was asked about or to close.
+  const panes = { gone: false as boolean | null, closes: true, asked: [] as string[], closed: [] as string[] };
+  // Where live sessions say they run (their polls' place hints).
+  const places = new Map<string, { kind: "rex"; session: string; block: string }>();
   const launch = createInboxLaunch({
     store,
     live: { runStateOf: () => null },
@@ -84,7 +90,13 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
     onChange: () => {},
     selfCommand: ["plannotator"],
     hosts: () => [fake.host],
-    rex: { open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)), appAttachedNow: async () => (asked.attached++, options.attached ?? true) },
+    rex: {
+      open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)),
+      appAttachedNow: async () => (asked.attached++, options.attached ?? true),
+      paneGone: async (place) => (panes.asked.push(`${place.session}/${place.block}`), panes.gone),
+      closePane: async (place) => (panes.closed.push(`${place.session}/${place.block}`), panes.closes),
+    },
+    placeOf: (session) => places.get(session) ?? null,
     rexStatus: (session) => statuses.get(session) ?? null,
     processListing: async () => processes.listing,
     now: () => clock.now,
@@ -96,16 +108,22 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
       `/api/inbox/launch/${id}/${action}`,
       "local",
     );
-  // `pressedHere`: a Send pressed in this computer's own window (the only one that may start in Rex).
-  const send = async (words = "Tidy the changelog, then tell me.", pressedHere = true) => {
+  // `background`: a routine's run.
+  const send = async (words = "Tidy the changelog, then tell me.", background = false) => {
     const target = launch.target({ launch: options.scratch ? { agent: FAKE, scratch: true } : { agent: FAKE, project_id: project.id } })!;
-    const prepared = await launch.prepare(target, { name: "Tidy", body: words, resolveProject: async () => project, pressedHere });
+    const prepared = await launch.prepare(target, { name: "Tidy", body: words, resolveProject: async () => project, background });
     const message = store.startPersonThread({ project_id: project.id, body: words, to: prepared.to, idempotency_key: `send-${words.length}`, thread_name: "Tidy", launch: prepared.launch }).message;
     launch.begin(message);
     await until(() => !!store.message(message.id)!.launch!.session_ref || !!store.message(message.id)!.launch!.error);
     return { root: store.message(message.id)!, id: prepared.launch.id };
   };
-  return { store, clock, project, fake, launch, opens, statuses, processes, asked, post, send, loginBin, dataDir };
+  const setStartIn = async (startIn: "inbox" | "rex") =>
+    launch.route(
+      new Request("http://127.0.0.1/api/inbox/launch/settings", { method: "POST", headers: { Origin: "http://127.0.0.1", Host: "127.0.0.1" }, body: JSON.stringify({ serverSession: "srv", start_in: startIn }) }),
+      "/api/inbox/launch/settings",
+      "local",
+    );
+  return { store, clock, project, fake, launch, opens, statuses, processes, asked, panes, places, post, send, setStartIn, loginBin, dataDir };
 }
 
 describe("Start in Rex", () => {
@@ -118,14 +136,15 @@ describe("Start in Rex", () => {
     // The message reaches it as its first turn through its own channel: never on the command line.
     expect(opens[0]!.command).not.toContain("changelog");
     expect(root.to).toEqual({ host: FAKE, session: "session-r1" });
-    expect(root.launch).toMatchObject({ session_ref: "session-r1", session: "session-r1", rex: { line: "Rex · my-app / Fake Agent" } });
+    // Where Rex put it, and the pane Rex made (Stop closes that pane).
+    expect(root.launch).toMatchObject({ session_ref: "session-r1", session: "session-r1", rex: { line: "Rex · my-app / Fake Agent", session: "session:x", block: "block:z" } });
     // The tab is made and the agent not connected yet (Rex's app may not have jumped): where it is, on the line.
     expect(await launch.runOf(root.thread_id)).toMatchObject({ state: "starting", rex: { line: "Rex · my-app / Fake Agent" }, attach_command: null });
   });
 
-  test("a Send not pressed in this computer's own window (a phone, the tailnet, a linked machine, a routine): Rex is never asked", async () => {
+  test("a routine's run starts in the background with Rex chosen: Rex is never asked (no new tab per run)", async () => {
     const { fake, opens, send } = setup();
-    const { root } = await send("From the phone.", false);
+    const { root } = await send("The nightly run.", true);
     expect(opens).toEqual([]);
     expect(fake.calls).toEqual(["start Tidy"]);
     expect(root.launch!.rex).toBeUndefined();
@@ -185,12 +204,44 @@ describe("Start in Rex", () => {
     expect(await launch.runOf(root.thread_id)).toMatchObject({ state: "working" });
   });
 
-  test("Rex owns it: Stop is refused, Delete leaves its session and scratch folder (only the Inbox forgets it)", async () => {
+  test("Stop closes its pane in Rex (the one its session reports, else the one Rex made), never the host's stop; the line says stopped", async () => {
+    const { clock, fake, store, panes, places, send, post, launch } = setup();
+    const { root, id } = await send();
+    fake.poll("session-r1", true, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
+    expect((await launch.runOf(root.thread_id))?.rex?.stops).toBe(true);
+    const stopped = (await (await post(id, "stop"))!.json()) as { run: { state: string; stopped_by_person?: boolean } };
+    expect(panes.closed).toEqual(["session:x/block:z"]);
+    expect(fake.calls.filter((call) => call.startsWith("stop "))).toEqual([]);
+    expect(stopped.run).toMatchObject({ state: "stopped", stopped_by_person: true });
+    // The session says it runs in another pane (the person moved it): that one is closed.
+    places.set("session-r1", { kind: "rex", session: "session:x", block: "block:moved" });
+    fake.poll("session-r1", true, clock.now + 1);
+    await post(id, "stop");
+    expect(panes.closed.at(-1)).toBe("session:x/block:moved");
+  });
+
+  test("Stop in Rex that cannot work (no pane known, or Rex not closing it): refused with words, and nothing counts as stopped", async () => {
+    const unknown = setup({ answer: async () => ({ opened: false, sent: true }) });
+    const first = await unknown.send();
+    unknown.fake.poll("session-r1", true, unknown.clock.now);
+    unknown.store.recordDelivery(first.root.id, { host: FAKE, session: "session-r1" });
+    expect((await unknown.launch.runOf(first.root.thread_id))?.rex?.stops).toBeUndefined();
+    await expect(unknown.post(first.id, "stop")).rejects.toMatchObject({ code: "launch_in_rex", message: INBOX_RUN_IN_REX_STOP });
+    const refusing = setup();
+    refusing.panes.closes = false;
+    const second = await refusing.send();
+    refusing.fake.poll("session-r1", true, refusing.clock.now);
+    refusing.store.recordDelivery(second.root.id, { host: FAKE, session: "session-r1" });
+    await expect(refusing.post(second.id, "stop")).rejects.toMatchObject({ code: "launch_in_rex", message: INBOX_RUN_IN_REX_STOP });
+    expect((await refusing.launch.runOf(second.root.thread_id))?.state).toBe("working");
+  });
+
+  test("Delete leaves its Rex session and scratch folder (only the Inbox forgets it)", async () => {
     const { clock, fake, store, send, post } = setup({ scratch: true });
     const { root, id } = await send();
     fake.poll("session-r1", true, clock.now);
     store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
-    await expect(post(id, "stop")).rejects.toMatchObject({ code: "launch_in_rex", message: INBOX_RUN_IN_REX_STOP });
     const deleted = (await (await post(id, "delete"))!.json()) as Record<string, unknown>;
     expect(deleted).toMatchObject({ ok: true, scratch_removed: false });
     expect(fake.calls.filter((call) => /^(stop|remove|purge) /.test(call))).toEqual([]);
@@ -269,6 +320,30 @@ describe("Start in Rex", () => {
     await until(() => opens.length === 2);
   });
 
+  test("a reply right after an Inbox restart whose tab Rex says is gone: no wait, one new tab at once (its new pane recorded); Rex unsure: it waits", async () => {
+    const { clock, fake, store, opens, panes, send, launch } = setup({ answer: async (request) => (request.command.includes("--resume") || opens.length > 1 ? { ...opened, block: "block:new" } : opened) });
+    const { root } = await send();
+    fake.poll("session-r1", false, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
+    const answer = store.sendMessage({ project_id: root.project_id, author: { kind: "agent", host: FAKE, session: "session-r1", name: "Fake Agent" }, body: "Done.", reply_to: root.id, idempotency_key: "answer-gone" }).message;
+    fake.ended("session-r1");
+    clock.now += INBOX_RUN_START_GRACE_MS + 1_000;
+    // Rex has no answer about the pane: within the Inbox's first minute and a half, the reply waits.
+    panes.gone = null;
+    store.sendReply(answer.id, { words: "Still there?", idempotency_key: "reply-gone-1" });
+    await until(() => panes.asked.length === 1);
+    await Bun.sleep(20);
+    expect(opens).toHaveLength(1);
+    expect((await launch.runOf(root.thread_id))?.rex?.held).toBe("may_run");
+    // Rex says the pane is gone (and no process runs the session): the next look starts it again at once.
+    panes.gone = true;
+    clock.now += 10_000;
+    store.sendReply(answer.id, { words: "Hello?", idempotency_key: "reply-gone-2" });
+    await until(() => opens.length === 2);
+    expect(panes.asked.at(-1)).toBe("session:x/block:z");
+    await until(() => store.message(root.id)!.launch!.rex?.block === "block:new");
+  });
+
   test("Try again right after an Inbox restart: refused, as the tab's agent may still be running", async () => {
     const { clock, send, post } = setup();
     const { id } = await send();
@@ -313,6 +388,16 @@ describe("Start in Rex", () => {
 });
 
 describe("Settings → Agents: Start new agents in", () => {
+  test("back to the background: agents started in Rex keep their Rex place until they end; every agent in a Rex pane counts only while Rex is chosen", async () => {
+    const { launch, send, setStartIn } = setup();
+    await send();
+    expect(launch.startsInRex()).toBe(true);
+    expect([...(launch.rexSessions() ?? [])]).toEqual(["session-r1"]);
+    await setStartIn("inbox");
+    expect(launch.startsInRex()).toBe(false);
+    expect([...(launch.rexSessions() ?? [])]).toEqual(["session-r1"]);
+  });
+
   test("Rex is asked whether its app is here only for this computer's own Settings answer: never for the routines' clock or the tailnet", async () => {
     const { launch, asked } = setup({ startIn: "inbox" });
     // The routines' clock and the window's settings model: whether Launch is on, no Rex.
@@ -348,8 +433,8 @@ describe("Settings → Agents: Start new agents in", () => {
         "local",
       );
     const saved = (await (await route({ start_in: "rex" }))!.json()) as { launch: Record<string, unknown> };
-    // Claude Code and Pi connect by themselves from a terminal; Codex and OpenCode never start in Rex (no dead choice).
-    expect(saved.launch).toMatchObject({ start_in: "rex", rex_agents: ["claude-code", "pi", FAKE] });
+    // Claude Code, Pi and OpenCode connect by themselves from a terminal; Codex never starts in Rex (no dead choice).
+    expect(saved.launch).toMatchObject({ start_in: "rex", rex_agents: ["claude-code", "pi", "opencode", FAKE] });
     expect(saved.launch.rex_here).toBeUndefined();
     expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxLaunch.startIn).toBe("rex");
     const back = (await (await route({ start_in: "inbox" }))!.json()) as { launch: Record<string, unknown> };

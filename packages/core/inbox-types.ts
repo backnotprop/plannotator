@@ -1206,11 +1206,13 @@ export interface InboxLaunchRecord {
   rex?: InboxLaunchRex;
 }
 
-/** `InboxLaunchRecord.rex`. */
+/** `InboxLaunchRecord.rex`. `session` and `block`: the Rex session and the pane Rex made for it (Stop closes that pane). */
 export interface InboxLaunchRex {
   line?: string;
   unavailable?: true;
   refused?: true;
+  session?: string;
+  block?: string;
 }
 
 /** The launch runs in a Rex tab (it asked for Rex and Rex made the tab): Rex owns it, the Inbox never stops or removes it. */
@@ -1255,10 +1257,15 @@ export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting
 /**
  * Whether Stop is offered for a launch: it started (the host gave it a session) and it runs, at rest (no line) or
  * starting, working or at a prompt in Terminal. A prompt in the window has its own Stop on the permission card.
- * Never for one that runs in Rex (`rex`): Rex owns its process, and the Inbox never stops it.
+ * `rex`: it runs in Rex and the Inbox has no pane of it to close (`inboxLaunchRexUnstoppable`), so no Stop.
  */
 export function inboxLaunchStops(started: boolean, run: InboxRunState | null, rex = false): boolean {
   return !rex && started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+}
+
+/** A launch in Rex the Inbox cannot stop: it never learned the pane Rex made for it (`InboxLaunchRex.block`). */
+export function inboxLaunchRexUnstoppable(launch: Pick<InboxLaunchRecord, "rex" | "session_ref">): boolean {
+  return inboxLaunchInRex(launch) && !launch.rex?.block;
 }
 
 /** A run line's launch runs in a Rex tab (`InboxRun.rex`, not one that started in the background instead). */
@@ -1306,9 +1313,10 @@ export interface InboxRun {
    */
   /**
    * `held`: a reply waits to start it again, as its old process may still run (`may_run`: the Inbox just started and
-   * has not heard from it yet) or still does (`still_runs`: a process runs that session).
+   * has not heard from it yet) or still does (`still_runs`: a process runs that session). `stops`: the Inbox knows its
+   * pane, so Stop closes it.
    */
-  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs" };
+  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { inboxRunInRex, type InboxRun } from '@plannotator/core/inbox-types';
-import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
+import { INBOX_RUN_REX_NOT_CONNECTED, INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import { whenTime } from '../format';
@@ -151,9 +151,11 @@ export function RunLine({
   );
   const kept = 'Your message is kept.';
   let bar: number | null = null;
-  // Started in Rex (Settings → Agents' "Start new agents in"): Rex owns it, so no Stop here; its tab is the way in.
+  // Started in Rex (Settings → Agents' "Start new agents in"): its tab is the way in; Stop (when given) closes that tab.
   const inRex = inboxRunInRex(run);
   const rexLine = inRex ? run.rex!.line : null;
+  // In Rex, Stop closes its tab: only when the Inbox knows that tab.
+  const stopHere = inRex && !run.rex!.stops ? null : stop;
   switch (run.state) {
     case 'starting':
       text = run.again ? `Starting ${name} again…` : inRex ? (
@@ -277,7 +279,7 @@ export function RunLine({
           {name} is working{minutes ? ` · ${minutes}` : ''}
         </>
       );
-      actions = inRex ? null : stop;
+      actions = stopHere;
       break;
     case 'waiting_answer':
       // A permission prompt asked above, as a question card (screen 09): answering it is the action.
@@ -286,7 +288,7 @@ export function RunLine({
           {name} is waiting on your answer{minutes ? ` · ${minutes}` : ''}
         </>
       );
-      actions = inRex ? null : stop;
+      actions = stopHere;
       break;
     case 'waiting_terminal':
       icon = 'warn';
@@ -300,6 +302,7 @@ export function RunLine({
             {minutes ? ` · ${minutes}` : ''}
           </>
         );
+        actions = stopHere;
         break;
       }
       text = (
@@ -378,7 +381,7 @@ export function RunLine({
       }
       text = (
         <>
-          <b>{name} didn't start.</b> {run.cause ?? ''} Your message is kept.
+          {inRex && run.cause === INBOX_RUN_REX_NOT_CONNECTED ? <b>{name} opened in Rex but hasn't connected to the Inbox.</b> : <b>{name} didn't start.</b>} {run.cause ?? ''} Your message is kept.
           {/* Create a folder (E8): the folder the Send made is not taken away when the agent doesn't start. */}
           {run.made_folder ? (
             <span className="ib-run-sub" data-run-made-folder="">

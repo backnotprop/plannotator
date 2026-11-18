@@ -3,8 +3,8 @@
  * shown only when Rex confirms it and a list never waits on Rex; Show in Rex asks the app only at the click and counts
  * only a confirmed success; starting in Rex makes its tab only in a session the Inbox made, through a login shell; what
  * a pane says it is doing is read only for a confirmed block, state and kind only, never with an attach; only an app
- * attached over this computer's own socket is ever acted through; and nothing beyond ids, labels, status records, new
- * tabs and focus is ever asked of Rex.
+ * attached over this computer's own socket is ever acted through; Stop closes only the agent's own pane; and nothing
+ * beyond ids, labels, status records, new tabs, focus and closing that pane is ever asked of Rex.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
@@ -14,8 +14,8 @@ import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
 import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_MARK_STALE_MS, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 
-/** Every method the Inbox may call: view (ids and labels), status records (`block.method` `program_status` only), a new session or tab with its command, focus. */
-const ALLOWED = new Set(["target.resolve", "client.list", "client.perform", "session.attach", "session.create", "session.new_window", "session.focus_block", "block.method"]);
+/** Every method the Inbox may call: view (ids and labels), status records (`block.method` `program_status` only), a new session or tab with its command, focus, Stop's close of a pane. */
+const ALLOWED = new Set(["target.resolve", "client.list", "client.perform", "session.attach", "session.create", "session.new_window", "session.focus_block", "block.method", "block.close"]);
 
 const fakes: FakeRex[] = [];
 const rexes: InboxRex[] = [];
@@ -203,6 +203,49 @@ describe("the app attached here", () => {
   });
 });
 
+describe("Stop and a closed tab", () => {
+  test("a start in Rex knows the pane Rex made (a new session's, or a new tab's in the Inbox's session)", async () => {
+    const { fake, rex } = setup();
+    const first = await rex.open({ project: "p", projectKey: "p", tab: "One", command: "c" });
+    const second = await rex.open({ project: "p", projectKey: "p", tab: "Two", command: "c" });
+    if (!first.opened || !second.opened) throw new Error("not opened");
+    const made = fake.sessions.find((s) => s.session_id === first.session)!;
+    expect(first.block).toBe(made.windows[0]!.blocks[0]!);
+    expect(second.block).toBe(made.windows[1]!.blocks[0]!);
+  });
+
+  test("Stop closes only that pane (the tab goes with its last pane); one already gone counts as closed; no Rex or Rex's error: not closed", async () => {
+    const { fake, rex } = setup();
+    const opened = await rex.open({ project: "p", projectKey: "p", tab: "Agent", command: "c" });
+    if (!opened.opened || !opened.block) throw new Error("not opened");
+    const pane = placeOf({ session: opened.session, block: opened.block });
+    const other = fake.addSession("their work", "shell");
+    expect(await rex.closePane(pane)).toBe(true);
+    expect(fake.calls.filter((c) => c.method === "block.close").map((c) => c.payload)).toEqual([{ session_id: opened.session, block_id: opened.block }]);
+    expect(fake.sessions.find((s) => s.session_id === opened.session)!.windows).toEqual([]);
+    expect(fake.sessions.find((s) => s.session_id === other.session)!.windows[0]!.blocks).toEqual([other.block]);
+    // Closed by hand already: nothing runs there.
+    expect(await rex.closePane(pane)).toBe(true);
+    fake.setRefusal("block.close", { code: "permission_denied", message: "no", status: 403 });
+    expect(await rex.closePane(placeOf(other))).toBe(false);
+    const none = createInboxRex({ socketPath: null });
+    rexes.push(none);
+    expect(await none.closePane(pane)).toBe(false);
+  });
+
+  test("whether a pane is gone: Rex's own word (gone, there), or none when Rex does not answer", async () => {
+    const { fake, rex } = setup();
+    const ids = fake.addSession("p", "t");
+    expect(await rex.paneGone(placeOf(ids))).toBe(false);
+    expect(await rex.paneGone(placeOf({ session: ids.session, block: "block:00000000-0000-4000-8000-000000000000" }))).toBe(true);
+    // Its whole session gone.
+    expect(await rex.paneGone(placeOf({ session: "session:00000000-0000-4000-8000-000000000000", block: ids.block }))).toBe(true);
+    const none = createInboxRex({ socketPath: null });
+    rexes.push(none);
+    expect(await none.paneGone(placeOf(ids))).toBeNull();
+  });
+});
+
 describe("Show in Rex", () => {
   test("reading where agents live never asks the app anything", async () => {
     const { fake, rex } = setup({ remote: true });
@@ -225,15 +268,14 @@ describe("Show in Rex", () => {
     expect(fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
   });
 
-  test("a session the Inbox did not make: never attached to, its focus never moved (the app's own select only)", async () => {
+  test("an agent the person started by hand in a session of their own: the app goes to its tab and the pane gets the focus too", async () => {
     const { fake, rex } = setup({ remote: true });
     const theirs = fake.addSession("their work", "shell");
     expect(await rex.show(placeOf(theirs))).toEqual({ shown: true });
-    expect(fake.methods()).not.toContain("session.attach");
-    expect(fake.methods()).not.toContain("session.focus_block");
+    expect(fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: theirs.session, block_id: theirs.block });
   });
 
-  test("offered while the app is attached; a refusal (Remote Control off) hides it until Rex's app is gone and back, never as a dead item meanwhile", async () => {
+  test("a refusal (Remote Control off) hides it for a minute, then it is offered again by itself; Rex's app gone and back brings it at once", async () => {
     let clock = Date.parse("2026-11-18T09:00:00.000Z");
     const { fake, rex } = setup({ remote: true }, { now: () => clock });
     const ids = fake.addSession("p", "t");
@@ -242,18 +284,18 @@ describe("Show in Rex", () => {
     expect(rex.offersShow()).toBe(true);
     fake.setRemote(false);
     expect(await rex.show(placeOf(ids))).toEqual({ shown: false, refused: true });
-    expect(fake.methods()).not.toContain("session.focus_block");
     expect(rex.offersShow()).toBe(false);
-    // A start in Rex asks the app nothing, so it neither offers nor hides it.
+    // A new tab is Rex's server's (taken with Remote Control off too): it says nothing of Show.
     expect((await rex.open({ project: "p", projectKey: "p", tab: "t2", command: "c" })).opened).toBe(true);
     expect(rex.offersShow()).toBe(false);
-    // However long after: still hidden while that app stays.
-    clock += 60 * 60_000;
+    clock += 59_000;
     expect(rex.offersShow()).toBe(false);
-    rex.appAttached();
-    await rex.settled();
+    // A minute on: offered again, never hidden until a restart.
+    clock += 1_500;
+    expect(rex.offersShow()).toBe(true);
+    // Refused again; then Rex's app quits and comes back (Remote Control may be on now): offered at once.
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: false, refused: true });
     expect(rex.offersShow()).toBe(false);
-    // Rex's app quit and came back (Remote Control may be on now): offered again.
     fake.setApp(false);
     clock += 3_000;
     rex.appAttached();
@@ -265,6 +307,19 @@ describe("Show in Rex", () => {
     expect(rex.offersShow()).toBe(true);
     fake.setRemote(true);
     expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
+    expect(rex.offersShow()).toBe(true);
+  });
+
+  test("the windows hear when a hidden Show in Rex comes back by itself (nothing else may change meanwhile)", async () => {
+    const { fake, rex } = setup({ remote: false }, { showRefusedMs: 80 });
+    const ids = fake.addSession("p", "t");
+    rex.appAttached();
+    await rex.settled();
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: false, refused: true });
+    const hidden = rex.version();
+    expect(rex.offersShow()).toBe(false);
+    for (let i = 0; i < 100 && rex.version() === hidden; i++) await Bun.sleep(10);
+    expect(rex.version()).toBeGreaterThan(hidden);
     expect(rex.offersShow()).toBe(true);
   });
 

@@ -688,7 +688,7 @@ export function AgentsSettings({
       setLaunchBusy(false);
     }
   };
-  // "Start new agents in" (`inboxLaunch.startIn`): the Inbox, in the background, or Rex. Rex is offered while its app is
+  // "Start new agents in" (`inboxLaunch.startIn`): in the background, or Rex. Rex is offered while its app is
   // attached on this computer, or while it is the choice (so it can be turned back); the agents that can't run in Rex say so.
   const pickStartIn = async (next: 'inbox' | 'rex') => {
     if (!launchState || launchBusy || launchState.start_in === next) return;
@@ -713,7 +713,7 @@ export function AgentsSettings({
           <span className="ib-seg" role="group" aria-label="Start new agents in">
             {(['inbox', 'rex'] as const).map((where) => (
               <button key={where} type="button" className="ib-seg-o" aria-pressed={(launchState.start_in ?? 'inbox') === where} data-on={(launchState.start_in ?? 'inbox') === where ? '' : undefined} disabled={launchBusy} onClick={() => void pickStartIn(where)} data-launch-start-in={where}>
-                {where === 'inbox' ? 'The Inbox (in the background)' : 'Rex'}
+                {where === 'inbox' ? 'In the background' : 'Rex'}
               </button>
             ))}
           </span>

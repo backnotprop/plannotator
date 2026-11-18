@@ -204,6 +204,16 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
         if (payload.method !== "program_status") return fail("method_not_found", `no block method ${String(payload.method)}`, 404);
         return { payload: { records: statuses.get(payload.block_id) ?? [] } };
       }
+      case "block.close": {
+        // Closing a pane ends its program; its window goes with its last pane.
+        const s = sessionOf(payload.session_id);
+        if (!s) return fail("session_not_found", "no such session", 404);
+        const w = s.windows.find((x) => x.blocks.includes(payload.block_id as string));
+        if (!w) return fail("not_found", "no such block", 404);
+        w.blocks = w.blocks.filter((b) => b !== payload.block_id);
+        if (w.blocks.length === 0) s.windows.splice(s.windows.indexOf(w), 1);
+        return { payload: {} };
+      }
       case "session.destroy": {
         const at = sessions.findIndex((s) => s.session_id === payload.session_id);
         if (at < 0) return fail("session_not_found", "no such session", 404);

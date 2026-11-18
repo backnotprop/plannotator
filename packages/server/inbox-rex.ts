@@ -46,6 +46,8 @@ export const INBOX_REX_SLOW_BACKOFF_MS = 30_000;
 export const INBOX_REX_FRESH_MS = 2_000;
 /** A status read longer ago than this draws no mark on an icon (stale: today's icon until the next read). */
 export const INBOX_REX_MARK_STALE_MS = 15_000;
+/** How long Show in Rex stays hidden after the app refused one (Remote Control off), then offered again; Rex's app restarting brings it back at once. */
+export const INBOX_REX_SHOW_REFUSED_MS = 60_000;
 /** A read connection is closed once nothing used it this long. */
 const IDLE_CLOSE_MS = 3_000;
 /** The longest a name shown from Rex is, in characters. */
@@ -135,8 +137,6 @@ function sessionsKept(file: string | null) {
   };
   return {
     of: (project: string): KeptSession | null => memory[project] ?? null,
-    /** A Rex session the Inbox made (by its id). */
-    made: (id: string): boolean => Object.values(memory).some((kept) => kept.id === id),
     set(project: string, session: KeptSession) {
       memory = { ...memory, [project]: session };
       save();
@@ -158,6 +158,8 @@ export interface InboxRexOptions {
   readTimeoutMs?: number;
   openTimeoutMs?: number;
   showTimeoutMs?: number;
+  /** How long a refused Show stays hidden (INBOX_REX_SHOW_REFUSED_MS; tests shorten it). */
+  showRefusedMs?: number;
   now?: () => number;
   /** Said in the hello. */
   version?: string;
@@ -172,9 +174,15 @@ export interface InboxRexOptions {
  * may exist: the agent must not start elsewhere as well. `refused`: Rex answered the ask with an error, so it made
  * nothing (an option this Rex does not take, Remote Control off): the agent starts in the background.
  */
-export type InboxRexOpened = { opened: true; session: string; window: string; line: string } | { opened: false; sent: boolean; refused?: true };
+export type InboxRexOpened = { opened: true; session: string; window: string; block: string | null; line: string } | { opened: false; sent: boolean; refused?: true };
 
 export type InboxRex = ReturnType<typeof createInboxRex>;
+
+/** The first block id in a Rex answer's `block_ids` (the pane a new window starts with), or null. */
+function firstBlock(ids: unknown): string | null {
+  const first = Array.isArray(ids) ? ids[0] : null;
+  return typeof first === "string" && first.length > 0 && first.length <= 200 ? first : null;
+}
 
 export function createInboxRex(options: InboxRexOptions) {
   const now = options.now ?? Date.now;
@@ -182,6 +190,7 @@ export function createInboxRex(options: InboxRexOptions) {
   const readTimeout = options.readTimeoutMs ?? INBOX_REX_READ_TIMEOUT_MS;
   const openTimeout = options.openTimeoutMs ?? INBOX_REX_OPEN_TIMEOUT_MS;
   const showTimeout = options.showTimeoutMs ?? INBOX_REX_SHOW_TIMEOUT_MS;
+  const showRefused = options.showRefusedMs ?? INBOX_REX_SHOW_REFUSED_MS;
   const kept = sessionsKept(options.sessionsFile ?? null);
   const socketPath = () => (options.socketPath && inboxRexSocketOk(options.socketPath, uid) ? options.socketPath : null);
 
@@ -190,13 +199,27 @@ export function createInboxRex(options: InboxRexOptions) {
   /** What the last reads confirmed: each hinted session's place and line, and the app attached here. */
   const confirmed = new Map<string, { place: InboxPlace; line: string; status: InboxRexStatus | null; at: number }>();
   let app: { id: string | null; at: number } = { id: null, at: 0 };
-  /** The app that last refused (or failed or timed out on) a Show, and when: Show in Rex is hidden for it a while. */
-  /** The app that refused a Show (Remote Control off): none is offered again until Rex's app is seen gone and back. */
+  /**
+   * The app that last refused (or failed or timed out on) a Show, and when: Show in Rex is hidden for it for
+   * `showRefused`, or until its app goes and comes back or does a Show again. A new tab or a closed pane
+   * says nothing of it: those are Rex's server's, which takes them with Remote Control off too.
+   */
   let refusedShow: { app: string; at: number } | null = null;
+  let showBack: ReturnType<typeof setTimeout> | null = null;
   const jumped = (appId: string, ok: boolean) => {
     const next = ok ? null : { app: appId, at: now() };
     if (!next && !refusedShow) return;
     refusedShow = next;
+    if (showBack) clearTimeout(showBack);
+    showBack = null;
+    if (next) {
+      // The windows hear when it is offered again (nothing else may change meanwhile).
+      showBack = setTimeout(() => {
+        showBack = null;
+        changed();
+      }, showRefused + 50);
+      (showBack as { unref?: () => void }).unref?.();
+    }
     changed();
   };
   /** One start at a time per project: two Sends never make two sessions for it (the second waits for the first's). */
@@ -445,6 +468,7 @@ export function createInboxRex(options: InboxRexOptions) {
       }
       let session: string;
       let window: string;
+      let block: string | null = null;
       if (own) {
         try {
           await within(openTimeout, rex.call("session.attach", { session_id: own }));
@@ -460,6 +484,7 @@ export function createInboxRex(options: InboxRexOptions) {
         }
         session = own;
         window = text(made.window_id);
+        block = firstBlock(made.block_ids);
       } else {
         sent = true;
         let made: Record<string, unknown>;
@@ -469,11 +494,13 @@ export function createInboxRex(options: InboxRexOptions) {
           return refusedBy(error);
         }
         session = text(made.session_id);
-        window = text((made.initial_windows as { window_id?: unknown }[] | undefined)?.[0]?.window_id);
+        const first = (made.initial_windows as { window_id?: unknown; block_ids?: unknown }[] | undefined)?.[0];
+        window = text(first?.window_id);
+        block = firstBlock(first?.block_ids);
         if (SESSION_ID.test(session)) kept.set(request.projectKey, { id: session, label: project });
       }
       if (!session || !window) return { opened: false, sent: true };
-      return { opened: true, session, window, line: inboxRexLine(ownLabel, tab) };
+      return { opened: true, session, window, block, line: inboxRexLine(ownLabel, tab) };
     });
     return result ?? { opened: false, sent };
   };
@@ -541,10 +568,41 @@ export function createInboxRex(options: InboxRexOptions) {
       return appHere() !== null;
     },
 
-    /** Show in Rex may be offered: Rex's app is attached here, and it has not refused a Show in the last while. */
+    /** Show in Rex may be offered: Rex's app is attached here, and it has not refused a Show in the last minute. */
     offersShow(): boolean {
       const id = appHere();
-      return id !== null && !(refusedShow && refusedShow.app === id);
+      return id !== null && !(refusedShow && refusedShow.app === id && now() - refusedShow.at < showRefused);
+    },
+
+    /**
+     * Whether the pane `place` names is gone from Rex (Rex answered, and has no such block in that session): a reply
+     * may start its agent again without waiting. False: it is there. Null: no answer (no Rex, a slow one).
+     */
+    async paneGone(place: InboxPlace): Promise<boolean | null> {
+      const answer = await read((rex) => rex.call("target.resolve", { kinds: ["block"], queries: [place.block], scope: { session: place.session } }));
+      if (!answer) return null;
+      const result = resultsOf(answer)[0];
+      if (!result) return null;
+      if (result.status === "not_found") return true;
+      return result.status === "resolved" && result.target?.block_id === place.block ? false : null;
+    },
+
+    /**
+     * Stop: close the pane `place` names, which ends the program in it (Rex hangs it up, as closing a terminal does).
+     * True once Rex closed it or has no such pane any more; false when Rex is not here or did not do it.
+     */
+    async closePane(place: InboxPlace): Promise<boolean> {
+      const closed = await act(showTimeout, async (rex) => {
+        try {
+          await within(showTimeout, rex.call("block.close", { session_id: place.session, block_id: place.block }));
+          return true;
+        } catch (error) {
+          // Already gone (closed by hand, or the session went): nothing runs there.
+          if (error instanceof RexCallError && (error.code === "not_found" || error.code === "session_not_found")) return true;
+          throw error;
+        }
+      });
+      return closed === true;
     },
 
     /** What the list's Rex part depends on (the delivery watch says `agents` when it moves). */
@@ -576,7 +634,8 @@ export function createInboxRex(options: InboxRexOptions) {
     /**
      * Have Rex's app go to `place`'s pane, on the person's click. `shown` only for the app's confirmed success
      * (`performed_by` is that app). `refused`: the app was asked and did not (said no, failed, timed out or answered
-     * in another shape): Show in Rex is hidden until it confirms a jump again. Otherwise the pane or the app is gone.
+     * in another shape): Show in Rex is hidden for a minute, or until Rex's app goes and comes back. Otherwise the pane
+     * or the app is gone. In the session, the pane itself gets the focus (best effort).
      */
     async show(place: InboxPlace): Promise<{ shown: boolean; refused?: true }> {
       const outcome = await act(showTimeout, async (rex) => {
@@ -590,9 +649,8 @@ export function createInboxRex(options: InboxRexOptions) {
           answer = null;
         }
         if (!answer || answer.performed_by !== appId) return { shown: false, app: appId };
-        // The pane itself, in a tab of several: best effort, the app already went there. Only in a session the Inbox
-        // made: never attach to, or move the focus in, one it did not.
-        if (kept.made(place.session)) try {
+        // The pane itself, in a tab of several: best effort, the app already went there.
+        try {
           await within(1_500, rex.call("session.attach", { session_id: place.session }));
           await within(1_500, rex.call("session.focus_block", { session_id: place.session, block_id: place.block }));
         } catch {
@@ -607,6 +665,7 @@ export function createInboxRex(options: InboxRexOptions) {
     /** Close what is open (the Inbox stops). */
     close(): void {
       dropReader();
+      if (showBack) clearTimeout(showBack);
     },
   };
 }

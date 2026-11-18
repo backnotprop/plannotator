@@ -32,7 +32,7 @@ const cachedPlugin = (home: string, version: string, launches: boolean, generati
   writeFileSync(join(dir, "dist", "server.js"), launches ? `const watch = process.env.${OPENCODE_LAUNCH_ENV};` : "export default {};");
 };
 
-function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; withOpenCode?: boolean } = {}) {
+function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; withOpenCode?: boolean; rex?: boolean } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-opencode-")));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
@@ -40,7 +40,9 @@ function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; wit
   const folder = join(root, "project");
   for (const dir of [home, dataDir, folder, join(home, ".config", "opencode")]) mkdirSync(dir, { recursive: true });
   if (options.plugin !== false) writeFileSync(join(home, ".config", "opencode", "opencode.json"), JSON.stringify({ plugins: ["@plannotator/opencode"] }));
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true, ...(options.rex ? { startIn: "rex" } : {}) } }));
+  // Rex chosen: the tabs it was asked for (a stand-in for inbox-rex.ts; no Rex is reached).
+  const rexTabs: { command: string; tab: string }[] = [];
   const before = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
   cleanup.push(() => {
@@ -74,6 +76,16 @@ function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; wit
     onChange: () => {},
     log: () => {},
     selfCommand: ["plannotator"],
+    ...(options.rex
+      ? {
+          rex: {
+            open: async (request: { command: string; tab: string }) => (rexTabs.push({ command: request.command, tab: request.tab }), { opened: true as const, session: "session:x", window: "window:y", block: "block:z", line: "Rex · project / OpenCode" }),
+            appAttachedNow: async () => true,
+            paneGone: async () => null,
+            closePane: async () => true,
+          },
+        }
+      : {}),
   });
   cleanup.push(() => launch.stop());
   const send = async (body: string, choice: { model?: string; effort?: string; primary_agent?: string } = {}) => {
@@ -85,7 +97,7 @@ function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; wit
   };
   const stopRoute = (launchId: string) =>
     launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${launchId}/stop`, { method: "POST", headers: { "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }, body: JSON.stringify({ server_session: "srv" }) }), `/api/inbox/launch/${launchId}/stop`, "local");
-  return { home, store, project, folder, dataDir, fake, launch, send, stopRoute };
+  return { home, store, project, folder, dataDir, fake, launch, send, stopRoute, rexTabs };
 }
 
 describe("OpenCode through the launch engine, against the fake opencode2", () => {
@@ -168,6 +180,26 @@ describe("OpenCode through the launch engine, against the fake opencode2", () =>
     await until("the reply went in on it", () => t.fake.turns().some((turn) => turn.pid === again.pid && turn.text.includes("Please go on.")));
     expect(t.fake.http("POST", /^\/api\/session$/)).toHaveLength(1);
   }, 30_000);
+
+  test("Rex chosen: the session is made with the picked model on a server that then ends, and a Rex tab runs OpenCode's own UI on it, the plugin watching that session", async () => {
+    const t = setup({ rex: true });
+    await until("the lists", async () => (await t.launch.composeBlock())!.agents.find((a) => a.agent === "opencode")?.choices);
+    const root = await t.send("Tidy the readme in Rex.", { model: "opencode/big-pickle" });
+    const session = await until("the session", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.store.message(root.id)!.launch).toMatchObject({ session, rex: { line: "Rex · project / OpenCode", block: "block:z" } });
+    const [created] = t.fake.http("POST", /^\/api\/session$/);
+    expect(created!.body).toMatchObject({ location: { directory: t.folder }, title: "Tidy", model: { providerID: "opencode", id: "big-pickle" } });
+    // The server that made it is gone: only the tab runs OpenCode (never two on one session).
+    const [server] = t.fake.starts();
+    await until("the making server ended", () => !t.fake.alive(server!.pid));
+    expect(t.rexTabs).toHaveLength(1);
+    const { command, tab } = t.rexTabs[0]!;
+    expect(tab).toBe("OpenCode");
+    expect(command).toContain(`cd '${t.folder}' && exec env PLANNOTATOR_INBOX_TOOL=1 PLANNOTATOR_INBOX_LAUNCHED_SESSION='${session}' PLANNOTATOR_DATA_DIR='${t.dataDir}' opencode2 --standalone --session '${session}'`);
+    // The person's words reach it as its first turn through the plugin, never on the command line.
+    expect(command).not.toContain("readme");
+    expect(t.fake.turns()).toEqual([]);
+  });
 
   test("a permission OpenCode asks is the card: Allow once and Deny, and Allow once answers once", async () => {
     const t = setup();

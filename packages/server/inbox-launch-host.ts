@@ -278,8 +278,10 @@ export interface LaunchHost {
    * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
    * at its start, as the session id given here (so the root, addressed to it, is its first turn through its own
    * channel, as for `start`): never the person's message on the command line. `resume`: the same session again (a
-   * reply to one that ended). It writes what the session needs (Claude Code's settings file) but runs nothing. No
-   * member: this agent always starts in the background.
+   * reply to one that ended). It writes what the session needs (Claude Code's settings file), or makes the session
+   * first when only the agent's server can (OpenCode: a short server of its own, ended before the tab opens); the
+   * agent itself runs only in the tab. No member: this agent always starts in the background (Codex: a Codex in a tab
+   * never tells the Inbox between turns whether it runs, so its line could not say).
    */
   rexCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
   /**

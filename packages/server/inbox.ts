@@ -4971,30 +4971,31 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   rexVersion = rex.version;
   rexWatch = () => rex.watch(rexHints(live.placedSessions()));
   /**
-   * Where the given live sessions say they live (their polls' place hints), only for the sessions the Inbox itself
-   * started in Rex while "Start new agents in" is Rex (`launch.rexSessions()`), and the conversations that go on from
-   * them: Rex is never read about, and nothing from it is shown for, any other session (one the person runs in Rex by
-   * hand included). None (the default setting, or no such agent): no hints, so no Rex read at all.
+   * Where the given live sessions say they live (their polls' place hints). While "Start new agents in" is Rex: every
+   * one in a Rex pane, one the person started there by hand included. Otherwise only the sessions the Inbox started in
+   * Rex (`launch.rexSessions()`) and the conversations that go on from them, until they end. None (the default
+   * setting and no such agent, or no agent in a Rex pane): no hints, so no Rex read at all.
    */
   const rexHints = (sessions: Iterable<string>): Map<string, InboxPlace> => {
     const hints = new Map<string, InboxPlace>();
+    const every = launch.startsInRex();
     const inRex = launch.rexSessions();
-    if (!inRex || inRex.size === 0) return hints;
+    if (!every && (!inRex || inRex.size === 0)) return hints;
     for (const session of sessions) {
-      if (!inRex.has(session) && !live.continuesOf(session).some((old) => inRex.has(old))) continue;
+      if (!every && !inRex!.has(session) && !live.continuesOf(session).some((old) => inRex!.has(old))) continue;
       const place = live.placeOf(session);
       if (place) hints.set(session, place);
     }
     return hints;
   };
   /**
-   * This Inbox's agents with where they live (inbox-rex.ts), for a window on this computer only (`here`; a phone,
-   * the tailnet or a linked machine gets none and makes no Rex read): each place Rex last confirmed, as one line, and
-   * `show` while Show in Rex may be offered; and what that pane says the agent is doing (`withRexStatus`). Answered
-   * at once from the last read; a stale one starts the next in the background (never waited on).
+   * This Inbox's agents with where they live (inbox-rex.ts), for every window (a phone, the tailnet and a linked
+   * machine too): each place Rex last confirmed, as one line, and what that pane says the agent is doing
+   * (`withRexStatus`, the marks). `show` (Show in Rex) only for a window on this computer (`here`): elsewhere it would
+   * move a screen no one there looks at. Answered at once from the last read; a stale one starts the next in the
+   * background (never waited on).
    */
   const withRexPlaces = (groups: InboxAgentsGroup[], here: boolean): InboxAgentsGroup[] => {
-    if (!here) return groups;
     const at = groups.findIndex((group) => !group.machine || group.machine === machines.selfId);
     const own = at >= 0 ? groups[at]! : null;
     if (!own) return groups;
@@ -5003,8 +5004,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const shown = rex.places(hints);
     if (shown.size === 0) return groups;
     const statuses = rex.statuses(hints);
-    const show = rex.offersShow();
-    // The icons' status marks, from a fresh read (the hints are only sessions started in Rex while Rex is the choice).
+    const show = here && rex.offersShow();
+    // The icons' status marks, from a fresh read.
     const fresh = rex.freshStatuses(hints);
     const agents = own.agents.map((agent) => {
       const line = shown.get(agent.session);
@@ -5022,7 +5023,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * agent list, whose runs ask this again.
    */
   const rexStatusOf = (session: string): InboxRexStatus | null => {
-    // Only while "Start new agents in" is Rex, as every Rex word (`rexSessions` reads no runs: no loop).
+    // Only a session the Inbox started in Rex (`rexSessions` reads no runs: no loop).
     if (!launch.rexSessions()?.has(session)) return null;
     const place = live.placeOf(session);
     return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
@@ -5030,6 +5031,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const launch = createInboxLaunch({
     rex,
     rexStatus: (session) => rexStatusOf(session),
+    placeOf: (session) => live.placeOf(session),
     store,
     live,
     dataDir,
@@ -5842,7 +5844,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const faces = fromMachine ? agentFacesFile.wire() : null;
         const phone = door !== undefined && !fromMachine;
         const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
-        // Where this computer's agents live and what their panes say, as Rex says now; Show in Rex only for a window on this computer.
+        // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex only in one on this computer.
         const agents = withRexPlaces(listed, via === "local" && door === undefined);
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
         const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
@@ -5852,16 +5854,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (since === null) return json(model);
         return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
-      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click,
-      // only for a session the Inbox itself started in Rex (`rexHints`): never one the person runs there by hand.
-      // A request from this computer only, as a page of this Inbox sends it (never the tailnet, a phone or a linked
-      // machine: their Rex is not this one). A local program that copies those headers could ask too; all it can do is
-      // move Rex's app to a pane.
+      // Show in Rex (inbox-rex.ts): Rex's app on this computer goes to the pane a live session said it lives in, on the
+      // person's click, for any session the list places in Rex (`rexHints`). Only this computer's windows offer it (it
+      // moves this screen); another site's page never asks.
       if (path === "/api/inbox/rex/show") {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-        if (via !== "local" || fromDeviceDoor.has(req) || req.headers.get("sec-fetch-site") !== "same-origin") {
-          return json({ error: "Rex opens from this computer's own Inbox window only.", code: "window_only" }, 403);
-        }
+        if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const session = typeof body.session === "string" ? body.session : "";
@@ -7644,9 +7642,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const door = fromDeviceDoor.get(req);
             const fromMachine = door?.platform === MACHINE_PLATFORM;
             // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
-            // Start in Rex only for a reply pressed in this computer's own window (a page of this Inbox, same origin).
-            const pressedHere = via === "local" && !door && req.headers.get("sec-fetch-site") === "same-origin";
-            const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null, pressedHere) : null;
+            const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null) : null;
             const asked = body.to === undefined || startsSession ? undefined : store.message(messageId);
             const to = launching ? launching.to : body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
             // The sessions the person tagged with `@` (approval "inbox-tag-agents"): each one live

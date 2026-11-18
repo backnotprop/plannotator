@@ -229,7 +229,7 @@ test.skipIf(!hasDom)('"Start new agents in": only while Rex is open here or chos
   await settle();
   const row = () => el.querySelector('[data-launch-start-in-row]')!;
   expect([...row().querySelectorAll('[data-launch-start-in]')].map((b) => [b.textContent, b.getAttribute('aria-pressed')])).toEqual([
-    ['The Inbox (in the background)', 'true'],
+    ['In the background', 'true'],
     ['Rex', 'false'],
   ]);
   expect(row().textContent).toContain('Claude Code and Pi can start in Rex; Codex and OpenCode always start in the background.');

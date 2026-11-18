@@ -173,7 +173,7 @@ export function createInboxCompose(options: {
   const withStatus = (draft: InboxDraft) => ({ ...draft, status: draftStatus(draft) });
 
   /** A new thread the person writes, addressed to one live session (compose's Send). */
-  const startThread = async (body: Record<string, unknown>, from: InboxLaunchFrom | null = null, sent?: (message: InboxMessage) => void, pressedHere = false): Promise<Response> => {
+  const startThread = async (body: Record<string, unknown>, from: InboxLaunchFrom | null = null, sent?: (message: InboxMessage) => void): Promise<Response> => {
     const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     // A replayed Send answers the thread it wrote, whatever the session's state now.
@@ -197,7 +197,7 @@ export function createInboxCompose(options: {
     }
     // A scratch launch makes its folder here, named from the thread's name (`abandon` removes it if no thread is written).
     const prepared = launchTarget
-      ? await options.launch!.prepare(launchTarget, { name: typeof body.thread_name === "string" ? body.thread_name : null, body: body.body, resolveProject: options.resolveProject, from, pressedHere })
+      ? await options.launch!.prepare(launchTarget, { name: typeof body.thread_name === "string" ? body.thread_name : null, body: body.body, resolveProject: options.resolveProject, from })
       : null;
     const target = prepared ? { ...prepared.to, root: prepared.project.root } : live.composeTarget(body.to);
     if (!target) {
@@ -346,9 +346,7 @@ export function createInboxCompose(options: {
       const body = await options.readBody(req);
       // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
       if (door?.machine && !door.window && body.to && typeof body.to === "object" && "launch" in body.to) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
-      // Start in Rex only for a Send pressed in this computer's own window (a page of this Inbox, same origin).
-      const pressedHere = here && req.headers.get("sec-fetch-site") === "same-origin";
-      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, door?.machine ? door.from : null, (message) => options.onSent?.(req, body, message), pressedHere));
+      return staleTab(body) ?? trustRefused(req, body, owner, door) ?? (await startThread(body, door?.machine ? door.from : null, (message) => options.onSent?.(req, body, message)));
     }
     const toMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/to$/.exec(path);
     if (toMatch) {

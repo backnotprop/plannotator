@@ -52,7 +52,7 @@ export function createInboxReplyLaunch(options: {
      * The launch a reply starts, or null when the key was sent already (the store answers the reply it wrote).
      * `door`: a linked machine asked (remote launch); its machine is recorded on the launch and named in refusals.
      */
-    async prepare(messageId: string, body: Record<string, unknown>, door: ReplyLaunchDoor | null, pressedHere = false): Promise<Prepared | null> {
+    async prepare(messageId: string, body: Record<string, unknown>, door: ReplyLaunchDoor | null): Promise<Prepared | null> {
       if (door && !door.window) throw replyLaunchRefusal({ door, switchOn: true, askerEnded: () => true })!;
       const key = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
       if (key && options.store.replyByKey(messageId, key)) return null;
@@ -80,8 +80,7 @@ export function createInboxReplyLaunch(options: {
       };
       const target = options.launch.target(to);
       if (!target) throw new InboxError("launch_off", door ? LAUNCH_OFF_THERE : LAUNCH_OFF_HERE);
-      // `pressedHere`: a reply pressed in this computer's own window, which alone may start in Rex.
-      return options.launch.prepare(target, { name: null, body: typeof body.words === "string" ? body.words : "", resolveProject: options.resolveProject, from, pressedHere });
+      return options.launch.prepare(target, { name: null, body: typeof body.words === "string" ? body.words : "", resolveProject: options.resolveProject, from });
     },
 
     /** After the reply's write: start the agent for a reply just written; a replay, or a write that failed (`reply` null), starts nothing. */

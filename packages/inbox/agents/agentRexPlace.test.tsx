@@ -12,6 +12,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAgent, InboxAgentsGroup, InboxRun } from '@plannotator/core/inbox-types';
+import { INBOX_RUN_REX_NOT_CONNECTED } from '@plannotator/core/inbox-run-line';
 import type { MachineView } from '../api';
 
 const hasDom = typeof document !== 'undefined';
@@ -217,7 +218,7 @@ test.skipIf(!hasDom)("the place is a Where row on the hover card and in the row'
   expect(agentFacts({ agent: agent('b'), machine: null, name: 'b', thread: null }, null).rows.some(([key]) => key === 'Where')).toBe(false);
 });
 
-test.skipIf(!hasDom)("a run started in Rex: where Rex put it while it connects, no Stop (Rex owns it), its pane's prompt with the kind, and why it started in the background when Rex wasn't open", () => {
+test.skipIf(!hasDom)("a run started in Rex: where Rex put it while it connects, Stop only when the Inbox knows its tab, its pane's prompt with the kind, and why it started in the background when Rex wasn't open", () => {
   const base = { launch_id: 'lch_1', agent: 'claude-code', project: 'billing', folder: '/work/billing', since: null, again: false, stopped_by_person: false, cause: null, untrusted: false, attach_command: null };
   const draw = (run: Record<string, unknown>) => {
     document.body.innerHTML = '';
@@ -231,10 +232,14 @@ test.skipIf(!hasDom)("a run started in Rex: where Rex put it while it connects, 
   expect(draw({ state: 'starting', rex: { line: LINE } }).querySelector('[data-run-rex]')!.textContent).toBe(`Started in ${LINE}`);
   const working = draw({ state: 'working', rex: { line: LINE } });
   expect(working.textContent).toContain('Claude Code is working');
+  // No tab the Inbox knows: no Stop that could not work.
   expect(working.querySelector('[data-run-stop]')).toBeNull();
+  // Its tab known: Stop closes it, working or at its prompt.
+  expect(draw({ state: 'working', rex: { line: LINE, stops: true } }).querySelector('[data-run-stop]')).not.toBeNull();
+  expect(draw({ state: 'waiting_terminal', rex: { line: LINE, waiting: 'permission', stops: true } }).querySelector('[data-run-stop]')).not.toBeNull();
   const waiting = draw({ state: 'waiting_terminal', rex: { line: LINE, waiting: 'permission' } });
   expect(waiting.textContent).toContain('Claude Code is waiting on you in Rex: a permission prompt');
-  // Its tab is the way in: no Open in Terminal, no Stop.
+  // Its tab is the way in: no Open in Terminal.
   expect(waiting.querySelector('[data-run-open]')).toBeNull();
   expect(waiting.querySelector('[data-run-stop]')).toBeNull();
   const away = draw({ state: 'working', rex: { line: null, unavailable: true } });
@@ -245,8 +250,11 @@ test.skipIf(!hasDom)("a run started in Rex: where Rex put it while it connects, 
   expect(refused.querySelector('[data-run-rex-refused]')).not.toBeNull();
   expect(refused.querySelector('[data-run-rex-away]')).toBeNull();
   expect(refused.querySelector('[data-run-stop]')).not.toBeNull();
-  // Never connected: Try again, and no Open in Terminal (it would run a second copy beside its tab's).
-  const failed = draw({ state: 'failed', rex: { line: LINE }, cause: 'Its tab' });
+  // Never connected: what happened in one true sentence (it opened, it hasn't connected), Try again, and no Open in
+  // Terminal (it would run a second copy beside its tab's).
+  const failed = draw({ state: 'failed', rex: { line: LINE }, cause: INBOX_RUN_REX_NOT_CONNECTED });
+  expect(failed.textContent).toContain(`Claude Code opened in Rex but hasn't connected to the Inbox. ${INBOX_RUN_REX_NOT_CONNECTED}`);
+  expect(failed.textContent).not.toContain("didn't start");
   expect(failed.querySelector('[data-run-retry]')).not.toBeNull();
   expect(failed.querySelector('[data-run-open]')).toBeNull();
   expect(draw({ state: 'failed', cause: 'x' }).querySelector('[data-run-open]')).not.toBeNull();

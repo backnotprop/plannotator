@@ -498,11 +498,14 @@ describe("linked machines", () => {
     expect(group).toMatchObject({ machine: "ibx_far", total: 1, ended_today: 0 });
   });
 
-  test("another machine's agent never carries Rex's words here: no place, no pane status, no mark (Rex is this computer's own)", () => {
-    const sent = { id: "a", session: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y" }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } };
+  test("another machine's agent keeps where it lives in that machine's Rex, its pane's status and mark, but never Show in Rex (that machine's screen)", () => {
+    const sent = { id: "a", session: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y", show: true }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } };
     const [agent] = inboxPeerAgentsGroup([{ agents: [sent] }], "ibx_far")!.agents;
-    expect(agent).toMatchObject({ id: "a", state: "waiting" });
-    expect([agent!.place, agent!.rex_status, agent!.rex_mark]).toEqual([undefined, undefined, undefined]);
+    expect(agent).toMatchObject({ id: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y" }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } });
+    expect(agent!.place?.show).toBeUndefined();
+    // A malformed one is dropped, as any field that does not parse.
+    const [odd] = inboxPeerAgentsGroup([{ agents: [{ ...sent, place: { kind: "elsewhere", line: 3 }, rex_mark: { state: "dancing" } }] }], "ibx_far")!.agents;
+    expect([odd!.place, odd!.rex_mark]).toEqual([undefined, undefined]);
   });
 
   test("a machine keeps a tile choice only when its list says so: an older Inbox's group never claims it", () => {

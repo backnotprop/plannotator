@@ -340,7 +340,8 @@ export function createInboxScheduled(deps: {
       let prepared: Awaited<ReturnType<InboxLaunch["prepare"]>>;
       try {
         if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
-        prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
+        // A routine's run starts in the background whatever "Start new agents in" says: never a new Rex tab per run.
+        prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject, background: true });
       } catch (error) {
         const before = currentForRun();
         const project = projectOf(before) ?? (await firstProject(before));
