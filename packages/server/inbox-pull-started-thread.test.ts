@@ -121,3 +121,10 @@ test("a started thread the person took back, or one no hand-off could own now (a
   expect(links[pr(881).key]).toBeUndefined();
   expect(links[pr(882).key]).toMatchObject({ via: "owner", thread_id: "thr_reviewed" });
 });
+
+test("a Link line holding two links names no PR", () => {
+  const two = details(880).replace(`- Link: https://github.com/${REPO}/pull/880`, `- Link: https://github.com/${REPO}/pull/880 https://github.com/${REPO}/pull/870`);
+  const store = storeOf([{ id: "thr_two", body: `Hi.\n\n${two}`, at: "2026-11-03T10:00:00.000Z" }]);
+  const links = linkInboxPulls([pr(870), pr(880)], store, projects);
+  expect([links[pr(870).key], links[pr(880).key]]).toEqual([undefined, undefined]);
+});

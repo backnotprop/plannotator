@@ -1031,6 +1031,22 @@ describe("on", () => {
     expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links["github.com/northwind/billing-svc#413"]?.thread_id).not.toBe(backThread);
   });
 
+  test("a started thread tied at once, then its message taken back: the PR has no owner again (its link, validate_only), so its page offers Start a thread", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const thread = await startPageThread(w, 412, "ses_talk");
+    expect((await w.own([key], thread, { ask: "thread" })).status).toBe(200);
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links[key]).toMatchObject({ via: "owner", thread_id: thread, ask: "thread", page: true });
+    const back = await fetch(`${w.base}/api/inbox/messages/${thread}/take-back`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    expect(back.status).toBe(200);
+    // No link at all: the window's launchpad then offers Start a thread (`canStartPullThread` needs no link).
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links[key]).toBeUndefined();
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect(await (await w.check([key], projectId)).json()).toMatchObject({ ok: true, owner: null });
+  });
+
   test("checked before the send: validate_only writes nothing, refuses another project, and needs no thread", async () => {
     const w = await world({ codeReview: true });
     await w.send("Ready.", "handed");

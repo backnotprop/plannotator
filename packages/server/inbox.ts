@@ -1581,10 +1581,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
   // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
   // listed again and a new review can start. Unarchived, it owns the PR again, unless the PR was handed on since.
-  /** Which threads may own a PR now: not archived, unless it holds a review (archiving frees the PR). */
+  /**
+   * Which threads may own a PR now: not one whose first message the person took back (it is a draft again, and no
+   * thread: a root is taken back only while it is the thread's only message), and not archived unless it holds a
+   * review (archiving frees the PR).
+   */
   const pullOwnable = () => {
     const reviewed = new Set(reviewIndex.threads().map((thread) => thread.thread_id));
     return (threadId: string) => {
+      if (store.message(threadId)?.taken_back_at) return false;
       if (reviewed.has(threadId)) return true;
       const row = store.listRow(threadId);
       return !row || !inboxRowArchived(row);
