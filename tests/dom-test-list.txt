@@ -658,6 +658,7 @@ packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
+packages/inbox/prs/checksTurn.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
