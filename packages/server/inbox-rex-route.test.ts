@@ -260,14 +260,15 @@ describe("the Agents list and Rex", () => {
     expect(w.fake.calls.filter((c) => c.method === "block.method" && c.payload.block_id === theirs.block)).toEqual([]);
   });
 
-  test("Rex chosen: a Send from the tailnet or a paired phone starts in the background (the window's headers copied or not); this window's starts in Rex", async () => {
+  test("Rex chosen: a Send from the tailnet (the window's headers copied) or a paired phone starts in the background; this window's starts in Rex", async () => {
     const w = await world({ remote: false, startIn: "rex", phones: true });
     const far = w.tailnet();
     const fromTailnet = await w.sendNew(far.headers, `${far.at}/api/inbox/messages`);
     expect(fromTailnet.launch!.session_ref).toBeTruthy();
     expect(fromTailnet.launch!.rex).toBeUndefined();
     const token = await w.pairPhone();
-    const fromPhone = await w.sendNew({ Authorization: `Bearer ${token}`, "Sec-Fetch-Site": "same-origin", Origin: w.base }, `${w.base}/api/inbox/device/messages`, false);
+    // The phone app's own request (the device door turns a browser's away before anything starts).
+    const fromPhone = await w.sendNew({ Authorization: `Bearer ${token}` }, `${w.base}/api/inbox/device/messages`, false);
     expect(fromPhone.launch!.session_ref).toBeTruthy();
     expect(fromPhone.launch!.rex).toBeUndefined();
     expect(w.fake.methods()).not.toContain("session.create");
