@@ -5,9 +5,12 @@
  * 0.1.9 on 2026-11-18), or whenever T3 Code is closed, while T3's own CLI can add the folder and its app can be
  * opened; and, when that can't be done, words that hide why.
  *
+ * A project T3 just added has no default model ("Pass modelSelection: the project has no default model.", the same
+ * real T3): with the model left on Default, the start goes on the first model To lists, never on nothing.
+ *
  * The launch engine and the real T3 host against a fake T3 home (tests/helpers/fake-t3.ts: `project add`, `thread
- * start`, a server that is down until the stand-in for opening the app brings it up). No Inbox server, no app opened,
- * no T3 run.
+ * start`, a server that is down until the stand-in for opening the app brings it up, a project just added with no
+ * default model). No Inbox server, no app opened, no T3 run.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -18,7 +21,7 @@ import { makeFakeT3Home, type FakeT3Home } from "../../tests/helpers/fake-t3";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { createInboxLaunch } from "./inbox-launch";
 import type { LaunchHostContext } from "./inbox-launch-host";
-import { createT3LaunchHost, T3_LAUNCH_NOT_OPEN } from "./inbox-launch-t3";
+import { createT3LaunchHost, T3_LAUNCH_NO_MODEL, T3_LAUNCH_NOT_OPEN } from "./inbox-launch-t3";
 import { openT3App, t3ProjectAdded, t3RemedyOf } from "./inbox-launch-t3-ready";
 
 const cleanup: (() => void)[] = [];
@@ -36,15 +39,20 @@ async function until<T>(what: string, check: () => T | null | undefined | false,
   }
 }
 
-/** A T3 home whose project list holds `shop` only when `known`; `opens`: what the stand-in for opening T3 Code's app does. */
-function setup(options: { known: boolean; down?: boolean; opens?: "up" | "nothing" | "fails"; openWaitMs?: number }) {
+/**
+ * A T3 home whose project list holds `shop` only when `known`, and always `web`, whose one T3 thread ran Codex
+ * gpt-5.5 when `used`; `opens`: what the stand-in for opening T3 Code's app does.
+ */
+function setup(options: { known: boolean; used?: boolean; down?: boolean; opens?: "up" | "nothing" | "fails"; openWaitMs?: number }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-launch-t3-ready-")));
   cleanup.push(() => rmSync(root, { recursive: true, force: true }));
   const home = join(root, "home");
   const dataDir = join(root, "data");
   const shop = join(home, "code", "shop");
-  for (const dir of [home, dataDir, join(shop, ".git")]) mkdirSync(dir, { recursive: true });
+  const web = join(home, "code", "web");
+  for (const dir of [home, dataDir, join(shop, ".git"), join(web, ".git")]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(shop, ".git", "HEAD"), "ref: refs/heads/main\n");
+  writeFileSync(join(web, ".git", "HEAD"), "ref: refs/heads/main\n");
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
   const before = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
@@ -52,7 +60,11 @@ function setup(options: { known: boolean; down?: boolean; opens?: "up" | "nothin
     if (before === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
     else process.env.PLANNOTATOR_DATA_DIR = before;
   });
-  const t3: FakeT3Home = makeFakeT3Home(home, {}, { projects: options.known ? [shop] : [], db: false });
+  const t3: FakeT3Home = makeFakeT3Home(home, {}, {
+    projects: options.known ? [shop, web] : [web],
+    db: false,
+    ...(options.used ? { used: { [web]: [{ threadId: "thread:project:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", title: "Older work", providerInstanceId: "codex", model: "gpt-5.5" }] } } : {}),
+  });
   if (options.down) t3.setState("down");
   const opened: string[] = [];
   const openApp = async () => {
@@ -64,6 +76,7 @@ function setup(options: { known: boolean; down?: boolean; opens?: "up" | "nothin
   const path = "/usr/bin:/bin";
   const store = InboxStore.open(dataDir);
   const project = store.ensureProject({ name: "shop", root: shop });
+  store.ensureProject({ name: "web", root: web });
   const startLog: string[] = [];
   const launch = createInboxLaunch({
     store,
@@ -88,6 +101,8 @@ function setup(options: { known: boolean; down?: boolean; opens?: "up" | "nothin
   });
   cleanup.push(() => launch.stop());
   const send = async () => {
+    // As the window does: New message reads To's agents (and T3's model lists) before the Send.
+    await launch.composeBlock();
     const target = launch.target({ launch: { agent: "t3", project_id: project.id } })!;
     const prepared = await launch.prepare(target, { name: "Checkout copy", body: "Tighten the checkout copy.", resolveProject: async () => project });
     const message = store.startPersonThread({ project_id: project.id, body: "Tighten the checkout copy.", to: prepared.to, idempotency_key: `send-${Math.random()}`, thread_name: "Checkout copy", launch: prepared.launch }).message;
@@ -99,17 +114,19 @@ function setup(options: { known: boolean; down?: boolean; opens?: "up" | "nothin
   return { t3, shop, send, opened, verbs, startLog };
 }
 
-test("a folder T3 doesn't know: the Inbox adds it as a T3 project with T3's own `project add`, then starts the thread there, with no step for the person", async () => {
-  const t = setup({ known: false });
+test("a folder T3 doesn't know: the Inbox adds it as a T3 project with T3's own `project add`, then, the new project having no default model, starts the thread on the first model To lists, with no step for the person", async () => {
+  const t = setup({ known: false, used: true });
   const root = await t.send();
   expect(root.launch!.error ?? null).toBeNull();
   expect(root.launch!.session_ref).toBe(t.t3.starts()[0]!.id);
   expect(root.delivery).toMatchObject({ state: "delivered", host: "t3" });
   expect(t.t3.added()).toEqual([t.shop]);
-  expect(t.verbs()).toEqual(["thread start", "project add", "thread start"]);
+  expect(t.verbs()).toEqual(["thread start", "project add", "thread start", "thread start"]);
   expect(t.t3.calls()).toContainEqual(["project", "add", t.shop]);
   expect(t.t3.starts()).toHaveLength(1);
+  expect(t.t3.starts()[0]).toMatchObject({ provider: "codex", model: "gpt-5.5" });
   expect(t.opened).toEqual([]);
+  expect(t.startLog).toContain("T3 Code has no default model for this project: starting on codex/gpt-5.5, the first To lists");
   // start.log says what was run and what T3 said, for each step.
   expect(t.startLog.some((line) => line.startsWith(`t3 project add ${t.shop}\nexit 0\nAdded project`))).toBe(true);
 });
@@ -124,12 +141,12 @@ test("T3 Code not running: the Inbox opens its app, waits for its server, then s
   expect(t.startLog).toContain("T3 Code wasn't running: opened it, waiting for it");
 });
 
-test("both: T3 Code closed and a folder it doesn't know: opened, then the folder added, then one thread", async () => {
-  const t = setup({ known: false, down: true, opens: "up" });
+test("all three: T3 Code closed, a folder it doesn't know, no default model: opened, the folder added, a listed model, then one thread", async () => {
+  const t = setup({ known: false, used: true, down: true, opens: "up" });
   const root = await t.send();
   expect(root.launch!.session_ref).toBe(t.t3.starts()[0]!.id);
   expect(t.opened).toEqual(["open"]);
-  expect(t.verbs()).toEqual(["thread start", "thread start", "project add", "thread start"]);
+  expect(t.verbs()).toEqual(["thread start", "thread start", "project add", "thread start", "thread start"]);
   expect(t.t3.starts()).toHaveLength(1);
 });
 
@@ -145,6 +162,13 @@ test("what the Inbox can't clear keeps today's words: an app that won't open, a 
   expect(never.opened).toEqual(["open"]);
   expect(never.verbs()).toEqual(["thread start"]);
 
+  // A new project with no default model and no model listed anywhere (no sign-in, no T3 thread used one): plain words, never T3's.
+  const nothingListed = setup({ known: false });
+  const said = (await nothingListed.send()).launch!.error!;
+  expect(said).toMatchObject({ code: "failed", text: T3_LAUNCH_NO_MODEL });
+  expect(said.text).not.toContain("modelSelection");
+  expect(nothingListed.verbs()).toEqual(["thread start", "project add", "thread start"]);
+
   const refused = setup({ known: false });
   refused.t3.refuseProjectAdd();
   expect((await refused.send()).launch!.error).toMatchObject({ code: "failed", text: "shop isn't a project in T3 Code yet. Add its folder in T3 Code, then try again." });
@@ -156,6 +180,7 @@ test("T3's words: which refusal the Inbox can clear, and what counts as added", 
   expect(t3RemedyOf("No running T3 Code server uses /Users/someone/.t3. Start T3 Code, then retry.")).toBe("open");
   expect(t3RemedyOf("Could not reach the T3 Code server at http://127.0.0.1:9. connect ECONNREFUSED")).toBe("open");
   expect(t3RemedyOf("No T3 Code project matches '.'. Pass a project id or a path inside a project.")).toBe("add");
+  expect(t3RemedyOf("Pass modelSelection: the project has no default model. orchestrator_capabilities lists providers and models.")).toBe("model");
   expect(t3RemedyOf("Model 'retired' is not available for provider instance 'codex'.")).toBeNull();
   expect(t3ProjectAdded({ exitCode: 0, stdout: "Added project p (shop) at /x/shop.", stderr: "" })).toBe(true);
   expect(t3ProjectAdded({ exitCode: 1, stdout: "", stderr: "An active project already exists for '/x/shop'." })).toBe(true);

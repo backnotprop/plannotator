@@ -62,12 +62,14 @@ import type { LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchLive } from "./inbox-launch-host";
 import { INBOX_T3_SEND_TIMEOUT_MS, t3ChildEnv, t3CommandOf, t3HomeOf, t3ServerOf } from "./inbox-t3-local";
 import { connectT3, savedT3Grants } from "./inbox-t3-wake";
-import { openT3App, T3_NO_PROJECT, T3_NOT_RUNNING, T3_OPEN_WAIT_MS, t3LastLine, t3ProjectAdded, t3RemedyOf, waitUntil } from "./inbox-launch-t3-ready";
+import { openT3App, T3_NO_DEFAULT_MODEL, T3_NO_PROJECT, T3_NOT_RUNNING, T3_OPEN_WAIT_MS, t3LastLine, t3ProjectAdded, t3RemedyOf, waitUntil } from "./inbox-launch-t3-ready";
 
 /** What the person reads when T3 Code is not open on this computer (never T3's path or "server"). */
 export const T3_LAUNCH_NOT_OPEN = "T3 Code isn't open on this computer. Open it, then try again.";
 /** The same, for a launch another linked machine sent here: named as linked machines know this one, so that window reads which computer. */
 export const t3NotOpenWords = (machine: string | null | undefined): string => (machine ? `T3 Code isn't open on ${machine}. Open it there, then try again.` : T3_LAUNCH_NOT_OPEN);
+/** What the person reads when T3 needs a model for the project and the Inbox has none to offer (no sign-in, no thread used one). */
+export const T3_LAUNCH_NO_MODEL = "T3 Code has no default model for this project. Pick one with the model button in New message, or start one thread there in T3 Code, then try again.";
 /** The run line's cause for a start the Inbox closed during: its Try again takes a thread that start made. */
 export const T3_LAUNCH_INTERRUPTED = "The Inbox closed while T3 Code was starting. Try again: if T3 Code made the thread, the Inbox picks it up.";
 /** How long after the start the run line waits for the thread's agent to reach the Inbox before it says it isn't connected. */
@@ -232,6 +234,7 @@ export function t3StartCause(text: string, project: string, machine?: string | n
   const last = t3LastLine(text);
   if (T3_NO_PROJECT.test(last)) return `${project} isn't a project in T3 Code yet. Add its folder in T3 Code, then try again.`;
   if (T3_NOT_RUNNING.test(last)) return t3NotOpenWords(machine);
+  if (T3_NO_DEFAULT_MODEL.test(last)) return T3_LAUNCH_NO_MODEL;
   const plain = t3WithoutPaths(last);
   const said = plain.length > CAUSE_MAX ? `${plain.slice(0, CAUSE_MAX - 1).trimEnd()}…` : plain;
   if (!said) return "T3 Code did not say why.";
@@ -334,6 +337,8 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
   const agentNames = new Map<string, string>();
   const agentOf = (instance: string) => agentNames.get(instance) ?? t3AgentName(instance);
   const capabilities = keptRead<Lists>(LISTS_TTL_MS, now);
+  /** The folders To offered T3 Code in, newest first (12 at most): where a start with no model looks for one the person's T3 threads used. */
+  let offeredFolders: readonly string[] = [];
   const used = keptRead<string>(LISTS_TTL_MS, now);
 
   const command = async (): Promise<{ e: AgentEnvironment; t3: string } | null> => {
@@ -434,6 +439,7 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
     },
 
     async choices(folders: readonly string[] = []): Promise<Lists | null> {
+      if (folders.length > 0) offeredFolders = [...new Set([...folders, ...offeredFolders])].slice(0, 12);
       const found = await command();
       // T3 not open: no lists (a start would be refused anyway).
       if (!found || !t3ServerOf(t3HomeOf(found.e))) return null;
@@ -501,7 +507,8 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
         const words = t3ModelOf(launch.model) ? `${agentOf(t3ModelOf(launch.model)!.provider)} · ${t3ModelOf(launch.model)!.model}` : launch.model;
         return { ok: false as const, code: "failed" as const, text: `T3 Code doesn't list ${words}. Send it again with another model.` };
       }
-      const argv = [found.t3, "thread", "start", ".", "-", `--worktree=${base}`, ...(title ? [`--title=${title}`] : []), ...t3LaunchChoiceArgs({ model: launch.model, effort: launch.effort }), "--json"];
+      const argvFor = (model: string | undefined) => [found.t3, "thread", "start", ".", "-", `--worktree=${base}`, ...(title ? [`--title=${title}`] : []), ...t3LaunchChoiceArgs({ model, effort: model === launch.model ? launch.effort : undefined }), "--json"];
+      let argv = argvFor(launch.model);
       const env = { ...t3ChildEnv(found.e), ...(input.login.PATH ? { PATH: input.login.PATH } : {}) };
       /** One `t3 thread start`, noted before and after (`t3-start.json`), with the command and T3's words in start.log. */
       const attempt = async (titled: typeof listed) => {
@@ -520,7 +527,7 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
       let { result, thread } = await attempt(listed);
       // T3 refused for a reason the Inbox can clear by itself: T3 Code not running (open its app, wait for its server)
       // or a folder that is no project of T3's (add it). Each at most once; what can't be cleared keeps T3's refusal.
-      const done = new Set<"open" | "add">();
+      const done = new Set<"open" | "add" | "model">();
       for (let need = thread ? null : t3RemedyOf(`${result.stdout}\n${result.stderr}`); need && !done.has(need); need = thread ? null : t3RemedyOf(`${result.stdout}\n${result.stderr}`)) {
         done.add(need);
         if (need === "open") {
@@ -535,6 +542,15 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
             await Bun.sleep(2_000);
             ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
           }
+        } else if (need === "model") {
+          // Only when the person left it on Default: a model they picked is never swapped for another.
+          if (launch.model) break;
+          const lists = (await signedInLists(found.e).catch(() => null)) ?? (await usedLists(found, [launch.folder, ...offeredFolders.filter((f) => f !== launch.folder)]).catch(() => null));
+          const model = lists?.models[0];
+          ctx.startLog(launch.id, model ? `T3 Code has no default model for this project: starting on ${model}, the first To lists` : "T3 Code has no default model for this project, and no model is listed to start on");
+          if (!model) break;
+          argv = argvFor(model);
+          ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
         } else {
           const added = await runT3(found, ["project", "add", launch.folder], launch.folder);
           ctx.startLog(launch.id, `t3 project add ${/^[\w./:@=-]+$/.test(launch.folder) ? launch.folder : shellQuote(launch.folder)}\nexit ${added.timedOut ? "timed out" : added.exitCode}\n${`${added.stdout}\n${added.stderr}`.trim().slice(-2000)}`);

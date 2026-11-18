@@ -256,6 +256,8 @@ else if (args[0] === "project" && args[1] === "add") {
   if (base === "no-such-branch") say('Base ref "no-such-branch" does not resolve to a commit in project "' + require("node:path").basename(project) + '" (' + project + ').', 1);
   const provider = flag("--provider") ?? null;
   const model = flag("--model") ?? null;
+  // A project \`project add\` just made has no default model: T3 0.1.9's words for a start that names none.
+  if (model === null && !${JSON.stringify(options.projects ?? [])}.includes(project)) say("Pass modelSelection: the project has no default model. orchestrator_capabilities lists providers and models.", 1);
   if ((provider === null) !== (model === null)) say("--provider and --model go together.", 1);
   if (model === "retired") say("Model 'retired' is not available for provider instance '" + provider + "'.", 1);
   const options = flags("--option");

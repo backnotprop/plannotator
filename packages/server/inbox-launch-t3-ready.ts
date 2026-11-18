@@ -7,6 +7,9 @@
  * - A folder T3 doesn't know ("No T3 Code project matches …"): the Inbox adds it as a T3 project with T3's own
  *   command (`t3 project add <folder>`, T3's apps/server/src/cli/project.ts), then starts again. A folder T3 already
  *   has ("An active project already exists for …", a start racing another) counts as added.
+ * - A project with no default model ("Pass modelSelection: the project has no default model.", a project just added),
+ *   when the person left the model on Default: the Inbox starts again on the first model To's model button lists (a
+ *   signed-in T3's own list, or the pairs the person's T3 threads used). With no list, the run line says so plainly.
  *
  * Each is done at most once per start. A test run (PLANNOTATOR_TEST_SANDBOX) never opens an app: the person's real
  * T3 Code is never reached from a test.
@@ -17,6 +20,8 @@ import type { AgentEnvironment } from "./inbox-agents";
 export const T3_NO_PROJECT = /^No T3 Code project matches /;
 /** T3's words when its app is not running: no server for this home, or a runtime file whose server does not answer. */
 export const T3_NOT_RUNNING = /^(No running T3 Code server uses |Could not reach the T3 Code server)/;
+/** T3's words when no model was passed and the project has no default one (seen on a real T3 0.1.9 for a project just added). */
+export const T3_NO_DEFAULT_MODEL = /the project has no default model/;
 /** T3's words when the folder is already one of its projects (cli/project.ts `ProjectAlreadyExistsError`). */
 const T3_PROJECT_EXISTS = /^An active project already exists for /;
 /** The desktop app's names on macOS (T3's apps/desktop `productName`), tried in order. */
@@ -27,11 +32,15 @@ export const T3_OPEN_WAIT_MS = 45_000;
 /** The last non-empty line of what T3 printed, spaces folded. */
 export const t3LastLine = (text: string): string => text.split("\n").map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean).pop() ?? "";
 
-/** What a refused start needs before it can start again: T3's app opened, the folder added as a project, or nothing the Inbox can do. */
-export function t3RemedyOf(text: string): "open" | "add" | null {
+/**
+ * What a refused start needs before it can start again: T3's app opened, the folder added as a project, a model named
+ * (a project with no default model), or nothing the Inbox can do.
+ */
+export function t3RemedyOf(text: string): "open" | "add" | "model" | null {
   const last = t3LastLine(text);
   if (T3_NOT_RUNNING.test(last)) return "open";
   if (T3_NO_PROJECT.test(last)) return "add";
+  if (T3_NO_DEFAULT_MODEL.test(last)) return "model";
   return null;
 }
 
