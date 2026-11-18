@@ -1276,7 +1276,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semStateRef = useRef(new Map<string, SemanticFileState>());
   const semTextsRef = useRef(new Map<string, { file: DiffFile; oldText: string; newText: string; generation: string; signal: AbortSignal }>());
   const arrowLoadedRef = useRef(new Set<string>());
-  const retiredControllersRef = useRef<AbortController[]>([]);
+  const retiredControllersRef = useRef<{ controller: AbortController; generation: string }[]>([]);
   const viewRunsRef = useRef(new AbortController());
   useEffect(() => {
     const runs = new AbortController();
@@ -1605,7 +1605,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // sweep is pure cleanup.
     keptWholeFilesRef.current.keepOnly(fileSetKey);
     for (const key of arrowLoadedRef.current) if (!key.startsWith(`${fileSetKey}::`)) arrowLoadedRef.current.delete(key);
-    for (const controller of retiredControllersRef.current.splice(0)) controller.abort();
+    retiredControllersRef.current = retiredControllersRef.current.filter((entry) => {
+      if (entry.generation === fileSetKey) return true;
+      entry.controller.abort();
+      return false;
+    });
     for (const [itemId, entry] of augmentRef.current) {
       if (entry.generation === fileSetKey) continue;
       entry.controller.abort();
@@ -2098,7 +2102,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   useEffect(() => {
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
-  }, [semanticEnabled, showSemantic]);
+    if (!semanticEnabled) for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
+  }, [semanticEnabled, showSemantic, refreshItem]);
 
   const reportPowerUp = useStableCallback(() => {
     if (!onPowerUpStatus) return;
@@ -2323,7 +2328,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const controller = new AbortController();
     const prior = augmentRef.current.get(itemId);
     if (prior?.status === 'pending') prior.controller.abort();
-    else if (prior) retiredControllersRef.current.push(prior.controller);
+    else if (prior) retiredControllersRef.current.push({ controller: prior.controller, generation: prior.generation });
     augmentRef.current.set(itemId, { status: 'pending', controller, generation });
     // The arrows say a read is on its way (SCROLLS_WITH_PAGE_CSS): the click's rows arrive with it.
     const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId)?.element;
@@ -2469,6 +2474,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
       const itemId = host ? nodeToItemIdRef.current.get(host) : undefined;
       if (itemId == null) return;
+      if (event.type === 'click') {
+        markExpanded(itemId);
+        return;
+      }
       const touch = (event as TouchEvent).changedTouches?.[0];
       if (event.type === 'touchstart') tapStart = touch ? { itemId, x: touch.clientX, y: touch.clientY } : null;
       else if (event.type === 'touchend') {
@@ -2486,6 +2495,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     scrollEl.addEventListener('focusin', readAheadOfExpand);
     scrollEl.addEventListener('keydown', readAheadOfExpand, { capture: true });
     scrollEl.addEventListener('touchend', readAheadOfExpand, { passive: true, capture: true });
+    scrollEl.addEventListener('click', readAheadOfExpand, { capture: true });
     return () => {
       scrollEl.removeEventListener('pointermove', readAheadOfExpand);
       scrollEl.removeEventListener('pointerdown', readAheadOfExpand, { capture: true });
@@ -2493,6 +2503,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       scrollEl.removeEventListener('focusin', readAheadOfExpand);
       scrollEl.removeEventListener('keydown', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('touchend', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('click', readAheadOfExpand, { capture: true });
     };
   }, [scrollEl, opensWholeFiles]);
 
@@ -2621,10 +2632,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // Abort all in-flight content fetches on unmount.
   useEffect(() => {
     const augmentState = augmentRef.current;
-    const retired = retiredControllersRef.current;
     return () => {
       for (const { controller } of augmentState.values()) controller.abort();
-      for (const controller of retired.splice(0)) controller.abort();
+      for (const { controller } of retiredControllersRef.current.splice(0)) controller.abort();
       augmentState.clear();
     };
   }, []);

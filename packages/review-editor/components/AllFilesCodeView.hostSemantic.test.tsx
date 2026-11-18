@@ -480,6 +480,38 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(([...items.values()][0]!.fileDiff as { semanticFolds?: unknown[] }).semanticFolds?.length ?? 0).toBe(0);
   });
 
+  test.skipIf(!hasDom)('a tap whose arrow row is redrawn before the finger lifts still counts: the click opens the lines and the note is offered', async () => {
+    const client: SemDiffClient = {
+      supports: (path) => path.endsWith('.ts'),
+      diff: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return moved;
+      },
+      attempt: async () => ({ result: moved, failed: false }),
+      dispose: () => {},
+    };
+    const { read } = hostReader();
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
+    const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown>; onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
+    const container = document.createElement('diffs-container');
+    const before = document.createElement('div');
+    before.setAttribute('data-expand-button', '');
+    container.appendChild(before);
+    document.querySelector('[data-mock-scroll]')!.appendChild(container);
+    await act(async () => {
+      options.onPostRender(container, {}, 'update', { item: [...items.values()][0] });
+      before.dispatchEvent(touchAt('touchstart', 0));
+      await options.loadDiffFiles({ name: 'a.ts' });
+      before.remove();
+      const after = document.createElement('div');
+      after.setAttribute('data-expand-button', '');
+      container.appendChild(after);
+      after.dispatchEvent(new Event('click', { bubbles: true, composed: true }));
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
+  });
+
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });
