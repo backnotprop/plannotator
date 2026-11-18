@@ -18,9 +18,7 @@
  * first), so the Swift always matches the JSON beside it.
  */
 import type { DoorEntry } from './door';
-import { existsSync } from 'node:fs';
-import { join } from 'node:path';
-import { OUT, ROOT, cli, contractVersion, jsonText, readRepoText, type Output } from './lib';
+import { OUT, cli, contractVersion, jsonText, readRepoText, repoFileExists, type Output } from './lib';
 import type { Schema } from './schema';
 
 /** The two source files whose error codes the app may meet (read as text: never imported). */
@@ -514,7 +512,7 @@ type Baseline = { about: string; contract: number; required: Record<string, stri
 
 /** The committed baseline, when it belongs to this contract; a new contract number starts a new one. */
 function readBaseline(): Record<string, string[]> | null {
-  if (!existsSync(join(ROOT, OUT.required))) return null;
+  if (!repoFileExists(OUT.required)) return null;
   const baseline = JSON.parse(readRepoText(OUT.required)) as Baseline;
   return baseline.contract === contractVersion() ? baseline.required : null;
 }
