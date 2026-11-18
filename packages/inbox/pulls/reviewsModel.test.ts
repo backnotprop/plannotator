@@ -284,6 +284,11 @@ test('a walkthrough says Walkthrough, not a branch, from its start (Writing…) 
   const curatingReview = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local' } } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(curatingReview).status).toBe('Curating…');
   expect(reviewViewOf(curatingReview, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} }).curating).toBe('Curating the review…');
+  // A local Show me: the row and the thread say a page is being made, never a guided review.
+  const showMe = row({ reviewed: false, reason: 'curating', review: null, started: { ...started, kind: 'local', ask: 'show_me' } } as unknown as Partial<InboxReviewRow>);
+  const showMeView = reviewViewOf(showMe, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} });
+  expect(reviewRowLine(showMe).status).toBe('Making a Show me page…');
+  expect([showMeView.curating, showMeView.asked]).toEqual(['Making a Show me page…', 'New review · Show me']);
   // Its review in: the source names a branch, but the row still says what it is; there is no verdict to wait on.
   const ready = row({ started, review: review({ walkthrough: true }) } as unknown as Partial<InboxReviewRow>);
   expect(reviewRowLine(ready)).toMatchObject({ lead: 'Walkthrough', status: 'Ready' });

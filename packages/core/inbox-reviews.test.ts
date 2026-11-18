@@ -458,6 +458,7 @@ describe("New review on local changes", () => {
   test("a Send's review field is taken only when it says what it reviews; refs that aren't short strings are dropped, the ask defaults to a guided review", () => {
     expect(inboxReviewStartOf({ kind: "local", changes: "last", branch: "main", base: "main", ask: "custom" }, start)).toMatchObject({ changes: "last", branch: "main", ask: "custom", project_id: "prj_1" });
     expect(inboxReviewStartOf({ kind: "local", changes: "branch", branch: 7, base: "x".repeat(201) }, start)).toMatchObject({ branch: null, base: null, ask: "guide" });
+    expect(inboxReviewStartOf({ kind: "local", changes: "uncommitted", branch: null, base: null, ask: "show_me" }, start)).toMatchObject({ ask: "show_me" });
     for (const bad of [null, "local", {}, { kind: "pr", changes: "last" }, { kind: "local", changes: "everything" }]) expect(inboxReviewStartOf(bad, start)).toBeNull();
   });
 

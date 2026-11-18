@@ -105,4 +105,5 @@ test.skipIf(!hasDom)('the box asked for Show me on local changes: the message as
   expect(started[0]!.body.startsWith('Please send me a Show me page of the whole branch in other')).toBe(true);
   expect(started[0]!.body).toContain('using /show-me.');
   expect(started[0]!.body).not.toContain('/review-curate');
+  expect(started[0]!.review).toMatchObject({ kind: 'local', changes: 'branch', ask: 'show_me' });
 });

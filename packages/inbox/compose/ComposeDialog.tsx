@@ -835,9 +835,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : { host: target!.host, session: target!.session },
         body: skills ? withSkillsBlock(words, skills) : words,
         idempotency_key: sendKey.current,
-        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: box?.ask === 'show_me' ? ('show_me' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         ...(box && reviewKind === 'walkthrough' ? { review: { kind: 'walkthrough' as const } } : {}),
-        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: box?.ask === 'show_me' ? ('show_me' as const) : body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
         // A second review of the same changes is named too: "… (2)" rather than the request's first line.
