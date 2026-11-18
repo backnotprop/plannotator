@@ -47,7 +47,9 @@
  *   can represent (`plannotator annotate|review|last ...`, take-over.ts) is
  *   answered the same way instead of running, with or without the tool: the
  *   take-over adds nothing to Claude's context, it only changes what a
- *   command Claude already chose to run does.
+ *   command Claude already chose to run does. Where Claude Code's guard
+ *   refuses that launch until the call is allowed (2.1.326+, early-run.ts),
+ *   the call goes on to the session's permission check and opens at `tool.run`.
  * - "Ask this session": each launched server gets a pull-bridge token; the
  *   mod polls it and runs the reviewer's questions as turns (bridge.ts).
  * - The Plannotator Inbox (inbox.ts): where the inbox tool switch allows it
@@ -151,6 +153,7 @@ import { isAbsolutePath } from './paths'
 import { PLAN_TOOL } from './plan'
 import { pickShell, useShell, type ModShell } from './shell'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
+import { answerAtRun, isEarlyRunRefusal, isServedAtRun, RUN_EVENT, RUN_MATCHER } from './early-run'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
@@ -1004,10 +1007,34 @@ async function registerInboxTool($: Engine, settings: Allowed): Promise<void> {
   }
 }
 
-/** A tool call's arguments: the event minus the keys the engine reserves. */
+/** A tool call's arguments: the event minus the keys the engine reserves (and `requestMeta`, which a hook may set). */
 function toolArgsOf(e: Record<string, unknown>): Record<string, unknown> {
-  const { tool: _tool, tool_use_id: _id, agentId: _agent, consent: _consent, ...args } = e
+  const { tool: _tool, tool_use_id: _id, agentId: _agent, consent: _consent, requestMeta: _meta, ...args } = e
   return args
+}
+
+/** Claude's `plannotator` tool, answered with the slash commands' detached launch (at `tool.call`, or at `tool.run`). */
+async function answerModTool($: Engine, e: any): Promise<{ result: string } | { deny: string }> {
+  const instance = await currentMod($)
+  if (!instance) return { deny: 'Plannotator is not available in this session; run the plannotator CLI instead.' }
+  // `last` reads the main session's transcript, so from a subagent it
+  // would annotate a message the subagent never wrote.
+  if (e.agentId && e.action === 'last') {
+    return { deny: 'Invalid plannotator call: action "last" annotates the main session\'s last message and is not available to a subagent.' }
+  }
+  const answer = await instance.runTool(toolArgsOf(e))
+  return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
+}
+
+/**
+ * A launch Claude Code's guard refused because the call is not allowed yet
+ * (early-run.ts): pass the call on, so the session decides it, and open it at
+ * `tool.run`. Only for a tool that hook hears; any other refusal stands.
+ */
+function heldUntilAllowed($: Engine, e: any, answer: { deny: string } | object): boolean {
+  if (!('deny' in answer) || !isEarlyRunRefusal(answer.deny) || !isServedAtRun(e.tool)) return false
+  if (allowed?.debugPath) hostOf($, allowed.debugPath).debug(`${e.tool} call: Claude Code's guard holds it until it is allowed; passed on, opened at ${RUN_EVENT}`)
+  return true
 }
 
 export function register(on: On) {
@@ -1176,17 +1203,12 @@ export function register(on: On) {
 
   on('tool.call', async ($: Engine, e: any, next: Next) => {
     // Claude's `plannotator` tool: answered here, with the same detached
-    // launch the slash commands use. No other hook or core runs for it.
+    // launch the slash commands use. No other hook or core runs for it,
+    // unless Claude Code's guard holds the launch until the call is allowed:
+    // then it goes on to the session's permission check and opens at tool.run.
     if (allowed && toolName && e.tool === toolName) {
-      const instance = await currentMod($)
-      if (!instance) return { deny: 'Plannotator is not available in this session; run the plannotator CLI instead.' }
-      // `last` reads the main session's transcript, so from a subagent it
-      // would annotate a message the subagent never wrote.
-      if (e.agentId && e.action === 'last') {
-        return { deny: 'Invalid plannotator call: action "last" annotates the main session\'s last message and is not available to a subagent.' }
-      }
-      const answer = await instance.runTool(toolArgsOf(e))
-      return 'deny' in answer ? { deny: answer.deny } : { result: answer.text }
+      const answer = await answerModTool($, e)
+      return heldUntilAllowed($, e, answer) ? next(e) : answer
     }
     // `plannotator_inbox`: the Inbox tool the call names, through the Inbox's
     // /mcp, with this session's working folder and id filled in (inbox.ts).
@@ -1208,7 +1230,9 @@ export function register(on: On) {
       if (!input) return next(e)
       const instance = await currentMod($)
       if (!instance) return next(e)
-      return answerShellCall(instance, input)
+      const answer = await answerShellCall(instance, input)
+      // Held by Claude Code's guard until allowed: the session checks the command, tool.run opens it (it never runs).
+      return heldUntilAllowed($, e, answer) ? next(e) : answer
     }
     // Only the main loop's ExitPlanMode: a subagent's keeps the classic flow.
     if (!allowed?.planReview || e.tool !== PLAN_TOOL || e.agentId) {
@@ -1225,6 +1249,35 @@ export function register(on: On) {
     } finally {
       await instance.onPlanCallSettled(e.tool_use_id)
     }
+  })
+
+  // `tool.run` (Claude Code 2.1.326+): a call the session allowed, about to
+  // run. Here the mod opens a `plannotator` tool call or a taken-over Bash
+  // command that `tool.call` passed on because Claude Code's guard held its
+  // launch (early-run.ts); the guard has forgotten the call by now. It asks
+  // nothing of `tool.call` or `tool.check` having run: every call of the mod's
+  // own tool that reaches here is answered (nothing else serves it), and a
+  // Bash command is taken over by the same rule as at `tool.call`. Registered
+  // through `tool.*`: an engine before 2.1.326 refuses to load a module that
+  // names `tool.run` ("registered "tool.run", which is not an event"), and
+  // there no call ever reaches this hook as `tool.run`. The glob puts the mod
+  // in the chain of every `tool.*` event (the engine picks a module's hooks by
+  // pattern; a matcher only decides whether this hook runs), so where the
+  // guard sends one past the user tier Claude Code reports this hook skipped
+  // (claude-code-mod.md, "Behind Claude Code's guard"). A refusal here is the
+  // guard holding another call with the same words: Claude reads our words
+  // for it (HELD_AT_RUN_TEXT), not the guard's advice to serve at tool.run.
+  on('tool.*', RUN_MATCHER, async ($: Engine, e: any, next: Next) => {
+    if (next?.event !== RUN_EVENT) return next(e)
+    if (allowed && toolName && e.tool === toolName) return answerAtRun(await answerModTool($, e))
+    if (allowed?.reviews && e.tool === SHELL_TOOL) {
+      const input = shellTakeOver(e.command, !!e.agentId)
+      if (!input) return next(e)
+      const instance = await currentMod($)
+      if (!instance) return next(e)
+      return answerAtRun(await answerShellCall(instance, input))
+    }
+    return next(e)
   })
 
   // Matched on ExitPlanMode alone (#2159): a plugin seated above that sends
