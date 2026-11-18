@@ -2029,8 +2029,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
     const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
     // The sidebar's Agents (inbox-agents-list.ts): this machine's from its own rows, every linked machine's from its list.
-    // Its rows before the Hide's filter: a thread left out for its hidden PRs keeps its agent (only the row leaves).
-    const ownAgents = agentsOf(allOwn, now);
+    // Its rows before the Hide's filter: a thread left out for its hidden PRs keeps its agent (only the row leaves),
+    // but not its wait: the agent's waiting count, "Waiting on you" and its rank come from the threads still listed.
+    const ownAgents = agentsOf(allOwn, now, own.length === allOwn.length ? undefined : new Set(own.map((row) => row.thread_id)));
     return {
       serverSession,
       version,
@@ -2089,7 +2090,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /** This Inbox's agents for the list model (inbox-agents-list.ts), from its own rows (decorated) and the live sessions. */
-  const agentsOf = (own: InboxListRow[], now: Date): InboxAgentsGroup => {
+  const agentsOf = (own: InboxListRow[], now: Date, listed?: ReadonlySet<string>): InboxAgentsGroup => {
     const projectById = (id: string) => {
       const project = store.project(store.canonicalProjectId(id));
       return project ? { id: project.id, name: project.name } : null;
@@ -2105,7 +2106,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
       const owner = store.threadOwner(row.thread_id);
-      if (owner) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
+      if (owner) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at, ...(listed && !listed.has(row.thread_id) ? { hidden: true as const } : {}) });
     }
     return inboxAgentsGroup({
       sessions: live.agentSessions(inboxStartOfDay(live.clock())),

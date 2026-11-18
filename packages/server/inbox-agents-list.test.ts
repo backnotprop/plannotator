@@ -101,6 +101,26 @@ describe("who is listed, and how", () => {
     expect(group.ended_today).toBe(0);
   });
 
+  test("a thread left out for its hidden PRs keeps its agent listed but is no wait: no count, no waiting state, no rank", () => {
+    const at = "2026-11-09T10:00:00.000Z";
+    const group = inboxAgentsGroup(
+      evidence({
+        sessions: [{ session: "ses-live", host: "codex", root: "/work/ledger", startedAt: 1, lastSeen: 2, live: true, busy: false, label: null }],
+        waits: [
+          { thread_id: "msg_1", session: "ses-live", host: "codex", project: { id: "prj_ledger", name: "ledger" }, at, hidden: true },
+          { thread_id: "msg_2", session: "ses-gone", host: "pi", project: { id: "prj_other", name: "other" }, at, hidden: true },
+          { thread_id: "msg_3", session: "ses-waits", host: "pi", project: { id: "prj_other", name: "other" }, at: "2026-11-01T10:00:00.000Z" },
+        ],
+      }),
+    );
+    // The one still waiting ranks first; the other two are listed, waiting on nothing.
+    expect(group.agents[0]).toMatchObject({ id: "ses-waits", state: "waiting", waiting: 1 });
+    expect(group.agents.filter((agent) => agent.id !== "ses-waits").map((agent) => [agent.id, agent.state, agent.waiting]).sort()).toEqual([
+      ["ses-gone", "idle", 0],
+      ["ses-live", "idle", 0],
+    ]);
+  });
+
   test("a launched agent is listed by its launch: working while it starts, idle once stopped, ended when its start failed; done with an archived thread", () => {
     const launch = (id: string, run: InboxAgentsEvidence["launches"][number]["run"], session = `launch:${id}`) => ({ launch_id: id, session, thread_id: `msg_${id}`, host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", started: session !== `launch:${id}`, run, scratch: id === "lch_starting" ? "palette-helper" : null });
     const group = inboxAgentsGroup(
