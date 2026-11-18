@@ -9,6 +9,7 @@ interface SearchableTree {
 
 export function useTreeSearchKeys(model: SearchableTree) {
   const steering = useRef(false);
+  const menuPress = useRef(false);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -25,11 +26,20 @@ export function useTreeSearchKeys(model: SearchableTree) {
         (input as HTMLInputElement).blur();
       }
     };
+    const onPress = (event: PointerEvent) => {
+      if (event.button === 0 && !event.ctrlKey) return;
+      menuPress.current = true;
+      setTimeout(() => { menuPress.current = false; }, 0);
+    };
     window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    window.addEventListener('pointerdown', onPress, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('pointerdown', onPress, true);
+    };
   }, [model]);
 
   return useMemo(() => ({
-    quiet: () => !steering.current && !!model.getFileTreeContainer()?.shadowRoot?.activeElement?.matches(SEARCH_INPUT),
+    quiet: () => menuPress.current || (!steering.current && !!model.getFileTreeContainer()?.shadowRoot?.activeElement?.matches(SEARCH_INPUT)),
   }), [model]);
 }
