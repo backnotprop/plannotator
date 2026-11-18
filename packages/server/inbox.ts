@@ -1617,6 +1617,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     threadsOf: (id) => store.threadsOf(id),
     threadMessageIds: (id) => store.threadMessageIds(id),
     message: (id) => store.message(id),
+    messageSeq: (id) => store.messageCursor(id),
     threadSubject: (id) => store.threadSubject(id),
     threadProject: (id) => {
       const root = store.message(id);

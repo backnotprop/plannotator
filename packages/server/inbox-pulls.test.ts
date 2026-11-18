@@ -993,6 +993,21 @@ describe("on", () => {
     expect((await w.own([key], talk, { ask: "show-me" })).status).toBe(422);
   });
 
+  test("a Show me page is marked seen once the person has looked at its thread", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    expect((await w.own([key], talk, { ask: "show_me" })).status).toBe(200);
+    const page = join(w.root, "show-me.html");
+    writeFileSync(page, '<html><head><meta name="plannotator-page" content="show-me"><title>Retries</title></head><body></body></html>');
+    await w.send("Here it is.", "talk", { attachments: [page] });
+    expect((await linkOf())?.show_me_page?.seen).toBeUndefined();
+    w.server.store.markSeen(talk);
+    expect((await linkOf())?.show_me_page).toMatchObject({ title: "Retries", seen: true });
+  });
+
   test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {
     const w = await world({ codeReview: true });
     const talk = await w.send("Ready.", "talk");

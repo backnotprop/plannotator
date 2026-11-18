@@ -159,12 +159,17 @@ export function reviewRowAutoRun(row: Pick<InboxReviewRow, 'stacks'>, runs: Read
   return layer ? runs![layer.key]! : null;
 }
 
-export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, link: InboxPullLink | null): string | null {
+export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, row: Pick<InboxReviewRow, 'link' | 'review' | 'thread_id' | 'stacks'>): string | null {
   if (!run) return null;
-  if (run.state === 'failed') return `Couldn't start: ${run.reason ?? 'the agent did not start.'}`;
-  const page = link?.show_me_page && (!run.thread_id || link.thread_id === run.thread_id) && link.show_me_page.at >= run.at;
-  if (run.made !== 'guide' && page) return `Show me ready, made when it ranked ${LEVEL_WORD[run.level]}`;
-  if (run.made !== 'show_me' && link?.guide?.review) return null;
+  const link = row.link;
+  if (run.state === 'failed') {
+    const open = row.stacks[0] ? openLayers(row.stacks[0]).length > 0 : false;
+    return open && !link && !row.thread_id ? `Couldn't start: ${run.reason ?? 'the agent did not start.'}` : null;
+  }
+  if (run.state !== 'started' || !link || link.thread_id !== run.thread_id) return null;
+  const page = run.made !== 'guide' && link.show_me_page && link.show_me_page.at >= run.at ? link.show_me_page : null;
+  if (page) return !page.seen && !row.review ? `Show me ready, made when it ranked ${LEVEL_WORD[run.level]}` : null;
+  if (link.agent?.ended || row.review) return null;
   return run.made === 'show_me' ? 'Making a Show me page…' : run.made === 'both' ? 'Making a guided review and a Show me page…' : 'Making a guided review…';
 }
 
@@ -176,7 +181,7 @@ export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<st
   const said = statusOf(row);
   const { tone } = said;
   // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
-  const auto = reviewRowAutoWords(reviewRowAutoRun(row, autoRuns), row.link ?? null);
+  const auto = reviewRowAutoWords(reviewRowAutoRun(row, autoRuns), row);
   const parts: Words = auto ? [auto] : reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
   const status = wordsText(parts);
   if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status, parts, tone };

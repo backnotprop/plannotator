@@ -119,7 +119,7 @@ export interface InboxPullLink {
    */
   guide: { message_id: string; title: string; steps: number; review: boolean; session?: string | null } | null;
   show_me_asked_at?: string;
-  show_me_page?: { message_id: string; title: string; at: string };
+  show_me_page?: { message_id: string; title: string; at: string; seen?: true };
   /**
    * `owner` only: what the hand-off asked for first (a guided review, or the person's own curation), or `thread`: nothing
    * (a PR page's Start a thread; the thread is the PR's page from then on). Absent for an older choice.
