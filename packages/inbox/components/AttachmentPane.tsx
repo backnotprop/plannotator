@@ -64,6 +64,7 @@ import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
 import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { scrollerOf } from './fileScroller';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
@@ -323,17 +324,6 @@ const openPanes = new Set<{ unsaved: () => boolean }>();
 /** Whether a file open now holds a comment not saved yet (saved words compared: an edit not changed is not unsaved). */
 export function openPaneUnsaved(): boolean {
   return [...openPanes].some((pane) => pane.unsaved());
-}
-
-/** The element that scrolls the open file (a document, code, or an image at its own size). */
-function scrollerOf(pane: HTMLElement | null): HTMLElement | null {
-  if (!pane) return null;
-  // The file's own, never a linked Markdown document drawn over it.
-  const doc = pane.querySelector<HTMLElement>('.ib-docscroll:not(.ib-linkeddoc)');
-  if (doc) return doc;
-  const code = pane.querySelector('.ib-codeview diffs-container')?.shadowRoot?.querySelector<HTMLElement>('[data-code]');
-  if (code) return code;
-  return pane.querySelector<HTMLElement>('.ib-imgstage');
 }
 
 /**
@@ -2890,7 +2880,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               // A linked document over the file hides the file's Contents with it.
               hidden={!contentsShown || linkedTop !== null}
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
-              panelAction={<ContentsHide onHide={hideContents} />} />
+              panelAction={<ContentsHide onHide={hideContents} />}
+            />
           )}
         </div>
         <div
