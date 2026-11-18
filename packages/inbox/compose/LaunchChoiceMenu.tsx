@@ -13,7 +13,7 @@ export function LaunchChoiceButton({ choice, choices, open, onToggle, className 
       className={`${className} ib-cp-lchbtn`}
       aria-haspopup="true"
       aria-expanded={open}
-      aria-label={`Model and ${choices.effort_word.toLowerCase()}: ${words}. Change`}
+      aria-label={`${launchChoiceMenuName(choices)}: ${words}. Change`}
       data-compose-choice={words}
       onClick={onToggle}
     >
@@ -21,6 +21,12 @@ export function LaunchChoiceButton({ choice, choices, open, onToggle, className 
       <Icon name="chevD" size={13} />
     </button>
   );
+}
+
+/** What the menu picks: "Model and variant", or with OpenCode's agents "Model, variant and agent". */
+function launchChoiceMenuName(choices: InboxLaunchChoices): string {
+  const effort = choices.effort_word.toLowerCase();
+  return choices.primary_agents?.length ? `Model, ${effort} and agent` : `Model and ${effort}`;
 }
 
 export function LaunchChoiceMenu({
@@ -61,7 +67,7 @@ export function LaunchChoiceMenu({
     button?.focus();
   };
   const effortWord = choices.effort_word;
-  const column = (field: 'model' | 'effort', caption: string, values: string[], show: (value: string) => string) => (
+  const column = (field: 'model' | 'effort' | 'primary_agent', caption: string, values: string[], show: (value: string) => string) => (
     <div className="ib-cp-list ib-cp-lchcol" role="group" aria-label={caption} data-compose-choice-menu={field}>
       <div className="ib-cp-cap">{caption}</div>
       {[null, ...values].map((value) => {
@@ -78,8 +84,8 @@ export function LaunchChoiceMenu({
             onClick={() => {
               if (field === 'model') return onChoice(pickLaunchModel(choice, choices, value));
               const next = { ...choice };
-              if (value === null) delete next.effort;
-              else next.effort = value;
+              if (value === null) delete next[field];
+              else next[field] = value;
               onChoice(next);
             }}
           >
@@ -97,14 +103,14 @@ export function LaunchChoiceMenu({
   const models = launchModelRows(choice, choices);
   const efforts = launchEffortsFor(choices, choice.model);
   return (
-    <div className="ib-cp-picker ib-cp-lch" ref={ref} role="menu" aria-label={`Model and ${effortWord.toLowerCase()}`} data-compose-choices="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
+    <div className="ib-cp-picker ib-cp-lch" ref={ref} role="menu" aria-label={launchChoiceMenuName(choices)} data-compose-choices="" data-phone={phone ? '' : undefined} onKeyDown={onKey}>
       {phone && (
         <div className="ib-cp-pickhead">
           <button type="button" className="ib-cp-back" onClick={back}>
             <Icon name="chevL" size={16} />
             Back
           </button>
-          <span>Model and {effortWord.toLowerCase()}</span>
+          <span>{launchChoiceMenuName(choices)}</span>
         </div>
       )}
       <div className="ib-cp-lchcols">
@@ -114,6 +120,8 @@ export function LaunchChoiceMenu({
           models.length > 0 && column('model', 'Model', models, (model) => launchModelWords(model, choices))
         )}
         {efforts.length > 0 && column('effort', effortWord, efforts, (v) => v)}
+        {/* OpenCode's own agents (build, plan, …), the session's from its start. */}
+        {choices.primary_agents && choices.primary_agents.length > 0 && column('primary_agent', 'Agent', choices.primary_agents, (v) => v)}
       </div>
     </div>
   );

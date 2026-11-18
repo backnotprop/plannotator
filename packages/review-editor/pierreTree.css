@@ -1,0 +1,68 @@
+.review-file-tree {
+  display: block;
+  position: relative;
+  color-scheme: dark;
+  --trees-bg-override: var(--tree-bg, var(--background));
+  --trees-fg-override: color-mix(in oklab, var(--foreground) 88%, var(--background));
+  --trees-fg-muted-override: var(--muted-foreground);
+  --trees-bg-muted-override: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --trees-selected-bg-override: color-mix(in oklab, var(--foreground) 9%, transparent);
+  --trees-selected-fg-override: var(--foreground);
+  --trees-selected-focused-border-color-override: transparent;
+  --trees-accent-override: var(--primary);
+  --trees-focus-ring-color-override: color-mix(in oklab, var(--primary) 70%, transparent);
+  --trees-border-color-override: transparent;
+  --trees-indent-guide-bg-override: color-mix(in oklab, var(--foreground) 9%, transparent);
+  --trees-input-bg-override: var(--muted);
+  --trees-search-bg-override: color-mix(in oklab, var(--foreground) 6%, transparent);
+  --trees-search-fg-override: var(--foreground);
+  --trees-search-font-weight-override: 600;
+  --trees-font-family-override: var(--font-sans);
+  --trees-font-size-override: 13px;
+  --trees-font-weight-semibold-override: 500;
+  --trees-border-radius-override: 4px;
+  --trees-padding-inline-override: 0px;
+  --trees-item-padding-x-override: 8px;
+  --trees-item-margin-x-override: 0px;
+  --trees-level-gap-override: 4.5px;
+  --trees-item-row-gap-override: 4px;
+  --trees-git-lane-width-override: 10px;
+  --trees-git-added-color-override: var(--success);
+  --trees-git-untracked-color-override: var(--muted-foreground);
+  --trees-git-deleted-color-override: var(--destructive);
+  --trees-git-modified-color-override: var(--muted-foreground);
+  --trees-git-renamed-color-override: var(--muted-foreground);
+  --trees-git-ignored-color-override: var(--muted-foreground);
+  --trees-scrollbar-thumb-override: color-mix(in oklab, var(--foreground) 18%, transparent);
+  --trees-row-part-gap: 4px;
+}
+:root.light .review-file-tree {
+  color-scheme: light;
+}
+[data-compact-rows] .review-file-tree::part(row-trail) {
+  display: none;
+}
+.review-tree-menu {
+  z-index: 50;
+  min-width: 160px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--popover);
+  color: var(--popover-foreground);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
+}
+.review-tree-menu > button {
+  padding: 6px 8px;
+  border-radius: 4px;
+  font-size: 13px;
+  text-align: left;
+  color: color-mix(in oklab, var(--foreground) 80%, transparent);
+}
+.review-tree-menu > button:hover,
+.review-tree-menu > button:focus-visible {
+  background: var(--muted);
+  color: var(--foreground);
+  outline: none;
+}

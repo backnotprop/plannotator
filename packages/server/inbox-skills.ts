@@ -23,6 +23,7 @@
  */
 import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
+import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
 import { listReferenceSkills } from "./review-skill-loader";
 import { handleReferenceSkillContent, handleReferenceSkills } from "./shared-handlers";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
@@ -43,10 +44,11 @@ function noStore(res: Response): Response {
  * the window pastes their instructions into the reply that names one, and no
  * folder (the window carries their text, `@plannotator/core/inbox-review`).
  * A skill of the person's own with the same name wins: the built-in is left
- * out. Off, the catalog is exactly the discovered skills.
+ * out. Off, the catalog is exactly the discovered skills. `/shape` the same way while Shape is on, and
+ * `/create-routine` while Routines are on.
  */
-export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, shape = false): Response {
-  if (!codeReview && !shape) return handleReferenceSkills();
+export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, shape = false, routines = false): Response {
+  if (!codeReview && !shape && !routines) return handleReferenceSkills();
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
     skills = discovered();
@@ -55,7 +57,8 @@ export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnT
   }
   const own = new Set(skills.map((skill) => skill.name));
   // Shape's `/shape` (approval "shape-living-board") while Shape is on, beside the review skills while Code review is.
-  const offered = [...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : [])];
+  // `/create-routine` (packages/core/create-routine-skill.ts) while Routines are on.
+  const offered = [...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
   const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
     root: INBOX_BUILTIN_SKILL_ROOT,
@@ -65,10 +68,10 @@ export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnT
   return Response.json({ skills: [...builtins, ...skills] });
 }
 
-/** The answer for a skills path, or null for any other path. `codeReview`: the person's Code review switch. */
-export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; shape?: boolean } = {}): Response | null {
+/** The answer for a skills path, or null for any other path. `codeReview`, `shape`, `routines`: the person's switches. */
+export function inboxSkillsRoute(req: Request, url: URL, options: { codeReview?: boolean; shape?: boolean; routines?: boolean } = {}): Response | null {
   if (url.pathname !== INBOX_SKILLS_PATH && url.pathname !== INBOX_SKILL_CONTENT_PATH) return null;
   if (req.method !== "GET") return noStore(Response.json({ error: "Use GET." }, { status: 405 }));
   if (isCrossSiteRequest(req)) return noStore(Response.json(INBOX_CROSS_SITE_BODY, { status: 403 }));
-  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.shape === true) : handleReferenceSkillContent(req));
+  return noStore(url.pathname === INBOX_SKILLS_PATH ? inboxSkillCatalog(options.codeReview === true, undefined, options.shape === true, options.routines === true) : handleReferenceSkillContent(req));
 }

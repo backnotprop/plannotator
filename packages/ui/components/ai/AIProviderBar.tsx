@@ -123,7 +123,7 @@ export const AIProviderBar: React.FC<AIProviderBarProps> = ({
     <ModelSourceHint
       tool={modelSourceToolForProvider(currentProvider?.name)}
       info={currentProvider}
-      className="-mt-1 px-2 pb-1.5 text-[10px] text-muted-foreground/50"
+      className="-mt-1 px-2 pb-1.5 text-xs text-muted-foreground"
     />
     <AskSessionSetupHint text={setupHint} />
     </>

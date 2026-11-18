@@ -315,8 +315,8 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     [section.diffs, host.generatedFiles],
   );
   const orderedFiles = useMemo(
-    () => groupByFileKind(files, (file) => file.path, host.generatedFiles).flatMap((group) => group.items),
-    [files, host.generatedFiles],
+    () => (host.keepsFileOrder ? files : groupByFileKind(files, (file) => file.path, host.generatedFiles).flatMap((group) => group.items)),
+    [files, host.generatedFiles, host.keepsFileOrder],
   );
   const showKinds = chipGroups.length > 1;
 

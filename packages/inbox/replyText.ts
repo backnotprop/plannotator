@@ -51,12 +51,6 @@ export function useReplyText(store: ReplyText): string {
   return useSyncExternalStore(store.subscribe, store.get, store.get);
 }
 
-/** The words while `on` (null otherwise): the caller re-renders on every change only while it draws them. */
-export function useReplyTextWhile(store: ReplyText, on: boolean): string | null {
-  const read = () => (on ? store.get() : null);
-  return useSyncExternalStore(store.subscribe, read, read);
-}
-
 const holdsWords = (text: string) => text.trim() !== '';
 
 /** Whether the words are more than spaces: re-renders the caller only when that flips. */
@@ -64,3 +58,13 @@ export function useReplyHasWords(store: ReplyText): boolean {
   const read = () => holdsWords(store.get());
   return useSyncExternalStore(store.subscribe, read, read);
 }
+
+/** Never changes: what the hook below reads when there is no store. */
+const NO_STORE = createReplyText();
+
+/** `store`'s words, as `useReplyText` (the caller re-renders on every change); with no store, `fallback`. */
+export function useReplyTextOr(store: ReplyText | undefined, fallback: string): string {
+  const live = useReplyText(store ?? NO_STORE);
+  return store ? live : fallback;
+}
+

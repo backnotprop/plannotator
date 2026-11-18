@@ -115,8 +115,20 @@ export function launchStartOf(input: {
  */
 export function launchSpawnEnv(env: Readonly<LaunchEnv>, platform: NodeJS.Platform = process.platform): LaunchEnv {
   // Windows: PATH under the one key `PATH`, whatever its spelling (`Path`), so a later copy that sets it is the one used.
-  return foldEnvPath(Object.fromEntries(Object.entries(env).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV)), platform);
+  return foldEnvPath(Object.fromEntries(Object.entries(withoutRexPane(env)).filter(([name]) => !SPAWN_DROP.test(name) && !PER_SESSION_CLAUDE.test(name) && name !== CLAUDE_SKIP_PERMISSIONS_ENV)), platform);
 }
+
+/**
+ * `env` without the names Rex's terminal gives what runs in one of its panes (`REX_SESSION`, `REX_BLOCK`,
+ * `REX_SERVER`, and `TERM_PROGRAM`/`TERM_PROGRAM_VERSION` while they say `rex`). An Inbox started from a Claude Code
+ * in a Rex pane has them; an agent it starts in the background must not, or it reports that pane as its own place
+ * (its place line, marks and Show would be the person's pane). An agent started in a Rex tab gets them from Rex.
+ */
+export function withoutRexPane<T extends Readonly<Record<string, string | undefined>>>(env: T): T {
+  const rex = env.TERM_PROGRAM === "rex";
+  return Object.fromEntries(Object.entries(env).filter(([name]) => !REX_PANE_NAMES.test(name) && !(rex && (name === "TERM_PROGRAM" || name === "TERM_PROGRAM_VERSION")))) as T;
+}
+const REX_PANE_NAMES = /^REX_(SESSION|BLOCK|SERVER)$/;
 
 /** The Inbox's own env for the calls that are not a start: the same filter, `extraPath` after its PATH (`;`-joined on Windows). */
 export function launchPlainEnv(own: Readonly<Record<string, string | undefined>>, extraPath: readonly string[] = [], platform: NodeJS.Platform = process.platform): LaunchEnv {

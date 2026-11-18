@@ -82,11 +82,12 @@ export const CONTENTS_RAIL_MIN_PANE_WIDTH = 480;
 /**
  * Whether a document gets the contents rail: at least
  * `CONTENTS_RAIL_MIN_HEADINGS` headings of levels 1 to
- * `CONTENTS_RAIL_MAX_LEVEL`. Kept out of the rail's own module, so a host can
- * decide without loading the (lazy) rail.
+ * `CONTENTS_RAIL_MAX_LEVEL` (or `minHeadings`, the rail's prop of that name).
+ * Kept out of the rail's own module, so a host can decide without loading the
+ * (lazy) rail.
  */
-export function hasContentsRailHeadings(blocks: readonly Block[]): boolean {
-  return tocHeadings(blocks, CONTENTS_RAIL_MAX_LEVEL).length >= CONTENTS_RAIL_MIN_HEADINGS;
+export function hasContentsRailHeadings(blocks: readonly Block[], minHeadings = CONTENTS_RAIL_MIN_HEADINGS): boolean {
+  return tocHeadings(blocks, CONTENTS_RAIL_MAX_LEVEL).length >= minHeadings;
 }
 
 export function buildTocHierarchy(

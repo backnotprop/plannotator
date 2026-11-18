@@ -2,6 +2,8 @@
 export interface InboxLaunchChoice {
   model?: string;
   effort?: string;
+  /** OpenCode's own primary agent for the session (build, plan, or one the person made): `agent` on its new session. */
+  primary_agent?: string;
 }
 
 export interface InboxLaunchChoices {
@@ -11,6 +13,8 @@ export interface InboxLaunchChoices {
   model_efforts?: Record<string, string[]>;
   /** The words a model reads as, where its value doesn't say it (T3 Code: `claudeAgent/opus` reads "Claude Code · opus"). */
   model_labels?: Record<string, string>;
+  /** OpenCode's own agents a session may start as (`GET /api/agent`: primary, not hidden). Absent: no Agent column. */
+  primary_agents?: string[];
   last?: InboxLaunchChoice;
 }
 
@@ -94,12 +98,24 @@ export function parseOpenCodeModels(answer: unknown): Omit<InboxLaunchChoices, "
   return { models, efforts, effort_word: "Variant", model_efforts: modelEfforts };
 }
 
+/** OpenCode's agents a session can start as: a primary one (or one for either use) that is not hidden, in its order. */
+export function parseOpenCodeAgents(answer: unknown): string[] | null {
+  const data = (answer as { data?: unknown } | null)?.data;
+  if (!Array.isArray(data)) return null;
+  const agents: string[] = [];
+  for (const entry of data as { id?: unknown; mode?: unknown; hidden?: unknown }[]) {
+    if (entry?.mode === "subagent" || entry?.hidden === true || !inboxLaunchTokenOk(entry?.id) || agents.includes(entry.id)) continue;
+    agents.push(entry.id);
+  }
+  return agents;
+}
+
 export function launchEffortsFor(choices: Pick<InboxLaunchChoices, "efforts" | "model_efforts">, model: string | undefined): string[] {
   return (model && choices.model_efforts?.[model]) || choices.efforts;
 }
 
 /** `efforts` null: the lists are not read yet, so only the token is checked (a slow CLI never refuses a start). */
-export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown }, efforts: readonly string[] | null): InboxLaunchChoice {
+export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown; primary_agent?: unknown }, efforts: readonly string[] | null): InboxLaunchChoice {
   const choice: InboxLaunchChoice = {};
   if (raw.model !== undefined && raw.model !== null) {
     if (!inboxLaunchTokenOk(raw.model)) throw new LaunchChoiceError("model", "to.launch.model: a model name, such as opus.");
@@ -111,12 +127,16 @@ export function parseLaunchChoice(raw: { model?: unknown; effort?: unknown }, ef
     }
     choice.effort = raw.effort;
   }
+  if (raw.primary_agent !== undefined && raw.primary_agent !== null) {
+    if (!inboxLaunchTokenOk(raw.primary_agent)) throw new LaunchChoiceError("primary_agent", "to.launch.primary_agent: an agent's name, such as plan.");
+    choice.primary_agent = raw.primary_agent;
+  }
   return choice;
 }
 
 export class LaunchChoiceError extends Error {
   constructor(
-    readonly field: "model" | "effort",
+    readonly field: "model" | "effort" | "primary_agent",
     message: string,
   ) {
     super(message);
@@ -261,6 +281,6 @@ export function launchInnerWords(inner: { agent: string; model: string } | null 
 }
 
 export function launchChoiceLine(choice: InboxLaunchChoice | null | undefined, shortModel = (model: string) => model): string | null {
-  if (!choice?.model && !choice?.effort) return null;
-  return [choice.model ? shortModel(choice.model) : null, choice.effort ?? null].filter(Boolean).join(" · ");
+  if (!choice?.model && !choice?.effort && !choice?.primary_agent) return null;
+  return [choice.model ? shortModel(choice.model) : null, choice.effort ?? null, choice.primary_agent ?? null].filter(Boolean).join(" · ");
 }

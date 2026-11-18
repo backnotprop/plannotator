@@ -290,13 +290,21 @@ describe.if(hasDom)('edit-mode Discard repaints the pristine diff (DOM)', () => 
       const editor = handle!.getEditor(item.id) as unknown as {
         applyEdits: (edits: unknown[]) => void;
       };
+      const typeEdit = () => {
+        try {
+          editor.applyEdits([
+            {
+              range: { start: { line: 61, character: 0 }, end: { line: 61, character: 0 } },
+              newText: `  // ${EDITED_MARKER}\n`,
+            },
+          ]);
+          return true;
+        } catch {
+          return false;
+        }
+      };
       await act(async () => {
-        editor.applyEdits([
-          {
-            range: { start: { line: 61, character: 0 }, end: { line: 61, character: 0 } },
-            newText: `  // ${EDITED_MARKER}\n`,
-          },
-        ]);
+        expect(await waitFor(typeEdit, 10_000)).toBe(true);
       });
       expect(await waitFor(() => shadowText(host!).includes(EDITED_MARKER), 10_000)).toBe(true);
 

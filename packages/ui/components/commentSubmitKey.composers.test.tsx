@@ -69,14 +69,14 @@ function must<T extends Element>(selector: string): T {
 
 // --- The plan / annotate comment popover (also the Inbox's file and message comments) ---
 
-async function mountPopover(text: string, onSubmit: () => void, skillReferences = false) {
+async function mountPopover(text: string, onSubmit: () => void, skillReferences = false, onClose = () => {}) {
   await render(
     <CommentPopover
       anchorRect={new DOMRect(100, 100, 60, 20)}
       contextText="selected text"
       isGlobal={false}
       onSubmit={onSubmit}
-      onClose={() => {}}
+      onClose={onClose}
       skillReferences={skillReferences}
     />,
   );
@@ -88,6 +88,17 @@ describeCommentSubmitKeys('CommentPopover', async (text) => {
   await mountPopover(text, () => { saves++; });
   return { field: () => must('[data-comment-popover] textarea'), saves: () => saves };
 }, { skip });
+
+test.skipIf(skip)('a composing Escape leaves the comment open for the input method', async () => {
+  let closes = 0;
+  await mountPopover('draft', () => {}, false, () => { closes++; });
+  const field = must<HTMLTextAreaElement>('[data-comment-popover] textarea');
+  const escape = await pressKey(field, 'Escape', { isComposing: true });
+  expect(escape.defaultPrevented).toBe(false);
+  expect(closes).toBe(0);
+  await pressKey(field, 'Escape');
+  expect(closes).toBe(1);
+});
 
 describe('CommentPopover with the skill menu open', () => {
   test.skipIf(skip)('on: Enter on an arrowed-to row inserts the skill and does not save', async () => {

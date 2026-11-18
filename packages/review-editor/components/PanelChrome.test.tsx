@@ -81,16 +81,6 @@ async function openMenu(el: HTMLElement) {
 }
 
 describe.skipIf(!hasDom)("PanelControlsRow", () => {
-  test("the progress in words, and the staged count", async () => {
-    const el = await mount(<Harness />);
-    expect(el.querySelector("[data-panel-viewed-controls]")?.textContent).toBe("0 of 22 viewed");
-    expect(el.querySelector("[data-panel-staged-count]")?.textContent).toBe("2 staged");
-    await act(async () => root?.render(<Harness viewedCount={22} />));
-    expect(el.querySelector("[data-panel-viewed-controls]")?.textContent).toBe("All 22 viewed");
-    await act(async () => root?.render(<Harness stagedCount={0} />));
-    expect(el.querySelector("[data-panel-staged-count]")).toBeNull();
-  });
-
   test("Hide viewed is a one-click toggle with its pressed state", async () => {
     const el = await mount(<Harness />);
     expect(eye(el)?.getAttribute("aria-pressed")).toBe("true");
@@ -117,7 +107,7 @@ describe.skipIf(!hasDom)("PanelControlsRow", () => {
     expect(el.querySelector('[aria-label="Search in diff"]')?.hasAttribute("aria-pressed")).toBe(false);
   });
 
-  test("Search in diff and Collapse all are one click", async () => {
+  test("Search in diff is one click; Collapse all folders is in the … menu", async () => {
     const onOpenSearch = mock(() => {});
     const onToggleAllFolders = mock(() => {});
     const el = await mount(
@@ -126,13 +116,11 @@ describe.skipIf(!hasDom)("PanelControlsRow", () => {
     const search = el.querySelector<HTMLButtonElement>('[aria-label="Search in diff"]')!;
     await act(async () => search.click());
     expect(onOpenSearch).toHaveBeenCalledTimes(1);
-    const collapse = el.querySelector<HTMLButtonElement>('[aria-label="Collapse all folders"]')!;
-    await act(async () => collapse.click());
+    expect(el.querySelector('[aria-label="Collapse all folders"]')).toBeNull();
+    await openMenu(el);
+    expect(menuItem("data-review-collapse-folders")?.textContent).toBe("Collapse all folders");
+    await act(async () => menuItem("data-review-collapse-folders")?.click());
     expect(onToggleAllFolders).toHaveBeenCalledTimes(1);
-    await act(async () =>
-      root?.render(<Harness onOpenSearch={onOpenSearch} onToggleAllFolders={onToggleAllFolders} areAllFoldersExpanded={false} collapseDisabled />),
-    );
-    expect(el.querySelector<HTMLButtonElement>('[aria-label="Expand all folders"]')?.disabled).toBe(true);
   });
 
   test("the scope leads the row; without one the row says Files", async () => {

@@ -179,6 +179,23 @@ export function filterAgentRows(sections: readonly InboxListSection[], filter: A
   return sections.map((section) => ({ ...section, threads: section.threads.filter((row) => agentRowOf(row, filter, self)) }));
 }
 
+/** What a Rex pane blocked on the person waits for (OSC 7501's `kind`), after "waiting on you in Rex". */
+export const REX_WAITING_WORDS: Record<'permission' | 'question' | 'auth' | 'other', string> = {
+  permission: ': a permission prompt',
+  question: ': a question',
+  auth: ': a sign-in',
+  other: '',
+};
+
+/** Its Rex pane's word, where the Inbox had none of its own (the server folded it into `state`); null otherwise. */
+function rexStateWords(agent: InboxAgent): string | null {
+  const rex = agent.rex_status;
+  if (agent.state === 'waiting' && agent.waiting === 0 && rex?.state === 'blocked') return `Waiting on you in Rex${REX_WAITING_WORDS[rex.kind ?? 'other']}`;
+  if (agent.state === 'idle' && rex?.state === 'done') return 'Done';
+  if (agent.state === 'idle' && rex?.state === 'error') return 'Stopped on an error';
+  return null;
+}
+
 /** What an agent's hover card says, line by line; a fact the window does not have is left out. */
 export interface AgentFacts {
   title: string;
@@ -197,6 +214,7 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =
     away ??
+    rexStateWords(agent) ??
     (agent.state === 'waiting'
       ? agent.waiting > 1
         ? `${agent.waiting} threads waiting on you`
@@ -210,6 +228,8 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   if (agent.started_at) rows.push(['Started', agent.launch ? `From the Inbox, ${whenTime(agent.started_at, now)}` : whenTime(agent.started_at, now)]);
   else if (agent.launch) rows.push(['Started', 'From the Inbox']);
   if (agent.last_seen_at) rows.push(['Last heard', whenTime(agent.last_seen_at, now)]);
+  // Where it lives (a Rex pane, as Rex named it at the last read): a row of its own.
+  if (agent.place?.line) rows.push(['Where', agent.place.line]);
   if (entry.thread?.subject && entry.thread.subject !== entry.name) rows.push(['Thread', entry.thread.subject]);
   return { title: entry.name, sub, state, rows };
 }
