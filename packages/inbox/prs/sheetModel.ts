@@ -22,6 +22,7 @@ import {
   type InboxPullsAnswer,
 } from '@plannotator/core/inbox-types';
 import { repoLabels } from '../pulls/labels';
+import { pullInProject } from '../pulls/model';
 import { person, wordsText, type Words } from '../pulls/words';
 
 /**
@@ -181,6 +182,16 @@ export interface SheetModel {
 }
 
 const isMergedWithin = (pull: InboxPull, now: number, ms: number) => pull.state === 'merged' && !!pull.merged_at && now - Date.parse(pull.merged_at) <= ms;
+
+/**
+ * The board as Reviews' project filter shows it: only that project's PRs, by Reviews' own rule (`pullInProject`), so
+ * its sections, its Merged view and its head line count only those.
+ * No project: the answer as it is.
+ */
+export function boardInProject<T extends Pick<InboxPullsAnswer, 'pulls' | 'projects'> & { links?: InboxPullsAnswer['links'] }>(answer: T, project: string | null): T {
+  if (!project) return answer;
+  return { ...answer, pulls: answer.pulls.filter((pull) => pullInProject(pull, project, answer.projects, answer.links?.[pull.key]?.project_id)) };
+}
 
 /** The Open view: a section per repository with an open PR, the repositories with the most on you first. */
 export function sheetModel(answer: Pick<InboxPullsAnswer, 'pulls' | 'projects'>, now: number, risk: RiskLevels = {}): SheetModel {

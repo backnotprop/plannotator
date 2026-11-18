@@ -447,3 +447,10 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prp-stack.ib-prp-views { flex: none; max-height: none; }
 .ib-prp-sincedot { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; }
 .ib-prp-sincedot::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--foreground); }
+
+/* Hide repository (SheetPage's `repoHide`): quiet, muted words and icon at the end of a repository's header, always shown. */
+.ib-prs-rhide { display: inline-flex; align-items: center; gap: 4px; align-self: center; height: 22px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: var(--muted-foreground); font-family: inherit; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; cursor: pointer; white-space: nowrap; }
+.ib-prs-rhide:hover { background: var(--ib-prt-hover); color: var(--foreground); }
+.ib-prs-rhide:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-prtb-gin .ib-prs-rhide { margin-left: auto; }
+.ib-prs-sum > .ib-prs-in { color: var(--foreground); }

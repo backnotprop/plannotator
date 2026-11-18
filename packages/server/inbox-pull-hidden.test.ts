@@ -42,6 +42,14 @@ describe("the PRs a machine keeps hidden", () => {
     expect(createInboxPullHidden(dataDir).has(KEY)).toBe(false);
   });
 
+  test("a fork's PR keeps its head repository across a restart (the Hidden fold's project rule); one without has none", () => {
+    const dataDir = scratch();
+    createInboxPullHidden(dataDir).change({ hide: [{ ...hide(8), head_repo: "dana/api" }, { ...hide(9), head_repo: null }], show: [] }, new Date("2026-11-17T10:00:00Z"));
+    const kept = createInboxPullHidden(dataDir).list();
+    expect(kept.find((h) => h.key.endsWith("#8"))?.head_repo).toBe("dana/api");
+    expect(kept.find((h) => h.key.endsWith("#9"))).not.toHaveProperty("head_repo");
+  });
+
   test("a hidden PR leaves the list; the newest hidden comes first", () => {
     const hidden = createInboxPullHidden(scratch());
     hidden.change({ hide: [hide(7)], show: [] }, new Date("2026-11-17T10:00:00Z"));
@@ -175,5 +183,51 @@ describe("the Inbox list's threads with hidden PRs", () => {
     const after = createInboxPullHidden(dataDir);
     expect(after.rehidOf("thr_a")).toBeNull();
     expect(after.rehidOf("thr_b")).toBe(T2);
+  });
+});
+
+describe("the repositories a machine keeps hidden", () => {
+  const REPO = "github.com/northwind/api";
+  const other = (number: number) => pull(number, { key: `github.com/northwind/web#${number}`, repo: "northwind/web" });
+
+  test("every PR in a hidden repository is hidden, a new one too, across a restart; Show again brings them all back", () => {
+    const dataDir = scratch();
+    const hidden = createInboxPullHidden(dataDir);
+    hidden.change({ hide: [], show: [], hide_repos: [{ key: REPO, label: "api" }] }, new Date("2026-11-17T10:00:00Z"));
+    const again = createInboxPullHidden(dataDir);
+    // #900 was never seen before the hide: new PRs there stay hidden too.
+    expect(again.shown([pull(7), pull(900), other(8)]).map((p) => p.key)).toEqual([other(8).key]);
+    expect(again.has(pull(900).key)).toBe(true);
+    expect(again.repos()).toEqual([{ key: REPO, label: "api", at: "2026-11-17T10:00:00.000Z" }]);
+    // The hidden PRs' list stays the PRs hidden one by one.
+    expect(again.list()).toEqual([]);
+    again.change({ hide: [], show: [], show_repos: [REPO] }, new Date());
+    expect(createInboxPullHidden(dataDir).shown([pull(7), other(8)])).toHaveLength(2);
+  });
+
+  test("a hidden repository never takes a thread out of the Inbox list: only PRs hidden one by one do", () => {
+    const hidden = createInboxPullHidden(scratch());
+    hidden.change({ hide: [], show: [], hide_repos: [{ key: REPO, label: "api" }] }, new Date("2026-11-17T10:00:00Z"));
+    expect(hidden.atOf(pull(7).key)).toBeNull();
+    const inPlay = new Map([["thr_a", new Map([[pull(7).key, { ...hide(7), thread_id: "thr_a" }]])]]);
+    expect(threadPullsHidden(inPlay, (key) => hidden.atOf(key)).gone.size).toBe(0);
+    hidden.change({ hide: [hide(7)], show: [] }, new Date("2026-11-17T11:00:00Z"));
+    expect([...threadPullsHidden(inPlay, (key) => hidden.atOf(key)).gone.keys()]).toEqual(["thr_a"]);
+  });
+
+  test("the newest 500 hidden repositories are kept", () => {
+    const hidden = createInboxPullHidden(scratch());
+    const many = Array.from({ length: PULL_HIDDEN_KEPT + 1 }, (_, i) => ({ key: `github.com/o/r${i}`, label: `r${i}` }));
+    for (const [i, repo] of many.entries()) hidden.change({ hide: [], show: [], hide_repos: [repo] }, new Date(Date.parse("2026-11-17T10:00:00Z") + i * 1000));
+    expect(hidden.repos()).toHaveLength(PULL_HIDDEN_KEPT);
+    expect(hidden.has("github.com/o/r0#1")).toBe(false);
+    expect(hidden.has(`github.com/o/r${PULL_HIDDEN_KEPT}#1`)).toBe(true);
+  });
+
+  test("a write's repositories: host/owner/repo, lowercased; a PR's key is refused", () => {
+    expect(pullHiddenBodyOf({ hide_repos: [{ key: "GitHub.com/Northwind/API", label: "API" }] }).hide_repos).toEqual([{ key: REPO, label: "API" }]);
+    expect(pullHiddenBodyOf({ show_repos: [REPO] }).show_repos).toEqual([REPO]);
+    expect(() => pullHiddenBodyOf({ hide_repos: [{ key: `${REPO}#7`, label: "api" }] })).toThrow();
+    expect(() => pullHiddenBodyOf({ hide_repos: "api" })).toThrow();
   });
 });

@@ -7,7 +7,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
-import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
@@ -26,7 +26,7 @@ import { pullAvatarUrl } from './pullUrls';
 import { UnreportedBranches } from './UnreportedBranches';
 import type { InboxUnreportedBranch } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
-import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy } from './hiddenPulls';
+import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -250,21 +250,62 @@ export function hideWords(pulls: readonly Pick<InboxPull, 'platform'>[]): string
  * at first. Each hidden PR: its number, title and repository (its thread when it has one, else a link to the forge),
  * and Show again. Show again moves focus to the next hidden PR's, else the fold's own button.
  */
-function HiddenFold({ hidden, onShow, onOpenThread }: { hidden: readonly InboxPullHidden[]; onShow: (hidden: InboxPullHidden) => void; onOpenThread?: (threadId: string) => void }) {
+function HiddenFold({
+  hidden,
+  repos,
+  onShow,
+  onShowRepo,
+  onOpenThread,
+}: {
+  hidden: readonly InboxPullHidden[];
+  /** Hidden repositories (the board's Hide repository): listed first, each with its own Show again. */
+  repos: readonly InboxRepoHidden[];
+  onShow: (hidden: InboxPullHidden) => void;
+  onShowRepo?: (repo: InboxRepoHidden) => void;
+  onOpenThread?: (threadId: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const fold = useRef<HTMLDivElement>(null);
-  if (hidden.length === 0) return null;
-  const show = (h: InboxPullHidden) => {
+  const shownRepos = onShowRepo ? repos : [];
+  const count = hidden.length + shownRepos.length;
+  if (count === 0) return null;
+  const leave = (id: string) => {
     const col = fold.current?.closest('.ib-listcol') ?? null;
-    focusWhenGone(itemsBy(() => fold.current, 'data-pulls-show-again'), h.key, () => fold.current?.querySelector<HTMLElement>('[data-pulls-hidden-toggle]') ?? col?.querySelector<HTMLElement>('[data-pulls-heading]') ?? null);
+    focusWhenGone(itemsBy(() => fold.current, 'data-pulls-show-again'), id, () => fold.current?.querySelector<HTMLElement>('[data-pulls-hidden-toggle]') ?? col?.querySelector<HTMLElement>('[data-pulls-heading]') ?? null);
+  };
+  const show = (h: InboxPullHidden) => {
+    leave(h.key);
     onShow(h);
   };
   return (
-    <div ref={fold} className="ib-group ib-pr-fold" role="group" aria-label="Hidden" data-pulls-hidden={hidden.length}>
+    <div ref={fold} className="ib-group ib-pr-fold" role="group" aria-label="Hidden" data-pulls-hidden={count}>
       <button type="button" className="ib-pr-foldbtn" onClick={() => setOpen((was) => !was)} aria-expanded={open} data-pulls-hidden-toggle="">
         <Icon name={open ? 'chevD' : 'chevR'} size={14} />
-        Hidden <span className="ib-n">{formatCount(hidden.length)}</span>
+        Hidden <span className="ib-n">{formatCount(count)}</span>
       </button>
+      {open &&
+        shownRepos.map((repo) => (
+          <div key={repo.key} className="ib-pr-hid" data-pulls-hidden-repo={repo.key}>
+            <span className="ib-pr-hid-t" title={repo.key}>
+              <span className="ib-pr-hid-title" dir="auto">
+                {repo.label}
+              </span>
+              <span className="ib-pr-hid-repo">Every pull request</span>
+            </span>
+            <button
+              type="button"
+              className="ib-pr-hid-show"
+              onClick={() => {
+                leave(repoChangeKey(repo.key));
+                onShowRepo!(repo);
+              }}
+              aria-label={`Show again, ${repo.label}`}
+              data-pulls-show-again={repoChangeKey(repo.key)}
+            >
+              Show again
+            </button>
+          </div>
+        ))}
       {open &&
         hidden.map((h) => {
           const words = (
@@ -403,6 +444,7 @@ export function ReviewsList({
   onReviewBranch,
   menuRow = null,
   onShowAgain,
+  onShowRepo,
   onOpenThread,
 }: {
   answer: InboxReviewsAnswer;
@@ -429,6 +471,8 @@ export function ReviewsList({
   menuRow?: string | null;
   /** The Hidden fold's Show again. Absent: no fold. */
   onShowAgain?: (hidden: InboxPullHidden) => void;
+  /** Show a hidden repository again (Hidden lists them only with it). */
+  onShowRepo?: (repo: InboxRepoHidden) => void;
   /** A hidden PR's thread, from the Hidden fold. */
   onOpenThread?: (threadId: string) => void;
 }) {
@@ -498,8 +542,8 @@ export function ReviewsList({
   const draw = (row: InboxReviewRow) => (
     <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} menu={menuRow === row.id} onOpen={() => onOpen(row)} />
   );
-  // Under a project filter, that project's hidden PRs only, as the rest of the page (its count follows).
-  const hiddenFold = onShowAgain ? <HiddenFold hidden={hiddenInProject(answer.hidden ?? [], project, answer.projects)} onShow={onShowAgain} onOpenThread={onOpenThread} /> : null;
+  // Under a project filter, that project's hidden PRs and repositories only, as the rest of the page (its count follows).
+  const hiddenFold = onShowAgain ? <HiddenFold hidden={hiddenInProject(answer.hidden ?? [], project, answer.projects)} repos={hiddenInProject(answer.hidden_repos ?? [], project, answer.projects)} onShow={onShowAgain} onShowRepo={onShowRepo} onOpenThread={onOpenThread} /> : null;
   // High: what it can't place, behind one quiet line in the fold's own shape.
   const notRankedLine =
     notRanked.length > 0 ? (

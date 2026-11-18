@@ -5,7 +5,6 @@
 import {
   inboxActionInDraft,
   inboxPullIsOpen,
-  inboxPullRepoKey,
   type InboxMessageWire,
   type InboxPull,
   type InboxPullStack,
@@ -15,7 +14,7 @@ import {
 import { plural } from '@plannotator/core/inbox-format';
 import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
-import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, requestedParts, type PullFilter } from './model';
+import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullInProject, pullViewOf, requestedParts, type PullFilter } from './model';
 import { person, wordsText, type Words } from './words';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
@@ -25,8 +24,9 @@ import { branchContextWords, branchNoteOf, branchReportOf, branchRowLead, type B
 export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null, filter: PullFilter): InboxReviewRow[] {
   const inProject = (row: InboxReviewRow) => {
     if (!project) return true;
-    if (reviewRowProject(row) === project) return true;
-    return row.stacks.some((stack) => (answer.projects[inboxPullRepoKey(stack.host, stack.repo)] ?? []).includes(project));
+    const own = reviewRowProject(row);
+    if (own === project) return true;
+    return row.stacks.some((stack) => stack.layers.some((pull) => pullInProject(pull, project, answer.projects, own)));
   };
   const inView = (row: InboxReviewRow) => {
     if (filter === 'all') return true;

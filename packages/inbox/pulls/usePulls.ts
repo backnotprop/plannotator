@@ -68,7 +68,7 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
         .then(([answer, rows]) => {
           if (controller.signal.aborted) return;
           setModel(answer);
-          settleHidden(answer.hidden);
+          settleHidden(answer.hidden, Date.now(), answer.hidden_repos);
           // A linked machine's reported branch: its thread opens there (Branch reviews).
           rememberFarBranches(rows);
           setReviews(rows);

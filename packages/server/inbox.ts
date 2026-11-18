@@ -1456,7 +1456,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const was = pullThreads.get(pull.key)?.thread_id;
       if (thread) pullThreads.set(pull.key, { thread_id: thread, title: pull.title, url: pull.url });
       else pullThreads.delete(pull.key);
-      if (was !== thread && pullHidden.has(pull.key)) touched = true;
+      if (was !== thread && pullHidden.atOf(pull.key) !== null) touched = true;
     }
     if (touched) pullHiddenChanged();
   };
@@ -5833,7 +5833,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ serverSession, looked: pullLooked.mark(pullLookedSeenOf(body, Date.now())) });
       }
       // Hide a PR from Reviews, the PR board, the Inbox list and their counts, or show it again (inbox-pull-hidden.ts).
-      // `threads`: the Inbox list's Hide, every open PR of those threads not hidden yet. Kept on this machine only, never
+      // `threads`: the Inbox list's Hide, every open PR of those threads not hidden yet. `hide_repos` / `show_repos`: the
+      // board's Hide repository, every PR in it (new ones too). Kept on this machine only, never
       // sent to the forge; same guards as the list. Answers the hidden list and `hid`, the keys this write hid (Undo
       // shows exactly those). Inbox-only (Bun).
       if (path === "/api/inbox/pulls/hidden") {
@@ -5849,25 +5850,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const threadIds = [...new Set(input.threads.map((id) => store.message(id)?.thread_id ?? id))];
         const fromThreads = threadIds.flatMap((id) => [...(inPlay?.get(id)?.values() ?? [])]);
         const threadOf = input.hide.length > 0 ? pullThreadLookup() : () => null;
-        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].filter((pull, i, all) => !pullHidden.has(pull.key) && all.findIndex((other) => other.key === pull.key) === i);
+        // Hidden one by one (`atOf`): a PR in a hidden repository is hidden for itself too, so its thread can leave the list.
+        // With its head repository as the PR list knows it (a fork's): the Hidden fold's project rule.
+        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].map((pull) => ({ ...pull, head_repo: pulls.find(pull.key)?.head_repo ?? null })).filter((pull, i, all) => pullHidden.atOf(pull.key) === null && all.findIndex((other) => other.key === pull.key) === i);
         // A thread whose PRs were all hidden already (it came back, or began after they were hidden): hidden again as
         // a thread (`rehid`), newer than what brought it back. Undo (`show_threads`) takes that off; its PRs stay hidden.
         const rehid = threadIds.filter((id) => {
           const pulls = inPlay?.get(id);
-          return !!pulls && pulls.size > 0 && [...pulls.keys()].every((key) => pullHidden.has(key));
+          return !!pulls && pulls.size > 0 && [...pulls.keys()].every((key) => pullHidden.atOf(key) !== null);
         });
         // `threads_left`: the threads this write takes out of the Inbox list (the toast says so; Undo brings them back).
+        // A repository's hide never takes a thread out of the Inbox list: only PRs hidden one by one do.
         // `threads_back`: the ones it brings back (Undo, Show again): the window puts them back in place at once, as
         // its own write, never behind "N new".
         const before = threadsHiddenNow();
         const at = new Date();
-        pullHidden.change({ hide, show: input.show }, at);
+        pullHidden.change({ hide, show: input.show, hide_repos: input.hide_repos, show_repos: input.show_repos }, at);
         if (rehid.length > 0 || input.show_threads.length > 0) pullHidden.rehide({ hide: rehid, show: input.show_threads }, at);
         const after = threadsHiddenNow();
         const left = [...after].filter((id) => !before.has(id));
         const back = [...before].filter((id) => !after.has(id));
         pullHiddenChanged();
-        return json({ serverSession, hidden: hiddenList(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
+        return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -5989,7 +5993,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = farBoards.length > 0 ? mergePullBoards(own, farBoards) : own;
         if (farBoards.length > 0) settled = pullHidden.settle(board.pulls) || settled;
         if (settled) pullHiddenChanged();
-        return json({ serverSession, ...board, ...(byWindow ? { pulls: pullHidden.shown(board.pulls), hidden: hiddenList() } : {}) });
+        return json({ serverSession, ...board, ...(byWindow ? { pulls: pullHidden.shown(board.pulls), hidden: hiddenList(), hidden_repos: pullHidden.repos() } : {}) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
       // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
@@ -6045,7 +6049,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const branchesOn = branchReviewsOn();
         const farBranches = branchesOn && fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM ? machines.branchLists()() : null;
         if (farBranches) rows.push(...farBranches.rows.map(inboxFarBranchReviewRow));
-        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}), ...(byWindow ? { hidden: hiddenList() } : {}) });
+        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}), ...(byWindow ? { hidden: hiddenList(), hidden_repos: pullHidden.repos() } : {}) });
       }
       // New review's Pull request link: what a pasted link is. One read of that one PR, unless the list already has it.
       if (path === "/api/inbox/reviews/link") {
