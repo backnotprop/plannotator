@@ -1,18 +1,19 @@
 /**
  * The door's version handshake (adr/implementation/inbox-mobile.md section 14), in process: no Inbox, the window's
- * handler is a recorder. What regresses: `health.door.routes` drifting from what the door answers (an app then calls a
- * route that 404s, or never offers one that works); an app from before the handshake refused or answered differently;
- * an app below the floor reaching a route other than health and revoke, on the door or through the relay; the app's
- * header reaching the window; a route-missing 404 kept under its key, so the same key never runs once the route is
- * there; and a client offering a route an older Inbox does not list.
+ * handler is a recorder. What regresses: `health.door` drifting from what the door answers (an app then calls a route
+ * that 404s, through the relay or at all, or never offers one that works); an own route answered with no row, or
+ * listed by an Inbox that does not answer it; an app from before the handshake refused or answered differently; an app
+ * below the floor reaching a route other than health and revoke, on the door or through the relay; a relay command's
+ * `app` that is not a header's characters turning into a 500 the app retries for ever; the app's header reaching the
+ * window; a refusal at the door kept under the key; and a client offering a route an older Inbox does not list.
  */
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { formatInboxAppHeader, inboxDoorOffers, parseInboxAppHeader, readInboxDoorHealth } from "@plannotator/core/inbox-door-version";
-import { createInboxDevices, doorRouteNames, doorRouteOf, doorRoutesFor, doorRouteTable } from "./inbox-devices";
-import { APP_HEADER, DOOR_CONTRACT, doorHealth, MIN_APP_CONTRACT } from "./inbox-door-version";
+import { createInboxDevices, doorReachOf, doorRouteNames, doorRouteOf, doorRouteTable, type InboxDevicesContext } from "./inbox-devices";
+import { APP_HEADER, APP_UPGRADE, DOOR_CONTRACT, doorHealth, MIN_APP_CONTRACT } from "./inbox-door-version";
 
 type Json = Record<string, any>;
 const roots: string[] = [];
@@ -21,7 +22,7 @@ afterAll(() => {
 });
 
 /** A door whose window answers what `answer` says, recording every request handed to it. */
-function door(answer: (path: string) => Response = () => Response.json({ ok: true })) {
+function door(answer: (path: string) => Response = () => Response.json({ ok: true }), extra: Partial<InboxDevicesContext> = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "plannotator-door-version-"));
   roots.push(dataDir);
   const handed: { path: string; headers: Headers }[] = [];
@@ -36,12 +37,15 @@ function door(answer: (path: string) => Response = () => Response.json({ ok: tru
       handed.push({ path, headers: req.headers });
       return answer(path);
     },
+    ...extra,
   });
   const pairUrl = new URL("http://127.0.0.1/api/inbox/device/pair");
+  const pair = async (body: Json): Promise<Json> => (await devices.door(new Request(pairUrl, { method: "POST", body: JSON.stringify(body) }), pairUrl))!.json();
   const phone = async (): Promise<Json> => {
     const made = (await (await devices.windowRoute(new Request("http://127.0.0.1/api/inbox/pairing", { method: "POST", body: "{}" }), new URL("http://127.0.0.1/api/inbox/pairing")))!.json()) as Json;
-    return (await devices.door(new Request(pairUrl, { method: "POST", body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) }), pairUrl))!.json();
+    return pair({ code: made.offer.code, name: "iPhone", platform: "ios" });
   };
+  const machine = async (): Promise<Json> => pair({ name: "MacBook", platform: "machine", secret: devices.machineDoor.openMachineOffer().secret });
   const call = async (token: string, route: string, init: { method?: string; body?: Json; app?: string } = {}) => {
     const url = new URL(`http://127.0.0.1/api/inbox/device/${route}`);
     const method = init.method ?? (init.body ? "POST" : "GET");
@@ -49,7 +53,7 @@ function door(answer: (path: string) => Response = () => Response.json({ ok: tru
     return (await devices.door(new Request(url, { method, headers, ...(init.body ? { body: JSON.stringify(init.body) } : {}) }), url))!;
   };
   const listed = async (): Promise<Json[]> => ((await (await devices.windowRoute(new Request("http://127.0.0.1/api/inbox/devices"), new URL("http://127.0.0.1/api/inbox/devices")))!.json()) as Json).devices;
-  return { devices, handed, phone, call, listed };
+  return { devices, handed, phone, machine, call, listed };
 }
 
 /** A path that the row's pattern matches: each `:id` tried with ids of the shapes the allowlist takes. */
@@ -90,11 +94,28 @@ describe("the route table: one source for health.door.routes", () => {
     const patterns = new Set(doorRouteTable().map((row) => row.pattern.replace(/^\^|\$$/g, "")));
     const words = (pattern: string) => pattern.replaceAll("([^/]+)", ":id").replaceAll("\\/", "/");
     for (const name of doorRouteNames()) expect([name, [...patterns].some((pattern) => name === `${name.split(" ")[0]} ${words(pattern)}`)]).toEqual([name, true]);
+    // The two agree on a linked machine's own routes, `GET update` included.
+    expect(doorRouteNames().filter((name) => !name.includes("/") && !doorRouteOf(name.split(" ")[0]!, name.split(" ")[1]!, true))).toEqual(
+      doorRouteTable().filter((row) => row.grant === "machine" && row.pattern === `^${row.route}$` && !doorRouteOf(row.method, row.route, true)).map((row) => row.name),
+    );
+  });
+
+  test("relay: false exactly where the sealed relay path refuses, true where it hands the command in", async () => {
+    expect(doorRouteTable().filter((row) => !row.relay).map((row) => row.name).sort()).toEqual(["GET events", "POST markups", "POST pair", "POST uploads"]);
+    const d = door();
+    const phone = await d.phone();
+    for (const row of doorRouteTable()) {
+      if (row.grant !== "phone" || row.name === "POST revoke") continue;
+      const path = row.name === "POST pair" ? "pair" : concrete(row)!;
+      const answer = await d.devices.asDevice(phone.device.id, { method: row.method, path: `/api/inbox/device/${path}`, body: { idempotency_key: `k-${row.name}` } });
+      const code = ((await answer.json()) as Json).code;
+      expect([row.name, ["device_route_not_found", "relay_upload_unavailable"].includes(code)]).toEqual([row.name, !row.relay]);
+    }
   });
 
   test("a phone's list is the phone rows; a linked computer's is every row", () => {
-    const phone = doorRoutesFor("ios");
-    const machine = doorRoutesFor("machine");
+    const phone = doorReachOf("ios").routes;
+    const machine = doorReachOf("machine").routes;
     expect(phone).toEqual(doorRouteTable().filter((row) => row.grant === "phone").map((row) => row.name));
     expect(phone).toContain("GET health");
     expect(phone).toContain("POST revoke");
@@ -103,6 +124,28 @@ describe("the route table: one source for health.door.routes", () => {
       expect(machine).toContain(only);
     }
     expect(machine.length).toBe(doorRouteTable().length);
+    expect(doorReachOf("ios").not_by_relay.sort()).toEqual(["GET events", "POST markups", "POST pair", "POST uploads"]);
+  });
+
+  test("a linked machine's own routes are listed exactly when this Inbox answers them, and each listed one answers", async () => {
+    const own = ["GET accounts", "POST link-back", "POST unlink", "GET update", "POST update"];
+    const bare = door();
+    expect(own.filter((name) => bare.devices.doorReach("machine").routes.includes(name))).toEqual(["GET accounts"]);
+    const lone = await bare.machine();
+    for (const name of ["POST link-back", "POST unlink", "GET update", "POST update"]) {
+      const [method, route] = name.split(" ");
+      const answer = await bare.call(lone.token, route!, method === "POST" ? { body: { idempotency_key: `k-${route}` } } : {});
+      expect([name, answer.status, ((await answer.json()) as Json).code]).toEqual([name, 404, "device_route_not_found"]);
+    }
+    const machines = { linkBack: async () => Response.json({ linked: true }), unlinkedBy: () => Response.json({ unlinked: true }), hasLinks: () => true };
+    const full = door(undefined, { machines: () => machines, machineUpdate: { read: () => ({ state: "idle" }), start: async () => ({ outcome: "started" }) } });
+    expect(own.filter((name) => full.devices.doorReach("machine").routes.includes(name))).toEqual(own);
+    const linked = await full.machine();
+    for (const name of own) {
+      const [method, route] = name.split(" ");
+      const answer = await full.call(linked.token, route!, method === "POST" ? { body: { idempotency_key: `k-${route}` } } : {});
+      expect([name, answer.status]).toEqual([name, 200]);
+    }
   });
 });
 
@@ -143,13 +186,26 @@ describe("an app that names itself", () => {
     expect((await d.listed())[0]!.app).toMatchObject({ app_version: "1.5.0", contract: 1 });
   });
 
+  test("a relay command's `app` that is not in the form, or not a header's characters, is served as if absent, never a 500", async () => {
+    const d = door();
+    const phone = await d.phone();
+    for (const app of ["ios 1.0 ✓ contract 1", "ios 1.0.0 contract 1\r\nX-Evil: 1", "ios 1.0.0\u0000 contract 1", 7]) {
+      const answer = await d.devices.asDevice(phone.device.id, { method: "GET", path: "/api/inbox/device/threads", app });
+      expect([app, answer.status]).toEqual([app, 200]);
+      const write = await d.devices.asDevice(phone.device.id, { method: "POST", path: "/api/inbox/device/threads/thr_1/seen", body: { idempotency_key: `k-${String(app)}` }, app });
+      expect([app, write.status]).toEqual([app, 200]);
+    }
+    expect((await d.listed())[0]!.app).toBeNull();
+    expect(d.handed.every((h) => h.headers.get(APP_HEADER) === null)).toBe(true);
+  });
+
   test("below the floor: 426 app_needs_update everywhere but health and revoke, on the door and through the relay; nothing reaches the window", async () => {
     const d = door();
     const phone = await d.phone();
     const old = "ios 0.9.0 contract 0";
     const refused = { error: "Update Plannotator on your phone.", code: "app_needs_update", min_app_contract: MIN_APP_CONTRACT };
     const threads = await d.call(phone.token, "threads", { app: old });
-    expect([threads.status, await threads.json()]).toEqual([426, refused]);
+    expect([threads.status, await threads.json(), threads.headers.get("Upgrade")]).toEqual([426, refused, APP_UPGRADE]);
     const write = await d.call(phone.token, "threads/thr_1/seen", { app: old, body: { idempotency_key: "k-floor" } });
     expect([write.status, await write.json()]).toEqual([426, refused]);
     const relayed = await d.devices.asDevice(phone.device.id, { method: "POST", path: "/api/inbox/device/threads/thr_1/seen", body: { idempotency_key: "k-floor-relay" }, app: old });
@@ -163,7 +219,7 @@ describe("an app that names itself", () => {
   });
 });
 
-describe("a route the Inbox does not have is never kept under the key", () => {
+describe("a refusal at the door is never kept under the key", () => {
   test("a POST to a route off the door: 404, and the same key is free for the route the app meant", async () => {
     const d = door();
     const phone = await d.phone();
@@ -172,30 +228,6 @@ describe("a route the Inbox does not have is never kept under the key", () => {
     const meant = await d.call(phone.token, "threads/thr_1/seen", { body: { idempotency_key: "k-1" } });
     expect([meant.status, meant.headers.get("Idempotent-Replayed")]).toEqual([200, null]);
   });
-
-  test("a route-missing 404 passed on from behind the door runs again under the same key once the route is there; any other 4xx is kept", async () => {
-    let there = false;
-    const d = door((path) => {
-      if (path.endsWith("/snooze")) return there ? Response.json({ ok: true }) : Response.json({ error: "Not a phone route.", code: "device_route_not_found" }, { status: 404 });
-      return Response.json({ error: "No such thread.", code: "thread_not_found" }, { status: 404 });
-    });
-    const phone = await d.phone();
-    const body = { idempotency_key: "k-snooze", until: "2026-11-19T09:00:00.000Z" };
-    expect((await d.call(phone.token, "threads/thr_1/snooze", { body })).status).toBe(404);
-    there = true;
-    const later = await d.call(phone.token, "threads/thr_1/snooze", { body });
-    expect([later.status, later.headers.get("Idempotent-Replayed")]).toEqual([200, null]);
-    expect((await d.call(phone.token, "threads/thr_1/snooze", { body })).headers.get("Idempotent-Replayed")).toBe("true");
-    // Through the relay, the same rule.
-    there = false;
-    const relayed = { method: "POST", path: "/api/inbox/device/threads/thr_2/snooze", body: { idempotency_key: "k-relay", until: body.until } };
-    expect((await d.devices.asDevice(phone.device.id, relayed)).status).toBe(404);
-    there = true;
-    expect((await d.devices.asDevice(phone.device.id, relayed)).headers.get("Idempotent-Replayed")).toBeNull();
-    // A 404 about the thing, not the route, is the Inbox's answer and is replayed.
-    expect((await d.call(phone.token, "threads/thr_9/seen", { body: { idempotency_key: "k-gone" } })).status).toBe(404);
-    expect((await d.call(phone.token, "threads/thr_9/seen", { body: { idempotency_key: "k-gone" } })).headers.get("Idempotent-Replayed")).toBe("true");
-  });
 });
 
 describe("what a client offers, both ways round", () => {
@@ -203,15 +235,20 @@ describe("what a client offers, both ways round", () => {
   const app = { contract: DOOR_CONTRACT, min_inbox_contract: 0, routes_before_door: BEFORE };
 
   test("this Inbox's own health: a phone is offered exactly its routes, never a linked computer's", () => {
-    const skew = readInboxDoorHealth({ ok: true, door: doorHealth(doorRoutesFor("ios")) }, app);
+    const skew = readInboxDoorHealth({ ok: true, door: doorHealth(doorReachOf("ios")) }, app);
     expect(skew.state).toBe("ok");
     expect(inboxDoorOffers(skew, "POST messages/:id/reply")).toBe(true);
+    expect(inboxDoorOffers(skew, "POST messages/:id/reply", "relay")).toBe(true);
     expect(inboxDoorOffers(skew, "GET cards")).toBe(false);
+    // Listed, but not through the relay.
+    expect(inboxDoorOffers(skew, "POST uploads")).toBe(true);
+    expect(inboxDoorOffers(skew, "POST uploads", "relay")).toBe(false);
   });
 
   test("a newer app on an Inbox from before the handshake: today's routes only, or update the computer once the app needs more", () => {
     const old = { ok: true, version: "0.28.8" };
-    expect(readInboxDoorHealth(old, app)).toEqual({ state: "ok", contract: 0, routes: BEFORE, grants: [] });
+    expect(readInboxDoorHealth(old, app)).toEqual({ state: "ok", contract: 0, routes: BEFORE, not_by_relay: [], grants: [] });
+    expect(inboxDoorOffers(readInboxDoorHealth(old, { ...app, not_by_relay_before_door: ["POST messages/:id/reply"] }), "POST messages/:id/reply", "relay")).toBe(false);
     expect(inboxDoorOffers(readInboxDoorHealth(old, app), "POST threads/:id/send")).toBe(false);
     expect(readInboxDoorHealth(old, { ...app, min_inbox_contract: 1 })).toEqual({ state: "inbox_needs_update", contract: 0, min_inbox_contract: 1 });
     // A `door` not in the shape is read as no door at all.
@@ -227,7 +264,7 @@ describe("what a client offers, both ways round", () => {
 
   test("an older app on a newer Inbox: routes and fields it does not know are left alone; below the Inbox's floor it is told to update", () => {
     const newer = { door: { contract: 7, routes: ["GET health", "GET threads", "GET events:device"], grants: ["agents"], min_app_contract: 1, later_field: true }, later_field: 1 };
-    expect(readInboxDoorHealth(newer, app)).toEqual({ state: "ok", contract: 7, routes: ["GET health", "GET threads", "GET events:device"], grants: ["agents"] });
+    expect(readInboxDoorHealth(newer, app)).toEqual({ state: "ok", contract: 7, routes: ["GET health", "GET threads", "GET events:device"], not_by_relay: [], grants: ["agents"] });
     expect(readInboxDoorHealth({ door: { ...newer.door, min_app_contract: 5 } }, app)).toEqual({ state: "app_needs_update", contract: 7, min_app_contract: 5 });
   });
 });

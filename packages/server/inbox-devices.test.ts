@@ -39,8 +39,8 @@ import { inboxUploadAttachments } from "@plannotator/shared/inbox/uploads";
 import { resetServedHostnamesForTests } from "./request-host-guard";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer } from "./inbox";
-import { createInboxDevices, doorRoutesFor, takeDownInboxTailnet } from "./inbox-devices";
-import { DOOR_CONTRACT, MIN_APP_CONTRACT } from "./inbox-door-version";
+import { createInboxDevices, doorReachOf, takeDownInboxTailnet } from "./inbox-devices";
+import { doorHealth } from "./inbox-door-version";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 
@@ -296,7 +296,8 @@ describe("the device door, on the binary", () => {
     expect(Object.keys(h).sort()).toEqual(["app", "door", "event_streams", "inbox_id", "launch_from_machines", "machine_links", "machine_update", "message_deletions", "notify_reach", "ok", "peek", "pid", "self_update", "serverSession", "update", "update_no_change", "version", "window_controls"]);
     expect(h).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession });
     // Section 14: through the door only, the contract and the routes a phone's token reaches; the window's own health has no `door`.
-    expect(h.door).toEqual({ contract: DOOR_CONTRACT, routes: doorRoutesFor("ios"), grants: [], min_app_contract: MIN_APP_CONTRACT });
+    expect(h.door).toEqual(doorHealth(doorReachOf("ios")));
+    expect(h.door).toMatchObject({ contract: 1, grants: [], min_app_contract: 1 });
     expect(h.door.routes).not.toContain("GET cards");
     expect("door" in ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json)).toBe(false);
     expect(await (await door("health", { token: null })).json()).toEqual({ error: "This request needs the phone's token.", code: "device_token_missing" });

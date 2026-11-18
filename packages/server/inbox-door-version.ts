@@ -1,8 +1,8 @@
 /**
  * The device door's version (adr/implementation/inbox-mobile.md, section 14 "Versions"): the contract this Inbox
  * speaks, the oldest app contract it serves, and `health.door`. The rules a client reads them by are in
- * packages/core/inbox-door-version.ts; the route list comes from the door's own table (`doorRoutesFor` in
- * inbox-devices.ts, next to the allowlist).
+ * packages/core/inbox-door-version.ts; the route list comes from the door's own table (`doorRouteTable` and
+ * `doorReachOf` in inbox-devices.ts, next to the allowlist).
  *
  * Raise `DOOR_CONTRACT` for any change to the wire a phone reads: a route, a field, a record kind, a block kind, a
  * code. Raise `MIN_APP_CONTRACT` only for a change of meaning; an additive change never raises it.
@@ -12,17 +12,25 @@ import { type InboxAppVersion, type InboxDoorHealth } from "@plannotator/core/in
 
 export { INBOX_APP_HEADER as APP_HEADER, parseInboxAppHeader as parseAppHeader } from "@plannotator/core/inbox-door-version";
 
-/** The wire contract this Inbox speaks (apps/mobile/contract/VERSION holds the same number once it exists). */
+/**
+ * The wire contract this Inbox speaks (apps/mobile/contract/VERSION holds the same number once it exists). 0 is
+ * reserved: it means "before the handshake" (an Inbox with no `health.door`). The first app is contract 1.
+ */
 export const DOOR_CONTRACT = 1;
-/** An app built against an older contract gets `426 app_needs_update` on every route but `health`, `pair` and `revoke`. */
+/**
+ * An app built against an older contract gets `426 app_needs_update` on every route but `health`, `pair` and `revoke`.
+ * A well-formed `contract 0` is below it by design: no app is built against "before the handshake".
+ */
 export const MIN_APP_CONTRACT = 1;
+/** The 426's `Upgrade` header (RFC 9110 asks for one): the app contract this Inbox needs at least. */
+export const APP_UPGRADE = `plannotator-app/${MIN_APP_CONTRACT}`;
 
 /** The routes an app below the floor still reaches: it learns the floor from `health`, and can still remove itself. */
 const BELOW_FLOOR_ROUTES = new Set(["health", "revoke"]);
 
-/** `health.door` for one caller: the routes its token reaches (`doorRoutesFor`), and its grant groups. */
-export function doorHealth(routes: readonly string[], grants: readonly string[] = []): InboxDoorHealth {
-  return { contract: DOOR_CONTRACT, routes: [...routes], grants: [...grants], min_app_contract: MIN_APP_CONTRACT };
+/** `health.door` for one caller: what its token reaches (`doorReachOf` in inbox-devices.ts), and its grant groups. */
+export function doorHealth(reach: { routes: readonly string[]; not_by_relay: readonly string[] }, grants: readonly string[] = []): InboxDoorHealth {
+  return { contract: DOOR_CONTRACT, routes: [...reach.routes], not_by_relay: [...reach.not_by_relay], grants: [...grants], min_app_contract: MIN_APP_CONTRACT };
 }
 
 /** An app that named itself below the floor, on a route it may not use: the door's refusal body. Null: served. */

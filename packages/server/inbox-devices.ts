@@ -65,7 +65,8 @@ import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups
 import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, serveStatusProxy, TAILSCALE_CLI_TIMEOUT_MS, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner, type TailscaleRunResult } from "@plannotator/shared/tailscale";
 import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
-import { APP_HEADER, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
+import { formatInboxAppHeader } from "@plannotator/core/inbox-door-version";
+import { APP_HEADER, APP_UPGRADE, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
@@ -351,12 +352,32 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^launch\/(clone|clone-check)$/, window: (m) => `/api/inbox/launch/${m[1]}`, machineOnly: true },
 ];
 
-/** The two writes only a linked machine sends this door (inbox-machines.ts answers them); never a window route. */
-const MACHINE_DOOR_WRITES = ["link-back", "unlink", "update"] as const;
-/** Read and start this computer's update, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches it. */
-const MACHINE_DOOR_UPDATE = "update";
-/** This computer's accounts, for a linked machine's window: never on the allowlist, so no phone and no relay command reaches them. */
-const MACHINE_DOOR_ACCOUNTS = "accounts";
+/**
+ * The door's own routes, beside the allowlist: `pair` (no token, answered before the token is read), `revoke`, and a
+ * linked machine's own (never on the allowlist, so no phone reaches them): its link-back and unlink (inbox-machines.ts
+ * answers them), this computer's update, read and started for a linked machine's window, and this computer's
+ * accounts. `serve` answers the machine's through `machineOwn`, typed by this list, so a route here without an answer,
+ * or an answer not here, does not compile. `needs`: answered only while this Inbox has it, and only then listed.
+ */
+const DOOR_OWN_ROUTES = [
+  { method: "POST", route: "pair", grant: "phone" },
+  { method: "POST", route: "revoke", grant: "phone" },
+  { method: "GET", route: "accounts", grant: "machine" },
+  { method: "POST", route: "link-back", grant: "machine", needs: "machines" },
+  { method: "POST", route: "unlink", grant: "machine", needs: "machines" },
+  { method: "GET", route: "update", grant: "machine", needs: "machine_update" },
+  { method: "POST", route: "update", grant: "machine", needs: "machine_update" },
+] as const satisfies readonly { method: "GET" | "POST"; route: string; grant: "phone" | "machine"; needs?: DoorOwnNeeds }[];
+
+/** What an own route needs from this Inbox to be answered: linked machines, or Update from another machine. */
+type DoorOwnNeeds = "machines" | "machine_update";
+type DoorOwnRoute = (typeof DOOR_OWN_ROUTES)[number];
+/** A linked machine's own routes by name (`POST link-back`). */
+type OwnName<R> = R extends { method: infer M extends string; route: infer P extends string } ? `${M} ${P}` : never;
+type MachineOwnName = OwnName<Extract<DoorOwnRoute, { grant: "machine" }>>;
+
+/** Door routes the sealed relay path never carries (`asDevice`): `pair`, and the event stream. Raw bodies neither. */
+const NOT_BY_RELAY = new Set(["pair", "events"]);
 
 /**
  * The window route a door request goes to, or null: the allowlist's first entry for its method and route, skipping a
@@ -372,10 +393,14 @@ export function doorRouteOf(method: string, route: string, machine: boolean): { 
   return null;
 }
 
-/** For rule 8's test (inbox-outbox.test.ts): every door route in words (`GET threads`, `POST messages/:id/(picks|reply|…)`). */
+/**
+ * For rule 8's test (inbox-outbox.test.ts): every door route in words (`GET threads`, `POST messages/:id/(picks|reply|…)`),
+ * then a linked machine's own (the same rows as `doorRouteTable`).
+ */
 export function doorRouteNames(): string[] {
   const words = (route: RegExp) => route.source.replace(/^\^|\$$/g, "").replaceAll("([^/]+)", ":id").replaceAll("\\/", "/");
-  return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), `GET ${MACHINE_DOOR_ACCOUNTS}`, ...MACHINE_DOOR_WRITES.map((route) => `POST ${route}`)];
+  const own = DOOR_OWN_ROUTES.filter((row) => row.grant === "machine").map((row) => `${row.method} ${row.route}`);
+  return [...ALLOWLIST.map((entry) => `${entry.method} ${words(entry.route)}`), ...own];
 }
 
 /** For rule 8's test: the door's POST routes, and which take a raw body (a file). */
@@ -398,6 +423,11 @@ export interface DoorRouteRow {
   grant: "phone" | "machine";
   /** The body is a file and the key rides the query; never carried by the relay. */
   raw: boolean;
+  /**
+   * The sealed relay path carries it (`asDevice`). False for `pair`, the event stream and the two raw-body routes. A
+   * carried byte route answers the whole file (no Range through the relay), or `413 result_too_large`.
+   */
+  relay: boolean;
 }
 
 /** A route pattern in words: `(a|b)` of plain words written out, `(.+)` as `:path`, any other group as `:id`. */
@@ -430,17 +460,11 @@ function routeWords(source: string): string[] {
   return out;
 }
 
-/** The door's own routes beside the allowlist: `pair` (no token) and `revoke`, then a linked computer's own. */
-const DOOR_OWN_ROUTES: readonly { method: "GET" | "POST"; route: string; grant: "phone" | "machine" }[] = [
-  { method: "POST", route: "pair", grant: "phone" },
-  { method: "POST", route: "revoke", grant: "phone" },
-  { method: "GET", route: MACHINE_DOOR_ACCOUNTS, grant: "machine" },
-  { method: "GET", route: MACHINE_DOOR_UPDATE, grant: "machine" },
-  ...MACHINE_DOOR_WRITES.map((route) => ({ method: "POST" as const, route, grant: "machine" as const })),
-];
+let table: readonly DoorRouteRow[] | null = null;
 
-/** Every route the door answers, one row per route in words: the one source `health.door.routes` and the contract kit read. */
-export function doorRouteTable(): DoorRouteRow[] {
+/** Every route the door answers, one row per route in words: the one source `health.door` and the contract kit read. */
+export function doorRouteTable(): readonly DoorRouteRow[] {
+  if (table) return table;
   const rows: DoorRouteRow[] = ALLOWLIST.flatMap((entry) =>
     routeWords(entry.route.source).map((route) => ({
       method: entry.method,
@@ -449,16 +473,27 @@ export function doorRouteTable(): DoorRouteRow[] {
       pattern: entry.route.source,
       grant: entry.machineOnly ? ("machine" as const) : ("phone" as const),
       raw: entry.raw !== undefined,
+      relay: entry.raw === undefined && !NOT_BY_RELAY.has(route),
     })),
   );
-  for (const own of DOOR_OWN_ROUTES) rows.push({ ...own, name: `${own.method} ${own.route}`, pattern: `^${own.route}$`, raw: false });
+  for (const own of DOOR_OWN_ROUTES) {
+    rows.push({ method: own.method, route: own.route, name: `${own.method} ${own.route}`, pattern: `^${own.route}$`, grant: own.grant, raw: false, relay: !NOT_BY_RELAY.has(own.route) });
+  }
+  table = rows;
   return rows;
 }
 
-/** `health.door.routes` for a caller: a phone's token reaches the `phone` rows; a linked computer's reaches every row. */
-export function doorRoutesFor(platform: string): string[] {
+const OWN_NEEDS = new Map<string, DoorOwnNeeds>(DOOR_OWN_ROUTES.flatMap((own) => ("needs" in own ? [[`${own.method} ${own.route}`, own.needs] as const] : [])));
+
+/**
+ * What a caller's token reaches (`health.door`): a phone's token the `phone` rows; a linked computer's every row.
+ * `has`: whether this Inbox answers an own route that needs something (`createInboxDevices` asks its context).
+ * `not_by_relay`: those of `routes` the sealed relay path refuses.
+ */
+export function doorReachOf(platform: string, has: (needs: DoorOwnNeeds) => boolean = () => true): { routes: string[]; not_by_relay: string[] } {
   const machine = platform === MACHINE_PLATFORM;
-  return [...new Set(doorRouteTable().filter((row) => machine || row.grant === "phone").map((row) => row.name))];
+  const rows = doorRouteTable().filter((row) => (machine || row.grant === "phone") && (!OWN_NEEDS.has(row.name) || has(OWN_NEEDS.get(row.name)!)));
+  return { routes: rows.map((row) => row.name), not_by_relay: rows.filter((row) => !row.relay).map((row) => row.name) };
 }
 
 /** Where a pairing attempt reached the door: the Wi-Fi's listener, the tailnet's, or this computer's own port (the simulator). */
@@ -781,6 +816,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   const revoke = (device: InboxDevice): InboxDevice => {
     const revoked = devices.revoke(device.id, now().toISOString()) ?? device;
+    apps.delete(device.id);
     for (const stream of streams.get(device.id) ?? []) stream.abort();
     streams.delete(device.id);
     if (device.platform !== MACHINE_PLATFORM) context.relay?.revoked(revoked);
@@ -1055,7 +1091,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
     const run = (async () => {
       const result = await apply();
-      if (result.record && result.status !== undefined && result.status < 500 && !routeMissing(result.status, result.answer)) {
+      if (result.record && result.status !== undefined && result.status < 500) {
         let parsed: unknown = null;
         try {
           parsed = JSON.parse(result.answer ?? "");
@@ -1076,25 +1112,29 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
-  /**
-   * A 404 that says a route is not there (`device_route_not_found`: from a linked machine's older door, behind a
-   * route that passes its answer on) is never kept under the key: once that Inbox has the route, the same key runs.
-   */
-  const routeMissing = (status: number, answer: string | undefined): boolean => {
-    if (status !== 404 || !answer) return false;
-    try {
-      return (JSON.parse(answer) as { code?: unknown } | null)?.code === "device_route_not_found";
-    } catch {
-      return false;
-    }
-  };
-
   const caught = (error: unknown): Response => {
     if (error instanceof InboxError) return json({ error: error.message, code: error.code, ...error.details }, error.code === "validation_error" ? 422 : 400);
     const full = inboxDiskFullError(error);
     if (full) return json({ error: full.message, code: full.code }, 507);
     return refuse(500, "internal_error", "Internal error.");
   };
+
+  /** Whether this Inbox answers an own route that needs something: linked machines, or Update from another machine. */
+  const hasOwn = (needs: DoorOwnNeeds): boolean => (needs === "machines" ? (context.machines?.() ?? null) !== null : context.machineUpdate !== undefined);
+
+  /** A linked machine's own routes (`DOOR_OWN_ROUTES`), each answered only when `hasOwn` says so. */
+  const machineOwn: Record<MachineOwnName, (req: Request, url: URL, device: InboxDevice) => Promise<Response>> = {
+    // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
+    "GET accounts": (req, url, device) => toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal),
+    "POST link-back": async (req, _url, device) => context.machines?.()?.linkBack(device.id, await context.readBody(req)) ?? routeNotFound(device),
+    "POST unlink": async (_req, _url, device) => context.machines?.()?.unlinkedBy(device.id) ?? routeNotFound(device),
+    // The body is never read, so a machine cannot name a version or a place to download from.
+    "GET update": async (_req, _url, device) => (context.machineUpdate ? json(context.machineUpdate.read()) : routeNotFound(device)),
+    "POST update": async (_req, _url, device) => (context.machineUpdate ? json(await context.machineUpdate.start()) : routeNotFound(device)),
+  };
+
+  /** `health.door` for a caller's platform, as this Inbox answers now. */
+  const doorReach = (platform: string) => doorReachOf(platform, hasOwn);
 
   /** One request from a known, live device: its own revoke, or an allowlisted route handed to the window. */
   const serve = async (req: Request, url: URL, route: string, device: InboxDevice): Promise<Response> => {
@@ -1105,22 +1145,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const app = parseAppHeader(req.headers.get(APP_HEADER));
     if (app) apps.set(device.id, { app_version: app.app_version, contract: app.contract, seen_at: at });
     const belowFloor = appBelowFloor(app, route);
-    if (belowFloor) return json(belowFloor, 426);
+    if (belowFloor) return json(belowFloor, 426, { Upgrade: APP_UPGRADE });
     if (route === "revoke" && req.method === "POST") return json({ device: publicDevice(revoke(device)) });
     if (device.platform === MACHINE_PLATFORM) {
       // A machine reads this Inbox's own threads only (PLAN rule 3): never the merged view, so links both ways cannot echo.
       if (url.searchParams.has("machines")) return refuse(403, "machines_view_refused", "A linked machine reads this Inbox's own threads only.");
-      const machines = context.machines?.() ?? null;
-      const [linkBack, unlink] = MACHINE_DOOR_WRITES;
-      if (machines && req.method === "POST" && route === linkBack) return machines.linkBack(device.id, await context.readBody(req));
-      if (machines && req.method === "POST" && route === unlink) return machines.unlinkedBy(device.id);
-      // The body is never read, so a machine cannot name a version or a place to download from.
-      if (context.machineUpdate && route === MACHINE_DOOR_UPDATE) {
-        if (req.method === "GET") return json(context.machineUpdate.read());
-        if (req.method === "POST") return json(await context.machineUpdate.start());
-      }
-      // Only this Inbox's own read, so it never passes on a third machine's. Of the query, only Refresh's `fresh`.
-      if (req.method === "GET" && route === MACHINE_DOOR_ACCOUNTS) return await toWindow(req, device, "/api/inbox/accounts", url.searchParams.get("fresh") === "1" ? "?fresh=1" : "", null, req.signal);
+      const name = `${req.method} ${route}`;
+      const own = DOOR_OWN_ROUTES.find((row) => row.grant === "machine" && `${row.method} ${row.route}` === name);
+      if (own && (!("needs" in own) || hasOwn(own.needs))) return await machineOwn[name as MachineOwnName](req, url, device);
     }
     const door = doorRouteOf(req.method, route, device.platform === MACHINE_PLATFORM);
     if (door) {
@@ -1209,7 +1241,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
         return routeNotFound(device);
       }
       const route = url.pathname.startsWith(DOOR_PREFIX) ? url.pathname.slice(DOOR_PREFIX.length) : "";
-      if (!route || route === "pair" || route === "events" || url.origin !== `http://127.0.0.1:${context.port()}`) {
+      if (!route || NOT_BY_RELAY.has(route) || url.origin !== `http://127.0.0.1:${context.port()}`) {
         return routeNotFound(device);
       }
       // A file (an upload, a drawing) is not carried: a sealed command's body is JSON, and a file in it would be
@@ -1218,8 +1250,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
         return refuse(413, "relay_upload_unavailable", "Files and drawings are sent over the Wi-Fi or the tailnet, not the relay.");
       }
       const headers: Record<string, string> = input.method === "POST" ? { "Content-Type": "application/json" } : {};
-      // A sealed command names its app as `app` beside `v`, in the header's words: the same floor applies.
-      if (typeof input.app === "string") headers[APP_HEADER] = input.app;
+      // A sealed command names its app as `app` beside `v`, in the header's words: the same floor applies. Read first,
+      // so a value that is not in the form (or not a header's characters) is served as if absent, never a 500.
+      const app = parseAppHeader(typeof input.app === "string" ? input.app : null);
+      if (app) headers[APP_HEADER] = formatInboxAppHeader(app);
       const req = new Request(url, {
         method: input.method,
         headers,
@@ -1924,5 +1958,5 @@ export function createInboxDevices(context: InboxDevicesContext) {
     },
   };
 
-  return { door, asDevice, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices, machineDoor, agentDevices };
+  return { door, asDevice, doorReach, windowRoute, startTailnet, stopTailnet, startLan: lan.start, stopLan: lan.stop, devices, machineDoor, agentDevices };
 }

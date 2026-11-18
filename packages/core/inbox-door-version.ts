@@ -2,7 +2,7 @@
  * The device door's version handshake (adr/implementation/inbox-mobile.md, section 14 "Versions").
  *
  * An app names itself on every door request with `X-Plannotator-App: <platform> <app version> contract <n>` (and as
- * `app` inside a sealed relay command). Through the door, `health` answers `door: { contract, routes, grants,
+ * `app` inside a sealed relay command). Through the door, `health` answers `door: { contract, routes, not_by_relay, grants,
  * min_app_contract }`: what this Inbox can do for that caller's token. The app reads it with `readInboxDoorHealth`,
  * so neither side probes for a 404 and each can tell the other it is too old.
  *
@@ -39,13 +39,15 @@ export interface InboxDoorHealth {
   contract: number;
   /** Every route this caller's token reaches, in words: `GET threads`, `POST messages/:id/reply`. */
   routes: string[];
+  /** Those of `routes` the sealed relay path refuses (`POST pair`, `GET events`, `POST uploads`, `POST markups`). */
+  not_by_relay: string[];
   /** The grant groups this caller's token holds (empty until the grant lands). */
   grants: string[];
   /** Below this contract the Inbox answers `426 app_needs_update` on every route but `health`, `pair` and `revoke`. */
   min_app_contract: number;
 }
 
-/** What an Inbox before the handshake is read as: contract 0, the routes it had then. */
+/** What an Inbox before the handshake is read as: contract 0, the routes it had then. 0 is never an app's contract. */
 export const INBOX_DOOR_CONTRACT_BEFORE_HANDSHAKE = 0;
 
 /** What a client built against one contract knows about itself. */
@@ -56,6 +58,8 @@ export interface InboxDoorClient {
   min_inbox_contract: number;
   /** The routes an Inbox from before the handshake answers, in the same words as `routes`. */
   routes_before_door: readonly string[];
+  /** Of those, the ones its relay path refused. Default none. */
+  not_by_relay_before_door?: readonly string[];
 }
 
 /**
@@ -66,7 +70,7 @@ export interface InboxDoorClient {
  * - `app_needs_update`: this Inbox refuses the app (`426 app_needs_update` everywhere but health, pair and revoke).
  */
 export type InboxDoorSkew =
-  | { state: "ok"; contract: number; routes: string[]; grants: string[] }
+  | { state: "ok"; contract: number; routes: string[]; not_by_relay: string[]; grants: string[] }
   | { state: "inbox_needs_update"; contract: number; min_inbox_contract: number }
   | { state: "app_needs_update"; contract: number; min_app_contract: number };
 
@@ -77,10 +81,10 @@ const strings = (value: unknown): string[] | null => (Array.isArray(value) && va
 export function inboxDoorOf(health: unknown): InboxDoorHealth | null {
   const door = health && typeof health === "object" ? (health as { door?: unknown }).door : undefined;
   if (!door || typeof door !== "object") return null;
-  const { contract, routes, grants, min_app_contract } = door as Record<string, unknown>;
+  const { contract, routes, not_by_relay, grants, min_app_contract } = door as Record<string, unknown>;
   const routeList = strings(routes);
   if (!wholeNumber(contract) || !wholeNumber(min_app_contract) || !routeList) return null;
-  return { contract, routes: routeList, grants: strings(grants) ?? [], min_app_contract };
+  return { contract, routes: routeList, not_by_relay: strings(not_by_relay) ?? [], grants: strings(grants) ?? [], min_app_contract };
 }
 
 /**
@@ -94,10 +98,11 @@ export function readInboxDoorHealth(health: unknown, client: InboxDoorClient): I
   const contract = door ? door.contract : INBOX_DOOR_CONTRACT_BEFORE_HANDSHAKE;
   if (door && client.contract < door.min_app_contract) return { state: "app_needs_update", contract, min_app_contract: door.min_app_contract };
   if (contract < client.min_inbox_contract) return { state: "inbox_needs_update", contract, min_inbox_contract: client.min_inbox_contract };
-  return { state: "ok", contract, routes: door ? door.routes : [...client.routes_before_door], grants: door ? door.grants : [] };
+  if (door) return { state: "ok", contract, routes: door.routes, not_by_relay: door.not_by_relay, grants: door.grants };
+  return { state: "ok", contract, routes: [...client.routes_before_door], not_by_relay: [...(client.not_by_relay_before_door ?? [])], grants: [] };
 }
 
-/** Whether the app may call a route (`POST messages/:id/reply`) on this Inbox. */
-export function inboxDoorOffers(skew: InboxDoorSkew, route: string): boolean {
-  return skew.state === "ok" && skew.routes.includes(route);
+/** Whether the app may call a route (`POST messages/:id/reply`) on this Inbox, on the path it would use. */
+export function inboxDoorOffers(skew: InboxDoorSkew, route: string, path: "direct" | "relay" = "direct"): boolean {
+  return skew.state === "ok" && skew.routes.includes(route) && (path === "direct" || !skew.not_by_relay.includes(route));
 }
