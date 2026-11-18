@@ -392,6 +392,66 @@
       ]
     },
     {
+      "name": "display math closing mid-line, then text",
+      "markdown": "Cite[^1].\n\n$$x^2$$ and more text\n\n- [ ] Task\n\n[^1]: Note.",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Cite[^1].",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "math",
+          "content": "x^2",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "paragraph",
+          "content": "and more text",
+          "startLine": 3
+        },
+        {
+          "id": "block-3",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 5
+        },
+        {
+          "id": "block-4",
+          "type": "paragraph",
+          "content": "[^1]: Note.",
+          "startLine": 7
+        }
+      ]
+    },
+    {
+      "name": "an uncited definition line right after a note",
+      "markdown": "Cite[^1].\n\n[^1]: Cited note.\n[^2]: Nobody cites this.\n\n- [x] Task",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Cite[^1].",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "paragraph",
+          "content": "[^1]: Cited note.\n[^2]: Nobody cites this.",
+          "startLine": 3
+        },
+        {
+          "id": "block-2",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 6
+        }
+      ]
+    },
+    {
       "name": "unclosed $$ inside a note",
       "markdown": "Cite[^m].\n\n[^m]: costs\n$$100k for infra\n\n- [ ] Task",
       "base": [

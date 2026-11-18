@@ -329,6 +329,7 @@ function emitPlainTextWithBareUrls(
   validation?: CodePathValidationContextValue | null,
   baseDir?: string,
   barePaths?: BarePathWrap | null,
+  sourceLike = false,
 ): void {
   if (text.length === 0) return;
 
@@ -352,7 +353,7 @@ function emitPlainTextWithBareUrls(
   }
 
   // Bare `www.` addresses (GFM extended autolinks), where no URL above took them.
-  if (text.includes('www.')) {
+  if (!sourceLike && text.includes('www.')) {
     for (const found of findWwwAutolinks(text, previousChar)) {
       if (spans.some(s => found.start < s.end && found.end > s.start)) continue;
       spans.push({ start: found.start, end: found.end, kind: 'url', value: found.shown, href: wwwAutolinkHref(found.shown) });
@@ -522,6 +523,13 @@ let digitHexIssueRefs = false;
  */
 export const SoftLineBreaksContext = createContext<boolean>(false);
 
+/**
+ * A view of the source (the plan diff): GFM's `www.` and e-mail autolinks
+ * and HTML character references stay as written, as `[^1]` does there.
+ * Default false: every other surface draws them.
+ */
+export const SourceLikeInlineContext = createContext<boolean>(false);
+
 export function setDigitHexIssueRefs(on: boolean): void {
   digitHexIssueRefs = on;
 }
@@ -620,6 +628,7 @@ export const InlineMarkdown: React.FC<{
   const matchLocalLink = useLocalLinkMatch();
   const barePaths = useContext(BarePathContext);
   const softLineBreaks = useContext(SoftLineBreaksContext);
+  const sourceLike = useContext(SourceLikeInlineContext);
   const footnotes = useFootnoteScope();
   const resolveImage = useImageResolver();
   const inlineImageTags = useContext(InlineImageTagsContext);
@@ -733,7 +742,7 @@ export const InlineMarkdown: React.FC<{
 
     // HTML character reference (`&amp;`, `&copy;`, `&#8212;`): the character,
     // as React text. An unknown name stays as written.
-    const entity = remaining[0] === '&' ? matchHtmlEntity(remaining) : null;
+    const entity = remaining[0] === '&' && !sourceLike ? matchHtmlEntity(remaining) : null;
     if (entity) {
       parts.push(entity.text);
       remaining = remaining.slice(entity.length);
@@ -803,7 +812,7 @@ export const InlineMarkdown: React.FC<{
     // Bare `www.` and e-mail addresses (GFM extended autolinks,
     // utils/inlineAutolinks). A `www.` link opens like a bare URL; an
     // e-mail address like `<a@b.co>` (the host's mailto rule included).
-    if (!linkLabel) {
+    if (!linkLabel && !sourceLike) {
       const www = remaining[0] === 'w' && autolinkMayFollow(previousChar) ? matchWwwAutolink(remaining) : null;
       if (www) {
         parts.push(
@@ -1563,7 +1572,7 @@ export const InlineMarkdown: React.FC<{
     // A ref inside a URL never splits it: the URL starts first and wins.
     let urlAt = linkLabel ? -1 : bareUrlRunningPast(remaining, chunkEnd);
     // Likewise a `www.` or e-mail address (an e-mail address always holds the `@` that ends its chunk).
-    const autolinkAt = linkLabel ? -1 : autolinkRunningPast(remaining, chunkEnd);
+    const autolinkAt = linkLabel || sourceLike ? -1 : autolinkRunningPast(remaining, chunkEnd);
     if (autolinkAt > 0 && (urlAt === -1 || autolinkAt < urlAt)) urlAt = autolinkAt;
     const refAt = crossRepoProject && !linkLabel ? findCrossRepoRef(remaining, urlAt === -1 ? chunkEnd : urlAt, crossRepoProject, crossRepoAccept) : -1;
     let splitAt = refAt !== -1 ? refAt : urlAt;
@@ -1573,14 +1582,14 @@ export const InlineMarkdown: React.FC<{
     if (splitAt !== -1) {
       const before = remaining.slice(0, splitAt);
       if (linkLabel) parts.push(transformPlainText(before));
-      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths);
+      else emitPlainTextWithBareUrls(before, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths, sourceLike);
       previousChar = before[before.length - 1] || previousChar;
       remaining = remaining.slice(splitAt);
       continue;
     }
     const plainText = nextSpecial === -1 ? remaining : remaining.slice(0, nextSpecial + 1);
     if (linkLabel) parts.push(transformPlainText(plainText));
-    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths);
+    else emitPlainTextWithBareUrls(plainText, previousChar, parts, () => key++, onOpenCodeFile, validation, imageBaseDir, barePaths, sourceLike);
     previousChar = plainText[plainText.length - 1] || previousChar;
     if (nextSpecial === -1) {
       break;

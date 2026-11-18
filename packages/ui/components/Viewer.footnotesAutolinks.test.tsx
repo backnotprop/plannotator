@@ -21,7 +21,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { AnnotationType, type Annotation } from '../types';
-import { parseMarkdownToBlocks } from '../utils/parser';
+import { exportAnnotations, parseMarkdownToBlocks } from '../utils/parser';
 import type { AnnotationRestoreReport } from '../hooks/useAnnotationHighlighter';
 
 const hasDom = typeof document !== 'undefined';
@@ -117,16 +117,19 @@ const painted = (id: string): string => marks(id).map((el) => el.textContent ?? 
 const paintedBlock = (id: string): string | undefined => marks(id)[0]?.closest<HTMLElement>('[data-block-id]')?.dataset.blockId;
 
 const OLD = JSON.parse(readFileSync(join(import.meta.dir, '../../../tests/test-fixtures/footnote-old-anchors.json'), 'utf8')) as {
-  docs: { name: string; markdown: string; annotation: Annotation }[];
+  docs: { name: string; markdown: string; restoreOn?: string; annotation: Annotation }[];
 };
 /** What each captured comment paints on the page now: its words as drawn (a reference's number is not part of a quote). */
-const NOW: Record<string, { text: string; inNotes?: boolean }> = {
+const NOW: Record<string, { text: string; inNotes?: boolean; block?: string }> = {
   'a definition mid-document; the second copy of a repeated sentence': { text: 'Then run the tests.' },
   'a run of definitions under a line; the second copy of a repeated sentence': { text: 'Then run the tests.' },
   'a repeated sentence after a character reference in its paragraph': { text: 'Then run the tests.' },
   'a repeated link after a new www. link in its paragraph': { text: 'the docs' },
   'a whole old definition paragraph, marker included': { text: 'The first note.', inNotes: true },
   'a quote across a reference': { text: 'a footnote. And another' },
+  // No footnotes: the saved positions win, as on main. The stored block-2 now
+  // names the FIRST copy; the positions lead to the second, the right one.
+  'a draft reopened after a heading was inserted above a repeated sentence': { text: 'Run the tests.', block: 'block-3' },
 };
 
 describe.if(hasDom)('comments made on the page before footnotes, links and references were drawn (captured on origin/main)', () => {
@@ -136,13 +139,13 @@ describe.if(hasDom)('comments made on the page before footnotes, links and refer
   for (const doc of OLD.docs) {
     test(doc.name, async () => {
       const reports: AnnotationRestoreReport[] = [];
-      const { ref } = await mount(() => {}, doc.markdown, (r) => reports.push(r));
+      const { ref } = await mount(() => {}, doc.restoreOn ?? doc.markdown, (r) => reports.push(r));
       const ann = doc.annotation;
       await act(async () => ref.current!.applySharedAnnotations([ann]));
       await settle();
       expect(painted(ann.id)).toBe(NOW[doc.name].text);
       // In the block it was made in (block ids are kept), not the first copy of its words.
-      expect(paintedBlock(ann.id)).toBe(ann.blockId);
+      expect(paintedBlock(ann.id)).toBe(NOW[doc.name].block ?? ann.blockId);
       expect(Boolean(marks(ann.id)[0]?.closest('[data-footnotes]'))).toBe(Boolean(NOW[doc.name].inNotes));
       // Nothing to write back: the plan editor would otherwise save a new block id and drop the positions.
       const last = reports.filter((r) => r.attempted.includes(ann.id)).at(-1)!;
@@ -151,17 +154,50 @@ describe.if(hasDom)('comments made on the page before footnotes, links and refer
     });
   }
 
-  test('a comment whose block is gone and whose words are written twice is left unanchored, its block and positions kept', async () => {
-    const doc = OLD.docs.find((d) => d.name.startsWith('a definition mid-document'))!;
+  const THREE = ['# One', '', 'Run the tests.', '', '# Two', '', 'Run the tests.', '', '# Three', '', 'Run the tests.', '', 'Closing words.'].join('\n');
+  const lost = (id: string, blockId: string, quote = 'Run the tests.'): Annotation => ({
+    ...oldAnchor(id, 40, quote, quote),
+    blockId,
+  });
+
+  test('positions that miss and a quote written three times: the copy nearest the stored block, reported moved', async () => {
+    // The copies are block-1, block-3 and block-5; block-6 is "Closing words.", next to the third. The positions lead nowhere.
     const reports: AnnotationRestoreReport[] = [];
-    const { ref } = await mount(() => {}, doc.markdown, (r) => reports.push(r));
-    const ann: Annotation = { ...doc.annotation, id: 'gone', blockId: 'block-99', startMeta: { parentTagName: 'P', parentIndex: 40, textOffset: 0 }, endMeta: { parentTagName: 'P', parentIndex: 40, textOffset: 19 } };
+    const { ref } = await mount(() => {}, THREE, (r) => reports.push(r));
+    await act(async () => ref.current!.applySharedAnnotations([lost('near', 'block-6')]));
+    await settle();
+    expect(painted('near')).toBe('Run the tests.');
+    expect(paintedBlock('near')).toBe('block-5');
+    const last = reports.filter((r) => r.attempted.includes('near')).at(-1)!;
+    expect(last.unanchored).toEqual([]);
+    expect(last.moved?.map((m) => [m.id, m.blockId])).toEqual([['near', 'block-5']]);
+  });
+
+  test('a stored block that is gone goes by where its number falls; a tie takes the later copy', async () => {
+    const reports: AnnotationRestoreReport[] = [];
+    const { ref } = await mount(() => {}, THREE, (r) => reports.push(r));
+    // block-2 is "# Two" (holds no copy): the copies in block-1 and block-3 are equally near, the later wins.
+    await act(async () => ref.current!.applySharedAnnotations([lost('tie', 'block-2'), lost('gone', 'block-99')]));
+    await settle();
+    expect(paintedBlock('tie')).toBe('block-3');
+    // block-99 falls after the last block: the third copy.
+    expect(paintedBlock('gone')).toBe('block-5');
+  });
+
+  test('words that are nowhere: unanchored, no block (so no line label), words and positions kept', async () => {
+    const reports: AnnotationRestoreReport[] = [];
+    const { ref } = await mount(() => {}, THREE, (r) => reports.push(r));
+    const ann = lost('nowhere', 'block-2', 'Deploy on Friday.');
     await act(async () => ref.current!.applySharedAnnotations([ann]));
     await settle();
-    expect(painted('gone')).toBe('');
-    const last = reports.filter((r) => r.attempted.includes('gone')).at(-1)!;
-    expect(last.unanchored).toEqual(['gone']);
-    expect(last.moved ?? []).toEqual([]);
+    expect(painted('nowhere')).toBe('');
+    const last = reports.filter((r) => r.attempted.includes('nowhere')).at(-1)!;
+    expect(last.unanchored).toEqual(['nowhere']);
+    expect(last.moved).toEqual([{ id: 'nowhere', blockId: '', positionsStale: false }]);
+    // What the plan editor stores from that (restoredAnchors.test.ts): no block, so the export names no line.
+    expect(exportAnnotations(parseMarkdownToBlocks(THREE), [{ ...ann, blockId: '' }])).not.toMatch(/\(lines? \d/);
+    // Kept, its stale block would label an unrelated line (block-2 is the "# Two" heading).
+    expect(exportAnnotations(parseMarkdownToBlocks(THREE), [ann])).toMatch(/\(line 5\)/);
   });
 
   test('a comment whose block is gone and whose words are written once still follows them', async () => {

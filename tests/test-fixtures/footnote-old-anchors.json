@@ -1,5 +1,5 @@
 {
-  "generatedFrom": "Comments made on the Viewer of origin/main f89f51a7b848a03d9a27eb19f6da24576feb6173 (no footnotes, autolinks or character references drawn): each document rendered there, its text selected and commented through the composer, the annotation saved as the Viewer handed it over.",
+  "generatedFrom": "Comments made on the Viewer of origin/main f89f51a7b848a03d9a27eb19f6da24576feb6173 (no footnotes, autolinks or character references drawn): each document rendered there, its text selected and commented through the composer, the annotation saved as the Viewer handed it over. `restoreOn`, when present, is the document as later edited, on which the saved comment is restored.",
   "docs": [
     {
       "name": "a definition mid-document; the second copy of a repeated sentence",
@@ -142,6 +142,31 @@
           "parentTagName": "P",
           "parentIndex": 0,
           "textOffset": 48
+        }
+      }
+    },
+    {
+      "name": "a draft reopened after a heading was inserted above a repeated sentence",
+      "markdown": "# Plan\n\nRun the tests.\n\nRun the tests.\n",
+      "restoreOn": "# Plan\n\n## Steps\n\nRun the tests.\n\nRun the tests.\n",
+      "annotation": {
+        "id": "old-6",
+        "blockId": "block-2",
+        "startOffset": 0,
+        "endOffset": 14,
+        "type": "COMMENT",
+        "text": "why?",
+        "originalText": "Run the tests.",
+        "createdA": 1,
+        "startMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 0
+        },
+        "endMeta": {
+          "parentTagName": "P",
+          "parentIndex": 1,
+          "textOffset": 14
         }
       }
     }

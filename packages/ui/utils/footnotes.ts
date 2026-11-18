@@ -64,12 +64,22 @@ export interface FootnoteIndex {
 const REF_SCAN = /\[\^([^\]\s]{1,64})\]/g;
 const CODE_SPAN = /(`+)[\s\S]*?\1/g;
 
-/** Labels referenced in a block's text, in order (code spans and definition markers skipped). */
+/** A link or image whose label is not itself a reference, one level of brackets deep: `[see [^1]](u)`. */
+const LINK_SPAN = /!?\[(?!\^)(?:[^\[\]]|\[[^\[\]]*\])*\]\([^)]*\)/g;
+/** A reference the way `InlineMarkdown` draws one: not escaped (`\[^1]` is text). */
+const CITED_REF = /(?<!\\)\[\^([^\]\s]{1,64})\]/g;
+
+/**
+ * Labels cited in a block's text, in order: what `InlineMarkdown` draws as
+ * a reference. Code spans, link and image labels (`[see [^1]](u)`),
+ * escaped `\[^1]` and a definition's own marker are not citations.
+ */
 function referencedKeys(text: string, out: string[]): void {
   if (!text.includes('[^')) return;
-  const prose = text.includes('`') ? text.replace(CODE_SPAN, '') : text;
+  let prose = text.includes('`') ? text.replace(CODE_SPAN, '') : text;
+  if (prose.includes('](')) prose = prose.replace(LINK_SPAN, ' ');
   for (const line of prose.split('\n')) {
-    for (const m of line.replace(FOOTNOTE_DEF_RE, '').matchAll(REF_SCAN)) out.push(footnoteKey(m[1]));
+    for (const m of line.replace(FOOTNOTE_DEF_RE, '').matchAll(CITED_REF)) out.push(footnoteKey(m[1]));
   }
 }
 

@@ -31,17 +31,18 @@ describe('footnote definitions in the parser', () => {
   });
 
   test('a [^label]: line is a note only when the document cites that label outside code', () => {
-    const md = 'A regex: `[^0-9]`.\n\n[^0-9]: anything but digits\n\nCited[^x].\n\n[^x]: Real note.\n[^y]: Nobody cites me.';
+    const md = 'A regex: `[^0-9]`.\n\n[^0-9]: anything but digits\n\nCited[^x].\n\n[^x]: Real note.\n[^y]: Nobody cites me.\n\n[^z]: Nor me.';
     const blocks = parse(md);
     expect(blocks.map((b) => [b.content, b.footnoteLabel])).toEqual([
       ['A regex: `[^0-9]`.', undefined],
       ['[^0-9]: anything but digits', undefined],
       ['Cited[^x].', undefined],
-      ['[^x]: Real note.', 'x'],
-      ['[^y]: Nobody cites me.', undefined],
+      // An uncited line right under a note was in that note's paragraph, and stays in its block.
+      ['[^x]: Real note.\n[^y]: Nobody cites me.', 'x'],
+      ['[^z]: Nor me.', undefined],
     ]);
-    // The uncited line under the note is drawn where it is written, not in the notes list.
-    expect(indexFootnotes(blocks)!.bodyBlocks.map((b) => b.content)).toContain('[^y]: Nobody cites me.');
+    // An uncited line on its own is drawn where it is written, not in the notes list.
+    expect(indexFootnotes(blocks)!.bodyBlocks.map((b) => b.content)).toContain('[^z]: Nor me.');
   });
 
   test('a definition inside a code fence or written in a list continuation is not one', () => {

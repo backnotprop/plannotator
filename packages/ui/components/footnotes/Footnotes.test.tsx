@@ -74,22 +74,30 @@ describe('footnotes', () => {
 describe('the plan diff stays source', () => {
   test('a diff that adds a footnote, a www. link, a mail address and &amp; shows them as written', () => {
     const before = '# Plan\n\nShip it.\n';
-    const after = '# Plan\n\nShip it.[^1] See www.example.com, mail a@example.com, A &amp; B.\n\n[^1]: Care.\n';
+    const after = '# Plan\n\nShip it.[^1] See www.example.com, mail a@example.com, A &amp; B.\n\n> Quoted www.example.org &copy;\n\n- Listed a@example.org &mdash;\n\n[^1]: Care.\n';
     const html = renderToStaticMarkup(createElement(PlanCleanDiffView, { blocks: computePlanDiff(before, after).blocks, wordLevel: false }));
     const text = html.replace(/<[^>]*>/g, '');
     expect(text).toContain('Ship it.[^1] See www.example.com, mail a@example.com, A &amp;amp; B.');
     expect(text).toContain('[^1]: Care.');
+    // Quotes and list items are drawn by the shared pieces: source there too.
+    expect(text).toContain('Quoted www.example.org &amp;copy;');
+    expect(text).toContain('Listed a@example.org &amp;mdash;');
     expect(html).not.toContain('<sup');
     expect(html).not.toMatch(/href="(https:\/\/www\.|mailto:)/);
   });
 });
 
-describe('headings name themselves without their references', () => {
-  test('the slug and the contents read Title, not Title[^1]; an undefined [^x] stays', () => {
-    const blocks = parseMarkdownToBlocks('# Title[^1]\n\n## Other[^x]\n\nText.\n\n[^1]: The note.');
-    expect([...buildHeadingSlugMap(blocks).values()]).toEqual(['title', 'other-x']);
+describe('headings: slugs as before, references left out of the displayed text', () => {
+  test('Title[^1] keeps its slug title-1 and same-named headings keep their order; the contents show Title', () => {
+    const blocks = parseMarkdownToBlocks('# Title[^1]\n\n## Setup[^1]\n\n## Setup\n\n## Other[^x]\n\nText.\n\n[^1]: The note.');
+    expect([...buildHeadingSlugMap(blocks).values()]).toEqual(['title-1', 'setup-1', 'setup', 'other-x']);
     const toc = buildTocHierarchy(blocks, new Map());
     expect(toc[0].content).toBe('Title');
-    expect(toc[0].children[0].content).toBe('Other[^x]');
+    expect(toc[0].children.map((c) => c.content)).toEqual(['Setup', 'Setup', 'Other[^x]']);
+  });
+
+  test('a hand-written #title-1 link still names the heading', () => {
+    const html = renderToStaticMarkup(createElement(RenderedMarkdown, { markdown: '# Title[^1]\n\nSee [it](#title-1).\n\n[^1]: The note.', headingAnchors: true }));
+    expect(html).toMatch(/<h1[^>]* id="title-1"/);
   });
 });

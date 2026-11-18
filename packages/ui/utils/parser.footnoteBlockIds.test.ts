@@ -42,13 +42,6 @@ describe('every block that is not a note keeps the id the parser gave it before 
           continue;
         }
         const same = base.get(block.id);
-        if (!same && FOOTNOTE_DEF_RE.test(block.content)) {
-          // A `[^label]:` line nobody cites, right under a note: an ordinary
-          // paragraph split from the note's old paragraph, a block that did not
-          // exist before, so its id is derived like a note's.
-          expect(block.id).toMatch(/^block-\d+-fn\d+$/);
-          continue;
-        }
         expect(same, `${block.id} "${block.content}"`).toBeDefined();
         expect([same!.type, same!.startLine]).toEqual([block.type, block.startLine]);
         if (same!.content !== block.content) {
@@ -76,6 +69,26 @@ describe('every block that is not a note keeps the id the parser gave it before 
     const taskB = blocks.find((b) => b.content === 'Task B')!;
     expect(taskB.id).toBe(doc.base.find((b) => b.content === 'Task B')!.id);
     expect(blocks.filter((b) => b.footnoteLabel).map((b) => b.id)).toEqual(['block-0-fn1', 'block-0-fn2']);
+  });
+});
+
+test('two blocks starting on one line (display math closing mid-line) and an uncited line under a note keep main\'s ids', () => {
+    for (const name of ['display math closing mid-line, then text', 'an uncited definition line right after a note']) {
+      const doc = fixture.docs.find((d) => d.name === name)!;
+      expect(parseMarkdownToBlocks(doc.markdown).map((b) => b.id), name).toEqual(doc.base.map((b) => b.id));
+    }
+    // The uncited line stays in the block that held it: the note's.
+    const doc = fixture.docs.find((d) => d.name === 'an uncited definition line right after a note')!;
+    expect(parseMarkdownToBlocks(doc.markdown).find((b) => b.footnoteLabel === '1')!.content).toBe('[^1]: Cited note.\n[^2]: Nobody cites this.');
+});
+
+describe('what counts as a citation', () => {
+  test('a [^1] inside a link label or escaped as \\[^1] cites nothing: the line stays a paragraph', () => {
+    for (const md of ['Read [see [^1]](https://example.com).\n\n[^1]: Not a note.', 'Literal \\[^1] here.\n\n[^1]: Not a note.', 'An image ![alt [^1]](a.png).\n\n[^1]: Not a note.']) {
+      expect(parseMarkdownToBlocks(md).some((b) => b.footnoteLabel !== undefined), md).toBe(false);
+    }
+    // A reference right before a parenthesis is still one.
+    expect(parseMarkdownToBlocks('Cited[^1](aside).\n\n[^1]: A note.').some((b) => b.footnoteLabel === '1')).toBe(true);
   });
 });
 

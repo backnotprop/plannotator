@@ -416,14 +416,19 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
  * leaves its number unused.
  */
 function keepBlockIds(plain: Block[], withNotes: Block[]): Block[] {
-  const byLine = new Map<number, Block>();
-  for (const block of plain) if (!byLine.has(block.startLine)) byLine.set(block.startLine, block);
+  // Blocks by start line, in order: display math closing mid-line
+  // (`$$x$$ more`) starts two blocks on one line, matched in turn.
+  const byLine = new Map<number, Block[]>();
+  for (const block of plain) {
+    const onLine = byLine.get(block.startLine);
+    if (onLine) onLine.push(block);
+    else byLine.set(block.startLine, [block]);
+  }
   let prev: Block | null = null;
   let derived = 0;
   for (const block of withNotes) {
-    const same = byLine.get(block.startLine);
+    const same = byLine.get(block.startLine)?.shift();
     if (same) {
-      byLine.delete(block.startLine);
       block.id = same.id;
       block.order = same.order;
       prev = same;
@@ -810,14 +815,12 @@ const parseBlocks = (markdown: string, options: ParseMarkdownOptions | undefined
       note = { label: footnoteDef[1], startLine: currentLineNum, lines: [line] };
       continue;
     }
+    // Any other line the loop would add to a paragraph is the note's lazy
+    // text, an uncited `[^x]:` line included: it was in the same paragraph
+    // before notes were drawn, so it stays in the block with that id.
     if (note) {
-      // A `[^label]:` line nobody cites ends the note above it and stays an
-      // ordinary paragraph where it is written.
-      if (!FOOTNOTE_DEF_RE.test(line)) {
-        note.lines.push(line);
-        continue;
-      }
-      closeNote();
+      note.lines.push(line);
+      continue;
     }
 
     // Accumulate paragraph text

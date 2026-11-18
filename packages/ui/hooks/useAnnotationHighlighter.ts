@@ -1152,21 +1152,23 @@ export function useAnnotationHighlighter({
   /**
    * Where a quote is on the page, by its text. With `blockId` (the block the
    * comment was made in), that block is searched first: a sentence written
-   * twice in a document must come back to the copy the reviewer chose, even
-   * when the stored positions no longer lead there (a footnote's paragraph
-   * moved to the end, a character reference shortened the text before it, a
-   * new link renumbered the links after it). Only when the block does not
-   * hold it is the whole document searched, and `ambiguous` then says the
-   * quote is written there more than once, so the match found is a guess.
+   * twice must come back to the copy the reviewer chose when the stored
+   * positions no longer lead there (a footnote's paragraph moved to the end,
+   * a character reference shortened the text before it, a new link
+   * renumbered the links after it). Otherwise the whole document: when it
+   * holds the quote more than once, the copy nearest the stored block's
+   * place (its position in the page, or where its `block-N` number falls
+   * when it is gone; a tie goes to the later copy, as text inserted above a
+   * comment pushes its words down). With no block to go by, the first copy.
    */
-  const findTextInDOM = useCallback((searchText: string, blockId?: string): { range: Range; ambiguous: boolean } | null => {
+  const findTextInDOM = useCallback((searchText: string, blockId?: string): Range | null => {
     if (!containerRef.current) return null;
 
     // Search for an exact substring match inside `root`'s text tree.
     // Falls back to a multi-text-node walk when the match spans siblings.
-    // `again`: the stream holds the needle a second time after this one.
-    const searchOnce = (needle: string, root: Element): { range: Range; again: boolean } | null => {
-      if (!needle) return null;
+    // `all`: every copy (up to 100), not only the first.
+    const searchOnce = (needle: string, root: Element, all = false): Range[] => {
+      if (!needle) return [];
 
       const walker = document.createTreeWalker(
         root,
@@ -1259,37 +1261,37 @@ export function useAnnotationHighlighter({
         };
       };
 
-      const fullText = textNodes.map((node) => node.textContent ?? '').join('');
-      const literalIndex = fullText.indexOf(needle);
-      const literalAgain = literalIndex !== -1 && fullText.indexOf(needle, literalIndex + 1) !== -1;
-
-      for (const node of textNodes) {
-        const text = node.textContent || '';
-        const index = text.indexOf(needle);
-        if (index !== -1) {
-          const range = document.createRange();
-          range.setStart(node, index);
-          range.setEnd(node, index + needle.length);
-          return { range, again: literalAgain };
+      if (!all) {
+        for (const node of textNodes) {
+          const text = node.textContent || '';
+          const index = text.indexOf(needle);
+          if (index !== -1) {
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.setEnd(node, index + needle.length);
+            return [range];
+          }
         }
       }
 
-      if (literalIndex !== -1) {
-        const range = rangeFromTextOffsets(literalIndex, literalIndex + needle.length);
-        return range ? { range, again: literalAgain } : null;
+      const fullText = textNodes.map((node) => node.textContent ?? '').join('');
+      const ranges: Range[] = [];
+      for (let at = fullText.indexOf(needle); at !== -1 && ranges.length < 100; at = all ? fullText.indexOf(needle, at + 1) : -1) {
+        const range = rangeFromTextOffsets(at, at + needle.length);
+        if (range) ranges.push(range);
       }
+      if (ranges.length > 0) return ranges;
 
       const haystack = normalizeWithMap(fullText, blockBoundaryOffsets(textNodes));
       const normalizedNeedle = normalizeWithMap(needle).text;
-      const normalizedIndex = haystack.text.indexOf(normalizedNeedle);
-      if (normalizedNeedle && normalizedIndex !== -1) {
-        const originalStart = haystack.map[normalizedIndex];
-        const originalEnd = haystack.map[normalizedIndex + normalizedNeedle.length - 1] + 1;
+      if (!normalizedNeedle) return [];
+      for (let at = haystack.text.indexOf(normalizedNeedle); at !== -1 && ranges.length < 100; at = all ? haystack.text.indexOf(normalizedNeedle, at + 1) : -1) {
+        const originalStart = haystack.map[at];
+        const originalEnd = haystack.map[at + normalizedNeedle.length - 1] + 1;
         const range = rangeFromTextOffsets(originalStart, originalEnd);
-        return range ? { range, again: haystack.text.indexOf(normalizedNeedle, normalizedIndex + 1) !== -1 } : null;
+        if (range) ranges.push(range);
       }
-
-      return null;
+      return ranges;
     };
 
     // The quote as saved; then with the transform the renderer applies to
@@ -1308,18 +1310,48 @@ export function useAnnotationHighlighter({
       add(transformPlainText(variant));
     }
 
+    const container = containerRef.current;
     const stored = blockId
-      ? containerRef.current.querySelector<HTMLElement>(`[data-block-id="${escapeAttrValue(blockId)}"]`)
+      ? container.querySelector<HTMLElement>(`[data-block-id="${escapeAttrValue(blockId)}"]`)
       : null;
     if (stored) {
       for (const candidate of candidates) {
-        const found = searchOnce(candidate, stored);
-        if (found) return { range: found.range, ambiguous: false };
+        const [found] = searchOnce(candidate, stored);
+        if (found) return found;
       }
     }
     for (const candidate of candidates) {
-      const found = searchOnce(candidate, containerRef.current);
-      if (found) return { range: found.range, ambiguous: found.again };
+      const copies = searchOnce(candidate, container, Boolean(blockId));
+      if (copies.length === 0) continue;
+      if (copies.length === 1 || !blockId) return copies[0]!;
+      // Several copies: the one nearest the stored block's place.
+      const order = Array.from(container.querySelectorAll<HTMLElement>('[data-block-id]'));
+      const indexOf = new Map(order.map((el, i) => [el, i]));
+      const numberOf = (id: string | undefined) => {
+        const m = id ? /^block-(\d+)/.exec(id) : null;
+        return m ? Number(m[1]) : null;
+      };
+      let place: number | null = stored ? indexOf.get(stored) ?? null : null;
+      if (place === null) {
+        const wanted = numberOf(blockId);
+        if (wanted === null) return copies[0]!;
+        const after = order.findIndex((el) => (numberOf(el.dataset.blockId) ?? -1) >= wanted);
+        place = after === -1 ? order.length : after - 0.5;
+      }
+      let best = copies[0]!;
+      let bestDistance = Infinity;
+      let bestAt = -Infinity;
+      for (const copy of copies) {
+        const block = blockElementOf(copy.startContainer);
+        const at = block ? indexOf.get(block) ?? -1 : -1;
+        const distance = Math.abs(at - place);
+        if (distance < bestDistance || (distance === bestDistance && at > bestAt)) {
+          best = copy;
+          bestDistance = distance;
+          bestAt = at;
+        }
+      }
+      return best;
     }
     return null;
   }, []);
@@ -1553,8 +1585,15 @@ export function useAnnotationHighlighter({
     // Stored positions that paint the right words in a block other than the
     // comment's own, while its own block holds them too: they lead to the
     // other copy of a repeated sentence.
+    //
+    // Only on a page with a notes list: drawing a document's notes at its end
+    // takes their paragraphs out of the flow and shifts every later `<p>`
+    // count, while block ids stay. Anywhere else the positions win, as they
+    // always did: after an edit above two copies, the stored block id names
+    // the wrong copy and the positions the right one.
+    const hasNotes = Boolean(containerRef.current?.querySelector('[data-footnotes]'));
     const paintedOutsideStoredBlock = (ann: Annotation, firstDom: Node | null | undefined): boolean => {
-      if (!ann.blockId) return false;
+      if (!hasNotes || !ann.blockId) return false;
       const painted = blockElementOf(firstDom)?.dataset.blockId;
       if (!painted || painted === ann.blockId) return false;
       const own = containerRef.current?.querySelector(`[data-block-id="${escapeAttrValue(ann.blockId)}"]`);
@@ -1650,19 +1689,7 @@ export function useAnnotationHighlighter({
         } catch {}
       }
 
-      const found = findTextInDOM(ann.originalText, ann.blockId || undefined);
-      if (found && found.ambiguous && ann.blockId) {
-        // Neither the stored positions nor the comment's own block lead to
-        // the quote, and the document holds it more than once: any copy would
-        // be a guess. The comment stays unanchored with its words, and its
-        // stored block and positions are kept as they are (no `moved` entry),
-        // never moved to the first copy for good.
-        if (rejectedRestoreText !== null) onRestoreMismatchRef.current?.(ann, rejectedRestoreText);
-        if (!paintedMath) unanchored.push(ann.id);
-        console.warn(`Annotation ${ann.id}: its text is in the document more than once and not in its own block; left unanchored`);
-        return;
-      }
-      const range = found?.range ?? null;
+      const range = findTextInDOM(ann.originalText, ann.blockId || undefined);
       if (!range) {
         if (rejectedRestoreText !== null) {
           onRestoreMismatchRef.current?.(ann, rejectedRestoreText);
@@ -1672,7 +1699,10 @@ export function useAnnotationHighlighter({
         // painted above is anchored, whatever its quote search says.
         if (!paintedMath) {
           unanchored.push(ann.id);
-          moved.push({ id: ann.id, blockId: '', positionsStale: true });
+          // No block (so the export prints no line label for it) but its
+          // words and stored positions stay, for a later restore to try again
+          // (the positions are verified before they paint).
+          moved.push({ id: ann.id, blockId: '', positionsStale: !(ann.startMeta && ann.endMeta) });
         }
         console.warn(`Could not find text for annotation ${ann.id}: "${ann.originalText.slice(0, 50)}..."`);
         return;
@@ -3068,7 +3098,7 @@ export function useAnnotationHighlighter({
         try { highlighter.remove(id); } catch {}
       }
     }
-    const range = findTextInDOM(annotation.originalText, annotation.blockId || undefined)?.range ?? null;
+    const range = findTextInDOM(annotation.originalText, annotation.blockId || undefined);
     if (!range) {
       onMissing?.();
       return;

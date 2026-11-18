@@ -60,8 +60,9 @@ export function buildOutline(blocks: readonly Block[], annotations: readonly Ann
   const notes = footnoteKeysOf(blocks);
   blocks.forEach((block, index) => {
     if (block.type !== 'heading') return;
+    // The section id stays the one from the heading as written; only the title shown leaves references out.
     const title = withoutFootnoteRefs(block.content, notes);
-    const base = slugifyHeading(title);
+    const base = slugifyHeading(block.content);
     const count = (seen.get(base) ?? 0) + 1;
     seen.set(base, count);
     const id = count === 1 ? base : `${base}-${count}`;
