@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { PULLS_FOCUS_MS, PULLS_PENDING_MS, PULLS_TICK_MS } from '../pulls/usePulls';
+import { onHiddenWritten, pullsShown, settleHidden, useHiddenChanges } from '../pulls/hiddenPulls';
 
 export interface SheetPullsState {
   model: InboxPullsAnswer | null;
@@ -39,6 +40,7 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
         .then((answer) => {
           if (controller.signal.aborted) return;
           setModel(answer);
+          settleHidden(answer.hidden);
           setError(null);
           // Others (the projects' other PRs) and a linked machine's board still being read: on the server's next answer.
           const pending = answer.hosts.some((h) => h.others_pending) || Object.values(answer.machines ?? {}).some((m) => m.pending);
@@ -90,6 +92,11 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
     [],
   );
 
+  // A PR hidden or shown again (hiddenPulls.ts): read again from the server's cache.
+  useEffect(() => onHiddenWritten(() => readRef.current(false)), []);
+
   const refresh = useCallback(() => read(true), [read]);
-  return { model, error, loading, refresh };
+  // What was hidden here leaves at once, before the server's next answer says so.
+  const changes = useHiddenChanges();
+  return { model: useMemo(() => pullsShown(model, changes), [model, changes]), error, loading, refresh };
 }
