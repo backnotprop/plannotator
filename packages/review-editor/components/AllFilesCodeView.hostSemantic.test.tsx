@@ -732,6 +732,30 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
   });
 
+  test.skipIf(!hasDom)('the first step of a fling after a pause counts at its own speed, not spread over the pause', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 1300 });
+    document.dispatchEvent(new Event('wheel'));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    });
+    const realFrame = globalThis.requestAnimationFrame;
+    const frames: FrameRequestCallback[] = [];
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    try {
+      await page.land();
+      for (const element of document.querySelectorAll('div')) {
+        Object.defineProperty(element, 'scrollTop', { configurable: true, value: 600 });
+        element.dispatchEvent(new Event('scroll'));
+      }
+      await act(async () => {
+        for (const frame of frames.splice(0)) frame(performance.now());
+      });
+    } finally {
+      globalThis.requestAnimationFrame = realFrame;
+    }
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
   test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
     const page = await reading(['a.ts', 'b.ts', 'c.ts'], { 'a.ts': -3000, 'b.ts': 3000, 'c.ts': 3000 });
     document.dispatchEvent(new Event('pointerdown'));

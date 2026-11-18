@@ -853,6 +853,7 @@ const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
 const SCROLL_SPEED_FRESH_MS = 100;
+const FRAME_MS = 16;
 const SWAP_LEAD_MS = 100;
 
 function stickyHeaderHeight(node: HTMLElement | undefined): number {
@@ -1355,7 +1356,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const moved = () => {
       if (!page) return;
       const now = { top: page.scrollTop, at: performance.now() };
-      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / Math.max(1, now.at - last.at), at: now.at };
+      const gap = now.at - last.at;
+      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / (gap > SCROLL_SPEED_FRESH_MS ? FRAME_MS : Math.max(1, gap)), at: now.at };
       last = now;
     };
     moves?.addEventListener('scroll', moved, { passive: true });
