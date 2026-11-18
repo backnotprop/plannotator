@@ -9,16 +9,15 @@
  * The model: sessions with labelled windows ("tabs") of blocks ("panes"), an optional Mac app client, and the app's
  * Remote Control setting. `session.new_window` and `session.focus_block` need a `session.attach` on the same
  * connection first (409 `conflict`), as the real server does. With Remote Control off, the app answers every
- * action `refused` (403), as a real app was seen to refuse `session.select`; its real words were not recorded, so
- * the fake's message is a placeholder. What a real app answers with Remote Control on was never seen: here, the
- * documented success (`performed_by`).
+ * action `refused` (403) with the real app's words (as a real one answered, 2026-11-18). What a
+ * real app answers with Remote Control on was never seen: here, the documented success (`performed_by`).
  */
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-/** The fake app's refusal message: a placeholder (the real app's words were never recorded). */
-export const FAKE_REX_REFUSAL = "fake app: refused";
+/** What Rex's app answers an action while its Remote Control setting is off, as a real one answered. */
+export const FAKE_REX_REFUSAL = "Rex.app is not accepting actions. Turn on Remote Control in its Settings under Rex Server.";
 
 export interface FakeRexWindow {
   window_id: string;

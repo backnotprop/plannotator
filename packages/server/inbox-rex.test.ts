@@ -64,6 +64,25 @@ describe("where an agent lives", () => {
     expect(changes.length).toBe(2);
   });
 
+  test("the last read stands until the next replaces it: no gap after a quiet spell, nothing once Rex stops answering", async () => {
+    let clock = 1_000_000;
+    const { fake, rex } = setup({}, { readTimeoutMs: 150, now: () => clock });
+    const ids = fake.addSession("p", "t");
+    const hints = new Map([["s", placeOf(ids)]]);
+    expect((await placesRead(rex, hints)).get("s")).toBe("Rex · p / t");
+    expect(rex.appAttached()).toBe(true);
+    // A minute with no list read: the next read answers with the last confirmed line at once (and reads again).
+    clock += 60_000;
+    expect(rex.places(hints).get("s")).toBe("Rex · p / t");
+    expect(rex.appAttached()).toBe(true);
+    await rex.settled();
+    // Rex stops answering: that read clears it.
+    clock += 3_000;
+    fake.setDelay(Infinity);
+    expect((await placesRead(rex, hints)).size).toBe(0);
+    expect(rex.appAttached()).toBe(false);
+  });
+
   test("a miss shows nothing: a block that is gone, or one in another session than the hint says", async () => {
     const { fake, rex } = setup();
     const a = fake.addSession("one", "a");

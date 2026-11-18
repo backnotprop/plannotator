@@ -10,7 +10,7 @@
  *  - Open in Rex. A launched session's attach command opens in a new tab of a Rex session the Inbox made for the
  *    project, recognised by the id it recorded when it made it (`sessionsFile`), never by its name: the Inbox never
  *    makes a tab in, or changes the active tab of, a session it did not make. The command runs through the person's
- *    login shell (Rex's own `login` option), with the Inbox's login PATH in front.
+ *    login shell (Rex's own `login` option), with the Inbox's login PATH added (Rex's `path_prepend`; a real login profile puts its own first).
  *  - Show in Rex. Rex's app goes to an agent's pane (`session.select`, then `session.focus_block`), on the person's
  *    click only. It is offered only while Rex's app is known to perform actions for other programs (its Remote
  *    Control setting), and the only way to know is the app's own answer to an action: nothing asks it in the
@@ -39,8 +39,6 @@ export const INBOX_REX_SHOW_TIMEOUT_MS = 3_000;
 export const INBOX_REX_SLOW_BACKOFF_MS = 30_000;
 /** How old the last read may be before a list starts another (it still answers from the last one at once). */
 export const INBOX_REX_FRESH_MS = 2_000;
-/** A confirmed place is shown at most this long after the last read that confirmed it. */
-const KEEP_MS = 30_000;
 /** A read connection is closed once nothing used it this long. */
 const IDLE_CLOSE_MS = 3_000;
 /** The longest a name shown from Rex is, in characters. */
@@ -326,8 +324,9 @@ export function createInboxRex(options: InboxRexOptions) {
     lastRead = at;
     let moved = false;
     if (!found) {
-      // No answer: nothing confirmed stands past its time (and an app that may be gone is not acted on).
-      if (app.id !== null) moved = true;
+      // No answer (no Rex, a slow one): nothing confirmed stands, and an app that may be gone is not acted on.
+      if (app.id !== null || confirmed.size > 0) moved = true;
+      confirmed.clear();
       app = { id: null, at };
     } else {
       const lines = new Map(found.rows.map((r) => [r.session, { place: r.place, line: inboxRexLine(found.sessionNames.get(r.place.session) ?? "", found.windowNames.get(r.window) ?? "") }]));
@@ -361,7 +360,9 @@ export function createInboxRex(options: InboxRexOptions) {
       });
   };
 
-  const appHere = () => (app.id !== null && now() - app.at < KEEP_MS ? app.id : null);
+  // The last read's answer stands until the next read replaces it (a list read after a quiet spell starts that read:
+  // a time limit here would drop the line, or Open in Rex, for that one read).
+  const appHere = () => app.id;
 
   return {
     /**
@@ -373,7 +374,7 @@ export function createInboxRex(options: InboxRexOptions) {
       const out = new Map<string, string>();
       for (const [session, place] of hints) {
         const known = confirmed.get(session);
-        if (known && known.place.session === place.session && known.place.block === place.block && now() - known.at < KEEP_MS) out.set(session, known.line);
+        if (known && known.place.session === place.session && known.place.block === place.block) out.set(session, known.line);
       }
       return out;
     },
@@ -415,7 +416,7 @@ export function createInboxRex(options: InboxRexOptions) {
         const layout = {
           block: {
             flavor: TERMINAL_FLAVOR,
-            // The person's own shell as a login shell reads their profile first; the Inbox's PATH goes in front.
+            // The person's own shell as a login shell reads their profile; the Inbox's PATH is added (the profile's comes first).
             options: { command: ["/bin/sh", "-c", request.command], login: true, ...(request.pathPrepend?.length ? { path_prepend: [...request.pathPrepend] } : {}) },
           },
         };
