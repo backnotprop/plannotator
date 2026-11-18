@@ -1,6 +1,6 @@
 # Plannotator's build of @pierre/diffs
 
-`pierre-diffs-1.7.0-beta.3-sem.6.tgz` is `@pierre/diffs` built from Pierre's unreleased `amadeus/semantic-diffs` branch, which draws semantic diffs (moved, renamed, reformatted, extracted and inlined code, with moved code folded into one row). It is installed as `@pierre/diffs-sem` (root `devDependencies`), and the code review app's build points `@pierre/diffs` at it (`apps/review/vite.config.ts`). Every `package.json` keeps the stock npm `@pierre/diffs`, so nothing published depends on this file. That includes `@plannotator/ui` and the Pi extension, which uses only `@pierre/diffs/ssr`.
+`pierre-diffs-1.7.0-beta.3-sem.6.tgz` is `@pierre/diffs` built from Pierre's unreleased `amadeus/semantic-diffs` branch, which draws semantic diffs (moved, renamed, reformatted, extracted and inlined code, with moved code folded into one row). It is installed as `@pierre/diffs-sem` (root `devDependencies`), and two builds point `@pierre/diffs` at it: the code review app (`apps/review/vite.config.ts`) and the Inbox window (the window's config in `apps/inbox/vite.config.ts`; the phone's surface and the Shape page, which share `sharedConfig`, stay on the stock package). Every `package.json` keeps the stock npm `@pierre/diffs`, so nothing published depends on this file. That includes `@plannotator/ui` and the Pi extension, which uses only `@pierre/diffs/ssr`.
 
 | | |
 |---|---|

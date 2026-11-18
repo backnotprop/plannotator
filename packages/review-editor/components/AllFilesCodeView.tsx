@@ -3002,6 +3002,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // live CodeView selection without re-running on every drag delta.
   const selectedLinesRef = useRef(selectedLines);
   selectedLinesRef.current = selectedLines;
+  const drawnSelectedLines = useMemo(() => {
+    if (selectedLines == null) return null;
+    const file = itemIdToFile.get(selectedLines.id);
+    const { start, end, side } = selectedLines.range;
+    if (!file || isLineRangeInPatch(file.patch, Math.min(start, end), Math.max(start, end), side === 'deletions' ? 'old' : 'new')) return selectedLines;
+    const item = viewerRef.current?.getItem(selectedLines.id);
+    return item?.type === 'diff' && item.fileDiff.isPartial === true ? null : selectedLines;
+  }, [selectedLines, itemIdToFile]);
 
   // Reconcile the App-level `pendingSelection` (the range the toolbar / AI is
   // operating on) with CodeView's highlighted lines. CodeView selection is
@@ -4155,7 +4163,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       className={`relative ${minimapOn && minimapShown ? 'mr-6' : ''} ${scrollsWithPage ? 'overflow-x-clip [contain:layout_style]' : `h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [will-change:scroll-position]`} [overflow-anchor:none] focus-visible:outline-none! [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
       initialItems={identity.items}
       options={options}
-      selectedLines={selectedLines}
+      selectedLines={drawnSelectedLines}
       onSelectedLinesChange={handleSelectedLinesChange}
       onScroll={handleScroll}
       renderCustomHeader={renderCustomHeader}
