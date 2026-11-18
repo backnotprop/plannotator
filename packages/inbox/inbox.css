@@ -1416,11 +1416,15 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    above the rows; its box is the rows' own ground, so rows pass under it unseen, and the 12 px under the line is
    the box's. Above the phone's sticky group headers, which stick under it. `--ib-held-h` is the box's height: the
    phone's headers and the list's top pill sit below it. Nothing moves: no transition, so reduced motion is the same. */
-.ib-listcol { --ib-held-h: 50px; }
+.ib-listcol { --ib-held-h: 50px; --ib-held-pad: var(--ib-held-h); }
 .ib-notice-stick { position: sticky; top: 0; z-index: 3; padding-bottom: 12px; background: var(--card); }
 .ib-notice-stick > .ib-notice { margin-bottom: 0; }
-/* A row that ↑ ↓, J/K or Tab scrolls to (`scrollIntoView`, block nearest) stops below the stuck bar, never under it. */
-.ib-lbody:has(> .ib-notice-stick) { scroll-padding-top: var(--ib-held-h); }
+/* A row that ↑ ↓, J/K or Tab scrolls to (`scrollIntoView`, block nearest) stops below the stuck bar, never under it.
+   The bar itself sits inside that padding, so it takes a negative scroll margin of the same size: without it, the bar
+   taking focus (Tab, a click that scrolls its target into view) made the browser scroll to bring it below the padding,
+   which a stuck box never reaches, and the list jumped (418 px in a 900 px window). */
+.ib-lbody:has(> .ib-notice-stick) { scroll-padding-top: var(--ib-held-pad); }
+.ib-notice-stick > .ib-notice { scroll-margin-top: calc(-1 * var(--ib-held-pad)); }
 .pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 12px); }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
@@ -3713,13 +3717,12 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
   /* The bar's box on a phone: the line's 10 / 12 px margins are its padding, the line one 44 px row; the group
      headers stick under it. */
-  .ib-listcol { --ib-held-h: 64px; }
+  .ib-listcol { --ib-held-h: 64px; --ib-held-pad: calc(var(--ib-held-h) + 44px); }
   .ib-notice-stick { padding: 10px 12px; }
   /* A fixed 44 px (one line, nowrap) so the box is exactly `--ib-held-h`: change one, change the other. */
   .ib-notice-stick > .ib-notice { height: 44px; margin: 0; width: 100%; }
-  /* Below the bar and the group header stuck under it (a band button is 44 px here). */
-  .ib-lbody:has(> .ib-notice-stick) { scroll-padding-top: calc(var(--ib-held-h) + 44px); }
-  .ib-lbody:has(.ib-notice-stick) .ib-band { top: var(--ib-held-h); }
+  /* The group header stuck under the bar is in the padding too: the same negative margin, its own 44 px. */
+  .ib-lbody:has(.ib-notice-stick) .ib-band { top: var(--ib-held-h); scroll-margin-top: -44px; }
   .pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 56px); }
   /* The stale page notice's ×: a finger's width. */
   .pn-inbox .ib-stale .ib-stale-x { width: 44px; }

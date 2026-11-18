@@ -231,6 +231,15 @@ test('at rest the bar covers no row and shows no pill; it stays stuck while the 
     await barStuck(page);
     await page.waitForTimeout(500);
     await expect(pill(page)).toHaveAttribute('data-off', '');
+    // Focus on the stuck bar (Tab, or a click that scrolls its target into view) moves nothing: the bar sits inside the
+    // list's scroll padding, which once made the browser scroll 418 px trying to bring it below that padding.
+    const still = await placeIn(page, '.ib-lbody [data-thread-id]');
+    const firstId = await body(page).locator('[data-thread-id]').first().getAttribute('data-thread-id');
+    const scrolledTo = await body(page).evaluate((el) => el.scrollTop);
+    await line(page).focus();
+    await expect(line(page)).toBeFocused();
+    expect(await body(page).evaluate((el) => el.scrollTop)).toBe(scrolledTo);
+    expect((await placeIn(page, `.ib-lbody [data-thread-id="${firstId}"]`)).top).toBe(still.top);
     // ↑ from the first row wholly below the stuck bar: each row it reaches is scrolled to below the bar, never under it.
     const start = await page.evaluate(() => {
       const bar = document.querySelector('[data-held-bar]')!.getBoundingClientRect();
