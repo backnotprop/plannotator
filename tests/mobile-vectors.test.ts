@@ -20,10 +20,11 @@ import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { doorRouteNames, doorRouteOf } from '../packages/server/inbox-devices';
+import { MACHINE_PLATFORM, doorReachOf, doorRouteOf } from '../packages/server/inbox-devices';
+import { DOOR_CONTRACT } from '../packages/server/inbox-door-version';
 import { doorEntries, generateDoor } from '../scripts/mobile/door';
 import { GENERATORS } from '../scripts/mobile/all';
-import { REGENERATE, emit, readRepoText, type Output } from '../scripts/mobile/lib';
+import { OUT, REGENERATE, VERSION_FILE, emit, readRepoText, type Output } from '../scripts/mobile/lib';
 import { SCHEMA_SOURCES, buildSchema, schemaWith } from '../scripts/mobile/schema';
 
 const sample = (path: string) => path.replace(/\{path\}/g, 'a/b.png').replace(/\{card\}/g, 'crd_x').replace(/\{combine\}/g, 'cmb_x').replace(/\{action\}/g, 'a-0123abcd').replace(/\{\w+\}/g, 'x_1');
@@ -67,8 +68,21 @@ describe('the contract is up to date', () => {
 describe('door.json is the door', () => {
   const entries = doorEntries();
 
-  test('every door entry is there, and each route reaches the door entry it names', () => {
-    expect([...new Set(entries.map((e) => e.door_name))].filter((n) => n !== 'POST pair' && n !== 'POST revoke')).toEqual(doorRouteNames());
+  test('VERSION is the door\'s contract number, and Wire.swift and the decode baseline carry the same', () => {
+    expect(readRepoText(VERSION_FILE)).toBe(`${DOOR_CONTRACT}\n`);
+    expect(readRepoText(OUT.swift)).toContain(`public let wireContract = ${DOOR_CONTRACT}\n`);
+    expect((JSON.parse(readRepoText(OUT.required)) as { contract: number }).contract).toBe(DOOR_CONTRACT);
+  });
+
+  test('a phone\'s health lists exactly the phone routes, and the relay refuses exactly those door.json marks', () => {
+    const phone = doorReachOf('ios');
+    expect(phone.routes).toEqual(entries.filter((e) => e.grant === 'phone').map((e) => e.name));
+    expect(phone.not_by_relay).toEqual(entries.filter((e) => e.grant === 'phone' && !e.relay).map((e) => e.name));
+  });
+
+  test('every route the door lists is there, by the name health gives it, and reaches the door', () => {
+    // The names are what `health.door.routes` lists to a linked computer, which reaches every route.
+    expect(entries.map((e) => e.name)).toEqual(doorReachOf(MACHINE_PLATFORM).routes);
     for (const e of entries.filter((x) => x.window)) {
       const asMachine = doorRouteOf(e.method, sample(e.path), true);
       expect(asMachine, e.name).not.toBeNull();

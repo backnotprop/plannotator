@@ -16,6 +16,7 @@
     "DoorSeenBody": "scripts/mobile/door-shapes.ts",
     "InboxDelivery": "packages/core/inbox-types.ts",
     "InboxDevicePublic": "packages/shared/inbox/devices.ts",
+    "InboxDoorHealth": "packages/core/inbox-door-version.ts",
     "InboxDraft": "packages/core/inbox-types.ts",
     "InboxHealth": "packages/core/inbox-types.ts",
     "InboxListRow": "packages/core/inbox-types.ts",
@@ -1578,6 +1579,44 @@
       ],
       "additionalProperties": true,
       "x-source": "packages/shared/inbox/devices.ts"
+    },
+    "InboxDoorHealth": {
+      "type": "object",
+      "properties": {
+        "contract": {
+          "type": "number"
+        },
+        "routes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "not_by_relay": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "min_app_contract": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "contract",
+        "routes",
+        "not_by_relay",
+        "grants",
+        "min_app_contract"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-door-version.ts"
     },
     "InboxDraft": {
       "type": "object",
