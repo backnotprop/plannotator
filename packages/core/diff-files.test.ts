@@ -213,6 +213,19 @@ describe("parseDiffToFiles — change-type status", () => {
 });
 
 describe("diffHunkLines", () => {
+  it("keeps side line numbers when Git omits the prefix on blank context", () => {
+    // Real shape of a patch produced with diff.suppressBlankEmpty=true.
+    const patch = ["@@ -1,3 +1,3 @@", " same", "", "-old", "+new", ""].join("\n");
+    expect(diffHunkLines(patch)?.[0].lines).toEqual([
+      { kind: "context", oldLine: 1, newLine: 1, text: "same" },
+      { kind: "context", oldLine: 2, newLine: 2, text: "" },
+      { kind: "del", oldLine: 3, text: "old" },
+      { kind: "add", newLine: 3, text: "new" },
+    ]);
+    // The split sentinel after a newline cannot complete an unfinished hunk.
+    expect(diffHunkLines("@@ -1,2 +1,2 @@\n same\n")).toBeNull();
+  });
+
   // Real `git diff` (git 2.50): a SQL comment line removed and a line added
   // that look like file headers, and a last line that gains its newline.
   const sql = [

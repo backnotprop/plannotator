@@ -615,6 +615,23 @@ describe("review-core", () => {
     expect(listPatchFiles(renamed.patch).map((file) => file.path)).toContain(renamedTo);
   }, 20_000);
 
+  test("keeps the space on blank context rows when Git is set to drop it", async () => {
+    const repoDir = initRepo();
+    writeFileSync(join(repoDir, "notes.txt"), "one\n\ntwo\n", "utf-8");
+    git(repoDir, ["add", "notes.txt"]);
+    git(repoDir, ["commit", "-m", "notes"]);
+    git(repoDir, ["config", "diff.suppressBlankEmpty", "true"]);
+    writeFileSync(join(repoDir, "notes.txt"), "one\n\nthree\n", "utf-8");
+
+    const runtime = makeConfigForwardingRuntime(repoDir);
+    for (const diffType of ["unstaged", "staged"] as const) {
+      if (diffType === "staged") git(repoDir, ["add", "notes.txt"]);
+      const { patch } = await runGitDiff(runtime, diffType, "main");
+      const hunk = patch.slice(patch.indexOf("@@ ")).split("\n");
+      expect(hunk.slice(0, 5)).toEqual(["@@ -1,3 +1,3 @@", " one", " ", "-two", "+three"]);
+    }
+  });
+
   test("keeps gitlink pointers as normal subproject diffs and fingerprints them", async () => {
     const superproject = initRepo();
     const submoduleSource = makeTempDir("plannotator-review-core-submodule-");
@@ -895,6 +912,7 @@ describe("review-core", () => {
       expect(options?.config).toEqual({
         "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
         "diff.submodule": "short",
+        "diff.suppressBlankEmpty": "false",
       });
       expect(args.some((arg) => arg.includes("bigFileThreshold"))).toBe(false);
     }

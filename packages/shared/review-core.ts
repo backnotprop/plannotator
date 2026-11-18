@@ -1139,6 +1139,8 @@ const BOUNDED_DIFF_GIT_CONFIG: Record<string, string> = {
   "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
   // Keep gitlinks as parseable pointer hunks even if interactive Git uses log or inline diffs.
   "diff.submodule": "short",
+  // Keep the space on a blank context row: without it the viewer's parser skips the row and every later line number is one off.
+  "diff.suppressBlankEmpty": "false",
 };
 
 /**
