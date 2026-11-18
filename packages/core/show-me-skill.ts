@@ -9,14 +9,15 @@ const BODY = `# Show me
 Use HTML to help me understand what we're discussing. Show me with big pictures and little words, without withholding key details. If my words with this skill name a focus, show that; for a code change, show what changed and why.
 Use your own taste, avoid lazy design, and bring in real pictures, icons or visuals only selectively, when they make sense.
 When you do use prose: be clear, terse, and avoid jargon. Explain as if I am new here, but no weird metaphors.
+Let the pictures carry it: most of the page is drawing, words are labels and a short line where one is needed. Not a report: no tables of facts, no file lists.
 
 ## Keep it true
 
-Every file, line, name and number comes from the code or this thread; never make one up. From a diff, a line number is the new file's, counted from the hunk header (\`@@ -a,b +c,d @@\` starts at c).
+When you name a file, line, function or number, take it from the code or this thread; never make one up. From a diff, a line number is the new file's, counted from the hunk header (\`@@ -a,b +c,d @@\` starts at c).
 
 ## Lean technical
 
-Think a good developer tool's docs: \`var(--font-mono)\` for labels and numbers, thin rules in \`var(--border)\`, square corners, colour only where it means something. No shadows, gradients or emoji.
+Big, clear drawings with a technical look: thin rules in \`var(--border)\`, square corners, \`var(--font-mono)\` for code names, colour only where it means something. No shadows, gradients or emoji.
 
 ## Read on a phone
 
