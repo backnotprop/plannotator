@@ -1755,6 +1755,22 @@
       "relay": true
     },
     {
+      "name": "POST rex/show",
+      "method": "POST",
+      "path": "rex/show",
+      "params": [],
+      "call": "postRexShow",
+      "window": "/api/inbox/rex/show",
+      "grant": "machine",
+      "auth": "token",
+      "kind": "now",
+      "write": "now",
+      "key": "body",
+      "answer": "json",
+      "range": false,
+      "relay": true
+    },
+    {
       "name": "GET open-in/file/view",
       "method": "GET",
       "path": "open-in/file/view",
