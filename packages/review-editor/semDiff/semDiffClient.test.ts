@@ -157,7 +157,7 @@ describe('semantic diff client', () => {
 
   test('gives up after the cutoff and replaces the stuck worker', async () => {
     const log = { created: 0, terminated: 0 };
-    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 30 });
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('hang', log), timeoutMs: 30, coldTimeoutMs: 30 });
     expect(await client.diff('src/users.ts', before, moved)).toBeNull();
     expect(log.terminated).toBe(1);
     expect((await client.attempt('src/users.ts', before, moved)).failed).toBe(true);
@@ -167,7 +167,7 @@ describe('semantic diff client', () => {
 
   test('one file that stalls the worker fails alone; the files queued behind it still get their answers', async () => {
     const log = { created: 0, terminated: 0 };
-    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('stuck-on-big', log), timeoutMs: 200 });
+    const client = createSemDiffClient({ advert, origin: 'http://127.0.0.1:1', createWorker: fakeWorker('stuck-on-big', log), timeoutMs: 200, coldTimeoutMs: 200 });
     const big = client.attempt('src/big.ts', before, moved);
     const others = [client.attempt('src/a.ts', before, moved), client.attempt('src/b.ts', before, `${moved}\n`)];
     expect((await big).failed).toBe(true);
@@ -329,4 +329,20 @@ describe('a moved method is named by itself, not its class, in every language', 
     expect(shortName('greet(x)')).toBe('greet(x)');
     expect(shortName('return foo(x);', 'A.java')).toBe('return foo(x);');
   });
+});
+
+test('a slow first answer while the engine and its grammar arrive is not a failure; a warm engine that stalls still is', async () => {
+  const replyAfter = (ms: number) => () =>
+    ({
+      onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        setTimeout(() => this.onmessage?.({ data: { id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' } } as MessageEvent<SemDiffReply>), ms);
+      },
+      terminate() {},
+    }) as unknown as Worker;
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker: replyAfter(120), timeoutMs: 30, coldTimeoutMs: 400 });
+  expect(await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).toEqual({ result: null, failed: false });
+  expect((await client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n')).failed).toBe(true);
+  client.dispose();
 });

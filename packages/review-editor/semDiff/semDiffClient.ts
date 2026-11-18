@@ -7,6 +7,7 @@ import type { SemDiffReply, SemDiffRequest } from './protocol';
 
 export const SEM_DIFF_TIMEOUT_MS = 3_000;
 export const SEM_DIFF_OPINION_TIMEOUT_MS = 30_000;
+export const SEM_DIFF_COLD_TIMEOUT_MS = 30_000;
 const MAX_CACHED = 500;
 
 function hashText(text: string): string {
@@ -44,6 +45,7 @@ export interface SemDiffClientOptions {
   origin: string;
   createWorker: () => Worker | Promise<Worker>;
   timeoutMs?: number;
+  coldTimeoutMs?: number;
 }
 
 const HAS_SOMETHING_TO_SAY = new Set<string>([...SKIM_KINDS, 'movedWithEdit']);
@@ -53,7 +55,8 @@ export function hasSomethingToSay(operations: SemanticDiffOperation[]): boolean 
 }
 
 export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClient {
-  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS } = options;
+  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS } = options;
+  const warm = new Set<string>();
   let worker: Promise<Worker> | null = null;
   let nextId = 1;
   interface Pending {
@@ -76,11 +79,13 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const entry = pending.get(id);
     if (!entry) return;
     pending.delete(id);
+    if (reply?.ok) warm.add(languageForPath(entry.request.path) ?? '');
     entry.settle(reply);
   };
   const dropWorker = () => {
     const old = worker;
     worker = null;
+    warm.clear();
     void old?.then((w) => w.terminate(), () => {});
   };
   const post = (id: number) => {
@@ -137,7 +142,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const id = nextId++;
     const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
-      pending.set(id, { request, settle: resolve, limitMs: opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : timeoutMs });
+      pending.set(id, { request, settle: resolve, limitMs: opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : warm.has(languageForPath(path) ?? '') ? timeoutMs : Math.max(timeoutMs, coldTimeoutMs) });
       post(id);
       if (pending.size === 1) watchHead();
     }).then((reply) => {
