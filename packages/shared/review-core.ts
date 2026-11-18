@@ -393,6 +393,25 @@ export const GIT_COLOR_FREE_ARGS: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * Output settings every command pins on argv after the color ones, whatever
+ * the user's config says:
+ * - `core.quotePath=false`: non-ASCII paths print as they are;
+ * - `diff.relative=false`: with it on, a review started in a subdirectory
+ *   lists only that subdirectory, with paths relative to it, while hunk
+ *   expansion, stage and unstage, and untracked files use paths from the root;
+ * - `log.showSignature=false`: with it on, `log` and `show` print a signature
+ *   check before the formatted fields, so a commit's SHA reads wrong.
+ */
+export const GIT_OUTPUT_ARGS: readonly string[] = Object.freeze([
+  "-c",
+  "core.quotePath=false",
+  "-c",
+  "diff.relative=false",
+  "-c",
+  "log.showSignature=false",
+]);
+
+/**
  * The same color-off settings as `GIT_CONFIG_*` environment variables, for
  * processes Plannotator spawns that run git themselves (review and
  * guide agent jobs). Inherited `GIT_CONFIG_*` entries are kept. Git 2.31+
@@ -423,7 +442,7 @@ export function prepareGitCommand(
   const interaction = options?.interaction ?? "allow";
   if (interaction === "allow") {
     return {
-      args: [...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", ...args],
+      args: [...GIT_COLOR_FREE_ARGS, ...GIT_OUTPUT_ARGS, ...args],
       ...(configEnv || options?.env ? { env: { ...environment, ...configEnv, ...options?.env } } : {}),
       isolateProcessGroup: false,
     };
@@ -438,8 +457,7 @@ export function prepareGitCommand(
   return {
     args: [
       ...GIT_COLOR_FREE_ARGS,
-      "-c",
-      "core.quotePath=false",
+      ...GIT_OUTPUT_ARGS,
       "-c",
       "credential.interactive=false",
       ...args,
