@@ -231,6 +231,8 @@ Pi-only installations that do not include the `plannotator` CLI should use:
 pi remove npm:@plannotator/pi-extension
 ```
 
+`plannotator uninstall` also removes the extension from Oh My Pi (`omp plugin uninstall @plannotator/pi-extension`). If that fails, or `omp` is not on your `PATH`, it says so with the command and goes on.
+
 <details>
 <summary><strong>Installing behind a rate-limited IP</strong></summary>
 
@@ -475,7 +477,7 @@ See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
 omp plugin install @plannotator/pi-extension
 ```
 
-To update it by hand, run `omp plugin upgrade @plannotator/pi-extension`. A run with `--version` pinned to an older release installs that version in a fresh OMP and leaves an installed one as it is.
+To update it by hand, run `omp plugin upgrade @plannotator/pi-extension`. A version you pinned in OMP (`omp plugin install @plannotator/pi-extension@0.28.60`) is left as it is; the installer says so. A run with `--version` pinned to an older release installs that version in a fresh OMP and leaves an installed one as it is.
 
 Open reviews with the extension's commands: `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode` for plan mode. Reviews opened this way can use **Ask this session**: Ask AI sends your question to the OMP session, and the answer streams back from it. Ask AI labels it "Ask this session · Pi".
 

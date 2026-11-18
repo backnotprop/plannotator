@@ -14,7 +14,7 @@ import { mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { releasePiSessionClaim, writePiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
-import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxPiParentSession, processStartedAtMs, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxPiParentReader, inboxPiParentSession, processStartedAtMs, runInboxMcpShim } from "./inbox-mcp-shim";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -161,6 +161,36 @@ describe("plannotator inbox mcp under a Pi or Oh My Pi session with the extensio
     claim(dataDir, "live-session");
     const live = await shimSends(dataDir, process.pid, [{ body: "b", reply_to: "msg_01" }], { parentStartedMs: started });
     expect(author(live[0]!)).toEqual(piAuthor("live-session"));
+  });
+
+  test.skipIf(process.platform === "win32")("a process's start time is read right, in a time zone that is not UTC", () => {
+    const savedTz = process.env.TZ;
+    process.env.TZ = "Asia/Kolkata";
+    try {
+      const started = processStartedAtMs(process.pid);
+      expect(started).not.toBeNull();
+      // Whole seconds, a little early: within a few seconds of when this process began.
+      expect(Math.abs(started! - (Date.now() - process.uptime() * 1000))).toBeLessThan(5000);
+    } finally {
+      if (savedTz === undefined) delete process.env.TZ;
+      else process.env.TZ = savedTz;
+    }
+  });
+
+  test("a parent that claims no session (not Pi or Oh My Pi) never has its start time read; one that does, once", () => {
+    const dataDir = dataDirFor();
+    let reads = 0;
+    const read = inboxPiParentReader(dataDir, () => process.pid, () => {
+      reads += 1;
+      return null;
+    });
+    expect(read()).toBeNull();
+    expect(read()).toBeNull();
+    expect(reads).toBe(0);
+    claim(dataDir, "omp-session-a");
+    expect(read()).toEqual(piAuthor("omp-session-a"));
+    expect(read()).toEqual(piAuthor("omp-session-a"));
+    expect(reads).toBe(1);
   });
 
   test("the agent's own session or another host it names still wins", async () => {

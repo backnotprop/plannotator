@@ -144,3 +144,10 @@ test('a note copied by hand (Cursor) is never named in "Add to …"; with only t
 test('the note copied by hand has no marker lines', () => {
   expect(noteWithoutMarkers('<!-- plannotator-inbox:start v1 · added by Plannotator. Remove it … -->\n## Plannotator Inbox\n\nBody.\n<!-- plannotator-inbox:end -->')).toBe('## Plannotator Inbox\n\nBody.');
 });
+
+test('an Oh My Pi install the Inbox finished in the background is news in the band, with the restart it needs', () => {
+  const report = { at: '', first: false, added: ['oh-my-pi' as const], already: [], failed: [], foreign: [], manual: [], unfinished: [], claude_code: false, installed: ['oh-my-pi' as const] };
+  expect(cardReport(model({ last_report: report }))).not.toBeNull();
+  expect(bandLines(report).installed).toEqual([{ agent: 'oh-my-pi', text: "Installed Plannotator's extension in Oh My Pi. Type /restart in each open Oh My Pi session to load it." }]);
+  expect(bandLines({ ...report, installed: [] }).installed).toEqual([]);
+});

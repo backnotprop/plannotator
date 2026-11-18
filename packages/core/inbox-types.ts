@@ -2688,6 +2688,21 @@ export interface InboxConnectReport {
   granted?: { agent: InboxAgentId; setting: string; undo: string }[];
   /** Why registering as a trusted sender failed this run, said once per reason. */
   trust_failed?: { agent: InboxAgentId; reason: string }[];
+  /** Agents whose Plannotator extension this run started installing in the background (Oh My Pi): said in the terminal. */
+  installing?: InboxAgentId[];
+  /** Agents whose Plannotator extension the Inbox installed (Oh My Pi): open sessions load it after a restart. */
+  installed?: InboxAgentId[];
+}
+
+/** After the Inbox installed an agent's extension: what loads it in open sessions. */
+export function inboxInstalledText(agent: InboxAgentId): string {
+  const label = INBOX_AGENT_LABELS[agent];
+  return `Installed Plannotator's extension in ${label}. Type /restart in each open ${label} session to load it.`;
+}
+
+/** While the Inbox installs an agent's extension in the background. */
+export function inboxInstallingText(agent: InboxAgentId): string {
+  return `Installing Plannotator's extension in ${INBOX_AGENT_LABELS[agent]} in the background; the Inbox says when it is done.`;
 }
 
 /** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */

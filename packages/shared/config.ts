@@ -2268,8 +2268,9 @@ export const INBOX_TOOL_OMP_DEFAULT = true;
  * default differs, as the `plannotator` agent tool's does: off on Pi, on in
  * Oh My Pi (INBOX_TOOL_OMP_DEFAULT), which lists an extension
  * tool as one short `xd://` line and loads its schema only when the model
- * reads it. Nothing else turns it on for OMP: the Inbox's connect step finds
- * the extension only in Pi's own settings.json.
+ * reads it. The Inbox's connect step installs the extension in OMP with
+ * `omp plugin install` and writes no `inboxTool` key for it, since that key
+ * is Pi's too (inbox-agents.ts, the "oh-my-pi" agent).
  */
 export function resolvePiInboxTool(
   config: PlannotatorConfig,

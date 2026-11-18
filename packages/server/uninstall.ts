@@ -42,7 +42,7 @@ import { takeDownInboxTailnet } from "./inbox-devices";
 import { hasTailnetDoorRecord, readTailnetDoorRecord } from "./inbox-tailnet-door";
 import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { inboxLoginItem } from "./inbox-scheduled-login";
-import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
+import { OMP_EXTENSION_PACKAGE, agentHomeAllowed, forgetInboxAgents, ompExtension, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
 import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
 import { hermesPluginInstalled } from "./inbox-hermes";
 import { HERMES_PLUGIN_REMOVE } from "@plannotator/core/inbox-hermes";
@@ -825,6 +825,8 @@ async function removeHostPlugins(
     command: string;
     args: readonly string[];
     references: () => HostReferences;
+    /** Its failure is a warning with the command, never an uninstall error (an extension another agent loads). */
+    optional?: boolean;
   }> = [
     {
       label: "Claude Code plugin plannotator@plannotator",
@@ -878,6 +880,20 @@ async function removeHostPlugins(
       },
     },
     {
+      // The installers and the Inbox add it with `omp plugin install`; OMP's own `plugin uninstall` removes it
+      // (can1357/oh-my-pi packages/coding-agent/src/cli/plugin-cli.ts handleUninstall, 7f38fc6). Found when OMP's
+      // plugin manifest lists it.
+      label: `Oh My Pi extension ${OMP_EXTENSION_PACKAGE}`,
+      owner: "Oh My Pi",
+      command: "omp",
+      args: ["plugin", "uninstall", OMP_EXTENSION_PACKAGE],
+      optional: true,
+      references: () => {
+        const ext = ompExtension(agentEnvironmentOf(environment));
+        return { references: ext ? [join(ext.dir, "package.json")] : [], otherScopes: [], unreadable: [] };
+      },
+    },
+    {
       // The installers add it with `qwen extensions install`; Qwen's own
       // command removes it from its extension store.
       label: "Qwen Code extension plannotator",
@@ -918,6 +934,10 @@ async function removeHostPlugins(
     const executable = environment.which(action.command);
     const manualCommand = [action.command, ...action.args].join(" ");
     const byHand = (entries: readonly string[]) => `remove only these Plannotator entries by hand: ${entries.join("; ")}. Keep everything else, then run \`${retry}\` again.`;
+    if (!executable && action.optional) {
+      state.warnings.push(`Skipped: ${action.label} (${action.command} is not on PATH). To remove it, run \`${manualCommand}\`.`);
+      continue;
+    }
     if (!executable) {
       state.errors.push(
         `${action.label} was detected but ${action.command} is unavailable; it was not removed. Manual cleanup: restore ${action.command} on PATH and run \`${manualCommand}\`. After it succeeds, rerun \`${retry}\`. If ${action.owner} was uninstalled for good, ${byHand(references)}`,
@@ -935,11 +955,15 @@ async function removeHostPlugins(
       const remaining = action.references();
       for (const unreadable of remaining.unreadable) reportUnreadableConfig(action.owner, unreadable, request, state);
       if (remaining.unreadable.length > 0) continue;
-      if (remaining.references.length > 0) {
+      if (remaining.references.length > 0 && action.optional) {
+        state.warnings.push(`${action.label} is still there after \`${manualCommand}\` reported success. To remove it, run \`${manualCommand}\` again.`);
+      } else if (remaining.references.length > 0) {
         state.errors.push(`${action.label} is still there after \`${manualCommand}\` reported success. To continue, ${byHand(remaining.references)}`);
       } else {
         state.removed.push(action.label);
       }
+    } else if (action.optional) {
+      state.warnings.push(`${action.label} was not removed (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}). To remove it, run \`${manualCommand}\`.`);
     } else {
       state.errors.push(
         `${action.label} was not removed automatically (${result.timedOut ? "command timed out" : `exit ${result.exitCode}`}). Manual cleanup: run \`${manualCommand}\` directly and resolve the host error until it succeeds. Then rerun \`${retry}\`. If ${action.command} keeps refusing because ${action.owner} no longer has it installed, ${action.command === "claude" ? `run \`claude plugin disable ${pluginId} --scope user\` to turn off its settings key, or ` : ""}${byHand(references)}`,

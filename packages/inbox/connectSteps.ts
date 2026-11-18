@@ -91,6 +91,8 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
   // DeepSeek Harness: Plannotator's plugin, reached through its tool, but not on the first-run screen's host cards.
   if (row.reach.kind === 'tool') {
     if (live || row.reach.on) return { ...base, state: 'ready' };
+    // Oh My Pi with an extension the person pinned before its Inbox tool was on there: theirs to move, not a step.
+    if (row.id === 'oh-my-pi' && row.reach.reason) return { ...base, state: 'tool-off', chosenOff: true, offNote: OMP_PINNED_NOTE };
     return { ...base, state: 'tool-off', locked: row.reach.locked, chosenOff: row.tool?.chosen_off === true };
   }
   if (row.reach.on) return { ...base, state: 'mcp' };
@@ -99,6 +101,9 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
   if (row.reach.kind === 'mcp' && row.reach.state === 'not_connected') return { ...base, state: 'connect' };
   return null;
 }
+
+/** "Left to do" for Oh My Pi when its extension is pinned to a version without the Inbox tool on there. */
+export const OMP_PINNED_NOTE = 'extension pinned to an older version';
 
 /** Done: reaches the Inbox (through the plugin, or through MCP). */
 export function isDone(row: ConnectRow): boolean {
@@ -241,6 +246,7 @@ export function blockedText(plan: ConnectPlan, opts: { skipped: readonly string[
   for (const row of off) {
     if (row.offNote === 'plugin turned off') parts.push(`Plannotator's plugin is turned off in ${row.label} (claude plugin enable plannotator@plannotator turns it back on).`);
     else if (row.offNote === 'plugin turned off by managed settings') parts.push(`Your organization's managed settings turn Plannotator's plugin off in ${row.label}.`);
+    else if (row.offNote === OMP_PINNED_NOTE) parts.push(`${row.label} has Plannotator's extension pinned to a version without the Inbox tool there (omp plugin install @plannotator/pi-extension moves it to the newest).`);
     else if (row.offNote) parts.push(`Plannotator's ${row.label} mod is turned off (PLANNOTATOR_CLAUDE_MOD or claudeCodeMod), so ${row.label} has no Inbox tool.`);
   }
   const toolOff = off.filter((row) => !row.offNote);

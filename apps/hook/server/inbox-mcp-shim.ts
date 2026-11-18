@@ -79,7 +79,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { inboxEnsureFailedWords, inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
-import { piSessionClaimOfPid } from "@plannotator/shared/inbox/pi-session-claim";
+import { piSessionClaimFileOfPid, piSessionClaimOfPid } from "@plannotator/shared/inbox/pi-session-claim";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 import { spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
@@ -311,6 +311,26 @@ export function inboxCallHostSession(
 export function inboxPiParentSession(dataDir: string, parentPid: number, parentStartedMs: number | null = null): InboxHostSession | null {
   const session = piSessionClaimOfPid(dataDir, parentPid, parentStartedMs);
   return session && isInboxSessionId(session) ? { host: "pi", session, name: INBOX_SESSION_HOST_NAMES.pi! } : null;
+}
+
+/**
+ * The shim's `piParent`: the session its parent process claims, read at each
+ * call. The parent's start time is read once per parent (it never changes),
+ * and only once a claim file names it: an agent that is not Pi or Oh My Pi
+ * writes none, so its tool calls never run `ps`.
+ */
+export function inboxPiParentReader(
+  dataDir: string,
+  parentPid: () => number = () => process.ppid,
+  startedAt: (pid: number) => number | null = processStartedAtMs,
+): () => InboxHostSession | null {
+  let started: { pid: number; at: number | null } | null = null;
+  return () => {
+    const pid = parentPid();
+    if (!piSessionClaimFileOfPid(dataDir, pid)) return null;
+    if (started?.pid !== pid) started = { pid, at: startedAt(pid) };
+    return inboxPiParentSession(dataDir, pid, started.at);
+  };
 }
 
 /**

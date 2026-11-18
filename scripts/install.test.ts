@@ -5622,13 +5622,15 @@ const FAKE_OMP = [
   "#!/bin/bash",
   'printf \'%s|%s\\n\' "$*" "$PWD" >> "$FAKE_OMP_LOG"',
   'dir="$HOME/.omp/plugins"',
-  'write() { mkdir -p "$dir/node_modules/@plannotator/pi-extension"; printf \'{"name":"omp-plugins","private":true,"dependencies":{"@plannotator/pi-extension":"^%s"}}\\n\' "$1" > "$dir/package.json"; printf \'{"name":"@plannotator/pi-extension","version":"%s"}\\n\' "$1" > "$dir/node_modules/@plannotator/pi-extension/package.json"; }',
-  'if [ "$FAKE_OMP" = hang ]; then sleep 30; exit 0; fi',
-  'if [ "$FAKE_OMP" = fail ]; then echo "Failed to install $3: 404 Not Found" >&2; exit 1; fi',
+  // As bun writes it: a bare name gets "^<version>", "name@<version>" the exact version (a pin).
+  'write() { mkdir -p "$dir/node_modules/@plannotator/pi-extension"; printf \'{"name":"omp-plugins","private":true,"dependencies":{"@plannotator/pi-extension":"%s"}}\\n\' "$2" > "$dir/package.json"; printf \'{"name":"@plannotator/pi-extension","version":"%s"}\\n\' "$1" > "$dir/node_modules/@plannotator/pi-extension/package.json"; }',
+  // A hang leaves a child (bun) of its own: the time limit must stop it too.
+  'if [ "$FAKE_OMP" = hang ]; then sleep 30 & echo $! > "$HOME/omp-child.pid"; wait; exit 0; fi',
+  'if [ "$FAKE_OMP" = fail ]; then printf \'Resolving...\\r\\033[31mFailed to install %s: 404 Not Found\\033[0m\\n\' "$3" >&2; exit 1; fi',
   'if [ "$FAKE_OMP" = silent ]; then exit 0; fi',
   'case "$1 $2" in',
-  '  "plugin install") v="${3##*@}"; case "$3" in @plannotator/pi-extension@*) ;; *) v="$FAKE_OMP_LATEST" ;; esac; write "$v"; echo "Installed @plannotator/pi-extension@$v"; exit 0 ;;',
-  '  "plugin upgrade") write "$FAKE_OMP_LATEST"; echo "Upgraded"; exit 0 ;;',
+  '  "plugin install") v="${3##*@}"; spec="$v"; case "$3" in @plannotator/pi-extension@*) ;; *) v="$FAKE_OMP_LATEST"; spec="^$v" ;; esac; write "$v" "$spec"; echo "Installed @plannotator/pi-extension@$v"; exit 0 ;;',
+  '  "plugin upgrade") write "$FAKE_OMP_LATEST" "^$FAKE_OMP_LATEST"; echo "Upgraded"; exit 0 ;;',
   "esac",
   "exit 1",
   "",
@@ -5637,6 +5639,8 @@ const FAKE_OMP = [
 interface OmpScenario {
   /** The extension's version OMP has installed; null: not installed. */
   installed: string | null;
+  /** The manifest's spec for it (default "^<installed>"; an exact version is the person's pin). */
+  spec?: string;
   latest?: string;
   behave?: "ok" | "fail" | "hang" | "silent";
 }
@@ -5646,7 +5650,7 @@ function setupOmpSandbox(sc: OmpScenario) {
   const dir = join(sandbox.home, ".omp", "plugins");
   if (sc.installed !== null) {
     mkdirSync(join(dir, "node_modules", "@plannotator", "pi-extension"), { recursive: true });
-    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { [OMP_PKG]: `^${sc.installed}` } }));
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "omp-plugins", private: true, dependencies: { [OMP_PKG]: sc.spec ?? `^${sc.installed}` } }));
     writeFileSync(join(dir, "node_modules", "@plannotator", "pi-extension", "package.json"), JSON.stringify({ name: OMP_PKG, version: sc.installed }));
   }
   writeFileSync(join(sandbox.stub, "omp"), FAKE_OMP, { mode: 0o755 });
@@ -5753,14 +5757,48 @@ function ompStepTests(runner: OmpRunner) {
     const s = setupOmpSandbox({ installed: null, behave: "fail" });
     const r = runOmpStep(runner, s);
     expect(r.code).toBe(0);
+    // The progress line before a carriage return and the colour codes are not part of the reason.
     expect(r.out).toContain(`Oh My Pi: could not install the Plannotator extension (omp exited 1: Failed to install ${OMP_PKG}: 404 Not Found). ${OMP_MANUAL}`);
+  }, timeout);
+
+  test(`${runner}: an update that fails says update, with the upgrade command`, () => {
+    const s = setupOmpSandbox({ installed: PI_OLDER, behave: "fail" });
+    const r = runOmpStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Oh My Pi: could not update the Plannotator extension (omp exited 1: Failed to install ${OMP_PKG}: 404 Not Found). Run this, then restart OMP:\n  omp plugin upgrade ${OMP_PKG}\n`);
+  }, timeout);
+
+  test(`${runner}: npm has an older extension than this release: says still, never up to date`, () => {
+    const s = setupOmpSandbox({ installed: PI_OLDER, latest: PI_OLDER });
+    const r = runOmpStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`Oh My Pi: Plannotator extension still ${PI_OLDER} (this release is ${PI_RELEASE}). To update it later: omp plugin upgrade ${OMP_PKG}\n`);
+    expect(r.out).not.toContain("up to date");
+  }, timeout);
+
+  test(`${runner}: a version the person pinned in OMP is left as is`, () => {
+    const s = setupOmpSandbox({ installed: PI_OLDER, spec: PI_OLDER });
+    const r = runOmpStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([]);
+    expect(s.version()).toBe(PI_OLDER);
+    expect(r.out).toContain(`Oh My Pi: Plannotator extension pinned to ${PI_OLDER} in OMP, left as is. To move it: omp plugin install ${OMP_PKG}@${PI_RELEASE}\n`);
+  }, timeout);
+
+  test(`${runner}: listed but its package can't be read: installed again`, () => {
+    const s = setupOmpSandbox({ installed: PI_OLDER });
+    rmSync(join(s.sandbox.home, ".omp", "plugins", "node_modules"), { recursive: true, force: true });
+    const r = runOmpStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`plugin install ${OMP_PKG}`]);
+    expect(r.out).toContain(`Oh My Pi: Plannotator extension installed (${PI_RELEASE}). Restart OMP to load it.\n`);
   }, timeout);
 
   test(`${runner}: omp exits 0 but OMP's manifest does not list it: not called installed`, () => {
     const s = setupOmpSandbox({ installed: null, behave: "silent" });
     const r = runOmpStep(runner, s);
     expect(r.code).toBe(0);
-    expect(r.out).toContain(`Oh My Pi: could not install the Plannotator extension (OMP's plugin list does not show it). ${OMP_MANUAL}`);
+    expect(r.out).toContain(`Oh My Pi: could not install the Plannotator extension (OMP's plugin folder does not list it). ${OMP_MANUAL}`);
     expect(r.out).not.toContain("extension installed");
   }, timeout);
 
@@ -5771,6 +5809,18 @@ function ompStepTests(runner: OmpRunner) {
     expect(r.code).toBe(0);
     expect(Date.now() - at).toBeLessThan(25_000);
     expect(r.out).toContain(`Oh My Pi: could not install the Plannotator extension (it did not finish within 3s). ${OMP_MANUAL}`);
+    // omp's own child (its bun) was stopped with it, never left behind.
+    const child = Number(readFileSync(join(s.sandbox.home, "omp-child.pid"), "utf-8").trim());
+    let alive = true;
+    for (let waited = 0; waited < 3000 && alive; waited += 100) {
+      try {
+        process.kill(child, 0);
+        Bun.sleepSync(100);
+      } catch {
+        alive = false;
+      }
+    }
+    expect(alive).toBe(false);
   }, timeout);
 
   test(`${runner}: a pinned run installs that version fresh and leaves an install as it is`, () => {

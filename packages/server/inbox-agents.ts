@@ -45,6 +45,8 @@ import {
   inboxAgentList,
   inboxElsewhereText,
   inboxGrantText,
+  inboxInstalledText,
+  inboxInstallingText,
   type InboxAgentId,
   type InboxConnectReport,
   INBOX_MUSE_BIN,
@@ -697,10 +699,11 @@ export function piExtensionInstalled(e: AgentEnvironment): boolean {
 /** The npm package Oh My Pi installs as Plannotator's extension (`omp plugin install`). */
 export const OMP_EXTENSION_PACKAGE = "@plannotator/pi-extension";
 /**
- * The first extension whose `plannotator_inbox` tool is on in Oh My Pi with nothing configured. An older one
- * (0.29.0) keeps it off, so the connect step moves it on (`omp plugin upgrade`).
+ * What an extension says in its package.json (`plannotator.features`) when its `plannotator_inbox` tool is on in Oh
+ * My Pi with nothing configured. Read from the installed package, never inferred from a version number, so a
+ * release that carries the change is current whatever its number (apps/pi-extension/package.json carries it).
  */
-export const OMP_EXTENSION_TOOL_ON_SINCE = "0.29.1";
+export const OMP_EXTENSION_FEATURE = "omp-inbox-tool-default";
 
 /**
  * Oh My Pi's plugin folders, the one it uses first: `$XDG_DATA_HOME/omp/plugins` when OMP set that folder up,
@@ -713,57 +716,94 @@ export function ompPluginDirs(e: AgentEnvironment): string[] {
 }
 
 /**
- * The version of Plannotator's extension Oh My Pi installed: null when OMP's plugin manifest
- * (`<plugins>/package.json` dependencies) does not list it, "" when it does but its package can't be read. Read only.
+ * Plannotator's extension as Oh My Pi installed it, read only. Null: OMP's plugin manifest (`<plugins>/package.json`
+ * dependencies) does not list it. `version` "": listed, but the package's own package.json can't be read (an install
+ * cut short: treated as not installed, so it is installed again). `pinned`: the manifest holds an exact version
+ * (`omp plugin install @plannotator/pi-extension@0.28.60`), left as it is. `current`: its Inbox tool is on in OMP.
  */
-export function ompExtensionVersion(e: AgentEnvironment): string | null {
+export interface OmpExtension {
+  version: string;
+  spec: string;
+  pinned: boolean;
+  current: boolean;
+  dir: string;
+}
+
+export function ompExtension(e: AgentEnvironment): OmpExtension | null {
   for (const dir of ompPluginDirs(e)) {
     const manifest = readAgentFile(join(dir, "package.json"));
     if (manifest.kind !== "file") continue;
+    let spec: unknown;
     try {
       const deps = (JSON.parse(manifest.text) as { dependencies?: unknown }).dependencies;
       if (!deps || typeof deps !== "object" || !(OMP_EXTENSION_PACKAGE in deps)) continue;
+      spec = (deps as Record<string, unknown>)[OMP_EXTENSION_PACKAGE];
     } catch {
       continue;
     }
+    const text = typeof spec === "string" ? spec.trim() : "";
+    const pinned = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(text);
     const pkg = readAgentFile(join(dir, "node_modules", ...OMP_EXTENSION_PACKAGE.split("/"), "package.json"));
-    if (pkg.kind !== "file") return "";
-    try {
-      const version = (JSON.parse(pkg.text) as { version?: unknown }).version;
-      return typeof version === "string" ? version : "";
-    } catch {
-      return "";
+    let version = "";
+    let current = false;
+    if (pkg.kind === "file") {
+      try {
+        const parsed = JSON.parse(pkg.text) as { version?: unknown; plannotator?: { features?: unknown } };
+        if (typeof parsed.version === "string") version = parsed.version;
+        const features = parsed.plannotator?.features;
+        current = version !== "" && Array.isArray(features) && features.includes(OMP_EXTENSION_FEATURE);
+      } catch {
+        version = "";
+      }
     }
+    return { version, spec: text, pinned, current, dir };
   }
   return null;
 }
 
-function versionAtLeast(version: string, min: string): boolean {
-  const a = version.replace(/^v/, "").split(/[.+-]/).map(Number);
-  const b = min.split(".").map(Number);
-  for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
-  return true;
+/** The extension's version as OMP installed it: null when not listed, "" when its package can't be read. */
+export function ompExtensionVersion(e: AgentEnvironment): string | null {
+  return ompExtension(e)?.version ?? null;
 }
 
-/** Whether Oh My Pi has an extension whose Inbox tool is on by default (installed, and new enough). */
+/** Whether Oh My Pi has an extension whose Inbox tool is on by default (installed, readable, with the feature). */
 export function ompExtensionCurrent(e: AgentEnvironment): boolean {
-  const version = ompExtensionVersion(e);
-  return version !== null && version !== "" && versionAtLeast(version, OMP_EXTENSION_TOOL_ON_SINCE);
+  return ompExtension(e)?.current === true;
 }
 
-/** How long `omp plugin install` may take (it downloads the package); a run's own total limit still applies. */
-export const OMP_INSTALL_TIMEOUT_MS = 120_000;
+/**
+ * How long `omp plugin install` may take at the Inbox (it downloads the package). Run outside the connect step's
+ * total limit, off the request path (`startAgentInstall`).
+ */
+export const OMP_INSTALL_TIMEOUT_MS = 180_000;
+
+/** Why an OMP install or upgrade ran and the extension is still not current: what is actually there. */
+function ompNotDone(line: string, e: AgentEnvironment): string {
+  const ext = ompExtension(e);
+  if (!ext) return `${line} ran, but Oh My Pi's plugin folder does not list the extension`;
+  if (ext.version === "") return `${line} ran, but the extension's package in Oh My Pi's plugin folder can't be read`;
+  return `${line} ran, but Oh My Pi still has an older Plannotator extension (${ext.version})`;
+}
 
 /**
  * Oh My Pi's way: Plannotator's Pi extension and its tool. The connect step installs the extension with OMP's own
- * command when it is not there, or moves one too old to have the tool on (`omp plugin upgrade`). A version that
- * can't be read is left as it is.
+ * command when it is not there (or its package can't be read), or moves one without the OMP default
+ * (`omp plugin upgrade`). An exact version the person pinned in OMP is left as it is.
  */
 function ompWay(e: AgentEnvironment): ConnectWay {
-  const version = ompExtensionVersion(e);
-  // Not listed, or listed with no readable package (an install cut short): install (OMP reinstalls a listed one).
-  const args = !version ? ["plugin", "install", OMP_EXTENSION_PACKAGE] : !versionAtLeast(version, OMP_EXTENSION_TOOL_ON_SINCE) ? ["plugin", "upgrade", OMP_EXTENSION_PACKAGE] : null;
-  return { kind: "tool", host: "pi", piHost: "oh-my-pi", ...(args ? { then: { bin: "omp", args, done: ompExtensionCurrent, cwd: e.homeDir, timeoutMs: OMP_INSTALL_TIMEOUT_MS } } : {}) };
+  const ext = ompExtension(e);
+  const args = !ext || ext.version === "" ? ["plugin", "install", OMP_EXTENSION_PACKAGE] : !ext.current && !ext.pinned ? ["plugin", "upgrade", OMP_EXTENSION_PACKAGE] : null;
+  const step: ToolConnectStep | null = args
+    ? { bin: "omp", args, done: ompExtensionCurrent, cwd: e.homeDir, timeoutMs: OMP_INSTALL_TIMEOUT_MS, seen: (env) => ompExtensionVersion(env), notDone: ompNotDone }
+    : null;
+  return { kind: "tool", host: "pi", piHost: "oh-my-pi", ...(step ? { then: step } : {}) };
+}
+
+/** An extension pinned in Oh My Pi too old to have its Inbox tool on there: why, for Settings (null otherwise). */
+function ompPinnedReason(e: AgentEnvironment): string | null {
+  const ext = ompExtension(e);
+  if (!ext || !ext.pinned || ext.current || ext.version === "") return null;
+  return `Plannotator's extension is pinned to ${ext.version} in Oh My Pi, which has no Inbox tool there by default. omp plugin install ${OMP_EXTENSION_PACKAGE} moves it to the newest`;
 }
 
 /** Whether a tool way's Inbox tool is on: Oh My Pi's own default, else the host's. */
@@ -1632,6 +1672,14 @@ export interface InboxAgentsFile {
   manual_said?: Partial<Record<InboxAgentId, string>>;
   /** Each agent last said to be connected in another file than the environment names (`recorded -> now`): said once. */
   elsewhere_said?: Partial<Record<InboxAgentId, string>>;
+  /**
+   * An install the connect step ran that did not finish connecting the agent (Oh My Pi's `omp plugin install`), under
+   * which Plannotator (`version`) and with what was there (`seen`): not run again at each start until either changes,
+   * so a release npm does not carry yet is not fetched at every start. Settings' switch runs it whatever this says.
+   */
+  install_failed?: Partial<Record<InboxAgentId, { version: string; seen: string | null; reason: string }>>;
+  /** What the shared `inboxTool` key held before Settings turned an agent sharing it (Oh My Pi) off: put back on. */
+  tool_before_off?: Partial<Record<InboxAgentId, boolean | null>>;
 }
 
 export function inboxAgentsPath(dataDir: string): string {
@@ -1678,6 +1726,10 @@ export interface ConnectOptions {
    * nothing is written.
    */
   signal?: AbortSignal;
+  /** This Plannotator's version ("dev" when unknown): a failed install is tried again only under another. */
+  version?: string;
+  /** Internal: the connect step hands an install back (`installing`) to run outside its total limit. */
+  installInBackground?: boolean;
 }
 
 function firstLine(text: string): string {
@@ -1704,6 +1756,10 @@ interface ToolConnectStep {
   undo?: string;
   cwd?: string;
   timeoutMs?: number;
+  /** An install: the version of what is there now (null: nothing), so a failure is tried again only once that changes. */
+  seen?: (e: AgentEnvironment) => string | null;
+  /** An install that ran and is still not done: what is actually there. */
+  notDone?: (line: string, e: AgentEnvironment) => string;
 }
 
 type ToolGrant = { setting: string; undo: string };
@@ -1715,6 +1771,7 @@ type AgentOutcome =
   | { kind: "failed"; reason: string; path: string | null }
   | { kind: "manual"; why: string }
   | { kind: "off"; record: InboxAgentRecord }
+  | { kind: "installing"; step: ToolConnectStep }
   | { kind: "none" };
 
 /** The commands that count as this CLI's entry: what it writes now, and what a record says it wrote. */
@@ -1753,6 +1810,8 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
       }
     }
     const step = way.then && !way.then.done(e) ? way.then : null;
+    // An install (Oh My Pi's `omp plugin install`) at an Inbox start runs outside the step's total limit.
+    if (step && !step.setting && options.installInBackground) return { kind: "installing", step };
     const unfinished = step ? await finishToolConnect(e, step, options.agentTimeoutMs ?? step.timeoutMs ?? timeoutMs) : null;
     if (unfinished) return { kind: "failed", reason: unfinished, path: null };
     const granted = step?.setting && step.undo ? { granted: { setting: step.setting, undo: step.undo } } : {};
@@ -1797,8 +1856,72 @@ async function finishToolConnect(e: AgentEnvironment, then: ToolConnectStep, tim
     return `${line} exited with code ${ran.exitCode}${why ? ` (${why})` : ""}`;
   }
   // An install that exits 0 counts only once the agent's own files show it (Oh My Pi's plugin manifest).
-  if (!then.setting && !then.done(e)) return `${line} ran, but the extension is not there`;
+  if (!then.setting && !then.done(e)) return then.notDone ? then.notDone(line, e) : `${line} ran, but the extension is not there`;
   return null;
+}
+
+const agentInstalls = new Map<string, Promise<string | null>>();
+
+/** Every background install still running (tests, and an Inbox that waits before it stops). */
+export async function agentInstallsSettled(): Promise<void> {
+  await Promise.all([...agentInstalls.values()]);
+}
+
+/** The install running for this agent and data folder, if any. */
+function agentInstallRunning(dataDir: string, id: InboxAgentId): Promise<string | null> | undefined {
+  return agentInstalls.get(`${dataDir}\0${id}`);
+}
+
+/**
+ * Run an agent's install (Oh My Pi's `omp plugin install`) off the request path, up to its own time limit and
+ * outside the connect step's total, never two at once for one agent. When it ends, its outcome is written: the
+ * record and a "restart to load it" line, or the failure, said once and kept per Plannotator version and per what
+ * was there, so it is not run again at each start. False: one is already running.
+ */
+function startAgentInstall(id: InboxAgentId, step: ToolConnectStep, options: ConnectOptions): boolean {
+  const key = `${options.dataDir}\0${id}`;
+  if (agentInstalls.has(key)) return false;
+  const e = options.environment;
+  const seenBefore = step.seen?.(e) ?? null;
+  const version = options.version ?? "dev";
+  const scoped: AgentEnvironment = options.signal ? { ...e, run: (argv, runOptions) => e.run(argv, { ...runOptions, signal: options.signal }) } : e;
+  const job = (async (): Promise<string | null> => {
+    let reason: string | null;
+    try {
+      reason = await finishToolConnect(scoped, step, step.timeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS);
+    } catch (error) {
+      reason = error instanceof Error ? error.message : String(error);
+    }
+    // The Inbox stopped: the install was cut off; the next start tries again.
+    if (options.signal?.aborted) return reason;
+    const at = (options.now ?? (() => new Date()))().toISOString();
+    const file = readInboxAgents(options.dataDir);
+    const pending = file.last_report && !file.last_report.seen ? file.last_report : null;
+    const report: InboxConnectReport & { seen?: boolean } = pending ?? { at, first: false, added: [], already: [], failed: [], foreign: [], manual: [], unfinished: [], claude_code: false };
+    if (reason === null) {
+      file.agents[id] = { state: "added", reach: "tool", path: null, at };
+      if (file.install_failed) delete file.install_failed[id];
+      if (file.failures) delete file.failures[id];
+      if (!report.added.includes(id)) report.added.push(id);
+      report.installed = [...(report.installed ?? []).filter((agent) => agent !== id), id];
+      if (!file.first_connected_at) file.first_connected_at = at;
+    } else {
+      (file.install_failed ??= {})[id] = { version, seen: seenBefore, reason };
+      const said = file.failures?.[id] === reason;
+      (file.failures ??= {})[id] = reason;
+      if (!said) report.failed = [...report.failed.filter((failure) => failure.agent !== id), { agent: id, reason, path: null }];
+      if (said && !pending) return reason;
+    }
+    file.last_report = { ...report, seen: false };
+    try {
+      writeInboxAgents(options.dataDir, file);
+    } catch {
+      // Not kept: the next start finds the extension (done) or tries again.
+    }
+    return reason;
+  })().finally(() => agentInstalls.delete(key));
+  agentInstalls.set(key, job);
+  return true;
 }
 
 /**
@@ -1865,7 +1988,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   // behind (a hung CLI in its own process group would otherwise outlive us).
   const runs = new AbortController();
   const scoped: AgentEnvironment = { ...e, run: (argv, runOptions) => e.run(argv, { ...runOptions, signal: runs.signal }) };
-  const stepOptions: ConnectOptions = { ...options, environment: scoped };
+  const stepOptions: ConnectOptions = { ...options, environment: scoped, installInBackground: true };
   let timer: ReturnType<typeof setTimeout> | undefined;
   let onAbort: (() => void) | undefined;
   await Promise.race([
@@ -1896,6 +2019,8 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
 
   const failures = { ...(file.failures ?? {}) };
   const manualSaid = { ...(file.manual_said ?? {}) };
+  /** Installs started once this run's records are written, so their own write comes after. */
+  const installs: { id: InboxAgentId; step: ToolConnectStep }[] = [];
   for (const spec of toConnect) {
     const outcome = settled.get(spec.id);
     if (!outcome) {
@@ -1922,6 +2047,17 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
       case "off":
         file.agents[spec.id] = outcome.record;
         break;
+      case "installing": {
+        // Not again under the same Plannotator with the same extension there, after it failed; never two at once.
+        const failed = file.install_failed?.[spec.id];
+        const version = options.version ?? "dev";
+        const seen = outcome.step.seen?.(e) ?? null;
+        if (failed && failed.version === version && failed.seen === seen) break;
+        if (agentInstallRunning(options.dataDir, spec.id)) break;
+        installs.push({ id: spec.id, step: outcome.step });
+        (report.installing ??= []).push(spec.id);
+        break;
+      }
       case "failed":
         // A lasting failure is said once; tried again every run.
         if (failures[spec.id] !== outcome.reason) report.failed.push({ agent: spec.id, reason: outcome.reason, path: displayPath(outcome.path, e) });
@@ -1981,6 +2117,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   } catch {
     // The records could not be kept: this run's adds are found again next time ("found").
   }
+  for (const install of installs) startAgentInstall(install.id, install.step, options);
   return report;
 }
 
@@ -2007,6 +2144,8 @@ export function formatConnectReport(report: InboxConnectReport): string[] {
     );
   }
   for (const grant of report.granted ?? []) lines.push(inboxGrantText(grant));
+  for (const agent of report.installed ?? []) lines.push(inboxInstalledText(agent));
+  for (const agent of report.installing ?? []) lines.push(inboxInstallingText(agent));
   for (const failure of report.trust_failed ?? []) {
     lines.push(`${INBOX_AGENT_LABELS[failure.agent]} won't get your replies by itself: ${failure.reason}. Plannotator tries again at the next plannotator inbox.`);
   }
@@ -2285,6 +2424,11 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
     if (way.then && !way.then.setting && configuredInboxTool(loadConfig(), way.host) !== false && toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv) !== false) {
       return { kind: "tool", on: false, state: "not_connected", path: null, locked: false, reason: `Turning this on runs ${[way.then.bin, ...way.then.args].join(" ")}` };
     }
+    // Oh My Pi with an extension the person pinned before the OMP default: off unless turned on by name or by env.
+    const pinned = way.piHost === "oh-my-pi" ? ompPinnedReason(e) : null;
+    if (pinned && configuredInboxTool(loadConfig(), way.host) !== true && parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== true) {
+      return { kind: "tool", on: false, state: "off", path: null, locked, reason: pinned };
+    }
     const on = !modOff && toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv) && (!way.then || way.then.setting !== undefined || way.then.done(e));
     return { kind: "tool", on, state: on ? "connected" : "off", path: null, locked, reason: modOff ? CLAUDE_CODE_MOD_OFF_REASON : null };
   }
@@ -2400,13 +2544,30 @@ export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options:
       const removed = await removeOurMcpEntry(id, options, file.agents[id]);
       if (removed) return `Plannotator's earlier MCP entry for ${INBOX_AGENT_LABELS[id]} could not be removed, so its Inbox tool stays off: ${removed}`;
     }
-    // Oh My Pi: on clears a `pi: false` (its own default is on, Pi's stays off) and installs the extension when it
-    // is not there; off writes `pi: false`, the key the extension reads in both.
-    const problem = way.piHost && on ? (configuredInboxTool(loadConfig(), way.host) === false ? clearInboxTool(way.host, e) : parseInboxToolEnv(e.env as NodeJS.ProcessEnv) === false ? "PLANNOTATOR_INBOX_TOOL decides this" : null) : setInboxTool(way.host, on, e);
+    // Oh My Pi shares Pi's key (the extension reads `pi` in both). Off writes `pi: false` and remembers what was there;
+    // on puts that back (a Pi turned on by name stays on), or takes the key out so each default decides again.
+    let problem: string | null;
+    if (way.piHost) {
+      const before = configuredInboxTool(loadConfig(), way.host);
+      if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) problem = "PLANNOTATOR_INBOX_TOOL decides this";
+      else if (!on) {
+        problem = setInboxTool(way.host, false, e);
+        if (!problem && before !== false) (file.tool_before_off ??= {})[id] = before ?? null;
+      } else if (before === false) {
+        const restore = file.tool_before_off?.[id];
+        problem = restore === true ? setInboxTool(way.host, true, e) : clearInboxTool(way.host, e);
+        if (!problem && file.tool_before_off) delete file.tool_before_off[id];
+      } else problem = null;
+    } else problem = setInboxTool(way.host, on, e);
     if (problem) return problem;
     if (on && way.then && !way.then.setting && !way.then.done(e)) {
-      const unfinished = await finishToolConnect(e, way.then, options.agentTimeoutMs ?? way.then.timeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS);
-      if (unfinished) return unfinished;
+      // One already running (started with the Inbox): wait for it rather than start a second.
+      const running = agentInstallRunning(options.dataDir, id);
+      const unfinished = running ? await running : await finishToolConnect(e, way.then, options.agentTimeoutMs ?? way.then.timeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS);
+      if (unfinished && !way.then.done(e)) return unfinished;
+      // The background install may have written the file meanwhile: carry on from what it wrote.
+      if (running) Object.assign(file, readInboxAgents(options.dataDir), { tool_before_off: file.tool_before_off });
+      if (file.install_failed) delete file.install_failed[id];
     }
     file.agents[id] = { state: on ? "added" : "off", reach: "tool", path: null, at };
   } else if (on) {

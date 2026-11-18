@@ -80,7 +80,9 @@ omp plugin install @plannotator/pi-extension
 ```
 
 Update with `omp plugin upgrade @plannotator/pi-extension`, then type
-`/restart` in each open OMP session to load the new version. Remove with
+`/restart` in each open OMP session to load the new version. A version you
+pinned (`omp plugin install @plannotator/pi-extension@0.28.60`) is left as
+it is by the installer and the Inbox. Remove with
 `omp plugin uninstall @plannotator/pi-extension`.
 
 Open reviews with the extension's commands: `/plannotator-review`,
@@ -107,8 +109,9 @@ reply there wake the session, is also **on by default in OMP** (off on Pi). It
 reads the same switch as Pi: `PLANNOTATOR_INBOX_TOOL=0` or
 `{ "inboxTool": { "pi": false } }` keeps it out. An Inbox MCP server OMP
 loads beside the extension sends as the same session, so its replies wake the
-session too. A subagent OMP runs in the same process can take over that
-session's identity for a moment, so its messages may read as its parent's.
+session too. While a subagent runs in the same Oh My Pi process, messages
+sent over MCP may be filed under the subagent, and a reply to them may not
+wake the main session.
 
 Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the
 extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a

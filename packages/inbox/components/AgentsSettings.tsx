@@ -242,6 +242,15 @@ function Switch({ on, label, disabled, busy, onClick }: { on: boolean; label: st
   );
 }
 
+/** A row's sub-line with the shared-switch sentence after it. */
+function withShared(sub: string | null, shared: string | undefined): string | null {
+  if (!shared) return sub;
+  return sub ? `${sub} ${shared}` : shared;
+}
+
+/** Said under Oh My Pi's and Pi's switch when both are found: one key in config.json turns both. */
+export const SHARED_SWITCH_WORDS = 'Oh My Pi and Pi share this switch.';
+
 /** How an agent reaches the Inbox, beside its name. */
 function viaOf(row: InboxAgentRow): string {
   if (row.reach.kind === 'tool') return row.id === 'pi' || row.id === 'oh-my-pi' ? "Plannotator's extension" : "Plannotator's plugin";
@@ -409,8 +418,11 @@ function AgentGroup({
   sessions,
   extra,
   settling,
+  shared,
 }: {
   row: InboxAgentRow;
+  /** Oh My Pi and Pi both found: they read one `inboxTool` key, said under the switch that writes it. */
+  shared?: string;
   /** A run is still connecting the agents (`model.connecting`): the switches may still turn on, so no off line yet. */
   settling?: boolean;
   /** Rows after its own (Claude Code: "Start new sessions with full permissions", launch only). */
@@ -524,7 +536,7 @@ function AgentGroup({
         // Connected under another QWEN_HOME still reaches the Inbox from there: its value says where, so no off line.
         off={reachSwitchable && !reach.on && reach.state !== 'elsewhere' ? offLine('reach', offWords.reach(row.label)) : null}
         // Oh My Pi without Plannotator's extension: turning it on runs `omp plugin install` (the reason names it).
-        sub={(modOff || reach.state === 'not_connected') && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null}
+        sub={withShared((modOff || reach.state === 'not_connected' || (reach.state === 'off' && row.id === 'oh-my-pi')) && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null, reach.kind === 'tool' ? shared : undefined)}
         warn={modOff && reach.kind === 'tool'}
         r={
           reachSwitchable ? (
@@ -539,7 +551,7 @@ function AgentGroup({
       {row.tool && reach.kind !== 'tool' && (
         <Row
           k="The Inbox tool"
-          sub={cost}
+          sub={withShared(cost, shared)}
           off={row.tool.on ? null : offLine('tool', reach.on ? offWords.toolBesideMcp(row.label) : offWords.reach(row.label))}
           v={
             <>
@@ -804,6 +816,7 @@ export function AgentsSettings({
   const [busy, setBusy] = useState<Set<string>>(new Set());
   // The three Plannotator hosts stay listed (their Inbox tool switch) even when not found on this computer.
   const shown = model.agents.filter((row) => row.detected || row.tool);
+  const piAndOmp = model.agents.some((row) => row.id === 'pi' && row.detected) && model.agents.some((row) => row.id === 'oh-my-pi' && row.detected);
   const detected = model.agents.filter((row) => row.detected);
   const undetected = model.agents.filter((row) => !row.detected && !row.tool);
   // T3 Code runs Claude and Codex threads: its group follows theirs.
@@ -872,6 +885,7 @@ export function AgentsSettings({
             busy={busy.has(row.id)}
             settling={model.connecting}
             onChange={(input) => void change(row.id, input)}
+            {...((row.id === 'pi' || row.id === 'oh-my-pi') && piAndOmp ? { shared: SHARED_SWITCH_WORDS } : {})}
             {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{launchState?.enabled && <LaunchSettingsFile launch={launchState} busy={launchBusy} onLaunch={setLaunchState} onError={setError} />}{scratchRow}</> } : {})}
             {...(row.id === 'codex' && row.detected ? { extra: <CodexAccountRow /> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}

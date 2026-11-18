@@ -2306,7 +2306,11 @@ update_pi_extension_if_present() {
 # neither prompts. Installed means the package is in OMP's plugin manifest:
 # `<plugins>/package.json` dependencies, `<plugins>` being
 # $XDG_DATA_HOME/omp/plugins when OMP set that folder up, else ~/.omp/plugins
-# (docs/plugin-manager-installer-plumbing.md). Each call is time-bounded, with
+# (docs/plugin-manager-installer-plumbing.md); a listed package whose own
+# package.json can't be read is installed again. An exact version in the
+# manifest (`omp plugin install @plannotator/pi-extension@0.28.60`) is the
+# person's pin, left as is, as the Pi step leaves one in Pi's settings. Each
+# call is time-bounded (its process group, so omp's bun or npm stops too), with
 # stdin from /dev/null, run in the home folder (never a project's plugin
 # scope); a failure or a hang never fails the install: it prints the command
 # to run. A pinned run (--version naming an older tag) installs that version
@@ -2315,8 +2319,10 @@ update_pi_extension_if_present() {
 # which has no opt-out of its own either. install.ps1 and install.cmd's
 # :UpdateOmpExtension carry the same step.
 OMP_EXTENSION_PACKAGE="@plannotator/pi-extension"
-# none (no omp) | installed | updated | current | pinned | failed
+# none (no omp) | installed | updated | current | behind | pinned | failed
 omp_extension_state="none"
+# The command the closing section prints when the step could not finish.
+omp_extension_manual="omp plugin install ${OMP_EXTENSION_PACKAGE}"
 
 # OMP's plugin folders, the one it uses first.
 omp_plugin_dirs() {
@@ -2324,6 +2330,18 @@ omp_plugin_dirs() {
         printf '%s\n' "$XDG_DATA_HOME/omp/plugins"
     fi
     printf '%s\n' "$HOME/.omp/plugins"
+}
+
+# The manifest's spec for the extension ("^0.29.1", "0.28.60"), or "" when
+# OMP's manifest does not list it.
+omp_extension_spec() {
+    omp_plugin_dirs | while IFS= read -r _omp_dir; do
+        if [ -f "$_omp_dir/package.json" ] && grep -q '"@plannotator/pi-extension"[[:space:]]*:' "$_omp_dir/package.json" 2>/dev/null; then
+            _omp_s=$(tr -d '\n' < "$_omp_dir/package.json" 2>/dev/null | grep -o '"@plannotator/pi-extension"[[:space:]]*:[[:space:]]*"[^"]*"' | head -n 1 | sed 's/.*"\([^"]*\)"$/\1/')
+            printf '%s\n' "${_omp_s:-listed}"
+            break
+        fi
+    done
 }
 
 # The extension's version as OMP installed it: "" when OMP's manifest does not
@@ -2338,69 +2356,128 @@ omp_extension_version() {
     done
 }
 
-print_omp_extension_manual() {
-    echo "  omp plugin install ${OMP_EXTENSION_PACKAGE}"
+# run_with_time_limit, with the command in its own process group, stopped as a
+# whole on the limit (omp's bun or npm child too). Same arguments and status.
+run_with_time_limit_group() {
+    _rtg_secs="$1"
+    _rtg_flag="$2"
+    shift 2
+    rm -f "$_rtg_flag" 2>/dev/null || true
+    set -m
+    "$@" </dev/null &
+    _rtg_pid=$!
+    set +m
+    (
+        _rtg_sleep=""
+        trap '[ -n "$_rtg_sleep" ] && kill "$_rtg_sleep" 2>/dev/null; exit 0' TERM
+        sleep "$_rtg_secs" &
+        _rtg_sleep=$!
+        wait "$_rtg_sleep"
+        : > "$_rtg_flag"
+        kill -TERM -- "-$_rtg_pid" 2>/dev/null || kill -TERM "$_rtg_pid" 2>/dev/null
+        sleep 5 &
+        _rtg_sleep=$!
+        wait "$_rtg_sleep"
+        kill -KILL -- "-$_rtg_pid" 2>/dev/null || kill -KILL "$_rtg_pid" 2>/dev/null
+    ) >/dev/null 2>&1 </dev/null &
+    _rtg_dog=$!
+    _rtg_rc=0
+    wait "$_rtg_pid" || _rtg_rc=$?
+    kill -TERM "$_rtg_dog" 2>/dev/null || true
+    wait "$_rtg_dog" 2>/dev/null || true
+    if [ -f "$_rtg_flag" ]; then
+        return 124
+    fi
+    return "$_rtg_rc"
 }
 
 update_omp_extension_if_present() {
     command -v omp >/dev/null 2>&1 || return 0
-    _omp_secs="${PLANNOTATOR_OMP_PLUGIN_TIMEOUT:-300}"
-    case "$_omp_secs" in ''|*[!0-9]*|0) _omp_secs=300 ;; esac
+    _omp_secs="${PLANNOTATOR_OMP_PLUGIN_TIMEOUT:-180}"
+    case "$_omp_secs" in ''|*[!0-9]*|0) _omp_secs=180 ;; esac
+    _omp_target="${latest_tag#v}"
+    _omp_spec=$(omp_extension_spec)
     _omp_before=$(omp_extension_version)
+    case "$_omp_spec" in
+        [0-9]*.*.*|v[0-9]*.*.*)
+            case "$_omp_spec" in
+                *[!0-9A-Za-z.+-]*) ;;
+                *)
+                    omp_extension_state="pinned"
+                    echo "Oh My Pi: Plannotator extension pinned to ${_omp_spec#v} in OMP, left as is. To move it: omp plugin install ${OMP_EXTENSION_PACKAGE}@${_omp_target}"
+                    return 0 ;;
+            esac ;;
+    esac
     _omp_pinned=0
     if [ "$VERSION_EXPLICIT" -eq 1 ] && [ "${PLANNOTATOR_UPDATE_VERSION:-}" != "$latest_tag" ]; then
         _omp_pinned=1
     fi
-    if [ -n "$_omp_before" ] && [ "$_omp_pinned" -eq 1 ]; then
+    # A listed package that can't be read is installed again (OMP reinstalls it).
+    _omp_update=0
+    if [ -n "$_omp_before" ] && [ "$_omp_before" != "unknown" ]; then _omp_update=1; fi
+    if [ "$_omp_update" -eq 1 ] && [ "$_omp_pinned" -eq 1 ]; then
         omp_extension_state="pinned"
         echo "Oh My Pi: the Plannotator extension was not updated: pinned to ${latest_tag}; updating would install the newest extension."
         return 0
     fi
+    if [ "$_omp_update" -eq 1 ]; then
+        omp_extension_manual="omp plugin upgrade ${OMP_EXTENSION_PACKAGE}"
+        _omp_doing="update"
+    else
+        omp_extension_manual="omp plugin install ${OMP_EXTENSION_PACKAGE}"
+        _omp_doing="install"
+    fi
     _omp_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-omp.XXXXXX" 2>/dev/null) || _omp_tmp=""
     if [ -z "$_omp_tmp" ]; then
         omp_extension_state="failed"
-        echo "Oh My Pi: could not install the Plannotator extension (no temporary folder). Run this, then restart OMP:"
-        print_omp_extension_manual
+        echo "Oh My Pi: could not ${_omp_doing} the Plannotator extension (no temporary folder). Run this, then restart OMP:"
+        echo "  ${omp_extension_manual}"
         return 0
     fi
     _omp_rc=0
-    if [ -n "$_omp_before" ]; then
+    if [ "$_omp_update" -eq 1 ]; then
         echo "Updating the Plannotator extension in Oh My Pi..."
-        (cd "$HOME" && run_with_time_limit "$_omp_secs" "$_omp_tmp/timed-out" omp plugin upgrade "$OMP_EXTENSION_PACKAGE") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
+        (cd "$HOME" && run_with_time_limit_group "$_omp_secs" "$_omp_tmp/timed-out" omp plugin upgrade "$OMP_EXTENSION_PACKAGE") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
     else
-        _omp_spec="$OMP_EXTENSION_PACKAGE"
-        if [ "$_omp_pinned" -eq 1 ]; then _omp_spec="${OMP_EXTENSION_PACKAGE}@${latest_tag#v}"; fi
+        _omp_spec_arg="$OMP_EXTENSION_PACKAGE"
+        if [ "$_omp_pinned" -eq 1 ]; then _omp_spec_arg="${OMP_EXTENSION_PACKAGE}@${_omp_target}"; fi
         echo "Installing the Plannotator extension in Oh My Pi..."
-        (cd "$HOME" && run_with_time_limit "$_omp_secs" "$_omp_tmp/timed-out" omp plugin install "$_omp_spec") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
+        (cd "$HOME" && run_with_time_limit_group "$_omp_secs" "$_omp_tmp/timed-out" omp plugin install "$_omp_spec_arg") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
     fi
     _omp_after=$(omp_extension_version)
-    if [ "$_omp_rc" -ne 0 ] || [ -z "$_omp_after" ]; then
+    if [ "$_omp_rc" -ne 0 ] || [ -z "$_omp_after" ] || [ "$_omp_after" = "unknown" ]; then
         if [ "$_omp_rc" -eq 124 ]; then
             _omp_why="it did not finish within ${_omp_secs}s"
         elif [ "$_omp_rc" -ne 0 ]; then
-            _omp_last=$(tr -cd '\11\12\15\40-\176' < "$_omp_tmp/out" 2>/dev/null | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c1-200)
+            # Printable text only: a carriage return (a progress line) ends a line, colour codes go.
+            _omp_last=$(tr '\r' '\n' < "$_omp_tmp/out" 2>/dev/null | tr -cd '\12\40-\176' | sed 's/\[[0-9;]*[A-Za-z]//g; s/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c1-200)
             _omp_why="omp exited ${_omp_rc}${_omp_last:+: ${_omp_last}}"
+        elif [ -z "$_omp_after" ]; then
+            _omp_why="OMP's plugin folder does not list it"
         else
-            _omp_why="OMP's plugin list does not show it"
+            _omp_why="its package in OMP's plugin folder can't be read"
         fi
         rm -rf "$_omp_tmp"
         omp_extension_state="failed"
-        echo "Oh My Pi: could not install the Plannotator extension (${_omp_why}). Run this, then restart OMP:"
-        print_omp_extension_manual
+        echo "Oh My Pi: could not ${_omp_doing} the Plannotator extension (${_omp_why}). Run this, then restart OMP:"
+        echo "  ${omp_extension_manual}"
         return 0
     fi
     rm -rf "$_omp_tmp"
-    _omp_shown=""
-    [ "$_omp_after" = "unknown" ] || _omp_shown=" (${_omp_after})"
-    if [ -z "$_omp_before" ]; then
+    if ! pi_version_at_least "$_omp_after" "$_omp_target"; then
+        # The registry does not have this release yet (npm lagging, a mirror).
+        omp_extension_state="behind"
+        omp_extension_manual="omp plugin upgrade ${OMP_EXTENSION_PACKAGE}"
+        echo "Oh My Pi: Plannotator extension still ${_omp_after} (this release is ${_omp_target}). To update it later: ${omp_extension_manual}"
+    elif [ "$_omp_update" -eq 0 ]; then
         omp_extension_state="installed"
-        echo "Oh My Pi: Plannotator extension installed${_omp_shown}. Restart OMP to load it."
+        echo "Oh My Pi: Plannotator extension installed (${_omp_after}). Restart OMP to load it."
     elif [ "$_omp_before" = "$_omp_after" ]; then
         omp_extension_state="current"
-        echo "Oh My Pi: Plannotator extension already up to date${_omp_shown}."
+        echo "Oh My Pi: Plannotator extension already up to date (${_omp_after})."
     else
         omp_extension_state="updated"
-        echo "Oh My Pi: Plannotator extension updated${_omp_shown}. Restart OMP to load it."
+        echo "Oh My Pi: Plannotator extension updated (${_omp_after}). Restart OMP to load it."
     fi
 }
 
@@ -3477,19 +3554,18 @@ if command -v omp >/dev/null 2>&1; then
         installed|updated)
             echo "The Plannotator extension is installed in OMP. Restart OMP (/restart in each open"
             echo "session) to load it." ;;
-        current|pinned)
+        current|pinned|behind)
             echo "The Plannotator extension is installed in OMP." ;;
         *)
             echo "Install the Plannotator extension in OMP:"
             echo ""
-            print_omp_extension_manual
+            echo "  ${omp_extension_manual}"
             echo ""
             echo "Then restart OMP." ;;
     esac
     echo ""
     echo "Open reviews with /plannotator-review, /plannotator-annotate and /plannotator-last."
-    echo "Reviews opened that way can use Ask this session, and replies in the Plannotator"
-    echo "Inbox start a turn in the session that asked."
+    echo "Reviews opened that way can use Ask this session."
 fi
 if [ -d "$HOME/.gemini" ]; then
     echo ""

@@ -112,6 +112,16 @@ export function readPiSessionClaims(dataDir: string): PiSessionClaim[] {
   return claims;
 }
 
+/** Whether any claim file names `pid`: no file, no session, so the caller need not read the process's start time. */
+export function piSessionClaimFileOfPid(dataDir: string, pid: number): boolean {
+  if (!Number.isInteger(pid) || pid <= 1) return false;
+  try {
+    return readdirSync(piSessionClaimDirOf(dataDir)).some((name) => name.endsWith(`.${pid}.json`));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The session `pid` claims now, or null: the Pi (or Oh My Pi) process that started the Inbox's stdio MCP shim as
  * its MCP server says which session it runs here, and says it again on `/new`, `/resume` and an OMP session

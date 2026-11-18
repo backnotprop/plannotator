@@ -2452,7 +2452,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
   void autoNotes();
   const connectAgents = (): Promise<InboxConnectReport> => {
-    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal })
+    connecting ??= connectInboxAgents({ dataDir, selfCommand, environment: agentEnvironment, signal: connectStop.signal, version })
       .then(async (report) => {
         await autoNotes();
         return report;
