@@ -257,6 +257,12 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     return () => observer.disconnect();
   }, [fitContent]);
 
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const page = box && fitContent ? pageOf(box) : null;
+    if (page?.hasAttribute('data-keeping-place')) page.dispatchEvent(new Event('plannotator:layout'));
+  }, [renderedHeight, fitContent]);
+
   // Folded from its sticky header, the box is gone from under the reader: bring the file to the top of the page, not
   // whatever now sits where they were reading. Before paint, and before the box's new height reaches the observer above.
   // Not for Collapse all: every box folds then, and the host's bar keeps the place.

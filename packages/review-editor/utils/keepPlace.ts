@@ -1,4 +1,5 @@
 export const KEEPING_PLACE = 'data-keeping-place';
+export const LAYOUT_CHANGED = 'plannotator:layout';
 
 const HOLD_MS = 1_500;
 const OPENED_MS = 20_000;
@@ -173,6 +174,7 @@ export function keepPlace(scroller: HTMLElement, hooks: KeepPlaceHooks = {}): vo
       cancelAnimationFrame(frame);
       observer?.disconnect();
       scroller.removeEventListener('scroll', scrolled);
+      scroller.removeEventListener(LAYOUT_CHANGED, settle);
       for (const type of INTENT) window.removeEventListener(type, hold.stop, { capture: true });
       hooks.onStop?.();
     },
@@ -219,6 +221,7 @@ export function keepPlace(scroller: HTMLElement, hooks: KeepPlaceHooks = {}): vo
   holds.set(scroller, hold);
   scroller.setAttribute(KEEPING_PLACE, '');
   scroller.addEventListener('scroll', scrolled, { passive: true });
+  scroller.addEventListener(LAYOUT_CHANGED, settle);
   for (const type of INTENT) window.addEventListener(type, hold.stop, { capture: true, passive: true });
   watch();
   settle();
