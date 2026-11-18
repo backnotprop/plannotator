@@ -88,6 +88,12 @@ export function createInboxScheduled(deps: {
 
   // ── Runs, read from the thread ──
 
+  const sameSchedule = (before: InboxScheduledThread, after: InboxScheduledThread) =>
+    before.enabled === after.enabled &&
+    before.approved_at === after.approved_at &&
+    before.handled_through === after.handled_through &&
+    JSON.stringify(before.schedule) === JSON.stringify(after.schedule);
+
   /** Every run's divider, oldest first (the detail's run list reads it; the clock and the list read only the newest). */
   const dividersOf = (record: InboxScheduledThread): InboxMessage[] =>
     record.thread_id
@@ -303,6 +309,13 @@ export function createInboxScheduled(deps: {
     starting.add(id);
     try {
       const first = found(id);
+      const currentForRun = (): InboxScheduledThread => {
+        const record = found(id);
+        if (due.by === "schedule" && (!deps.on() || !deps.launchOn() || !sameSchedule(first, record))) {
+          throw new InboxError("routine_schedule_changed", "The routine's schedule or settings changed while it was starting.");
+        }
+        return record;
+      };
       const bodyOf = (record: InboxScheduledThread) =>
         `${record.prompt}${due.late && record.schedule ? `\n\n${inboxScheduledLateLine(new Date(due.due_at), new Date(now()), record.schedule.tz)}` : ""}`;
       const runOf = (record: InboxScheduledThread): InboxScheduledRun => ({
@@ -323,8 +336,9 @@ export function createInboxScheduled(deps: {
         if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
         prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
       } catch (error) {
-        const record = found(id);
-        const project = projectOf(record) ?? (await firstProject(record));
+        const before = currentForRun();
+        const project = projectOf(before) ?? (await firstProject(before));
+        const record = currentForRun();
         const run = runOf(record);
         log(`Inbox scheduled ${id}: run ${run.run} did not start (${error instanceof InboxError ? error.code : "error"})`);
         if (!project) throw error;
@@ -334,12 +348,13 @@ export function createInboxScheduled(deps: {
         if (record.thread_id !== message.thread_id) save(record, { thread_id: message.thread_id });
         return message;
       }
-      // Deleted while it was starting: the run doesn't start, and what the launch made for it goes.
       const live = (): InboxScheduledThread => {
-        const record = store.scheduledThread(id);
-        if (record) return record;
-        launch.abandon(prepared.launch, prepared.project);
-        throw new InboxError("routine_not_found", `No routine ${id}.`);
+        try {
+          return currentForRun();
+        } catch (error) {
+          launch.abandon(prepared.launch, prepared.project);
+          throw error;
+        }
       };
       const record = live();
       let attachments: InboxAttachment[] = [];
@@ -420,8 +435,10 @@ export function createInboxScheduled(deps: {
     lastCheck = at;
     checking = true;
     try {
-      for (const record of store.scheduledThreads()) {
-        if (!record.enabled || record.done_at || !record.approved_at || !record.schedule) continue;
+      for (const { id } of store.scheduledThreads()) {
+        if (!deps.on() || !deps.launchOn()) break;
+        const record = store.scheduledThread(id);
+        if (!record?.enabled || record.done_at || !record.approved_at || !record.schedule) continue;
         const running = starting.has(record.id) || runningOf(record) !== null;
         const decision = inboxScheduledDecide({ schedule: record.schedule, if_missed: record.if_missed, handled_through: handledThrough(record), now: new Date(at), why, running });
         if (decision.kind === "wait") continue;
@@ -433,7 +450,7 @@ export function createInboxScheduled(deps: {
           log(`Inbox scheduled ${record.id}: ${error instanceof InboxError ? error.code : error instanceof Error ? error.name : "error"}`);
         }
         const after = store.scheduledThread(record.id);
-        if (!after) continue;
+        if (!after || !deps.on() || !deps.launchOn() || !sameSchedule(record, after)) continue;
         const once = "at" in record.schedule;
         const behind = (handledThrough(after) ?? "") < decision.handled_through;
         if (once || behind) save(after, { ...(behind ? { handled_through: decision.handled_through } : {}), ...(once ? { done_at: iso(), enabled: false } : {}) });
