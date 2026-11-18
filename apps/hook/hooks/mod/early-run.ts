@@ -48,6 +48,21 @@ export function isEarlyRunRefusal(text: unknown): boolean {
 export const RUN_EVENT = 'tool.run'
 
 /**
+ * What Claude reads when the guard refuses the start at `tool.run`, where its
+ * own advice ("serve an allowed call at tool.run") no longer applies. The
+ * call was allowed and the guard forgot it there, so another call it still
+ * holds shares this one's words. That is a call refused in this turn, or one
+ * a hook answered, and the guard keeps it until the person's next message.
+ */
+export const HELD_AT_RUN_TEXT =
+  'Plannotator could not start: Claude Code\'s guard is still holding an earlier call with the same words (one refused or answered in this turn), so it refused this start. It lets go at the person\'s next message: ask them to send one, then call again.'
+
+/** The answer at `tool.run`: the guard's refusal there reads as HELD_AT_RUN_TEXT, anything else as it was. */
+export function answerAtRun<A extends object>(answer: A | { deny: string }): A | { deny: string } {
+  return 'deny' in answer && isEarlyRunRefusal(answer.deny) ? { deny: HELD_AT_RUN_TEXT } : answer
+}
+
+/**
  * A plugin tool named `plannotator` as the engine names it (`mcp__<server>__plannotator`);
  * the hook still checks the call names the mod's own registered tool.
  */

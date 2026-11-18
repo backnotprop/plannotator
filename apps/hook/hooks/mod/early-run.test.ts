@@ -18,7 +18,7 @@
  * permission step, as before); and a hook named `tool.run`, which an engine before 2.1.326 refuses to load.
  */
 import { describe, expect, test } from 'bun:test'
-import { isServedAtRun } from './early-run'
+import { HELD_AT_RUN_TEXT, isServedAtRun } from './early-run'
 
 type Hook = ($: unknown, e: unknown, next: unknown) => unknown
 
@@ -182,6 +182,19 @@ describe('behind the guard (Claude Code 2.1.326+, a Team or Enterprise login)', 
     const { answer, reached } = await modelCall(setup, call, 'deny')
 
     expect(answer).toEqual({ deny: 'The user doesn\'t want to proceed with this tool use.' })
+    expect([setup.world.launched, reached.core, launchFolders(setup.world)]).toEqual([[], [], []])
+  })
+
+  // The person refuses the tool, then allows a Bash fallback with the same words in the same turn: the
+  // guard still holds the refused call, so it refuses the start at tool.run too. Its advice ("serve an
+  // allowed call at tool.run") would send Claude in a circle there; Claude reads what to do instead.
+  test('a start refused at tool.run reads as the held call it is, not as the guard\'s advice', async () => {
+    const setup = await started('held-at-run', true)
+    await modelCall(setup, TOOL_CALL, 'deny')
+    const { answer, reached } = await modelCall(setup, BASH_CALL)
+
+    expect(answer).toEqual({ deny: HELD_AT_RUN_TEXT })
+    expect(HELD_AT_RUN_TEXT).not.toContain('tool.run')
     expect([setup.world.launched, reached.core, launchFolders(setup.world)]).toEqual([[], [], []])
   })
 

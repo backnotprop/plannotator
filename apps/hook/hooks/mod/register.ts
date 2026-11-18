@@ -153,7 +153,7 @@ import { isAbsolutePath } from './paths'
 import { PLAN_TOOL } from './plan'
 import { pickShell, useShell, type ModShell } from './shell'
 import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
-import { isEarlyRunRefusal, isServedAtRun, RUN_EVENT, RUN_MATCHER } from './early-run'
+import { answerAtRun, isEarlyRunRefusal, isServedAtRun, RUN_EVENT, RUN_MATCHER } from './early-run'
 import { answerRemovalPrompt, isEnvOn, removalAskKey, RemovalAsks } from './skip-rm-prompts'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
@@ -1260,16 +1260,22 @@ export function register(on: On) {
   // Bash command is taken over by the same rule as at `tool.call`. Registered
   // through `tool.*`: an engine before 2.1.326 refuses to load a module that
   // names `tool.run` ("registered "tool.run", which is not an event"), and
-  // there no call ever reaches this hook as `tool.run`.
+  // there no call ever reaches this hook as `tool.run`. The glob puts the mod
+  // in the chain of every `tool.*` event (the engine picks a module's hooks by
+  // pattern; a matcher only decides whether this hook runs), so where the
+  // guard sends one past the user tier Claude Code reports this hook skipped
+  // (claude-code-mod.md, "Behind Claude Code's guard"). A refusal here is the
+  // guard holding another call with the same words: Claude reads our words
+  // for it (HELD_AT_RUN_TEXT), not the guard's advice to serve at tool.run.
   on('tool.*', RUN_MATCHER, async ($: Engine, e: any, next: Next) => {
     if (next?.event !== RUN_EVENT) return next(e)
-    if (allowed && toolName && e.tool === toolName) return answerModTool($, e)
+    if (allowed && toolName && e.tool === toolName) return answerAtRun(await answerModTool($, e))
     if (allowed?.reviews && e.tool === SHELL_TOOL) {
       const input = shellTakeOver(e.command, !!e.agentId)
       if (!input) return next(e)
       const instance = await currentMod($)
       if (!instance) return next(e)
-      return answerShellCall(instance, input)
+      return answerAtRun(await answerShellCall(instance, input))
     }
     return next(e)
   })
