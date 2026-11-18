@@ -2,7 +2,7 @@
  * The parity ledger's clock (scripts/mobile/parity-debts.ts,
  * docs/agent-guides/mobile.md). This file checks the rule on fixed dates
  * only, never the real ledger: the ledger's own dates are checked by
- * mobile-ios.yml's `ledger` job alone, so a mobile debt never turns a
+ * mobile-ledger.yml alone, so a mobile debt never turns a
  * `bun test` red (scripts/ci-affected-map.test.ts holds this).
  *
  * What can regress: the clock passing an old decision or debt, or failing a
