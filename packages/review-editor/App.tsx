@@ -78,6 +78,7 @@ import { generateId } from './utils/generateId';
 import { parseDiagramEngineUrls } from './utils/diagramEngine';
 import { parseSemDiffAdvert } from './semDiff/protocol';
 import { createSemDiffClient } from './semDiff/semDiffClient';
+import { loadSemDiffWorker } from './semDiff/loadSemDiffWorker';
 import { readPowerUpRejected, writePowerUpRejected, type PowerUpConfig, type PowerUpStatus } from './semDiff/powerUp';
 import { PowerUpStatusSlot } from './semDiff/PowerUpStatusSlot';
 import { POWER_UP_CHANGED_EVENT } from '@plannotator/ui/components/settings/SemanticDiffsTab';
@@ -277,8 +278,6 @@ import {
   type ReviewSubmissionRecovery,
   type ReviewRecoveryStorage,
 } from './utils/reviewSubmissionRecovery';
-
-const loadSemDiffWorker = (): Promise<Worker> => import('./semDiff/createSemDiffWorker').then((m) => m.createSemDiffWorker());
 
 declare const __APP_VERSION__: string;
 

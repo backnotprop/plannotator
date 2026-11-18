@@ -21,7 +21,7 @@ import type { PullViewScope } from './viewScope';
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
-  mock.module('#guide-reader', () => ({ default: () => null }));
+  mock.module('#guide-reader', () => ({ default: () => null, PullChangesTree: () => null }));
   await (await import('./platformPostSeam')).realPlatformPost();
 }
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');

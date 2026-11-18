@@ -4194,9 +4194,9 @@ function Inbox() {
   // The board in Reviews' pane: Open or Merged, Grid or Table, kept while the Inbox is open (Reviews' address has no room for them).
   const [paneView, setPaneView] = useState<SheetView>('open');
   const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
-  const { project: boardProject, board: boardModel, head: sheetHead } = useBoardInProject(sheetPulls.model, route);
+  const { project: boardProject, board: boardModel, head: sheetHead, name: boardProjectLabel } = useBoardInProject(sheetPulls.model, route, projectNames, projects);
   // What the board shares in Reviews' pane and on its own page; a review thread opens beside Reviews.
-  const sheetShared = { model: boardModel, project: boardProject, projectName: boardProject ? (projectNames.get(boardProject) ?? null) : null, error: sheetPulls.error, loading: sheetPulls.loading, phone, onMerged: sheetPulls.refresh, onToast: showToast, machineName: (id: string) => machineViews?.find((m) => m.id === id)?.name ?? null, onOpenThread: (id: string) => go({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id }) };
+  const sheetShared = { model: boardModel, project: boardProject, projectName: boardProjectLabel, error: sheetPulls.error, loading: sheetPulls.loading, phone, onMerged: sheetPulls.refresh, onToast: showToast, machineName: (id: string) => machineViews?.find((m) => m.id === id)?.name ?? null, onOpenThread: (id: string) => go({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id }) };
   // The list a thread from the box opens beside: the one the box opened over.
   const reviewsScope = () => (route.page === 'reviews' ? { project: route.project, view: route.view ?? pullFilterOf(null) } : (route.reviews ?? { project: null, view: pullFilterOf(null) }));
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);

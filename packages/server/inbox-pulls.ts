@@ -744,7 +744,7 @@ export interface InboxPulls {
   /** The profile pictures' URLs of the authors of the PRs the last list showed on this host, by login. */
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or a compare up to that layer (`InboxPullDiffScope`; `from` for a range or a commit). Throws InboxPullsError. */
-  diff(key: string, scope: InboxPullDiffScope, from?: string): Promise<InboxPullDiffAnswer>;
+  diff(key: string, scope: InboxPullDiffScope, from?: string, pinnedHead?: string): Promise<InboxPullDiffAnswer>;
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
   /** The PR's own text as the details read answered it, for the PR media route. Throws InboxPullsError. */
@@ -1045,6 +1045,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const budgetHold = new Map<string, number>();
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
+  const diffsInFlight = new Map<string, Promise<InboxPullDiffAnswer>>();
   const readHeads = new Map<string, string>();
   /** One read a PR, while it is fresh; the people's pictures it named stay allowed while the PR is on the list. */
   const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean; context?: PRContext }>();
@@ -1787,7 +1788,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         readWorkingTree: readRepoWorkingTreeFile,
       });
     },
-    async diff(key, scope, from) {
+    async diff(key, scope, from, pinnedHead) {
       const pull = findKnown(key);
       if (!pull || !listedRepo(pull)) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // Whole stack: from the branch the lowest open layer is based on (merged layers are not read again), and from
@@ -1815,74 +1816,85 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
       // head the forge did not pin down.
       if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
-      if (compare && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
-      const state = hosts.get(pull.host);
-      const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
-      if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
-      const parts = splitPath(pull.repo)!;
-      let forkProjects: GitlabForkProjects | null = null;
-      const argsFor = (base: string): string[] => {
-        if (pull.platform === "github") {
-          const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${headRef}`;
-          return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
+      if (hit && pinnedHead && hit.answer.head_sha === pinnedHead) return hit.answer;
+      const flying = diffsInFlight.get(cacheKey);
+      if (flying) return flying;
+      const reading = (async (): Promise<InboxPullDiffAnswer> => {
+        if (compare && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
+        const state = hosts.get(pull.host);
+        const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
+        if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
+        const parts = splitPath(pull.repo)!;
+        let forkProjects: GitlabForkProjects | null = null;
+        const argsFor = (base: string): string[] => {
+          if (pull.platform === "github") {
+            const endpoint = scope === "layer" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${headRef}`;
+            return ["api", "--hostname", pull.host, endpoint, "-H", "Accept: application/vnd.github.v3.diff"];
+          }
+          const endpoint = scope === "layer" ? `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/raw_diffs` : gitlabCompareEndpoint(pull.repo, base, pull.head, forkProjects);
+          return ["api", "--hostname", pull.host, endpoint];
+        };
+        // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
+        // leaves it unknown; a layer posts nothing), and its description.
+        // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
+        const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null } | null> => {
+          const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+          const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body} | tojson"] : [])]).catch(() => null);
+          if (!read || read.exitCode !== 0) return null;
+          try {
+            const answer = obj(JSON.parse(read.stdout));
+            if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body) };
+            return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer) };
+          } catch {
+            return null;
+          }
+        };
+        const before = await pullNow();
+        if (compare && fork && pull.platform === "gitlab") {
+          forkProjects = before?.fork ?? null;
+          if (!forkProjects) throw new InboxPullsError("pull_diff_failed", `${cli} could not read where this layer's fork is. Try again, or open it on the forge.`);
         }
-        const endpoint = scope === "layer" ? `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}/raw_diffs` : gitlabCompareEndpoint(pull.repo, base, pull.head, forkProjects);
-        return ["api", "--hostname", pull.host, endpoint];
-      };
-      // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
-      // leaves it unknown; a layer posts nothing), and its description.
-      // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
-      const pullNow = async (): Promise<{ sha: string | null; description: string | null; fork?: GitlabForkProjects | null } | null> => {
-        const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
-        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body} | tojson"] : [])]).catch(() => null);
-        if (!read || read.exitCode !== 0) return null;
-        try {
-          const answer = obj(JSON.parse(read.stdout));
-          if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body) };
-          return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description), fork: gitlabForkProjects(answer) };
-        } catch {
-          return null;
+        let base = bases[0]!;
+        let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
+        if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
+          base = bases[1]!;
+          result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
         }
-      };
-      const before = await pullNow();
-      if (compare && fork && pull.platform === "gitlab") {
-        forkProjects = before?.fork ?? null;
-        if (!forkProjects) throw new InboxPullsError("pull_diff_failed", `${cli} could not read where this layer's fork is. Try again, or open it on the forge.`);
-      }
-      let base = bases[0]!;
-      let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
-      if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
-        base = bases[1]!;
-        result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
-      }
-      if (result.tooLarge) throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
-      if (result.exitCode !== 0) {
-        const error = refErrorOf(cli, result);
-        if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
-        if (/too_large|maximum number of (lines|files)|diff is taking too long|\b406\b/i.test(`${result.stderr}\n${result.stdout}`)) {
-          throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
+        if (result.tooLarge) throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
+        if (result.exitCode !== 0) {
+          const error = refErrorOf(cli, result);
+          if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+          if (/too_large|maximum number of (lines|files)|diff is taking too long|\b406\b/i.test(`${result.stderr}\n${result.stdout}`)) {
+            throw new InboxPullsError("pull_diff_too_large", "This diff is too large to read here. Open it on the forge.");
+          }
+          throw new InboxPullsError("pull_diff_failed", error === "signed_out" ? `${cli} is not signed in to ${pull.host}.` : `${cli} could not read this diff. Try again, or open it on the forge.`);
         }
-        throw new InboxPullsError("pull_diff_failed", error === "signed_out" ? `${cli} is not signed in to ${pull.host}.` : `${cli} could not read this diff. Try again, or open it on the forge.`);
-      }
-      let patch = result.stdout;
-      if (pull.platform === "gitlab" && compare) {
-        try {
-          const diffsOf = obj(JSON.parse(result.stdout)).diffs;
-          patch = reconstructGitlabPatch((Array.isArray(diffsOf) ? diffsOf : []) as GitLabDiffEntry[]);
-        } catch {
-          throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
+        let patch = result.stdout;
+        if (pull.platform === "gitlab" && compare) {
+          try {
+            const diffsOf = obj(JSON.parse(result.stdout)).diffs;
+            patch = reconstructGitlabPatch((Array.isArray(diffsOf) ? diffsOf : []) as GitLabDiffEntry[]);
+          } catch {
+            throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
+          }
         }
+        const headBefore = before?.sha ?? null;
+        const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
+        const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
+        const description = before?.description ?? null;
+        if (head_sha) readHeads.set(key, head_sha);
+        const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha };
+        diffs.set(cacheKey, { at: now(), answer });
+        // Bounded: only the last few diffs are kept.
+        while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
+        return answer;
+      })();
+      diffsInFlight.set(cacheKey, reading);
+      try {
+        return await reading;
+      } finally {
+        diffsInFlight.delete(cacheKey);
       }
-      const headBefore = before?.sha ?? null;
-      const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
-      const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
-      const description = before?.description ?? null;
-      if (head_sha) readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha };
-      diffs.set(cacheKey, { at: now(), answer });
-      // Bounded: only the last few diffs are kept.
-      while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
-      return answer;
     },
     async wholeDiff(key, signal, roots = []) {
       const pull = findKnown(key);

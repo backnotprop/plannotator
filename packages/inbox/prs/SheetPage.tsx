@@ -789,18 +789,16 @@ export function SheetPage(props: SheetPageProps) {
       {startButtonWords(reviews.groups.length)}
     </button>
   );
-  // Hide (hiddenPulls.ts): every pick leaves the board and Reviews at once; nothing changes on the forge. The toast's Undo shows them again.
+  // Hide (hiddenPulls.ts): every pick leaves the board and Reviews at once, and select mode ends; nothing changes on the forge. The toast's Undo shows them again.
   const hideControl = live.at !== 'running' && pickedPulls.length > 0 && (
     <button
       type="button"
       className="ib-prs-btn"
       onClick={() => {
         const list = pickedPulls;
+        // Every pick hid: nothing is left to act on, so select mode ends with it.
         void hideWithUndo(list, props.onToast).then((hid) => {
-          if (!hid) return;
-          setPicked((was) => new Set([...was].filter((key) => !list.some((pull) => pull.key === key))));
-          anchor.current = null;
-          setBulk({ at: 'idle' });
+          if (hid) leaveSelect();
         });
       }}
       data-pr-hide=""

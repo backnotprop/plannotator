@@ -183,6 +183,9 @@ test('Hide N: every pick leaves the board and its "need you" at once, in one wri
   expect(toasts[0]!.toast).toMatchObject({ icon: 'check', noKey: true });
   expect(toasts[0]!.toast.lead).toContain('2');
   expect(toasts[0]!.toast.detail).toContain('GitHub');
+  // Nothing is left picked: select mode ends with the Hide.
+  expect($('[data-pr-select="select"]')).not.toBeNull();
+  expect($('[data-pr-hide]')).toBeNull();
   // The picks it hid let go; Undo shows exactly those again.
   act(() => toasts[0]!.toast.onUndo!());
   expect(sent[1]!.body).toMatchObject({ hide: [], show: [key(7), WEB20] });

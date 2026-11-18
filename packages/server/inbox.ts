@@ -152,6 +152,7 @@ import { createInboxCombine } from "./inbox-combine";
 import { inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { answerSemDiffRequest, createSemDiffAssets, isSemDiffRequest, type SemDiffSource } from "@plannotator/shared/sem-diff-assets";
 import { isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxLaunchedWakeOf } from "@plannotator/core/inbox-run-line";
 import { createInboxReplyLaunch, replyStartsSession } from "./inbox-reply-launch";
@@ -540,6 +541,7 @@ export interface InboxServerOptions {
   htmlContent?: string;
   /** The live bridge's sources for live sites (`inbox-live.ts`), passed by the CLI as annotate's are, so the server never imports ui. Absent: sites are listed but do not open. */
   liveBridge?: InboxLiveBridgeSources;
+  semDiff?: SemDiffSource;
   /** Tests: how long a live site's proxy lives with no open or ping (default `INBOX_LIVE_IDLE_MS`, 10 minutes). */
   liveIdleMs?: number;
   /** Tests: the live probe's fetch. */
@@ -5419,6 +5421,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * diagram runtimes, the syntax grammars) on first use. An unpacked page (the not-built line) serves whole.
    */
   const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
+  const semDiffAssets = createSemDiffAssets(options.semDiff);
   const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
   // Every listener sends the page and its scripts compressed. Each compressed body is made once per Inbox run,
   // off the event loop, and kept: the page and the entry script it asks for next now, in brotli (what Chromium
@@ -5957,7 +5960,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             // Parsed once per diff (`changedFileOf`): the PR page asks for every changed file as it nears the viewport.
             const head = ids ? null : url.searchParams.get("head");
             const pinned = head && /^[0-9a-f]{40,64}$/.test(head) ? head : null;
-            const answer = ids || pinned ? await pulls.diff(key, scope, from) : null;
+            const answer = ids || pinned ? await pulls.diff(key, scope, from, pinned ?? undefined) : null;
             const changed = answer ? changedFileOf(answer, filePath) : null;
             if (answer && (!changed || (pinned && (answer.head_sha !== pinned || (changed.status !== "modified" && changed.status !== "renamed"))))) {
               return json({ serverSession, oldContent: null, newContent: null });
@@ -6571,6 +6574,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const saved = decisionPostDestinationOf(loadConfig().inboxDecisionsPostTo);
         if (saved !== body.post_to) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
         return json({ serverSession, post_to: saved });
+      }
+      if (path === "/api/inbox/sem-diff") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        return json({ advert: (await semDiffAssets.advert()) ?? null });
       }
       if (path === "/api/inbox/settings/storage") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -7636,6 +7646,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
         return windowPage(req, page, compressWindowAsset(req, via, "/"), framers);
+      }
+      if (isSemDiffRequest(path)) {
+        const answer = await answerSemDiffRequest(semDiffAssets, path, req.method, req.headers.get("accept-encoding"), via !== "local" || req.headers.has("x-forwarded-for"));
+        return new Response(answer.body as BodyInit, { status: answer.status, headers: answer.headers });
       }
       // The window's scripts, by exact name from the pack (404 for any other), compressed on every listener as the page is.
       if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, compressWindowAsset(req, via, path));
