@@ -38,9 +38,13 @@ const FILES: [string, [string, string]][] = [
   ['src/e-dates.ts', shrinks('dates')],
   ['src/f-tail.ts', shrinks('tail')],
 ];
-const swapping = /(money|names|dates|tail)/;
-const base = Object.fromEntries(FILES.map(([path, [old]]) => [path, old]));
-const head = Object.fromEntries(FILES.map(([path, [, now]]) => [path, now]));
+const swapping = /(money|names|dates|tail|far)/;
+const MANY: [string, [string, string]][] = Array.from({ length: 20 }, (_, i) => {
+  const name = `f${String(i + 1).padStart(2, '0')}`;
+  return [`src/${name}.ts`, i === 17 ? shrinks('far') : pair(plain(name, 40))];
+});
+const sides = (files: typeof FILES) => [Object.fromEntries(files.map(([path, [old]]) => [path, old])), Object.fromEntries(files.map(([path, [, now]]) => [path, now]))] as const;
+const [base, head] = sides(FILES);
 
 export type Host = 'review' | 'inbox';
 interface View {
@@ -159,7 +163,8 @@ function inboxWorld(browser: () => Browser): () => Inbox {
 
 let projects = 0;
 
-async function inboxReview(browser: Browser, world: Inbox, held: string[], phone = false): Promise<View> {
+async function inboxReview(browser: Browser, world: Inbox, held: string[], phone = false, files = FILES): Promise<View> {
+  const [base, head] = sides(files);
   const project = scratchProject(join(world.root, 'src'), `shop${++projects}`);
   git(project, 'checkout', '-q', '-b', 'main');
   commitAll(project, base, 'base');
@@ -171,7 +176,7 @@ async function inboxReview(browser: Browser, world: Inbox, held: string[], phone
     guide: {
       title,
       intent: 'Reading it.',
-      sections: [{ title: 'All', overview: 'Every file.', diffs: FILES.map(([file]) => ({ file, summary: 'A change.' })) }],
+      sections: [{ title: 'All', overview: 'Every file.', diffs: files.map(([file]) => ({ file, summary: 'A change.' })) }],
       review: { gitRef: 'main...HEAD', base: 'main' },
       generator: { engine: 'claude-code', model: 'claude-opus-5' },
     },
@@ -190,7 +195,7 @@ async function inboxReview(browser: Browser, world: Inbox, held: string[], phone
   await page.goto(`${world.url}#thread=${review.thread_id}`);
   await page.locator('[data-review-card]').filter({ hasText: title }).first().getByRole('button', { name: 'Start review' }).click();
   const pane = page.locator('[data-review-message]');
-  await expect(pane.locator('[data-guide-file-shell]')).toHaveCount(FILES.length, { timeout: 60_000 });
+  await expect(pane.locator('[data-guide-file-shell]')).toHaveCount(files.length, { timeout: 60_000 });
   if (!phone) {
     await pane.locator('[data-review-mode-choice="files"]').click();
     await expect(pane).toHaveAttribute('data-review-mode', 'files');
@@ -331,6 +336,26 @@ export function landingCases(type: BrowserType) {
   });
   const inbox = inboxWorld(() => browser);
   const open = (host: Host, held: string[] = []) => (host === 'review' ? reviewWindow(browser, held) : inboxReview(browser, inbox(), held));
+
+  test('inbox, 20 files: a jump to file 18 from the menu of files, hands off, moves nothing as its note lands, and the note is offered', async () => {
+    const view = await inboxReview(browser, inbox(), ['far'], false, MANY);
+    try {
+      const shell = view.shell('f18');
+      expect(await view.page.locator(`${shell} diffs-container`).count(), 'precondition: file 18 is not drawn before the jump').toBe(0);
+      if (process.env.SEM_LANDING_SHOT) await view.page.screenshot({ path: process.env.SEM_LANDING_SHOT });
+      await view.page.locator('[data-review-message] [data-review-jump]').click({ timeout: 10_000 });
+      await view.page.locator('[data-review-files] [data-review-jump-row="src/f18.ts"]').click({ timeout: 10_000 });
+      await expect.poll(async () => (await edgeOf(view, 'f18'))?.top ?? null, { timeout: 30_000 }).not.toBeNull();
+      await expect.poll(() => view.page.locator(`${shell} diffs-container`).count(), { timeout: 30_000 }).toBe(1);
+      await atRest(view);
+      const edge = (await edgeOf(view, 'f18'))!;
+      expect(edge.bottom > 0 && edge.top < edge.top + edge.bottom, 'precondition: file 18 on screen after the jump').toBe(true);
+      await heldUntilWatched(view, 'far', 'f18', 'off');
+      await still(view);
+    } finally {
+      await view.close();
+    }
+  });
 
   for (const host of ['review', 'inbox'] as const) {
     test.describe(host, () => {
