@@ -41,7 +41,7 @@
  * stays at the URL relay.json names.
  */
 
-import { createHmac, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { decryptWithKey, deriveRelayKeys, deriveRelaySignalToken, encryptWithKey } from "@plannotator/core/crypto";
@@ -52,6 +52,7 @@ import type { InboxLine } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAgentRelayApplied } from "./inbox-agent-relay-applied";
 import { AGENT_PLATFORM } from "./inbox-devices";
+import { inboxPushCollapseId } from "@plannotator/core/inbox-push";
 import { inboxPushSummary, sizedPushEnvelope } from "./inbox-relay-push";
 
 export { apnsBody } from "./inbox-relay-push";
@@ -704,7 +705,7 @@ export function createInboxRelay(context: InboxRelayContext) {
         const { key, collapseKey } = await deriveRelayKeys(secret, device.id);
         const ciphertext = await sizedPushEnvelope(summary, key);
         // The collapse id: the thread id under the phone's collapse key (its own HKDF label, never the envelope key), so a thread's newer push replaces its older one and the relay never learns the thread.
-        const collapseId = createHmac("sha256", Buffer.from(collapseKey, "base64url")).update(message.thread_id).digest("hex");
+        const collapseId = await inboxPushCollapseId(collapseKey, message.thread_id);
         const answer = await call("POST", mailboxPath("/push"), mailbox.secret, { device_id: device.id, collapse_id: collapseId, ciphertext });
         const result = (await answer.json().catch(() => ({}))) as { reason?: string; code?: string };
         log(`push ${message.id} ${device.id} ${answer.status}${result.reason ? ` ${result.reason}` : result.code ? ` ${result.code}` : ""}`);

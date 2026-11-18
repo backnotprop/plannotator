@@ -15,7 +15,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decryptWithKey, deriveRelayKeys } from "@plannotator/core/crypto";
-import { readFileSync } from "node:fs";
 import { InboxDevices } from "@plannotator/shared/inbox/devices";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxRelay } from "./inbox-relay";
@@ -210,28 +209,6 @@ test("push 2's ladder keeps Apple's 4096 bytes: action labels go first, then the
 
   const idsOnly = await open({ ...huge, subject: "S".repeat(4000) });
   expect(idsOnly).toEqual({ v: 1, type: "push", thread_id: LADDER_BASE.thread_id, message_id: LADDER_BASE.message_id, kind: "question", badge: 3, time_sensitive: true });
-});
-
-// The vectors F2's generated phone types and the app's tests read (packages/core/fixtures/inbox-relay-push-v2-vectors.json):
-// each envelope opens under the all-zero pairing's device key to its plaintext, and every plaintext is a shape this Inbox writes.
-test("the push 2 vectors open under the device key and hold only fields this Inbox writes", async () => {
-  const vectors = JSON.parse(readFileSync(new URL("../core/fixtures/inbox-relay-push-v2-vectors.json", import.meta.url), "utf8")) as {
-    pairing_secret: string;
-    device_id: string;
-    key: string;
-    pushes: { name: string; plaintext: InboxPushPlaintext; envelope: string }[];
-  };
-  const keys = await deriveRelayKeys(vectors.pairing_secret, vectors.device_id);
-  expect(vectors.key).toBe(keys.key);
-  const written = new Set(Object.keys(LADDER_BASE));
-  const kinds = new Set<string>();
-  for (const vector of vectors.pushes) {
-    expect(JSON.parse(await decryptWithKey(vector.envelope, keys.key))).toEqual(vector.plaintext);
-    expect(fits(vector.envelope)).toBe(true);
-    for (const field of Object.keys(vector.plaintext)) expect(written.has(field)).toBe(true);
-    kinds.add(vector.plaintext.kind!);
-  }
-  expect([...kinds].sort()).toEqual(["new_thread", "permission", "question", "replaced", "review", "turn_error"]);
 });
 
 test("a withdrawal that asks nothing pushes on the thread's collapse id with no question; plain news still does not", async () => {

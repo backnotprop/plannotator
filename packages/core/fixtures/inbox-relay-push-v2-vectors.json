@@ -1,8 +1,9 @@
 {
-  "about": "Push version 2 vectors for the Inbox relay (adr/implementation/inbox-mobile.md, section 4, \"Push\"), sealed under the device key of the all-zero pairing in inbox-relay-vectors.json. packages/server/inbox-relay-push.test.ts opens each and checks its fields are ones the Inbox writes; the phone's generated types and its notification tests read the same file. Sample data is invented. Public by design: nothing here protects anything.",
+  "about": "Push version 2 vectors for the Inbox relay (adr/implementation/inbox-mobile.md, section 4, \"Push\" and \"Relay 1.1 and push 2\"), produced by scripts/inbox-push-vectors.ts (packages/core/inbox-push-vectors.ts) from the Inbox's own push rules (packages/core/inbox-push.ts) and sealed under the all-zero pairing of inbox-relay-vectors.json: `envelope` under `key`, `collapse_id` the thread id under `collapse_key`. packages/core/inbox-push.test.ts checks the file against the code; the phone's notification tests read it. Sample data is invented. Public by design: nothing here protects anything.",
   "pairing_secret": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
   "device_id": "dev_00000000000000000000000000",
   "key": "EWmqHqbdwPC6kxOAZoGZpQiyudtOsYa_Vf1fUDAn-Wk",
+  "collapse_key": "YgaG1d8capOHl-xRM9_iFys1BGInP0Pbh40QvLlIBCQ",
   "pushes": [
     {
       "name": "question",
@@ -44,10 +45,11 @@
           }
         ]
       },
-      "envelope": "Xhco6xyhDD9gHfBV05xS6DUwvGTIwXKLWjYc8yTkFz-_gJMeoTJEjy1vo-nTSnMLbBu4pn5OCOj4Q1P7kDS4d3DtMXNowkRwwT59nrtKbC7dyr26a2VQhA_Eo1LuysCp8VoVIOjnDXltb0sFi-YaWrNbAkzlUIdl4xgu_qIdlff2Oa2MNK78OwkxrT4ZqY_PElfO8huqc74Ck27KNOUBmU7_-MMU00P0uGCS_AnGujk3EEUa2DHyBLUfdBk6eO40-2nl7HMes2NZhxsaMIA24Fgrsq6xRc0VJ2VyWGec-G7iUmZxj6X4PS_s8tpKdw7LB_GZjG4b100mKoPXNTEDyL8DSRyY0rsIJZ8ooHbZk_Lo5jcYZcnIy8IMouytC_JtMtzJvo-CNohNtKVFKXc8-RIZfaHuGNLS774ewG6Fd1v7EdT6W57q38IGLst9oj5LhtXGq1zqh9Q-7i3J4AaPDaSwcTJ_ssxd9YCES0tEOy4to_CG2XXt-jBg3-oNNGO2Uiz3wV7GIUF14ynWlWpzwVqedefJiiRVxpcZHLaq6oAS5uc_ToCW3qniIv1yrnnImubrkftyTmYLGdSZby2UM58L7Tsw1Gp3Hdru7j5YkjHj1Z79-WyiJBo5K70SG3DhnhRVCZipd0G7AH-TimAtwZmR1NzM0lSv8XQrb804LV9szDlpoxK9IwxYiKe7np1DKkepc5Ad_H3SmH4T5NyBb7vNCecJHeD_J_dGu-t4lBu--lDdMV95K4eviXrjd6rNvOVBPMnuZxv1mbSqv_7Xr0tSRtOSYkEM8o27vifWGk3sUgTciNtz7afb_DGKi9QNVDTi"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "h6mxSGouIstUZclgSfaUxIu3lekdtg_SCeCrwPbitKpT7NmiGLa9fuxd9BIvzmEGmmazBeBpIKIOJiPZJ2PhbCuWJ9wabjgM4070JshE3boqBHEXTclwl7ny9HvbWhzr9DoJWU4l7xwv3wQVC910_vmDWoNjR5G1PN1qdk_YEwX5rwCUrWmXaZ7MZf1PVFmr0Lggf5U64Q781BC4hTlyVb5eyPjivM3pYV-G6_EV8ory4VYtmPXTX0OlQyv9R6RZPmLxXjYpaWXRZtVlD-adiYbJybMBioIWvi4UeSDXlatiBGont_Lk9WbYKott0yiDshaCDMZypavW1qfiH0SDi2LIKmERVvFtulqjLesQlTqDkz9TkmIgGdRgvmEFKCVIhiiMTXbGukuTKcB1MJWwRmapB3LU-PZONKP7BvL-vNZw56QXCCypXofxO1GIH8PAZuoQVa7xOehwf47KAIVpbziG4lgRzOYdh202GLKwgl25GStbv1sdjNv5SunNt9oFw1_muOC7mUSnxNIwt89-ZhSrGOFmbdL9y42aUiGjAYqsn9XF676GCGmrvoDhlZfbhGSWDnRUC_t1BxdxBxSxao_6R59D7qZRbFDwyUhwOpVbsoxpUASUbrgqK4pmzDTKrnE08I3JxrE5fZp2RL0-Cy12C-15iffJ3JoKSkCXUTZ2Uhp8gwWjDSTOvoM5JTXRQtJfqrP5hU3uAk85Wqy7WsO8mMHjDZdIIJc87_2BKN4dUc5Ar6a361lhA3ZNpU08ZXc7Ge-qbtU5fMdIUYQRGLUlpUH8Gdqwjyrd4abETNp3Sg-ERkWGoV0RUA_6_9bSg2sL"
     },
     {
-      "name": "question, recommended second (actions drawn recommended first)",
+      "name": "question, recommended second (actions drawn recommended first), its thread stopped on the person",
       "plaintext": {
         "v": 1,
         "type": "push",
@@ -86,50 +88,11 @@
           }
         ]
       },
-      "envelope": "R17nx4kvDY9YLFwwZ4BaQfz1tJBGmo7GgawxS-cEWfMRFHjbagwkxaWlOTw215WFYQp-1EjVndfe_VY-3DEk1fJQcDGvFDgo3s_SCzkMFUeC0znXu2caIaTR8GEM17cTCE6pd-r1-QXLKw-GLNn0O7Eg3hOcK7KH6HHD8LqZK2E18KvnmGrfwIThzUAHGYD2qSgw9RLwSrlkTVJJT8FIaPAzhmS3KBieOht86AAdvQDRBIRF_ONDWzbDOOMr_Z7MkGxCGlwQlzRnC5eGjgQKHKR6FoUYACjqo8GcM-OwjKn-JBsKGJy3I3ugyb7Sys6o7DyyEL9tEhbO5Itw-dWwf9DGZ8fZwUOBTwF6oy3T78wbv8sqrE6l7x52mlZT-1lbf6HMCSSfpSLufGauJ03KOOIXq2YeeqaD67cXXXAWv5Qac9DyyRx-o_1iiyBUOlHVkDaXsVdVYZOeImjG1xkD7vTBegTRB_2DB5FX99wM7BeBZCLj-Q2pAJnIsdE0ewAd_C0lNIbjPRt1QozVlutCBTsfYBFrBBzd5F71LoHA_EFU8OxKHvZsYMILM1JMVUM-_YXRczxJdup8nxtGVgXYlZ8gQhMjPx3NTMWLGPsPYHKj3KscNFZXlgrSzIhACoBTrrOU4p8KHKv4sB_vKIlg1QC0EwvcMgbSvIohldx4YRtzQ2YU1Vc6t5vuyVacPqLFQ2vCaRuCu3CSEG2T1cvuoQ4RZG_4bg2vC_nfm1NU4N5shUG0JocBwRw"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "N0D_BN8EsIVbyiSaji6mKs9TQY2gODGfwqb5gjfGD06z6IJoFNggUmluDC07c3mqmCQGeGTtCiENHM1DYtkLd5_H1kmaRu7_xQJIkMlJaPY5k5P6Mt2EJK_K18g60Eh4D1SMkj7jZ4kAhXa38qqDh7tGAEtSc_M4sWyU-J3rGlIRvmzAbEhUHV283x930nnn345hJ7tfa-iEm544Kt72iTT6qmMIlV5du75mCvpJJmpaAXfWqWBcLOflYtJVkoGlcc-mPpeBTnOgP2v7rl8qvCggRSqYjb22EI_xnJGFoKV3zeGgJLvD1bUmlOEujkvw5Eg98GI9gJEkEV5pfaaWFne-BX-Iq0tGntSck1es-JWx7ldYVFtR794tQZKqbeeOd-XIFyVNVDEXRrkRmg_hAAoc28WCaOtT2nUwjNiZoh9i1M-do_cgV_AmG67n8nLx9UMDIdQbpiEjTqdemh-sMJa6N05eYHZaWqI6l5Jj1Q1iRt-TpxPutX6ZFz0ehy4b9ktvqknEw1pE1Cc78Zc1dmSoA1M4LHW_9hAMDapo6UAjirWl6V8HBaLzvLZMi-79VFICsUe8aTFe81Rdq_xrqztfbLpu5WZP_BvR9_YxA3Cpe-pl3SanZPWUQirc8nj9-tISuYULwCTpqi5SXbAS2gD-or5LV6EJjlsYxI2kvCSvoTdxyHJItSlWxXZN1vljTp-MsGt3GQaY587lKhXoBNRULyvg33sD0xl6zPgNqVbhoeDSNju-Yi4"
     },
     {
-      "name": "question, action labels dropped by the ladder",
-      "plaintext": {
-        "v": 1,
-        "type": "push",
-        "thread_id": "msg_01K70000000000000000000010",
-        "message_id": "msg_01K70000000000000000000010",
-        "subject": "Run the retry tests against the Stripe test clock?",
-        "project": "billing-svc",
-        "agent": "Claude Code",
-        "question": {
-          "key": "q-1a2b3c4d",
-          "revision": 0,
-          "prompt": "Run the retry tests against the Stripe test clock?",
-          "context": null,
-          "choices": [
-            {
-              "label": "Yes",
-              "recommended": true
-            },
-            {
-              "label": "No",
-              "recommended": false
-            }
-          ]
-        },
-        "kind": "question",
-        "badge": 2,
-        "time_sensitive": false,
-        "actions": [
-          {
-            "id": "choice.0"
-          },
-          {
-            "id": "choice.1"
-          }
-        ]
-      },
-      "envelope": "EJFThACDnq1UTP-ya4UVZ__0LtiY7qEd4i5Go0UYM8zFpM91Y5z14ktsLBDsAqmYh5PN5T7pd-8gO_BFBvUyv0UUAHBLwRd_hoF0eInroXrPqaNVSzqPwJs__Od_cTp4tO0nXw8J7IVjB3pFkZfGaAqm7UFtqOdShE73r4f8FWSdZdhnu8F5UkRKV7FEGYPN8P3DDgBAkcleUrg90xep9hHbxLduQBGPa5DzfX29sHXEXFJKfI2rwtQIhoe0qlt-4Ub2kWfZc_X1yOJb3ZwJozpquH3u4i8yVEPcocoJw4ShF7R2nQAusOP8VUO8yY3eQqYVlyFM8LCfGRWyXgUhZfa_bzBYxKGyNSEgwXeIm7QHVrSG2wT-KqNKqYySk4i5-gy4EeN3WVQy0jRxEOG3X_JBGNJowX2OPysl0ujLfIukAdwhm7_LgHiCKFIAoTvc3dQBz29SYyoDVSQtyrJO8jfxpJuCpk20sFcvo4Wti8E_ff7Bz7BVrGcl-d32siIMPGE2N_-1CF0FzXoE8XMLrRtIBrK2vJG0XSCK31qsRpbk49z0NZeTvxi_cwLZl6TEnd2B-GQtsPKoSFmq3OCQm7cf89VDGQCFYYOoZm7ElnZcEtr1g7AgYdbt_Gx_WrL4fRH6OWkHeoyAAVUe5y_QvCoL7gGxC8NOi7IiH7mFM68z_AjkaXpIQ8ppCPmpnNPLRij6iz9OBS3ckGiE54huLxvw2F0IJ0lN"
-    },
-    {
-      "name": "permission",
+      "name": "permission (only the choices one tap can answer)",
       "plaintext": {
         "v": 1,
         "type": "push",
@@ -168,7 +131,26 @@
           }
         ]
       },
-      "envelope": "ROzZpf3bsZTjURQwS_JMfe1Ne2-LW8CflzK9JYipbA-sqAuPKPFjm3J76pqxg-W7bae3qPZhnF373kJNiphfkykPMKr_FqwcaPerN2Wpwu4DZ-DnWsCYgu_rlqfA_wT__Lr-IFylp_C8KsTIGZvbfVbAjhX5AP2UasXQIF0vRJCCxgDo1fg1Ghks8lXEnOEASlrRk4hs28KlBz0k0CzQDcXF26Zq4OYIbTF3wxaJ1Y8xa02f6H_kifJhnHjGl7LaMJzumapNb78eSMOuCg8xfOsWhpKc0KdLa7LpRkNVlTfCgm29YWXGEjQrYFRPVcZfMe_iC3OABCKdr7yX6VcaOs-WaSixHIkJ27D6OUuRcH1Q9DXx1tcBhjqR_f1WlY90RAinu3a3GfpoAzXqrJs2VQonSe8ZHrR1-xsjjvRJJSylSx9c27DIQ9LO-RzsTEQuxjQ-4iqw3lAwTU50Fj4WZXnpW2Kc-FXrGGJN7GKZARupNlcelEY-TzpfpiL-0qeFSqwvmhPOHjJWUmairhRcul3Ujv3GYWvFxtfFLD19G0Kn8lKZAmQn93wJ2EbNpEtFp7DlzrssgkcUD8m1VPYXXVxTIY7EBNUf-sKx8WzOkKXcn3JW4TFAx9-QDAffsAXW39xWr8FHHqO02wKEy5CykMamGkiZ2loTLgUUuFPnRNI8howAZVucQIdmootVympBWngE_UD1J5CSsPH1ht0fFaq00jVSdyaTW3r6ZJKulwPm7g"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "8iHCoWVhGgxQgbHrT0acV4ZxNfJzggdSU92hR_StWMWXHnHe_anIVLenTY3oqm30sboLQJde8cnyQWm73zKs7C-tU1a723tOwYvd8Ns8e8gGyDYcpLBpNCJ4DsInR00DruPlR7igLhO2TvVFqKC1OH7NQaOik6i3pxjF9KlDI62YKcmaOOC7O_uYVLkSVlt2koKFzhUqTOqSh1MfKAgttgF4Fog2tsGsOF8fEfs7ztXsO6sh-gIBm7ehwwbZBIqXehaB_9Y30aquR1aYF0C0zcRrdG9wbkC855PcMwK5o1d0ENliD3mytBEm3S0OTONP7Hem90KK4rsp935dO9kbPqDJ7MhL9DXwXBJRrtH-9i39sFfCLxRsmC-PdCV7cDqcyqB91OgiPHL-CQWx86mWoLdWYuLv2-XoUsgojttjsYoiK5osWjw3s6wyxZBj4io1txbbVc28caAB7neMZW_RaPIUNjSrSiEu4fI-0EeVYmWiSWAsQIylIlOM62NMnj-Nx4XT60bKEn_h7xsYavM8tY_wlX4wmQ6VnMMKQu30p2qa3vNSlqCzKp8sllWAZ4t-AbYY5KZ_jbjP-TcNUqjFj5ag1oExYS9SdwVrDoxewGcp6ZBJjLC3YD2zbYtQPe0ia9yn2LMuE_vwXAL7auEUN55KZrmvdXhMMF6wESprxEc1zKxbUqvfYbkfHRnGFuCuEki5uh3Efwb0DxUxVIrWmuVgc1IkANFND6VFghRUJ2_ZxQ"
+    },
+    {
+      "name": "question with more than one open (no lock-screen answer)",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": null,
+        "kind": "question",
+        "badge": 2,
+        "time_sensitive": false
+      },
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "I13DaIAuYAiI1Cd-snzEPXy9k447Yu9_9Ii9CBqSQTnpuFDereo0mafJ98Ef1MhBTfYXP3m9BOOlQqNiuWjNtEN-xSmmxEFEMNPQvmS6TlNG26KAtRDz4FtPAk_TZ8vEG98jl51qkbkIM-sAo-xakdIr5xtjpeYEM_OsXAVuaAZBWoUvm8o7xXsZmaapsDvYraGO53mxrFILnaZu_Ws_N9eWL6i5CLUm8ZAe4oduqPfzG7cHHGMVr8eT7gG6fHgkD2nldXgI1smw859xER8U9du0bJWp7O3v14Q86uVbGcZIUmAq5Ljgn1bnGmlJbZoZpYf6ulxJgHY2Kh73X5T1DjzoswCFS89dMwV7UHnwvHdVp9efA1n4FeywWIT9H06wuy7Ku7AnKOWtNdM1mxjSgNU0j7vN6p4WkecZAQ"
     },
     {
       "name": "new_thread",
@@ -185,7 +167,8 @@
         "badge": 1,
         "time_sensitive": false
       },
-      "envelope": "E6MQAIxyqyqVguc4sdBNA-fEiUty09xicMS_xckuCavNLIA40afF2IkAWxmcG2IRtadISYl0F2ba6LamlvbYB6rnB0pQD7XbgmYeZyeMm6k0ukpAQ8HhvJKWYugPPg-OYxl4AxsGt996GtWQmeaS1VnOIsK9jW_rylU8wilnZYMRp2sPZXb7hnGIouly6bSWXmQveHJg2gLHlOeRaTXDfO-StlSdzDxZBs9-7mLZQ2l4oYLzH194wmXseM7CO3vlUhMNefr3CQIzIM63ce2EqJkfR2KFZqexpHlS2Oqpv3cfuLk7BhBlYsOOJeB6UGS7KvTSlzKFRHjEuoNTNzMk1uiXXfOJZiInTGI0TqSQl_0qXMGHEEAwORydE8LEwXmtCG4-WnGrmHMCT9R4hRHWV9g"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "y5jG6uq0s_lJDoQH4cBEnM4cayo7TYHWTd4UylhVFfXs1jqBnMqPQwN6mw0eDFbq_2jgvOyUpjN_KVoDNSvivU351HOAkP2Xy2djAQK6LOsWT0koLLS4NDXkWkt-Fm29tF016gncSzu6mQmSCRQ2O5Q9NB6clHbjjp1jubdz_eqebYYoPjIfhJ3t3fidkXC0YeuOBS7gJYnkernNti_Wujap8a5rDgq2atCcqwE4eTvlALTL1p47rlaZIlBtysZOi_H9SVbEcVeOlaNhe2YiepDI2lZKH8d0285uxl5qWv6hSvfGA6Q2I6Bm2C0uvXSs73UOjYyhw-pjzZ_NS0K2zNeLMMXia6_SyId8R62TJrkzfmUOr24Qw1ydQUUTgAQHZUJNUmSe5N2-DfSUWVPAR2k"
     },
     {
       "name": "turn_error",
@@ -202,7 +185,8 @@
         "badge": 1,
         "time_sensitive": false
       },
-      "envelope": "uKMlIYBf1iBgmNSAe517mUHJtVJ2k5fr1WfghpLbile0ZU08nEqWuzeHyjL_mYZP3ahq1-YnIwWW2vqm0jS59CmuLvMyIqTJWlqXxr6r16eltZGjHVwzthZB8emfd652HCZPmMtBPgGqXTeKcnjm5gXQoWjo7otxnWDtNDpytUAAt7xXMvpjnPzCv4lmR9yceOuoR2dj3kiwovOFPWI14fadj6JeHo0d6u-IOS1zNUbJEgdzhHr99AvRqv4BUeXBxguflLDcJJH-ZRfXMXWFHVhR6vp_OcFOTxcBS_Lwz-G34yuUKC-f-yYHre_D6abVkY-8p9Rn7CwbmtG9bdPQyd8ZP7NajFRo2_ZOUobr3j5UioZdlb09zAEgZHTy2Q"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "Df4y32zOhJw31tumcTFdC84Uh3WHf5wq9Ws8dHlJVCIHDX8Q05GzutcHIN-vH2M3VS3sNWSWA9VckvVza04m2OJxMu9ajkBxtX321o4zh8OinFQdJD2UHkYHDqmMFhx5djrJY6IillNyU9uPdFlislQughtFryrJ4wD99Q2EKU2cRe6Y_xI9apq-LeIwQ73OpCE3uY3sksLz8tvevi8XMvaB0gvo5nX-yFtWAnL2jdM_gdKidvBWbmqw3heVwOn10bzPP8yHqjpraA2UYaMfJhWZrEX8d7HdyyuDIcy-wnroihdpB660P85vXMFJWrDbVf9NB4FfuHmoYuATzjyBjxxGaKjzL_Yd3m6zfwgMdR_mF1-duVz9Uos0TR8_hg"
     },
     {
       "name": "review",
@@ -219,7 +203,8 @@
         "badge": 3,
         "time_sensitive": false
       },
-      "envelope": "GyaIinAN9DcU4CxJQyDm-N3hD2OlOnyRoE5EiSRluiIx4On0PtkvWdF4p-by20yrODGWMOPHkmXVqQCRE9sA6K9Y4aLXncQLll3kpPQcKUa21UiRO2f2wjeFgZX6aD8uOI9L1Yfo5ynHyl-NOc0CraQ36g_wCNAJHSfLAUp1h-p61bT6R1iOdhubN7kucxKlkPPFEHX0VbZvmMk2T5jlNn6gdJyvNPWatZjMsRJWrHY2T1QcLEbgc8KuH_1FUxSDiUSfHiIoJGFnDpfch5z09CTfGYzqCBkjN9kCmR74GYtk-y38tWLpA0yOKFiENU07DtVGhLKV8cNAl5dNeE6cmlVmwRfrg2rpqu0PeKRRJhsRv1Lqwo5pjj5VF9wovk2VmZNJibLtxtC5"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "gMkrklPdjkqDNF7keKxLmzs5REjCG1zeZynkAXlru2w_ZeWb0IRv8GfGmOy2Dpg801qL_EPw6fBPH5BBp_gib5Jt4VgnFjM9bhsxlRRmqA5dkCFnZl1438fLV_gFMXSUkT_m6-xEisK-NPYvUTTaGFo4hote4OrErjvjD5qKZN3ebEAY5wQkyBXsSdT0ktS1pnDi23FT_doqL3S90NWb3m4yxuzDgkEZ-bSyMR8ioXJ9hotSSgeEaYK7reEbPtIV3hN6DlcOuOmTmAsEBE-wFC8kcN1gPshENAfPvh9f0J6E06NSmirB4uKJSEEcDTvO5Dt1KAQZlvQCVw_Z7lXpJnIUl7w8z2jGc5YsntXUX4q1OIC_3I7hEJOz84JwSMHclNxSrDjHyRFU"
     },
     {
       "name": "replaced",
@@ -236,20 +221,122 @@
         "badge": 0,
         "time_sensitive": false
       },
-      "envelope": "ZOT6mCTyzO1HYHA3O7aI5kCkqKBJkf7sLFt72SArDRAevBFASsvfMDyLupVg20a9jY1KK_6ITlls-RoF50lvrm6W4a3MhkeNbA776zXQwG6qJ_Z9lrAXK1KG12yF6vOvX_NBLNTzzoyH-h_tJ0I3EN1oQ91YMDBlm79t4aSIJUyQT-I2igC8mH5EZ63xbduKFWd8yi9gmvw2ZyYoepz7jNQy21_3_gUGoldtubA16Lh_jwFksHBOa4lpDhEhvcAA6hhun-H4lvYjepuRimoqCLd1gRyZHo1r8O7FvqUxrKIUiNkF0AOdxZRLiYqgpocWZwvCA9zm5xVxxTfGGwF74QtP32EILH7R23dLrYaNsCNLO4eFw-O2lN8WvrqeRvrqlWZRuyE5WxJabakdyU2SIornmgLSNEHW2EiuGA"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "AoBI-TCZ-EwjuFdb_Vo5yL19Mk3bBBCN8z9atVqFolBjFtwqL9cc8gAfP2PPSs8d9XOoRDZCD1lARfndUwTWy9YEJDWzDDNg5k0e9wwyC6BTsi52XASuxBVgF5FEwIlF2KSxBBitLgwpYDvfO9WQX0-CnuWgfudEbsEbb1Impp-7qnXgW85Q5fzeiDC5lG_rYcP869g2c6XJz4PLGuBm5IN1fN3zzxcXIDz7dXIT-BGSQCwvm_zlebPV7kynOGQz4gYovsifWGzjqQhnthme-JFSIbtpkoAiEp3ho64cR5n894Wmolzn05sQ3yatgkUdsD4k5q0i7vkAppVyCBDLh7jVtJ9xsrCrxcbX32G4_8FFFhjLXMXdYWNiU-WdoH-nZcHJLIB5rJ4fvqZs5aXpON-R3AS130eWXafrKA"
     },
     {
-      "name": "ids only (the ladder's last rung)",
+      "name": "ladder rung 1: action labels dropped",
       "plaintext": {
         "v": 1,
         "type": "push",
         "thread_id": "msg_01K70000000000000000000010",
-        "message_id": "msg_01K70000000000000000000014",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": {
+          "key": "q-1a2b3c4d",
+          "revision": 0,
+          "prompt": "Run the retry tests against the Stripe test clock?",
+          "context": "They take about four minutes against the test key.",
+          "choices": [
+            {
+              "label": "Yes",
+              "recommended": true
+            },
+            {
+              "label": "No",
+              "recommended": false
+            }
+          ]
+        },
         "kind": "question",
-        "badge": 4,
-        "time_sensitive": true
+        "badge": 2,
+        "time_sensitive": false,
+        "actions": [
+          {
+            "id": "choice.0"
+          },
+          {
+            "id": "choice.1"
+          }
+        ]
       },
-      "envelope": "HarCOZmbxuz8B8ZFNnbYFb4boNEWixTzWsrh9FvGzoQgovDXyE6Gp0P7ZeSbHyJfCdx6s9XIIAJaH7Pm5BIgYWJWpaDtijmZlkZphiz6jNcmVkx3VlmonzImg6SpNG6vEYvSeyE8CZ5sVpjpWMh87hlVxKRXnrFb_Pv7cc94R96pIbDPh4NR-5sO38ICDdQzpQszh__XaIOH4izDG8yaLxSgZbGELIQY4TQG9p-ThHq9Vj7ccUegzf2Fud2Ldw"
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "_2lATTys98gTu4cvAT4OK-zzr1PLVSeFmpAjcWNH6wBRDOFFR9qalyEUS49Hf-Ic4yjNXb3T0XH8HxR02UUKjFVT2FcmEoSQcFpfbNw2eyU4mLn4NW_BMqiOnfpMtcX1uioNASrf88xx_ofR9f7BEnHU318mBIe-6J3MsI1UFJsSoeMPBhecQa1BmKZO1v_Clrin4slWZMdgYwZHYavKMxjUmjleUA0oy5Kl5RfSd4Q1Pa6VELWEYK1Nfp-qMY9pWlTKd30YASZI5841f-s-Ak-iHy7L3FrAPe0EykhikfD9r5SzViarTd_NvOunXgeFcxsLLtqh62O1L7jL0MObXtrya67O_UsM2YU-KYws4BHleoiz6npGO5PDDZJzCzDw2nUVx1Xxgzhi5I1oTnNjCW8mIWIcETqH7daY4T2gz-V1MbaYoprcbcY6lQ9ieo1u9KHbRB2OOcoWnrOzxQZ73IuieGbkUuY9Nk1LaJarF_Z0N7XesmDu6q8jG70QXYt4ruVld-7hhPO7xKZt5y7A0_8qz5wBz3dAmsjlBjCNA_okgqr4XG182QmXGKC5h7mNfc8H8pVwPzlclyaXYhJiBGIajI-3rCkkfIou65RQk6wai_oybJcwyZjkhCD8xJ5yEid_diMbyZJ5Vd2iobuz0TWVCVBkAfrMoOtr1Mb2b9DAooAWrzs6PdlRnnoIsxjQ4JqlWqK7kazXeOvQlv4feXPozWbpg-f2W5DiDz2NN3gmLRjmbQ9pDNLNH24tIZg4qYoYhmQYOj16HTVzjO2f4SiI8GB6ay4v"
+    },
+    {
+      "name": "ladder rung 2: question.context dropped",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": {
+          "key": "q-1a2b3c4d",
+          "revision": 0,
+          "prompt": "Run the retry tests against the Stripe test clock?",
+          "context": null,
+          "choices": [
+            {
+              "label": "Yes",
+              "recommended": true
+            },
+            {
+              "label": "No",
+              "recommended": false
+            }
+          ]
+        },
+        "kind": "question",
+        "badge": 2,
+        "time_sensitive": false,
+        "actions": [
+          {
+            "id": "choice.0"
+          },
+          {
+            "id": "choice.1"
+          }
+        ]
+      },
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "a6yxA1-Q49bu4llI2KxybhaIqre9We2RNAVjLh1ywwe6jFTAQX-CXNhrwdl12DW-FCVurKNiPGtuatDac4bKhC-mRarbNSvBjam1Zc5CeTJ1qmWV7cx_EQX3n0Gw6onB-FPVyDtIKppj2GgDmlBPUdnyEsR32C_wpA-ozr1hZ4fjtlxTHkjWl7UWEGCiNUZjBnhpGvZ59aEpCA_psy1rDPD3X6CK39sUAMkj7z1Wup8RvOHBikXKGP186x_YcelGhFN6pWjEb6ytGv2uRhd2-OFMW-fRX_Jh0qQeSE8eByH-EyFs2VKBmaUugHOICDtY5pGQbkyQavoLCSofz1eOmrmtm1YkYF18TYPYQGiiICAZqZXuQSWzXPF3flw16jYOaecnDoKuow1vo-aC9tajwYh9PYhrHQgSrMYmuedysqIbJKewxx9IK0HlS3qgh_S9_hubvGONL1gJFjUdyxrpj5_Komj-QNadzchuITVIG1Gb3820KKLJAGfRQPUzF0PU9wYphcFQA_fRBIy0uzotUbnxpS9Dr-irYbdAsZGalrBHfbFY9EZkrf7vNgwpgJMCAtc5aBI2HVRAMo6HrS3kfSSueaMMs6_HXYiM0GQnaNU2UA10-HFdDivtWR5N-xx76KgL1aW3nSLyJbaSHybsjD0LN3wuWchlfS_UclB_IReUBKALRK2jJXrSlXszhvXUuO401pCMH5UjZwzqry4qmQK8uYF5jKVt"
+    },
+    {
+      "name": "ladder rung 3: question and actions dropped",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": null,
+        "kind": "question",
+        "badge": 2,
+        "time_sensitive": false
+      },
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "NSpo2n-GmoUENliGwZu__dkXgDZW_hvbmAcYv4dxDVXhXU60W3hMnXQqx0nVI3N9LDFg72hEmiboMauSzcz5OQlqUpktcayau0GhXtVLe2Z_Cfo-hZKAK4TpdGljgYb1SR6v_7-b3Z71SC0y9k1H7AoVYOeUkeaZmwVfQ5McegjiL8-r28Msf3NiuHavj5tcrz3HsRlK_8ebau8U-eh0ph61fge47e3seTIeaWy_ORGG9HJgV1nTN2vCN-gKOVPMis_R1eZs0pnRgEm_hdb1gts2uepzIl7sLIJvM6J_eLI-CSsxPtPLmK6_Cdq7Jr1zoCSe_3PXtQjaoI8qQpe71y_w77_zkKByK76zk8Pdu462Y21AL2zY9TZWx05wQ32LyY25suw9_77-aCXqY_3jazjfLd_Ifvz9L5A5wA"
+    },
+    {
+      "name": "ladder: ids only (the last rung)",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "kind": "question",
+        "badge": 2,
+        "time_sensitive": false
+      },
+      "collapse_id": "d362db15bfe8cbf346f8d2d0fb253071906e62bebcda92c2fdf1dcd3bd83dad7",
+      "envelope": "Drfc3sX5H0mulFWvtqowCdH-ut42QzLlD7TfMHrYL3Gc9ZOdZ3_NGOCBaw7gKERKdBnQ2vJocfIKpIM4UXuaLZ2Zc3qTj5wzx93U9kNX9CK7qpN0zceClRqR7jFjQMuVsiyvYT1wcf60FiI6qMJKO1kuVq3Q4zme2CDqRN8R5ObnPK1me6WO8cLHL-bwekCWglT_f0KLrLt8lWU4dAaE6qFzoo6ko06LSB7lqX3CgjYdiDofhvpF96CzJzg42TU"
     }
   ]
 }
