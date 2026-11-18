@@ -575,7 +575,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     hidden = false;
   });
 
-  async function reading(files: string[], at: Record<string, number>, extra: Partial<React.ComponentProps<typeof AllFilesCodeView>> = {}) {
+  async function reading(files: string[], at: Record<string, number>, extra: Partial<React.ComponentProps<typeof AllFilesCodeView>> = {}, secondOpinions: SemDiffResult[] = []) {
     if (!restore) {
       const realRect = Element.prototype.getBoundingClientRect;
       const realSizes = sizes.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
@@ -593,10 +593,11 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => pageHeight });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
     const gates: (() => void)[] = [];
+    let asked = 0;
     const client: SemDiffClient = {
       supports: (path) => path.endsWith('.ts'),
       diff: (_path, _old, _new, _signal, options) =>
-        new Promise((resolve) => gates.push(() => resolve(options ? { ...moved, secondOpinion: { state: 'ok', links: [{ operationIndex: 0, candidateId: 'c1' }] } as never } : moved))),
+        new Promise((resolve) => gates.push(() => resolve(options ? { ...(secondOpinions.shift() ?? moved), secondOpinion: { state: 'ok', links: [{ operationIndex: 0, candidateId: `c${++asked}` }] } as never } : moved))),
       attempt: async () => ({ result: moved, failed: false }),
       dispose: () => {},
     };
@@ -628,7 +629,15 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
       });
     };
     const drawnKey = (path: string) => String([...items.values()].find((item) => item.id.includes(path))!.fileDiff.cacheKey ?? '');
-    return { land, swapped, move, redraw, drawnKey };
+    const rerender = async (props: Partial<React.ComponentProps<typeof AllFilesCodeView>>) => {
+      await act(async () => {
+        root!.render(
+          <AllFilesCodeView files={files.map(changed)} diffStyle="unified" annotations={[]} selectedAnnotationId={null} scrollTargetAnnotation={null} pendingSelection={null} onLineSelection={() => {}} onAddAnnotationForFile={() => {}} onEditAnnotation={() => {}} onSelectAnnotation={() => {}} onDeleteAnnotation={() => {}} readOnly contextExpansionAvailable={false} semDiffClient={client} fetchFileContent={read} {...extra} {...props} />,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+    };
+    return { land, swapped, move, redraw, drawnKey, rerender };
   }
 
   test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
@@ -746,6 +755,20 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(off?.dataset.semanticNote).toBe('off');
     await act(async () => off!.click());
     expect(page.drawnKey('a.ts')).toContain(':c1');
+  });
+
+  test.skipIf(!hasDom)('a newer answer drawn by itself brings its own counts to the header, not those of one that was waiting', async () => {
+    const summary = (counts: Record<string, number>) => ({ ...moved, summary: { counts } as never });
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp }, [summary({ moved: 1, renamed: 1 }), summary({ moved: 2 })]);
+    await page.land();
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    expect(page.drawnKey('a.ts')).not.toContain(':c1');
+    page.move('a.ts', 3000);
+    await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c2');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.textContent).toBe('2 moved');
   });
 
   test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {

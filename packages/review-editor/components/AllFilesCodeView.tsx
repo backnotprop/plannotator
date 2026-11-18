@@ -1381,6 +1381,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     previewAppliedRef.current = new Set();
     semStateRef.current = new Map();
     semDiffsRef.current = new Map();
+    pendingSummaryRef.current = new Map();
     semTextsRef.current = new Map();
     powerUpFilesRef.current = new Map();
     for (const item of identity.items) {
@@ -2259,6 +2260,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       semDiffsRef.current.set(itemId, { plain, semantic });
       if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
         semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+        pendingSummaryRef.current.delete(itemId);
         showSemantic(itemId, semanticEnabledRef.current);
         return;
       }
