@@ -36,7 +36,10 @@
 .ib-prs-field input::placeholder { color: var(--muted-foreground); }
 .ib-prs-field input::-webkit-search-cancel-button { cursor: pointer; }
 .ib-prs-seg .ib-seg-o { border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); }
-.ib-prs-seg .ib-seg-o[data-on] { background: var(--card); }
+/* The board sits on the card colour, so in dark a selected option painted with it showed as the page through the well
+   (Open / Merged, Grid / Table): it is raised above the well there, as the Guide tabs' marks are. Light keeps the card. */
+.ib-prs-seg .ib-seg-o[data-on] { background: color-mix(in oklch, var(--foreground) 20%, var(--card)); }
+:root.light .ib-prs-seg .ib-seg-o[data-on], .ib-lightscope.light .ib-prs-seg .ib-seg-o[data-on] { background: var(--card); }
 .ib-prs-seg .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-prs-closed { display: inline-flex; align-items: center; gap: 4px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); text-decoration: none; border-radius: 6px; padding: 4px 6px; }
 .ib-prs-closed:hover { color: var(--foreground); background: var(--ib-hover); }

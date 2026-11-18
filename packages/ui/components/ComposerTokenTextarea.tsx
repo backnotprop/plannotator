@@ -19,6 +19,16 @@ import type { MentionPerson } from '../utils/mentions';
  * and box metrics MUST stay identical or the overlay drifts out of alignment. */
 export const COMPOSER_TEXT_CLASSES = 'w-full bg-transparent text-sm px-1 py-0.5';
 
+/**
+ * The textareas' `defaultValue`, beside their `value`. Given `value` alone, React 19 also sets the textarea's
+ * `defaultValue` (its text child) to the words on every change: a write of the whole text and a DOM mutation per key,
+ * and in Chrome that mutation ends the browser's undo step, so ⌘Z took back one character at a time. With a
+ * `defaultValue` of its own React writes that instead, and an empty one changes nothing, so the text child stays
+ * empty and the browser's undo groups a typing run again. The value is controlled as before. (React's dev build
+ * warns once about a textarea with both props; the production build says nothing.)
+ */
+const KEEP_TEXT_CHILD_EMPTY = '';
+
 /** Per-composer memo for the overlay gutter sync below. */
 interface OverlayGutterState {
   /** The overlay the applied value belongs to (a remount invalidates it). */
@@ -272,6 +282,14 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
   const attachRef = useCallback(
     (el: HTMLTextAreaElement | null) => {
       innerRef.current = el;
+      // See `defaultValue=""` on the textareas below: React wrote the first words (a draft brought back) as the
+      // textarea's text child when it made it. Dropped now, before the person types, rather than by React's first
+      // update, which would make the first key its own undo step. The value is the person's and stays.
+      if (el && el.defaultValue !== '') {
+        const words = el.value;
+        el.defaultValue = '';
+        if (el.value !== words) el.value = words;
+      }
       textareaRef(el);
     },
     [textareaRef],
@@ -296,9 +314,33 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
 
   // Keep the mirror aligned when the value changes without a scroll event
   // (e.g. programmatic insertion moving the caret into a scrolled region).
+  // Read in the next frame, before it paints, not in the key's own task: a
+  // read of `scrollTop` right after React's write forces a layout of the
+  // whole text on every key (and again for every key that lands before the
+  // frame), where the frame lays it out once anyway. Animation frames run
+  // before the frame's layout and paint, so the mirror is aligned in every
+  // frame drawn, as before; scroll events and the ResizeObserver still sync
+  // at once.
+  const syncFrame = useRef<number | null>(null);
   useEffect(() => {
-    if (innerRef.current) syncScroll(innerRef.current);
+    if (typeof requestAnimationFrame === 'undefined') {
+      if (innerRef.current) syncScroll(innerRef.current);
+      return;
+    }
+    // One read a frame, however many keys land before it.
+    if (syncFrame.current !== null) return;
+    syncFrame.current = requestAnimationFrame(() => {
+      syncFrame.current = null;
+      if (innerRef.current) syncScroll(innerRef.current);
+    });
   }, [value, syncScroll]);
+  useEffect(
+    () => () => {
+      if (syncFrame.current !== null) cancelAnimationFrame(syncFrame.current);
+      syncFrame.current = null;
+    },
+    [],
+  );
 
   // `syncScroll` otherwise only runs on scroll and on value change, so a
   // window/panel resize that grows or drops the textarea's scrollbar without a
@@ -325,6 +367,7 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
         {...inputProps}
         ref={attachRef}
         value={value}
+        defaultValue={KEEP_TEXT_CHILD_EMPTY}
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSelect={onSelectCaret}
@@ -403,6 +446,7 @@ export const ComposerTokenTextarea: React.FC<ComposerTokenTextareaProps> = ({
         aria-activedescendant={activeOptionId}
         ref={attachRef}
         value={value}
+        defaultValue={KEEP_TEXT_CHILD_EMPTY}
         onChange={onChange}
         onKeyDown={onKeyDown}
         onSelect={onSelectCaret}

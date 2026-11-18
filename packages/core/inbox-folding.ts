@@ -230,7 +230,12 @@ export function replyWords(body: string): string {
  * with none, the answers it sent (from `messages`, the thread); else the
  * names of the files it carries; else its first words.
  */
-export function foldSnippet(message: InboxMessageWire, messages: readonly InboxMessageWire[] = [message]): FoldSnippet {
+export function foldSnippet(
+  message: InboxMessageWire,
+  messages: readonly InboxMessageWire[] = [message],
+  // `firstWords` with its defaults; a caller that draws a long thread on every refresh can pass one that keeps its answers.
+  words: (markdown: string) => string = firstWords,
+): FoldSnippet {
   if (message.author.kind === 'person') {
     // A Re-ask note: what the person did, not the instructions the agent got.
     const reasked = message.reask?.length ?? 0;
@@ -249,25 +254,25 @@ export function foldSnippet(message: InboxMessageWire, messages: readonly InboxM
       }
       return { kind: 'words', text: reasked === 1 ? 'Asked to re-ask the open question' : `Asked to re-ask ${reasked} open questions in one message` };
     }
-    const words = firstWords(replyWords(message.body));
-    if (words) return { kind: 'words', text: words };
+    const said = words(replyWords(message.body));
+    if (said) return { kind: 'words', text: said };
     const sent = messages.flatMap((m) => (m.questions ?? []).filter((q) => q.sent_reply_id === message.id && q.answer !== null));
     if (sent.length > 0) return { kind: 'answers', parts: answeredParts(sent) };
     // Files pasted in with no words: name them, not the still-open line the agent reads.
     const files = message.attachments ?? [];
     if (files.length > 0) return { kind: 'words', text: files.map((file) => file.name).join(', ') };
-    return { kind: 'words', text: firstWords(withoutInboxSkillsBlock(message.body)) };
+    return { kind: 'words', text: words(withoutInboxSkillsBlock(message.body)) };
   }
   const questions = (message.questions ?? []).filter(live);
   if (questions.length > 0 && questions.every((q) => q.state === 'sent' && q.answer !== null)) {
     return { kind: 'answers', parts: answeredParts(questions) };
   }
-  const words = firstWords(message.body);
-  if (!words && questions.length > 0) return { kind: 'words', text: plainPrompt(questions[0]!.prompt) };
+  const first = words(message.body);
+  if (!first && questions.length > 0) return { kind: 'words', text: plainPrompt(questions[0]!.prompt) };
   // A message that is only an action item: its line ("Action item: Approve the deploy").
   const todo = (message.actions ?? []).find((a) => a.state !== 'superseded');
-  if (!words && todo) return { kind: 'words', text: `Action item: ${plainPrompt(todo.prompt)}` };
-  return { kind: 'words', text: words };
+  if (!first && todo) return { kind: 'words', text: `Action item: ${plainPrompt(todo.prompt)}` };
+  return { kind: 'words', text: first };
 }
 
 /** The snippet as one line of text, whole: a line's title and its screen-reader label. */

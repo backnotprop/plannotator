@@ -7607,6 +7607,28 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-bi-text .ib-bi-q { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); margin-top: 10px; }
 .ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
 .pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
+/* The Routines intro (components/RoutinesIntro.tsx, routinesIntroArt.ts): the loop on the storm's void, the same in both
+   themes, then the Board's words and two equal buttons (the same button, the same size: neither is the primary). */
+dialog.ib-rti:focus { outline: none; }
+.ib-rti-art { position: relative; height: 212px; overflow: hidden; background: #0F0D16; }
+.ib-rti-art svg { position: absolute; inset: 0; display: block; width: 100%; height: 100%; }
+.ib-rti-art .ib-rti-label { font-family: var(--font-sans); font-size: var(--ib-fs-12, 12px); }
+.ib-rti-art .ib-rti-when { font-weight: 600; }
+.ib-rti-art .ib-rti-small { font-size: var(--ib-fs-11-5, 11.5px); }
+.ib-rti-art .ib-rti-count { font-family: var(--font-mono); font-size: var(--ib-fs-24, 24px); font-weight: 700; }
+/* The title carries the sidebar's Routines glyph after the word (decorative: the heading's name stays "Routines"). */
+.ib-rti .ib-rti-h { display: flex; align-items: center; gap: 7px; }
+dialog.ib-rti svg.ib-rti-h-ic, .pn-inbox .ib-rti svg.ib-rti-h-ic { width: 16px; height: 16px; flex: none; color: var(--primary); stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.ib-rti .ib-bi-q code { font-family: var(--font-mono); font-size: var(--ib-fs-12-5, 12.5px); color: var(--foreground); background: var(--ib-fill); padding: 1px 5px; border-radius: 5px; white-space: nowrap; }
+.ib-rti-acts { gap: 10px; padding: 18px 22px 20px; }
+.pn-inbox .ib-rti-acts .ib-btn, dialog .ib-rti-acts .ib-btn { flex: 1 1 0; min-width: 0; height: 36px; padding: 0 16px; font-size: var(--ib-fs-14, 14px); justify-content: center; color: var(--foreground); border-color: transparent; background: color-mix(in oklch, var(--foreground) 9%, transparent); }
+.pn-inbox .ib-rti-acts .ib-btn:hover, dialog .ib-rti-acts .ib-btn:hover { background: color-mix(in oklch, var(--foreground) 14%, transparent); }
+.ib-rti-acts .ib-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-bi-phone .ib-rti-art { height: 196px; }
+.ib-bi-phone .ib-rti-art .ib-rti-count { font-size: var(--ib-fs-20, 20px); }
+/* A phone: stacked in the same order, each a full 44 px tap target. */
+.ib-bi-phone .ib-bi-acts.ib-rti-acts { flex-direction: column; align-items: stretch; padding: 16px 18px 18px; }
+.pn-inbox .ib-bi-phone .ib-rti-acts .ib-btn, dialog.ib-bi-phone .ib-rti-acts .ib-btn { flex: none; height: 44px; }
 /* BRO-CARD-START Bro mode's card (the owner's pick, "poster"): the name as the picture on sneaker navy, the same in
    both themes; the sidebar's Tater sits on the e. */
 dialog.ib-dlg.ib-bi.ib-bro { --bro-w: 77px; --bro-h: 88px; width: min(480px, calc(100vw - 32px)); border: 0; border-radius: 16px; background: #27345a; color: #fbfaf5; box-shadow: 0 18px 50px oklch(0 0 0 / 0.4); }
