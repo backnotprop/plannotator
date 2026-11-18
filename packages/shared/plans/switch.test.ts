@@ -1,13 +1,15 @@
 /**
  * Plans' switch over config.json `inboxPlans`, on a scratch data dir. What regresses if these fail:
  * - Plans is on without the person turning it on (unset, a string, a broken config.json);
- * - turning it on or off does not stick, touches the person's other settings, or reports a save that did not happen.
+ * - turning it on or off does not stick, touches the person's other settings, or reports a save that did not happen;
+ * - the Spaces home's view (config.json `inboxSpacesView`) is not the person's across windows: it is not cards
+ *   unless they chose the list, a choice does not stick, or it touches their other settings.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { plansOn, setPlansSwitch } from "./switch";
+import { plansOn, setPlansSwitch, setSpacesView, spacesView } from "./switch";
 
 let dataDir = "";
 let saved: string | undefined;
@@ -56,5 +58,17 @@ describe("Plans' switch", () => {
     }
     expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe("{ not json");
     expect(plansOn()).toBe(false);
+  });
+
+  test("the Spaces view is cards unless the person chose the list; a choice sticks beside their other settings", () => {
+    expect(spacesView()).toBe("cards");
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxPlans: true, inboxSpacesView: "grid" }));
+    expect(spacesView()).toBe("cards");
+    expect(setSpacesView("list")).toBe(true);
+    expect(spacesView()).toBe("list");
+    expect(config()).toEqual({ inboxPlans: true, inboxSpacesView: "list" });
+    expect(setSpacesView("cards")).toBe(true);
+    expect(spacesView()).toBe("cards");
+    expect(plansOn()).toBe(true);
   });
 });

@@ -23,6 +23,7 @@ import {
   readDiffSideBytes,
   validateFilePath,
 } from "./review-core";
+import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
 export const REVIEW_IMAGE_ENDPOINT = "/api/review-image";
 
@@ -187,6 +188,34 @@ function jpegDimensions(b: Uint8Array): ImageDimensions | null {
   return null;
 }
 
+export const SVG_DEFAULT_SIZE: ImageDimensions = { width: 300, height: 150 };
+
+function svgLength(value: string | undefined): number | null {
+  if (!value) return null;
+  const match = /^\s*([0-9]*\.?[0-9]+)\s*(px)?\s*$/i.exec(value);
+  if (!match) return null;
+  const n = Number(match[1]);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
+}
+
+const SVG_COMMENT = new RegExp("<!--[\\s\\S]*?-->", "g");
+
+export function svgDimensions(b: Uint8Array): ImageDimensions {
+  const text = new TextDecoder().decode(b.subarray(0, 8192)).replace(SVG_COMMENT, "");
+  const tag = /<svg\b([^>]*)>/i.exec(text)?.[1] ?? "";
+  const attr = (name: string) => new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`, "i").exec(tag)?.[2];
+  const width = svgLength(attr("width"));
+  const height = svgLength(attr("height"));
+  const box = attr("viewBox")?.trim().split(/[\s,]+/).map(Number);
+  const boxWidth = box && box.length === 4 && box[2]! > 0 ? box[2]! : null;
+  const boxHeight = box && box.length === 4 && box[3]! > 0 ? box[3]! : null;
+  if (width && height) return { width, height };
+  if (width && boxWidth && boxHeight) return { width, height: Math.max(1, Math.round((width * boxHeight) / boxWidth)) };
+  if (height && boxWidth && boxHeight) return { width: Math.max(1, Math.round((height * boxWidth) / boxHeight)), height };
+  if (boxWidth && boxHeight) return { width: Math.max(1, Math.round(boxWidth)), height: Math.max(1, Math.round(boxHeight)) };
+  return { ...SVG_DEFAULT_SIZE };
+}
+
 function avifDimensions(b: Uint8Array): ImageDimensions | null {
   const limit = Math.min(b.byteLength, 64 * 1024) - 16;
   for (let i = 0; i < limit; i++) {
@@ -239,6 +268,9 @@ export function readImageDimensions(bytes: Uint8Array, contentType: string): Ima
       else if (headerSize >= 40 && b.byteLength >= 26) dims = { width: Math.abs(i32le(b, 18)), height: Math.abs(i32le(b, 22)) };
       break;
     }
+    case "image/svg+xml":
+      dims = svgDimensions(b);
+      break;
     case "image/x-icon":
       if (b.byteLength >= 8) dims = { width: b[6] || 256, height: b[7] || 256 };
       break;
@@ -397,7 +429,10 @@ function formatMegabytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+const SVG_PATH = /\.svg$/i;
+
 function isEligibleEntry(entry: PatchFileEntry): boolean {
+  if (SVG_PATH.test(entry.newPath ?? "") || SVG_PATH.test(entry.oldPath ?? "")) return true;
   return !entry.hasHunks && (isReviewImagePath(entry.newPath) || isReviewImagePath(entry.oldPath));
 }
 
@@ -519,4 +554,78 @@ export function reviewImageBytesResponse(
     return { status: 304, headers: rest, body: null };
   }
   return { status: 200, headers, body: bytes };
+}
+
+export const REVIEW_IMAGE_SIZES_ENDPOINT = "/api/review-image-sizes";
+export const MAX_REVIEW_IMAGE_SIZE_FILES = 48;
+
+export interface ReviewImageSideSize {
+  bytes: number;
+  width?: number;
+  height?: number;
+}
+
+export type ReviewImageSizes = Record<string, Partial<Record<DiffSide, ReviewImageSideSize>>>;
+
+async function sideSize(request: Pick<ReviewImageRequest, "signal" | "readSide">, entry: PatchFileEntry, side: DiffSide): Promise<ReviewImageSideSize | null> {
+  const sidePath = side === "old" ? entry.oldPath : entry.newPath;
+  if (!sidePath) return null;
+  try {
+    validateFilePath(sidePath);
+    const read = await request.readSide(side, entry.newPath ?? sidePath, entry.oldPath, MAX_REVIEW_IMAGE_PREVIEW_BYTES, request.signal);
+    if (read.kind === "too-large") return { bytes: read.size };
+    if (read.kind !== "ok") return null;
+    const contentType = sniffImageContentType(read.bytes);
+    const dims = contentType ? readImageDimensions(read.bytes, contentType) : null;
+    return { bytes: read.bytes.byteLength, ...(dims ? { width: dims.width, height: dims.height } : {}) };
+  } catch {
+    return null;
+  }
+}
+
+export const REVIEW_IMAGE_SIZES_BUDGET_MS = 250;
+
+type ReviewImageSizesSource = Pick<ReviewImageRequest, "available" | "patch" | "signal" | "readSide">;
+
+function eligibleImageEntries(patch: string): PatchFileEntry[] {
+  return parseDiffToFiles(patch)
+    .map((file) => findPatchFileEntry(patch, file.path))
+    .filter((entry): entry is PatchFileEntry => !!entry && isEligibleEntry(entry))
+    .slice(0, MAX_REVIEW_IMAGE_SIZE_FILES);
+}
+
+export async function collectReviewImageSizes(source: ReviewImageSizesSource): Promise<ReviewImageSizes> {
+  const sizes: ReviewImageSizes = {};
+  if (!source.available) return sizes;
+  await Promise.all(
+    eligibleImageEntries(source.patch).map(async (entry) => {
+      const [old, next] = await Promise.all([sideSize(source, entry, "old"), sideSize(source, entry, "new")]);
+      if (old || next) sizes[entry.path] = { ...(old ? { old } : {}), ...(next ? { new: next } : {}) };
+    }),
+  );
+  return sizes;
+}
+
+export async function reviewImageSizesAdvert(source: ReviewImageSizesSource, budgetMs = REVIEW_IMAGE_SIZES_BUDGET_MS): Promise<{ imageSizes?: ReviewImageSizes }> {
+  if (!source.available || eligibleImageEntries(source.patch).length === 0) return {};
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), budgetMs);
+  });
+  const sizes = await Promise.race([collectReviewImageSizes(source).catch(() => null), late]);
+  if (timer) clearTimeout(timer);
+  return sizes ? { imageSizes: sizes } : {};
+}
+
+export async function handleReviewImageSizesRequest(request: Omit<ReviewImageRequest, "ifNoneMatch">): Promise<ReviewImageResponse> {
+  const json = (status: number, body: unknown): ReviewImageResponse => ({
+    status,
+    headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
+    body: JSON.stringify(body),
+  });
+  if (!request.available) return json(200, { sizes: {} });
+  const snapshot = request.params.get("snapshot");
+  if (!snapshot) return json(400, { reason: "bad-request", error: "Expected snapshot" });
+  if (!request.isCurrentSnapshot(snapshot)) return json(409, { reason: "stale", error: "Diff snapshot is stale; refresh the review" });
+  return json(200, { sizes: await collectReviewImageSizes(request) });
 }

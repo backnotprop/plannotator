@@ -71,11 +71,12 @@ async function shot(page: Page, name: string, schemes: readonly ('light' | 'dark
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
-/** The header's visible controls, left to right, by a short name. */
+/** The header's visible controls, left to right, by a short name. The title is left out: cut, it is a button too (a tap opens it whole). */
 async function headerOrder(pane: Locator): Promise<string[]> {
   return pane.locator('.ib-phead').evaluate((head) =>
     [...head.querySelectorAll('button')]
       .filter((b) => {
+        if (b.hasAttribute('data-header-title')) return false;
         const r = b.getBoundingClientRect();
         return r.width > 0 && getComputedStyle(b).visibility !== 'hidden';
       })
@@ -165,23 +166,36 @@ test('desktop beside the list: the subject leads, ⋯ More (Mark read and Snooze
   await expect(page.locator('.ib-listcol')).toBeVisible();
   await shot(page, '1-desktop', ['light', 'dark']);
   expect(await headerOrder(pane)).toEqual(['artifacts', 'expand', 'more', 'close']);
-  // The title leads the bar, up to Artifacts. A named thread shows its name at once (the list's rule, the owner's
-  // 2026-11-02 call); its tooltip shows the whole subject, the body's heading stays the subject, and the meta line has
-  // no pill repeating the name.
+  // The title leads the bar, up to Artifacts. A named thread shows its name (the list's rule, the owner's 2026-11-02
+  // call) with its subject after it, the thread's only heading (2026-11-15: none in the body); the meta line has no
+  // pill repeating the name.
   const subject = pane.locator('.ib-phead [data-header-subject]');
-  await expect(subject).toHaveText('invoices');
-  await expect(subject).toHaveAttribute('data-on', '');
-  await expect(pane.locator('.ib-pbody > h2.ib-subject')).toHaveText('Invoice list: cards or a table?');
+  await expect(subject.locator('[data-header-name-words]')).toHaveText('invoices');
+  await expect(subject.locator('[data-header-after]')).toHaveText('Invoice list: cards or a table?');
+  await expect(subject.locator('[data-header-after]')).toBeVisible();
+  await expect(subject).toHaveAttribute('aria-label', 'invoices: Invoice list: cards or a table?');
+  await expect(pane.locator('.ib-pbody h2')).toHaveCount(0);
   await expect(pane.locator('[data-thread-meta] .ib-key')).toHaveCount(0);
-  // The tooltip hangs on the words, not on the title's box (which takes the bar's free room): it opens over "invoices",
-  // not far to the right over the empty room (the owner, 2026-11-08).
+  // Whole on the line, the title is no button and has no tooltip repeating it.
   const words = subject.locator('[data-header-title]');
+  await expect(words).not.toHaveAttribute('aria-expanded');
   await words.hover();
   const subjectTip = page.locator('[data-side].bg-popover');
+  await page.waitForTimeout(800);
+  await expect(subjectTip).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  // Cut (the title's room narrowed here), its tooltip shows the subject, and hangs on the words, not on the title's box
+  // (which takes the bar's free room): it opens over the words, not far to the right over the empty room (the owner,
+  // 2026-11-08).
+  await subject.evaluate((el) => (el.style.maxWidth = '120px'));
+  await expect(words).toHaveAttribute('aria-expanded', 'false');
+  await words.hover();
   await expect(subjectTip).toHaveText('Invoice list: cards or a table?');
   const [wordsBox, tipBox] = await Promise.all([words.boundingBox(), subjectTip.boundingBox()]);
   expect(Math.abs(tipBox!.x + tipBox!.width / 2 - (wordsBox!.x + wordsBox!.width / 2))).toBeLessThan(2);
   await page.mouse.move(0, 0);
+  await subject.evaluate((el) => (el.style.maxWidth = ''));
+  await expect(words).not.toHaveAttribute('aria-expanded');
   const [headBox, subjectBox, artifactsBox] = await Promise.all([pane.locator('.ib-phead').boundingBox(), subject.boundingBox(), pane.locator('[data-artifacts-button]').boundingBox()]);
   expect(subjectBox!.x - headBox!.x).toBeLessThan(24);
   expect(subjectBox!.x + subjectBox!.width).toBeLessThanOrEqual(artifactsBox!.x + 0.5);
@@ -562,9 +576,10 @@ for (const phone of [
       await expect(pane.locator('[data-phone-back]')).toBeVisible();
       await shot(page, `7-phone-${phone.name.replace(/\W+/g, '-').toLowerCase()}`, ['light', 'dark']);
       expect(await headerOrder(pane)).toEqual(['back', 'artifacts', 'expand', 'more']);
-      // The title (this named thread's name) is drawn with room to read (approval "inbox-thread-header").
-      const title = pane.locator('.ib-phead [data-header-subject][data-on]');
-      await expect(title).toHaveText('invoices');
+      // The title (this named thread's name, its subject after it) is drawn with room to read (approval "inbox-thread-header").
+      const title = pane.locator('.ib-phead [data-header-subject]');
+      await expect(title.locator('[data-header-name-words]')).toHaveText('invoices');
+      await expect(title.locator('[data-header-after]')).toHaveText('Invoice list: cards or a table?');
       expect(await title.evaluate((h) => h.getBoundingClientRect().width)).toBeGreaterThanOrEqual(88);
       // The read button and Snooze moved into the ⋯ sheet, where they lead.
       await pane.locator('[data-thread-more]').click();
@@ -575,7 +590,7 @@ for (const phone of [
       await expect(sheet).toHaveCount(0);
       // The pin lives in ⋯ More's menu (a phone's way to pin), not the header.
       await expect(pane.locator('[data-pin-toggle]')).toHaveCount(0);
-      // Every header control is a 44 px target and none overlaps another.
+      // Every header control is a 44 px target and none overlaps another (the title too, a button when cut).
       // Measured against the header itself (the thread may still be sliding in).
       const boxes = await pane.locator('.ib-phead').evaluate((head) => {
         const h = head.getBoundingClientRect();

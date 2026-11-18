@@ -16,6 +16,13 @@ export type ReviewPullsRead = 'reading' | 'read' | 'failed';
 /** What the box reviews: `pick` fills it in, from a pull request's own page. */
 export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
+  /** Branch reviews' safety net: a local branch nobody reported, reviewed whole against its base, in its project. */
+  branch?: ReviewBoxBranch | null;
+}
+
+export interface ReviewBoxBranch {
+  name: string;
+  projectId: string;
 }
 
 /**

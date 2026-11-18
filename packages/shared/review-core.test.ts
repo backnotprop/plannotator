@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   isOversizedReviewStubPatch,
+  oversizedReviewStubBytes,
   OVERSIZED_REVIEW_STUB_LIMIT_LABEL,
 } from "./diff-paths";
 import { spawnSync } from "node:child_process";
@@ -407,6 +408,21 @@ describe("review-core", () => {
     // produces the same `Binary files ... differ` line, so the marker is the
     // only thing that tells the two apart.
     expect(isOversizedReviewStubPatch(result.patch)).toBe(true);
+    expect(oversizedReviewStubBytes(result.patch)).toEqual({ new: MAX_REVIEW_FILE_CONTENT_BYTES + 1 });
+  });
+
+  test("a committed oversized file's stub carries both sides' byte sizes, so the page never fetches a side over the image cap", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 10, 1));
+    spawnSync("git", ["add", "photo.png"], { cwd: repoDir });
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "photo"], { cwd: repoDir });
+    writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 20, 2));
+
+    const result = await runGitDiff(runtime, "uncommitted", "main");
+
+    expect(isOversizedReviewStubPatch(result.patch)).toBe(true);
+    expect(oversizedReviewStubBytes(result.patch)).toEqual({ old: MAX_REVIEW_FILE_CONTENT_BYTES + 10, new: MAX_REVIEW_FILE_CONTENT_BYTES + 20 });
   });
 
   test("the oversized-stub marker is absent from ordinary and genuinely binary diffs", async () => {

@@ -417,13 +417,13 @@ function layOutPhoneBar(width: number) {
 
 for (const width of [320, 390]) {
   test.skipIf(!hasDom)(`a phone at ${width} px: the title has room to read it, "Inbox" whole and the count kept`, async () => {
-    for (const [thread, shown] of [[THREAD, 'customize row look'], [{ ...THREAD, thread_name: null }, SUBJECT]] as const) {
+    for (const [thread, shown] of [[THREAD, `customize row look ${SUBJECT}`], [{ ...THREAD, thread_name: null }, SUBJECT]] as const) {
       await render(OPENED, true, thread);
       layOutPhoneBar(width);
       expect(fitPhoneHead(head())).toEqual([]);
       expect(head().hasAttribute('data-subject-off')).toBe(false);
       const title = head().querySelector<HTMLElement>('.ib-phsubj')!;
-      expect(title.textContent).toBe(shown);
+      expect(title.querySelector('[data-header-title]')!.textContent).toBe(shown);
       expect(title.getBoundingClientRect().width).toBeGreaterThanOrEqual(SUBJECT_FLOOR);
       act(() => root?.unmount());
       host?.remove();
@@ -433,14 +433,16 @@ for (const width of [320, 390]) {
 }
 
 /**
- * The bar's title (the owner, 2026-11-02): the thread's name by the list's rule (`threadChipName`), else the subject,
- * shown as main shows it (a name always; the subject once the body's heading has scrolled away). The body keeps the
- * subject as the thread's heading. Its tooltip is the whole subject. No name pill on the meta line.
+ * The bar's title (the owner, 2026-11-02): the thread's name by the list's rule (`threadChipName`), else the subject.
+ * Since 2026-11-15 it is always there, the thread's one heading (its h2), and the body has none: a short thread's
+ * title is not a large heading over its message with an empty bar above. Its tooltip is the whole subject. No name
+ * pill on the meta line.
  */
 const title = () => host!.querySelector<HTMLElement>('.ib-phead [data-header-subject]');
 /** The title's words inside its box: the tooltip's trigger. */
 const words = () => title()!.querySelector<HTMLElement>('[data-header-title]');
-const heading = () => host!.querySelector<HTMLElement>('.ib-pbody > h2.ib-subject');
+/** The body's own heading, which no longer exists: the title is the bar's h2. */
+const heading = () => host!.querySelector<HTMLElement>('.ib-pbody h2.ib-subject');
 const namePill = () => host!.querySelector('.ib-pbody [data-thread-meta] .ib-key');
 
 // The owner, 2026-11-08: over a short name ("PRs") the tooltip opened far to the right, over the empty room after the
@@ -462,29 +464,32 @@ test.skipIf(!hasDom)("the title's tooltip opens over its words, not centred on t
   restore.push(() => {
     HTMLElement.prototype.getBoundingClientRect = saved;
   });
+  // A short name whose subject after it is cut (the tooltip opens only on a cut title).
+  sized(tipped, 900, 40);
   expect(await tooltipOf(tipped)).toBe(SUBJECT);
   const popup = [...document.querySelectorAll<HTMLElement>('[data-pn-tooltip]')].at(-1)!;
   // Base UI's positioner names its anchor's size: the words' 40 px, not the box's 800.
   expect(popup.parentElement!.style.getPropertyValue('--anchor-width')).toBe('40px');
 });
 
-test.skipIf(!hasDom)('a named thread: the bar shows the name at once, its tooltip the whole subject; the heading is the subject; no name pill', async () => {
+test.skipIf(!hasDom)('a named thread: the bar shows the name and its subject after it, the thread\'s heading; the tooltip the subject when cut; no heading in the body; no name pill', async () => {
   await render(OPENED);
-  expect(title()!.textContent).toBe('customize row look');
-  expect(title()!.hasAttribute('data-on')).toBe(true);
-  expect(title()!.getAttribute('aria-hidden')).toBe('true');
-  expect(heading()!.textContent).toBe(SUBJECT);
+  expect(words()!.querySelector('[data-header-name-words]')!.textContent).toBe('customize row look');
+  expect(words()!.querySelector('[data-header-after]')!.textContent).toBe(SUBJECT);
+  expect(title()!.tagName).toBe('H2');
+  expect(title()!.hasAttribute('aria-hidden')).toBe(false);
+  expect(heading()).toBeNull();
+  sized(words()!, 900, 120);
   expect(await tooltipOf(words()!)).toBe(SUBJECT);
   expect(namePill()).toBeNull();
-  // Seen words only: the screen-reader line ("Thread name: …") is the one extra, on purpose (threadNameMeta.test).
-  const seen = [...host!.querySelectorAll('.ib-sr')].reduce((t, el) => t.replace(el.textContent!, ''), host!.textContent!);
-  expect(seen.split('customize row look').length - 1).toBe(1);
+  expect(host!.textContent!.split('customize row look').length - 1).toBe(1);
+  expect(title()!.getAttribute('aria-label')).toBe(`customize row look: ${SUBJECT}`);
 });
 
-test.skipIf(!hasDom)('no name: the bar holds the subject (shown once the heading scrolls away: threadNameMeta.test.tsx), its tooltip only when cut; no pill', async () => {
+test.skipIf(!hasDom)('no name: the bar holds the subject from the first draw, its tooltip only when cut; no pill', async () => {
   await render(OPENED, false, { ...THREAD, thread_name: null });
   expect(title()!.textContent).toBe(SUBJECT);
-  expect(heading()!.textContent).toBe(SUBJECT);
+  expect(heading()).toBeNull();
   expect(await tooltipOf(words()!)).toBeNull();
   unhover(words()!);
   sized(words()!, 900, 120);
@@ -497,7 +502,7 @@ test.skipIf(!hasDom)('a name equal to the subject, or one the subject starts wit
     await render(OPENED, false, { ...THREAD, thread_name: name, subject, messages: THREAD.messages.map((m) => (m.id === ROOT ? { ...m, subject } : m)) });
     expect(title()!.textContent).toBe(subject);
     expect(title()!.hasAttribute('data-header-name')).toBe(false);
-    expect(heading()!.textContent).toBe(subject);
+    expect(heading()).toBeNull();
     expect(namePill()).toBeNull();
     act(() => root?.unmount());
     host?.remove();
@@ -519,20 +524,20 @@ test.skipIf(!hasDom)("opened from Reviews, a review thread's bar says the review
     await render(OPENED, phone, thread, 'quiet', view(landed));
     const rowTitle = reviewRowTitle(landed, () => '');
     expect(rowTitle).toBe(guideTitle);
-    expect(title()!.textContent).toBe(rowTitle);
-    expect(heading()!.textContent).toBe(rowTitle);
+    expect(words()!.textContent).toBe(rowTitle);
+    expect(heading()).toBeNull();
     expect(title()!.hasAttribute('data-header-name')).toBe(true);
     act(() => root?.unmount());
     host?.remove();
     for (const undo of restore.splice(0).reverse()) undo();
   }
 
-  // Still curating: no title yet, so the row, the heading and the bar all keep the thread's name.
+  // Still curating: no title yet, so the row and the bar keep the thread's name.
   const curating = reviewRow(null);
   await render(OPENED, false, thread, 'quiet', view(curating));
   expect(reviewRowTitle(curating, () => '')).toBe('Webhook delivery');
-  expect(title()!.textContent).toBe('Webhook delivery');
-  expect(heading()!.textContent).toBe('Webhook delivery');
+  expect(words()!.textContent).toBe('Webhook delivery');
+  expect(heading()).toBeNull();
   // Under the request, a walkthrough being written says so in its own words, not "Curating the review…".
   expect(document.querySelector('[data-review-curating]')?.textContent).toBe('Writing the walkthrough…');
 });

@@ -1,5 +1,5 @@
 /** A list row's tag colour (approval "inbox-thread-tags", step 3, look C): the tint's attributes and the tag's name on the row. */
-import type { CSSProperties, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { rowTintTitle, tintAttrs, type RowTint } from '../tagColours';
 
@@ -40,10 +40,8 @@ export function sameTint(a: RowTintFields, b: RowTintFields): boolean {
 }
 
 /** A tinted row's attributes (threadTags.css), on the row's button. */
-export function tintProps(tint: string | undefined): { 'data-tint'?: string; style?: CSSProperties } {
-  if (!tint) return {};
-  const attrs = tintAttrs(tint);
-  return { 'data-tint': attrs['data-tint'], style: attrs.style as CSSProperties | undefined };
+export function tintProps(tint: string | undefined): { 'data-tint'?: string } {
+  return tint ? tintAttrs(tint) : {};
 }
 
 /** The tag a tinted row names (look C): quiet, cut with "…", "+1" for each other coloured tag; null on a plain row. */

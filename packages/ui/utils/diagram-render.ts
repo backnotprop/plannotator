@@ -77,7 +77,19 @@ export type DiagramRenderError = {
    * source's fault, and not one a Retry can change in Safari, which keeps a
    * failed module fetch for the page: the block offers Reload. */
   readonly chunkFailed?: boolean;
+  /** The host's check (`DiagramRenderOptions.accept`) refused the drawn svg before it reached the page: the block
+   * shows the source instead. */
+  readonly refused?: boolean;
 };
+
+/**
+ * Opt-in, per render: `accept` is shown the drawn svg after the sanitizer's parse and before the root is adopted into
+ * the page (in DOMPurify's inert document, so nothing it references has loaded). False: the svg is never mounted and
+ * the result is `refused`. Absent: every render is exactly as before.
+ */
+export interface DiagramRenderOptions {
+  readonly accept?: (svg: SVGSVGElement) => boolean;
+}
 
 export type DiagramRenderResult =
   | {
@@ -90,7 +102,7 @@ export type DiagramRenderResult =
   | DiagramRenderError;
 
 interface DiagramRenderer {
-  render(renderId: string, source: string, theme: DiagramTheme): Promise<DiagramRenderResult>;
+  render(renderId: string, source: string, theme: DiagramTheme, options?: DiagramRenderOptions): Promise<DiagramRenderResult>;
   readonly finder: DiagramFinder;
 }
 
@@ -128,6 +140,17 @@ export function sanitizeDiagramSvg(svg: string): SVGSVGElement | null {
  * document, or when the fragment cannot be adopted.
  */
 export function parseDiagramSvg(svg: string): SVGSVGElement | null {
+  const root = parseDiagramSvgDetached(svg);
+  if (root === null) return null;
+  try {
+    return document.adoptNode(root) as SVGSVGElement;
+  } catch {
+    return null;
+  }
+}
+
+/** The parse alone: the svg root still in DOMPurify's inert document, not adopted into the page. */
+function parseDiagramSvgDetached(svg: string): SVGSVGElement | null {
   if (typeof document === 'undefined') return null;
   const fragment = DOMPurify.sanitize(svg, {
     USE_PROFILES: { svg: true, svgFilters: true, html: true },
@@ -136,13 +159,40 @@ export function parseDiagramSvg(svg: string): SVGSVGElement | null {
     HTML_INTEGRATION_POINTS: { foreignobject: true },
     RETURN_DOM_FRAGMENT: true,
   });
-  const root = fragment.querySelector('svg');
-  if (root === null) return null;
-  try {
-    return document.adoptNode(root) as SVGSVGElement;
-  } catch {
-    return null;
+  return fragment.querySelector('svg');
+}
+
+const REFUSED = 'refused' as const;
+
+/**
+ * `sanitizeDiagramSvg` with a host's `accept` asked first, on the parsed root before it is adopted into the page.
+ * (A test's stand-in parser adopts as it parses; happy-dom loads nothing.)
+ */
+function sanitizeAcceptedDiagramSvg(svg: string, accept: (svg: SVGSVGElement) => boolean): SVGSVGElement | null | typeof REFUSED {
+  let root: SVGSVGElement | null;
+  if (parseSvg === parseDiagramSvg) {
+    const detached = parseDiagramSvgDetached(svg);
+    if (detached === null) return null;
+    if (!accept(detached)) return REFUSED;
+    try {
+      root = document.adoptNode(detached) as SVGSVGElement;
+    } catch {
+      return null;
+    }
+  } else {
+    root = parseSvg(svg);
+    if (root === null) return null;
+    if (!accept(root)) return REFUSED;
   }
+  scrubDiagramSvg(root);
+  return root;
+}
+
+const REFUSED_RESULT: DiagramRenderError = { ok: false, message: 'The diagram is shown as its source.', line: null, runtimeUnavailable: false, refused: true };
+
+/** The sanitized root, through `accept` when the host gave one. */
+function sanitizeFor(svg: string, options: DiagramRenderOptions | undefined): SVGSVGElement | null | typeof REFUSED {
+  return options?.accept ? sanitizeAcceptedDiagramSvg(svg, options.accept) : sanitizeDiagramSvg(svg);
 }
 
 /**
@@ -505,15 +555,15 @@ function isChunkLoadFailure(error: unknown): boolean {
  * modulepreload link started (Vite adds one) for the life of the page, so
  * only a reload fetches it again.
  */
-async function renderMermaid(runtime: Mermaid, renderId: string, source: string): Promise<DiagramRenderResult> {
+async function renderMermaid(runtime: Mermaid, renderId: string, source: string, options?: DiagramRenderOptions): Promise<DiagramRenderResult> {
   try {
-    return await renderMermaidOnce(runtime, renderId, source);
+    return await renderMermaidOnce(runtime, renderId, source, options);
   } catch (error) {
     if (!isChunkLoadFailure(error)) return mermaidFailure(error, false);
   }
   await wait(getMermaidRetryDelayMs());
   try {
-    return await renderMermaidOnce(runtime, renderId, source);
+    return await renderMermaidOnce(runtime, renderId, source, options);
   } catch (error) {
     return mermaidFailure(error, isChunkLoadFailure(error));
   }
@@ -547,7 +597,7 @@ function removeMermaidLeftovers(renderId: string): void {
 }
 
 /** One render; a throw (a parse error, a chunk that did not load) is the caller's. */
-async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: string): Promise<DiagramRenderResult> {
+async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: string, options?: DiagramRenderOptions): Promise<DiagramRenderResult> {
   let svg: string;
   try {
     ({ svg } = await runtime.render(renderId, source));
@@ -555,7 +605,8 @@ async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: str
     removeMermaidLeftovers(renderId);
     throw error;
   }
-  const svgNode = sanitizeDiagramSvg(svg);
+  const svgNode = sanitizeFor(svg, options);
+  if (svgNode === REFUSED) return REFUSED_RESULT;
   if (svgNode === null) {
     return { ok: false, message: 'The diagram could not be rendered.', line: null, runtimeUnavailable: false };
   }
@@ -565,7 +616,7 @@ async function renderMermaidOnce(runtime: Mermaid, renderId: string, source: str
 
 const mermaidRenderer: DiagramRenderer = {
   finder: MERMAID_FINDER,
-  async render(renderId, source, theme) {
+  async render(renderId, source, theme, options) {
     let runtime: Mermaid;
     try {
       runtime = await loadWithRetry(loadMermaidRuntime, getMermaidRetryDelayMs());
@@ -596,7 +647,7 @@ const mermaidRenderer: DiagramRenderer = {
     // With no tokens on the page it is a no-op and the static
     // MERMAID_CONFIG (securityLevel strict) applies.
     applyMermaidTheme(runtime, mermaidThemeKey(theme.colorTheme, theme.mode, theme.shadowAmount));
-    return renderMermaid(runtime, renderId, source);
+    return renderMermaid(runtime, renderId, source, options);
   },
 };
 
@@ -682,7 +733,7 @@ export function themeGraphvizSvg(svg: SVGSVGElement): void {
  */
 const graphvizRenderer: DiagramRenderer = {
   finder: GRAPHVIZ_FINDER,
-  async render(_renderId, source) {
+  async render(_renderId, source, _theme, options) {
     let viz: GraphvizRuntime;
     try {
       viz = await loadWithRetry(loadGraphvizRuntime, getGraphvizRetryDelayMs());
@@ -701,7 +752,8 @@ const graphvizRenderer: DiagramRenderer = {
         const message = first?.message.trim() || 'The graph could not be rendered.';
         return { ok: false, message, line: errorLine(message), runtimeUnavailable: false };
       }
-      const svgNode = sanitizeDiagramSvg(result.output);
+      const svgNode = sanitizeFor(result.output, options);
+      if (svgNode === REFUSED) return REFUSED_RESULT;
       if (svgNode === null) {
         return { ok: false, message: 'The graph could not be rendered.', line: null, runtimeUnavailable: false };
       }
@@ -740,6 +792,7 @@ export function renderDiagram(
   renderId: string,
   source: string,
   theme: DiagramTheme,
+  options?: DiagramRenderOptions,
 ): Promise<DiagramRenderResult> {
-  return RENDERERS[kind].render(renderId, source, theme);
+  return RENDERERS[kind].render(renderId, source, theme, options);
 }

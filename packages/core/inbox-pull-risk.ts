@@ -56,6 +56,11 @@ export interface InboxPullRiskAnswer {
   provider: string | null;
   /** The agent's model, or null for the agent's own default. */
   model: string | null;
+  /**
+   * Rank the branches agents report too (Branch reviews, config.json `inboxBranchReviews`): each report's whole diff,
+   * pushed or not, goes to this agent once. Off unless the person turned it on. Present only while Branch reviews is on.
+   */
+  branches?: boolean;
   agents: InboxPullRiskAgent[];
   /** By pull request key, only for its current head and the current rules. */
   judgments: Record<string, InboxPullRiskJudgment>;

@@ -13,6 +13,9 @@
  */
 import { createContext, useContext, type ReactNode } from 'react';
 import type { InboxAnnotationRecord, InboxAttachmentState } from '@plannotator/core/inbox-types';
+import type { ImageResolution } from '@plannotator/ui/components/ImageResolverContext';
+import type { LocalLinkResolution } from '@plannotator/ui/components/LocalLinkContext';
+import type { Block } from '@plannotator/ui/types';
 import { inboxApi, type AttachmentView, type LinkedPageView } from './api';
 import { attachmentDownloadUrl, attachmentImageUrl, attachmentVideoUrl } from './attachments';
 import { inboxUrl } from './inboxUrl';
@@ -70,6 +73,15 @@ export interface InboxFileSource {
   suggestion?(attachment: InboxAttachmentState): FileSuggestion | null;
   /** False in the tour: nothing leaves the window (no Open in, Download or Copy path). */
   writes: boolean;
+  /**
+   * A Markdown file's picture, by the source's own rule (a plan page: only one written into it, `data:`). Absent:
+   * the Inbox's rule (relative to the file's folder).
+   */
+  markdownImage?(src: string): ImageResolution;
+  /** A Markdown file's local link, by the source's own rule (a plan page: inert). Absent: the Inbox's own links. */
+  markdownLink?(href: string): LocalLinkResolution;
+  /** A text file's blocks (a plan page: a Mermaid fence that could load is shown as its source). Absent: the Inbox's. */
+  textBlocks?(kind: string, text: string, name: string): Block[];
 }
 
 /** The window's own: every route of the Inbox, as the viewers always called them. */

@@ -15,7 +15,7 @@ import {
   type LinkedDocExportHeading,
   type MessageAnnotationEntry,
 } from "@plannotator/ui/utils/parser";
-import { composeFeedbackWithEditSections } from "./directEdits";
+import { composeFeedbackWithEditSections } from "@plannotator/shared/direct-edits";
 import { blocksForDocument } from "./feedbackDocuments";
 
 export interface AnnotateApprovalBodyInput {

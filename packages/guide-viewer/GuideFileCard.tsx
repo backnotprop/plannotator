@@ -10,8 +10,9 @@ import { useGuideFileWindow } from './GuideViewportManager';
 const MAX_DIFF_HEIGHT = 620;
 /** A fitted box's border and padding around the viewer's own height. */
 const FIT_BOX_CHROME = 2 + 16;
-/** The arrow row after a file's last hunk. */
-const TRAILING_ROW_HEIGHT = 32;
+export const GUIDE_FILE_HEADER_HEIGHT = 32;
+export const GUIDE_HUNK_SEPARATOR_HEIGHT = 20;
+const TRAILING_ROW_HEIGHT = GUIDE_HUNK_SEPARATOR_HEIGHT;
 /** A folded file's box: its header alone. */
 const COLLAPSED_HEIGHT = 49;
 
@@ -36,7 +37,7 @@ function estimateDiffHeight(patch: string): number {
  * renderer measures it: the rows the diff draws (its hunks' lines, not git's header lines; in Split a run of removed
  * lines and the added lines after it share rows), a separator before each hunk that does not start the file, the
  * file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, one more for a "\ No newline", a
- * 33 px header, a 32 px separator above the first hunk and between hunks, with no gaps around them (the renderer's
+ * 32 px header, a 20 px separator above the first hunk and between hunks, with no gaps around them (the renderer's
  * files scroll with the page and draw no spacing there, so a host whose files sit flush, `flushFiles`, counts the
  * same), 8 px above and below the list, a 1 px border). With a reader of whole files the viewer also draws an arrow
  * row after the last hunk (`trailingRow`), whose 24 px its margins leave out. A patch with no hunk (a binary file, a
@@ -59,8 +60,8 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
     if (line.startsWith('@@')) {
       closeBlock();
       const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
-      if (hunks > 0) separatorHeight += 32;
-      else if (at && (Number(at[1]) > 1 || Number(at[2]) > 1)) separatorHeight += 32;
+      if (hunks > 0) separatorHeight += GUIDE_HUNK_SEPARATOR_HEIGHT;
+      else if (at && (Number(at[1]) > 1 || Number(at[2]) > 1)) separatorHeight += GUIDE_HUNK_SEPARATOR_HEIGHT;
       hunks += 1;
       inHunk = true;
     } else if (line.startsWith('diff --git')) {
@@ -84,7 +85,7 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
   }
   closeBlock();
   if (hunks === 0) return estimateDiffHeight(patch);
-  return FIT_BOX_CHROME + 33 + rows * 20 + separatorHeight + (trailingRow ? TRAILING_ROW_HEIGHT : 0);
+  return FIT_BOX_CHROME + GUIDE_FILE_HEADER_HEIGHT + rows * 20 + separatorHeight + (trailingRow ? TRAILING_ROW_HEIGHT : 0);
 }
 
 interface GuideFileCardProps {

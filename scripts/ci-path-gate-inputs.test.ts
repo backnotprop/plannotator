@@ -1,7 +1,10 @@
 /**
- * Guard for the three CI path gates: `guides-show` in
- * .github/workflows/test.yml, `qwen-gate` and `diagram-engine-gate` in
- * .github/workflows/windows.yml.
+ * Guard for four CI path gates: `guides-show` in .github/workflows/test.yml,
+ * the Qwen Code installer and diagram engine rules of windows.yml's gate
+ * (GATES['windows.yml'] and HEAVY_FAIL_SAFE in scripts/ci-affected.ts), and
+ * the Browser smoke's gate (GATES['browser-smoke.yml']: the binary is built
+ * from apps/hook/server/index.ts, and the smoke was once gated on a hand list
+ * that left out 359 of the files it imports, apps/hook/server/cli.ts among them).
  *
  * Each diffs a PR against its base and skips its job when nothing in a fixed
  * pattern changed, and each pattern claims to name every input of its job —
@@ -29,18 +32,23 @@
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
+import { GATES as WINDOWS_RULES, HEAVY_FAIL_SAFE, buildGraph, decideGates } from './ci-affected';
 
 const repoRoot = resolve(import.meta.dir, '..');
 
 interface Gate {
   /** The workflow holding the gate job. */
   workflow: string;
-  /** The job id whose `gate` step runs the `grep -Eq`. */
+  /** The job id whose `gate` step runs the `grep -Eq`, `windows:<key>` for a rule of windows.yml's gate, or `browser-smoke:smoke`. */
   job: string;
   /** The files its job builds or tests. */
   entries: string[];
   /** One input that was outside the pattern, so the walk's reach is pinned. */
   known: string;
+  /** Paths this job must still skip (default UNRELATED). */
+  unrelated?: string[];
+  /** Leave out `import type` / `export type ... from`: the job runs the code, and typecheck (every PR) covers the types. */
+  runtimeOnly?: boolean;
 }
 
 const GATES: Gate[] = [
@@ -52,13 +60,13 @@ const GATES: Gate[] = [
   },
   {
     workflow: '.github/workflows/windows.yml',
-    job: 'qwen-gate',
+    job: 'windows:qwen',
     entries: ['scripts/install.test.ts'],
     known: 'packages/shared/plannotator-tool.ts',
   },
   {
     workflow: '.github/workflows/windows.yml',
-    job: 'diagram-engine-gate',
+    job: 'windows:diagram_engine',
     entries: [
       'apps/review/diagram-engine/build.ts',
       'apps/review/diagram-engine/engine.tsx',
@@ -67,12 +75,31 @@ const GATES: Gate[] = [
     ],
     known: 'packages/ui/components/MermaidBlock.tsx',
   },
+  {
+    workflow: '.github/workflows/browser-smoke.yml',
+    job: 'browser-smoke:smoke',
+    entries: ['apps/hook/server/index.ts'],
+    known: 'apps/hook/server/cli.ts',
+    unrelated: ['README.md', 'apps/marketing/src/pages/index.astro'],
+    runtimeOnly: true,
+  },
 ];
 
 type Job = { steps?: { id?: string; run?: string }[] };
 
-/** The extended regex a gate job's `gate` step passes to `grep -Eq`. */
-function gatePattern({ workflow, job }: Gate): RegExp {
+/** What a gate runs for: the `grep -Eq` pattern of a gate step, or a windows.yml rule's globs with the heavy fail-safe. */
+// The picker's graph of this checkout, built once before the tests (not inside a test's time).
+const graph = buildGraph();
+function gatePattern({ workflow, job }: Gate): { test: (path: string) => boolean } {
+  if (job === 'browser-smoke:smoke') {
+    return { test: (path) => decideGates('browser-smoke.yml', 'subset', [], [{ status: 'M', path, added: [], removed: [] }], undefined, graph)[0]!.run };
+  }
+  if (job.startsWith('windows:')) {
+    const rule = WINDOWS_RULES['windows.yml']!.find((g) => g.key === job.slice('windows:'.length));
+    if (!rule) throw new Error(`windows.yml: no gate rule ${job}`);
+    const globs = [...rule.paths, ...HEAVY_FAIL_SAFE].map((g) => new Bun.Glob(g));
+    return { test: (path) => globs.some((g) => g.match(path)) };
+  }
   const parsed = Bun.YAML.parse(readFileSync(join(repoRoot, workflow), 'utf8')) as { jobs: Record<string, Job> };
   const step = parsed.jobs[job]?.steps?.find((s) => s.id === 'gate');
   const match = /grep -Eq '([^']+)'/.exec(step?.run ?? '');
@@ -111,7 +138,7 @@ function resolveSpecifier(specifier: string, importer: string): string | null {
 const SPECIFIER = /(?:from|import)\s*\(?\s*['"]([^'"]+)['"]/g;
 
 /** Every repo file the entries reach, static and dynamic imports alike, as repo-relative paths. */
-function closure(entries: readonly string[]): string[] {
+function closure(entries: readonly string[], runtimeOnly = false): string[] {
   const seen = new Set<string>();
   const pending = entries.map((entry) => resolve(repoRoot, entry));
   while (pending.length > 0) {
@@ -119,7 +146,9 @@ function closure(entries: readonly string[]): string[] {
     if (seen.has(file)) continue;
     seen.add(file);
     if (!/\.(ts|tsx)$/.test(file)) continue;
-    for (const match of readFileSync(file, 'utf8').matchAll(SPECIFIER)) {
+    let source = readFileSync(file, 'utf8');
+    if (runtimeOnly) source = source.replace(/^\s*(?:import|export)\s+type\s[^;]*?from\s*['"][^'"]+['"];?/gm, '');
+    for (const match of source.matchAll(SPECIFIER)) {
       const target = resolveSpecifier(match[1], file);
       if (target !== null && !seen.has(target)) pending.push(target);
     }
@@ -132,7 +161,7 @@ const UNRELATED = ['README.md', 'packages/inbox/App.tsx', 'apps/marketing/src/pa
 
 describe('CI path gates cover the jobs they gate', () => {
   for (const gate of GATES) {
-    const inputs = closure(gate.entries);
+    const inputs = closure(gate.entries, gate.runtimeOnly);
 
     test(`${gate.job}: the closure walk reached its job (a resolver regression must not pass vacuously)`, () => {
       // Without this the coverage assertion would pass on an empty closure.
@@ -151,7 +180,7 @@ describe('CI path gates cover the jobs they gate', () => {
 
     test(`${gate.job}: still skips a PR that touches none of its job`, () => {
       const pattern = gatePattern(gate);
-      for (const path of UNRELATED) {
+      for (const path of gate.unrelated ?? UNRELATED) {
         expect(inputs, `${gate.job}: ${path}`).not.toContain(path);
         expect(pattern.test(path), `${gate.job}: ${path}`).toBe(false);
       }

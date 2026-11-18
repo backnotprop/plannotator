@@ -310,6 +310,7 @@ async function scene(browser: Browser, view: View, run: (scene: Scene) => Promis
   }
 }
 
+/** The thread's heading in its header bar: its accessible name carries the subject also under a thread name. */
 const subject = (page: Page) => page.locator('section.ib-pane h2.ib-subject');
 const linksMessage = (page: Page) => page.locator(`[data-message-id="${world.links}"]`);
 const inMessage = (name: string) => (page: Page) => linksMessage(page).getByRole('link', { name, exact: true });
@@ -317,7 +318,7 @@ const threadUrl = (id: string) => `${world.origin}/#thread=${id}`;
 
 async function openFirstThread(page: Page): Promise<void> {
   await page.goto(threadUrl(world.T1));
-  await expect(subject(page)).toHaveText(/First thread/);
+  await expect(subject(page)).toHaveAccessibleName(/First thread/);
   await expect(linksMessage(page)).toBeVisible();
 }
 
@@ -356,11 +357,11 @@ for (const view of ['desktop', 'phone'] as const) {
           await openFirstThread(page);
           await press(kind.link(page));
           await expect(page).toHaveURL(kind.to(), { timeout: 5_000 });
-          await expect(subject(page)).toHaveText(kind.shows);
+          await expect(subject(page)).toHaveAccessibleName(kind.shows);
           await noTabOpened(s);
           await page.goBack();
           await expect(page).toHaveURL(threadUrl(world.T1));
-          await expect(subject(page)).toHaveText(/First thread/);
+          await expect(subject(page)).toHaveAccessibleName(/First thread/);
         });
       });
     }
@@ -370,7 +371,7 @@ for (const view of ['desktop', 'phone'] as const) {
         const { page, press } = s;
         await openFirstThread(page);
         await press(inMessage('link to T2 message')(page));
-        await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+        await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
         await expect(page.locator(`[data-message-id="${world.M2}"]`)).toBeInViewport();
         await expect(page).toHaveURL(threadUrl(world.T2));
         await noTabOpened(s);
@@ -395,7 +396,7 @@ for (const view of ['desktop', 'phone'] as const) {
         const entries = await page.evaluate(() => history.length);
         await press(inMessage('link to this thread')(page));
         await expect(page).toHaveURL(threadUrl(world.T1));
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
 
         const first = page.locator(`[data-message-id="${world.M1}"]`);
         const link = inMessage('link to this thread message')(page);
@@ -425,7 +426,7 @@ for (const view of ['desktop', 'phone'] as const) {
         await expect.poll(rows).toEqual([world.T1, world.T2, world.T4].sort());
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
       });
     });
 
@@ -438,7 +439,7 @@ for (const view of ['desktop', 'phone'] as const) {
         await expect(page.locator('[data-settings-link]:visible').first()).toBeVisible();
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
       });
     });
 
@@ -450,7 +451,7 @@ for (const view of ['desktop', 'phone'] as const) {
           const link = name === 'bare' ? pane.locator(`a[href="${threadUrl(world.T2)}"]`).filter({ hasText: 'http' }).first() : pane.getByRole('link', { name, exact: true });
           await press(link);
           await expect(page).toHaveURL(threadUrl(world.T2), { timeout: 5_000 });
-          await expect(subject(page)).toHaveText(/Second thread/);
+          await expect(subject(page)).toHaveAccessibleName(/Second thread/);
           await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
           await noTabOpened(s);
           await page.goBack();
@@ -470,7 +471,7 @@ for (const view of ['desktop', 'phone'] as const) {
           await openFile(page, world.html);
           await press(page.frameLocator('.ib-htmlframe iframe').getByRole('link', { name, exact: true }));
           await expect(page).toHaveURL(threadUrl(to()), { timeout: 5_000 });
-          await expect(subject(page)).toHaveText(shows);
+          await expect(subject(page)).toHaveAccessibleName(shows);
           await noTabOpened(s);
         });
       });
@@ -496,10 +497,10 @@ for (const view of ['desktop', 'phone'] as const) {
         await box.pressSequentially(words);
         // At once: the draft's save has not run yet.
         await press(inMessage('link to T2')(page));
-        await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+        await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
         await expect(box).toHaveValue(words);
       });
     });
@@ -536,7 +537,7 @@ for (const view of ['desktop', 'phone'] as const) {
         console.log(`${view}, no such thread: ${JSON.stringify(fromTheAddress)}`);
         await noTabOpened(s);
         await page.goBack();
-        await expect(subject(page)).toHaveText(/First thread/);
+        await expect(subject(page)).toHaveAccessibleName(/First thread/);
       });
     });
   });
@@ -548,18 +549,18 @@ test.describe('phone stack', () => {
       const { page, press } = s;
       await page.goto(`${world.origin}/`);
       await press(page.locator(`[data-thread-id="${world.T1}"]:visible`).first());
-      await expect(subject(page)).toHaveText(/First thread/);
+      await expect(subject(page)).toHaveAccessibleName(/First thread/);
       await expect(subject(page)).toBeInViewport();
       const opened = (from: string) => expect.poll(() => page.evaluate(() => (history.state as { ibFrom?: string } | null)?.ibFrom)).toBe(from);
       await opened('');
 
       await press(inMessage('link to T2')(page));
-      await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+      await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
       await expect(subject(page)).toBeInViewport();
       await opened(`#thread=${world.T1}`);
 
       await page.goBack();
-      await expect(subject(page)).toHaveText(/First thread/);
+      await expect(subject(page)).toHaveAccessibleName(/First thread/);
       await expect(subject(page)).toBeInViewport();
       await page.goBack();
       await expect(page).toHaveURL(`${world.origin}/`);
@@ -575,7 +576,7 @@ test.describe('the list', () => {
       const { page } = s;
       await page.goto(`${world.origin}/#project=${world.project}&thread=${world.T1}`);
       await inMessage('link to T2')(page).click();
-      await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+      await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
       await expect(page).toHaveURL(`${world.origin}/#project=${world.project}&thread=${world.T2}`);
       await noTabOpened(s);
     });
@@ -603,7 +604,7 @@ test.describe('still a new tab', () => {
           const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), link(page).click(click)]);
           await expect(tab).toHaveURL(threadUrl(world.T2));
           await expect(page).toHaveURL(threadUrl(world.T1));
-          await expect(subject(page)).toHaveText(/First thread/);
+          await expect(subject(page)).toHaveAccessibleName(/First thread/);
         });
       });
     }
@@ -623,7 +624,7 @@ test.describe('still a new tab', () => {
           const [tab] = await Promise.all([context.waitForEvent('page', { timeout: 5_000 }), press(inMessage(link)(page))]);
           await expect(tab).toHaveURL(to());
           await expect(page).toHaveURL(threadUrl(world.T1));
-          await expect(subject(page)).toHaveText(/First thread/);
+          await expect(subject(page)).toHaveAccessibleName(/First thread/);
         });
       });
     }
@@ -861,7 +862,7 @@ test.describe('the tour', () => {
         document.body.append(link);
       }, threadUrl(world.T2));
       await page.getByRole('link', { name: 'out of the tour', exact: true }).click();
-      await expect(subject(page)).toHaveText(/Second thread/, { timeout: 5_000 });
+      await expect(subject(page)).toHaveAccessibleName(/Second thread/, { timeout: 5_000 });
       await expect(page.locator('[data-tour-bar]')).toHaveCount(0);
       await page.goBack();
       await expect(page).toHaveURL(threadUrl(world.T1));

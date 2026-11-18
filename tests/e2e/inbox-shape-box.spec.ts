@@ -265,7 +265,8 @@ for (const scheme of ['light', 'dark'] as const) {
 
 test('a click still marks one part; a tiny drag is a click; Esc cancels a drag and closes nothing else', async ({ browser }) => {
   const id = store('click');
-  const { context, page, problems } = await openBoard(browser, id);
+  // Wide enough that References opens beside the board (a narrow board opens it as a sheet over the drawing).
+  const { context, page, problems } = await openBoard(browser, id, { viewport: { width: 1800, height: 900 } });
   await crosshair(page).click();
   const s = await at(page, 'save', 0.5, 0.5);
   await drag(page, s, { x: s.x + 3, y: s.y + 2 }, 3);
@@ -290,6 +291,53 @@ test('a click still marks one part; a tiny drag is a click; Esc cancels a drag a
   await context.close();
 });
 
+test("a part's comment bubble takes its own press: one click opens it beside References, and it never starts a box", async ({ browser }) => {
+  const id = store('bubble-press');
+  const { context, page, problems } = await openBoard(browser, id, { viewport: { width: 1800, height: 900 } });
+  await crosshair(page).click();
+  // Save, at the board's right edge: References beside the board must leave it (and its bubble) in reach.
+  const s = await at(page, 'save', 0.5, 0.5);
+  await drag(page, s, { x: s.x + 2, y: s.y + 1 }, 2);
+  await composer(page).locator('textarea').fill('Make it green.');
+  await composer(page).getByRole('button', { name: 'Change it' }).click();
+  await expect(composer(page)).toHaveCount(0);
+  const bubble = page.locator('.shp-view:not(.leaving) [data-shp-talk-bubble]');
+  await expect(bubble).toHaveCount(1);
+
+  // References open beside the board: a click on the board only closes it, but one click on the bubble opens its box.
+  await page.locator('.shp-dock').getByRole('button', { name: /References/ }).click();
+  await expect(page.locator('.shp-sidep.open:not(.sheet)')).toBeVisible();
+  // The panel slides in (0.32 s) and the drawing refits into the room left of it: the bubble ends clear of the panel.
+  await page.waitForTimeout(400);
+  const clearOfPanel = (what: ReturnType<Page['locator']>) => async () => {
+    const panel = (await page.locator('.shp-sidep.open').boundingBox())!;
+    const shown = (await what.boundingBox())!;
+    return shown.x + shown.width <= panel.x;
+  };
+  await expect.poll(clearOfPanel(bubble), { message: 'the bubble is clear of the References panel' }).toBe(true);
+  // The title and its line wrap in the same room: none of them under the panel either.
+  for (const head of ['.shp-head h1', '.shp-claim', '.shp-head-side']) {
+    await expect.poll(clearOfPanel(page.locator(head).first()), { message: `${head} is clear of the References panel` }).toBe(true);
+  }
+  // Bounded: a click on a covered bubble would wait for it until the test's own timeout.
+  await bubble.click({ timeout: 10_000 });
+  await expect(composer(page)).toContainText('Make it green.');
+  await page.keyboard.press('Escape');
+  await expect(composer(page)).toHaveCount(0);
+
+  // With the crosshair on, a press that travels from the bubble draws no box and opens no box's composer.
+  if ((await crosshair(page).getAttribute('aria-pressed')) !== 'true') await crosshair(page).click();
+  const b = (await bubble.boundingBox())!;
+  const from = { x: b.x + b.width / 2, y: b.y + b.height / 2 };
+  await press(page, from, { x: from.x - 60, y: from.y + 80 });
+  await expect(page.locator('.shp-box-band')).toHaveCount(0);
+  await page.mouse.up();
+  await page.waitForTimeout(150);
+  await expect(box(page)).toHaveCount(0);
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
 test('How it works: a lazy drag over a diagram', async ({ browser }) => {
   const id = store('views');
   const { context, page, problems } = await openBoard(browser, id);
@@ -301,9 +349,11 @@ test('How it works: a lazy drag over a diagram', async ({ browser }) => {
   await page.waitForTimeout(250);
   await page.screenshot({ path: join(shots, '06-diagram-comment.png') });
   await composer(page).getByRole('button', { name: 'Ask' }).click();
-  await expect(composer(page)).toHaveCount(0);
-  // An Ask opens the chat beside the board.
-  await expect(page.locator('.shp-sidep.open')).toBeVisible();
+  // An Ask keeps its box open on the box it asked about, the words cleared: the question (and its answer, as it
+  // comes) above them. The side panel is References only and stays shut.
+  await expect(composer(page).locator('[data-shape-talk]')).toContainText('Show me how this works');
+  await expect(composer(page).locator('textarea')).toHaveValue('');
+  await expect(page.locator('.shp-sidep.open')).toHaveCount(0);
   // `shape read --notes` hands the notes over and marks them delivered, so the read that finds them is the one kept.
   let notes: { view: string; part: string; code?: string[]; picture?: string }[] = [];
   await expect.poll(() => (notes = waiting(id) as typeof notes).length).toBeGreaterThan(0);
@@ -470,7 +520,9 @@ test('Add to reply’s Undo: once, its own press only (even of the same words), 
   const { thread } = await freshThread('undo');
   const id = store('reply-undo', thread);
   const { context, page, problems } = await openBoard(browser, id, {}, thread);
-  const reply = page.getByRole('textbox', { name: /^Reply to / });
+  // The board shows in the thread's place, its reply hidden under it (kept, as its draft is): read by its label, as a
+  // role query finds nothing hidden. The toast says it is added; the reply shows it once the board closes.
+  const reply = page.locator('section.ib-pane textarea[aria-label^="Reply to "]');
   const added = page.locator('.ib-toast', { hasText: 'Added to your reply' });
   await crosshair(page).click();
   await page.mouse.move(5, 5);

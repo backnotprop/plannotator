@@ -4,7 +4,10 @@
  * - `plans` does not turn Plans on and open the Inbox's Plans page, or refuses where no terminal is attached;
  * - `plans off` does not turn it off (or starts anything);
  * - while off, another `plans …` does more than print one line naming `plannotator plans` and exit 1;
- * - `plans list` writes anything, starts the Inbox, or prints other than the library holds.
+ * - `plans list` writes anything, starts the Inbox, or prints other than the library holds;
+ * - with an Inbox running, `plans` / `plans off` write config.json behind its back instead of saving through it, so
+ *   an open window never hears the switch (its Plans row stays or stays away until a reload); `plans` opens a second
+ *   tab where a window is open instead of taking that window to the Plans page.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -112,8 +115,55 @@ describe("plannotator plans", () => {
     expect(await run("off")).toBe(0);
     expect(out).toEqual(["Plans is off."]);
     expect(inboxPlans()).toBe(false);
-    expect(calls).toEqual({ ensure: 0, opened: [], running: 0 });
+    // It looked for a running Inbox (none) and started nothing.
+    expect(calls).toEqual({ ensure: 0, opened: [], running: 1 });
     expect(existsSync(join(dataDir, "plan-library", "index.jsonl"))).toBe(true);
+  });
+
+  test("an Inbox running: on and off are saved through it, so its open windows follow; one that refuses: config.json", async () => {
+    const posted: { url: string; body: unknown }[] = [];
+    let windowOpen = true;
+    const shows: { auth: string | null; body: unknown }[] = [];
+    // The running Inbox: it saves the switch (here, as the Inbox would) and answers `plans: { on }`; its show route
+    // answers whether a window was open to show the page in.
+    const inbox = (async (url: string, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      if (url.endsWith("/api/inbox/control/show")) {
+        shows.push({ auth: new Headers(init?.headers).get("authorization"), body });
+        return Response.json({ shown: windowOpen });
+      }
+      posted.push({ url, body });
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxPlans: body.plans.on }));
+      return Response.json({ plans: { on: body.plans.on } });
+    }) as unknown as typeof fetch;
+    const withToken = { ...INBOX, token: "tok" };
+    const on = cli({ runningInbox: async () => INBOX, ensureInbox: async () => withToken, fetch: inbox });
+    expect(await on.run()).toBe(0);
+    expect(posted).toEqual([{ url: "http://localhost:4100/api/inbox/settings", body: { plans: { on: true } } }]);
+    expect(inboxPlans()).toBe(true);
+    // A window is open: it goes to the Plans page; no second tab.
+    expect(shows).toEqual([{ auth: "Bearer tok", body: { page: "plans" } }]);
+    expect(on.calls.opened).toEqual([]);
+    expect(on.out).toEqual(["http://localhost:4100/#plans"]);
+    // No window open: a tab opens on the page.
+    windowOpen = false;
+    const noWindow = cli({ runningInbox: async () => INBOX, ensureInbox: async () => withToken, fetch: inbox });
+    expect(await noWindow.run()).toBe(0);
+    expect(noWindow.calls.opened).toEqual(["http://localhost:4100/#plans"]);
+
+    const off = cli({ runningInbox: async () => INBOX, fetch: inbox });
+    expect(await off.run("off")).toBe(0);
+    expect(posted.at(-1)).toEqual({ url: "http://localhost:4100/api/inbox/settings", body: { plans: { on: false } } });
+    expect(inboxPlans()).toBe(false);
+    expect(off.calls.ensure).toBe(0);
+
+    // An Inbox older than Plans (it refuses the key) or one gone: the command writes config.json itself.
+    const old = cli({ runningInbox: async () => INBOX, fetch: (async () => Response.json({ error: "body: …", code: "validation_error" }, { status: 422 })) as unknown as typeof fetch });
+    expect(await old.run()).toBe(0);
+    expect(inboxPlans()).toBe(true);
+    const gone = cli({ runningInbox: async () => INBOX, fetch: (async () => Promise.reject(new Error("ECONNREFUSED"))) as unknown as typeof fetch });
+    expect(await gone.run("off")).toBe(0);
+    expect(inboxPlans()).toBe(false);
   });
 
   test("on: list reads the library on disk when no Inbox runs, writes nothing, and says when it is empty", async () => {

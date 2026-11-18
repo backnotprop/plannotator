@@ -27,7 +27,7 @@
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
-import { reviewBoxPull, type ReviewBoxPull } from '../compose/reviewBox';
+import { reviewBoxPull, type ReviewBoxBranch, type ReviewBoxPull } from '../compose/reviewBox';
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -126,6 +126,8 @@ export interface PullsPageProps {
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
+  /** Branch reviews' "Branches nobody reported": New review with that branch, in its project. */
+  onReviewBranch?: (branch: ReviewBoxBranch, opener: HTMLElement) => void;
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
   onOpenGuide?: (threadId: string, messageId: string) => void;
   /** Shape boards by thread (`useInboxShapes` `byThread`); absent or null while Shape is off: the launchpad has no Shape door. */
@@ -279,6 +281,8 @@ export function PullsPage(given: PullsPageProps) {
               else props.onOpenStack(row.stacks[0]?.id ?? null);
             }}
             onNew={props.onNew}
+            project={props.project}
+            onReviewBranch={props.onReviewBranch ? (branch, opener) => props.onReviewBranch!({ name: branch.branch, projectId: branch.project_id }, opener) : undefined}
           />
         )}
       </div>

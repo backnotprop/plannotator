@@ -486,14 +486,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect.poll(() => launched().length).toBe(claimCount + 1);
       expect(launched().at(-1)).toBe(revealed(realPath('src/ledger.ts')));
       await noCodeWindow(page, page.locator('.shp-claim [data-code-hover="react.js"]'));
-      // The board's Chat tab is the thread: its messages' words too.
-      await page.locator('.shp-tbtn.chat').click();
-      await page.locator('.shp-tabs [role="tab"]', { hasText: 'Thread' }).click();
-      const chatWindow = await codeWindowOf(page, page.locator('.ib-shape-thread [data-code-hover="src/ledger.ts"]'));
-      await expect(chatWindow).toContainText('export const ledger');
-      await expect(chatWindow.locator('[data-open-in-caret]')).toBeVisible();
-      await page.mouse.move(1, 1);
-      await page.getByRole('button', { name: 'Close panel' }).click();
+      // (The board's Thread tab is gone, the owner 2026-11-16: the thread's own messages are the thread's.)
       // The number beside it is still the number.
       await expect(page.locator('.shp-claim [data-ref="1"]').first()).toBeVisible();
       // Commenting (the crosshair, in Annotate's place), the claim's words are only words: nothing shows.

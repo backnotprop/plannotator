@@ -12,7 +12,7 @@ import { RefCardView } from '@plannotator/ui/components/RefHoverCard';
 import { loadRefCard, refCardTarget, setRefCardTransport } from '@plannotator/ui/utils/refCard';
 import { providedRefCardLabel, registerPlainTextLinker, registerRefCardProvider } from '@plannotator/ui/utils/refCardProviders';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
-import { installLinearCards, linearIdentifierLinker, linearRefCardProvider } from './linearCards';
+import { installLinearCards, linearIdentifierLinker, linearRefCardProvider, refreshLinearCards } from './linearCards';
 
 const undo: (() => void)[] = [];
 afterEach(() => {
@@ -87,6 +87,25 @@ test("a hover's load reaches the transport for a Linear ref (no forge spec for i
   const href = 'https://linear.app/acme/issue/ENG-9';
   expect(await loadRefCard(href, refCardTarget(href)!)).toMatchObject({ ok: false, error: 'signed_out' });
   expect(asked).toEqual([href]);
+});
+
+test('a saved key Linear refused: its card says the key was refused and where to replace it, not to add one', async () => {
+  let key = 'refused';
+  setRefCardTransport(async () => null);
+  undo.push(installLinearCards(async () => Response.json({ workspace: null, teams: [], key })));
+  const href = 'https://linear.app/acme/issue/ENG-9';
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+  const target = refCardTarget(href)!; // the first Linear link asks for the teams, and with them the verdict
+  await settle();
+  const card = () => renderToStaticMarkup(createElement(RefCardView, { target, href, result: { ok: false, error: 'signed_out', fetchedAt: 0 } }));
+  expect(card()).toContain('Linear refused the API key');
+  expect(card()).toContain('Settings → Accounts → Linear');
+  expect(card()).not.toContain('Add your Linear API key');
+  // No key at all: the card asks for one.
+  key = 'none';
+  await refreshLinearCards();
+  expect(card()).toContain('Add your Linear API key');
+  expect(card()).not.toContain('refused');
 });
 
 test('nothing is fetched on page load: the teams are asked once, when prose first shows a candidate identifier', async () => {

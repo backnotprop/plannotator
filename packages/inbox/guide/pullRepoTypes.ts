@@ -11,7 +11,7 @@ export interface PullAllFilesProps {
   pullKey: string;
   /** The head commit the patch on screen was read at (or the list's): what All files lists. */
   sha: string;
-  /** The PR's changed files: they keep their rows, letters, counts and Viewed circles. */
+  /** The PR's changed files: they keep their rows, letters and counts, dimmed once viewed. */
   files: readonly DiffFile[];
   viewed: ReadonlySet<string>;
   comments: readonly CodeAnnotation[];
@@ -25,7 +25,6 @@ export interface PullAllFilesProps {
   onSelect: (path: string) => void;
   /** A file the PR does not change: shown whole in place of the diff. */
   onOpen: (path: string) => void;
-  onToggleViewed: (path: string) => void;
 }
 
 export interface PullRepoFileProps {

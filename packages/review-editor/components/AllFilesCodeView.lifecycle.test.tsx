@@ -9,6 +9,7 @@ let codeViewUnmounts = 0;
 let scrollTargets: Array<Record<string, unknown>> = [];
 let lastCodeViewProps: Record<string, unknown> | null = null;
 let toolbarSelections: Array<SelectedLineRange | null> = [];
+let viewport: { scrollTop: number; tops: Record<string, number> } = { scrollTop: 0, tops: {} };
 
 // Captured BEFORE the mocks below replace the specifiers, so this file can put
 // the real modules back when it is done. `mock.module` is process global and
@@ -83,11 +84,11 @@ mock.module('@pierre/diffs/react', () => ({
       getSelectedLines: () => null,
       clearSelectedLines: () => {},
       getInstance: () => ({
-        getRenderedItems: () => [],
-        getScrollTop: () => 0,
+        getRenderedItems: () => Object.keys(viewport.tops).map((id) => ({ id })),
+        getScrollTop: () => viewport.scrollTop,
         getScrollHeight: () => 0,
         getHeight: () => 0,
-        getTopForItem: () => 0,
+        getTopForItem: (id: string) => viewport.tops[id] ?? 0,
         scrollTo: (target: Record<string, unknown>) => scrollTargets.push(target),
       }),
     }));
@@ -170,6 +171,7 @@ afterEach(async () => {
   scrollTargets = [];
   lastCodeViewProps = null;
   toolbarSelections = [];
+  viewport = { scrollTop: 0, tops: {} };
 });
 
 // Hand the real @pierre/diffs back to the process. Only the two library
@@ -235,6 +237,55 @@ describe('AllFilesCodeView guide mount state', () => {
     ]);
   });
 
+  test.skipIf(!hasDom)('leaves a guide file at its left edge when its first change sits off to the right', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    await render({ mountCollapsed: false });
+    const item = (lastCodeViewProps?.initialItems as Array<{ id: string; type: 'diff' }>)[0];
+    const code = document.createElement('div');
+    code.setAttribute('data-code', '');
+    const mark = document.createElement('span');
+    mark.setAttribute('data-diff-span', '');
+    code.appendChild(mark);
+    Object.defineProperties(code, { scrollWidth: { value: 750 }, clientWidth: { value: 440 } });
+    code.getBoundingClientRect = () => ({ left: 0, right: 440 }) as DOMRect;
+    mark.getBoundingClientRect = () => ({ left: 360, right: 460 }) as DOMRect;
+    const node = document.createElement('div');
+    node.attachShadow({ mode: 'open' }).appendChild(code);
+    const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: { item: unknown }) => void };
+
+    await act(async () => {
+      options.onPostRender(node, {}, 'mount', { item });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(code.scrollLeft).toBe(0);
+  });
+
+});
+
+describe('AllFilesCodeView semantic client switch', () => {
+  test.skipIf(!hasDom)('redraws the items and keeps the reader on the same file and offset', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const other: DiffFile = { ...file, path: 'other.ts', patch: file.patch.replaceAll('target.ts', 'other.ts') };
+    const client = { supports: () => false, diff: async () => null, dispose: () => {} } as unknown as NonNullable<React.ComponentProps<typeof AllFilesCodeView>['semDiffClient']>;
+    await render({ files: [other, file], semDiffClient: client });
+    const [first, second] = (lastCodeViewProps?.initialItems as Array<{ id: string }>).map((item) => item.id);
+    viewport = { scrollTop: 1240, tops: { [first]: 0, [second]: 1000 } };
+    await act(async () => {
+      (lastCodeViewProps?.onScroll as (() => void) | undefined)?.();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    scrollTargets = [];
+
+    await render({ files: [other, file], semDiffClient: null });
+
+    expect(codeViewMounts).toBe(2);
+    expect(scrollTargets).toContainEqual({ type: 'item', id: second, align: 'start', offset: -240 });
+  });
 });
 
 describe('AllFilesCodeView compact-touch line selection', () => {
