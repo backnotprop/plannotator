@@ -153,7 +153,8 @@ test("a release build: the Code review switch is there and off, the Shape switch
     const off = await (await world({ updateCheck: false }, false, version)).read();
     expect(off.code_review).toEqual({ on: false });
     expect("shape" in off).toBe(false);
-    expect(off.reveal?.next).not.toBe("code_review");
+    expect(off.reveal).toBeDefined();
+    expect(off.reveal!.next).not.toBe("code_review");
 
     const on = await (await world({ updateCheck: false, inboxCodeReview: true, inboxShape: true }, false, version)).read();
     expect(on.code_review).toEqual({ on: true });
@@ -162,6 +163,7 @@ test("a release build: the Code review switch is there and off, the Shape switch
     const preview = await (await world({ updateCheck: false }, true, version)).read();
     expect(preview.code_review).toEqual({ on: false });
     expect(preview.shape).toEqual({ on: false });
-    expect(preview.reveal?.next).not.toBe("code_review");
+    expect(preview.reveal).toBeDefined();
+    expect(preview.reveal!.next).not.toBe("code_review");
   }
 });
