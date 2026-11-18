@@ -38,10 +38,10 @@ const FILES: [string, [string, string]][] = [
   ['src/e-dates.ts', shrinks('dates')],
   ['src/f-tail.ts', shrinks('tail')],
 ];
-const swapping = /(money|names|dates|tail|far)/;
+const swapping = /(money|names|dates|tail|f18)/;
 const MANY: [string, [string, string]][] = Array.from({ length: 20 }, (_, i) => {
   const name = `f${String(i + 1).padStart(2, '0')}`;
-  return [`src/${name}.ts`, i === 17 ? shrinks('far') : pair(plain(name, 40))];
+  return [`src/${name}.ts`, i === 17 ? shrinks(name) : pair(plain(name, 40))];
 });
 const sides = (files: typeof FILES) => [Object.fromEntries(files.map(([path, [old]]) => [path, old])), Object.fromEntries(files.map(([path, [, now]]) => [path, now]))] as const;
 const [base, head] = sides(FILES);
@@ -52,11 +52,12 @@ interface View {
   scroller: string;
   shell: (file: string) => string;
   reads: Set<string>;
+  requested: Set<string>;
   release: (name: string) => void;
   close: () => Promise<void>;
 }
 
-function delay(page: Page, pattern: string, reads: Set<string>, held: string[]) {
+function delay(page: Page, pattern: string, reads: Set<string>, requested: Set<string>, held: string[]) {
   const gates = new Map(held.map((name) => {
     let open = () => {};
     const gate = new Promise<void>((done) => (open = done));
@@ -64,6 +65,7 @@ function delay(page: Page, pattern: string, reads: Set<string>, held: string[]) 
   }));
   void page.route(pattern, async (route) => {
     const found = swapping.exec(decodeURIComponent(route.request().url()));
+    if (found) requested.add(found[1]!);
     if (found) await (gates.get(found[1]!)?.gate ?? new Promise((done) => setTimeout(done, 1_500)));
     await route.continue().catch(() => {});
     if (found) reads.add(found[1]!);
@@ -90,8 +92,9 @@ const PHONE = (browser: Browser) => ({ viewport: { width: 390, height: 844 }, ha
 async function reviewWindow(browser: Browser, held: string[], phone = false): Promise<View> {
   const session = await reviewOf(`sem-landing-${Math.random().toString(36).slice(2, 8)}`, base, head);
   const reads = new Set<string>();
+  const requested = new Set<string>();
   let release = (_name: string) => {};
-  const { context, page } = await openReviewWindow(browser, session.url, async (page) => void (release = delay(page, '**/api/file-content?*', reads, held)), phone ? PHONE(browser) : undefined);
+  const { context, page } = await openReviewWindow(browser, session.url, async (page) => void (release = delay(page, '**/api/file-content?*', reads, requested, held)), phone ? PHONE(browser) : undefined);
   await firstRows(page);
   await markScroller(page);
   return {
@@ -99,6 +102,7 @@ async function reviewWindow(browser: Browser, held: string[], phone = false): Pr
     scroller: '[data-e2e-scroller]',
     shell: (file) => `diffs-container:has([data-file-header-path="src/${file}.ts"])`,
     reads,
+    requested,
     release: (name) => release(name),
     close: async () => {
       await context.close();
@@ -194,7 +198,8 @@ async function inboxReview(browser: Browser, world: Inbox, held: string[], phone
   );
   const page = await context.newPage();
   const reads = new Set<string>();
-  const release = delay(page, '**/guide/file?*', reads, held);
+  const requested = new Set<string>();
+  const release = delay(page, '**/guide/file?*', reads, requested, held);
   await page.goto(`${world.url}#thread=${review.thread_id}`);
   await page.locator('[data-review-card]').filter({ hasText: title }).first().getByRole('button', { name: 'Start review' }).click();
   const pane = page.locator('[data-review-message]');
@@ -204,7 +209,7 @@ async function inboxReview(browser: Browser, world: Inbox, held: string[], phone
     await expect(pane).toHaveAttribute('data-review-mode', 'files');
   }
   await firstRows(page);
-  return { page, scroller: '.ib-gbody', shell: (file) => `[data-guide-file-shell="src/${file}.ts"]`, reads, release, close: () => context.close() };
+  return { page, scroller: '.ib-gbody', shell: (file) => `[data-guide-file-shell="src/${file}.ts"]`, reads, requested, release, close: () => context.close() };
 }
 
 const watch = (view: View) =>
@@ -310,6 +315,7 @@ async function justBelow(view: View, file: string) {
 }
 
 async function heldUntilWatched(view: View, name: string, file: string, ends: 'off' | 'semantic') {
+  await expect.poll(() => view.requested.has(name), { timeout: 30_000, message: `precondition: ${name} was asked for` }).toBe(true);
   expect(view.reads.has(name), `precondition: the read of ${name} is still held`).toBe(false);
   await watch(view);
   view.release(name);
@@ -318,7 +324,7 @@ async function heldUntilWatched(view: View, name: string, file: string, ends: 'o
 
 async function settles(view: View, file: string, ends: 'off' | 'semantic') {
   await expect.poll(() => noteOf(view, file), { timeout: 45_000, message: `${file}'s note ends ${ends}` }).toBe(ends);
-  await view.page.waitForTimeout(1_000);
+  await view.page.waitForTimeout(2_000);
 }
 
 const still = async (view: View) => {
@@ -384,7 +390,7 @@ export function landingCases(type: BrowserType) {
   }
 
   test('inbox, 20 files: a jump to file 18 from the menu of files, hands off, moves nothing as its note lands, and the note is offered', async () => {
-    const view = await inboxReview(browser, inbox(), ['far'], false, MANY);
+    const view = await inboxReview(browser, inbox(), ['f18'], false, MANY);
     try {
       const shell = view.shell('f18');
       expect(await view.page.locator(`${shell} diffs-container`).count(), 'precondition: file 18 is not drawn before the jump').toBe(0);
@@ -395,8 +401,8 @@ export function landingCases(type: BrowserType) {
       await expect.poll(() => view.page.locator(`${shell} diffs-container`).count(), { timeout: 30_000 }).toBe(1);
       await atRest(view);
       const edge = (await edgeOf(view, 'f18'))!;
-      expect(edge.bottom > 0 && edge.top < edge.top + edge.bottom, 'precondition: file 18 on screen after the jump').toBe(true);
-      await heldUntilWatched(view, 'far', 'f18', 'off');
+      expect(edge.top >= -1 && edge.bottom > 0, `precondition: file 18's top on screen after the jump (${JSON.stringify(edge)})`).toBe(true);
+      await heldUntilWatched(view, 'f18', 'f18', 'off');
       await still(view);
     } finally {
       await view.close();
@@ -406,11 +412,10 @@ export function landingCases(type: BrowserType) {
   for (const host of ['review', 'inbox'] as const) {
     test.describe(host, () => {
       test('a little scroll before the notes land: nothing on screen moves, its files are offered the note, a file below takes it', async () => {
-        const view = await open(host);
+        const view = await open(host, ['money']);
         try {
           await scrollBy(view, 200);
-          await watch(view);
-          await settles(view, 'a-money', 'off');
+          await heldUntilWatched(view, 'money', 'a-money', 'off');
           await still(view);
           await view.page.locator(`${view.shell('a-money')} [data-semantic-note="off"]`).click();
           await expect.poll(() => noteOf(view, 'a-money')).toBe('semantic');
