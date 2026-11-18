@@ -332,7 +332,7 @@ export function processStartedAtMs(pid: number, platform: NodeJS.Platform = proc
       if (!Number.isFinite(ticks) || !boot) return null;
       return Number(boot[1]) * 1000 + Math.floor((ticks / 100) * 1000);
     }
-    const ran = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, env: { ...process.env, LC_ALL: "C", LANG: "C" } });
+    const ran = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, windowsHide: true, env: { ...process.env, LC_ALL: "C", LANG: "C" } });
     const at = Date.parse((ran.stdout ?? "").trim());
     return ran.status === 0 && Number.isFinite(at) ? at : null;
   } catch {
