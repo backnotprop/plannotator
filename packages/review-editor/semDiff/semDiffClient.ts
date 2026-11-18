@@ -81,7 +81,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const entry = pending.get(id);
     if (!entry) return;
     pending.delete(id);
-    if (reply?.ok) warm.add(languageForPath(entry.request.path) ?? '');
+    if (reply) warm.add(languageForPath(entry.request.path) ?? '');
     entry.settle(reply);
   };
   const dropWorker = () => {

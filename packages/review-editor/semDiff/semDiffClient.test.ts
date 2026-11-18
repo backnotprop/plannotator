@@ -396,3 +396,30 @@ test('a language whose cold start timed out once gets only the warm limit after 
   expect(order).toEqual(['first', 'second']);
   client.dispose();
 });
+
+test('an engine that answered at all, even with an error, is warm: a stall after it gets the warm limit', async () => {
+  let answered = false;
+  const createWorker = () =>
+    ({
+      onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        if (answered) return;
+        answered = true;
+        queueMicrotask(() => this.onmessage?.({ data: { id: request.id, ok: false, error: 'boom' } } as MessageEvent<SemDiffReply>));
+      },
+      terminate() {},
+    }) as unknown as Worker;
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 600 });
+  expect((await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).failed).toBe(true);
+  const stalled = client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n');
+  const outcome = await new Promise<string>((resolve) => {
+    const timer = setTimeout(() => resolve('cold limit'), 300);
+    void stalled.then(() => {
+      clearTimeout(timer);
+      resolve('warm limit');
+    });
+  });
+  expect(outcome).toBe('warm limit');
+  client.dispose();
+});
