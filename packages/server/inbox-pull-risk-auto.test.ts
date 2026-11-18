@@ -51,6 +51,7 @@ function world(initial: InboxPullRiskAuto | null = { level: "high", make: "show_
   const auto = createPullRiskAuto({
     dataDir,
     settings: () => settings,
+    listed: () => [...listed.values()],
     pullOf: (key) => listed.get(key) ?? null,
     stackOf: (key) => inboxPullStacks([...listed.values()]).find((stack) => stack.layers.some((layer) => layer.key === key)) ?? null,
     levelOf: (pull) => levels.get(pull.key) ?? null,
@@ -247,7 +248,6 @@ test("turned off while PRs wait: they are dropped quietly and never start", asyn
   w.set(null);
   release();
   await w.auto.idle();
-  w.set({ level: "high", make: "show_me" });
   w.auto.resume();
   await w.auto.idle();
   expect(w.started.map((job) => job.stack.layers.at(-1)!.number)).toEqual([1]);
@@ -308,4 +308,28 @@ test("a stack is one run: a layer at the level starts one agent for the whole st
     [bottom.key]: expect.objectContaining({ state: "started", thread_id: "thr_11" }),
     [top.key]: expect.objectContaining({ state: "started", thread_id: "thr_11" }),
   });
+});
+
+test("turned on, or after a crash, it covers PRs judged before: each open one at the level without a review thread or a run", async () => {
+  const w = world(null);
+  w.judged(pr(1), "high");
+  w.judged(pr(2), "medium");
+  w.judged(pr(3), "high");
+  w.judged(pr(4, { state: "closed" }), "high");
+  w.threads.add(pr(3).key);
+  await w.auto.idle();
+  expect(await w.auto.wouldStart()).toEqual({ high: 1, medium: 2 });
+  w.set({ level: "high", make: "guide" });
+  w.auto.resume();
+  await w.auto.idle();
+  expect(w.started.map((job) => job.stack.layers.at(-1)!.number)).toEqual([1]);
+  expect(await w.auto.wouldStart()).toEqual({ high: 0, medium: 1 });
+  const again = world({ level: "medium", make: "guide" }, w.dataDir);
+  for (const n of [1, 2]) {
+    again.listed.set(pr(n).key, pr(n));
+    again.levels.set(pr(n).key, n === 1 ? "high" : "medium");
+  }
+  again.auto.resume();
+  await again.auto.idle();
+  expect(again.started.map((job) => job.stack.layers.at(-1)!.number)).toEqual([2]);
 });

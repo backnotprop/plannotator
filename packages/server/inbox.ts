@@ -5159,6 +5159,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   pullRiskAuto = createPullRiskAuto({
     dataDir,
     settings: () => (codeReviewOn() ? inboxPullRiskAutoOf((loadConfig().inboxPullRisk as { auto?: unknown } | undefined)?.auto) : null),
+    listed: () => pullRisk.listed(),
     pullOf: (key) => pulls.find(key),
     stackOf: (key) => pulls.stack(key),
     levelOf: (pull) => pullRisk.levelOf(pull),
@@ -6005,7 +6006,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           pullRisk.save(body);
           pullRiskAuto?.resume();
         }
-        return json({ serverSession, ...pullRisk.answer() });
+        return json({ serverSession, ...pullRisk.answer(), auto_would_start: (await pullRiskAuto?.wouldStart()) ?? { high: 0, medium: 0 } });
       }
       // "Changed since you looked" (inbox-pull-looked.ts): the PR page's look at PRs this machine lists, from its window,
       // the owner's over the tailnet, or a linked machine's window through the forward (rule 8's `set`). Same guards as the list.

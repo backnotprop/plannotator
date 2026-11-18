@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { openLayers } from "@plannotator/core/inbox-pull-handoff";
-import { inboxPullRiskReaches, type InboxPull, type InboxPullStack, type InboxPullRiskAuto, type InboxPullRiskAutoMake, type InboxPullRiskAutoRun, type InboxPullRiskLevel } from "@plannotator/core/inbox-types";
+import { inboxPullIsOpen, inboxPullRiskReaches, type InboxPull, type InboxPullStack, type InboxPullRiskAuto, type InboxPullRiskAutoMake, type InboxPullRiskAutoRun, type InboxPullRiskLevel } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_RISK_AUTO_FILE = "pull-risk-auto.json";
@@ -16,6 +16,7 @@ export interface PullRiskAutoJob {
 export interface PullRiskAutoOptions {
   dataDir: string;
   settings: () => InboxPullRiskAuto | null;
+  listed: () => readonly InboxPull[];
   pullOf: (key: string) => InboxPull | null;
   stackOf: (key: string) => InboxPullStack | null;
   levelOf: (pull: InboxPull) => InboxPullRiskLevel | null;
@@ -28,6 +29,7 @@ export interface PullRiskAuto {
   judged(pull: InboxPull, level: InboxPullRiskLevel): void;
   runs(): Record<string, InboxPullRiskAutoRun>;
   resume(): void;
+  wouldStart(): Promise<Record<InboxPullRiskAuto["level"], number>>;
   idle(): Promise<void>;
   stop(): void;
 }
@@ -117,29 +119,47 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     });
   };
 
+  const judged = (pull: InboxPull, level: InboxPullRiskLevel) => {
+    if (stopped) return;
+    const auto = options.settings();
+    if (!auto || !inboxPullRiskReaches(level, auto)) return;
+    const open = openOf(pull.key)?.open ?? [];
+    const layers = open.length > 0 ? open : [pull];
+    const taken = () => layers.some((layer) => runs.has(layer.key));
+    if (taken()) return;
+    const check = (async () => {
+      if ((await anyThread(layers)) || stopped || taken()) return;
+      const at = new Date(now()).toISOString();
+      for (const layer of layers) runs.set(layer.key, { at, level, made: auto.make, state: "queued", thread_id: null });
+      save();
+      pump();
+    })().catch(() => {});
+    checks.add(check);
+    void check.finally(() => checks.delete(check));
+  };
+
   return {
-    judged(pull, level) {
-      if (stopped) return;
-      const auto = options.settings();
-      if (!auto || !inboxPullRiskReaches(level, auto)) return;
-      const open = openOf(pull.key)?.open ?? [];
-      const layers = open.length > 0 ? open : [pull];
-      const taken = () => layers.some((layer) => runs.has(layer.key));
-      if (taken()) return;
-      const check = (async () => {
-        if ((await anyThread(layers)) || stopped || taken()) return;
-        const at = new Date(now()).toISOString();
-        for (const layer of layers) runs.set(layer.key, { at, level, made: auto.make, state: "queued", thread_id: null });
-        save();
-        pump();
-      })().catch(() => {});
-      checks.add(check);
-      void check.finally(() => checks.delete(check));
-    },
+    judged,
     runs() {
       return Object.fromEntries(runs);
     },
-    resume: pump,
+    resume() {
+      for (const pull of options.listed()) {
+        const level = inboxPullIsOpen(pull) && !runs.has(pull.key) ? options.levelOf(pull) : null;
+        if (level) judged(pull, level);
+      }
+      pump();
+    },
+    async wouldStart() {
+      const count = { high: 0, medium: 0 };
+      for (const pull of options.listed()) {
+        const level = inboxPullIsOpen(pull) && !runs.has(pull.key) ? options.levelOf(pull) : null;
+        if (!level || level === "low" || (await options.hasThread(pull).catch(() => true))) continue;
+        count.medium++;
+        if (level === "high") count.high++;
+      }
+      return count;
+    },
     async idle() {
       while (running || checks.size > 0) await Promise.all([running, ...checks]);
     },
