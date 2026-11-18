@@ -428,6 +428,33 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     for (const path of ['a.ts', 'b.ts']) expect((await headerOf(path)).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('semantic');
   });
 
+  test.skipIf(!hasDom)('a first-draw run still out when an arrow loads and the view unmounts: nothing is asked after unmount', async () => {
+    let gone = false;
+    const late: string[] = [];
+    const client: SemDiffClient = {
+      supports: (path) => path.endsWith('.ts'),
+      diff: async (path, _old, _new, signal) => {
+        if (gone) late.push(path);
+        await new Promise((resolve) => setTimeout(resolve, 200));
+        return signal?.aborted ? null : moved;
+      },
+      attempt: async () => ({ result: moved, failed: false }),
+      dispose: () => {},
+    };
+    const { read } = hostReader();
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read, powerUp: { active: true, rejected: [], provider: 'jev', retry: 0 } }, 40);
+    await pressArrow();
+    const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
+    await act(async () => {
+      await options.loadDiffFiles({ name: 'a.ts' });
+    });
+    await act(async () => root?.unmount());
+    root = null;
+    gone = true;
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    expect(late).toEqual([]);
+  });
+
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });
