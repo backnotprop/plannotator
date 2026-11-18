@@ -269,7 +269,8 @@ test('the diff display switch and a file header note each bring back the plain d
     await page.locator('[data-diff-display-options]').first().click();
     await page.getByText('Show moved & renamed code').click();
     await page.keyboard.press('Escape');
-    await expect(note(page, 'off')).toHaveCount(2);
+    await expect(note(page, 'off')).toHaveCount(0);
+    await expect(note(page, 'semantic')).toHaveCount(0);
     await expect(page.getByText('Moved 4 lines')).toHaveCount(0);
     await context.close();
   } finally {

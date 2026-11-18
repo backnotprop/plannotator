@@ -4172,7 +4172,7 @@ test('the PR page draws moved and renamed code, says so in the file header, and 
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await toggle.click();
   await expect(moved.locator('[data-semantic-start]')).toHaveCount(0);
-  await expect(moved.locator('[data-semantic-note="off"]')).toBeVisible();
+  await expect(moved.locator('[data-semantic-note]')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect.poll(() => (JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { diffOptions?: { semantic?: boolean } }).diffOptions?.semantic).toBe(false);
 
