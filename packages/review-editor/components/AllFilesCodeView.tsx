@@ -1295,6 +1295,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semStateRef = useRef(new Map<string, SemanticFileState>());
   const semTextsRef = useRef(new Map<string, { file: DiffFile; oldText: string; newText: string; generation: string; signal: AbortSignal }>());
   const arrowLoadedRef = useRef(new Set<string>());
+  const pendingSummaryRef = useRef(new Map<string, SemDiffResult['summary']>());
   const retiredControllersRef = useRef<{ controller: AbortController; generation: string }[]>([]);
   const viewRunsRef = useRef(new AbortController());
   useEffect(() => {
@@ -2115,7 +2116,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (!pair || handle == null || item == null || item.type !== 'diff') return;
     if (itemId === editSession.editingItemIdRef.current) return;
     const state = semStateRef.current.get(itemId);
-    if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: state.summary });
+    const pending = pendingSummaryRef.current.get(itemId);
+    pendingSummaryRef.current.delete(itemId);
+    if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: pending ?? state.summary });
     const next = on ? openHeldFolds(itemId, pair.semantic, item.annotations) : pair.plain;
     const notePath = itemIdToFilePath.get(itemId);
     setSemanticNotes((current) => {
@@ -2230,10 +2233,16 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
       const previous = semDiffsRef.current.get(itemId);
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
+      const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
       semDiffsRef.current.set(itemId, { plain, semantic });
-      semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) showSemantic(itemId, semanticEnabledRef.current);
-      else refreshItem(itemId);
+      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
+        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+        showSemantic(itemId, semanticEnabledRef.current);
+        return;
+      }
+      if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
+      else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+      refreshItem(itemId);
     });
   });
 

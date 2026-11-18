@@ -686,6 +686,22 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.drawnKey('a.ts')).not.toContain(':c1');
   });
 
+  test.skipIf(!hasDom)('a file drawn semantic whose second opinion is offered keeps saying so, and the next toggle on draws the newer answer', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp });
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    expect(page.drawnKey('a.ts')).not.toContain(':c1');
+    const shown = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
+    expect(shown?.dataset.semanticNote).toBe('semantic');
+    await act(async () => shown!.click());
+    const off = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
+    expect(off?.dataset.semanticNote).toBe('off');
+    await act(async () => off!.click());
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+  });
+
   test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {
     configStore.set('diffSemantic', false);
     const page = await reading(['a.ts'], { 'a.ts': 100 });
