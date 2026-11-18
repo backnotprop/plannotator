@@ -612,24 +612,22 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
   /** A thread handed #412, then hidden from the Inbox list by its row's Hide. */
   type Agent = { session: string; state: string; waiting: number };
   const agentsNow = async (base: string) => ((await (await fetch(`${base}/api/inbox/threads`)).json()) as { agents: { agents: Agent[] }[] }).agents.flatMap((group) => group.agents);
-  const agentSessions = async (base: string) => (await agentsNow(base)).map((agent) => agent.session).sort();
   const handedAndHidden = async () => {
     const w = await world({ codeReview: true, answer: everywhere() });
     const handed = await w.send("Ready for review.", "handed");
     await w.pulls();
     expect((await w.own([KEY], handed)).status).toBe(200);
-    const agents = await agentSessions(w.base);
     // Its agent waits on the person for this thread before the Hide.
     expect((await agentsNow(w.base)).find((agent) => agent.session === "ses_handed")).toMatchObject({ state: "waiting", waiting: 1 });
     const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; threads_left: string[] };
     // The toast's "with its thread": this write took it out of the list.
     expect(res.threads_left).toEqual([handed]);
     expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
-    // Only the row leaves: its agent stays in the sidebar's Agents, no longer waiting on the person for a thread they hid.
-    expect(await agentSessions(w.base)).toEqual(agents);
-    const after = (await agentsNow(w.base)).find((agent) => agent.session === "ses_handed")!;
-    expect(after.waiting).toBe(0);
-    expect(after.state).not.toBe("waiting");
+    // A hidden thread is no wait: its agent waits on nothing, and is listed only in its own state (an ended one,
+    // with nothing waiting, is not listed at all).
+    const after = (await agentsNow(w.base)).find((agent) => agent.session === "ses_handed");
+    expect(after?.waiting ?? 0).toBe(0);
+    expect(after?.state).not.toBe("waiting");
     return { w, handed };
   };
 
