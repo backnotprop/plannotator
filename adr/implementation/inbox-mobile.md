@@ -1523,7 +1523,7 @@ The app will lag or lead the person's Inbox. The door says what it can do, so ne
 
 ### The contract number
 
-`contract` is a whole number (`DOOR_CONTRACT` in `packages/server/inbox-door-version.ts`), raised by any change to the wire a phone reads: a route, a field, a record kind, a block kind, a code. 0 is reserved for "before the handshake" (an Inbox whose `health` has no `door`); the first Inbox and the first app are contract 1. `min_app_contract` (`MIN_APP_CONTRACT`, 1) is raised only for a change of meaning; an additive change never raises it. A rule that changes meaning gets a new field name, never a new meaning for an old one.
+`contract` is a whole number, and there is one: `DOOR_CONTRACT` in `packages/server/inbox-door-version.ts` is the source, and the contract kit's `apps/mobile/contract/VERSION` is generated from it. It rises only for a breaking change to the wire a phone reads: a field or route removed or renamed, or a changed meaning. An added optional field or route never raises it: an app finds a new route in `health.door.routes` and decodes unknown fields tolerantly. 0 is reserved for "before the handshake" (an Inbox whose `health` has no `door`); the first Inbox and the first app are contract 1. `min_app_contract` (`MIN_APP_CONTRACT`, 1) is raised only when the Inbox stops serving an older contract's meaning. A rule that changes meaning gets a new field name, never a new meaning for an old one.
 
 ### The app names itself
 
@@ -1562,16 +1562,17 @@ What the contract kit, the device event stream, the grant and the app must know 
   - Generate `door.json` from `doorRouteTable()`, not `doorRouteNames()`. The latter keeps `(a|b)` groups.
   - Join the write kinds (`hold`, `now`, `bytes`) by `pattern`.
   - Carry the `relay` column.
-  - Make `apps/mobile/contract/VERSION` equal `DOOR_CONTRACT`.
+  - Generate `apps/mobile/contract/VERSION` from `DOOR_CONTRACT`: one contract number.
+  - Read `doorRouteTable()` whole: it has the door's own routes (`GET update` among a linked machine's) and the `relay` flag.
   - Add `skew` vectors for: no `door`; a malformed `door`; a contract above 2^53 or below 0 (read as no `door`); bad `grants` (read as `[]`) against bad `routes` (the whole `door` dropped); a floor above the app; an Inbox newer than the app.
   - Add a header-form vector, including a rejected `iOS`, a rejected leading zero, and `contract 0` as below the floor.
   - Set `routes_before_door` to the phone rows before this section, if older Inboxes must be served.
-- **The device event stream (F3).** `GET events:device` is not a path. Add it as a row the door answers (extend the door's own routes and the table test) or as a separate `door.features` list, and raise `DOOR_CONTRACT` with it.
+- **The device event stream (F3).** `GET events:device` is not a path. Add it as a row the door answers (extend the door's own routes and the table test) or as a separate `door.features` list. It is an addition, so `DOOR_CONTRACT` stays.
 - **The grant (F5a).**
   - `doorRouteTable`, `doorRouteOf` and `doorReachOf` read `machineOnly` today. Replacing it with `grant` changes them together.
   - `health` passes no grants yet: pass the token's groups.
   - Keep the table test that a phone row resolves through `doorRouteOf(..., false)`.
-  - Each opened route raises `DOOR_CONTRACT`.
+  - An opened route is an addition: it appears in `routes`, and `DOOR_CONTRACT` stays.
 - **The app (S1).**
   - Send the header on every door request, and `app` in every sealed command, exactly in the form. A typo is ignored silently: no floor and no Settings line.
   - On a 426, pause that computer's queue, keep its rows, and re-read `health` on foreground or with backoff. Never loop. A relay 426 result does not drop the row.

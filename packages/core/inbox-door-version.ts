@@ -35,7 +35,7 @@ export function formatInboxAppHeader(app: InboxAppVersion): string {
 
 /** `health.door`, through the device door only (the window's own `health` has none). */
 export interface InboxDoorHealth {
-  /** The wire contract this Inbox speaks: a whole number, raised by any change to the wire. */
+  /** The wire contract this Inbox speaks: a whole number, raised only by a breaking change (an addition is found in `routes`). */
   contract: number;
   /** Every route this caller's token reaches, in words: `GET threads`, `POST messages/:id/reply`. */
   routes: string[];

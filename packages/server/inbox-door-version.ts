@@ -4,8 +4,10 @@
  * packages/core/inbox-door-version.ts; the route list comes from the door's own table (`doorRouteTable` and
  * `doorReachOf` in inbox-devices.ts, next to the allowlist).
  *
- * Raise `DOOR_CONTRACT` for any change to the wire a phone reads: a route, a field, a record kind, a block kind, a
- * code. Raise `MIN_APP_CONTRACT` only for a change of meaning; an additive change never raises it.
+ * `DOOR_CONTRACT` is the one contract number: the contract kit's apps/mobile/contract/VERSION is generated from it. It
+ * rises only for a breaking change to the wire a phone reads: a field or route removed or renamed, or a changed meaning.
+ * An added optional field or route never raises it: an app finds a new route in `health.door.routes` and decodes
+ * unknown fields tolerantly. Raise `MIN_APP_CONTRACT` only when this Inbox stops serving an older contract's meaning.
  */
 
 import { type InboxAppVersion, type InboxDoorHealth } from "@plannotator/core/inbox-door-version";
@@ -13,8 +15,8 @@ import { type InboxAppVersion, type InboxDoorHealth } from "@plannotator/core/in
 export { INBOX_APP_HEADER as APP_HEADER, parseInboxAppHeader as parseAppHeader } from "@plannotator/core/inbox-door-version";
 
 /**
- * The wire contract this Inbox speaks (apps/mobile/contract/VERSION holds the same number once it exists). 0 is
- * reserved: it means "before the handshake" (an Inbox with no `health.door`). The first app is contract 1.
+ * The one wire contract number (apps/mobile/contract/VERSION is generated from it); breaking changes only, see above.
+ * 0 is reserved: it means "before the handshake" (an Inbox with no `health.door`). The first app is contract 1.
  */
 export const DOOR_CONTRACT = 1;
 /**
