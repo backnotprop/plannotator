@@ -141,6 +141,10 @@ export interface FakeT3Home {
   setState(state: FakeT3HomeState): void;
   /** The status `thread show` gives every thread's run ("completed" until set; "running" has an active run). */
   setRunStatus(status: string): void;
+  /** The folders `t3 project add` added, as T3 keeps them (real paths). */
+  added(): string[];
+  /** Make every later `t3 project add` fail. */
+  refuseProjectAdd(): void;
 }
 
 /** T3's state database (`userdata/statev2.sqlite`), one provider thread row per Codex thread. Bun only (`bun:sqlite`). */
@@ -218,7 +222,8 @@ const state = fs.readFileSync(${JSON.stringify(stateFile)}, "utf8").trim();
 const startsFile = ${JSON.stringify(startsLog)};
 const started = () => fs.existsSync(startsFile) ? fs.readFileSync(startsFile, "utf8").split("\\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
 const known = [...${JSON.stringify([...Object.values(threads), ...(options.t3Threads ?? [])])}, ...started().map((s) => s.id)];
-const projects = ${JSON.stringify(options.projects ?? [])};
+const addedFile = ${JSON.stringify(join(dir, "projects-added"))};
+const projects = [...${JSON.stringify(options.projects ?? [])}, ...(fs.existsSync(addedFile) ? fs.readFileSync(addedFile, "utf8").split("\\n").filter(Boolean) : [])];
 const turnsFile = ${JSON.stringify(turnsLog)};
 const runFile = ${JSON.stringify(join(dir, "run-status"))};
 const turns = () => fs.existsSync(turnsFile) ? fs.readFileSync(turnsFile, "utf8").split("\\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
@@ -234,7 +239,14 @@ if (state === "hang") setTimeout(() => {}, 60000);
 else if (state === "down") say("No running T3 Code server uses ${dir}. Start T3 Code, then retry.", 1);
 else if (state === "stale") say("Could not reach the T3 Code server at http://127.0.0.1:9. connect ECONNREFUSED", 1);
 else if (state === "fail") say("Something went wrong.", 1);
-else if (args[0] === "thread" && args[1] === "start") {
+else if (args[0] === "project" && args[1] === "add") {
+  // T3's cli/project.ts: adds the folder as a project, or says it has one there already.
+  if (fs.existsSync(${JSON.stringify(join(dir, "project-add-refused"))})) say("Something went wrong.", 1);
+  const root = fs.realpathSync(args[2]);
+  if (projects.includes(root)) say("An active project already exists for '" + root + "'.", 1);
+  fs.appendFileSync(addedFile, root + "\\n");
+  process.stdout.write("Added project project:" + require("node:path").basename(root) + " (" + require("node:path").basename(root) + ") at " + root + ".\\n");
+} else if (args[0] === "thread" && args[1] === "start") {
   const cwd = fs.realpathSync(process.cwd());
   const project = projects.find((root) => cwd === root || cwd.startsWith(root + "/"));
   if (args[2] !== "." || !project) say("No T3 Code project matches '" + args[2] + "'. Pass a project id or a path inside a project.", 1);
@@ -293,6 +305,10 @@ else if (args[0] === "thread" && args[1] === "start") {
     starts: () => (existsSync(startsLog) ? readFileSync(startsLog, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line) as ReturnType<FakeT3Home["starts"]>[number]) : []),
     setState,
     setRunStatus: (status: string) => writeFileSync(join(dir, "run-status"), status),
+    /** The folders `t3 project add` added. */
+    added: () => (existsSync(join(dir, "projects-added")) ? readFileSync(join(dir, "projects-added"), "utf8").split("\n").filter(Boolean) : []),
+    /** `t3 project add` fails from now on. */
+    refuseProjectAdd: () => writeFileSync(join(dir, "project-add-refused"), "1"),
   };
 }
 

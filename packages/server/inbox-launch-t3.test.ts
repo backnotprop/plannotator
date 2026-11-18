@@ -543,7 +543,7 @@ describe("T3 Code through the launch engine, against a fake t3", () => {
     expect((await dots.launch.composeBlock())!.agents.find((a) => a.agent === "t3")?.starts_in).toEqual([dots.project.id]);
   });
 
-  test("when T3 refuses, the run line says why in plain words: T3 Code not open (this computer here; named only for a launch another machine sent), a folder T3 doesn't know; never a path", async () => {
+  test("when T3 refuses and the Inbox can't clear it, the run line says why in plain words: T3 Code not open and not openable here (this computer here; named only for a launch another machine sent), a folder T3 won't add; never a path", async () => {
     for (const state of ["down", "stale"] as const) {
       // This machine has a name linked machines know it by, but a launch started here reads "this computer".
       const down = setup({ machine: "Mini" });
@@ -561,7 +561,9 @@ describe("T3 Code through the launch engine, against a fake t3", () => {
     const there = await named.send("Tighten the checkout copy.", named.project, {}, "Checkout copy", { machine: "ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV", name: "MacBook" });
     expect((await until("the start failed", () => named.store.message(there.id)!.launch!.error)).text).toBe("T3 Code isn't open on Mini. Open it there, then try again.");
 
+    // A folder T3 doesn't know, and T3 refusing to add it (inbox-launch-t3-ready.test.ts has the add that works).
     const unknown = setup({ known: false });
+    unknown.t3!.refuseProjectAdd();
     const two = await unknown.send("Tighten the checkout copy.");
     const said = await until("the start failed", () => unknown.store.message(two.id)!.launch!.error);
     expect(said.text).toBe("shop isn't a project in T3 Code yet. Add its folder in T3 Code, then try again.");

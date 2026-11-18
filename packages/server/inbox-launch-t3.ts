@@ -34,8 +34,10 @@
  *   a project's: such a folder is refused.
  * - T3 picks the new worktree's branch and folder: a temporary `t3/<8 hex>` branch, renamed in the background by
  *   T3's own branch naming settings, in T3's worktrees folder.
- * - T3 must be running, and the folder must be in a project T3 knows. When T3 refuses, the run line says why in
- *   plain words, with Try again.
+ * - T3 must be running, and the folder must be in a project T3 knows. The Inbox makes both true by itself
+ *   (inbox-launch-t3-ready.ts): T3 Code closed, it opens T3's macOS app in the background and waits for its server; a
+ *   folder T3 doesn't know, it adds with `t3 project add <folder>`; then it starts again. Only when it can't (no app to
+ *   open, T3 refusing to add the folder) does the run line say why in plain words, with Try again.
  * - `t3 thread start` takes no request id, so a start cut short (no answer in 30 s, an Inbox closed mid-start) may
  *   have made the thread. Each start first notes the threads of that title the project has, and then how it ended
  *   (`t3-start.json` in the launch's folder). Only after an uncertain end does a later start of the same launch take a
@@ -60,11 +62,8 @@ import type { LaunchEnv } from "./inbox-launch-env";
 import type { LaunchAvailability, LaunchHost, LaunchHostContext, LaunchHostResult, LaunchLive } from "./inbox-launch-host";
 import { INBOX_T3_SEND_TIMEOUT_MS, t3ChildEnv, t3CommandOf, t3HomeOf, t3ServerOf } from "./inbox-t3-local";
 import { connectT3, savedT3Grants } from "./inbox-t3-wake";
+import { openT3App, T3_NO_PROJECT, T3_NOT_RUNNING, T3_OPEN_WAIT_MS, t3LastLine, t3ProjectAdded, t3RemedyOf, waitUntil } from "./inbox-launch-t3-ready";
 
-/** T3's words for a folder in no project it knows (cli/thread.ts `ThreadProjectNotFoundError`). */
-const T3_NO_PROJECT = /^No T3 Code project matches /;
-/** T3's words when its app is not running: no server for this home, or a runtime file whose server does not answer. */
-const T3_NOT_RUNNING = /^(No running T3 Code server uses |Could not reach the T3 Code server)/;
 /** What the person reads when T3 Code is not open on this computer (never T3's path or "server"). */
 export const T3_LAUNCH_NOT_OPEN = "T3 Code isn't open on this computer. Open it, then try again.";
 /** The same, for a launch another linked machine sent here: named as linked machines know this one, so that window reads which computer. */
@@ -230,7 +229,7 @@ export function t3WithoutPaths(text: string): string {
  * no path in it. `machine`: this computer's name for linked machines, when it has one.
  */
 export function t3StartCause(text: string, project: string, machine?: string | null): string {
-  const last = text.split("\n").map((line) => line.replace(/\s+/g, " ").trim()).filter(Boolean).pop() ?? "";
+  const last = t3LastLine(text);
   if (T3_NO_PROJECT.test(last)) return `${project} isn't a project in T3 Code yet. Add its folder in T3 Code, then try again.`;
   if (T3_NOT_RUNNING.test(last)) return t3NotOpenWords(machine);
   const plain = t3WithoutPaths(last);
@@ -320,10 +319,16 @@ function keptRead<T>(ttl: number, now: () => number) {
   };
 }
 
-/** `startTimeoutMs`: how long `t3 thread start` may take (30 s; a test makes it short). */
-export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () => number; startTimeoutMs?: number } = {}) {
+/**
+ * `startTimeoutMs`: how long `t3 thread start` may take (30 s; a test makes it short). `openApp`: opens T3 Code when
+ * it isn't running (default `openT3App`: its macOS app, in the background; a test stands in). `openWaitMs`: how long
+ * after that a start waits for T3's server.
+ */
+export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () => number; startTimeoutMs?: number; openApp?: (e: AgentEnvironment) => Promise<boolean>; openWaitMs?: number } = {}) {
   const now = options.now ?? Date.now;
   const startTimeoutMs = options.startTimeoutMs ?? INBOX_T3_SEND_TIMEOUT_MS;
+  const openApp = options.openApp ?? openT3App;
+  const openWaitMs = options.openWaitMs ?? T3_OPEN_WAIT_MS;
   const nothing = (text: string): LaunchHostResult => ({ exitCode: 0, text });
   /** Each provider instance's agent in words, as a signed-in T3 last named it. */
   const agentNames = new Map<string, string>();
@@ -496,18 +501,47 @@ export function createT3LaunchHost(ctx: LaunchHostContext, options: { now?: () =
         const words = t3ModelOf(launch.model) ? `${agentOf(t3ModelOf(launch.model)!.provider)} · ${t3ModelOf(launch.model)!.model}` : launch.model;
         return { ok: false as const, code: "failed" as const, text: `T3 Code doesn't list ${words}. Send it again with another model.` };
       }
-      const startedAt = Date.now();
-      // T3 didn't list the title's threads first: nothing would tell a thread this start made from an older one, so
-      // none is ever taken for it ("unlisted").
-      writeAttempt(launch.id, { title, before: (listed ?? []).map((t) => t.threadId), at: startedAt, outcome: listed ? "running" : "unlisted" });
       const argv = [found.t3, "thread", "start", ".", "-", `--worktree=${base}`, ...(title ? [`--title=${title}`] : []), ...t3LaunchChoiceArgs({ model: launch.model, effort: launch.effort }), "--json"];
       const env = { ...t3ChildEnv(found.e), ...(input.login.PATH ? { PATH: input.login.PATH } : {}) };
-      const result = await found.e.run(argv, { timeoutMs: startTimeoutMs, cwd: launch.folder, env, cleanEnv: true, stdin: message });
-      // The message is never written down here: only the command and what T3 said.
-      ctx.startLog(launch.id, `${["t3", ...argv.slice(1)].map((arg) => (/^[\w./:@=-]+$/.test(arg) ? arg : shellQuote(arg))).join(" ")} (in ${launch.folder}, the message on stdin)\nexit ${result.timedOut ? "timed out" : result.exitCode}\n${`${result.stdout}\n${result.stderr}`.trim().slice(-2000)}`);
-      const thread = !result.timedOut && result.exitCode === 0 ? t3StartedThreadOf(result.stdout) : null;
-      // How it ended decides whether a later Try again may take a thread it made: only when T3 didn't say.
-      writeAttempt(launch.id, { title, before: (listed ?? []).map((t) => t.threadId), at: startedAt, outcome: !listed ? "unlisted" : thread ? "started" : result.timedOut || result.exitCode === 0 ? "uncertain" : "refused" });
+      /** One `t3 thread start`, noted before and after (`t3-start.json`), with the command and T3's words in start.log. */
+      const attempt = async (titled: typeof listed) => {
+        const startedAt = Date.now();
+        // T3 didn't list the title's threads first: nothing would tell a thread this start made from an older one, so
+        // none is ever taken for it ("unlisted").
+        writeAttempt(launch.id, { title, before: (titled ?? []).map((t) => t.threadId), at: startedAt, outcome: titled ? "running" : "unlisted" });
+        const result = await found.e.run(argv, { timeoutMs: startTimeoutMs, cwd: launch.folder, env, cleanEnv: true, stdin: message });
+        // The message is never written down here: only the command and what T3 said.
+        ctx.startLog(launch.id, `${["t3", ...argv.slice(1)].map((arg) => (/^[\w./:@=-]+$/.test(arg) ? arg : shellQuote(arg))).join(" ")} (in ${launch.folder}, the message on stdin)\nexit ${result.timedOut ? "timed out" : result.exitCode}\n${`${result.stdout}\n${result.stderr}`.trim().slice(-2000)}`);
+        const thread = !result.timedOut && result.exitCode === 0 ? t3StartedThreadOf(result.stdout) : null;
+        // How it ended decides whether a later Try again may take a thread it made: only when T3 didn't say.
+        writeAttempt(launch.id, { title, before: (titled ?? []).map((t) => t.threadId), at: startedAt, outcome: !titled ? "unlisted" : thread ? "started" : result.timedOut || result.exitCode === 0 ? "uncertain" : "refused" });
+        return { result, thread };
+      };
+      let { result, thread } = await attempt(listed);
+      // T3 refused for a reason the Inbox can clear by itself: T3 Code not running (open its app, wait for its server)
+      // or a folder that is no project of T3's (add it). Each at most once; what can't be cleared keeps T3's refusal.
+      const done = new Set<"open" | "add">();
+      for (let need = thread ? null : t3RemedyOf(`${result.stdout}\n${result.stderr}`); need && !done.has(need); need = thread ? null : t3RemedyOf(`${result.stdout}\n${result.stderr}`)) {
+        done.add(need);
+        if (need === "open") {
+          const opened = await openApp(found.e).catch(() => false);
+          ctx.startLog(launch.id, opened ? "T3 Code wasn't running: opened it, waiting for it" : "T3 Code isn't running, and the Inbox couldn't open it");
+          if (!opened) break;
+          const deadline = Date.now() + openWaitMs;
+          if (!(await waitUntil(() => t3ServerOf(t3HomeOf(found.e)) !== null, deadline))) break;
+          ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
+          // Its server may take a moment more to answer after it says it runs.
+          while (!thread && t3RemedyOf(`${result.stdout}\n${result.stderr}`) === "open" && Date.now() < deadline) {
+            await Bun.sleep(2_000);
+            ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
+          }
+        } else {
+          const added = await runT3(found, ["project", "add", launch.folder], launch.folder);
+          ctx.startLog(launch.id, `t3 project add ${/^[\w./:@=-]+$/.test(launch.folder) ? launch.folder : shellQuote(launch.folder)}\nexit ${added.timedOut ? "timed out" : added.exitCode}\n${`${added.stdout}\n${added.stderr}`.trim().slice(-2000)}`);
+          if (!t3ProjectAdded(added)) break;
+          ({ result, thread } = await attempt(await threadsTitled(found, launch.folder, title)));
+        }
+      }
       if (!thread) return { ok: false as const, code: "failed" as const, text: t3StartFailure(result, project, machine, startTimeoutMs) };
       ctx.startLog(launch.id, `T3 thread ${thread}, in a new worktree from ${base}`);
       return { ok: true as const, session: thread, ref: thread };

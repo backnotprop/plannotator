@@ -327,7 +327,8 @@ after it, and the wake never treats the `launch:` placeholder as a T3 thread.
 After the start, `t3 thread show --json` names what T3 runs it on ("T3 Code
 (Claude Code · opus)"). The thread is T3's: its permission prompts stay in T3
 Code's app, and the server refuses Stop for it. T3 Code must be running and
-must know the project. When it refuses, the run line says why in plain words.
+must know the project: the Inbox opens T3's app (macOS) and adds the folder
+with `t3 project add` by itself; only when it can't does the run line say why.
 The rest is "T3 Code" in `inbox-launch.md`.
 
 ### Codex Stop hook: which turn the plan belongs to
