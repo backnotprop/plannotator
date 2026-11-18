@@ -118,8 +118,16 @@ export interface InboxPullLink {
    * `session`: the session that sent it (absent from an older Inbox).
    */
   guide: { message_id: string; title: string; steps: number; review: boolean; session?: string | null } | null;
-  /** `owner` only: what the hand-off asked for first (a guided review, or the person's own curation); absent for an older choice. */
-  ask?: "guide" | "custom";
+  /**
+   * `owner` only: what the hand-off asked for first (a guided review, or the person's own curation), or `thread`: nothing
+   * (a PR page's Start a thread; the thread is the PR's page from then on). Absent for an older choice.
+   */
+  ask?: "guide" | "custom" | "thread";
+  /**
+   * `owner` only: the thread was started from the PR's page (Start a thread), so it is the PR's page; kept when that
+   * thread later asks for a guided review (`ask` then `guide`). Absent otherwise.
+   */
+  page?: true;
 }
 
 /** One host the Inbox asked, and as whom. */
@@ -683,4 +691,24 @@ export function inboxPullUrlsIn(text: string): string[] {
     if (!found.includes(match[0])) found.push(match[0]);
   }
   return found;
+}
+
+/** How a PR hand-off's details begin (the window's `pullHandoffMessage` opening): what tells them apart from the words. */
+export const PULL_DETAILS_START = "You're being asked to help me review and understand a ";
+/** Only a Start a thread's details have this step (`pullHandoffMessage`'s `thread` kind). */
+export const PULL_THREAD_STEP = "We discuss it in this thread.";
+
+/**
+ * A person's message split into their words and the PR's details that went with them (a PR page's Start a thread),
+ * or null for any other message. The details are the LAST block that starts with the hand-off's opening after a blank
+ * line and holds the thread's step, so words that quote it stay words, and a hand-off with nothing before it (New
+ * review's) is not split. The window folds the details; the server finds the PR a started thread is about by them.
+ */
+export function splitPullThreadDetails(body: string): { words: string; details: string } | null {
+  const at = body.lastIndexOf(`\n\n${PULL_DETAILS_START}`);
+  if (at <= 0) return null;
+  const words = body.slice(0, at).trimEnd();
+  const details = body.slice(at + 2).trimEnd();
+  if (!words.trim() || !details.includes(`\nWhat to do\n${PULL_THREAD_STEP}`)) return null;
+  return { words, details };
 }

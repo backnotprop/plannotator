@@ -658,6 +658,8 @@ packages/inbox/reviewJump.test.tsx
 packages/inbox/reviewAllFilesTree.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
+packages/inbox/pulls/pullThreadStart.test.tsx
+packages/inbox/pulls/pullThreadGuide.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/prs/checksTurn.test.tsx

@@ -13,6 +13,7 @@ import {
   inboxPullLandsNext,
   inboxPullSafeBranch,
   inboxPullStacks,
+  PULL_THREAD_STEP,
   type InboxPull,
   type InboxPullGroups,
   type InboxPullItem,
@@ -213,6 +214,14 @@ export function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
 
 /** What a hand-off asks the agent for first: a guided review (the default), or the person's own curation. */
 export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string };
+/** A launchpad's Start a thread (pulls/startThread.ts): the PR handed over with nothing asked for first, no guided review. */
+export type PullHandoffThread = { kind: 'thread' };
+
+/**
+ * A thread started from a PR's page (Start a thread): its link has the `thread` ask, or the `page` mark once that thread
+ * asked for a guided review; its row and page open the thread.
+ */
+export const isPullThread = (link: Pick<InboxPullLink, 'via' | 'ask' | 'page'> | null | undefined): boolean => link?.via === 'owner' && (link.ask === 'thread' || link.page === true);
 
 /** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
 const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';
@@ -312,7 +321,7 @@ export const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.pl
  * `pullTitleLine`, branches only when safe, logins and links only when they are what they claim. A tree stack is
  * narrowed first (`handoffStack`).
  */
-export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = { kind: 'guide' }): string {
+export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk | PullHandoffThread = { kind: 'guide' }): string {
   const layers = handoffLayers(stack);
   const many = layers.length > 1;
   const noun = pullNounOf(stack);
@@ -324,10 +333,17 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}.${pushable ? '' : " Don't change any code unless I explicitly tell you to."}`;
   const them = many ? 'them' : 'it';
   const branch = many ? 'branches' : 'branch';
+  // A thread with no guided review asked for (Start a thread): no step 1, and no review to update.
+  const thread = ask.kind === 'thread';
   const feedback = pushable
-    ? `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
+    ? thread
+      ? `If I ask for changes, make them and push them to the ${branch} if you can. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
+      : `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
     : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
-  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
+  const whatToDo =
+    ask.kind === 'thread'
+      ? `What to do\n${PULL_THREAD_STEP} ${PULL_HANDOFF_TALK} ${feedback}`
+      : `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
   if (!many) {
     const pull = layers[0]!;
     const url = pullUrl(pull);
