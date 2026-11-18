@@ -1173,7 +1173,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   // A diff's base commit, by its head (a pushed head has its own), and each file's text by commit: a commit's file
   // never changes, so a settled answer stays until the bound. A failed read is forgotten, for the next look to retry.
   const mergeBases = new Map<string, Promise<string | null>>();
-  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number; callers: (AbortSignal | undefined)[] }>();
+  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number; callers: (AbortSignal | undefined)[]; settled: boolean }>();
   let fileTextBytes = 0;
   let readsRunning = 0;
   const readsWaiting: (() => void)[] = [];
@@ -2028,7 +2028,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           // Used again: the last to go.
           fileTexts.delete(textKey);
           fileTexts.set(textKey, hit);
-          hit.callers.push(signal);
+          if (!hit.settled) hit.callers.push(signal);
           return stillWanted(hit.read, sha, filePath);
         }
         const callers: (AbortSignal | undefined)[] = [signal];
@@ -2046,10 +2046,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           const text = await ask(endpoint, pull.platform === "github" ? ["-H", "Accept: application/vnd.github.v3.raw"] : []);
           return text === null || text.slice(0, 8000).includes("\u0000") ? null : text;
         });
-        const entry = { read, bytes: 0, callers };
+        const entry = { read, bytes: 0, callers, settled: false };
         fileTexts.set(textKey, entry);
         read.then(
           (text) => {
+            entry.settled = true;
+            entry.callers.length = 0;
             // Still the one kept (the bound may have dropped it while it ran).
             if (fileTexts.get(textKey) !== entry) return;
             // Only a text is kept: an empty answer or a 404 can be a passing sign-in problem, and the next click asks again.
@@ -2067,6 +2069,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             }
           },
           () => {
+            entry.settled = true;
+            entry.callers.length = 0;
             if (fileTexts.get(textKey) === entry) fileTexts.delete(textKey);
           },
         );
