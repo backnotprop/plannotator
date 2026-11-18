@@ -1954,8 +1954,8 @@ export const inboxApi = {
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(cardUrl(id), change),
-  /** The opened card's edits: title, notes; a link (a thread, an issue or PR); sent to an agent (the thread just started). */
-  editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'send'; thread_id: string }) =>
+  /** The opened card's edits: title, notes; a link (a thread, an issue or PR) added, or one removed (by its URL); sent to an agent (the thread just started). */
+  editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'unlink'; url: string } | { op: 'send'; thread_id: string }) =>
     post<{ card: InboxCardWire }>(cardUrl(id), change),
   /** The opened card: the card and its history, newest first, and its project's repo (absent from an older Inbox). */
   card: (id: string) => get<{ card: InboxCardWire; history: InboxCardHistoryEntry[]; repo?: InboxProjectRepo | null }>(cardUrl(id)),

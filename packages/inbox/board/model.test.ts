@@ -157,6 +157,7 @@ test('history reads like the mock: short refs, and a Start in the card’s own t
   expect(shortRef('acme/widgets#2018')).toBe('#2018');
   expect(shortRef('g/p!7')).toBe('!7');
   expect(historyWords({ at: 'x', by: CLAUDE, kind: 'linked_ref', ref: 'acme/widgets#2018', ref_kind: 'pr' })).toMatchObject({ before: 'Linked ', bold: '#2018', after: '' });
+  expect(historyWords({ at: 'x', by: PERSON, kind: 'unlinked_ref', ref: 'acme/widgets#2018', ref_kind: 'pr' })).toMatchObject({ before: 'Removed ', bold: '#2018', after: '' });
   expect(historyWords({ at: 'x', by: PERSON, kind: 'sent', to: CLAUDE, thread_id: 'msg_1', existing_thread: true }).after).toBe(' in the card’s thread');
   expect(historyWords({ at: 'x', by: PERSON, kind: 'sent', to: CLAUDE, thread_id: 'msg_1', existing_thread: false }).after).toBe(' in a new thread');
   // The Inbox's own move to Done says so, naming the PRs that merged.

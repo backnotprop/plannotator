@@ -525,6 +525,8 @@ export function historyWords(
       return { before: 'Linked a thread', bold: null, after: by === 'you' ? '' : ` (${by})`, quote: null };
     case 'linked_ref':
       return { before: 'Linked ', bold: shortRef(entry.ref), after: '', quote: null };
+    case 'unlinked_ref':
+      return { before: 'Removed ', bold: shortRef(entry.ref), after: '', quote: null };
     case 'renamed':
       return { before: 'Renamed by ', bold: null, after: by, quote: `“${entry.title}”` };
     case 'notes':
