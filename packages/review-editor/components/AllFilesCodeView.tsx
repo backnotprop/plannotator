@@ -2120,7 +2120,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     [minimapMarks, semanticNotes],
   );
 
+  const semanticWasEnabledRef = useRef(semanticEnabled);
+  const semanticAskedForRef = useRef<string | null>(null);
   useEffect(() => {
+    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = fileSetKeyRef.current;
+    semanticWasEnabledRef.current = semanticEnabled;
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
   }, [semanticEnabled, showSemantic]);
 
@@ -2141,7 +2145,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   });
 
   const swapsUnseen = useStableCallback((itemId: string) => {
-    if (!engagedRef.current) return true;
+    if (!engagedRef.current || semanticAskedForRef.current === fileSetKeyRef.current) return true;
     const scroller = scrollRef.current;
     if (!scroller) return false;
     const page = scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : scroller;

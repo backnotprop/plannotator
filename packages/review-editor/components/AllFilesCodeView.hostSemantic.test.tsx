@@ -425,7 +425,12 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     };
     const swapped = (path: string) => ([...items.values()].find((item) => item.id.includes(path))!.fileDiff.semanticOperations as unknown[] | undefined)?.length === 1;
     const move = (path: string, top: number) => void tops.set(nodes.get(path)!, top);
-    return { land, swapped, move };
+    const redraw = async () => {
+      await act(async () => {
+        for (const item of items.values()) options.onPostRender(nodes.get(files.find((file) => item.id.includes(file))!)!, {}, 'update', { item });
+      });
+    };
+    return { land, swapped, move, redraw };
   }
 
   test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
@@ -468,6 +473,20 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.swapped('a.ts')).toBe(false);
     await act(async () => configStore.set('diffSemantic', false));
     await act(async () => configStore.set('diffSemantic', true));
+    expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {
+    configStore.set('diffSemantic', false);
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    document.dispatchEvent(new Event('pointerdown'));
+    await act(async () => configStore.set('diffSemantic', true));
+    await page.redraw();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    document.dispatchEvent(new Event('keydown'));
+    await page.land();
     expect(page.swapped('a.ts')).toBe(true);
   });
 });
