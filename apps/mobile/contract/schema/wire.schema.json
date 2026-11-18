@@ -6321,6 +6321,12 @@
           ],
           "x-open": true
         },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
         "id": {
           "type": "string"
         },
