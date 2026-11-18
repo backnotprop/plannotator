@@ -442,3 +442,72 @@ test.skipIf(!hasDom)('the diff card says the approved words with the file count:
   expect(diffWords(1)).toBe('The one file with your comments, Viewed and Approve.');
   expect(diffWords(0)).toBe('All files with your comments, Viewed and Approve.');
 });
+
+// Start a thread (pulls/startThread.ts; the owner, 2026-11-17: "I should be able to start a thread").
+const startThreadDoor = '[data-launch-door="thread"] [data-launch-go="start-thread"]';
+const threadAsked: { body?: string; pulls?: { keys: string[]; projects: string[]; ask_line: string } | null; pickTo?: boolean; threadName?: string; opener: string | null }[] = [];
+const withStartThread: Partial<PullsPageProps> = {
+  onStartThread: (request, opener) => {
+    threadAsked.push({ body: request.body, pulls: request.pulls, pickTo: request.pickTo, threadName: request.threadName, opener: opener.getAttribute('data-launch-go') });
+  },
+};
+
+test.skipIf(!hasDom)('no thread yet: the Review thread door offers Start a thread, a quiet button beside the one primary, and opens New message about this PR with To\'s list open and no guided review asked', async () => {
+  threadAsked.length = 0;
+  mount(single.key, answer(), withStartThread);
+  await settle();
+  const button = $<HTMLButtonElement>(startThreadDoor)!;
+  expect(!!button).toBe(true);
+  expect(button.textContent).toBe('Start a thread');
+  // A plain button (reachable with Tab), not a second primary: the guided review stays the one.
+  expect(button.tagName === 'BUTTON' && !button.classList.contains('ib-pri') && button.tabIndex === 0).toBe(true);
+  expect(document.querySelectorAll('.ib-lp .ib-btn.ib-pri')).toHaveLength(1);
+  expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('None yet. Start one, or start a guided review.');
+  await click(startThreadDoor);
+  expect(went).toEqual([]);
+  expect(threadAsked).toHaveLength(1);
+  const asked = threadAsked[0]!;
+  expect(asked.opener).toBe('start-thread');
+  expect(asked.pickTo).toBe(true);
+  expect(asked.pulls).toEqual({ keys: [single.key], projects: ['prj_web'], ask_line: '' });
+  expect(asked.threadName).toBe('Review #880: PR 880');
+  expect(asked.body!.includes(single.url) && !asked.body!.includes('/review-curate')).toBe(true);
+});
+
+test.skipIf(!hasDom)('Start a thread only while no thread is about the PR: a review thread, an ended one, or one that only named it keep their own Open', async () => {
+  for (const link of [live, { ...live, guide: null }, { ...live, guide: null, agent: { ...live.agent!, ended: true } }, { ...live, via: 'url' as const, ask: undefined, guide: null }]) {
+    mount(single.key, answer({ [single.key]: link }), withStartThread);
+    await settle();
+    expect(!!$(startThreadDoor)).toBe(false);
+    expect(!!$('[data-launch-door="thread"] [data-launch-go="thread"]')).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+  }
+});
+
+test.skipIf(!hasDom)('Start a thread on a phone, on a draft and on your own PR; never for a PR in no project, nor where the window does not offer it', async () => {
+  const draftMine: InboxPullsAnswer = { ...answer(), pulls: [{ ...single, state: 'draft', mine: true }, low, high] };
+  const cases: [InboxPullsAnswer, Partial<PullsPageProps>][] = [
+    [answer(), { ...withStartThread, phone: true }],
+    [draftMine, withStartThread],
+  ];
+  for (const [model, extra] of cases) {
+    mount(single.key, model, extra);
+    await settle();
+    expect(!!$(startThreadDoor)).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+  }
+  const none: [InboxPullsAnswer, Partial<PullsPageProps>][] = [
+    [{ ...answer(), projects: {} }, withStartThread],
+    [answer(), {}],
+  ];
+  for (const [model, extra] of none) {
+    mount(single.key, model, extra);
+    await settle();
+    expect(!!$(startThreadDoor)).toBe(false);
+    expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('None yet. Starting a guided review starts one.');
+    act(() => root!.unmount());
+    host!.remove();
+  }
+});

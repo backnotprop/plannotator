@@ -5,7 +5,8 @@
  * Guided review (wide, the primary), The diff, Review thread, Shape board (only while Shape is on) and System (coming,
  * from Workspaces, no button; only while System shows). Shape and System are both off in 0.29, so the page has three
  * doors there. Then the PR's Details (`PullDetails`, laid in the page), and Reply to the agent at the foot. A stack of several PRs keeps the stack page (`PullsPage` `StackView`), which owns
- * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in. No keyboard
+ * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in, and the Review
+ * thread door's Start a thread (New message about the PR, no guided review asked; `startThread.ts`). No keyboard
  * shortcuts of its own.
  */
 import { useId, useRef, type ReactNode, type RefObject } from 'react';
@@ -39,6 +40,10 @@ export interface LaunchpadStart {
   /** The New review box, filled in with this PR; focus comes back to `opener` when it closes. */
   onStart: (opener: HTMLElement) => void;
 }
+
+/** The Review thread door's words with no thread yet, and its Start a thread (`pulls/startThread.ts`). */
+export const THREAD_NONE_YET = 'None yet. Start one, or start a guided review.';
+export const START_THREAD = 'Start a thread';
 
 function Door({ kind, icon, title, sub, soon, wide, thread, children }: { kind: string; icon: ReactNode; title: string; sub: ReactNode; soon?: boolean; wide?: boolean; thread?: string; children?: ReactNode }) {
   return (
@@ -100,6 +105,7 @@ export function PullLaunchpad({
   now,
   heading,
   start,
+  startThread = null,
   shapes,
   system = false,
   risk = null,
@@ -122,6 +128,11 @@ export function PullLaunchpad({
   /** The title: it takes focus when the page opens on a phone. */
   heading: RefObject<HTMLHeadingElement | null>;
   start: LaunchpadStart | null;
+  /**
+   * Start a thread (`canStartPullThread`): the New message box about this PR, To's list open, no guided review asked
+   * for. Null: none (a thread about the PR already, a closed or merged PR, or no project an agent can take it in).
+   */
+  startThread?: { onStart: (opener: HTMLElement) => void } | null;
   /** Shape boards by thread; null while Shape is off (no Shape board door then). */
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
   /** System shows (`systemShown`, the Reviews page's `system`): only then the System door. */
@@ -315,11 +326,20 @@ export function PullLaunchpad({
                       !ended && <>{'\u00a0· '}No answer yet</>
                     )}
                   </>
+                ) : startThread ? (
+                  <>{THREAD_NONE_YET}</>
                 ) : (
                   <>None yet. Starting a guided review starts one.</>
                 )
               }
             >
+              {startThread && !link && !named && (
+                <div className="ib-lp-go">
+                  <button type="button" className="ib-btn" onClick={(event) => startThread.onStart(event.currentTarget)} data-launch-go="start-thread">
+                    {START_THREAD}
+                  </button>
+                </div>
+              )}
               {link && (
                 <div className="ib-lp-go">
                   <button type="button" className="ib-btn" onClick={() => onThread(link.thread_id)} data-launch-go="thread">

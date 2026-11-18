@@ -64,6 +64,8 @@ import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsMo
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
+import { canStartPullThread, pullThreadRequest } from './startThread';
+import type { ComposeRequest } from '../compose/ComposeDialog';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
@@ -126,6 +128,8 @@ export interface PullsPageProps {
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
+  /** A launchpad's Start a thread (`pulls/startThread.ts`): the New message box about the PR. Absent: not offered. */
+  onStartThread?: (request: ComposeRequest, opener: HTMLElement) => void;
   /** Branch reviews' "Branches nobody reported": New review with that branch, in its project. */
   onReviewBranch?: (branch: ReviewBoxBranch, opener: HTMLElement) => void;
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
@@ -525,6 +529,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         now={now}
         heading={heading}
         start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: (opener) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener) } : null}
+        startThread={props.onStartThread && canStartPullThread(start, link, projects) ? { onStart: (opener) => props.onStartThread!(pullThreadRequest(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects)), opener) } : null}
         shapes={props.shapes ?? null}
         system={!!props.system}
         risk={riskLines}

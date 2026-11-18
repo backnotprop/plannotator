@@ -202,6 +202,8 @@ export function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
 
 /** What a hand-off asks the agent for first: a guided review (the default), or the person's own curation. */
 export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string };
+/** A launchpad's Start a thread (pulls/startThread.ts): the PR handed over with nothing asked for first, no guided review. */
+export type PullHandoffThread = { kind: 'thread' };
 
 /** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
 const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';
@@ -301,7 +303,7 @@ export const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.pl
  * `pullTitleLine`, branches only when safe, logins and links only when they are what they claim. A tree stack is
  * narrowed first (`handoffStack`).
  */
-export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = { kind: 'guide' }): string {
+export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk | PullHandoffThread = { kind: 'guide' }): string {
   const layers = handoffLayers(stack);
   const many = layers.length > 1;
   const noun = pullNounOf(stack);
@@ -313,10 +315,17 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}.${pushable ? '' : " Don't change any code unless I explicitly tell you to."}`;
   const them = many ? 'them' : 'it';
   const branch = many ? 'branches' : 'branch';
+  // A thread with no guided review asked for (Start a thread): no step 1, and no review to update.
+  const thread = ask.kind === 'thread';
   const feedback = pushable
-    ? `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
+    ? thread
+      ? `If I ask for changes, make them and push them to the ${branch} if you can. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
+      : `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
     : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
-  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
+  const whatToDo =
+    ask.kind === 'thread'
+      ? `What to do\nWe discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`
+      : `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
   if (!many) {
     const pull = layers[0]!;
     const url = pullUrl(pull);
@@ -535,10 +544,19 @@ function pullSubject(target: PullReviewTarget): string {
  * step 1 (`ask_line`, `pullHandoffAskLine`) as a line of its own, else a custom curation. A line, not a substring: a
  * guided step 1 edited in compose, or one with the person's words after `/review-curate`, is a custom curation.
  */
-export function pullLaunchAsk(body: string, askLine: string): 'guide' | 'custom' {
+export function pullLaunchAsk(body: string, askLine: string): 'guide' | 'custom' | null {
+  if (pullAsksNothing({ ask_line: askLine })) return null;
   const wanted = askLine.trim();
-  return wanted !== '' && body.split('\n').some((line) => line.trim() === wanted) ? 'guide' : 'custom';
+  return body.split('\n').some((line) => line.trim() === wanted) ? 'guide' : 'custom';
 }
+
+/**
+ * A PR's thread that asks for nothing first (the launchpad's Start a thread, `pulls/startThread.ts`): its compose
+ * `pulls` carry no ask line. To is filled as New review fills it (`reviewDefaultTo`), the PR is checked with To's project
+ * (`pulls/owner`, `validate_only`) before the Send, and the thread is kept as the PR's with no ask, so no guided review
+ * is said to be on its way.
+ */
+export const pullAsksNothing = (pulls: { ask_line: string } | null | undefined): boolean => !!pulls && pulls.ask_line.trim() === '';
 
 /**
  * The person's verdict on a PR layer (or a stack), as the reply into the
