@@ -8,6 +8,7 @@ import type { SemDiffDownload, SemDiffReply, SemDiffRequest } from './protocol';
 export const SEM_DIFF_TIMEOUT_MS = 3_000;
 export const SEM_DIFF_OPINION_TIMEOUT_MS = 30_000;
 export const SEM_DIFF_COLD_TIMEOUT_MS = 30_000;
+export const SEM_DIFF_DOWNLOAD_TIMEOUT_MS = 90_000;
 const MAX_CACHED = 500;
 
 function hashText(text: string): string {
@@ -46,6 +47,7 @@ export interface SemDiffClientOptions {
   createWorker: () => Worker | Promise<Worker>;
   timeoutMs?: number;
   coldTimeoutMs?: number;
+  downloadTimeoutMs?: number;
 }
 
 const HAS_SOMETHING_TO_SAY = new Set<string>([...SKIM_KINDS, 'movedWithEdit']);
@@ -55,10 +57,12 @@ export function hasSomethingToSay(operations: SemanticDiffOperation[]): boolean 
 }
 
 export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClient {
-  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS } = options;
+  const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS, downloadTimeoutMs = SEM_DIFF_DOWNLOAD_TIMEOUT_MS } = options;
   const warm = new Set<string>();
   const coldTimedOut = new Map<string, number>();
   const downloading = new Set<string>();
+  const downloadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const stalledDownloads = new Set<string>();
   let worker: Promise<Worker> | null = null;
   let nextId = 1;
   interface Pending {
@@ -91,6 +95,8 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     worker = null;
     warm.clear();
     downloading.clear();
+    for (const timer of downloadTimers.values()) clearTimeout(timer);
+    downloadTimers.clear();
     void old?.then((w) => w.terminate(), () => {});
   };
   const post = (id: number) => {
@@ -117,9 +123,23 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     for (const other of pending.keys()) post(other);
     watchHead();
   };
+  const downloadTimedOut = (language: string) => {
+    downloadTimers.delete(language);
+    downloading.delete(language);
+    stalledDownloads.add(language);
+    const head = pending.keys().next().value;
+    for (const [id, { request }] of [...pending]) if ((languageForPath(request.path) ?? '') === language) settle(id, null);
+    if (pending.keys().next().value !== head) watchHead();
+  };
   const heard = ({ download, language }: SemDiffDownload) => {
-    if (download === 'start') downloading.add(language);
-    else downloading.delete(language);
+    if (download === 'start') {
+      downloading.add(language);
+      if (!downloadTimers.has(language)) downloadTimers.set(language, setTimeout(() => downloadTimedOut(language), downloadTimeoutMs));
+    } else {
+      downloading.delete(language);
+      clearTimeout(downloadTimers.get(language));
+      downloadTimers.delete(language);
+    }
     const head = pending.values().next();
     if (head.done || (languageForPath(head.value.request.path) ?? '') !== language) return;
     if (download === 'start' && watchdog) {
@@ -161,6 +181,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   const results = new Map<string, Promise<SemDiffAttempt>>();
 
   const compute = (path: string, oldText: string, newText: string, opinion?: SemDiffOpinionRequest): Promise<SemDiffAttempt> => {
+    if (stalledDownloads.has(languageForPath(path) ?? '')) return Promise.resolve({ result: null, failed: true });
     const id = nextId++;
     const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
