@@ -211,12 +211,10 @@ export function createInboxScheduled(deps: {
   };
 
   /** The fields an input sets, checked; nothing is written when one is refused. */
-  const fieldsOf = async (input: InboxScheduledInput, before: InboxScheduledThread | null): Promise<Partial<InboxScheduledThread>> => {
-    const creating = before === null;
+  const fieldsOf = async (input: InboxScheduledInput, creating: boolean): Promise<Partial<InboxScheduledThread>> => {
     const out: Partial<InboxScheduledThread> = {};
     if (creating || input.name !== undefined) out.name = text(input.name, "name", NAME_MAX);
     if (creating || input.prompt !== undefined) out.prompt = text(input.prompt, "prompt", 100_000);
-    if (creating || input.schedule !== undefined) out.schedule = scheduleOf(input.schedule, before?.schedule);
     if (input.if_missed !== undefined) {
       if (input.if_missed !== "run_once" && input.if_missed !== "skip") throw new InboxError("validation_error", "if_missed: run_once or skip.", { field: "if_missed" });
       out.if_missed = input.if_missed;
@@ -493,7 +491,8 @@ export function createInboxScheduled(deps: {
      * just before the routine is saved: a throw after it may have left the routine written.
      */
     async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string, asked = false, checked?: () => void): Promise<{ record: InboxScheduledThread; told: string | null }> {
-      const fields = await fieldsOf(input, null);
+      const fields = await fieldsOf(input, true);
+      const schedule = scheduleOf(input.schedule);
       checked?.();
       const on = (by.kind === "person" && input.enabled === true) || (by.kind === "agent" && asked);
       const at = iso();
@@ -503,7 +502,7 @@ export function createInboxScheduled(deps: {
         enabled: on,
         approved_at: on ? at : null,
         prompt: fields.prompt!,
-        schedule: fields.schedule ?? null,
+        schedule,
         if_missed: fields.if_missed ?? "run_once",
         runs_on: "this_computer",
         folder: fields.folder!,
@@ -523,8 +522,12 @@ export function createInboxScheduled(deps: {
     },
 
     async update(id: string, input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+      found(id);
+      const fields = await fieldsOf(input, false);
+      // Folder validation can yield to a concurrent edit or delete. Apply only the fields
+      // this caller sent to the record that still exists when validation finishes.
       const before = found(id);
-      const fields = await fieldsOf(input, before);
+      if (input.schedule !== undefined) fields.schedule = scheduleOf(input.schedule, before.schedule);
       const changed = (Object.keys(fields) as (keyof InboxScheduledThread)[]).filter((key) => JSON.stringify(fields[key] ?? null) !== JSON.stringify(before[key] ?? null));
       if (changed.length === 0) return { record: before, told: null };
       // An agent that changes where it works or which agent runs it hands the switch back to the person.

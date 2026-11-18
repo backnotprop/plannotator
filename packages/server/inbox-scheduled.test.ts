@@ -427,6 +427,21 @@ describe("schedules refused when set", () => {
     for (const schedule of [{ at: "2026-02-30T10:00", tz: NY }, { cron: "0 9 31 2 *", tz: NY }]) await expect(w.make({ schedule })).rejects.toMatchObject({ code: "schedule_invalid" });
     expect(w.store.scheduledThreads()).toEqual([]);
   });
+
+  test("an agent's /create-routine create with a refused schedule never reports its fields passed, so the person's grant is given back", async () => {
+    const w = world();
+    const agent: InboxScheduledBy = { kind: "agent", host: FAKE, session: "ses_maya", name: "Fake Agent", thread_id: null };
+    let checked = 0;
+    const input = { name: "Morning triage", prompt: "Triage the new issues.", folder: { project_id: w.project.id }, agent: FAKE };
+    for (const schedule of [{ at: "2026-02-30T10:00", tz: NY }, { cron: "nope", tz: NY }]) {
+      await expect(w.scheduled.create({ ...input, schedule }, agent, undefined, true, () => checked++)).rejects.toMatchObject({ code: "schedule_invalid" });
+    }
+    expect(checked).toBe(0);
+    expect(w.store.scheduledThreads()).toEqual([]);
+    // A good one passes its fields first, then saves.
+    await w.scheduled.create({ ...input, schedule: { cron: "0 9 * * *", tz: NY } }, agent, undefined, true, () => checked++);
+    expect(checked).toBe(1);
+  });
 });
 
 test("a schedule without tz takes this computer's zone, and an update changes only the fields it names", async () => {
@@ -435,6 +450,32 @@ test("a schedule without tz takes this computer's zone, and an update changes on
   expect(record.schedule).toEqual({ cron: "0 9 * * *", tz: Intl.DateTimeFormat().resolvedOptions().timeZone });
   const { record: renamed } = await w.scheduled.update(record.id, { name: "Morning sweep" }, { kind: "person" });
   expect({ ...renamed, name: record.name, updated_at: record.updated_at }).toEqual(record);
+});
+
+test("simultaneous routine updates preserve fields omitted by either edit", async () => {
+  const w = world();
+  const { record } = await w.make();
+  const person = { kind: "person" } as const;
+  await Promise.all([
+    w.scheduled.update(record.id, { name: "Morning sweep" }, person),
+    w.scheduled.update(record.id, { prompt: "Check the new reviews." }, person),
+  ]);
+
+  expect(w.store.scheduledThread(record.id)).toMatchObject({
+    name: "Morning sweep",
+    prompt: "Check the new reviews.",
+  });
+});
+
+test("a routine deleted while an edit is validating stays deleted", async () => {
+  const w = world();
+  const { record } = await w.make();
+  const person = { kind: "person" } as const;
+  const edit = w.scheduled.update(record.id, { name: "Morning sweep" }, person);
+  await w.scheduled.remove(record.id, person);
+
+  await expect(edit).rejects.toMatchObject({ code: "routine_not_found" });
+  expect(w.store.scheduledThread(record.id)).toBeNull();
 });
 
 describe("one run at a time", () => {
