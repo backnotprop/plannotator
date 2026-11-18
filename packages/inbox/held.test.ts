@@ -742,3 +742,26 @@ describe('markHeldRowLooked', () => {
     expect(rowIn(looked, 'p')).toMatchObject({ unseen: 0, unread: true });
   });
 });
+
+// The failure this guards: an agent asked five questions across two threads already on screen, and the notice read
+// "2 new", so the person did not know how much waited behind it.
+describe('heldNotice counts the questions too', () => {
+  const asking = (id: string, at: string, open: number, actions = 0) =>
+    ({ ...row(id, 'api', at, 'agent'), last_agent_at: at, sent: null, questions: { open, picked: 0, stopped: false, holds_up: [], prompt: null, actions } }) as InboxListRow;
+
+  test('new questions on threads already listed, and on a thread new to the list, when they are more than the threads', () => {
+    const shown = sections(asking('a', '2026-10-07T10:00:00Z', 1), asking('b', '2026-10-07T10:00:00Z', 0));
+    const latest = sections(asking('a', '2026-10-07T10:05:00Z', 4), asking('b', '2026-10-07T10:06:00Z', 2));
+    // a: 3 more, b: 2 more.
+    expect(heldNotice(shown, latest)).toEqual({ count: 2, questions: 5, text: '2 new · 5 questions in api', project: 'api' });
+    const plusNew = sections(...latest[0]!.threads, { ...asking('c', '2026-10-07T10:07:00Z', 2), project: { id: 'prj_web', name: 'web' } } as InboxListRow);
+    expect(heldNotice(shown, plusNew)).toEqual({ count: 3, questions: 7, text: '3 new · 7 questions' });
+  });
+
+  test('one question per thread, answered ones and action items say only "N new"', () => {
+    const shown = sections(asking('a', '2026-10-07T10:00:00Z', 3));
+    expect(heldNotice(shown, sections(asking('a', '2026-10-07T10:05:00Z', 4)))).toEqual({ count: 1, text: '1 new in api', project: 'api' });
+    expect(heldNotice(shown, sections(asking('a', '2026-10-07T10:05:00Z', 1)))).toEqual({ count: 1, text: '1 new in api', project: 'api' });
+    expect(heldNotice(shown, sections(asking('a', '2026-10-07T10:05:00Z', 9, 6)))).toEqual({ count: 1, text: '1 new in api', project: 'api' });
+  });
+});

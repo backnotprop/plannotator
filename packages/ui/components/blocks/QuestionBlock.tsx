@@ -95,6 +95,17 @@ const now = (): number => (typeof performance !== 'undefined' ? performance.now(
  *  holds a character no choice label can). */
 const SUGGESTION_ROW = '\u0000suggestion';
 
+/** A choice's description split for the card: the words after its label
+ *  (`lead`), and its details (`Why:`, `Trade-off:` … under it), which the
+ *  parser also put at the description's end. */
+export function choiceDetailParts(choice: { description?: string; details?: string[] }): { lead: string; lines: string[] } {
+  const description = choice.description ?? '';
+  const lines = choice.details ?? [];
+  const tail = lines.join(' ');
+  if (lines.length === 0 || !description.endsWith(tail)) return { lead: description, lines: [] };
+  return { lead: description.slice(0, description.length - tail.length).trim(), lines };
+}
+
 const cx = (...parts: Array<string | false | null | undefined>) => parts.filter(Boolean).join(' ');
 
 /** The box every pill in the eyebrow shares (the status tags, the decision
@@ -604,6 +615,9 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
     } else if (checked) {
       const { other: _o, ...single } = rest;
       commit({ ...single, selected: [label] });
+    } else if (answer?.selected.includes(label)) {
+      // Pick one: the chosen choice clicked again (or Space on it) is un-picked.
+      commit({ ...rest, selected: [] });
     }
   };
 
@@ -1065,6 +1079,7 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
             ) : (
               question.choices.map((choice) => {
                 const checked = selected.includes(choice.label);
+                const details = choiceDetailParts(choice);
                 return (
                   <label
                     key={choice.label}
@@ -1082,6 +1097,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                       name={groupName}
                       checked={checked}
                       onChange={(e) => pick(choice.label, e.target.checked)}
+                      // A checked radio fires no change: a click on it (a Space too) un-picks it.
+                      onClick={inputType === 'radio' && checked ? () => pick(choice.label, false) : undefined}
                       className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                       data-question-control=""
                       disabled={readOnly}
@@ -1089,10 +1106,13 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                     <span className="min-w-0 flex-1 select-text text-[13.5px] leading-[1.45] text-foreground" data-question-part="choice">
                       <span className="font-[550]">{inline(choice.label)}</span>
                       {choice.image && pictureChoices && pictureHeldTitle(choice.image.src) !== null && <> {heldPlaceholder(choice.image.src, choice.image.alt || choice.label)}</>}
-                      {choice.description && (
-                        <span className="text-muted-foreground"> — {inline(choice.description)}</span>
+                      {details.lead && (
+                        <span className="text-muted-foreground"> — {inline(details.lead)}</span>
                       )}
                       {choice.recommended && <> <Tag tone="rec">Recommended</Tag></>}
+                      {details.lines.map((line, i) => (
+                        <span key={i} className="block text-[12.5px] text-muted-foreground" data-question-part="choice-detail">{inline(line)}</span>
+                      ))}
                     </span>
                   </label>
                 );
@@ -1505,6 +1525,12 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
                   name={name}
                   checked={checked}
                   onChange={(e) => onPick(choice.label, e.target.checked)}
+                  // The host's own click first (the Inbox's Decision mode answers on it); then a checked radio, which
+                  // fires no change, is un-picked by a click (a Space too).
+                  onClick={(event) => {
+                    input?.onClick?.(event);
+                    if (inputType === 'radio' && checked) onPick(choice.label, false);
+                  }}
                   className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                   data-question-control=""
                   disabled={readOnly}
