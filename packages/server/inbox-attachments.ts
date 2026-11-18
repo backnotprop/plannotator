@@ -55,6 +55,7 @@ import { inboxAudioServedType } from "@plannotator/shared/inbox/audio";
 import { byteRangeResponse, decideByteRange, handleRangeStream } from "./inbox-byte-range";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { removeGoneCanvases } from "@plannotator/shared/canvas/store";
 import { createHtmlAssetRegistry } from "./html-assets";
 import { MAX_REVIEW_IMAGE_PREVIEW_BYTES, MAX_REVIEW_IMAGE_PREVIEW_PIXELS } from "@plannotator/shared/diff-paths";
 
@@ -300,6 +301,15 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
     const body = await context.readBody(req);
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     return body;
+  };
+
+  /** A deleted thread's canvas (canvases/<thread id>/ beside the inbox folder) goes with it, whatever the switch says. */
+  const canvasesGo = () => {
+    try {
+      removeGoneCanvases(dirname(store.dir), (threadId) => store.thread(threadId) !== null);
+    } catch {
+      // A canvas left behind never fails the person's delete.
+    }
   };
 
   const attachmentOf = (id: string) => {
@@ -675,6 +685,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       const body = await guardedBody(req);
       if (body instanceof Response) return body;
       store.deleteThread(deleteThread[1]!);
+      canvasesGo();
       return json({ ok: true, store: store.diskUsage() });
     }
 
@@ -684,6 +695,7 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
       const body = await guardedBody(req);
       if (body instanceof Response) return body;
       store.deleteProject(deleteProject[1]!);
+      canvasesGo();
       return json({ ok: true, store: store.diskUsage() });
     }
 

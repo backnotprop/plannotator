@@ -41,7 +41,8 @@ export function canvasCardsByMessage(messages: readonly Pick<InboxMessage, 'id' 
 export function CanvasCard({ threadId, version, latest, showing, onOpen }: { threadId: string; version: CanvasVersionSummary; latest: boolean; showing: boolean; onOpen: () => void }) {
   const [broken, setBroken] = useState(false);
   return (
-    <button type="button" className="ib-cvcard" onClick={onOpen} data-canvas-card={version.n} aria-label={`Open the canvas, version ${version.n}`}>
+    // Named by its own words ("Canvas version 3 · 2 parts changed Showing"): no label over them hides the count or state.
+    <button type="button" className="ib-cvcard" onClick={onOpen} data-canvas-card={version.n}>
       <span className="ib-cvcard-pic">
         {version.picture && !broken ? <img src={canvasApi.pictureUrl(threadId, version.n)} alt="" loading="lazy" onError={() => setBroken(true)} /> : <Icon name="brush" size={28} />}
       </span>

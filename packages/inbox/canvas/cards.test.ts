@@ -5,7 +5,9 @@
  */
 import { expect, test } from 'bun:test';
 import type { CanvasVersionSummary } from './client';
-import { canvasCardsByMessage } from './parts';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { CanvasCard, canvasCardsByMessage } from './parts';
 
 const agent = { kind: 'agent' } as const;
 const person = { kind: 'person' } as const;
@@ -27,4 +29,17 @@ test('the person\'s saves never get a card, and a person\'s message never carrie
   expect(cards.size).toBe(0);
   const mixed = canvasCardsByMessage([msg('p1', '10', person), msg('m1', '11')], [v(1, '09')]);
   expect([...mixed.keys()]).toEqual(['m1']);
+});
+
+/** The card as a screen reader names it: its own words (no aria-label over them), tags dropped. */
+const cardWords = (version: CanvasVersionSummary, state: { latest: boolean; showing: boolean }) => {
+  const html = renderToStaticMarkup(createElement(CanvasCard, { threadId: 't1', version, ...state, onOpen: () => {} }));
+  expect(html).not.toContain('aria-label');
+  return html.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+};
+
+test('a first version (nothing changed) shows no count; a later one names it; the state is read out with it', () => {
+  expect(cardWords({ ...v(1, '04'), changed: 0 }, { latest: true, showing: false })).toBe('Canvas version 1 Open');
+  expect(cardWords(v(1, '04'), { latest: true, showing: true })).toBe('Canvas version 1 Showing');
+  expect(cardWords({ ...v(2, '05'), changed: 3 }, { latest: false, showing: false })).toBe('Canvas version 2 · 3 parts changed Older');
 });

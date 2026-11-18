@@ -23,7 +23,7 @@
  * `@plannotator/ui/utils/pasteInsert`.)
  *
  * Nothing changes when focus is already in a text field or inside a frame (an
- * attached HTML page), when text is selected in an attached file's viewer or
+ * attached HTML page) or the thread canvas (it takes its own paste), when text is selected in an attached file's viewer or
  * a guided review, or a selection toolbar shows (the person is about to comment on it), or when
  * no remembered field is on screen: gone, hidden, disabled, read-only,
  * scrolled out of view (out of the window, or clipped by its pane), behind a
@@ -46,6 +46,8 @@ const TEXT_INPUT_TYPES = new Set(['text', 'search', 'url', 'email', 'tel', 'pass
  */
 const COVERS = '.ib-view.ib-full, .ib-viewer';
 const MODALS = 'dialog[open], [aria-modal="true"]';
+/** A surface that keeps its own keys and its own paste: the thread canvas (`.pn-canvas`, `data-keeps-keys`). */
+const KEEPS_KEYS = '.pn-canvas, [data-keeps-keys]';
 
 /** How many recently focused fields are remembered: the newest still on screen takes the paste. */
 const REMEMBERED = 8;
@@ -207,7 +209,8 @@ export function installPasteFollowsField(win: Window = window, mod?: (e: { metaK
 
   const remember = (event: FocusEvent) => {
     const target = event.target;
-    if (!isTextField(target)) return;
+    // A canvas's own text box (a label typed on the whiteboard) is the canvas's, never a paste's target.
+    if (!isTextField(target) || target.closest(KEEPS_KEYS)) return;
     recent = [target, ...recent.filter((field) => field !== target && field.isConnected)].slice(0, REMEMBERED);
   };
   const leave = (event: FocusEvent) => {
@@ -225,6 +228,8 @@ export function installPasteFollowsField(win: Window = window, mod?: (e: { metaK
     const active = doc.activeElement;
     // Already in a text field, or in a frame (the page in it gets the keys): the paste is aimed.
     if (isTextField(active) || active instanceof HTMLIFrameElement) return;
+    // In a surface that keeps its own keys (the thread canvas): it takes the paste itself (a picture, its shapes).
+    if (active instanceof Element && active.closest(KEEPS_KEYS)) return;
     // Text selected on the page: the person is commenting on it, keep the selection and its toolbar.
     if (pageSelection(doc)) return;
     const field = recent.find(usable);

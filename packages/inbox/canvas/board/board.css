@@ -40,6 +40,16 @@
 .pn-canvas .excalidraw .footer-center {
   display: none !important;
 }
+/* Links and the library are off: the right-click menu's link, element link and add-to-library items (and the rule
+   each leaves behind). Their keys and buttons are off by name in CanvasBoard.tsx (UIOptions.canvasActions). */
+.pn-canvas .excalidraw .context-menu li[data-testid="hyperlink"],
+.pn-canvas .excalidraw .context-menu li[data-testid="copyElementLink"],
+.pn-canvas .excalidraw .context-menu li[data-testid="addToLibrary"],
+.pn-canvas .excalidraw .context-menu li[data-testid="hyperlink"] + hr,
+.pn-canvas .excalidraw .context-menu li[data-testid="copyElementLink"] + hr,
+.pn-canvas .excalidraw .context-menu li[data-testid="addToLibrary"] + hr {
+  display: none !important;
+}
 /* Zoom and undo sit at the bottom right; the dock owns the middle (or the left, in a narrow canvas). */
 .pn-canvas .excalidraw .layer-ui__wrapper__footer-left {
   margin-left: auto;
@@ -66,9 +76,12 @@
   background: var(--card, #fff);
   color: var(--foreground, #1f2328);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.06), 0 4px 16px rgb(0 0 0 / 0.06), 0 0 0 1px var(--border, #e5e7eb);
+  width: max-content;
   max-width: calc(100% - 24px);
-  overflow-x: auto;
-  scrollbar-width: none;
+  /* Too narrow for one row: the tools wrap to a second row, both centred (nothing scrolls out of sight). */
+  flex-wrap: wrap;
+  justify-content: center;
+  row-gap: 2px;
 }
 .pn-canvas[data-dock="top"] .pn-canvas-dock {
   top: 12px;
@@ -82,8 +95,11 @@
     max-width: calc(100% - 260px);
   }
 }
+/* Narrow: the dock goes back to the middle, above zoom and undo, in two centred rows. */
 @container (max-width: 640px) {
   .pn-canvas[data-dock="bottom"] .pn-canvas-dock {
+    left: 50%;
+    transform: translateX(-50%);
     bottom: 64px;
     max-width: calc(100% - 24px);
   }

@@ -14,7 +14,7 @@ import { afterAll, beforeAll, expect, test } from 'bun:test';
 import type { CanvasElement } from '@plannotator/core/canvas-scene';
 
 const hasDom = typeof document !== 'undefined';
-const { liftBoard } = (hasDom ? await import('./lift') : {}) as typeof import('./lift');
+const { liftBoard, CanvasLiftError } = (hasDom ? await import('./lift') : {}) as typeof import('./lift');
 
 type Box = { x: number; y: number; w: number; h: number };
 const px = (v: string) => (v.endsWith('px') ? parseFloat(v) : NaN);
@@ -46,8 +46,20 @@ const stub = (proto: object, name: string, fn: unknown) => {
   Object.defineProperty(proto, name, { configurable: true, writable: true, value: fn });
 };
 
+// The lift lays out in a sandboxed blank frame. The stand-in layout lives in this window, so the layout tests take
+// the lift's other path (a hidden box in the page) by giving frames no document; the frame's own test lifts it back.
+let framesHaveDocuments = false;
+const frameDocument = hasDom ? Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentDocument') : undefined;
+
 beforeAll(() => {
   if (!hasDom) return;
+  saved.push([HTMLIFrameElement.prototype, 'contentDocument', frameDocument]);
+  Object.defineProperty(HTMLIFrameElement.prototype, 'contentDocument', {
+    configurable: true,
+    get(this: HTMLIFrameElement) {
+      return framesHaveDocuments ? frameDocument?.get?.call(this) : null;
+    },
+  });
   stub(Element.prototype, 'getBoundingClientRect', function (this: Element) {
     return rect(layout(this));
   });
@@ -161,4 +173,95 @@ test.skipIf(!hasDom)('a part the person pinned lands where they left it, at thei
   // The arrow follows the pinned part: it still ends on it.
   const arrow = pinned.elements.find((e) => e.id === 'to-delete') as CanvasElement & { endBinding?: { elementId: string } };
   expect(arrow.endBinding?.elementId).toBe('delete');
+});
+
+// ---- an untrusted board (a hand-edited store): built from its parse over the rules' allowlists, never as HTML ----
+
+/** Every element made while `run` runs: its tag, and whether the page's own document made it. */
+async function madeDuring(run: () => Promise<unknown>): Promise<{ tags: string[]; inPage: string[]; error: unknown }> {
+  const tags: string[] = [];
+  const inPage: string[] = [];
+  // The prototype that holds createElement for the page's document (and the frame's: the same classes).
+  let owner: object = document;
+  while (!Object.prototype.hasOwnProperty.call(owner, 'createElement')) owner = Object.getPrototypeOf(owner);
+  const create = (owner as Document).createElement;
+  (owner as Document).createElement = function (this: Document, tag: string, options?: ElementCreationOptions) {
+    tags.push(tag.toLowerCase());
+    if (this === document) inPage.push(tag.toLowerCase());
+    return create.call(this, tag, options);
+  } as typeof create;
+  try {
+    await run();
+    return { tags, inPage, error: null };
+  } catch (error) {
+    return { tags, inPage, error };
+  } finally {
+    (owner as Document).createElement = create;
+  }
+}
+
+const HOSTILE: [string, string, string][] = [
+  ['a picture with an error handler', '<div id="a"><img id="pic" src="files/a.png" onerror="window.__lifted=1"></div>', 'img'],
+  ['a script', '<div id="a"><p id="t">hi</p><script>window.__lifted=1</script></div>', 'script'],
+  ['a style that loads (url)', '<div id="a" style="background:url(https://example.invalid/x.png)"><p id="t">hi</p></div>', ''],
+  ['a style that loads (image-set)', '<div id="a" style="width:100px;background:image-set(x 1x)"><p id="t">hi</p></div>', ''],
+  ['a javascript: link', '<div id="a"><p id="t">hi</p></div><div id="b"></div><a data-arrow from="a" to="b" href="javascript:window.__lifted=1">go</a>', 'a'],
+  ['an iframe', '<div id="a"><iframe id="f" src="https://example.invalid"></iframe></div>', 'iframe'],
+  ['a form', '<div id="a"><form id="f" action="https://example.invalid"><p id="t">hi</p></form></div>', 'form'],
+  ['a picture from outside the canvas', '<div id="a"><img id="pic" src="https://example.invalid/x.png"></div>', 'img'],
+];
+
+for (const [what, board, tag] of HOSTILE) {
+  test.skipIf(!hasDom)(`a board with ${what} is refused, and nothing of it is made`, async () => {
+    const { tags, error } = await madeDuring(() => lift(board));
+    expect(error).toBeInstanceOf(CanvasLiftError);
+    expect((error as InstanceType<typeof CanvasLiftError>).reason).toBe('refused');
+    expect((error as Error).message).toStartWith('the board could not be laid out: ');
+    if (tag) expect(tags).not.toContain(tag);
+    for (const t of ['script', 'iframe', 'form', 'object', 'embed', 'meta', 'link']) expect(tags).not.toContain(t);
+    // Nothing of the board is left in the page, and nothing ran.
+    expect(document.querySelector('[onerror], [href], [data-file], #a')).toBeNull();
+    expect((window as { __lifted?: number }).__lifted).toBeUndefined();
+  });
+}
+
+test.skipIf(!hasDom)('a board over the element budget is refused before it is laid out', async () => {
+  const many = `<div id="a">${Array.from({ length: 30 }, (_, k) => `<p id="p${k}">word ${k}</p>`).join('')}</div>`;
+  const error = await liftBoard({ board: many, pictureUrl: (n) => n, limits: { nodes: 40 } }).catch((e) => e);
+  expect(error).toBeInstanceOf(CanvasLiftError);
+  expect(error.reason).toBe('too-big');
+  expect(document.querySelector('#a')).toBeNull();
+  // The same board within the budget lifts.
+  expect((await liftBoard({ board: many, pictureUrl: (n) => n, limits: { nodes: 100 } })).elements.length).toBeGreaterThan(0);
+});
+
+test.skipIf(!hasDom)('a layout over its time budget stops with an error, and leaves nothing in the page', async () => {
+  const error = await liftBoard({ board: BOARD, pictureUrl: (n) => n, limits: { ms: -1 } }).catch((e) => e);
+  expect(error).toBeInstanceOf(CanvasLiftError);
+  expect(error.reason).toBe('too-slow');
+  expect(document.querySelector('#app')).toBeNull();
+});
+
+test.skipIf(!hasDom)("the board is laid out in a blank frame sandboxed with no scripts, never in the page's document", async () => {
+  framesHaveDocuments = true;
+  const frames: HTMLIFrameElement[] = [];
+  const append = HTMLElement.prototype.append;
+  HTMLElement.prototype.append = function (this: HTMLElement, ...nodes: (Node | string)[]) {
+    for (const n of nodes) if (n instanceof HTMLIFrameElement) frames.push(n);
+    return append.apply(this, nodes);
+  };
+  try {
+    const { tags, inPage, error } = await madeDuring(() => liftBoard({ board: BOARD, pictureUrl: (n) => `/files/${n}` }));
+    expect(error).toBeNull();
+    // The board's own elements were made (in the frame's document).
+    for (const t of ['div', 'p', 'i', 'aside', 'a', 'style']) expect(tags).toContain(t);
+    expect(frames).toHaveLength(1);
+    expect(frames[0].getAttribute('sandbox')).toBe('allow-same-origin');
+    // The page's document made the frame and nothing else; the frame is gone once the lift ends.
+    expect(inPage).toEqual(['iframe']);
+    expect(frames[0].isConnected).toBe(false);
+  } finally {
+    HTMLElement.prototype.append = append;
+    framesHaveDocuments = false;
+  }
 });

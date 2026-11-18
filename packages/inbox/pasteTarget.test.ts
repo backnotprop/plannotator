@@ -452,6 +452,47 @@ test.skipIf(!hasDom)('a paste already aimed at a field stays there', () => {
   expect(document.activeElement).toBe($('#search'));
 });
 
+test.skipIf(!hasDom)('a ⌘V in the thread canvas stays in the canvas (a picture, its own shapes); the reply box gets nothing, and the page still routes to it', () => {
+  // The canvas as CanvasBoard draws it: `.pn-canvas` (keeps its keys) holding Excalidraw's focusable surface.
+  page(`
+    <textarea id="reply"></textarea>
+    <div class="pn-canvas" data-keeps-keys=""><div class="excalidraw" id="surface" tabindex="0"></div></div>
+    <div data-keeps-keys=""><button id="other-surface">x</button></div>
+  `);
+  const reply = $<HTMLTextAreaElement>('#reply');
+  reply.focus();
+  reply.value = 'draft';
+  reply.setSelectionRange(5, 5);
+
+  $<HTMLElement>('#surface').focus();
+  const v = commandV();
+  expect(document.activeElement).toBe($('#surface'));
+  expect(v.defaultPrevented).toBe(false);
+  // Any surface that keeps its own keys.
+  $<HTMLElement>('#other-surface').focus();
+  commandV();
+  expect(document.activeElement).toBe($('#other-surface'));
+
+  // Focus on the page: the paste goes to the reply box as before.
+  (document.activeElement as HTMLElement).blur();
+  commandV();
+  expect(document.activeElement).toBe(reply);
+  expect(reply.selectionStart).toBe(5);
+});
+
+test.skipIf(!hasDom)("a label typed on the canvas is never remembered as the paste's field", () => {
+  page(`
+    <textarea id="reply"></textarea>
+    <div class="pn-canvas"><textarea id="label"></textarea></div>
+    <button id="b">x</button>
+  `);
+  $<HTMLTextAreaElement>('#reply').focus();
+  $<HTMLTextAreaElement>('#label').focus();
+  $<HTMLButtonElement>('#b').focus();
+  commandV();
+  expect(document.activeElement).toBe($('#reply'));
+});
+
 test.skipIf(!hasDom)('left alone: no field used yet, a frame, a field gone, disabled, read-only or hidden', () => {
   page(`<button id="b">x</button><iframe id="f"></iframe>`);
   $<HTMLButtonElement>('#b').focus();

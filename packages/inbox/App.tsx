@@ -204,6 +204,8 @@ import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { useStack } from './stack';
 import { usePrPaneFocus } from './pulls/prPaneFocus';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
+import { threadEscapeStep } from './thread/escapeStep';
+import { canvasHere } from './canvas/seat';
 import { ListColumnEdge } from './shell/ListColumnEdge';
 import { backTo, settleLanding } from './history';
 import { adoptSavedTheme, useInboxThemePick } from './theme';
@@ -2100,25 +2102,11 @@ function Inbox() {
       if (target?.closest?.('[data-chat-window]')) return;
       // Words selected in a message (approval "inbox-message-comments"): its selection toolbar or label picker owns this Escape.
       if (selectionToolbarShowing()) return;
-      // An open guided review closes first, back to its thread; then the Artifacts view, back to the messages
-      // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
-      // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
-      const now = routeRef.current;
-      // The full-window review holds the board itself (over it, or as its corner card): Escape closes the board and the
-      // review stays. A review not drawn yet (its thread still reading) closes first, back to the board.
-      if (now.shape && now.guide && !reviewPaneOpenRef.current) {
-        closeTo({ ...now, guide: null, guideAt: null });
-        return;
-      }
-      if (now.shape) {
-        closeTo({ ...now, shape: null });
-        return;
-      }
-      if (!now.guide && !now.artifacts && threadFullRef.current) {
-        leaveFullRef.current();
-        return;
-      }
-      closeTo(now.guide ? { ...now, guide: null } : now.artifacts ? { ...now, artifacts: false } : { ...now, thread: null });
+      // One layer per press, the top one first (thread/escapeStep.ts): a Shape board, the canvas, a guided review,
+      // the Artifacts view, full screen, then the thread.
+      const step = threadEscapeStep(routeRef.current, { reviewPaneOpen: reviewPaneOpenRef.current, threadFull: threadFullRef.current, canvasOn: settingsRef.current?.canvas?.on === true && canvasHere(routeRef.current.thread), phone: isPhone() });
+      if (step === 'leave-full') leaveFullRef.current();
+      else closeTo(step);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -4716,7 +4704,7 @@ function Inbox() {
   }, [settingsMissing, refreshSettings]);
 
   // A file beside the thread takes the list's and the sidebar's room (record 2.2).
-  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.ref || (settings?.canvas?.on === true && !!route.canvas));
+  const fileOpen = route.page === 'inbox' && !!route.thread && (!!route.file || !!route.ref || (settings?.canvas?.on === true && !!route.canvas && canvasHere(route.thread)));
   // A thread opened from a Board card (`#thread=…&card=crd_…`): it takes the list's place, led by
   // "‹ Board" and a chip naming the card; both go back to the opened card.
   const fromCard = route.page === 'inbox' && route.thread && route.card ? route.card : null;

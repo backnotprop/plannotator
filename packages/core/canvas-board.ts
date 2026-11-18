@@ -36,6 +36,8 @@ const ATTRS: Record<string, Set<string>> = {
   aside: new Set(["data-note"]),
   a: new Set(["data-arrow", "from", "to", "at"]),
 };
+/** The attributes a board element may carry ("*": every element), for the window's lift (packages/inbox/canvas/board/lift.ts). */
+export const BOARD_ATTRS: Readonly<Record<string, ReadonlySet<string>>> = ATTRS;
 const COORD_HINT = 'the canvas places parts by layout, never by coordinates. Put parts side by side in a flex row or stacked in a flex column; for a note beside a part use <aside id="..." data-note="target-id">';
 const ID_RE = /^[a-z][a-z0-9-]{0,39}$/;
 const VARS_LIST = BOARD_VARS.map((x) => `var(--${x})`).join(" ");
@@ -445,10 +447,12 @@ export type BoardWrite =
 const notSaved = (errs: string[], what: "board not saved" | "patch not applied, nothing changed") =>
   `error: ${what} (${errs.length} problem${errs.length === 1 ? "" : "s"}):\n${errs.slice(0, 30).map((e) => `- ${e}`).join("\n")}`;
 
+const boardTooLong = (n: number) => `error: the board is ${n} characters; keep it under ${BOARD_MAX_CHARS} (split detail into a second board or simplify)`;
+
 /** Check a whole board. `version`: the canvas's latest agent version (0: none yet). */
 export function writeBoard(src: string, standing: BoardStanding, version: number, pictures: BoardPictures, baseDir: string): BoardWrite {
   if (!src.trim()) return { ok: false, error: "error: the board is empty" };
-  if (src.length > BOARD_MAX_CHARS) return { ok: false, error: `error: the board is ${src.length} characters; keep it under ${BOARD_MAX_CHARS} (split detail into a second board or simplify)` };
+  if (src.length > BOARD_MAX_CHARS) return { ok: false, error: boardTooLong(src.length) };
   if (/<\s*(html|head|body)\b/i.test(src)) return { ok: false, error: "error: write only the board parts, not a full page: remove <html>, <head> and <body>" };
   const { root, errors: perr } = parseBoard(src);
   const errs = [...perr, ...checkNodes(root.children.filter(isNode), pictures, baseDir)];
@@ -761,7 +765,10 @@ export function patchBoard(boardHtml: string, patch: string, standing: BoardStan
   }
   if (errs.length) return { ok: false, error: notSaved(errs, "patch not applied, nothing changed") };
   for (const p of Object.keys(pins)) if (!ids2.has(p)) delete pins[p];
-  return { ok: true, root, html: serializeBoard(root), pins, applied, notes, ops: nops };
+  // A patch cannot grow the board past what a whole write may hold.
+  const html = serializeBoard(root);
+  if (html.length > BOARD_MAX_CHARS) return { ok: false, error: boardTooLong(html.length) };
+  return { ok: true, root, html, pins, applied, notes, ops: nops };
 }
 
 /** The reply to a saved write: `saved: board vN (...)`, then the layout's verdict (null: not laid out yet). */

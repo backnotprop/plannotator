@@ -5,7 +5,7 @@
  * updates the open canvas in place with one quiet line saying what changed. An older version (`&cv=N`) shows read
  * only, with the way back to now.
  */
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { relativeWords } from '../relativeTime';
@@ -34,11 +34,16 @@ export interface CanvasPaneProps {
   composer?: ReactNode;
 }
 
-const QUIET_LINE_MS = 9000;
+/** Escape inside the canvas with nothing left for it to do: focus goes back to the thread, as from an open file. */
+function backToThread(pane: HTMLElement | null) {
+  const thread = pane?.closest('section.ib-pane') ?? document;
+  thread.querySelector<HTMLElement>('h2.ib-subject')?.focus({ preventScroll: true });
+}
 
 export function CanvasPane({ threadId, canvas, view, version, phone, theme, agent, projectName, onView, onVersion, onClose, composer }: CanvasPaneProps) {
   const { wire } = canvas;
   const full = phone || view === 'full';
+  const paneRef = useRef<HTMLElement>(null);
   const [old, setOld] = useState<CanvasVersionWire | null>(null);
   const [flash, setFlash] = useState<string[]>([]);
   const [line, setLine] = useState<ThreadCanvas['agentChange']>(null);
@@ -54,13 +59,13 @@ export function CanvasPane({ threadId, canvas, view, version, phone, theme, agen
     };
   }, [threadId, version]);
 
-  // The agent's new version: one quiet line, for a while.
+  // The agent's new version: one quiet line, until the person dismisses it or the next version replaces it (no timer:
+  // a keyboard or screen reader user reaches Show in their own time).
+  // A change that came before the canvas opened is not "just now".
+  const openedAt = useRef(Date.now());
   useEffect(() => {
-    if (!canvas.agentChange) return;
-    setLine(canvas.agentChange);
-    const t = setTimeout(() => setLine(null), QUIET_LINE_MS);
-    return () => clearTimeout(t);
-  }, [canvas.agentChange]);
+    setLine(canvas.agentChange && canvas.agentChange.at >= openedAt.current ? canvas.agentChange : null);
+  }, [canvas.agentChange, threadId]);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 30_000);
@@ -81,6 +86,7 @@ export function CanvasPane({ threadId, canvas, view, version, phone, theme, agen
 
   return (
     <section
+      ref={paneRef}
       className={`ib-view ib-nopanel ib-canvasview${full ? ' ib-full' : ''}${phone ? ' ib-phone' : ''}`}
       aria-label="Canvas"
       data-canvas-pane={threadId}
@@ -150,6 +156,7 @@ export function CanvasPane({ threadId, canvas, view, version, phone, theme, agen
               penWhenEmpty
               flash={flash}
               onChange={version ? undefined : (change) => canvas.save(change)}
+              onLeave={() => backToThread(paneRef.current)}
               emptyHint={{ title: 'Draw, type or paste a picture', body: `${agent} reads what you add with your next reply, and can draw here too.` }}
             />
           </Suspense>
@@ -176,6 +183,9 @@ export function CanvasPane({ threadId, canvas, view, version, phone, theme, agen
                 Show
               </button>
             )}
+            <button type="button" className="ib-cv-line-x" onClick={() => setLine(null)} aria-label="Dismiss" data-canvas-changed-dismiss="">
+              <Icon name="x" size={13} />
+            </button>
           </div>
         ) : null}
       </div>

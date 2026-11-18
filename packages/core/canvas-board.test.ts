@@ -5,7 +5,7 @@
  * person's pins and the read-back are by id).
  */
 import { describe, expect, test } from "bun:test";
-import { dropDeleted, emptyStanding, findIds, parseBoard, patchBoard, savedReply, writeBoard, type BoardPictures, type BoardStanding } from "./canvas-board";
+import { BOARD_MAX_CHARS, dropDeleted, emptyStanding, findIds, parseBoard, patchBoard, savedReply, writeBoard, type BoardPictures, type BoardStanding } from "./canvas-board";
 
 const pictures: BoardPictures = {
   resolve: (src) => (src.includes("missing") ? { ok: false, error: `no file at ${src}` } : { ok: true, src: `files/${src.split("/").pop()}` }),
@@ -125,6 +125,18 @@ describe("a patch", () => {
     expect(ids).not.toContain("arrow-note-row-2");
     expect(r.html.indexOf('id="row-3"')).toBeLessThan(r.html.indexOf('id="row-1"'));
     expect(r.ops).toBe(5);
+  });
+
+  test("a patch that would grow the board past what a whole write may hold is refused with the write's words", () => {
+    const html = saved();
+    const row = (i: number) => `add into #rows <div id="pad-${i}" style="display:flex"><p id="pad-${i}-label">${"Lorem ipsum dolor sit amet ".repeat(8)}</p></div>`;
+    const lines = Array.from({ length: Math.ceil(BOARD_MAX_CHARS / 250) + 5 }, (_, i) => row(i));
+    const r = patch(html, lines.join("\n"));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.error).toMatch(new RegExp(`^error: the board is \\d+ characters; keep it under ${BOARD_MAX_CHARS} \\(split detail into a second board or simplify\\)$`));
+    // Under the cap the same kind of patch applies.
+    expect(patch(html, lines.slice(0, 3).join("\n")).ok).toBe(true);
   });
 
   test("all or nothing: one bad line and the board is unchanged", () => {

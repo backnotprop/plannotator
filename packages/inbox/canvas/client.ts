@@ -43,7 +43,8 @@ export interface CanvasWire {
   pins: Record<string, CanvasPin>;
   deleted: string[];
   scene: { elements: CanvasElement[]; files: Record<string, CanvasFileRef> } | null;
-  layout: { version: number; state: 'pending' | 'done'; warnings: string[]; at: string } | null;
+  /** `failed`: no window could lay it out (`warnings[0]` says why); none tries again until the agent writes. */
+  layout: { version: number; state: 'pending' | 'done' | 'failed'; warnings: string[]; at: string } | null;
   versions: CanvasVersionSummary[];
   /** What the person did since the agent's latest version, as the agent reads it (`canvas read`). */
   marks: string[];
@@ -84,7 +85,10 @@ export const canvasApi = {
   pictureUrl: (id: string, n?: number) => (n ? one(id, `/versions/${n}/picture`) : one(id, '/picture')),
   save: (id: string, body: { base: number; elements: readonly unknown[]; files: Record<string, CanvasFileRef>; uploads: Record<string, { dataURL: string }> }) =>
     post<{ rev: number; version: number; deleted: string[]; marks: string[] }>(one(id, '/scene'), body),
-  layout: (id: string, body: { version: number; elements: readonly unknown[]; files: Record<string, CanvasFileRef>; warnings: string[]; parts: unknown; changed: number }) =>
+  /** `rev`: the canvas's rev the layout was computed from; a newer one refuses it (409 `stale_layout`). */
+  layout: (id: string, body: { rev: number; version: number; elements: readonly unknown[]; files: Record<string, CanvasFileRef>; warnings: string[]; parts: unknown; changed: number }) =>
     post<{ rev: number }>(one(id, '/layout'), body),
+  /** The board could not be laid out here (a bad board, over the lift's budget): the agent's CLI hears it. */
+  layoutFailed: (id: string, body: { version: number; error: string }) => post<{ state: 'pending' | 'failed'; attempts: number }>(one(id, '/layout-failed'), { ...body, error: body.error.slice(0, 300) }),
   picture: (id: string, body: { rev: number; version?: number; dataURL: string }) => post<{ saved: boolean }>(one(id, '/picture'), body),
 };

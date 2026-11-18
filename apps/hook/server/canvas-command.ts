@@ -14,7 +14,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { patchBoard, savedReply, writeBoard, type BoardPictures } from "@plannotator/core/canvas-board";
 import { CANVAS_HELP_TEXT } from "@plannotator/core/canvas-skill";
-import { canvasWindowOpen, CANVAS_ID_RE, createCanvasStore, type CanvasStore } from "@plannotator/shared/canvas/store";
+import { canvasBase, canvasWindowOpen, CANVAS_ID_RE, createCanvasStore, type CanvasStore } from "@plannotator/shared/canvas/store";
 import { inboxDir, INBOX_PROJECTS_DIR, MESSAGES_FILE } from "@plannotator/shared/inbox/schema";
 
 export interface CanvasCommandDeps {
@@ -29,9 +29,14 @@ export interface CanvasCommandDeps {
   /** How long to wait for a window's layout (default 20 s). */
   layoutWaitMs?: number;
   sleep?: (ms: number) => Promise<void>;
-  /** Whether the thread exists (default: the Inbox store on disk has its root message). */
-  threadExists?: (id: string) => boolean;
+  /** The thread a message id belongs to: its root's id, or null when there is no such message (default: the Inbox store on disk). */
+  threadRoot?: (id: string) => string | null;
+  /** The canvas store (default: the one in `dataDir`). */
+  store?: CanvasStore;
 }
+
+/** A write is read, built and written again this many times while the person's pins or deletions keep changing under it. */
+const WRITE_ATTEMPTS = 3;
 
 const isAlive = (pid: number) => {
   try {
@@ -42,24 +47,37 @@ const isAlive = (pid: number) => {
   }
 };
 
-/** The thread's root message is in the Inbox store on disk. */
-export function inboxThreadOnDisk(dataDir: string, id: string): boolean {
+/** The thread a message in the Inbox store on disk belongs to (its root's id; a root's is its own), or null. */
+export function inboxThreadRootOnDisk(dataDir: string, id: string): string | null {
   const projects = join(inboxDir(dataDir), INBOX_PROJECTS_DIR);
   let names: string[];
   try {
     names = readdirSync(projects);
   } catch {
-    return false;
+    return null;
   }
   const needle = `"id":"${id}"`;
   for (const name of names) {
+    let text: string;
     try {
-      if (readFileSync(join(projects, name, MESSAGES_FILE), "utf8").includes(needle)) return true;
+      text = readFileSync(join(projects, name, MESSAGES_FILE), "utf8");
     } catch {
-      // not a project folder
+      continue; // not a project folder
     }
+    if (!text.includes(needle)) continue;
+    let root: string | null = null;
+    for (const line of text.split("\n")) {
+      if (!line.includes(needle)) continue;
+      try {
+        const rec = JSON.parse(line) as { kind?: unknown; id?: unknown; record?: { thread_id?: unknown } };
+        if (rec.kind === "message" && rec.id === id) root = typeof rec.record?.thread_id === "string" ? rec.record.thread_id : id;
+      } catch {
+        // a torn line
+      }
+    }
+    if (root) return root;
   }
-  return false;
+  return null;
 }
 
 function flag(args: string[], name: string): { present: boolean; value: string | null } {
@@ -111,9 +129,11 @@ export async function runCanvasCommand(args: string[], deps: CanvasCommandDeps):
   if (!thread.present) return die("error: --thread <id> is required (your thread id is in your task)", 1);
   if (!thread.value) return die("error: --thread needs an id", 1);
   const id = thread.value;
-  const exists = deps.threadExists ?? ((t: string) => inboxThreadOnDisk(deps.dataDir, t));
-  if (!CANVAS_ID_RE.test(id) || !exists(id)) return die(`error: no thread "${id}". Check the thread id you were given.`, 1);
-  const store = createCanvasStore({ dataDir: deps.dataDir });
+  const rootOf = deps.threadRoot ?? ((t: string) => inboxThreadRootOnDisk(deps.dataDir, t));
+  const threadRoot = CANVAS_ID_RE.test(id) ? rootOf(id) : null;
+  if (!threadRoot) return die(`error: no thread "${id}". Check the thread id you were given.`, 1);
+  if (threadRoot !== id) return die(`error: ${id} is a message inside thread ${threadRoot}; use --thread ${threadRoot}`, 1);
+  const store = deps.store ?? createCanvasStore({ dataDir: deps.dataDir });
 
   if (reading) return read(store, id, rest, out);
 
@@ -144,52 +164,67 @@ export async function runCanvasCommand(args: string[], deps: CanvasCommandDeps):
     }
   }
 
-  const state = store.get(id);
   const pictures = picturesFor(store, id);
-  let html: string;
-  let pins = state.standing.pins;
-  let extra = "";
-  let patched: { applied: string[]; notes: string[] } | undefined;
-  let root;
-  if (file.present) {
-    const w = writeBoard(src, state.standing, state.agentVersion, pictures, baseDir);
-    if (!w.ok) return die(w.error, 2);
-    html = w.html;
-    pins = w.pins;
-    extra = w.extra;
-    root = w.root;
-  } else {
-    if (state.agentVersion === 0) return die("error: this thread has no board yet; write one first with --file board.html", 2);
-    const p = patchBoard(state.board, src, state.standing, id, pictures, baseDir);
-    if (!p.ok) return die(p.error, 2);
-    html = p.html;
-    pins = p.pins;
-    root = p.root;
-    extra = `; ${p.ops} op${p.ops === 1 ? "" : "s"} applied`;
-    patched = { applied: p.applied, notes: p.notes };
+  // Read, build and write: refused when the person's pins or deletions changed since the read, then built again on
+  // what they are now (so the person's place for a part is kept).
+  for (let attempt = 1; ; attempt++) {
+    const state = store.meta(id);
+    let html: string;
+    let pins = state.standing.pins;
+    let extra = "";
+    let patched: { applied: string[]; notes: string[] } | undefined;
+    let root;
+    if (file.present) {
+      const w = writeBoard(src, state.standing, state.agentVersion, pictures, baseDir);
+      if (!w.ok) return die(w.error, 2);
+      html = w.html;
+      pins = w.pins;
+      extra = w.extra;
+      root = w.root;
+    } else {
+      if (state.agentVersion === 0) return die("error: this thread has no board yet; write one first with --file board.html", 2);
+      const p = patchBoard(state.board, src, state.standing, id, pictures, baseDir);
+      if (!p.ok) return die(p.error, 2);
+      html = p.html;
+      pins = p.pins;
+      root = p.root;
+      extra = `; ${p.ops} op${p.ops === 1 ? "" : "s"} applied`;
+      patched = { applied: p.applied, notes: p.notes };
+    }
+    const saved = store.agentWrite(id, { base: canvasBase(state), board: html, pins, applied: patched?.applied ?? [] });
+    if (!saved.ok) {
+      if (attempt < WRITE_ATTEMPTS) continue;
+      return die(`error: the person changed the canvas while you wrote; nothing was saved. Read it again (plannotator canvas read --thread ${id} --html) and write your change again.`, 1);
+    }
+    const v = saved.state.agentVersion;
+    const layout = await waitForLayout(store, id, v, deps);
+    const failed = layout && "failed" in layout ? layout.failed : null;
+    const reply = savedReply(v, root, failed !== null ? [] : (layout && "warnings" in layout ? layout.warnings : null), extra, patched).replace("--thread <id>", `--thread ${id}`);
+    out(`${failed !== null ? reply.replace(NO_PROBLEMS, failedLine(failed)) : reply}\n`);
+    return 0;
   }
-  const saved = store.agentWrite(id, { board: html, pins, applied: patched?.applied ?? [] });
-  const v = saved.agentVersion;
-  const warnings = await waitForLayout(store, id, v, deps);
-  out(`${savedReply(v, root, warnings, extra, patched).replace("--thread <id>", `--thread ${id}`)}\n`);
-  return 0;
 }
 
-async function waitForLayout(store: CanvasStore, id: string, version: number, deps: CanvasCommandDeps): Promise<string[] | null> {
+const NO_PROBLEMS = "layout: no problems found.";
+const failedLine = (error: string) => `layout: the Inbox window could not lay this board out: ${error}`;
+
+/** The layout's warnings, why it failed, or null (no window, or none answered in time). */
+async function waitForLayout(store: CanvasStore, id: string, version: number, deps: CanvasCommandDeps): Promise<{ warnings: string[] } | { failed: string } | null> {
   if (!canvasWindowOpen(deps.dataDir, deps.alive ?? isAlive)) return null;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const until = Date.now() + (deps.layoutWaitMs ?? 20_000);
   for (;;) {
-    const s = store.get(id);
+    const s = store.meta(id);
     if (s.agentVersion !== version) return null;
-    if (s.layout?.version === version && s.layout.state === "done") return s.layout.warnings;
+    if (s.layout?.version === version && s.layout.state === "done") return { warnings: s.layout.warnings };
+    if (s.layout?.version === version && s.layout.state === "failed") return { failed: s.layout.warnings[0] ?? "" };
     if (Date.now() > until) return null;
     await sleep(100);
   }
 }
 
 function read(store: CanvasStore, id: string, args: string[], out: (t: string) => void): number {
-  const s = store.get(id);
+  const s = store.meta(id);
   const lines = store.readBack(id);
   if (s.agentVersion === 0) {
     if (lines.length) out(`${["You have not drawn on this canvas yet. The person:", ...lines.map((l) => `- ${l}`)].join("\n")}\n`);
@@ -227,6 +262,7 @@ function read(store: CanvasStore, id: string, args: string[], out: (t: string) =
     for (const [d, h] of Object.entries(s.standing.deletedHtml)) o.push(`  #${d} was: ${boardForAgent(store, id, h)}`);
   }
   if (s.layout?.version === v && s.layout.state === "pending") o.push(`layout: v${v} is not laid out yet; the Inbox lays it out when its window is open.`);
+  else if (s.layout?.version === v && s.layout.state === "failed") o.push(failedLine(s.layout.warnings[0] ?? ""));
   else if (s.layout?.version === v && s.layout.warnings.length) o.push("layout warnings (fix with a patch):", ...s.layout.warnings.map((w) => `- ${w}`));
   out(`${o.join("\n")}\n`);
   return 0;

@@ -7,7 +7,10 @@
  * - a write to a thread that does not exist is stored, or one to a real thread is not;
  * - a patch is not applied to the stored board, or a bad one changes it;
  * - the agent waits for a window that is not open, or does not get the layout's warnings from one that is;
- * - `read` does not tell the agent what the person did, what is pinned and what is deleted.
+ * - `read` does not tell the agent what the person did, what is pinned and what is deleted;
+ * - a reply's id is taken as a thread (the canvas would be keyed to a message no thread has);
+ * - a write built before the person moved or deleted a part lands over it, or is not built again on what they did;
+ * - the agent is not told when the Inbox's window could not lay its board out.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -15,11 +18,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CANVAS_HELP_TEXT } from "@plannotator/core/canvas-skill";
 import type { CanvasElement, CanvasParts } from "@plannotator/core/canvas-scene";
-import { createCanvasStore, writeCanvasWindows } from "@plannotator/shared/canvas/store";
+import { createCanvasStore, writeCanvasWindows, type CanvasStore } from "@plannotator/shared/canvas/store";
 import { canvasOn } from "@plannotator/shared/canvas/switch";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { formatTopLevelHelp, HIDDEN_SUBCOMMANDS } from "./cli";
-import { inboxThreadOnDisk, runCanvasCommand } from "./canvas-command";
+import { inboxThreadRootOnDisk, runCanvasCommand } from "./canvas-command";
 import { formatUnknownSubcommandError } from "./unknown-subcommand";
 
 const roots: string[] = [];
@@ -28,6 +31,8 @@ afterEach(() => {
 });
 
 const THREAD = "msg_01M7NQW4XEMG1FHP7SNPFAAE0Y";
+/** A reply inside THREAD. */
+const REPLY = "msg_01M7NQW4XEMG1FHP7SNPFAAE1A";
 const BOARD = [
   '<div id="app" data-frame="phone">',
   ' <p id="title" style="font-size:18px;color:var(--ink)">Settings</p>',
@@ -62,6 +67,8 @@ function world(options: { exists?: boolean } = {}) {
   const store = createCanvasStore({ dataDir });
   let stdin = "";
   let onSleep: () => void = () => {};
+  /** The store the command uses: the real one, unless a test puts the person between its read and its write. */
+  let used: CanvasStore = store;
   const run = async (...argv: string[]) => {
     const out: string[] = [];
     const err: string[] = [];
@@ -74,14 +81,15 @@ function world(options: { exists?: boolean } = {}) {
       alive: (pid) => pid === process.pid,
       layoutWaitMs: 2000,
       sleep: async () => onSleep(),
-      threadExists: (id) => (options.exists ?? true) && id === THREAD,
+      threadRoot: (id) => ((options.exists ?? true) && (id === THREAD || id === REPLY) ? THREAD : null),
+      store: used,
     });
     return { code, out: out.join(""), err: err.join("") };
   };
   /** The window: lay the waiting version out as LAID_OUT. */
   const layOut = (warnings: string[] = []) => {
     const s = store.get(THREAD);
-    const done = store.layoutDone(THREAD, { version: s.agentVersion, elements: LAID_OUT, files: {}, warnings, parts: PARTS, changed: 0 });
+    const done = store.layoutDone(THREAD, { version: s.agentVersion, rev: s.rev, elements: LAID_OUT, files: {}, warnings, parts: PARTS, changed: 0 });
     if (!done.ok) throw new Error(done.message);
     return done.rev;
   };
@@ -94,6 +102,12 @@ function world(options: { exists?: boolean } = {}) {
     layOut,
     setStdin: (s: string) => void (stdin = s),
     whileWaiting: (fn: () => void) => void (onSleep = fn),
+    /** Run `before` each time the command is about to write, before the write lands. */
+    beforeWrite: (before: (attempt: number) => void) => {
+      let attempt = 0;
+      used = { ...store, agentWrite: (id, input) => (before(++attempt), store.agentWrite(id, input)) };
+      return () => attempt;
+    },
     file: (name: string, text: string) => writeFileSync(join(cwd, name), text),
   };
 }
@@ -150,13 +164,28 @@ describe("help and arguments", () => {
     expect((await world().run("draw")).err).toContain('unknown canvas command "draw"');
   });
 
-  test("the default thread check finds a thread's root in the Inbox store on disk", () => {
+  test("the default thread check finds a message's thread root in the Inbox store on disk", () => {
     const w = world();
     const inbox = InboxStore.open(w.dataDir);
     const project = inbox.ensureProject({ name: "app", root: w.cwd });
-    const sent = inbox.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: null }, body: "Drew it.", thread: "Settings" });
-    expect(inboxThreadOnDisk(w.dataDir, sent.message.id)).toBe(true);
-    expect(inboxThreadOnDisk(w.dataDir, THREAD)).toBe(false);
+    const author = { kind: "agent" as const, host: "claude-code", session: "ses_a", name: null };
+    const sent = inbox.sendMessage({ project_id: project.id, author, body: "Drew it.", thread: "Settings" });
+    const reply = inbox.sendMessage({ project_id: project.id, author, body: "And one more thing.", reply_to: sent.message.id });
+    expect(inboxThreadRootOnDisk(w.dataDir, sent.message.id)).toBe(sent.message.id);
+    expect(inboxThreadRootOnDisk(w.dataDir, reply.message.id)).toBe(sent.message.id);
+    expect(inboxThreadRootOnDisk(w.dataDir, THREAD)).toBeNull();
+  });
+
+  test("a reply's id is refused with the thread to use, and nothing is stored", async () => {
+    const w = world();
+    w.file("board.html", BOARD);
+    for (const argv of [["--thread", REPLY, "--file", "board.html"], ["read", "--thread", REPLY]]) {
+      const r = await w.run(...argv);
+      expect(r.code).toBe(1);
+      expect(r.err).toBe(`error: ${REPLY} is a message inside thread ${THREAD}; use --thread ${THREAD}\n`);
+    }
+    expect(w.store.exists(REPLY)).toBe(false);
+    expect(w.store.exists(THREAD)).toBe(false);
   });
 });
 
@@ -234,6 +263,61 @@ describe("write and patch", () => {
     expect(bad.err).toContain("patch not applied, nothing changed");
     expect(w.store.get(THREAD).board).toBe(board);
     expect(w.store.get(THREAD).agentVersion).toBe(2);
+  });
+
+  test("the person moves a part while the agent writes: the write is built again on their move and keeps their place", async () => {
+    const w = world();
+    w.file("board.html", BOARD);
+    await w.run("--thread", THREAD, "--file", "board.html");
+    w.layOut();
+    const attempts = w.beforeWrite((attempt) => {
+      if (attempt !== 1) return;
+      const rev = w.store.meta(THREAD).rev;
+      expect(w.store.personSave(THREAD, { base: rev, elements: LAID_OUT.map((e) => (e.id.startsWith("row-1") ? { ...e, y: e.y + 40 } : e)), files: {} }).ok).toBe(true);
+    });
+    w.setStdin('text #title "Preferences"\n');
+    const r = await w.run("--thread", THREAD, "--patch", "-");
+    expect(r.code).toBe(0);
+    expect(r.out).toStartWith("saved: board v3"); // v2 was the person's
+    expect(attempts()).toBe(2);
+    const s = w.store.meta(THREAD);
+    expect(s.board).toContain("Preferences");
+    expect(s.standing.pins["row-1"]).toEqual({ x: 10, y: 140, w: 370, h: 50 });
+  });
+
+  test("the person keeps changing the canvas under the write: after three tries nothing is saved and the agent is told to read again", async () => {
+    const w = world();
+    w.file("board.html", BOARD);
+    await w.run("--thread", THREAD, "--file", "board.html");
+    w.layOut();
+    const attempts = w.beforeWrite((attempt) => {
+      const rev = w.store.meta(THREAD).rev;
+      expect(w.store.personSave(THREAD, { base: rev, elements: LAID_OUT.map((e) => (e.id.startsWith("row-1") ? { ...e, y: e.y + 10 * attempt } : e)), files: {} }).ok).toBe(true);
+    });
+    w.setStdin('text #title "Preferences"\n');
+    const r = await w.run("--thread", THREAD, "--patch", "-");
+    expect(r.code).toBe(1);
+    expect(r.out).toBe("");
+    expect(r.err).toBe(`error: the person changed the canvas while you wrote; nothing was saved. Read it again (plannotator canvas read --thread ${THREAD} --html) and write your change again.\n`);
+    expect(attempts()).toBe(3);
+    expect(w.store.meta(THREAD).agentVersion).toBe(1);
+    expect(w.store.meta(THREAD).board).not.toContain("Preferences");
+  });
+
+  test("a board the Inbox's window cannot lay out: the write says why, and so does read", async () => {
+    const w = world();
+    w.file("board.html", BOARD);
+    writeCanvasWindows(w.dataDir, 1, process.pid);
+    w.whileWaiting(() => {
+      for (let i = 0; i < 3; i++) w.store.layoutFailed(THREAD, { version: w.store.meta(THREAD).agentVersion, error: "the fonts did not load" });
+    });
+    const r = await w.run("--thread", THREAD, "--file", "board.html");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("\nlayout: the Inbox window could not lay this board out: the fonts did not load\n");
+    expect(r.out).not.toContain("no problems found");
+    expect(r.out).not.toContain("not checked yet");
+    const read = await w.run("read", "--thread", THREAD);
+    expect(read.out).toContain("\nlayout: the Inbox window could not lay this board out: the fonts did not load\n");
   });
 });
 

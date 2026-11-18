@@ -35,6 +35,8 @@ export const sharedConfig = defineConfig({
       '@pierre/highlights/themes/loader': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/highlights': path.resolve(__dirname, '../../build/pierre-highlights-stub.ts'),
       '@pierre/patches': path.resolve(__dirname, '../../build/pierre-patches-stub.ts'),
+      // The canvas's Excalidraw would bring a second Mermaid for a paste the canvas pastes as text. See build/excalidraw-mermaid-stub.ts.
+      '@excalidraw/mermaid-to-excalidraw': path.resolve(__dirname, '../../build/excalidraw-mermaid-stub.ts'),
       '@plannotator/shared': path.resolve(__dirname, '../../packages/shared'),
       '@plannotator/ui': path.resolve(__dirname, '../../packages/ui'),
       '@plannotator/inbox': path.resolve(__dirname, '../../packages/inbox/index.ts'),

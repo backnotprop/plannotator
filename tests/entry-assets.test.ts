@@ -360,6 +360,17 @@ describe('review entry assets', () => {
     }
   });
 
+  // Excalidraw nests a second Mermaid (11.x) under @excalidraw/mermaid-to-excalidraw, for its hidden Text-to-diagram
+  // dialog and a Mermaid-looking paste (pasted as text without it). The Inbox aliases it out
+  // (build/excalidraw-mermaid-stub.ts); the built window carries only the Inbox's own Mermaid.
+  test("the canvas's second Mermaid is aliased out of the Inbox window", () => {
+    expect(read('apps/inbox/vite.config.ts')).toContain("'@excalidraw/mermaid-to-excalidraw': path.resolve(");
+    const path = resolve(root, 'apps/hook/dist/inbox.html');
+    if (!existsSync(path)) return;
+    const versions = new Set([...readFileSync(path, 'utf8').matchAll(/\{version:"(\d+\.\d+\.\d+)"\}/g)].map((m) => m[1]));
+    expect([...versions].filter((v) => v.startsWith('11.'))).toEqual([]);
+  });
+
   // The alias assertions above only read SOURCE. A future @pierre/diffs bump
   // could reach the same inlined blob through a different import specifier and
   // every source check would still pass, so this reads the ARTIFACT: a base64

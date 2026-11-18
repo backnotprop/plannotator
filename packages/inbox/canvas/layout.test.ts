@@ -5,7 +5,7 @@
  */
 import { expect, test } from 'bun:test';
 import type { CanvasElement } from '@plannotator/core/canvas-scene';
-import { changedPartCount, changedPartIds } from './layout';
+import { changedPartCount, changedPartIds, layoutChangeCount } from './layout';
 
 const el = (id: string, more: Partial<CanvasElement> = {}): CanvasElement => ({ id, type: 'rectangle', x: 10, y: 20, width: 100, height: 40, customData: { part: id.split('~')[0] }, strokeColor: '#1e1e1e', backgroundColor: 'transparent', ...more });
 
@@ -27,4 +27,13 @@ test('moved, resized, reworded and recoloured parts count once each', () => {
 test('added and removed parts count', () => {
   expect(changedPartIds(before, [...before.filter((e) => e.id !== 'row-2'), el('row-3')]).sort()).toEqual(['row-2', 'row-3']);
   expect(changedPartIds(before, before.map((e) => (e.id === 'row-2' ? { ...e, isDeleted: true } : e)))).toEqual(['row-2']);
+});
+
+test('the first version changes nothing, even laid out over a scene that already holds parts (its card shows no count)', () => {
+  const lifted = [...before, el('row-3')];
+  expect(layoutChangeCount(1, before, lifted)).toBe(0);
+  expect(layoutChangeCount(1, [], lifted)).toBe(0);
+  // A later version over a scene of the person's own marks only: nothing of the agent's to compare with.
+  expect(layoutChangeCount(2, [{ id: 'ink', type: 'freedraw', x: 0, y: 0, width: 5, height: 5 }], lifted)).toBe(0);
+  expect(layoutChangeCount(2, before, lifted)).toBe(1);
 });

@@ -6,19 +6,29 @@
  * - on, a route answers anything but the owner's window on this computer;
  * - a stale page's save overwrites the canvas instead of a 409, or a stale layout replaces the current one;
  * - a link the person (or a page) put on an element is kept, or an element list with no bound is taken;
+ * - an iframe, an embed or foreign customData is stored from a POST, or served from a file planted on disk;
+ * - a layout with no rev, or one read before the person's pins or deletions changed, replaces the canvas;
+ * - a window that cannot lay a version out is asked to again forever, or the reason is lost;
+ * - a settings POST turns the canvas on or off, or fails the person's whole save;
+ * - a deleted thread's (or project's) canvas stays on disk;
  * - bytes that are not a picture are kept as one;
  * - a window is not told a canvas changed, or keeps being told after its stream stopped;
  * - read_thread does not point the agent at what the person did, or points when they did nothing.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CANVAS_INSTRUCTIONS_LINE, canvasChangedLine } from "@plannotator/core/canvas-skill";
 import type { CanvasElement, CanvasParts } from "@plannotator/core/canvas-scene";
+import { canvasBase, type CanvasStore } from "@plannotator/shared/canvas/store";
+import { canvasOn } from "@plannotator/shared/canvas/switch";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createCanvasCapability } from "./canvas-capability";
+import { createInboxAttachmentRoutes } from "./inbox-attachments";
 import {
+  answerInboxCapabilities,
+  checkInboxCapabilities,
   capabilitiesInstructions,
   capabilitiesThreadLines,
   capabilitiesWire,
@@ -58,6 +68,13 @@ const LAID_OUT: CanvasElement[] = [el("app", 0, 0, 390, 800), el("row-1", 10, 10
 
 const switchTo = (on: boolean) => writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxCanvas: on }));
 
+/** An agent write built on what the store holds now (as the CLI builds it). */
+function write(store: CanvasStore, id = ID) {
+  const w = store.agentWrite(id, { base: canvasBase(store.meta(id)), board: BOARD, pins: store.meta(id).standing.pins });
+  if (!w.ok) throw new Error(w.message);
+  return w.state;
+}
+
 function world() {
   let changed = 0;
   const capability = createCanvasCapability({ dataDir, changed: () => changed++ });
@@ -69,8 +86,8 @@ function world() {
   };
   /** An agent version, laid out by "the window". */
   const drawn = async () => {
-    const s = capability.store.agentWrite(ID, { board: BOARD, pins: {} });
-    const r = await route("POST", `/api/canvas/${ID}/layout`, { version: s.agentVersion, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS, changed: 0 });
+    const s = write(capability.store);
+    const r = await route("POST", `/api/canvas/${ID}/layout`, { version: s.agentVersion, rev: s.rev, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS, changed: 0 });
     expect(r.status).toBe(200);
     return r.body!.rev as number;
   };
@@ -80,7 +97,7 @@ function world() {
 describe("off", () => {
   test("every canvas route is the unknown-route 404 and the settings say nothing of it", async () => {
     const { list, route, capability } = world();
-    capability.store.agentWrite(ID, { board: BOARD, pins: {} });
+    write(capability.store);
     for (const on of [null, false]) {
       if (on !== null) switchTo(on);
       for (const [method, path] of [
@@ -106,7 +123,7 @@ describe("off", () => {
     const { list, capability } = world();
     const frames: string[] = [];
     const off = streamInboxCapabilities(list, (f) => frames.push(f), true);
-    capability.store.agentWrite(ID, { board: BOARD, pins: {} });
+    write(capability.store);
     await new Promise((r) => setTimeout(r, 500));
     expect(frames).toEqual([]);
     off.stop();
@@ -116,13 +133,13 @@ describe("off", () => {
     const local = streamInboxCapabilities(list, (f) => frames.push(f), true);
     // The server tells the CLI a window can lay out.
     expect(existsSync(join(dataDir, "canvases", ".windows.json"))).toBe(true);
-    capability.store.agentWrite(ID, { board: BOARD, pins: {} });
+    write(capability.store);
     await new Promise((r) => setTimeout(r, 500));
     expect(frames).toEqual([`event: canvas\ndata: ${JSON.stringify({ ids: [] })}\n\n`, `event: canvas\ndata: ${JSON.stringify({ ids: [ID] })}\n\n`]);
 
     local.stop();
     remote.stop();
-    capability.store.agentWrite(ID, { board: BOARD, pins: {} });
+    write(capability.store);
     await new Promise((r) => setTimeout(r, 500));
     expect(frames).toHaveLength(2);
   });
@@ -135,7 +152,7 @@ describe("off", () => {
     expect(frames).toHaveLength(1);
     switchTo(false);
     streams.sync();
-    capability.store.agentWrite(ID, { board: BOARD, pins: {} });
+    write(capability.store);
     await new Promise((r) => setTimeout(r, 500));
     expect(frames).toHaveLength(1);
     streams.stop();
@@ -183,13 +200,13 @@ describe("on", () => {
   test("a layout for a version not waiting is a 409; pending lists the waiting one", async () => {
     switchTo(true);
     const { route, capability } = world();
-    capability.store.agentWrite(ID, { board: BOARD, pins: {} });
-    capability.store.agentWrite(ID, { board: BOARD, pins: {} });
+    write(capability.store);
+    const s = write(capability.store);
     expect((await route("GET", "/api/canvas/pending")).body).toEqual({ pending: [{ id: ID, version: 2 }] });
-    const old = await route("POST", `/api/canvas/${ID}/layout`, { version: 1, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS });
+    const old = await route("POST", `/api/canvas/${ID}/layout`, { version: 1, rev: s.rev, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS });
     expect(old.status).toBe(409);
     expect(old.body?.code).toBe("stale_layout");
-    const now = await route("POST", `/api/canvas/${ID}/layout`, { version: 2, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS });
+    const now = await route("POST", `/api/canvas/${ID}/layout`, { version: 2, rev: s.rev, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS });
     expect(now.status).toBe(200);
     expect((await route("GET", "/api/canvas/pending")).body).toEqual({ pending: [{ id: ID, version: 2, picture: true }] });
   });
@@ -230,6 +247,98 @@ describe("on", () => {
     expect(capability.store.filePath(ID, "a.png")).not.toBeNull();
     expect(capability.store.filePath(ID, "b.png")).toBeNull();
   });
+
+  test("an iframe or embed is dropped and customData kept to part and role on a write; a scene planted on disk is served clean", async () => {
+    switchTo(true);
+    const { route, drawn, capability } = world();
+    const rev = await drawn();
+    const planted = [
+      ...LAID_OUT,
+      { id: "frame-1", type: "iframe", x: 0, y: 0, width: 10, height: 10, customData: { generationData: { status: "done", html: "<script>alert(1)</script>" } } },
+      { id: "embed-1", type: "embeddable", x: 0, y: 0, width: 10, height: 10, link: "https://example.com" },
+      { id: "mine", type: "rectangle", x: 0, y: 0, width: 10, height: 10, customData: { part: "row-1", role: "box", onload: "x" } },
+    ];
+    expect((await route("POST", `/api/canvas/${ID}/scene`, { base: rev, elements: planted, files: {} })).status).toBe(200);
+    const stored = capability.store.get(ID).scene!.elements;
+    expect(stored.map((e) => e.id)).toEqual([...LAID_OUT.map((e) => e.id), "mine"]);
+    expect(stored.find((e) => e.id === "mine")!.customData).toEqual({ part: "row-1", role: "box" });
+
+    // A hand-edited file on disk: the window is still served only what the canvas may hold.
+    writeFileSync(join(capability.store.folder(ID), "scene.json"), JSON.stringify({ elements: planted, files: {} }));
+    writeFileSync(join(capability.store.folder(ID), "versions", "1.json"), JSON.stringify({ n: 1, by: "agent", at: "2026-11-17T09:00:00.000Z", scene: { elements: planted, files: {} } }));
+    for (const path of [`/api/canvas/${ID}`, `/api/canvas/${ID}/versions/1`]) {
+      const served = (await route("GET", path)).body!.scene as { elements: Record<string, unknown>[] };
+      expect([path, served.elements.map((e) => e.type).filter((t) => t === "iframe" || t === "embeddable")]).toEqual([path, []]);
+      expect(served.elements.find((e) => e.id === "mine")!.customData).toEqual({ part: "row-1", role: "box" });
+    }
+  });
+
+  test("a layout with no rev, or read before the person's pins or deletions changed, is a 409 stale_layout", async () => {
+    switchTo(true);
+    const { route, drawn, capability } = world();
+    await drawn();
+    const s = write(capability.store);
+    const body = { version: s.agentVersion, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS };
+    expect(await route("POST", `/api/canvas/${ID}/layout`, body)).toMatchObject({ status: 409, body: { code: "stale_layout" } });
+    // The person deletes row 1 while the window lays out what it read at s.rev.
+    expect((await route("POST", `/api/canvas/${ID}/scene`, { base: s.rev, elements: LAID_OUT.filter((e) => !e.id.startsWith("row-1")), files: {} })).status).toBe(200);
+    expect(await route("POST", `/api/canvas/${ID}/layout`, { ...body, rev: s.rev })).toMatchObject({ status: 409, body: { code: "stale_layout" } });
+    expect(capability.store.meta(ID).layout?.state).toBe("pending");
+    expect((await route("POST", `/api/canvas/${ID}/layout`, { ...body, rev: capability.store.meta(ID).rev })).status).toBe(200);
+  });
+
+  test("a window that cannot lay a version out says so; the third time it is failed, no longer pending, and says why", async () => {
+    switchTo(true);
+    const { route, capability } = world();
+    const s = write(capability.store);
+    expect((await route("POST", `/api/canvas/${ID}/layout-failed`, { version: s.agentVersion })).status).toBe(400);
+    const long = `the lift timed out ${"x".repeat(400)}`;
+    for (const attempts of [1, 2]) expect((await route("POST", `/api/canvas/${ID}/layout-failed`, { version: s.agentVersion, error: long })).body).toEqual({ state: "pending", attempts });
+    expect((await route("GET", "/api/canvas/pending")).body).toEqual({ pending: [{ id: ID, version: 1 }] });
+    expect((await route("POST", `/api/canvas/${ID}/layout-failed`, { version: s.agentVersion, error: long, serverSession: SESSION })).body).toEqual({ state: "failed", attempts: 3 });
+    expect((await route("GET", "/api/canvas/pending")).body).toEqual({ pending: [] });
+    const layout = capability.store.meta(ID).layout!;
+    expect(layout.state).toBe("failed");
+    expect(layout.warnings[0]).toHaveLength(300);
+    expect((await route("POST", `/api/canvas/${ID}/layout-failed`, { version: 1, error: "again" })).status).toBe(409);
+    expect((await route("POST", `/api/canvas/${ID}/layout-failed`, { version: 1, error: "x", serverSession: "an-old-server" })).status).toBe(409);
+  });
+});
+
+describe("the switch is config.json only", () => {
+  test("a settings POST naming canvas neither turns it on nor off, never fails the save, and answers what config.json says", () => {
+    const { list } = world();
+    expect(() => checkInboxCapabilities(list, { canvas: { on: true } })).not.toThrow();
+    expect(answerInboxCapabilities(list, { canvas: { on: true } })).toEqual({ canvas: { on: false } });
+    expect(canvasOn()).toBe(false);
+    expect(existsSync(join(dataDir, "config.json"))).toBe(false);
+
+    switchTo(true);
+    expect(answerInboxCapabilities(list, { canvas: { on: false } })).toEqual({ canvas: { on: true } });
+    expect(canvasOn()).toBe(true);
+    expect(readFileSync(join(dataDir, "config.json"), "utf8")).toBe(JSON.stringify({ inboxCanvas: true }));
+  });
+});
+
+describe("a deleted thread", () => {
+  test("deleting a thread, or its project, from the Inbox removes its canvas; another thread's stays", async () => {
+    const store = InboxStore.open(dataDir);
+    const project = store.ensureProject({ name: "app", root: join(dataDir, "app") });
+    const other = store.ensureProject({ name: "site", root: join(dataDir, "site") });
+    const author = { kind: "agent" as const, host: "claude-code", session: "ses_a", name: null };
+    const a = store.sendMessage({ project_id: project.id, author, body: "Drew it.", thread: "A" }).message.id;
+    const b = store.sendMessage({ project_id: project.id, author, body: "Drew it too.", thread: "B" }).message.id;
+    const c = store.sendMessage({ project_id: other.id, author, body: "And this.", thread: "C" }).message.id;
+    const { capability } = world();
+    for (const id of [a, b, c]) write(capability.store, id);
+    const routes = createInboxAttachmentRoutes({ store, serverSession: SESSION, readBody: async (req) => (await req.json()) as Record<string, unknown> });
+    const post = (path: string) => routes(new Request(`http://127.0.0.1:1${path}`, { method: "POST", body: JSON.stringify({ serverSession: SESSION }) }), new URL(`http://127.0.0.1:1${path}`));
+
+    expect((await post(`/api/inbox/threads/${a}/delete`))?.status).toBe(200);
+    expect([a, b, c].map((id) => existsSync(capability.store.folder(id)))).toEqual([false, true, true]);
+    expect((await post(`/api/inbox/projects/${other.id}/delete`))?.status).toBe(200);
+    expect([a, b, c].map((id) => existsSync(capability.store.folder(id)))).toEqual([false, true, false]);
+  });
 });
 
 describe("the agent's side", () => {
@@ -268,8 +377,8 @@ describe("the agent's side", () => {
     const line = canvasChangedLine(thread);
 
     expect(await read()).not.toContain(line);
-    const s = capability.store.agentWrite(thread, { board: BOARD, pins: {} });
-    capability.store.layoutDone(thread, { version: s.agentVersion, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS, changed: 0 });
+    const s = write(capability.store, thread);
+    capability.store.layoutDone(thread, { version: s.agentVersion, rev: s.rev, elements: LAID_OUT, files: {}, warnings: [], parts: PARTS, changed: 0 });
     expect(capabilitiesThreadLines(list, thread)).toEqual([]);
     expect(await read()).not.toContain(line);
 

@@ -8,6 +8,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxCloudAgentView } from "@plannotator/core/inbox-cloud";
 import type { InboxListRow } from "@plannotator/core/inbox-types";
+import { canvasChangedLine } from "@plannotator/core/canvas-skill";
+import { canvasBase, createCanvasStore } from "@plannotator/shared/canvas/store";
 import { decodeInboxAgentPairing } from "@plannotator/shared/inbox/agent-pairing";
 import { sha256Hex } from "@plannotator/shared/inbox/devices";
 import { runInboxCallCommand } from "../../apps/hook/server/inbox-call-command";
@@ -252,5 +254,33 @@ describe("the agent door", () => {
     expect((await w.call(`/api/inbox/cloud-agents/${agent.session}/wake`, { url: hook.url, key: KEY })).status).toBe(200);
     await until(() => hook.seen.length === 1);
     expect(String(hook.seen[0]!.text)).toContain("Yes, fix it.");
+  });
+
+  test("with the canvas on, a cloud agent's read_thread never points at `plannotator canvas`, which it cannot run; the same thread's local read does", async () => {
+    const w = await world();
+    writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxCanvas: true }));
+    const { pairing } = await w.pair();
+    const sent = await w.door(pairing.token, "send_message", { body: "Drew the settings screen.", idempotency_key: "c1" });
+    const threadId = sent.result!.structuredContent!.thread_id as string;
+    // The person moved a part on the thread's canvas since the agent's version.
+    const canvas = createCanvasStore({ dataDir: w.dataDir });
+    const board = '<div id="app" data-frame="phone"><p id="title">Settings</p></div>';
+    const elements = [
+      { id: "app", type: "rectangle", x: 0, y: 0, width: 390, height: 800, customData: { part: "app" } },
+      { id: "title", type: "text", x: 20, y: 20, width: 100, height: 24, text: "Settings", customData: { part: "title" } },
+    ];
+    const written = canvas.agentWrite(threadId, { base: canvasBase(canvas.meta(threadId)), board, pins: {} });
+    if (!written.ok) throw new Error(written.message);
+    const parts = { app: { parent: null, kind: "frame" as const }, title: { parent: "app", kind: "text" as const, words: "Settings" } };
+    expect(canvas.layoutDone(threadId, { version: 1, rev: written.state.rev, elements, files: {}, warnings: [], parts, changed: 0 }).ok).toBe(true);
+    expect(canvas.personSave(threadId, { base: canvas.meta(threadId).rev, elements: elements.map((e) => (e.id === "title" ? { ...e, x: 60 } : e)), files: {} }).ok).toBe(true);
+    const line = canvasChangedLine(threadId);
+
+    const local = (await w.mcp.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses-pi", agent_host: "pi" } })) as { content: { text: string }[] };
+    expect(local.content.map((c) => c.text).join("\n")).toContain(line);
+    const read = await w.door(pairing.token, "read_thread", { thread_id: threadId });
+    expect(read.error).toBeNull();
+    expect(read.result!.content.map((c) => c.text).join("\n")).not.toContain(line);
+    expect(read.result!.content.map((c) => c.text).join("\n")).not.toMatch(/plannotator canvas/);
   });
 });

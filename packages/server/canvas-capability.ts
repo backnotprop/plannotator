@@ -6,37 +6,30 @@
  * The board is laid out by a window (a browser engine), never here: an agent's write leaves its version `pending`;
  * every window open on this computer hears `event: canvas` and lays pending versions out in the background, the
  * first to answer wins. The server writes `canvases/.windows.json` (how many windows can lay out, and its pid), so
- * the agent's CLI knows whether to wait for the layout's warnings.
+ * the agent's CLI knows whether to wait for the layout's warnings. A window that cannot lay a version out says so
+ * (`layout-failed`); the third report fails the version and the CLI tells the agent why.
+ *
+ * Every scene written is checked strictly (`cleanCanvasElements(…, true)`: a malformed element refuses the write, an
+ * embed or iframe is dropped, foreign `customData` and links are stripped); every scene served is read through the
+ * store, which cleans it again (`…, false`), so a hand-edited file on disk brings nothing in.
+ *
+ * The switch is config.json only: a settings POST that names `canvas` is answered and changes nothing.
  */
 import { CANVAS_ID_RE, createCanvasStore, writeCanvasWindows, type CanvasFileRef, type CanvasStore } from "@plannotator/shared/canvas/store";
-import { canvasOn, setCanvasSwitch } from "@plannotator/shared/canvas/switch";
-import type { CanvasElement, CanvasParts } from "@plannotator/core/canvas-scene";
+import { canvasOn } from "@plannotator/shared/canvas/switch";
+import { cleanCanvasElements } from "@plannotator/core/canvas-elements";
+import type { CanvasParts } from "@plannotator/core/canvas-scene";
 import { CANVAS_INSTRUCTIONS_LINE, canvasChangedLine } from "@plannotator/core/canvas-skill";
 import type { InboxCapability, InboxCore } from "./inbox-capability";
 
 export const CANVAS_ROUTE_PREFIX = "/api/canvas";
 const NO_STORE = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" };
-const MAX_ELEMENTS = 20_000;
 
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: NO_STORE });
 const refuse = (message: string, code = "validation_error", status = 400) => json({ error: message, code }, status);
 
 /** A canvas's frame on the window's event stream: these canvases changed. */
 export const canvasEventFrame = (ids: readonly string[]) => `event: canvas\ndata: ${JSON.stringify({ ids })}\n\n`;
-
-function elementsOf(input: unknown): CanvasElement[] | null {
-  if (!Array.isArray(input) || input.length > MAX_ELEMENTS) return null;
-  const out: CanvasElement[] = [];
-  for (const e of input) {
-    if (!e || typeof e !== "object" || Array.isArray(e)) return null;
-    const el = e as Record<string, unknown>;
-    if (typeof el.id !== "string" || !el.id || el.id.length > 200 || typeof el.type !== "string") return null;
-    for (const k of ["x", "y", "width", "height"]) if (typeof el[k] !== "number" || !Number.isFinite(el[k] as number)) return null;
-    // Links are off on the canvas: none is kept.
-    out.push({ ...(el as unknown as CanvasElement), link: null });
-  }
-  return out;
-}
 
 function filesOf(input: unknown): Record<string, CanvasFileRef> | null {
   if (!input || typeof input !== "object" || Array.isArray(input)) return null;
@@ -114,12 +107,9 @@ export function createCanvasCapability(core: InboxCore): InboxCapability & { sto
     prefix: CANVAS_ROUTE_PREFIX,
     store,
     on,
-    save(next) {
-      const was = on();
-      if (!setCanvasSwitch(next)) return false;
-      if (was !== on()) core.changed();
-      return true;
-    },
+    // Config only (config.json `inboxCanvas`): a settings POST that names it changes nothing, and its answer says
+    // what config.json says.
+    save: () => true,
     settingsWire: () => (on() ? { canvas: { on: true } } : {}),
     agentInstructions: () => [CANVAS_INSTRUCTIONS_LINE],
     agentThreadLines: (threadId) => (CANVAS_ID_RE.test(threadId) && store.exists(threadId) && store.readBack(threadId).length > 0 ? [canvasChangedLine(threadId)] : []),
@@ -148,7 +138,8 @@ export function createCanvasCapability(core: InboxCore): InboxCapability & { sto
       const id = rest[0];
       if (!id || !CANVAS_ID_RE.test(id)) return null;
       if (req.method === "GET") {
-        if (rest.length === 1) return json(canvasView(store, id));
+        // Read between writes: the state and its scene are separate files, written under the lock.
+        if (rest.length === 1) return (await unlocked(store, id)) ? json(canvasView(store, id)) : refuse("The canvas stayed busy; try again.", "busy", 503);
         if (rest[1] === "files" && rest.length === 3) {
           const p = store.filePath(id, rest[2]);
           const ext = rest[2].toLowerCase().split(".").pop();
@@ -171,7 +162,7 @@ export function createCanvasCapability(core: InboxCore): InboxCapability & { sto
       if (!body || typeof body !== "object") return refuse("A JSON body is required.");
       if (!(await unlocked(store, id))) return refuse("The canvas stayed busy; try again.", "busy", 503);
       if (rest[1] === "scene") {
-        const elements = elementsOf(body.elements);
+        const elements = cleanCanvasElements(body.elements, true);
         const files = filesOf(body.files ?? {});
         if (!elements || !files || typeof body.base !== "number") return refuse("scene: { base, elements, files } is required.");
         const uploads: Record<string, { mimeType: string; bytes: Uint8Array }> = {};
@@ -187,16 +178,25 @@ export function createCanvasCapability(core: InboxCore): InboxCapability & { sto
         return json({ rev: saved.rev, version: saved.version, deleted: saved.deleted, marks: store.readBack(id) });
       }
       if (rest[1] === "layout") {
-        const elements = elementsOf(body.elements);
+        const elements = cleanCanvasElements(body.elements, true);
         const files = filesOf(body.files ?? {});
         const warnings = Array.isArray(body.warnings) ? body.warnings.filter((w): w is string => typeof w === "string").slice(0, 200) : null;
         if (!elements || !files || !warnings || typeof body.version !== "number" || !body.parts || typeof body.parts !== "object") {
-          return refuse("layout: { version, elements, files, warnings, parts } is required.");
+          return refuse("layout: { version, rev, elements, files, warnings, parts } is required.");
         }
-        const done = store.layoutDone(id, { version: body.version, elements, files, warnings, parts: body.parts as CanvasParts, changed: typeof body.changed === "number" ? body.changed : 0 });
+        // The rev the window read before it laid out: without one, its pins and deletions may be stale.
+        if (typeof body.rev !== "number") return json({ error: "layout: rev (the canvas's rev the layout read) is required", code: "stale_layout" }, 409);
+        const done = store.layoutDone(id, { version: body.version, rev: body.rev, elements, files, warnings, parts: body.parts as CanvasParts, changed: typeof body.changed === "number" ? body.changed : 0 });
         if (!done.ok) return json({ error: done.message, code: done.code }, 409);
         poll();
         return json({ rev: done.rev });
+      }
+      if (rest[1] === "layout-failed") {
+        if (typeof body.version !== "number" || typeof body.error !== "string" || !body.error.trim()) return refuse("layout-failed: { version, error } is required.");
+        const failed = store.layoutFailed(id, { version: body.version, error: body.error.trim().slice(0, 300) });
+        if (!failed.ok) return json({ error: failed.message, code: failed.code }, 409);
+        poll();
+        return json({ state: failed.state, attempts: failed.attempts });
       }
       if (rest[1] === "picture") {
         const up = bytesOfDataUrl(body.dataURL);

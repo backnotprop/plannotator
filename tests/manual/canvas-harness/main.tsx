@@ -14,7 +14,8 @@ function App() {
   const [lifted, setLifted] = useState<LiftResult | null>(null);
   useEffect(() => {
     void (async () => {
-      const board = await (await fetch(`/boards/${q.get("board") ?? "a6"}.html`)).text();
+      // Vite's dev server adds its client <script> to an .html it serves; the lift refuses a board with a script.
+      const board = (await (await fetch(`/boards/${q.get("board") ?? "a6"}.html`)).text()).replace(/<script[^>]*@vite\/client[^>]*><\/script>\s*/g, "");
       const result = await liftBoard({ board, pins: JSON.parse(q.get("pins") ?? "{}"), pictureUrl: (n) => `/boards/files/${n}` });
       (window as unknown as { __canvas: unknown }).__canvas = result;
       setLifted(result);

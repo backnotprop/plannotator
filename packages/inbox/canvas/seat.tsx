@@ -1,7 +1,7 @@
 /**
  * The thread canvas in one thread pane (ThreadSlot.tsx): what ThreadPane draws of it, all null while the canvas is off
- * (config.json `inboxCanvas`; the window learns it from the settings, `canvas: { on }`). Off, a thread shows no
- * button, no card, no chip, and an address with `&canvas` opens the thread alone.
+ * (config.json `inboxCanvas`; the window learns it from the settings, `canvas: { on }`), and on a linked machine's
+ * thread. Off, a thread shows no button, no card, no chip, and an address with `&canvas` opens the thread alone.
  */
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { InboxThread } from '@plannotator/core/inbox-types';
@@ -9,6 +9,7 @@ import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import type { Route } from '../app/route';
 import { writeRoute } from '../app/writeRoute';
 import { agentName } from '../format';
+import { isContested, machineOf } from '../inboxUrl';
 import { CanvasPane } from './CanvasPane';
 import { CanvasButton, CanvasCard, CanvasMarksChip, canvasCardsByMessage, canvasMarksFeedback } from './parts';
 import { useThreadCanvas } from './useThreadCanvas';
@@ -28,6 +29,9 @@ export interface ThreadCanvasSeat {
   marks: { chip: ReactNode; feedback: string } | null;
 }
 
+/** The thread is this computer's own (not a linked machine's, nor claimed by two): its canvas is kept here. */
+export const canvasHere = (threadId: string | null | undefined): boolean => !!threadId && machineOf(threadId) === null && !isContested(threadId);
+
 const dismissedKey = (threadId: string) => `plannotator-canvas-marks:${threadId}`;
 const readDismissed = (threadId: string): string | null => {
   try {
@@ -38,8 +42,10 @@ const readDismissed = (threadId: string): string | null => {
 };
 
 export function useThreadCanvasSeat(input: { thread: InboxThread | null; on: boolean; route: Route; phone: boolean; go: (next: Route) => void; close: (next: Route) => void }): ThreadCanvasSeat | null {
-  const { thread, on, route, phone, go, close } = input;
+  const { thread, route, phone, go, close } = input;
   const threadId = thread?.thread_id ?? null;
+  // This computer's threads only: a linked machine's agent never reads a canvas kept here (its CLI reads its own).
+  const on = input.on && canvasHere(threadId);
   const canvas = useThreadCanvas(on ? threadId : null, on);
   const { resolvedMode } = useTheme();
   const [dismissed, setDismissed] = useState<{ thread: string; sig: string | null } | null>(null);

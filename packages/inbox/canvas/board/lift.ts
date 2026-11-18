@@ -15,7 +15,7 @@
  *   moves them to where the person left them before arrows are routed.
  * - Warnings name the part and what to change, as in the clean-room tool (fake-cli/render.cjs), which this ports.
  */
-import type { BoardPin } from "@plannotator/core/canvas-board";
+import { BOARD_ATTRS, BOARD_FRAMES, BOARD_MAX_CHARS, BOARD_TAGS, checkBoard, checkStyle, parseBoard, parseStyle, whereOf, type BoardNode, type BoardPin } from "@plannotator/core/canvas-board";
 import type { CanvasElement, CanvasParts, CanvasPartInfo } from "@plannotator/core/canvas-scene";
 
 /** The board's colours: the agent writes only these variables. Light; the canvas inverts for dark. */
@@ -44,7 +44,26 @@ export interface LiftInput {
   pins?: Record<string, BoardPin>;
   /** The address a stored picture loads from (`files/<name>` in the board). */
   pictureUrl: (name: string) => string;
+  /** The lift's budgets (tests): elements made, and milliseconds of layout. */
+  limits?: { nodes?: number; ms?: number };
 }
+
+/** Why a board was not laid out. The message goes back to the agent as the layout's error. */
+export class CanvasLiftError extends Error {
+  constructor(
+    readonly reason: "refused" | "too-big" | "too-slow",
+    message: string,
+  ) {
+    super(message);
+    this.name = "CanvasLiftError";
+  }
+}
+
+/** At most this many elements and words are laid out, and the layout stops after this long. */
+export const LIFT_MAX_NODES = 4000;
+export const LIFT_MAX_MS = 3000;
+/** Pictures get this long to load before the layout goes on without them (each then warns "did not load"). */
+const PICTURE_WAIT_MS = 5000;
 
 export interface LiftResult {
   elements: CanvasElement[];
@@ -58,7 +77,7 @@ type R = { x: number; y: number; w: number; h: number; r: number; b: number };
 
 const STYLE = (root: string) => `
 .${root}{${Object.entries(CANVAS_BOARD_COLOURS).map(([k, v]) => `--${k}:${v}`).join(";")};position:absolute;left:0;top:0;display:flex;gap:64px;align-items:flex-start;padding:40px;width:max-content;background:var(--paper);font:15px ${FONT};color:var(--ink);line-height:1.25;-webkit-font-smoothing:antialiased}
-.${root} *{box-sizing:border-box}.${root} p{margin:0}.${root} i{display:block;flex:none}.${root} img{display:block;object-fit:contain;max-width:none}
+.${root} *{box-sizing:border-box;margin:0;padding:0;border:0 solid}.${root} p{margin:0}.${root} i{display:block;flex:none}.${root} img{display:block;object-fit:contain;max-width:none}
 .${root} a[data-arrow]{display:none}
 .${root} aside[data-note]{display:block;width:220px;padding:12px 16px;background:var(--amber-soft);border:1px solid var(--amber);font-size:14px}
 .${root} [data-frame]{border:2px solid var(--ink);overflow:hidden;background:var(--paper);display:flex;flex-direction:column;flex:none}
@@ -116,29 +135,159 @@ function base(type: string, id: string, part: string, x: number, y: number, w: n
   };
 }
 
-/** Lay the board out in `doc` and lift it. The host it lays out in is removed before this returns. */
+/**
+ * Lay the board out and lift it. The board is untrusted (a hand-edited store, or a board the rules never saw): it is
+ * parsed again by the board's own rules and built element by element from that parse, never as HTML. Only the board's
+ * tags, the attributes the rules allow, inline styles the rules accept (no url(), @import or any function but var(),
+ * calc(), min(), max() and clamp()) and pictures from the canvas's own `files/` are made; anything else refuses the
+ * board (CanvasLiftError) and nothing is laid out.
+ *
+ * It lays out in a blank frame of `doc` (same origin, sandboxed with no scripts) that is removed before this returns,
+ * so the Inbox's page and its styles never hold the board. A DOM without frames (tests) lays out in a hidden box.
+ */
 export async function liftBoard(input: LiftInput, doc: Document = document): Promise<LiftResult> {
-  const root = `cv${Math.random().toString(36).slice(2, 8)}`;
-  const host = doc.createElement("div");
-  host.setAttribute("aria-hidden", "true");
-  host.style.cssText = "position:fixed;left:-100000px;top:0;width:0;height:0;overflow:visible;pointer-events:none;contain:layout style";
-  const style = doc.createElement("style");
-  style.textContent = STYLE(root);
-  const cv = doc.createElement("div");
-  cv.className = root;
-  // The board was checked by its rules before it was stored: only the board's elements and inline styles are in it.
-  cv.innerHTML = input.board.replace(/src="files\/([^"]+)"/g, (_m, name: string) => `src="${input.pictureUrl(name).replace(/"/g, "&quot;")}" data-file="${name}"`);
-  host.append(style, cv);
-  doc.body.append(host);
+  const maxNodes = input.limits?.nodes ?? LIFT_MAX_NODES;
+  const maxMs = input.limits?.ms ?? LIFT_MAX_MS;
+  // Checked whole before anything is made: a refused board makes no element, not even the frame.
+  const planned = planBoard(boardTree(input.board), input.pictureUrl, maxNodes);
+  const box = layoutBox(doc);
   try {
-    await Promise.all([...cv.querySelectorAll("img")].map((im) => (im.complete ? 0 : new Promise((r) => { im.onload = im.onerror = r; }))));
-    return layOut(cv, input.pins ?? {});
+    const into = box.doc;
+    const root = `cv${Math.random().toString(36).slice(2, 8)}`;
+    const style = into.createElement("style");
+    style.textContent = STYLE(root);
+    const cv = into.createElement("div");
+    cv.className = root;
+    buildBoard(planned, cv);
+    box.parent.append(style, cv);
+    const pictures = [...cv.querySelectorAll("img")].filter((im) => !im.complete);
+    if (pictures.length) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const loaded = (im: HTMLImageElement) =>
+        new Promise((r) => {
+          im.addEventListener("load", r, { once: true });
+          im.addEventListener("error", r, { once: true });
+        });
+      await Promise.race([Promise.all(pictures.map(loaded)), new Promise((r) => (timer = setTimeout(r, PICTURE_WAIT_MS)))]);
+      clearTimeout(timer);
+    }
+    return layOut(cv, input.pins ?? {}, deadline(maxMs));
   } finally {
-    host.remove();
+    box.done();
   }
 }
 
-function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
+const refuse = (why: string): never => {
+  throw new CanvasLiftError("refused", `the board could not be laid out: ${why}`);
+};
+
+/** The board, parsed and checked again by its own rules (a stored board passed them when it was written). */
+function boardTree(src: string): BoardNode {
+  if (src.length > 4 * BOARD_MAX_CHARS) throw new CanvasLiftError("too-big", "the board is too large to lay out; split it into smaller boards");
+  const { root, errors } = parseBoard(src);
+  if (errors.length) refuse(errors[0]);
+  const { errors: berrs } = checkBoard(root, new Set());
+  if (berrs.length) refuse(berrs[0]);
+  return root;
+}
+
+const VOID_TAGS = new Set(["img", "br"]);
+/** Ids as the rules write them; an arrow's own id (`arrow-<from>-<to>`) may run longer than an agent's. */
+const LIFT_ID = /^[a-z][a-z0-9-]{0,199}$/;
+/** A stored picture's name (packages/shared/canvas/store.ts copyPicture). */
+const PICTURE_SRC = /^files\/(\w[\w.-]{0,199})$/;
+const STYLE_FUNCTIONS = new Set(["var", "calc", "min", "max", "clamp"]);
+
+/** A style the lift keeps: what the rules accept, and nothing that loads, imports or escapes its declaration. */
+function styleOf(where: string, src: string): string {
+  const errs = checkStyle(where, src);
+  if (errs.length) refuse(errs[0]);
+  const out: string[] = [];
+  for (const [k, v] of parseStyle(src)) {
+    if (v === null) continue;
+    const bad = /[\\@<>{}"'`]|\/\*|url|image|expression|javascript/i.test(v) || [...v.matchAll(/([a-z-]*)\s*\(/gi)].some((m) => !STYLE_FUNCTIONS.has(m[1].toLowerCase()));
+    if (bad) refuse(`${where}: style "${k}:${v}" is not supported`);
+    out.push(`${k}:${v}`);
+  }
+  return out.join(";");
+}
+
+/** The board as the lift will make it: every tag, attribute and style checked, before any element exists. */
+type Planned = string | { tag: string; attrs: [string, string][]; children: Planned[] };
+
+function planBoard(root: BoardNode, pictureUrl: (name: string) => string, maxNodes: number): Planned[] {
+  let made = 0;
+  const plan = (n: BoardNode): Planned[] =>
+    n.children.map((c) => {
+      if (++made > maxNodes) throw new CanvasLiftError("too-big", `the board has more than ${maxNodes} elements and words; split it into smaller boards or simplify it`);
+      if (typeof c === "string") return c;
+      const where = whereOf(c);
+      if (!BOARD_TAGS.has(c.tag)) refuse(`${where}: <${c.tag}> is not a board element`);
+      const attrs: [string, string][] = [];
+      for (const [k, v] of Object.entries(c.attrs)) {
+        if (!BOARD_ATTRS["*"].has(k) && !BOARD_ATTRS[c.tag]?.has(k)) refuse(`${where}: attribute "${k}" is not used on <${c.tag}>`);
+        if (k === "style") {
+          const style = styleOf(where, v);
+          if (style) attrs.push(["style", style]);
+        } else if (k === "src") {
+          const name = PICTURE_SRC.exec(v)?.[1] ?? refuse(`${where}: a picture comes from the canvas's own files`);
+          attrs.push(["data-file", name], ["src", pictureUrl(name)]);
+        } else {
+          if (k === "id" && !LIFT_ID.test(v)) refuse(`${where}: id "${v}" must be lowercase letters, digits and dashes`);
+          if (k === "data-frame" && !BOARD_FRAMES.has(v)) refuse(`${where}: data-frame="${v}" must be phone, tablet or browser`);
+          attrs.push([k, v]);
+        }
+      }
+      return { tag: c.tag, attrs, children: VOID_TAGS.has(c.tag) ? [] : plan(c) };
+    });
+  return plan(root);
+}
+
+/** Make the planned board under `cv`: createElement and setAttribute only, never HTML. */
+function buildBoard(planned: Planned[], into: Node): void {
+  const doc = into.ownerDocument!;
+  for (const c of planned) {
+    if (typeof c === "string") {
+      into.appendChild(doc.createTextNode(c));
+      continue;
+    }
+    const el = doc.createElement(c.tag);
+    for (const [k, v] of c.attrs) el.setAttribute(k, v);
+    into.appendChild(el);
+    buildBoard(c.children, el);
+  }
+}
+
+/** Where the board is laid out: a blank sandboxed frame (no script runs in it), or a hidden box where frames have no document. */
+function layoutBox(doc: Document): { doc: Document; parent: HTMLElement; done: () => void } {
+  const frame = doc.createElement("iframe");
+  frame.setAttribute("sandbox", "allow-same-origin");
+  frame.setAttribute("aria-hidden", "true");
+  frame.setAttribute("tabindex", "-1");
+  frame.style.cssText = "position:fixed;left:-100000px;top:0;width:100px;height:100px;border:0;visibility:hidden;pointer-events:none";
+  doc.body.append(frame);
+  const inner = frame.contentDocument;
+  if (inner?.body && inner.defaultView) return { doc: inner, parent: inner.body, done: () => frame.remove() };
+  frame.remove();
+  const host = doc.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  host.style.cssText = "position:fixed;left:-100000px;top:0;width:0;height:0;overflow:visible;pointer-events:none;contain:layout style";
+  doc.body.append(host);
+  return { doc, parent: host, done: () => host.remove() };
+}
+
+/** The layout's clock: throws once its time is up (checked between phases and while arrows are routed). */
+function deadline(ms: number): () => void {
+  const end = performance.now() + ms;
+  return () => {
+    if (performance.now() > end) throw new CanvasLiftError("too-slow", `laying the board out took longer than ${ms / 1000} s; simplify it (fewer parts, arrows or words)`);
+  };
+}
+
+/** Computed style in the element's own window (the layout frame's). */
+const css = (el: Element): CSSStyleDeclaration => (el.ownerDocument.defaultView ?? window).getComputedStyle(el);
+
+function layOut(cv: HTMLElement, pins: Record<string, BoardPin>, tick: () => void): LiftResult {
   const doc = cv.ownerDocument;
   const W: string[] = [];
   const kids = [...cv.children] as HTMLElement[];
@@ -173,7 +322,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
     const between = [...piece.querySelectorAll<HTMLElement>("[id]")].some((e) => {
       if (e === t || e.contains(t) || t.contains(e)) return false;
       const r = e.getBoundingClientRect();
-      const cs = getComputedStyle(e);
+      const cs = css(e);
       const painted = e.children.length === 0 || cs.backgroundColor !== "rgba(0, 0, 0, 0)" || parseFloat(cs.borderTopWidth) > 0;
       return painted && r.left >= tr.right - 1 && r.top < tr.bottom && r.bottom > tr.top;
     });
@@ -247,6 +396,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
   }
 
   // ---- the person's pins: their size, then their place (outer parts first) ----
+  tick();
   const depthOf = (el: Element) => {
     let d = 0;
     for (let p = el.parentElement; p && p !== cv; p = p.parentElement) d++;
@@ -254,13 +404,13 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
   };
   const pinned = Object.entries(pins)
     .map(([id, pin]) => ({ el: byId(id), pin, id }))
-    .filter((x): x is { el: HTMLElement; pin: BoardPin; id: string } => !!x.el && !x.el.matches("a[data-arrow]"))
+    .filter((x): x is { el: HTMLElement; pin: BoardPin; id: string } => !!x.el && !x.el.matches("a[data-arrow]") && [x.pin?.x, x.pin?.y, x.pin?.w, x.pin?.h].every((n) => typeof n === "number" && Number.isFinite(n)))
     .sort((a, b) => depthOf(a.el) - depthOf(b.el));
   // A pinned part leaves the flow, and a blank box of its laid-out size holds its place, so the size the person gave
   // it never moves the parts around it (a widened button would widen its whole column).
   for (const { el, pin } of pinned) {
     const was = el.getBoundingClientRect();
-    const cs = getComputedStyle(el);
+    const cs = css(el);
     const hold = el.ownerDocument.createElement("div");
     hold.setAttribute("aria-hidden", "true");
     hold.style.cssText = `display:${cs.display.startsWith("inline") ? "inline-block" : "block"};flex:none;width:${was.width}px;height:${was.height}px;margin:${cs.margin};align-self:${cs.alignSelf}`;
@@ -286,6 +436,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
   const pinnedIds = new Set(pinned.map((p) => p.id));
 
   // ---- arrows: routed by the engine, never by the agent ----
+  tick();
   type Route = { aid: string; from: string; to: string; pts: [number, number][]; label: string; color: string; note: boolean };
   const routes: Route[] = [];
   const segs: { s: [number, number]; e: [number, number]; aid: string }[] = [];
@@ -364,6 +515,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
     }
     let pts: [number, number][] = [s, e];
     const crosses = (P: [number, number][]) => {
+      tick();
       const ends = endsOf(aid);
       const rects = textRects();
       for (let k = 0; k + 1 < P.length; k++) {
@@ -417,6 +569,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
   }
 
   // ---- warnings an agent can act on ----
+  tick();
   const partEls = [...cv.querySelectorAll<HTMLElement>("[id]")].filter((e) => !e.matches("a[data-arrow]"));
   for (const { el: l, aid } of labels) {
     const lr = R(l);
@@ -425,7 +578,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
     const hits = partEls.filter((e) => {
       if (ends.some((en) => en && e.contains(en))) return false;
       if (e.children.length && !e.matches("img")) {
-        const cs = getComputedStyle(e);
+        const cs = css(e);
         if (cs.backgroundColor === "rgba(0, 0, 0, 0)" && !parseFloat(cs.borderTopWidth)) return false;
       }
       const r = R(e);
@@ -451,13 +604,13 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
   }
   const inner = (el: HTMLElement) => {
     const r = R(el);
-    const s = getComputedStyle(el);
+    const s = css(el);
     return { x: r.x + parseFloat(s.borderLeftWidth), y: r.y + parseFloat(s.borderTopWidth), r: r.r - parseFloat(s.borderRightWidth), b: r.b - parseFloat(s.borderBottomWidth) };
   };
   for (const el of partEls) {
     const r = R(el);
     if (el.tagName === "IMG" && !((el as HTMLImageElement).complete && (el as HTMLImageElement).naturalWidth)) W.push(`#${el.id}: the picture did not load`);
-    if ((r.w < 1 || r.h < 1) && getComputedStyle(el).display !== "none") W.push(`#${el.id}: has no size (0 wide or 0 high); give it width and height or content`);
+    if ((r.w < 1 || r.h < 1) && css(el).display !== "none") W.push(`#${el.id}: has no size (0 wide or 0 high); give it width and height or content`);
     const par = el.parentElement?.closest<HTMLElement>("[id]");
     if (par && cv.contains(par) && !pinnedIds.has(el.id)) {
       const pr = inner(par);
@@ -487,8 +640,10 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
     }
   }
   {
+    tick();
     const rects = textRects();
     for (const g of segs) {
+      tick();
       const a = byId(g.aid);
       let ends: (HTMLElement | null)[] = [];
       if (a && a.matches("a[data-arrow]")) ends = [byId(a.getAttribute("from")), byId(a.getAttribute("to"))];
@@ -508,6 +663,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
   }
 
   // ---- lift: every part into elements at its measured place ----
+  tick();
   const elements: CanvasElement[] = [];
   const files: LiftResult["files"] = {};
   const parts: CanvasParts = {};
@@ -532,7 +688,7 @@ function layOut(cv: HTMLElement, pins: Record<string, BoardPin>): LiftResult {
     const groupIds = groupsOf(el);
     const r = R(el);
     if (r.w === 0 && r.h === 0) continue;
-    const s = getComputedStyle(el);
+    const s = css(el);
     if (el.tagName === "IMG") {
       const name = el.dataset.file ?? "";
       const fileId = name;
@@ -674,7 +830,7 @@ function mimeOf(name: string): string {
 const hasIdChildren = (el: Element) => !!el.querySelector("[id]:not(a[data-arrow])");
 
 function paintedBox(el: HTMLElement): boolean {
-  const s = getComputedStyle(el);
+  const s = css(el);
   return s.backgroundColor !== "rgba(0, 0, 0, 0)" || (parseFloat(s.borderTopWidth) > 0 && parseFloat(s.borderLeftWidth) > 0) || el.tagName === "IMG";
 }
 
@@ -732,7 +888,7 @@ function textOf(el: HTMLElement, cv: HTMLElement): { lines: string[]; x: number;
   if (!lines.length) return null;
   const x = Math.min(...lines.map((l) => l.left));
   const w = Math.max(...lines.map((l) => l.right)) - x;
-  const cs = getComputedStyle(el);
+  const cs = css(el);
   // Line boxes: the first line's top, at the element's line height.
   const lh = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.25;
   const top = lines[0].top - (lh - (lines[0].bottom - lines[0].top)) / 2;

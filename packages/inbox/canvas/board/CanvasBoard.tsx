@@ -10,7 +10,13 @@
  *   picture, eraser, frame, laser. Left out: the file menu (open, save, collaboration, its own theme switch), the
  *   shape library, embeds and links. Export as an image stays, as a dock button.
  * - Excalidraw's own one-key shortcuts work only while focus is inside the canvas (`handleKeyboardGlobally` off),
- *   and key events never leave the canvas for the host's shortcuts.
+ *   and key events never leave the canvas for the host's shortcuts (the box carries `data-keeps-keys`, which the
+ *   host's own key and paste handlers leave alone). Escape does Excalidraw's own thing first (ends the text, leaves the
+ *   tool, clears the selection); with nothing left to end, it calls `onLeave` (the host gives focus back).
+ * - Every scene is untrusted: it is cleaned (`cleanCanvasElements`: only the canvas's element types, no link, only
+ *   its own customData) before Excalidraw restores it, and whatever reaches the canvas another way (a paste, a dropped
+ *   file) is cleaned the moment it lands. Embeds take no address, links are off (no link action, no Cmd+K), and the
+ *   library, the file dialogs and Excalidraw's own save are out of reach.
  * - Roughness 0, the host's theme (Excalidraw's dark mode), the agent's ids kept on its elements.
  */
 import { Excalidraw, exportToBlob, restoreElements } from "@excalidraw/excalidraw";
@@ -19,6 +25,7 @@ import type { ExcalidrawImperativeAPI, BinaryFileData, AppState } from "@excalid
 import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { CanvasElement } from "@plannotator/core/canvas-scene";
+import { CANVAS_ELEMENT_TYPES, cleanCanvasElements } from "@plannotator/core/canvas-elements";
 import { CANVAS_DOCK_TOOLS, type CanvasDockTool } from "./dock";
 import "./board.css";
 
@@ -57,6 +64,8 @@ export interface CanvasBoardProps {
   flash?: readonly string[];
   /** Words in the middle of an empty canvas. */
   emptyHint?: { title: string; body: string };
+  /** Escape with nothing left to end in the canvas (no text, tool, menu or selection): give focus back to the host. */
+  onLeave?: () => void;
 }
 
 export interface CanvasBoardApi {
@@ -66,9 +75,35 @@ export interface CanvasBoardApi {
 
 const fileId = (name: string) => name;
 
-/** Restore plain elements (the lift's, the store's) into elements Excalidraw draws, keeping every id. */
+/** Restore plain elements (the lift's, the store's) into elements Excalidraw draws, keeping every id. Cleaned first. */
 function restored(elements: readonly CanvasElement[]): ExcalidrawElement[] {
-  return restoreElements(elements as unknown as ExcalidrawElement[], null, { refreshDimensions: false, repairBindings: true }) as ExcalidrawElement[];
+  const clean = cleanCanvasElements(elements, false) ?? [];
+  return restoreElements(clean as unknown as ExcalidrawElement[], null, { refreshDimensions: false, repairBindings: true }) as ExcalidrawElement[];
+}
+
+/** An element the canvas would not keep as it is: a type it leaves out (an embed, an iframe), a link, foreign customData. */
+function unclean(e: { type: string; link?: string | null; customData?: unknown }): boolean {
+  if (!CANVAS_ELEMENT_TYPES.has(e.type) || e.type === "selection" || e.link) return true;
+  const c = e.customData as Record<string, unknown> | null | undefined;
+  return !!c && Object.keys(c).some((k) => (k !== "part" && k !== "role") || typeof c[k] !== "string");
+}
+
+/** The dialogs Excalidraw draws here; any other `openDialog` (export, save) is switched off and draws nothing. */
+const SHOWN_DIALOGS = new Set(["help", "ttd", "elementLinkSelector"]);
+
+/**
+ * What Escape does in the canvas, read from Excalidraw's state before it acts. "canvas": Excalidraw's own Escape (end
+ * the text or the line, leave the tool, close its menu or dialog). "deselect": clear the selection. "leave": nothing
+ * is left to end; the host takes focus back.
+ */
+export function canvasEscape(s: AppState): "canvas" | "deselect" | "leave" {
+  const busy =
+    s.editingTextElement || s.newElement || s.multiElement || s.editingLinearElement || s.croppingElementId || s.isCropping ||
+    s.openMenu || s.openPopup || s.contextMenu || s.showHyperlinkPopup || s.openSidebar ||
+    (s.openDialog && SHOWN_DIALOGS.has(s.openDialog.name)) || s.activeTool.type !== "selection";
+  if (busy) return "canvas";
+  const picked = Object.values(s.selectedElementIds ?? {}).some(Boolean) || Object.values(s.selectedGroupIds ?? {}).some(Boolean) || !!s.editingGroupId;
+  return picked ? "deselect" : "leave";
 }
 
 async function dataUrlOf(url: string): Promise<{ dataURL: string; mimeType: string } | null> {
@@ -100,6 +135,8 @@ export default function CanvasBoard(props: CanvasBoardProps) {
   const [empty, setEmpty] = useState(!props.scene?.elements.some((e) => !e.isDeleted));
   const onChangeRef = useRef(props.onChange);
   onChangeRef.current = props.onChange;
+  const onLeaveRef = useRef(props.onLeave);
+  onLeaveRef.current = props.onLeave;
 
   // Excalidraw's stylesheet, only while a canvas is mounted.
   useEffect(() => {
@@ -191,7 +228,7 @@ export default function CanvasBoard(props: CanvasBoardProps) {
               if (!elements.length) return null;
               return exportToBlob({ elements, files: api.getFiles(), mimeType: "image/png", appState: { exportBackground: true, viewBackgroundColor: "#ffffff", exportWithDarkMode: false }, exportPadding: 24, maxWidthOrHeight: 1600 });
             },
-            focus: () => hostRef.current?.querySelector<HTMLElement>(".excalidraw")?.focus(),
+            focus: () => surface()?.focus(),
           }
         : null,
     );
@@ -203,10 +240,23 @@ export default function CanvasBoard(props: CanvasBoardProps) {
     setTool(appState.activeTool.type);
     setLocked(appState.activeTool.locked);
     if (applying.current || props.readOnly) return;
-    const plain = elements.map((e) => (e.link ? { ...e, link: null } : e)) as unknown as CanvasElement[];
+    let plain = elements as unknown as CanvasElement[];
     const sig = signature(plain);
     if (sig === lastSig.current) return;
-    lastSig.current = sig;
+    // Something landed that the canvas does not keep (a pasted or dropped scene's embed, link or customData): the
+    // canvas holds it cleaned from now on, and only the cleaned scene is saved.
+    if (elements.some(unclean)) {
+      plain = cleanCanvasElements(elements, false) ?? [];
+      const a = apiRef.current;
+      if (a) {
+        applying.current = true;
+        a.updateScene({ elements: restored(plain), captureUpdate: "NEVER" as never });
+        queueMicrotask(() => {
+          applying.current = false;
+        });
+      }
+    }
+    lastSig.current = signature(plain);
     setEmpty(!plain.some((e) => !e.isDeleted));
     const uploads: CanvasBoardChange["uploads"] = {};
     const refs: Record<string, CanvasBoardFile> = {};
@@ -269,10 +319,63 @@ export default function CanvasBoard(props: CanvasBoardProps) {
   // Keys stay in the canvas: Excalidraw's own keys work here, the host's shortcuts never see them.
   const keepKeys = (e: ReactKeyboardEvent) => e.stopPropagation();
 
+  // Read before Excalidraw acts (capture, on the canvas's box): Escape, and the export dialog's key, which is off here.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const onKey = (e: KeyboardEvent) => {
+      const a = apiRef.current;
+      if (!a) return;
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && !e.altKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+      if (e.key !== "Escape" || e.isComposing) return;
+      const next = canvasEscape(a.getAppState());
+      if (next === "canvas") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (next === "deselect") a.updateScene({ appState: { selectedElementIds: {}, selectedGroupIds: {}, editingGroupId: null } as never, captureUpdate: "NEVER" as never });
+      else onLeaveRef.current?.();
+    };
+    host.addEventListener("keydown", onKey, true);
+    return () => host.removeEventListener("keydown", onKey, true);
+  }, []);
+
+  // A dropped library, or a dropped file that is not a picture (a saved scene would replace the drawing): not taken.
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const onDrop = (e: DragEvent) => {
+      const dt = e.dataTransfer;
+      if (!dt) return;
+      const files = [...dt.files];
+      const picture = (f: File) => /^image\/(png|jpeg|gif|webp|svg\+xml)$/.test(f.type);
+      if (dt.types.includes("application/vnd.excalidrawlib+json") || files.some((f) => !picture(f))) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+    host.addEventListener("drop", onDrop, true);
+    return () => host.removeEventListener("drop", onDrop, true);
+  }, []);
+
+  // A paste of Excalidraw's own elements (copied here, or from another drawing): only what the canvas keeps.
+  const onPaste = useCallback((data: { elements?: readonly unknown[] | null; programmaticAPI?: boolean }) => {
+    if (data.elements && !data.programmaticAPI) data.elements = cleanCanvasElements(data.elements, false) ?? [];
+    else if (data.elements) data.elements = data.elements.filter((e) => !unclean({ ...(e as { type: string }), link: null, customData: null }));
+    return true;
+  }, []);
+
+  // A tool picked with the pointer leaves focus in the drawing (where its keys and pastes go).
+  const surface = () => hostRef.current?.querySelector<HTMLElement>(".excalidraw");
+
   return (
     <div
       ref={hostRef}
       className="pn-canvas"
+      data-keeps-keys=""
       data-canvas-theme={props.theme}
       data-dock={props.dockAtTop ? "top" : "bottom"}
       data-readonly={props.readOnly ? "" : undefined}
@@ -289,13 +392,16 @@ export default function CanvasBoard(props: CanvasBoardProps) {
         theme={props.theme}
         viewModeEnabled={!!props.readOnly}
         handleKeyboardGlobally={false}
-        validateEmbeddable={false}
+        validateEmbeddable={() => false}
+        onPaste={onPaste as never}
         detectScroll
         autoFocus={false}
         aiEnabled={false}
         onLinkOpen={(_el, event) => event.preventDefault()}
         UIOptions={{
-          canvasActions: { changeViewBackgroundColor: false, clearCanvas: false, export: false, loadScene: false, saveToActiveFile: false, toggleTheme: null, saveAsImage: false },
+          // Excalidraw reads every action's name here: off by name, its key and its button go too (link, save as,
+          // search with its library tab). The right-click menu's link and library items are hidden in board.css.
+          canvasActions: { changeViewBackgroundColor: false, clearCanvas: false, export: false, loadScene: false, saveToActiveFile: false, toggleTheme: null, saveAsImage: false, ...({ hyperlink: false, saveFileToDisk: false, searchMenu: false } as object) },
           tools: { image: true },
         }}
         renderTopRightUI={() => null}
@@ -307,7 +413,7 @@ export default function CanvasBoard(props: CanvasBoardProps) {
         </div>
       ) : null}
       {!props.readOnly ? (
-        <div className="pn-canvas-dock" role="toolbar" aria-label="Drawing tools">
+        <div className="pn-canvas-dock" role="group" aria-label="Drawing tools">
           {CANVAS_DOCK_TOOLS.map((t) =>
             t.kind === "sep" ? (
               <span key={t.key} className="pn-canvas-sep" aria-hidden="true" />
@@ -320,7 +426,11 @@ export default function CanvasBoard(props: CanvasBoardProps) {
                 title={t.label}
                 aria-pressed={t.kind === "lock" ? locked : t.kind === "tool" ? tool === t.tool : undefined}
                 data-tool={t.key}
-                onClick={() => pick(t)}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={(e) => {
+                  pick(t);
+                  if (e.detail > 0 && t.kind !== "export") surface()?.focus({ preventScroll: true });
+                }}
               >
                 <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" dangerouslySetInnerHTML={{ __html: t.icon }} />
               </button>

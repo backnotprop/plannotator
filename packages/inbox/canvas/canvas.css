@@ -1,5 +1,5 @@
 /* The thread canvas's pane (CanvasPane.tsx), in a file's place beside the thread. The whiteboard's own look is
-   packages/ui/components/canvas/canvas.css. */
+   packages/inbox/canvas/board/board.css. */
 .ib-canvasview .ib-vhead .ib-cv-name { display: inline-flex; align-items: center; gap: 7px; font-weight: 600; font-size: var(--ib-fs-14, 14px); white-space: nowrap; }
 .ib-canvasview .ib-vhead .ib-cv-name .ib-ic { color: var(--muted-foreground); }
 .ib-canvasview .ib-vhead .ib-cv-meta { min-width: 0; flex: 0 1 auto; }
@@ -17,6 +17,9 @@
 .ib-cv-line.ib-cv-line-top { bottom: auto; top: 72px; }
 .ib-cv-line b { font-weight: 600; }
 .ib-cv-line .ib-btn { border-radius: 999px; }
+.ib-cv-line-x { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border: 0; border-radius: 999px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.ib-cv-line-x:hover { background: color-mix(in oklch, var(--foreground) 8%, transparent); color: var(--foreground); }
+.ib-cv-line-x:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 1px; }
 
 /* The header's canvas button, pressed while the canvas is open. */
 .ib-cvbtn[aria-pressed='true'] { background: color-mix(in oklch, var(--primary) 14%, transparent); color: var(--primary); }
@@ -34,17 +37,17 @@
 .ib-cvcard-changed { color: var(--primary); }
 .ib-cvcard-state { margin-left: auto; color: var(--muted-foreground); }
 
-/* The reply box's "Canvas marks N" chip and its words. */
+/* The reply box's "Canvas marks N" chip and its words: plain lines under the chip, on the reply box's own surface. */
 .ib-cvmarks { margin: 6px 0 2px; }
 .ib-cvmarks-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 4px 3px 10px; border-radius: 999px; background: var(--muted); font-size: var(--ib-fs-13, 13px); }
 .ib-cvmarks-chip .ib-ic { color: var(--muted-foreground); }
 .ib-cvmarks-n { color: var(--muted-foreground); }
 .ib-cvmarks-chip button { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border: 0; border-radius: 999px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
 .ib-cvmarks-chip button:hover { background: color-mix(in oklch, var(--foreground) 8%, transparent); color: var(--foreground); }
-.ib-cvmarks-words { margin: 6px 0 0; padding: 10px 14px; border-radius: 10px; background: var(--muted); font-size: var(--ib-fs-13, 13px); }
+.ib-cvmarks-words { margin: 4px 0 0 10px; font-size: var(--ib-fs-13, 13px); }
 .ib-cvmarks-words ul { margin: 0; padding-left: 16px; }
 .ib-cvmarks-words li { margin: 2px 0; }
-.ib-cvmarks-words p { margin: 8px 0 0; color: var(--muted-foreground); }
+.ib-cvmarks-words p { margin: 4px 0 0; color: var(--muted-foreground); }
 @media (pointer: coarse) {
   .ib-cvmarks-chip button { width: 32px; height: 32px; }
 }

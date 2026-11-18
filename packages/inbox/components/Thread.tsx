@@ -178,7 +178,7 @@ import { clearPhoneHead, fitPhoneHead } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { openQuestionsShown, reaskItemLabel, skipToggledAnswer, threadOpenActions, threadOpenQuestions, type OpenQuestion } from '../openQuestions';
 import { newUuid } from '../uuid';
-import { ShortcutHint, useShortcutAria, useShortcutHintShown, withShortcut } from '../shortcuts/hint';
+import { ShortcutHint, useShortcutAria, useShortcutHintShown } from '../shortcuts/hint';
 import { lastInput, traversedJustNow } from '../lastInput';
 import { bareKeyAllowed, inOverlay, keyboardFocused, keyTarget, modalOpen } from '../shortcuts/guards';
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
@@ -197,6 +197,7 @@ import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBO
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
 import { ThreadBarTitle } from '../thread/ThreadBarTitle';
+import { ArtifactsButton, ExpandAllButton } from '../thread/ThreadBarButtons';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
@@ -3223,6 +3224,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       }
       const pendingAnnotations = withCommentWrites(records, writes, current.thread_id);
       const uploads = box.open ? replyUploads : draftUploads;
+      // The person's canvas marks (the reply box's chip) ride the reply that carries the words.
       const carries = words !== '' || pendingAnnotations.length > 0 || uploads.length > 0 || !!canvas?.marks;
       // One reply per session, its picks, skips and action items in the draft. The latest agent message rides
       // last only to carry the words, the annotations and the pasted files; with none, a target with nothing to
@@ -4450,6 +4452,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const closedByRead = thread.messages.flatMap((m) => (m.questions ?? []).filter((q) => q.state === 'closed' && q.set_aside_at));
 
   const openAttachment = file ? allFiles.find((a) => a.id === file.id) ?? null : null;
+  // The thread canvas (only while on) takes a file's place beside the thread.
   const fileOpen = openAttachment !== null || (namedFile !== null && file === null) || (canvas?.open === true && file === null);
   // The questions inside the open Markdown file (issue #2828): its cards answer like the body's, through the same
   // pick, draft and Send. A version changed since it was sent may ask otherwise: only the sent text takes answers then.
@@ -4780,39 +4783,20 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 review={pullReview}
               />
             )}
-            {canvas?.button}{shapeButton}
+            {/* The thread canvas's button (only while it is on), then Shape's. */}
+            {canvas?.button}
+            {shapeButton}
             {artifactsButton && (
-              <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
-                <button
-                  ref={artifactsButtonRef}
-                  type="button"
-                  className="ib-iconbtn ib-artbtn"
-                  aria-label={linksOnly ? `Links, ${linkList.count}` : `Artifacts, ${artifactList.length}`}
-                  aria-keyshortcuts={artifactsKeys}
-                  aria-pressed={artifactsOn}
-                  onClick={() => onArtifacts?.(!artifactsOn)}
-                  data-artifacts-button=""
-                >
-                  <Icon name="artifacts" size={17} />
-                  <span className="ib-artbtn-n" aria-hidden="true">
-                    {linksOnly ? linkList.count : artifactList.length}
-                  </span>
-                </button>
-              </Tip>
+              <ArtifactsButton
+                buttonRef={artifactsButtonRef}
+                on={artifactsOn}
+                linksOnly={linksOnly}
+                count={linksOnly ? linkList.count : artifactList.length}
+                keys={artifactsKeys}
+                onToggle={() => onArtifacts?.(!artifactsOn)}
+              />
             )}
-            {!one && !artifactsOn && !board && (
-              <Tip content={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}>
-                <button
-                  type="button"
-                  className="ib-iconbtn"
-                  data-expand-all=""
-                  onClick={expandAll}
-                  aria-label={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}
-                >
-                  <Icon name={allOpen ? 'fold' : 'unfold'} size={16} />
-                </button>
-              </Tip>
-            )}
+            {!one && !artifactsOn && !board && <ExpandAllButton allOpen={allOpen} onClick={expandAll} />}
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
@@ -5316,7 +5300,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     newestKeycap={!file}
                   />
                 )}
-                {canvas?.cardFor(message.id)}{message.guide &&
+                {/* The canvas version this agent message drew (only while the canvas is on). */}
+                {canvas?.cardFor(message.id)}
+                {message.guide &&
                   (codeReview && message.guide.review ? (
                     <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs && !message.guide.walkthrough} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
                   ) : (
@@ -5662,7 +5648,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                     />
                   </div>
                 )}
-                {canvas?.marks?.chip}{draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
+                {/* The person's canvas marks, which ride this reply (only while the canvas is on). */}
+                {canvas?.marks?.chip}
+                {draftAnswers.length > 0 && <ReplyAnswers answers={draftAnswers} onJump={jumpTo} />}
                 {draftActions.length > 0 && <ReplyActions actions={draftActions} onJump={jumpTo} />}
               </div>
               {/* A computer: a draft that did not save says so on its own line over the row, in full (a phone says it in
@@ -6013,9 +6001,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         composer={composer}
       />
     )}
-    {!openAttachment && file === null && (namedFile ? (
+    {!openAttachment && file === null && namedFile && (
       <ReferencedFilePane threadId={thread.thread_id} fileRef={namedFile} agent={asker} phone={phone} full={phone || fileStacked} onOpen={(ref) => onOpenNamedFile?.(ref)} onClose={() => onOpenNamedFile?.(null)} onAttached={openAttachedRef} />
-    ) : canvas?.pane(composer ? <FullScreenComposer value={composer} noun={null} comment={null} /> : null))}
+    )}
+    {/* The thread canvas (only while it is on) takes a file's place: beside the thread, or full screen under the reply box. */}
+    {!openAttachment && file === null && !namedFile && canvas?.pane(composer ? <FullScreenComposer value={composer} noun={null} comment={null} /> : null)}
     </>
     </ReuseContext.Provider>
     </CommentPictures>

@@ -13,8 +13,9 @@ export function subscribeCanvasFrames(listener: (ids: string[]) => void): () => 
 
 /**
  * A canvas frame arrived (eventFrames.ts): every open canvas reads again, and this window lays out each agent version
- * waiting for a browser engine, whether or not its canvas is open (layout.ts, loaded on the first frame: a window
- * with the canvas off never hears one, so never loads it).
+ * waiting for a browser engine, whether or not its canvas is open (layout.ts). layout.ts itself is small and in the
+ * window's main code (useThreadCanvas.ts imports it); the lift and the picture code it calls load on the first layout.
+ * A window with the canvas off never hears a frame, so never loads those.
  */
 export function canvasFrameArrived(ids: string[]): void {
   for (const listener of canvasFrameListeners) listener(ids);
