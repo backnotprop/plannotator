@@ -16480,6 +16480,9 @@
       "title": "Rex place line on an agent: \"Rex · <session> / <tab>\" on the hover card, in the row's spoken name, in the To picker",
       "surface": [
         "door:GET sessions",
+        "field:InboxAgent.place",
+        "field:InboxAgentPlace.kind",
+        "field:InboxAgentPlace.line",
         "window:GET /api/inbox/sessions"
       ],
       "flows": [],
@@ -16493,7 +16496,12 @@
     {
       "id": "other-115",
       "title": "Rex status mark on an agent's icon: Working, Asking a question, Asking for permission, Needs sign-in, Done, Idle, Stopped on an error",
-      "surface": [],
+      "surface": [
+        "field:InboxAgent.rex_mark",
+        "field:InboxAgent.rex_status",
+        "field:InboxRexMark.kind",
+        "field:InboxRexMark.state"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "mark on the agent icon",
@@ -16508,12 +16516,14 @@
       "surface": [
         "field:InboxAddressee.session",
         "field:InboxAgent.session",
+        "field:InboxAgentPlace.show",
         "field:InboxDelivery.session",
         "field:InboxDraftTo.session",
         "field:InboxLaunchRecord.session",
         "field:InboxParticipant.session",
         "field:InboxSentRecipient.session",
-        "field:InboxTag.session"
+        "field:InboxTag.session",
+        "window:POST /api/inbox/rex/show"
       ],
       "flows": [],
       "mobile": "never",
@@ -16528,6 +16538,13 @@
       "id": "other-117",
       "title": "\"Start new agents in\": In the background, or Rex",
       "surface": [
+        "field:InboxLaunchRecord.rex",
+        "field:InboxLaunchRex.block",
+        "field:InboxLaunchRex.line",
+        "field:InboxLaunchRex.refused",
+        "field:InboxLaunchRex.session",
+        "field:InboxLaunchRex.unavailable",
+        "field:InboxRun.rex",
         "window:POST /api/inbox/launch/settings"
       ],
       "flows": [],
