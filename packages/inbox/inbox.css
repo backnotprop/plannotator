@@ -4874,6 +4874,8 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-lchname > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-lchprov { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-filterable]) { width: min(480px, calc(100% - 28px)); }
+/* OpenCode's Agent column (build, plan) beside the model and the variant: the same room as a filterable list. */
+.ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-compose-choice-menu="primary_agent"]) { width: min(480px, calc(100% - 28px)); }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
@@ -7480,6 +7482,12 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-crdp-rjira { color: var(--muted-foreground); transition: color 120ms ease; }
 .ib-crdp-ref:is(:hover, :focus-within) .ib-crdp-rjira { color: var(--foreground); }
 .ib-crdp-rn:focus-visible { color: var(--foreground); text-decoration: underline; }
+/* A link's Remove, at the row's end: quiet until the row is hovered or focused; always there on a touch screen. */
+.pn-inbox .ib-crdp-rx { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: none; color: var(--muted-foreground); cursor: pointer; opacity: 0; transition: opacity 120ms ease; }
+.pn-inbox .ib-crdp-ref:is(:hover, :focus-within) .ib-crdp-rx { opacity: 1; }
+.pn-inbox .ib-crdp-rx:hover { color: var(--foreground); background: var(--ib-hover); }
+.pn-inbox .ib-crdp-rx:focus-visible { opacity: 1; outline: 2px solid var(--ring); outline-offset: 1px; }
+@media (hover: none) { .pn-inbox .ib-crdp-rx { opacity: 1; width: 44px; height: 44px; margin-right: -10px; } }
 @media (forced-colors: active) { .ib-crdp-rjira { color: CanvasText; } }
 /*
  * A web link (user feedback #10): its label (host and path, already cut in the middle at 44
@@ -12513,3 +12521,4 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-topen[data-thread-drop-label="refuse"] { color: var(--muted-foreground); }
 /* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
 .ib-topen[data-ghost-says] { visibility: hidden; }
+.pn-inbox span.ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: none; }

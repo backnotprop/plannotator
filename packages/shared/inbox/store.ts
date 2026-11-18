@@ -8938,6 +8938,25 @@ export class InboxStore {
     return next;
   }
 
+  /**
+   * The person took a link off a card (the opened card's Remove): the ref with
+   * that `url`. Its PRs are read again from what is left (`prs`, for an older
+   * Inbox). A link already gone changes nothing, so a retry after a lost
+   * answer writes no second line. The history says "Removed …".
+   */
+  unlinkCardRef(id: string, url: unknown): InboxCard {
+    const card = this.cards.get(id);
+    if (!card) throw new InboxError("card_not_found", `No card ${id}.`);
+    if (typeof url !== "string" || !url.trim()) throw new InboxError("validation_error", "url: the address of the link to remove.", { field: "url" });
+    const refs = inboxCardRefsOf(card);
+    const kept = refs.filter((ref) => ref.url !== url.trim());
+    if (kept.length === refs.length) return card;
+    const at = this.stamp();
+    const next: InboxCard = { ...card, refs: kept, prs: this.prsOf(kept), heard_at: at, heard_by: { kind: "person" } };
+    this.appendCard(next, at);
+    return next;
+  }
+
   /** Hashtags: one tag of a message's first line (`firstLineTagKeys`), indexed to its thread at `seq` (`tagThreads`). Code holds no tag. */
   private indexTag(key: string, threadId: string, seq: number): void {
     let entry = this.tagThreads.get(key);

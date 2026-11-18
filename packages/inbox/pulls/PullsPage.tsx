@@ -79,7 +79,7 @@ import { SystemButton } from '../system/SystemButton';
 import { SystemPane } from '../system/SystemPane';
 import type { ReactNode } from 'react';
 import type { InboxToastModel } from '../components/Toast';
-import { focusWhenGone, hiddenLabel, hideWithUndo, itemsBy, showWithToast } from './hiddenPulls';
+import { focusWhenGone, hiddenLabel, hideWithUndo, itemsBy, showRepoWithToast, showWithToast } from './hiddenPulls';
 
 /** System in Reviews: present only while System shows (`systemShown`). */
 export interface PullsSystem {
@@ -303,6 +303,7 @@ export function PullsPage(given: PullsPageProps) {
             onNew={props.onNew}
             menuRow={menuRow}
             onShowAgain={(hidden) => void showWithToast([hidden.key], [hiddenLabel(hidden)], props.onToast)}
+            onShowRepo={(repo) => void showRepoWithToast(repo, props.onToast)}
             onOpenThread={props.onOpenThread}
             project={props.project}
             onReviewBranch={props.onReviewBranch ? (branch, opener) => props.onReviewBranch!({ name: branch.branch, projectId: branch.project_id }, opener) : undefined}

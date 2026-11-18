@@ -291,6 +291,7 @@ import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { changedFileOf } from "./inbox-pull-diff-files";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import {
+  CODE_REVIEW_OFFER_SHOWN,
   INBOX_REVEALS,
   revealAgentNoteAgents,
   revealAgentNoteNew,
@@ -1142,23 +1143,20 @@ export function inboxUsedBefore(dataDir: string): boolean {
 }
 
 /**
- * HELD UNTIL THE NEXT BIG RELEASE (0.29): DELETE THIS FUNCTION THEN, NOT BEFORE. The owner decided (2026-11-04) to hold
- * Code review and Shape back from 0.28.49, and (2026-11-05) to keep holding them through 0.28.50. No version is read
- * here: the hold ends when this function is deleted. Their Settings → Capabilities switches show only to a person
- * who already has that feature on, or with PLANNOTATOR_INBOX_PREVIEW=1. Otherwise the settings read, the save's answer and the windows' `event:
- * capabilities` leave the key out, and Settings draws no row for an absent key. `told`: this request or event is the
- * switch's own save, so a person who turns a shown switch off hears it. The row may go at the next load.
- * In that release, write `[key]: { on }` at each caller again and drop the `changed` argument of `capabilityListeners`.
+ * SHAPE IS HELD UNTIL THE OWNER RELEASES IT: delete this function then, not before. The owner held Code review and
+ * Shape back from 0.28.49 (2026-11-04) and through 0.28.50 (2026-11-05); on 2026-11-17 they let Code review's switch
+ * show to everyone (off unless turned on; its one-time offer stays unshown, `CODE_REVIEW_OFFER_SHOWN` in
+ * shared/inbox/reveals.ts), and Shape stays held. No version is read here. Shape's Settings → Capabilities switch
+ * shows only to a person who already has Shape on, or with PLANNOTATOR_INBOX_PREVIEW=1. Otherwise the settings read,
+ * the save's answer and the windows' `event: capabilities` leave `shape` out, and Settings draws no row for an absent
+ * key. `told`: this request or event is the switch's own save, so a person who turns a shown switch off hears it. The
+ * row may go at the next load. When Shape ships, write `shape: { on }` at each caller and delete `switchesHeld` too.
  */
-function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told = false): { [P in K]?: { on: boolean } } {
-  return on || told || !switchesHeld() ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
+function heldSwitch(key: "shape", on: boolean, told = false): { shape?: { on: boolean } } {
+  return on || told || !switchesHeld() ? { [key]: { on } } : {};
 }
 
-/**
- * HELD UNTIL THE NEXT BIG RELEASE (0.29), with `heldSwitch`: the switches are held back from people who have them off
- * (no PLANNOTATOR_INBOX_PREVIEW=1), so nothing offers them either: Code review's one-time offer (approval
- * "code-review-offer-card") is never in the line while this says true. Delete it with `heldSwitch`.
- */
+/** Shape's switch is held back from this person (no PLANNOTATOR_INBOX_PREVIEW=1): see `heldSwitch`. Delete it with that. */
 function switchesHeld(): boolean {
   return process.env.PLANNOTATOR_INBOX_PREVIEW !== "1";
 }
@@ -1328,7 +1326,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   /** The reaction tray's saved emoji changed (config.json `inboxReactions`): the windows' streams say `event: reactions`. */
   const reactionsListeners = new Set<(reactions: readonly InboxReaction[], rev: number) => void>();
-  /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
+  /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: lets the save of a held switch (Shape, heldSwitch) reach the windows. */
   const capabilityListeners = new Set<(changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => void>();
   /** "Over your tailnet" published by itself once Tailscale came back: the windows' streams say `event: tailscale` with the new state. */
   const tailscaleListeners = new Set<() => void>();
@@ -1458,7 +1456,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const was = pullThreads.get(pull.key)?.thread_id;
       if (thread) pullThreads.set(pull.key, { thread_id: thread, title: pull.title, url: pull.url });
       else pullThreads.delete(pull.key);
-      if (was !== thread && pullHidden.has(pull.key)) touched = true;
+      if (was !== thread && pullHidden.atOf(pull.key) !== null) touched = true;
     }
     if (touched) pullHiddenChanged();
   };
@@ -2300,6 +2298,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "link":
         // A thread or a reference (issue, PR) the person links from the opened card.
         return store.updateCard(id, { by, threads: body.thread_id ? [body.thread_id] : [], refs: body.ref ? [body.ref] : [] });
+      case "unlink":
+        // A link (issue, PR, web link) the person removes from the opened card, by its `url`.
+        return store.unlinkCardRef(id, body.url);
       case "send":
         // Sent to an agent: `thread_id` is the thread the window just started for it (compose's Send).
         return store.sendCard(id, { thread_id: body.thread_id });
@@ -2310,7 +2311,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.initiative === undefined) throw new InboxError("validation_error", "initiative: an ini_ id, or null for none.", { field: "initiative" });
         return store.setCardInitiative(id, body.initiative, by);
       default:
-        throw new InboxError("validation_error", "op: move, icebox, drop, restore, edit, link, send or initiative.", { field: "op" });
+        throw new InboxError("validation_error", "op: move, icebox, drop, restore, edit, link, unlink, send or initiative.", { field: "op" });
     }
   };
 
@@ -3483,9 +3484,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /**
    * Code review's day-0 offer (approval "code-review-offer-card", 2026-11-06; its slot: `CODE_REVIEW_OFFER` in
    * shared/inbox/reveals.ts): only while config.json `inboxCodeReview` is unset (nobody decided; `false` is the
-   * person's own off), and never while the switch is held back from this person (`switchesHeld`).
+   * person's own off), and only while the offer is shown at all: `CODE_REVIEW_OFFER_SHOWN` (false for now: the
+   * owner chose the switch without the offer, 2026-11-17), so it is never open and never claimed.
    */
-  const codeReviewUndecided = () => options.codeReview === undefined && loadConfig().inboxCodeReview === undefined && !switchesHeld();
+  const codeReviewUndecided = () => CODE_REVIEW_OFFER_SHOWN && options.codeReview === undefined && loadConfig().inboxCodeReview === undefined;
   /**
    * The offers the line claims for itself (approval "inbox-one-time-dialogs"): each one's "undecided" (the person never
    * set its switch). The claim stamps `inboxReveals[id]` with the page's key and turns nothing on; its dialog's "Turn it
@@ -3940,8 +3942,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     mark_read_warning: { on: markReadWarningOn() },
     /** The list's "Show archived" (config.json `inboxShowArchived`), the same on every linked machine: off unless turned on. */
     show_archived: { on: showArchived.state().on, rev: showArchived.state().rev },
-    /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
-    ...heldSwitch("code_review", codeReviewOn()),
+    /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Shape is held (heldSwitch): absent while off. */
+    code_review: { on: codeReviewOn() },
     ...heldSwitch("shape", shapeOn()),
     /** Capabilities on the seam (inbox-capability.ts): Plans' `plans: { on: true }`, only while on and only to a window on this computer (its routes answer nowhere else). */
     ...capabilitiesWire(capabilities, capable),
@@ -4162,7 +4164,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onCapabilities = (changed?: "code_review" | "shape" | "float_drafts" | "mark_read_warning" | "scheduled_threads" | "seam") => {
           syncShapes();
           const floats = floatDraftsOn();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...(floats || changed === "float_drafts" ? { float_drafts: { on: floats } } : {}), ...(changed === "mark_read_warning" ? { mark_read_warning: { on: markReadWarningOn() } } : {}), code_review: { on: codeReviewOn() }, ...heldSwitch("shape", shapeOn(), changed === "shape"), ...systemWire(), ...chapterDiagramsWire(), ...capabilitiesFrame(capabilities, changed === "seam", via === "local" && !fromDeviceDoor.has(req)) };
           // Routines: while on, and to the save that turned them off.
           if (scheduledCap.on() || changed === "scheduled_threads") Object.assign(frame, scheduledCap.wire());
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
@@ -5836,7 +5838,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ serverSession, looked: pullLooked.mark(pullLookedSeenOf(body, Date.now())) });
       }
       // Hide a PR from Reviews, the PR board, the Inbox list and their counts, or show it again (inbox-pull-hidden.ts).
-      // `threads`: the Inbox list's Hide, every open PR of those threads not hidden yet. Kept on this machine only, never
+      // `threads`: the Inbox list's Hide, every open PR of those threads not hidden yet. `hide_repos` / `show_repos`: the
+      // board's Hide repository, every PR in it (new ones too). Kept on this machine only, never
       // sent to the forge; same guards as the list. Answers the hidden list and `hid`, the keys this write hid (Undo
       // shows exactly those). Inbox-only (Bun).
       if (path === "/api/inbox/pulls/hidden") {
@@ -5852,25 +5855,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const threadIds = [...new Set(input.threads.map((id) => store.message(id)?.thread_id ?? id))];
         const fromThreads = threadIds.flatMap((id) => [...(inPlay?.get(id)?.values() ?? [])]);
         const threadOf = input.hide.length > 0 ? pullThreadLookup() : () => null;
-        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].filter((pull, i, all) => !pullHidden.has(pull.key) && all.findIndex((other) => other.key === pull.key) === i);
+        // Hidden one by one (`atOf`): a PR in a hidden repository is hidden for itself too, so its thread can leave the list.
+        // With its head repository as the PR list knows it (a fork's): the Hidden fold's project rule.
+        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].map((pull) => ({ ...pull, head_repo: pulls.find(pull.key)?.head_repo ?? null })).filter((pull, i, all) => pullHidden.atOf(pull.key) === null && all.findIndex((other) => other.key === pull.key) === i);
         // A thread whose PRs were all hidden already (it came back, or began after they were hidden): hidden again as
         // a thread (`rehid`), newer than what brought it back. Undo (`show_threads`) takes that off; its PRs stay hidden.
         const rehid = threadIds.filter((id) => {
           const pulls = inPlay?.get(id);
-          return !!pulls && pulls.size > 0 && [...pulls.keys()].every((key) => pullHidden.has(key));
+          return !!pulls && pulls.size > 0 && [...pulls.keys()].every((key) => pullHidden.atOf(key) !== null);
         });
         // `threads_left`: the threads this write takes out of the Inbox list (the toast says so; Undo brings them back).
+        // A repository's hide never takes a thread out of the Inbox list: only PRs hidden one by one do.
         // `threads_back`: the ones it brings back (Undo, Show again): the window puts them back in place at once, as
         // its own write, never behind "N new".
         const before = threadsHiddenNow();
         const at = new Date();
-        pullHidden.change({ hide, show: input.show }, at);
+        pullHidden.change({ hide, show: input.show, hide_repos: input.hide_repos, show_repos: input.show_repos }, at);
         if (rehid.length > 0 || input.show_threads.length > 0) pullHidden.rehide({ hide: rehid, show: input.show_threads }, at);
         const after = threadsHiddenNow();
         const left = [...after].filter((id) => !before.has(id));
         const back = [...before].filter((id) => !after.has(id));
         pullHiddenChanged();
-        return json({ serverSession, hidden: hiddenList(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
+        return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -5992,7 +5998,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = farBoards.length > 0 ? mergePullBoards(own, farBoards) : own;
         if (farBoards.length > 0) settled = pullHidden.settle(board.pulls) || settled;
         if (settled) pullHiddenChanged();
-        return json({ serverSession, ...board, ...(byWindow ? { pulls: pullHidden.shown(board.pulls), hidden: hiddenList() } : {}) });
+        return json({ serverSession, ...board, ...(byWindow ? { pulls: pullHidden.shown(board.pulls), hidden: hiddenList(), hidden_repos: pullHidden.repos() } : {}) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
       // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
@@ -6048,7 +6054,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const branchesOn = branchReviewsOn();
         const farBranches = branchesOn && fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM ? machines.branchLists()() : null;
         if (farBranches) rows.push(...farBranches.rows.map(inboxFarBranchReviewRow));
-        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}), ...(byWindow ? { hidden: hiddenList() } : {}) });
+        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}), ...(byWindow ? { hidden: hiddenList(), hidden_repos: pullHidden.repos() } : {}) });
       }
       // New review's Pull request link: what a pasted link is. One read of that one PR, unless the list already has it.
       if (path === "/api/inbox/reviews/link") {
@@ -6714,7 +6720,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
         const showArchivedNow = showArchivedOn === undefined ? showArchived.state() : saveShowArchived(showArchivedOn);
-        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
+        return json({ show_archived: { on: showArchivedNow.on, rev: showArchivedNow.rev }, inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, favicon, ...reactions, ...rows, ...sidebar, diff_style: diffOptions.diff_style, diff_options: diffOptions, experimental, tour, board, steps, bro, float_drafts: floatDrafts, mark_read_warning: markReadWarning, code_review: { on: codeReview.on }, ...heldSwitch("shape", shape.on, body.shape !== undefined), ...systemAnswer, ...scheduledAnswer, ...chapterDiagrams, voice: voice.settings(via), prompts: promptsState(), cookie_host: cookieHost ?? cookieHostWire() });
       }
       // Routines (inbox-scheduled-routes.ts): the window's list, editor, Run now and Stop.
       if (path === "/api/inbox/scheduled" || path.startsWith("/api/inbox/scheduled/")) {

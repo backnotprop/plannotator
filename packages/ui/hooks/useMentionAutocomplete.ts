@@ -10,6 +10,7 @@ import {
   type MentionTrigger,
 } from '../utils/mentions';
 import { mentionAnchorOf, type MentionAnchor } from '../components/MentionPicker';
+import { replaceUndoably } from '../utils/undoableEdit';
 
 export interface MentionMenuState {
   items: readonly MentionPerson[];
@@ -221,7 +222,8 @@ export function useMentionAutocomplete(options: {
       // A picked name is no longer the one being typed: a Backspace after the pick reaches it as a deletion.
       typedStart.current = null;
       const result = applyMentionPick(text, trigger, person);
-      setText(result.text);
+      // The browser's own edit, one ⌘Z step of its own (utils/undoableEdit.ts); else written as before.
+      if (!el || !replaceUndoably(el, trigger.from, trigger.to, result.text.slice(trigger.from, result.caret))) setText(result.text);
       setCaret(result.caret);
       setTagged((prev) => (prev.some((p) => p.id === person.id) ? prev : [...prev, person]));
       setActiveIndex(null);

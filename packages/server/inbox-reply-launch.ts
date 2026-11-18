@@ -1,6 +1,6 @@
 /**
  * A reply sent to a new session in place of the one that ended (the reply box's "New Claude Code session" row):
- * `POST /api/inbox/messages/:id/reply` with `to: { launch: { agent, project_id, model?, effort? } }`, compose's shape
+ * `POST /api/inbox/messages/:id/reply` with `to: { launch: { agent, project_id, model?, effort?, primary_agent? } }`, compose's shape
  * (inbox-launch.ts `target`). It is checked and prepared before anything is written, as New message's launch is; the
  * reply then carries the launch and its placeholder `to` (`{ agent, launch:<id> }`) and takes the thread over, and the
  * agent starts only once the reply is written (`settle`). A replayed key answers the reply it wrote and starts nothing.
@@ -68,8 +68,16 @@ export function createInboxReplyLaunch(options: {
       const from = door?.from ?? null;
       const asked = (body.to as { launch: unknown }).launch;
       const value = asked && typeof asked === "object" ? (asked as Record<string, unknown>) : {};
-      // Only the agent, the project and the machine's model and effort: a reply never trusts a folder or makes one.
-      const to = { launch: { agent: value.agent, project_id: value.project_id, ...(value.model !== undefined ? { model: value.model } : {}), ...(value.effort !== undefined ? { effort: value.effort } : {}) } };
+      // Only the agent, the project and the machine's model, effort and OpenCode agent: a reply never trusts a folder or makes one.
+      const to = {
+        launch: {
+          agent: value.agent,
+          project_id: value.project_id,
+          ...(value.model !== undefined ? { model: value.model } : {}),
+          ...(value.effort !== undefined ? { effort: value.effort } : {}),
+          ...(value.primary_agent !== undefined ? { primary_agent: value.primary_agent } : {}),
+        },
+      };
       const target = options.launch.target(to);
       if (!target) throw new InboxError("launch_off", door ? LAUNCH_OFF_THERE : LAUNCH_OFF_HERE);
       return options.launch.prepare(target, { name: null, body: typeof body.words === "string" ? body.words : "", resolveProject: options.resolveProject, from });
