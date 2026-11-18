@@ -636,7 +636,7 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   expect(controlsBox.y + controlsBox.height).toBeLessThanOrEqual((await body.boundingBox())!.y);
   // The gear: code review's popover, without Whole file and Hide whitespace.
   await controls.getByRole('button', { name: 'Diff display options' }).click();
-  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds']);
+  await expect(page.locator('[data-diff-display-popup]').getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Show moved & renamed code']);
   await page.keyboard.press('Escape');
   await expect(page.locator('[data-diff-display-popup]')).toHaveCount(0);
   await expect(pane).toBeVisible();
