@@ -185,6 +185,17 @@ describe("inboxPullStacks", () => {
   });
 });
 
+test("a stack reconnects to its open parent through five merged layers", () => {
+  const parent = pr({ number: 1, head: "chain-1" });
+  const merged = Array.from({ length: 5 }, (_, i) =>
+    pr({ number: i + 2, state: "merged", head: `chain-${i + 2}`, base: `chain-${i + 1}` }),
+  );
+  const child = pr({ number: 7, head: "chain-7", base: "chain-6" });
+  const stacks = inboxPullStacks([child, ...merged.reverse(), parent]);
+  expect(stacks.map((stack) => keys(stack.layers))).toEqual([[1, 2, 3, 4, 5, 6, 7]]);
+  expect(keys(inboxPullAncestors(stacks[0]!, child.key))).toEqual([6, 5, 4, 3, 2, 1]);
+});
+
 describe("whose move", () => {
   test("each PR's move and why", () => {
     expect(inboxPullMove(pr({ number: 1, head: "a", mine: false, requested: true, author: "tomas" }), false)).toEqual({ move: "on_you", reason: "requested" });
