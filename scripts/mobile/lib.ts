@@ -22,6 +22,8 @@ export const OUT = {
   catalog: 'apps/mobile/contract/generated/swift/Tokens.xcassets/Contents.json',
   words: 'apps/mobile/contract/words/words.json',
   wordsSwift: 'apps/mobile/contract/generated/swift/Words.swift',
+  surface: 'apps/mobile/contract/parity/surface.json',
+  ledger: 'apps/mobile/contract/parity/ledger.json',
 } as const;
 
 /** The contract's number (a whole number; it rises when an app built from an older contract would misread the door). */
