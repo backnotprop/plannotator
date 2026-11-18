@@ -7,19 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		11D6EA054F777DC43DE0836D /* QuestionCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 449413D6A0FB97843156EE1D /* QuestionCard.swift */; };
 		59B32D5A7D0500B807B8DEB0 /* InboxStandIn in Frameworks */ = {isa = PBXBuildFile; productRef = 72C0A51338AA2D82D5F3BE79 /* InboxStandIn */; };
-		9376ED802DDDEEFE30EAE896 /* PlannotatorInboxApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0416C7F236697021B13D6F87 /* PlannotatorInboxApp.swift */; };
-		9A487C7183537FEF77373FBB /* FirstSliceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBB0B79ED70CBD943BB0705C /* FirstSliceTests.swift */; };
-		BFB89A3F98BE583AAD169870 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 02561335C07C425772D0A0E4 /* Theme.swift */; };
-		CBFADF5C2C2CCA08E5ECD822 /* InboxScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 685B326DBF02017C26DAAFBB /* InboxScreen.swift */; };
-		D31993D8D8F6D62589D8B977 /* PairingScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42C15E58416D67C786542494 /* PairingScreen.swift */; };
-		D38D564B854B75695772F9F9 /* PhoneWords.swift in Sources */ = {isa = PBXBuildFile; fileRef = 225D167A5E414F667A5F0419 /* PhoneWords.swift */; };
-		DA62B11D4F1B463107CE8DEB /* MessageBody.swift in Sources */ = {isa = PBXBuildFile; fileRef = 293C3DF942BC26A044D406DA /* MessageBody.swift */; };
-		E9921E9F3BCAA4286853293D /* ThreadScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF277DE8C405E8FA924D0C53 /* ThreadScreen.swift */; };
 		ECC136CB43A28A82797CB1D8 /* Tokens.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CBF3B2284232045A83451CD0 /* Tokens.xcassets */; };
 		ED3AB375310A0BAE2DAEDB48 /* InboxCore in Frameworks */ = {isa = PBXBuildFile; productRef = 657D8B55611F94C2AB78856C /* InboxCore */; };
-		F9027C0D61BCD0EF0C09C2A4 /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C1631636B49672CF7B9C5A8 /* AppModel.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,22 +23,34 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		02561335C07C425772D0A0E4 /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
-		0416C7F236697021B13D6F87 /* PlannotatorInboxApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlannotatorInboxApp.swift; sourceTree = "<group>"; };
-		225D167A5E414F667A5F0419 /* PhoneWords.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneWords.swift; sourceTree = "<group>"; };
-		293C3DF942BC26A044D406DA /* MessageBody.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MessageBody.swift; sourceTree = "<group>"; };
 		3A5587B5F75C971D6F775EB3 /* InboxCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = InboxCore; path = InboxCore; sourceTree = SOURCE_ROOT; };
-		42C15E58416D67C786542494 /* PairingScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingScreen.swift; sourceTree = "<group>"; };
-		449413D6A0FB97843156EE1D /* QuestionCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuestionCard.swift; sourceTree = "<group>"; };
-		685B326DBF02017C26DAAFBB /* InboxScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InboxScreen.swift; sourceTree = "<group>"; };
-		9C1631636B49672CF7B9C5A8 /* AppModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppModel.swift; sourceTree = "<group>"; };
-		BBB0B79ED70CBD943BB0705C /* FirstSliceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FirstSliceTests.swift; sourceTree = "<group>"; };
 		CBF3B2284232045A83451CD0 /* Tokens.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Tokens.xcassets; path = ../contract/generated/swift/Tokens.xcassets; sourceTree = "<group>"; };
-		CF277DE8C405E8FA924D0C53 /* ThreadScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreadScreen.swift; sourceTree = "<group>"; };
 		D7D02B77C209F07F462237F8 /* PlannotatorInboxUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlannotatorInboxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		DC93F1FEA4DB75ED54A1F63D /* App.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = App.xcconfig; sourceTree = "<group>"; };
 		DF31C7C23C493477CB2577F3 /* PlannotatorInbox.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PlannotatorInbox.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		314B5807E439DB1164E326EF /* UITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		F1E5676A666ED074A2B710FC /* Sources */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			explicitFileTypes = {
+			};
+			explicitFolders = (
+			);
+			name = Sources;
+			path = Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		79F37729132600D5450F7CEF /* Frameworks */ = {
@@ -63,14 +65,6 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		1C3B6EF61AEC073F83868598 /* UITests */ = {
-			isa = PBXGroup;
-			children = (
-				BBB0B79ED70CBD943BB0705C /* FirstSliceTests.swift */,
-			);
-			path = UITests;
-			sourceTree = "<group>";
-		};
 		20A2AB1CF6CE21F0F14F3D60 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
@@ -82,7 +76,7 @@
 		2F9222A57E68C56F41C7DFA5 /* App */ = {
 			isa = PBXGroup;
 			children = (
-				9AD18AA6AB2183FF9E63733C /* Sources */,
+				F1E5676A666ED074A2B710FC /* Sources */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -112,22 +106,6 @@
 			name = Contract;
 			sourceTree = "<group>";
 		};
-		9AD18AA6AB2183FF9E63733C /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				9C1631636B49672CF7B9C5A8 /* AppModel.swift */,
-				685B326DBF02017C26DAAFBB /* InboxScreen.swift */,
-				293C3DF942BC26A044D406DA /* MessageBody.swift */,
-				42C15E58416D67C786542494 /* PairingScreen.swift */,
-				225D167A5E414F667A5F0419 /* PhoneWords.swift */,
-				0416C7F236697021B13D6F87 /* PlannotatorInboxApp.swift */,
-				449413D6A0FB97843156EE1D /* QuestionCard.swift */,
-				02561335C07C425772D0A0E4 /* Theme.swift */,
-				CF277DE8C405E8FA924D0C53 /* ThreadScreen.swift */,
-			);
-			path = Sources;
-			sourceTree = "<group>";
-		};
 		CC120A57DFF37555AE148015 = {
 			isa = PBXGroup;
 			children = (
@@ -135,7 +113,7 @@
 				570D2084F597112A52D6F839 /* Config */,
 				8A8D92846FF12464DF834A29 /* Contract */,
 				20A2AB1CF6CE21F0F14F3D60 /* Packages */,
-				1C3B6EF61AEC073F83868598 /* UITests */,
+				314B5807E439DB1164E326EF /* UITests */,
 				49406BF10B532433FCA900A6 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -155,6 +133,9 @@
 			);
 			dependencies = (
 			);
+			fileSystemSynchronizedGroups = (
+				F1E5676A666ED074A2B710FC /* Sources */,
+			);
 			name = PlannotatorInbox;
 			packageProductDependencies = (
 				657D8B55611F94C2AB78856C /* InboxCore */,
@@ -169,11 +150,15 @@
 			buildConfigurationList = 29B8362DE48CDFAFF4E8234E /* Build configuration list for PBXNativeTarget "PlannotatorInboxUITests" */;
 			buildPhases = (
 				E35E562554394A5E6217DB16 /* Sources */,
+				BA6DEC1EA3E4C1E8E59AFEA4 /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				F3B88F2D452EF3366BB60A71 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				314B5807E439DB1164E326EF /* UITests */,
 			);
 			name = PlannotatorInboxUITests;
 			packageProductDependencies = (
@@ -233,6 +218,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		BA6DEC1EA3E4C1E8E59AFEA4 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -240,15 +232,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F9027C0D61BCD0EF0C09C2A4 /* AppModel.swift in Sources */,
-				CBFADF5C2C2CCA08E5ECD822 /* InboxScreen.swift in Sources */,
-				DA62B11D4F1B463107CE8DEB /* MessageBody.swift in Sources */,
-				D31993D8D8F6D62589D8B977 /* PairingScreen.swift in Sources */,
-				D38D564B854B75695772F9F9 /* PhoneWords.swift in Sources */,
-				9376ED802DDDEEFE30EAE896 /* PlannotatorInboxApp.swift in Sources */,
-				11D6EA054F777DC43DE0836D /* QuestionCard.swift in Sources */,
-				BFB89A3F98BE583AAD169870 /* Theme.swift in Sources */,
-				E9921E9F3BCAA4286853293D /* ThreadScreen.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -256,7 +239,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				9A487C7183537FEF77373FBB /* FirstSliceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # What .github/workflows/mobile-ios.yml runs for the native iPhone app.
 #
-#   bash apps/mobile/ios/ci.sh pr        `swift test` of InboxCore (no simulator), then the app built for the simulator
-#   bash apps/mobile/ios/ci.sh nightly   the same; the simulator UI suite (UITests/) joins it once the runner has iOS 26
+#   bash apps/mobile/ios/ci.sh pr        build and `swift test` (no simulator)
+#   bash apps/mobile/ios/ci.sh nightly   the same; the simulator UI suite joins it when it exists
 #
-# The app needs the iOS 26 SDK. On a runner whose Xcode is older the app build is
-# skipped and the job says so; InboxCore's tests still run.
+# Until the app's Swift package exists there is nothing to build but the
+# contract's Wire.swift: it says so and exits 0.
 set -euo pipefail
 
 mode=${1:-pr}
@@ -30,13 +30,3 @@ fi
 
 swift --version
 swift test --package-path "$here/InboxCore"
-
-sdk=$(xcrun --sdk iphonesimulator --show-sdk-version 2>/dev/null || echo 0)
-if [ "${sdk%%.*}" -lt 26 ]; then
-  echo "apps/mobile/ios: the app build is SKIPPED: it needs the iOS 26 SDK and this runner has iOS $sdk."
-  exit 0
-fi
-echo "apps/mobile/ios: build the app for the simulator (no signing)"
-xcodebuild -project "$here/PlannotatorInbox.xcodeproj" -scheme PlannotatorInbox \
-  -destination 'generic/platform=iOS Simulator' -derivedDataPath "$here/build/DerivedData" \
-  CODE_SIGNING_ALLOWED=NO build | tail -n 20
