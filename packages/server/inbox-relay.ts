@@ -52,6 +52,7 @@ import type { InboxLine } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAgentRelayApplied } from "./inbox-agent-relay-applied";
 import { AGENT_PLATFORM } from "./inbox-devices";
+import { commandTimeRefusal } from "./inbox-not-after";
 import { INBOX_PUSH_KINDS_FOR_NEW_APPS, inboxPushCollapseId, type InboxPushKind } from "@plannotator/core/inbox-push";
 import { inboxPushSummary, sizedPushEnvelope } from "./inbox-relay-push";
 
@@ -237,25 +238,7 @@ interface CommandPlaintext {
   not_after?: unknown;
 }
 
-/** How far past `not_after` a write is still applied: its time in transit and a clock a little off. */
-export const NOT_AFTER_GRACE_MS = 5_000;
-
-/**
- * Why a write is refused before the window sees it, or null to apply it: a
- * `not_after` more than `NOT_AFTER_GRACE_MS` past on this computer's clock
- * (`410 command_expired`), or one that is no time at all (`400 bad_request`).
- * Both carry `now`, the computer's time, so the phone can correct its clock's
- * offset. Used for a sealed relay command (reported applied either way) and
- * for a write sent straight to the door with `X-Plannotator-Not-After`.
- */
-export function commandTimeRefusal(notAfter: unknown, now: number): { status: number; body: { error: string; code: string; now: string } } | null {
-  if (notAfter === undefined || notAfter === null) return null;
-  const at = typeof notAfter === "string" ? Date.parse(notAfter) : Number.NaN;
-  const said = new Date(now).toISOString();
-  if (!Number.isFinite(at)) return { status: 400, body: { error: "not_after: an ISO time.", code: "bad_request", now: said } };
-  if (now > at + NOT_AFTER_GRACE_MS) return { status: 410, body: { error: "This command reached the computer too late and was not applied.", code: "command_expired", now: said } };
-  return null;
-}
+export { commandTimeRefusal, NOT_AFTER_GRACE_MS } from "./inbox-not-after";
 
 /** A Live Activity update (relay 1.1): counts only, never a name or a word. */
 export interface InboxLiveCounts {
