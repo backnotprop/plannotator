@@ -14,6 +14,7 @@ import { useAgentListFilter } from '../agentsList';
 import { filterAgentRows } from '../agents/model';
 import { filterTagRows } from '../threadTags';
 import { withLiveTagPicks } from '../listFilterTags';
+import { useRoutineThreads } from '../listFilterRoutines';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
@@ -103,12 +104,17 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const listFilterDay = localDay(Date.now());
   // Until the list is read its tags are not known: the Tag picks hold (no moment of unfiltered rows).
   const listTags = latest ? tags.listTags : undefined;
-  const listFilterApplied = useMemo(() => withLiveTagPicks(appliedFilter(listFilterPicks, listFilterScoped, filterTag !== null), listTags), [listFilterPicks, listFilterScoped, filterTag, listTags]);
+  // Routines (listFilterRoutines.ts): which rows are a routine's thread; null while Routines are off or not read, when the Routine picks step aside.
+  const isRoutine = useRoutineThreads();
+  const listFilterApplied = useMemo(
+    () => withLiveTagPicks(appliedFilter(listFilterPicks, listFilterScoped, filterTag !== null, isRoutine !== null), listTags),
+    [listFilterPicks, listFilterScoped, filterTag, listTags, isRoutine],
+  );
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, tagsOfRow),
+    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, tagsOfRow, isRoutine ?? undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay, heldRead, tagsOfRow],
+    [filterList, listFilterApplied, listFilterDay, heldRead, tagsOfRow, isRoutine],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {

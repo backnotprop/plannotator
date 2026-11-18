@@ -7,7 +7,8 @@
  *   colour and a small count in its corner (`CountBadge`, the PRs button's size): one per ticked row. No tokens, no line over the list: what is picked is read in the menu.
  * - The menu (Base UI's: arrows, Home/End, type-ahead, Escape and Tab close, focus back to the funnel): Not seen (one
  *   row: only the rows drawn bold), Updated (Today, Last 7 days, Last 30 days, Custom range…), Agent (several; only
- *   with two agents or more), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
+ *   with two agents or more), Routine (Routine threads, Other threads; only while Routines are on and a routine's thread
+ *   is in the list), Pull request (Open, Draft, Merged, Closed, Has a PR, No PR, several; only once a thread in the list has a PR), Tag (several, each
  *   with the `#` mark; only once a tag holds a thread in the list, never on a tag's own list), then Project last, since the
  *   sidebar already narrows by project (each project, several; only on the Inbox page and with two projects or
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
@@ -29,14 +30,17 @@ import { TagIcon } from './InitiativePeek';
 import { CountBadge } from './CountBadge';
 import { useThreadTags } from '../threadTags';
 import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
+import { useRoutineThreads } from '../listFilterRoutines';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
+  ROUTINE_OPTIONS,
   UPDATED_OPTIONS,
   rowNotSeen,
   rowPullMatches,
   rowPullStates,
   type PullPick,
+  type RoutinePick,
   agentHost,
   appliedFilter,
   countWhere,
@@ -106,8 +110,12 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   // Tags (approval "inbox-thread-tags", step 2): the window's, read with the rows' own rule (`rowTags`).
   const host = useThreadTags();
   const tagScoped = !!host?.listed;
-  const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped), host?.tags ?? null);
+  // Routines: null while they are off or not read, when the Routine picks step aside and no group is offered.
+  const isRoutine = useRoutineThreads();
+  const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped, isRoutine !== null), host?.tags ?? null);
   const tagsOf = host?.rowTags;
+  const routineTest = isRoutine ?? undefined;
+  const countOf = (group: Parameters<typeof countWhere>[3], test: (row: InboxListRow) => boolean) => countWhere(rows, filter, now, group, test, tagsOf, routineTest);
   const [open, setOpen] = useState(false);
   const [rangeOpen, setRangeOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -144,6 +152,8 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
 
   // Offered once a thread here has a PR, and while a pick of it is remembered (so it can be unticked).
   const pulls = source.filter.pulls.length > 0 || rows.some((row) => rowPullStates(row).length > 0);
+  // Offered while Routines are on, once a routine's thread is in the list, and while a pick of it is remembered.
+  const routines = isRoutine !== null && (source.filter.routines.length > 0 || rows.some(isRoutine));
   const tagGroup = tags.length > 0 && (
     <Menu.Group data-list-filter-group="tags">
       <Menu.GroupLabel className="ib-pm-glabel">Tag</Menu.GroupLabel>
@@ -152,7 +162,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
           key={tag.id}
           label={tag.name}
           on={filter.tags.includes(tag.id)}
-          count={countWhere(rows, filter, now, 'tags', (row) => (tagsOf ? tagsOf(row) : (row.tags ?? [])).includes(tag.id), tagsOf)}
+          count={countOf('tags', (row) => (tagsOf ? tagsOf(row) : (row.tags ?? [])).includes(tag.id))}
           onToggle={() => set({ tags: toggledTagPick(source.filter.tags, tag, host?.tags ?? []) })}
           mark={<TagIcon className="ib-ic" />}
           data={{ 'data-list-filter-tag': tag.id }}
@@ -168,7 +178,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
           key={p.id}
           label={p.name}
           on={filter.projects.includes(p.id)}
-          count={countWhere(rows, filter, now, 'projects', (row) => row.project.id === p.id, tagsOf)}
+          count={countOf('projects', (row) => row.project.id === p.id)}
           onToggle={() => set({ projects: toggled(source.filter.projects, p.id) })}
           mark={<Icon name="folder" />}
           data={{ 'data-list-filter-project': p.id }}
@@ -199,7 +209,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
               <CheckRow
                 label="Not seen"
                 on={filter.notSeen}
-                count={countWhere(rows, filter, now, 'notSeen', rowNotSeen, tagsOf)}
+                count={countOf('notSeen', rowNotSeen)}
                 onToggle={() => set({ notSeen: !source.filter.notSeen })}
                 mark={<Icon name="envelope" />}
                 data={{ 'data-list-filter-not-seen': '' }}
@@ -212,7 +222,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                     key={o.value}
                     label={o.label}
                     on={filter.updated === o.value}
-                    count={countWhere(rows, filter, now, 'updated', inSpan(o.value, now), tagsOf)}
+                    count={countOf('updated', inSpan(o.value, now))}
                     onToggle={() => set({ updated: filter.updated === o.value ? null : o.value })}
                     mark={<Icon name="clock" />}
                     data={{ 'data-list-filter-updated': o.value }}
@@ -230,7 +240,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                 >
                   <Icon name="clock" />
                   <span className="ib-pmi-l">{custom ? rangeWords(custom) : 'Custom range…'}</span>
-                  {custom && <span className="ib-pmi-n">{formatCount(countWhere(rows, filter, now, 'updated', inSpan(custom, now), tagsOf))}</span>}
+                  {custom && <span className="ib-pmi-n">{formatCount(countOf('updated', inSpan(custom, now)))}</span>}
                   {tick(custom !== null)}
                 </Menu.Item>
               </Menu.Group>
@@ -244,7 +254,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                         key={a.name}
                         label={a.name}
                         on={filter.agents.includes(a.name)}
-                        count={countWhere(rows, filter, now, 'agents', (row) => rowAgentNames(row).includes(a.name), tagsOf)}
+                        count={countOf('agents', (row) => rowAgentNames(row).includes(a.name))}
                         onToggle={() => set({ agents: toggled(source.filter.agents, a.name) })}
                         mark={
                           <span className="ib-lflt-host" aria-hidden="true">
@@ -252,6 +262,25 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                           </span>
                         }
                         data={{ 'data-list-filter-agent': a.name }}
+                      />
+                    ))}
+                  </Menu.Group>
+                </>
+              )}
+              {routines && (
+                <>
+                  <Menu.Separator className="ib-pm-sep" />
+                  <Menu.Group data-list-filter-group="routines">
+                    <Menu.GroupLabel className="ib-pm-glabel">Routine</Menu.GroupLabel>
+                    {ROUTINE_OPTIONS.map((o) => (
+                      <CheckRow
+                        key={o.value}
+                        label={o.label}
+                        on={filter.routines.includes(o.value)}
+                        count={countOf('routines', (row) => !!isRoutine?.(row) === (o.value === 'routine'))}
+                        onToggle={() => set({ routines: toggled(source.filter.routines, o.value) as RoutinePick[] })}
+                        mark={<Icon name={o.value === 'routine' ? 'scheduled' : 'minus'} />}
+                        data={{ 'data-list-filter-routine': o.value }}
                       />
                     ))}
                   </Menu.Group>
@@ -267,7 +296,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                         key={o.value}
                         label={o.label}
                         on={filter.pulls.includes(o.value)}
-                        count={countWhere(rows, filter, now, 'pulls', (row) => rowPullMatches(row, o.value), tagsOf)}
+                        count={countOf('pulls', (row) => rowPullMatches(row, o.value))}
                         onToggle={() => set({ pulls: toggled(source.filter.pulls, o.value) as PullPick[] })}
                         mark={o.value === 'none' ? <Icon name="minus" /> : <RefMarkIcon kind="pr" state={o.value === 'any' ? 'unknown' : o.value} size={16} />}
                         data={{ 'data-list-filter-pull': o.value }}

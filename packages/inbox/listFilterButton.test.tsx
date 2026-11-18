@@ -8,7 +8,9 @@
  * leaves a pick, the cookie, or focus nowhere; the empty words drawn in the header; a project's page that offers the
  * Project group or counts its picks; a reload that forgets the picks; a menu that puts Project anywhere but last (the
  * sidebar already narrows by project), or a Pull request group that does not narrow by the row's PR; a Not seen row
- * that is not first or does not narrow by the row's bold.
+ * that is not first or does not narrow by the row's bold; a Routine group offered while Routines are off (or with no
+ * routine's thread in the list), a remembered Routine pick that filters or counts while they are off, or Routine
+ * threads and Other threads that do not narrow by the routine's thread.
  *
  * The harness wires the list as App.tsx does (filter the sections, hand the list the rows before the filter).
  *
@@ -20,12 +22,15 @@ import { join } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
+import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 
 const hasDom = typeof document !== 'undefined';
 const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as typeof import('./components/InboxList');
 const { ListFilterEmpty, clearedFrom } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { LIST_FILTER_COOKIE, appliedFilter, filterListSections, pickCount, resetListFilterForTests, useListFilter } = await import('./listFilter');
+const { useRoutineThreads } = await import('./listFilterRoutines');
+const { resetScheduledForTests } = await import('./scheduled/store');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const stored = new Map<string, string>();
@@ -38,6 +43,7 @@ beforeEach(() => {
   stored.clear();
   setStorageBackend({ getItem: (k) => stored.get(k) ?? null, setItem: (k, v) => void stored.set(k, v), removeItem: (k) => void stored.delete(k) });
   resetListFilterForTests();
+  resetScheduledForTests();
 });
 
 afterEach(() => {
@@ -46,6 +52,7 @@ afterEach(() => {
   list = LIST;
   resetStorageBackend();
   resetListFilterForTests();
+  resetScheduledForTests();
   if (!hasDom) return;
   host?.remove();
   sheet?.remove();
@@ -93,15 +100,19 @@ const LIST = sections({
   new: [row('n-web', 'web', 3, 'codex', 'new', 'open'), row('n-docs-old', 'docs', 24 * 40, 'claude-code', 'new')],
 });
 
+/** One of this computer's routines, running in `thread` (null: not run yet). */
+const routine = (thread: string | null) => ({ id: `sch_${thread}`, name: `Routine ${thread}`, thread_id: thread, state: 'off', last_run: null, last_change: null }) as unknown as InboxScheduledRow;
+
 /** The list the harness draws: LIST unless a test swaps it. */
 let list = LIST;
 
 /** App.tsx's wiring: the picks from this browser, the sections filtered, the rows before the filter for the menu. */
 function Harness({ scoped }: { scoped: boolean }) {
   const [picks, setPicks] = useListFilter();
-  const applied = appliedFilter(picks, scoped);
+  const isRoutine = useRoutineThreads();
+  const applied = appliedFilter(picks, scoped, false, isRoutine !== null);
   const base = scoped ? list.map((s) => ({ ...s, threads: s.threads.filter((r) => r.project.id === 'prj_web') })) : list;
-  const shown = filterListSections(base, applied, Date.now());
+  const shown = filterListSections(base, applied, Date.now(), undefined, undefined, isRoutine ?? undefined);
   const none = pickCount(applied) > 0 && shown.every((s) => s.threads.length === 0);
   return (
     <InboxList
@@ -272,7 +283,7 @@ describe.skipIf(!hasDom)('the funnel', () => {
     await press(funnel());
     expect($('[data-list-filter-project]')).toBeNull();
     await click($('[data-list-filter-clear]')!);
-    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [], pulls: [], notSeen: false, tags: [] });
+    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!)).toEqual({ projects: ['prj_billing'], updated: null, agents: [], pulls: [], notSeen: false, tags: [], routines: [] });
   });
 
   test('the menu: Not seen, Updated, Agent, Pull request, then Project last; a Pull request pick narrows by the row\'s PR', async () => {
@@ -323,6 +334,47 @@ describe.skipIf(!hasDom)('the funnel', () => {
     await click($('[data-list-filter-pull="open"]')!);
     expect(rowIds(el)).toEqual(['w-billing', 'w-web', 'n-web', 'n-docs-old']);
     expect(badge()).toBeNull();
+  });
+
+  test('Routines on: a Routine group after Agent; Routine threads keeps the routine\'s thread, Other threads hides it, each counted', async () => {
+    resetScheduledForTests([routine('n-web')]);
+    const el = render();
+    await press(funnel());
+    const groups = [...document.querySelectorAll('[data-list-filter-menu] [data-list-filter-group]')].map((n) => n.getAttribute('data-list-filter-group'));
+    expect(groups).toEqual(['updated', 'agents', 'routines', 'pulls']);
+    expect([...document.querySelectorAll('[data-list-filter-routine]')].map((n) => n.textContent)).toEqual(['Routine threads1', 'Other threads3']);
+    await click($('[data-list-filter-routine="routine"]')!);
+    expect(rowIds(el)).toEqual(['n-web']);
+    expect(bands(el)).toEqual(['new']);
+    expect(badge()).toBe('1');
+    expect(JSON.parse(stored.get(LIST_FILTER_COOKIE)!).routines).toEqual(['routine']);
+    await click($('[data-list-filter-routine="routine"]')!);
+    await click($('[data-list-filter-routine="other"]')!);
+    expect(rowIds(el)).toEqual(['w-billing', 'w-web', 'n-docs-old']);
+    // Another group's pick moves the Routine rows' counts.
+    await click($('[data-list-filter-agent="Codex"]')!);
+    expect([...document.querySelectorAll('[data-list-filter-routine]')].map((n) => n.textContent)).toEqual(['Routine threads1', 'Other threads1']);
+    expect(rowIds(el)).toEqual(['w-web']);
+  });
+
+  test('Routines off: no Routine group, and a remembered Routine pick neither filters nor counts until they are on', async () => {
+    stored.set(LIST_FILTER_COOKIE, JSON.stringify({ routines: ['routine'] }));
+    const el = render();
+    expect(rowIds(el)).toEqual(['w-billing', 'w-web', 'n-web', 'n-docs-old']);
+    expect(badge()).toBeNull();
+    await press(funnel());
+    expect($('[data-list-filter-group="routines"]')).toBeNull();
+    resetScheduledForTests([routine('n-web')]);
+    const on = rerender();
+    expect(rowIds(on)).toEqual(['n-web']);
+    expect(badge()).toBe('1');
+  });
+
+  test('Routines on with no routine\'s thread in the list: no Routine group', async () => {
+    resetScheduledForTests([routine(null), routine('elsewhere')]);
+    render();
+    await press(funnel());
+    expect($('[data-list-filter-group="routines"]')).toBeNull();
   });
 
   test('a reload keeps the picks (this browser\'s cookie)', async () => {
