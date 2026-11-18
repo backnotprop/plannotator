@@ -70,8 +70,13 @@ export async function reviewOf(name: string, base: Record<string, string>, head:
   return { url, close };
 }
 
-export async function openReview(browser: Browser, url: string, prepare: (page: import('@playwright/test').Page) => Promise<void> = async () => {}) {
-  const context = await browser.newContext({ viewport: { width: 1280, height: 900 }, reducedMotion: 'reduce' });
+export async function openReview(
+  browser: Browser,
+  url: string,
+  prepare: (page: import('@playwright/test').Page) => Promise<void> = async () => {},
+  options: import('@playwright/test').BrowserContextOptions = { viewport: { width: 1280, height: 900 } },
+) {
+  const context = await browser.newContext({ reducedMotion: 'reduce', ...options });
   const seen = [
     ['plannotator-plan-look-choice-resolved', 'true'],
     ['plannotator-edit-mode-announcement-seen', '3'],
