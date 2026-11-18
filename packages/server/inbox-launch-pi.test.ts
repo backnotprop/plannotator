@@ -194,12 +194,12 @@ describe("Pi's launch host, against the fake pi", () => {
     const made = await host.rexCommand!(launch, { name: "Tidy the readme", login: env, resume: false });
     if (!made.ok) throw new Error("no command");
     expect(made.ref).toBe(made.session);
-    expect(made.command).not.toContain("readme");
     expect(fake.starts()).toEqual([]);
     runTerminal(made.command);
     await until("the tab's pi to start", () => fake.terminals().length === 1, 4_000);
     const [call] = fake.terminals();
-    expect(call!.argv).toEqual(["--session-id", made.session]);
+    // Named for its thread, as a background start is: without it Pi names the session itself, and the list's row reads that name.
+    expect(call!.argv).toEqual(["--session-id", made.session, "--name", "Tidy the readme"]);
     expect(call!.cwd).toBe(folder);
     expect(call!.inboxTool).toBe("1");
     expect(call!.dataDir).toBe(dataDir);

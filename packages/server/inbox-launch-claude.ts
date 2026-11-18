@@ -774,6 +774,8 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
       const args = [
         input.resume ? "--resume" : "--session-id",
         session,
+        // Named for its thread, as a background start is (`--bg --name`); a session started again keeps the name it has.
+        ...(input.resume ? [] : ["--name", input.name.replace(/^-+/, "").trim() || "Inbox"]),
         "--settings",
         settingsPath,
         ...launchChoiceArgs(CLAUDE, { model: launch.model, effort: launch.effort }),

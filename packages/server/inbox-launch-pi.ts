@@ -797,7 +797,8 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       const dataDir = dataDirArg();
       const choice = launchChoiceArgs(PI, { model: launch.model, effort: launch.effort });
       const env = ["PLANNOTATOR_INBOX_TOOL=1", ...(dataDir ? [`PLANNOTATOR_DATA_DIR=${dataDir}`] : [])];
-      const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, ...choice].map(shellQuote).join(" ")}`;
+      // Named for its thread, as a background start is (`piArgv`): without it Pi names the session itself, and the list's row reads that name.
+      const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, "--name", input.name.trim() || "Inbox", ...choice].map(shellQuote).join(" ")}`;
       return { ok: true as const, session, ref: session, command };
     },
 

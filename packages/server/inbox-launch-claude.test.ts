@@ -435,8 +435,13 @@ describe("Claude Code as a launch host", () => {
     expect(made.session).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     expect(made.ref).toBe(made.session);
     const settings = join(w.dataDir, "inbox", "launch", "lch_1", "settings.json");
-    expect(made.command).toBe(`cd '${w.root}' && exec claude '--session-id' '${made.session}' '--settings' '${settings}'`);
-    expect(made.command).not.toContain("changelog");
+    // Named for its thread, as a background start is (`--bg --name`): the list's row and Claude's own title read it.
+    expect(made.command).toBe(`cd '${w.root}' && exec claude '--session-id' '${made.session}' '--name' 'Tidy the changelog' '--settings' '${settings}'`);
+    // A name that would read as a flag, or none: never a flag, never empty.
+    const dashed = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "--print it's", login: w.login, resume: false });
+    expect(dashed.ok && dashed.command).toContain(String.raw`'--name' 'print it'\''s' '--settings'`);
+    const unnamed = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "  ", login: w.login, resume: false });
+    expect(unnamed.ok && unnamed.command).toContain("'--name' 'Inbox'");
     // The same settings file as a background start (its permission hook brings prompts to the Inbox too).
     expect(JSON.parse(readFileSync(settings, "utf8")).env.PATH).toBe(w.login.PATH);
     // Nothing was run: Rex runs it.
@@ -444,6 +449,8 @@ describe("Claude Code as a launch host", () => {
     // A reply to it once it ended: the same session again.
     const again = await w.host.rexCommand!({ ...w.launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: w.login, resume: true });
     expect(again.ok && again.command).toContain(`'--resume' '${made.session}'`);
+    // Started again, it keeps the name it has (the person may have renamed it).
+    expect(again.ok && again.command).not.toContain("--name");
     expect(again.ok && again.command).toContain("'--permission-mode' 'auto'");
   });
 
