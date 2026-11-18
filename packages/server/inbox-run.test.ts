@@ -168,8 +168,12 @@ describe.if(posix)("a run", () => {
     await until(() => first.view().lines.length === 1);
     const pid = Number(first.view().lines[0]);
     // A kill -9 of the Inbox: nothing ends the run's record. (The test still ends the process it left.)
+    // The journal as the dead Inbox left it (this test's first Inbox lives on, and would write the run's end).
+    const left = memoryRunJournal(journal.records);
     process.kill(-pid, "SIGKILL");
-    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: (p, at, seen) => lostRunStillRunning(p, at, process.platform, undefined, seen) });
+    // Until its processes are reaped the group is still there (its killed leader a zombie): wait for it to go.
+    await until(() => gone(pid), 4_000);
+    const again = createInboxRuns({ messageAlive: () => true, journal: left, stillRunning: (p, at, seen) => lostRunStillRunning(p, at, process.platform, undefined, seen) });
     const lost: string[] = [];
     await again.recover((record) => lost.push(`${record.message_id}/${record.key}/${record.title}`));
     await again.recover((record) => lost.push(record.key));
