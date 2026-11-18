@@ -22,7 +22,7 @@
  */
 
 import { sameCommit, type InboxBranchReportRow } from "./inbox-branch-reports";
-import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHidden, type InboxRepoHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
 /** Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them. */
@@ -386,6 +386,10 @@ export interface InboxReviewsAnswer {
   branch_reviews?: true;
   /** A linked machine's reported branches are still being read: the window asks again soon. */
   branches_pending?: true;
+  /** The PRs the person hid (as `InboxPullsAnswer.hidden`): left out of `rows`. Absent from an older Inbox. */
+  hidden?: InboxPullHidden[];
+  /** The repositories hidden (every PR in them left out): Hidden lists them too. Absent from an older Inbox. */
+  hidden_repos?: InboxRepoHidden[];
 }
 
 /**
@@ -618,10 +622,12 @@ export function inboxReviewRows(input: {
     for (const stack of stacks) attached.add(stack.id);
     // A reported branch with no review yet waits on the person: they start the review (the owner, 2026-11-16).
     const reported = !review && input.started?.get(threadId)?.kind === "branch";
+    // A thread started from the PR's page asked for no review: nobody is curating, so the PR stays where its own state puts it.
+    const talk = !review && own?.link.via === "owner" && own.link.ask === "thread" && stacks[0] ? inboxReviewPullMove(stacks[0], input.posted) : null;
     rows.push({
       id: threadId,
       reviewed: true,
-      ...(reported ? { move: "on_you" as const, reason: "branch_ready" as const } : inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at))),
+      ...(reported ? { move: "on_you" as const, reason: "branch_ready" as const } : (talk ?? inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)))),
       thread_id: threadId,
       review,
       stacks,

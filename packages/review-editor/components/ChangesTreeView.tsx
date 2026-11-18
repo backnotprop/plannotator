@@ -19,7 +19,15 @@ export interface ChangesTreeGroup {
 
 export interface ChangesTreeHandle {
   setAllFoldersExpanded: (expanded: boolean) => void;
+  focus: () => void;
 }
+
+export interface ChangesTreeExtraFile {
+  file: DiffFile;
+  index: number;
+}
+
+export type ChangesTreePick = { via: 'focus' };
 
 interface ChangesTreeViewProps extends FileRowState {
   touch?: boolean;
@@ -30,13 +38,15 @@ interface ChangesTreeViewProps extends FileRowState {
   hiddenFiles: ReadonlySet<string>;
   hideViewedFiles: boolean;
   repoRoot?: string | null;
-  onSelectFile: (index: number) => void;
+  onSelectFile: (index: number, how?: ChangesTreePick) => void;
+  extraFiles?: readonly ChangesTreeExtraFile[];
   onDoubleClickFile?: (index: number) => void;
   handleRef?: React.Ref<ChangesTreeHandle>;
   grouping?: string;
 }
 
 const NO_PATHS: ReadonlySet<string> = new Set();
+const NO_EXTRA: readonly ChangesTreeExtraFile[] = [];
 
 function expandAll(model: { getItem: (path: string) => unknown }, dirs: readonly string[]) {
   for (const dir of dirs) {
@@ -60,7 +70,7 @@ interface Layout {
   groupDirs: Map<string, string>;
 }
 
-function layoutTree(tree: FileTreeNode[], groups: ChangesTreeGroup[] | null, hidden: ReadonlySet<string>, activePath: string | null): Layout {
+function layoutTree(tree: FileTreeNode[], groups: ChangesTreeGroup[] | null, hidden: ReadonlySet<string>, activePath: string | null, extra: readonly ChangesTreeExtraFile[]): Layout {
   const out: Layout = { paths: [], dirs: [], entries: new Map(), treePathOf: new Map(), folderPathOf: new Map(), groupDirs: new Map() };
   const visible = (node: FileTreeNode): boolean =>
     node.type === 'file' ? !hidden.has(node.path) || node.path === activePath : (node.children ?? []).some(visible);
@@ -95,6 +105,16 @@ function layoutTree(tree: FileTreeNode[], groups: ChangesTreeGroup[] | null, hid
   } else {
     walk(tree, '');
   }
+  const taken = new Set(out.paths.map((path) => path.replace(/\/$/, '')));
+  for (const { file, index } of extra) {
+    if (hidden.has(file.path) && file.path !== activePath) continue;
+    let path = file.path.split('/').join(CHAIN_JOIN);
+    while (taken.has(path)) path += '\u200b';
+    taken.add(path);
+    out.paths.push(path);
+    out.entries.set(path, { kind: 'file', file, index });
+    if (!out.treePathOf.has(file.path)) out.treePathOf.set(file.path, path);
+  }
   return out;
 }
 
@@ -111,12 +131,13 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     markdownPreviewedPaths,
     showViewedControls,
     handleRef,
+    extraFiles = NO_EXTRA,
   } = props;
 
   const pinnedPath = hideViewedFiles && activePath && hiddenFiles.has(activePath) ? activePath : null;
   const layout = useMemo(
-    () => layoutTree(tree, groups, hideViewedFiles ? hiddenFiles : NO_PATHS, pinnedPath),
-    [tree, groups, hideViewedFiles, hiddenFiles, pinnedPath],
+    () => layoutTree(tree, groups, hideViewedFiles ? hiddenFiles : NO_PATHS, pinnedPath, extraFiles),
+    [tree, groups, hideViewedFiles, hiddenFiles, pinnedPath, extraFiles],
   );
 
   const orderRef = useRef(new Map<string, number>());
@@ -126,6 +147,14 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
 
   const live = useRef({ props, layout });
   live.current = { props, layout };
+  const justPicked = useRef<string | null>(null);
+  const pick = (entry: { file: DiffFile; index: number }) => {
+    justPicked.current = entry.file.path;
+    setTimeout(() => {
+      if (justPicked.current === entry.file.path) justPicked.current = null;
+    }, 0);
+    live.current.props.onSelectFile(entry.index);
+  };
 
   const renderParts = useCallback((context: FileTreeRowDecorationContext): FileTreeRowParts | null => rowParts(context), []);
 
@@ -181,7 +210,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       const last = selected[selected.length - 1];
       const entry = last ? l.entries.get(last) : undefined;
       if (entry?.kind === 'file') {
-        if (entry.file.path !== p.activePath) p.onSelectFile(entry.index);
+        if (entry.file.path !== p.activePath) pick(entry);
         return;
       }
       queueMicrotask(() => syncSelection());
@@ -196,7 +225,7 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       onActivate: ({ path }) => {
         const { props: p, layout: l } = live.current;
         const entry = l.entries.get(path);
-        if (entry?.kind === 'file' && entry.file.path === p.activePath) p.onSelectFile(entry.index);
+        if (entry?.kind === 'file' && entry.file.path === p.activePath) pick(entry);
       },
     },
   });
@@ -278,17 +307,18 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
     const focused = model.getFocusedPath();
     const { props: p, layout: l } = live.current;
     const entry = focused ? l.entries.get(focused) : undefined;
-    if (entry?.kind === 'file' && entry.file.path !== p.activePath) p.onSelectFile(entry.index);
+    if (entry?.kind === 'file' && entry.file.path !== p.activePath && entry.file.path !== justPicked.current) p.onSelectFile(entry.index, { via: 'focus' });
   }, [model]);
   const searchKeys = useTreeSearchKeys(model);
 
+  const focusing = useRef(false);
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
     return model.subscribe(() => {
       const focused = model.getFocusedPath();
       if (focused === lastFocused) return;
       lastFocused = focused;
-      if (!model.getFileTreeContainer()?.shadowRoot?.activeElement || searchKeys.quiet()) return;
+      if (focusing.current || !model.getFileTreeContainer()?.shadowRoot?.activeElement || searchKeys.quiet()) return;
       openFocused();
     });
   }, [model, openFocused, searchKeys]);
@@ -301,6 +331,25 @@ export const ChangesTreeView: React.FC<ChangesTreeViewProps> = (props) => {
       expandAll(model, keep);
       model.setGitStatus(gitStatus);
       syncSelection();
+    },
+    focus: () => {
+      const { props: p, layout: l } = live.current;
+      const target = (p.activePath ? l.treePathOf.get(p.activePath) : undefined) ?? l.paths[0];
+      if (!target) return;
+      focusing.current = true;
+      for (const dir of ancestorsOf(target)) (model.getItem(dir) as { expand?: () => void } | null)?.expand?.();
+      model.scrollToPath(target, { focus: true, offset: 'nearest' });
+      const land = (tries: number) => {
+        const rows = model.getFileTreeContainer()?.shadowRoot?.querySelectorAll<HTMLElement>('[data-item-path]') ?? [];
+        const row = [...rows].find((r) => r.dataset.itemPath === target);
+        if (!row && tries > 0 && typeof requestAnimationFrame !== 'undefined') {
+          requestAnimationFrame(() => land(tries - 1));
+          return;
+        }
+        row?.focus({ preventScroll: true });
+        setTimeout(() => { focusing.current = false; }, 0);
+      };
+      land(4);
     },
   }), [model, gitStatus, syncSelection]);
 

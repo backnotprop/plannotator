@@ -230,11 +230,13 @@ async function scanHandle(handle: FileHandle, sink?: (chunk: Buffer) => Promise<
   return { sha256: hash.digest("hex"), size, head: Buffer.concat(headParts), text };
 }
 
-/** A file's sha256, size, first bytes and whether it is UTF-8 text with no NUL (one async pass, never whole in memory). */
-export async function scanInboxFile(path: string): Promise<{ sha256: string; size: number; head: Buffer; text: boolean }> {
+/** Scan a file in chunks, then seek for any media metadata outside its first bytes. */
+export async function scanInboxFile(path: string): Promise<Scan & { video: InboxVideoMetadata | null }> {
   const handle = await open(path, OPEN_FLAGS);
   try {
-    return await scanHandle(handle);
+    const scan = await scanHandle(handle);
+    const video = await readInboxVideoMetadata(handle, scan.size, scan.head);
+    return { ...scan, video };
   } finally {
     await handle.close().catch(() => {});
   }

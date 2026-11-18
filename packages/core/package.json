@@ -52,6 +52,8 @@
     "./markdown-structure": "./markdown-structure.ts",
     "./html-anchor": "./html-anchor.ts",
     "./inbox-types": "./inbox-types.ts",
+    "./inbox-wire-models": "./inbox-wire-models.ts",
+    "./inbox-answers": "./inbox-answers.ts",
     "./inbox-cloud": "./inbox-cloud.ts",
     "./inbox-personal-agents": "./inbox-personal-agents.ts",
     "./inbox-hermes": "./inbox-hermes.ts",

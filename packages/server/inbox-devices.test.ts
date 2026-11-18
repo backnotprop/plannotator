@@ -973,9 +973,11 @@ describe("the device door, in process", () => {
       const crashed = await startInboxServer({ dataDir, binaryPath: null, phones: true, tailscale });
       const deadDoor = serve.get(8443)!;
       const record = readFileSync(recordFile, "utf8");
-      expect(JSON.parse(record)).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: true });
+      // `made` keeps every target the Inbox pointed the mapping at, the newest last, through take-downs.
+      expect(JSON.parse(record)).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: true, made: expect.arrayContaining([deadDoor]) });
+      expect(JSON.parse(record).made.at(-1)).toBe(deadDoor);
       crashed.stop();
-      expect(readRecord()).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: false });
+      expect(readRecord()).toEqual({ v: 1, https_port: 8443, target: deadDoor, published: false, made: JSON.parse(record).made });
       // After a crash (kill -9) both stay: the mapping still points at the dead run's door listener.
       serve.set(8443, deadDoor);
       writeFileSync(recordFile, record);

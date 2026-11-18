@@ -28,7 +28,7 @@
  * `claude` first on PATH (tests/helpers/fake-claude/).
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import { chmodSync, closeSync, existsSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { inboxLaunchFullPermissions } from "@plannotator/core/inbox-permission";
@@ -754,6 +754,35 @@ export function createClaudeLaunchHost(ctx: LaunchHostContext) {
         ctx.log(`Inbox launch ${launch.id}: auto mode refused (${result.modeRefused}); started in default mode`);
       }
       return result.ok ? { ok: true as const, session: result.session, ref: result.short } : { ok: false as const, code: result.missing ? ("missing" as const) : result.code, text: result.text };
+    },
+
+    /**
+     * Start in Rex: interactive `claude` in the folder, as the session id the Inbox picks now (`--session-id`), or
+     * the same session again (`--resume`), with the same settings file and flags as `--bg` (so its permission
+     * prompts come to the Inbox's card as well as its own dialog in the tab). The plugin connects it at its start,
+     * as that id, and takes the root as its first turn: the message is never on the command line.
+     */
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
+      const person = personSettings();
+      if (person && !person.ok) {
+        ctx.startLog(launch.id, person.text);
+        return { ok: false as const, code: "failed" as const, text: person.text };
+      }
+      const settingsPath = writeSettings(launch, input.login, person?.settings ?? null);
+      const session = input.resume && launch.session ? launch.session : randomUUID();
+      const mode = modeOf(launch);
+      const args = [
+        input.resume ? "--resume" : "--session-id",
+        session,
+        "--settings",
+        settingsPath,
+        ...launchChoiceArgs(CLAUDE, { model: launch.model, effort: launch.effort }),
+        ...(launch.bypass_available === true ? ["--allow-dangerously-skip-permissions"] : []),
+        ...(mode ? ["--permission-mode", mode] : []),
+      ];
+      const command = `cd ${shellQuote(launch.folder)} && exec claude ${args.map(shellQuote).join(" ")}`;
+      ctx.startLog(launch.id, `rex: ${command}`);
+      return { ok: true as const, session, ref: session, command };
     },
 
     /** `claude agents --json --all`: a session by its short id, or the one whose full id it prefixes. */

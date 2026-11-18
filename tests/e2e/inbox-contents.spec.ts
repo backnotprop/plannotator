@@ -260,7 +260,8 @@ test('side by side at 1440: Hide then Show, focus following each; reloaded with 
 });
 
 test('side by side at 1440: a file without a rail keeps today\'s column', async ({ browser }) => {
-  const short = '# Refund worker plan\n\nMove refunds to a background worker.\n\n## Context\n\nInline today.\n\n## Design\n\nA worker.\n';
+  // One heading: no Contents (the Inbox shows them from 2).
+  const short = '# Refund worker plan\n\nMove refunds to a background worker.\n\nInline today; a worker next.\n';
   await withPlan(browser, { width: 1440, height: 900 }, 'side', async (page, pane) => {
     await page.waitForTimeout(1_000);
     await expect(pane.locator('nav[aria-label="Document contents"], [data-contents-open], [data-contents-show]')).toHaveCount(0);
