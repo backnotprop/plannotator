@@ -6,7 +6,7 @@
  *
  * Every stale check names this command. The stream suite's generator runs in
  * its own process: it imports the window's stream reader, and no test imports
- * this file, so the contract's main test never reaches the window.
+ * this file, so the contract's main test never reaches the stream reader.
  */
 import { GENERATORS } from './generators';
 import { REGENERATE, ROOT, emit } from './lib';

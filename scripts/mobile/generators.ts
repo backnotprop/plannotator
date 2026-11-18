@@ -1,8 +1,11 @@
 /**
- * The contract's generators that read no window code, in the order each reads
- * the one before. tests/mobile-vectors.test.ts checks each; scripts/mobile/all.ts
- * runs them, then the stream suite's generator (vectors-stream.ts), which
- * reads the window's stream reader and so is never imported from here.
+ * The contract's generators, in the order each reads the one before.
+ * tests/mobile-vectors.test.ts checks each; scripts/mobile/all.ts runs them,
+ * then the stream suite's generator (vectors-stream.ts), which reads the
+ * window's stream reader and so is never imported from here. Of the window's
+ * own code they read only the badge rule (packages/inbox/tabCount.ts, through
+ * vectors.ts), whose module also holds a React hook: a change there re-checks
+ * the contract.
  */
 import { generateDoor } from './door';
 import type { Output } from './lib';

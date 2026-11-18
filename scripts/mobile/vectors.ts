@@ -98,24 +98,30 @@ export function wordVectors(): unknown {
   };
 }
 
-/** The time words, from their own process with the fixture's zone. */
+/** The time words in each of the fixture's zones, each from its own process with TZ set. */
 export function timeVectors(): unknown {
-  const fixture = JSON.parse(readRepoText(FIXTURES.time)) as { time_zone: string };
-  const run = Bun.spawnSync([process.execPath, TIME_SCRIPT], { cwd: ROOT, env: { ...process.env, TZ: fixture.time_zone }, stdout: 'pipe', stderr: 'pipe' });
-  if (run.exitCode !== 0) throw new Error(`vectors.ts: ${TIME_SCRIPT} failed: ${run.stderr.toString()}`);
-  const made = JSON.parse(run.stdout.toString()) as { cases: Record<string, string>[] };
+  const fixture = JSON.parse(readRepoText(FIXTURES.time)) as { time_zones: string[]; now: string };
+  const zones = fixture.time_zones.map((zone) => {
+    const run = Bun.spawnSync([process.execPath, TIME_SCRIPT], { cwd: ROOT, env: { ...process.env, TZ: zone }, stdout: 'pipe', stderr: 'pipe' });
+    if (run.exitCode !== 0) throw new Error(`vectors.ts: ${TIME_SCRIPT} failed in ${zone}: ${run.stderr.toString()}`);
+    const made = JSON.parse(run.stdout.toString()) as { time_zone: string; cases: Record<string, string>[] };
+    if (made.time_zone !== zone) throw new Error(`vectors.ts: ${TIME_SCRIPT} ran in ${made.time_zone}, not ${zone}`);
+    return made;
+  });
   // iOS's en_US time format puts U+202F (narrow no-break space) before AM and PM; the window prints U+0020.
   const ios = (text: string) => text.replace(/ (AM|PM)\b/g, '\u202f$1');
-  const examples = [...new Set(made.cases.flatMap((c) => Object.entries(c).filter(([k]) => k !== 'iso').map(([, v]) => v)).filter((v) => / (AM|PM)\b/.test(v)))]
+  const examples = [...new Set(zones.flatMap((z) => z.cases.flatMap((c) => Object.entries(c).filter(([k]) => k !== 'iso').map(([, v]) => v))).filter((v) => / (AM|PM)\b/.test(v)))]
     .sort()
+    .slice(0, 6)
     .map((window) => ({ ios: ios(window), window }));
   return {
-    about: about('In the fixture\'s time zone; the app formats in the same zone and must give the same words.', FIXTURES.time),
+    about: about('Per time zone: the app formats in the zone it is given (never UTC unless told) and must give the same words.', FIXTURES.time),
     normalise: {
       rule: 'Before comparing, replace U+202F (narrow no-break space) and U+00A0 (no-break space) with U+0020. iOS formats en_US times with U+202F before AM and PM; the window prints U+0020.',
       examples,
     },
-    ...made,
+    now: fixture.now,
+    zones,
   };
 }
 
