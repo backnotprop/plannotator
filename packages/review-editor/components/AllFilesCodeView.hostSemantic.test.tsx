@@ -263,6 +263,27 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.textContent).toContain('1 moved');
   });
 
+  test.skipIf(!hasDom)('a moved block holding a comment draws open, one with none stays folded, and a comment arriving later opens its fold', async () => {
+    const folded: SemDiffResult = { ...moved, semanticFolds: [{ old: { start: 1, end: 1 }, operations: [0], counts: { moved: 1, edited: 0, removed: 0 } }] as never };
+    const { client } = fakeClient(folded);
+    const { read } = hostReader();
+    const comment = (filePath: string) => ({ id: `c-${filePath}`, type: 'comment', filePath, lineStart: 1, lineEnd: 1, side: 'old', text: 'Why move it?', createdAt: 0 }) as unknown as React.ComponentProps<typeof AllFilesCodeView>['annotations'][number];
+    const files = [changed('a.ts'), changed('b.ts')];
+    await mount(files, { semDiffClient: client, fetchFileContent: read, annotations: [comment('a.ts')] });
+    const folds = (path: string) => ([...items.values()].find((item) => item.id.includes(path))!.fileDiff as { semanticFolds?: unknown[] }).semanticFolds?.length ?? 0;
+    const drawn = (path: string) => (([...items.values()].find((item) => item.id.includes(path)) as { annotations?: Array<{ lineNumber: number; side: string }> }).annotations ?? []).some((a) => a.side === 'deletions' && a.lineNumber === 1);
+    expect([folds('a.ts'), drawn('a.ts')]).toEqual([0, true]);
+    expect([folds('b.ts'), drawn('b.ts')]).toEqual([1, false]);
+
+    await act(async () => {
+      root!.render(
+        <AllFilesCodeView files={files} diffStyle="unified" annotations={[comment('a.ts'), comment('b.ts')]} selectedAnnotationId={null} scrollTargetAnnotation={null} pendingSelection={null} onLineSelection={() => {}} onAddAnnotationForFile={() => {}} onEditAnnotation={() => {}} onSelectAnnotation={() => {}} onDeleteAnnotation={() => {}} readOnly contextExpansionAvailable={false} semDiffClient={client} fetchFileContent={read} />,
+      );
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect([folds('b.ts'), drawn('b.ts')]).toEqual([0, true]);
+  });
+
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });

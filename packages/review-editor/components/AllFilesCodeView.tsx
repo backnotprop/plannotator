@@ -2032,6 +2032,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, []);
 
   const [semanticNotes, setSemanticNotes] = useState<ReadonlyMap<string, SemanticMinimapNote[]>>(new Map());
+  const openHeldFolds = useStableCallback((itemId: string, fileDiff: FileDiffMetadata, annotations: readonly { side: string; lineNumber: number }[] | undefined): FileDiffMetadata => {
+    const folds = (fileDiff as { semanticFolds?: readonly { old: { start: number; end: number } }[] }).semanticFolds;
+    if (!folds?.length) return fileDiff;
+    const held = (annotations ?? []).filter((a) => a.side === 'deletions').map((a) => [a.lineNumber, a.lineNumber]);
+    const pick = selectedLinesRef.current;
+    if (pick?.id === itemId) {
+      const { start, end, side, endSide } = pick.range;
+      if (side === 'deletions') held.push([start, (endSide ?? side) === 'deletions' ? end : start]);
+      else if (endSide === 'deletions') held.push([end, end]);
+    }
+    const kept = folds.filter((fold) => !held.some(([from, to]) => Math.min(from!, to!) <= fold.old.end && Math.max(from!, to!) >= fold.old.start));
+    if (kept.length === folds.length) return fileDiff;
+    return { ...fileDiff, semanticFolds: kept.length > 0 ? kept : undefined, cacheKey: `${fileDiff.cacheKey ?? itemId}:open${folds.map((fold) => (kept.includes(fold) ? '' : fold.old.start)).join('.')}` };
+  });
   const showSemantic = useStableCallback((itemId: string, on: boolean) => {
     const pair = semDiffsRef.current.get(itemId);
     const handle = viewerRef.current;
@@ -2040,7 +2054,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (itemId === editSession.editingItemIdRef.current) return;
     const state = semStateRef.current.get(itemId);
     if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: state.summary });
-    const next = on ? pair.semantic : pair.plain;
+    const next = on ? openHeldFolds(itemId, pair.semantic, item.annotations) : pair.plain;
     const notePath = itemIdToFilePath.get(itemId);
     setSemanticNotes((current) => {
       if (!on && !current.has(itemId)) return current;
@@ -2704,10 +2718,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         contextNotesRef.current,
         hostLineNotesRef.current,
       );
+      item.fileDiff = openHeldFolds(itemId, item.fileDiff, item.annotations);
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
     },
-    [prUrl, prDiffScope],
+    [prUrl, prDiffScope, openHeldFolds],
   );
 
   // Keep review annotations incremental: a single add/edit/delete republishes
