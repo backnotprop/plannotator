@@ -130,7 +130,7 @@ export type InboxLaunchTarget = (
 function choiceOfTarget(value: Record<string, unknown>): { choice?: InboxLaunchChoice } {
   try {
     const choice = parseLaunchChoice(value, null);
-    return choice.model || choice.effort ? { choice } : {};
+    return choice.model || choice.effort || choice.primary_agent ? { choice } : {};
   } catch (error) {
     const field = error instanceof LaunchChoiceError ? error.field : "model";
     throw new InboxError("validation_error", (error as Error).message, { field: `to.launch.${field}` });
@@ -1786,6 +1786,12 @@ ${result.text}`);
       if (target.choice?.effort && modelEfforts && !modelEfforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
+      // OpenCode's own agent (build, plan, …): one it lists, and only for an agent CLI that lists them.
+      const primaryAgent = target.choice?.primary_agent;
+      if (primaryAgent && lists && !lists.primary_agents) throw new InboxError("validation_error", `${host.name} takes no agent from the Inbox. Nothing was sent.`, { field: "to.launch.primary_agent" });
+      if (primaryAgent && lists?.primary_agents && !lists.primary_agents.includes(primaryAgent)) {
+        throw new InboxError("validation_error", `${host.name} has no agent ${primaryAgent}: ${lists.primary_agents.join(", ") || "none listed"}. Nothing was sent.`, { field: "to.launch.primary_agent" });
+      }
       const model = target.choice?.model;
       const effort = target.choice?.effort;
       const id = inboxId("lch");
@@ -1850,6 +1856,7 @@ ${result.text}`);
         ...(start.bypass ? { bypass_available: true } : {}),
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),
+        ...(primaryAgent ? { primary_agent: primaryAgent } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
       if (host.choices) {
@@ -1954,7 +1961,7 @@ ${result.text}`);
           if (!ok.ok) return [];
           const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
           const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
-          const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
+          const choices = lists ? { ...lists, ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) } : null;
           return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );

@@ -3291,3 +3291,7 @@ On the inline path the guard is placed without scanning the page, so no script o
 
 - **Protocol 2.** A host serving `bridge-script.asset.js` must serve the asset of the same package version: an older cached asset reports 1, gets the version-mismatch banner, and its link clicks are not followed.
 - **`<meta name="plannotator-network" content="none">`** in `rawHtml` (Plannotator's servers add it to a document opened outside the session's roots) makes the viewer put `<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">` right after the doctype. It names no `script-src`. A page without the tag gets no policy from the viewer, as before.
+
+## Contents rail: `minHeadings` (unreleased; additive, opt-in, no core change)
+
+`MarkdownContentsRail` (and `DeferredMarkdownContentsRail`, which passes its props through) takes an optional `minHeadings`: the fewest headings of levels 1 to 4 a document needs for the rail. Its default is `CONTENTS_RAIL_MIN_HEADINGS` (4), so a host that passes nothing sees no change. `hasContentsRailHeadings(blocks, minHeadings?)` takes the same count, so a host can ask without loading the rail. The Plannotator Inbox passes 2, so a short plan opened in the Inbox has Contents; Workspaces keeps 4.
