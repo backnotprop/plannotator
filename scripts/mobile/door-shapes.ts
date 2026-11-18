@@ -9,7 +9,7 @@
  * Types only: nothing imports this file at run time.
  */
 import type { InboxDevicePublic } from '../../packages/shared/inbox/devices';
-import type { InboxMessageWire, InboxQuestion } from '../../packages/core/inbox-types';
+import type { InboxMessageWire, InboxQuestion, InboxRecordKind } from '../../packages/core/inbox-types';
 import type { QuestionAnswer } from '../../packages/core/question-block';
 
 /** Every refusal: `{ error, code, ...details }`. Act on `code`, never the words (packages/server/inbox-devices.ts `refuse`). */
@@ -66,7 +66,7 @@ export interface DoorHelloFrame {
  */
 export interface DoorRecordFrame {
   seq: number;
-  kind: string;
+  kind: InboxRecordKind;
   id: string;
   /** `message`: true on the message's first line. */
   first?: boolean;
