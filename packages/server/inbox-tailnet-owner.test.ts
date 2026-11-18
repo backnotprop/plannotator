@@ -813,8 +813,8 @@ describe("a linked machine gains none of it", () => {
     expect(Object.entries(DOOR_WRITES).filter(([, kind]) => kind === "forge").map(([name]) => name).sort()).toEqual(["POST pulls/close", "POST pulls/merge", "POST pulls/owner", "POST pulls/reopen"]);
     for (const verb of ["close", "merge", "reopen"]) expect(doorWriteKind(`pulls/${verb}`)).toBe("forge");
     expect(doorWriteKind("threads/msg_1/pulls")).toBe("set");
-    // A linked machine's `update` is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
-    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["POST update"]);
+    // A linked machine's `update` (read it, start it) is the one exception, and it is not on the allowlist: the forward refuses it (below), and only a machine's token reaches it.
+    expect(names.split("\n").filter((name) => name.includes("update"))).toEqual(["GET update", "POST update"]);
     for (const route of ["update/check", "update/snooze", "agents", "agents/notes", "agents/seen", "settings", "cards/marks", "voice/key"]) {
       expect([route, doorWriteKind(route)]).toEqual([route, null]);
     }
