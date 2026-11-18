@@ -46,6 +46,7 @@ async function world(options: { topic?: boolean } = {}) {
   const pushes: { collapse_id: string; ciphertext: string }[] = [];
   const sockets = new Set<{ send: (text: string) => void }>();
   let rowsRead = 0;
+  const logged: string[] = [];
   const relay = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
@@ -83,7 +84,7 @@ async function world(options: { topic?: boolean } = {}) {
     payload: () => ({}),
     apply: async () => new Response(null, { status: 404 }),
     url: `http://127.0.0.1:${relay.port}`,
-    log: () => {},
+    log: (line: string) => void logged.push(line),
     rows: () => {
       rowsRead++;
       return store.listRows();
@@ -97,8 +98,9 @@ async function world(options: { topic?: boolean } = {}) {
   const keys = await deriveRelayKeys(secret, device.id);
   const project = store.ensureProject({ name: "billing-svc", root: "/work/billing-svc" });
   /** The next push, opened with the phone's key. */
-  const nextPush = async (after: number) => {
-    for (let i = 0; i < 200 && pushes.length <= after; i++) await Bun.sleep(10);
+  const nextPush = async (after: number, ms = 5_000) => {
+    const deadline = Date.now() + ms;
+    while (pushes.length <= after && Date.now() < deadline) await Bun.sleep(10);
     const push = pushes[after];
     if (!push) throw new Error("no push");
     return { collapse_id: push.collapse_id, summary: JSON.parse(await decryptWithKey(push.ciphertext, keys.key)) as Record<string, any> };
@@ -106,9 +108,19 @@ async function world(options: { topic?: boolean } = {}) {
   const collapseOf = (threadId: string) => createHmac("sha256", Buffer.from(keys.collapseKey, "base64url")).update(threadId).digest("hex");
   /** Every push sent so far, opened. */
   const opened = async () => Promise.all(pushes.map(async (push) => JSON.parse(await decryptWithKey(push.ciphertext, keys.key)) as Record<string, any>));
-  /** The relay tells the Inbox the phone started (or stopped) naming its topic, as relay 1.1 does when the app registers. */
-  const topicFrame = (topic: boolean) => {
+  /**
+   * The relay tells the Inbox the phone started (or stopped) naming its topic, as relay 1.1 does when the app
+   * registers; resolves once the Inbox has taken it (its log line), not after a guessed wait.
+   */
+  const topicFrame = async (topic: boolean) => {
+    const said = `topic ${PHONE} ${topic ? "on" : "off"}`;
+    const before = logged.filter((line) => line === said).length;
     for (const ws of sockets) ws.send(JSON.stringify({ type: "topic", device_id: PHONE, topic }));
+    const deadline = Date.now() + 5_000;
+    while (logged.filter((line) => line === said).length === before) {
+      if (Date.now() > deadline) throw new Error(`the Inbox never took the topic frame (${said})`);
+      await Bun.sleep(5);
+    }
   };
   /** Waits a little and says how many pushes were sent: for checking that none was. */
   const settled = async () => {
@@ -274,13 +286,11 @@ test("a phone in use before relay 1.1 (no topic) gets exactly the pushes it had:
   expect((await w.nextPush(3)).summary.kind).toBe("replaced");
 
   // The new app registers its topic: from then on the new kinds go to it; it stops naming one: they stop again.
-  w.topicFrame(true);
-  await Bun.sleep(50);
+  await w.topicFrame(true);
   const later = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Rotated the keys", body: "Done." }).message;
   const fresh = await w.nextPush(4);
   expect(fresh.summary).toMatchObject({ kind: "new_thread", thread_id: later.id });
-  w.topicFrame(false);
-  await Bun.sleep(50);
+  await w.topicFrame(false);
   w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "The turn failed.", reply_to: later.id, turn_error: true });
   expect(await w.settled()).toBe(5);
 });
@@ -308,19 +318,20 @@ test("a snoozed thread that comes back with a question open pushes it once, as t
   await w.nextPush(0);
   // A thread that asks nothing (and, to this phone with no topic, pushed nothing).
   const quiet = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Notes", body: "Nothing to decide." }).message;
-  const until = new Date(Date.now() + 400).toISOString();
+  // Far enough ahead that a slow runner still sees the thread snoozed when the second question is written.
+  const until = new Date(Date.now() + 2_000).toISOString();
   w.store.setSnooze(asks.thread_id, until);
   w.store.setSnooze(quiet.thread_id, until);
   w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("And a 429?"), reply_to: asks.id });
   expect(await w.settled()).toBe(1);
-  const back = await w.nextPush(1);
+  const back = await w.nextPush(1, 10_000);
   expect(back.summary).toMatchObject({ kind: "question", thread_id: asks.thread_id });
   expect(back.summary.question.prompt).toBe("And a 429?");
   expect(back.collapse_id).toBe(w.collapseOf(asks.thread_id));
   // Once per return, and nothing for the thread with no question open.
   await Bun.sleep(300);
   expect(w.pushes.length).toBe(2);
-});
+}, 20_000);
 
 test("a withdrawal that asks nothing pushes on the thread's collapse id with no question; plain news still does not", async () => {
   const w = await world();

@@ -1,9 +1,11 @@
 /**
  * A "now" write's deadline (adr/implementation/inbox-mobile.md, section 4, "not_after"): a write the phone
  * queued (Run, a secret, Stop, a switch) carries the time after which it must not happen, inside a sealed relay
- * command as `not_after` and on a request sent straight to the door as `X-Plannotator-Not-After`. Past it by
- * more than a few seconds on this computer's clock, the write is refused and never applied. Both refusals carry
- * `now`, the computer's time, so the phone can correct its clock's offset.
+ * command as `not_after` and on a request sent straight to the door as `X-Plannotator-Not-After` (the relay
+ * client hands the sealed one to the door as this header). The door checks it in `claim`, after the command's
+ * key: a key already answered replays its answer whatever the time; a first arrival past it by more than a few
+ * seconds on this computer's clock is refused and never applied. Both refusals carry `now`, the computer's
+ * time, so the phone can correct its clock's offset.
  */
 
 /** The request header a write sent straight to the door names its deadline in. Never handed to the window. */

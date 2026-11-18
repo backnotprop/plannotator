@@ -27,9 +27,10 @@
  *    fires, packages/inbox/notify.ts), the summary (push version 2,
  *    inbox-relay-push.ts) encrypted under that phone's key; never for a
  *    snoozed thread;
- *  - refuses a command sealed with a `not_after` that has passed
- *    (`410 command_expired`, reported applied), so a "now" write held at the
- *    relay is never applied late;
+ *  - hands a command's sealed `not_after` to the door, which refuses a first
+ *    arrival past it (`410 command_expired`, reported applied) after looking
+ *    up its key, so a "now" write held at the relay is never applied late and
+ *    one already applied replays its answer;
  *  - reads the relay's version from `hello` (relay 1.1 says `"1.1"`; 1.0 says
  *    none) and uses a 1.1 route (the `live` push) only on a relay that has it.
  *
@@ -52,7 +53,6 @@ import type { InboxLine } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAgentRelayApplied } from "./inbox-agent-relay-applied";
 import { AGENT_PLATFORM } from "./inbox-devices";
-import { commandTimeRefusal } from "./inbox-not-after";
 import { INBOX_PUSH_KINDS_FOR_NEW_APPS, inboxPushCollapseId, type InboxPushKind } from "@plannotator/core/inbox-push";
 import { inboxPushSummary, sizedPushEnvelope } from "./inbox-relay-push";
 
@@ -236,7 +236,7 @@ interface CommandPlaintext {
   body?: unknown;
   /** The app's `X-Plannotator-App` words (inbox-door-version.ts); absent from an older app. */
   app?: unknown;
-  /** An ISO time: past it the command is refused (`410 command_expired`), never applied late. */
+  /** An ISO time: the door refuses a first arrival past it (`410 command_expired`), never applied late. */
   not_after?: unknown;
 }
 
@@ -269,7 +269,7 @@ export interface InboxRelayContext {
   /** A store line as the event stream's `record` event writes it (`eventPayload` in inbox.ts). */
   payload: (line: InboxLine) => unknown;
   /** Apply a command as a device, in-process through the device door (inbox-devices.ts `asDevice`). */
-  apply: (deviceId: string, command: { method: string; path: string; body?: unknown; app?: unknown }) => Promise<Response>;
+  apply: (deviceId: string, command: { method: string; path: string; body?: unknown; app?: unknown; not_after?: unknown }) => Promise<Response>;
   /** Where a new mailbox is made. Default: `relayUrl()`. */
   url?: string;
   /** One line per event, ids and status codes only (the Inbox's log). */
@@ -564,12 +564,10 @@ export function createInboxRelay(context: InboxRelayContext) {
     const command = opened && opened.id === frame.id ? opened : null;
     if (opened && !command) log(`command ${frame.device_id} refused: its sealed id is not the frame's`);
     if (keys && command) {
-      // Its time is checked before the door is asked: a late command never reaches it.
-      const late = commandTimeRefusal(command.not_after, (context.now ?? Date.now)());
-      const answer = late
-        ? Response.json(late.body, { status: late.status })
-        : await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body, app: command.app });
-      log(`command ${frame.device_id} ${command.method} ${answer.status}${late ? ` ${late.body.code}` : ""}`);
+      // Its time is checked by the door, after its key (inbox-devices.ts `claim`): a command already applied replays
+      // its answer however late it comes back (a hello re-sends one never acknowledged); a late first one is 410.
+      const answer = await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body, app: command.app, not_after: command.not_after });
+      log(`command ${frame.device_id} ${command.method} ${answer.status}`);
       if (devices.get(frame.device_id)?.carriage) {
         const item = await resultFrame(frame.device_id, command.id, answer, keys.key);
         transmit(item);
@@ -606,6 +604,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     } else if (frame?.type === "topic" && typeof frame.device_id === "string" && typeof frame.topic === "boolean") {
       if (frame.topic) topics.add(frame.device_id);
       else topics.delete(frame.device_id);
+      log(`topic ${frame.device_id} ${frame.topic ? "on" : "off"}`);
     }
   };
 

@@ -7,9 +7,9 @@
  * names no version (1.0, the relay deployed before 1.1) or `"1.1"`. Against
  * 1.0 the Inbox sends only what 1.0 takes: the push body stays
  * `{ device_id, collapse_id, ciphertext }` and no `live` push is posted.
- * A command past its `not_after` is answered `410 command_expired` and
- * reported applied without reaching the door; one inside it, or with none (an
- * app from before 1.1), is applied. No network beyond loopback.
+ * A sealed command's `not_after` goes to the door with it, which checks it
+ * after the command's key (inbox-door-not-after.test.ts proves the refusals);
+ * every result carries the computer's `now`. No network beyond loopback.
  */
 import { afterEach, expect, test } from "bun:test";
 import { randomBytes } from "node:crypto";
@@ -78,14 +78,14 @@ async function world(version: string | undefined) {
   const devices = InboxDevices.open(dataDir);
   const secret = randomBytes(32).toString("base64url");
   const device = devices.add({ id: PHONE, name: "Phone", platform: "ios", token: "tok_x", secret, at: new Date().toISOString() });
-  const applied: { method: string; path: string }[] = [];
+  const applied: { method: string; path: string; not_after?: unknown }[] = [];
   const client = createInboxRelay({
     dataDir,
     store,
     devices,
     payload: () => ({}),
     apply: async (_deviceId, command) => {
-      applied.push({ method: command.method, path: command.path });
+      applied.push({ method: command.method, path: command.path, not_after: command.not_after });
       return Response.json({ ok: true });
     },
     url: `http://127.0.0.1:${relay.port}`,
@@ -128,22 +128,14 @@ test("against relay 1.1: a live push carries counts only, in the clear", async (
   expect(body).toEqual({ device_id: PHONE, kind: "live", live: { timestamp: expect.any(Number), event: "update", "content-state": { working: 2, stopped_on_you: 1, ended: false } } });
 });
 
-test("a command past its not_after is refused 410 command_expired and never reaches the door; one inside it, or with none, is applied", async () => {
+test("a sealed command's not_after is handed to the door with it (which checks it after its key), and every result carries the computer's time", async () => {
   const w = await world(undefined);
-  const late = await w.command("key-late", { not_after: new Date(Date.now() - 60_000).toISOString() });
-  expect(late).toMatchObject({ status: 410 });
-  // The computer's time rides in the refusal and on every result, so the phone can keep its clock's offset.
-  const refused = JSON.parse(Buffer.from(late!.body_b64, "base64").toString());
-  expect(refused).toMatchObject({ code: "command_expired" });
-  expect(Math.abs(Date.parse(refused.now) - Date.now())).toBeLessThan(5_000);
-  expect(Math.abs(Date.parse(late!.now) - Date.now())).toBeLessThan(5_000);
-  expect(w.applied).toEqual([]);
-
-  const onTime = await w.command("key-on-time", { not_after: new Date(Date.now() + 60_000).toISOString() });
-  expect(onTime).toMatchObject({ status: 200 });
-  const old = await w.command("key-old-app", {});
-  expect(old).toMatchObject({ status: 200 });
-  expect(w.applied.length).toBe(2);
+  const at = new Date(Date.now() - 60_000).toISOString();
+  const result = await w.command("key-late", { not_after: at });
+  expect(result).toMatchObject({ status: 200 });
+  expect(Math.abs(Date.parse(result!.now) - Date.now())).toBeLessThan(5_000);
+  await w.command("key-old-app", {});
+  expect(w.applied.map((a) => a.not_after)).toEqual([at, undefined]);
 });
 
 test("not_after that is not a time refuses the command rather than guess; a few seconds past it are allowed for transit", () => {

@@ -387,6 +387,8 @@ export class Mailbox extends DurableObject<Env> {
     const existing = this.device(deviceId);
     if (existing?.secret_sha256 !== hash || existing.agent !== agent || existing.signal_sha256 !== signalHash) {
       this.deleteDevice(deviceId);
+      // Started over: no topic until its app names one again, and the Inbox is told so (it would still count a 1.1 app).
+      if (existing) this.topicChanged(existing, null);
       this.sql.exec(
         "INSERT INTO devices (id, secret_sha256, carriage, cursor, apns_token, apns_environment, next_n, fcm_token, agent, signal_sha256, signal) VALUES (?, ?, ?, ?, NULL, NULL, 1, NULL, ?, ?, ?)",
         deviceId,

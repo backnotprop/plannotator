@@ -103,6 +103,24 @@ describe("relay 1.1 under wrangler dev", () => {
     expect((await at("PUT", `/devices/${THIRD}/apns`, third, { token: null })).status).toBe(204);
   }, 30_000);
 
+  test("a device registered again with a new secret starts with no topic, and the Inbox is told; the same registration again says nothing", async () => {
+    const FOURTH = "dev_01K7RELAY11FOURTH00000000A";
+    const fourth = random();
+    expect((await at("PUT", `/devices/${FOURTH}`, inbox, { secret_sha256: sha256(fourth), cursor: 0 })).status).toBe(200);
+    const hub = await open("/socket", inbox);
+    await until(() => hub.frames.some((f) => f.type === "hello"), (said) => said, "hello");
+    expect((await at("PUT", `/devices/${FOURTH}/apns`, fourth, { token: TOKEN, environment: "sandbox", topic: "ai.plannotator.app" })).status).toBe(204);
+    expect((await at("PUT", `/devices/${FOURTH}`, inbox, { secret_sha256: sha256(fourth), cursor: 0 })).status).toBe(200);
+    expect((await at("PUT", `/devices/${FOURTH}`, inbox, { secret_sha256: sha256(random()), cursor: 0 })).status).toBe(200);
+    await until(() => hub.frames.filter((f) => f.type === "topic").length, (n) => n >= 2, "two topic frames");
+    expect(hub.frames.filter((f) => f.type === "topic")).toEqual([
+      { type: "topic", device_id: FOURTH, topic: true },
+      { type: "topic", device_id: FOURTH, topic: false },
+    ]);
+    hub.ws.close();
+    expect((await helloOf(relay.url, mailbox, inbox)).devices.find((d: Json) => d.device_id === FOURTH).topic).toBe(false);
+  }, 30_000);
+
   test("the device socket takes only that device's bearer, and an upgrade", async () => {
     expect((await at("GET", `/devices/${PHONE}/socket`, other)).status).toBe(401);
     expect((await at("GET", `/devices/${PHONE}/socket`, null)).status).toBe(401);

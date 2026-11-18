@@ -1090,6 +1090,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // A replayed file is not kept: the answer names the upload or drawing the first one made.
       return finish(json(seen.body, seen.status, { "Idempotent-Replayed": "true" }));
     }
+    // A "now" write the app queued (section 4, "not_after"), by the door or the relay: a key already answered replays
+    // its answer above, whatever the time; a first arrival past its time is refused, never applied, and not kept.
+    const late = commandTimeRefusal(req.headers.get(NOT_AFTER_HEADER) ?? undefined, now().getTime());
+    if (late) return finish(json(late.body, late.status));
     const run = (async () => {
       const result = await apply();
       if (result.record && result.status !== undefined && result.status < 500) {
@@ -1148,10 +1152,6 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const belowFloor = appBelowFloor(app, route);
     if (belowFloor) return json(belowFloor, 426, { Upgrade: APP_UPGRADE });
     if (route === "revoke" && req.method === "POST") return json({ device: publicDevice(revoke(device)) });
-    // A "now" write the app queued (section 4, "not_after"), sent straight here: past its time, refused and never
-    // applied, as through the relay. Like the door's other refusals before the window is asked, not kept under its key.
-    const late = req.method === "POST" ? commandTimeRefusal(req.headers.get(NOT_AFTER_HEADER) ?? undefined, now().getTime()) : null;
-    if (late) return json(late.body, late.status);
     if (device.platform === MACHINE_PLATFORM) {
       // A machine reads this Inbox's own threads only (PLAN rule 3): never the merged view, so links both ways cannot echo.
       if (url.searchParams.has("machines")) return refuse(403, "machines_view_refused", "A linked machine reads this Inbox's own threads only.");
@@ -1232,7 +1232,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
    * `413 result_too_large` otherwise, without reading it (inbox-relay.ts).
    * A phone plays a video over the Wi-Fi or the tailnet; relay ranges are v1.1.
    */
-  const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown; app?: unknown }): Promise<Response> => {
+  const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown; app?: unknown; not_after?: unknown }): Promise<Response> => {
     try {
       const device = devices.get(deviceId);
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
@@ -1259,6 +1259,9 @@ export function createInboxDevices(context: InboxDevicesContext) {
       // so a value that is not in the form (or not a header's characters) is served as if absent, never a 500.
       const app = parseAppHeader(typeof input.app === "string" ? input.app : null);
       if (app) headers[APP_HEADER] = formatInboxAppHeader(app);
+      // `not_after` beside `v`, as the header a direct write sends: one check, in `claim`, for both paths. A value
+      // that is not a string is carried as one, so it is refused as no time (400), never dropped.
+      if (input.not_after !== undefined && input.not_after !== null) headers[NOT_AFTER_HEADER] = typeof input.not_after === "string" ? input.not_after.replace(/[^\x20-\x7e]/g, "?") : "invalid";
       const req = new Request(url, {
         method: input.method,
         headers,
