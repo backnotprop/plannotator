@@ -157,6 +157,13 @@ const SLASH_PROSE_PRECEDING_WORDS = new Set([
   'can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would',
 ]);
 
+const LONGEST_PROSE_PRECEDING_WORD = Math.max(...[...SLASH_PROSE_PRECEDING_WORDS].map((word) => word.length));
+
+/** `[A-Za-z]`, by UTF-16 code unit as the regex it replaces read it. */
+function isAsciiLetter(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+
 /**
  * True when the character run immediately before `triggerIndex` is same-line
  * whitespace preceded by one of SLASH_PROSE_PRECEDING_WORDS. A newline (or
@@ -164,9 +171,18 @@ const SLASH_PROSE_PRECEDING_WORDS = new Set([
  * — a line-starting `/name` always reads as deliberate.
  */
 function slashTokenReadsAsProse(text: string, triggerIndex: number): boolean {
-  const before = text.slice(0, triggerIndex);
-  const word = /([A-Za-z]+)[ \t]+$/.exec(before)?.[1];
-  return word !== undefined && SLASH_PROSE_PRECEDING_WORDS.has(word.toLowerCase());
+  // The rule is `/([A-Za-z]+)[ \t]+$/` on the text before the trigger, walked back from the trigger instead of run
+  // over a copy of everything before it (that was a pass over the whole text for each `/name`, every key). The word
+  // is the whole letter run before the spaces; one longer than any listed word cannot be listed, so the walk stops.
+  let wordEnd = triggerIndex;
+  while (wordEnd > 0 && (text[wordEnd - 1] === ' ' || text[wordEnd - 1] === '\t')) wordEnd--;
+  if (wordEnd === triggerIndex) return false;
+  let wordStart = wordEnd;
+  while (wordStart > 0 && isAsciiLetter(text.charCodeAt(wordStart - 1))) {
+    wordStart--;
+    if (wordEnd - wordStart > LONGEST_PROSE_PRECEDING_WORD) return false;
+  }
+  return wordStart < wordEnd && SLASH_PROSE_PRECEDING_WORDS.has(text.slice(wordStart, wordEnd).toLowerCase());
 }
 
 /**
@@ -287,9 +303,17 @@ export function extractSkillReferences(
   text: string,
   catalog: SkillCatalogEntry[],
 ): SkillCatalogEntry[] {
+  return uniqueSkillReferences(findSkillReferenceTokens(text, catalog));
+}
+
+/**
+ * extractSkillReferences from tokens already found (findSkillReferenceTokens), so a caller that has both does not
+ * scan the text twice.
+ */
+export function uniqueSkillReferences(tokens: readonly SkillReferenceToken[]): SkillCatalogEntry[] {
   const found: SkillCatalogEntry[] = [];
   const seen = new Set<string>();
-  for (const token of findSkillReferenceTokens(text, catalog)) {
+  for (const token of tokens) {
     if (seen.has(token.entry.name)) continue;
     seen.add(token.entry.name);
     found.push(token.entry);

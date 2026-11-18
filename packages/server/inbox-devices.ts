@@ -215,6 +215,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // `messages`). Those four run only with the window's mark (`window`), which stops a bare call, the relay and a phone
   // (no PR board), not a program on that machine that imitates its window (inbox-launch.md "Accepted, not defended").
   { method: "GET", route: /^pulls$/, window: () => "/api/inbox/pulls", machineOnly: true },
+  // Branch reviews (mark `branches`): a linked machine's Reviews lists the branches agents reported here.
+  { method: "GET", route: /^reviews\/branches$/, window: () => "/api/inbox/reviews/branches", machineOnly: true },
   { method: "GET", route: /^pulls\/(risk|details|diff|file|repo-files|repo-file|avatar|media|media\/sizes)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   { method: "POST", route: /^pulls\/(close|reopen|merge|owner)$/, window: (m) => `/api/inbox/pulls/${m[1]}`, machineOnly: true },
   // "Changed since you looked" (approval "inbox-pr-dashboard"): the look at a PR lives on the machine that lists it.
@@ -242,6 +244,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // sniffed type and headers. Of the phone's request headers the door forwards
   // Range, If-Range and If-None-Match (and Last-Event-ID to the event stream).
   { method: "GET", route: /^attachments\/([^/]+)\/(image|video|audio|download)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}` },
+  // A Markdown file's own pictures and a document next to an attached file (approval "linked computers only",
+  // 2026-11-16): a linked machine's window shows them as for a file of its own. The window's own routes, so the same
+  // rules (by the attachment's id, inside its folder, pictures the file shows, sniffed, capped) and headers. Not a
+  // phone's: a phone reads them through the tailnet as the owner.
+  { method: "GET", route: /^attachments\/([^/]+)\/(markdown-image|linked-page)$/, window: (m) => `/api/inbox/attachments/${m[1]}/${m[2]}`, machineOnly: true },
   { method: "GET", route: /^markups\/([^/]+)$/, window: (m) => `/api/inbox/markups/${m[1]}` },
   // An image a message's body shows (`?path=<src as written>`, a question
   // block's context included): the window's own route, so the phone gets the

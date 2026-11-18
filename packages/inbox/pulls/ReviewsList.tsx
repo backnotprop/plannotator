@@ -16,11 +16,13 @@ import { initials, repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { chainMarks } from './topology';
 import { readReviewFolds, reviewRowLanding, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
-import { riskOrder, rowStack, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
+import { riskOrder, rowRisk, rowRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
 import { RiskMark } from './RiskMark';
 import { Named, usePicture } from './Face';
 import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
+import { UnreportedBranches } from './UnreportedBranches';
+import type { InboxUnreportedBranch } from '@plannotator/core/inbox-types';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -112,9 +114,9 @@ function ReviewRowItem({
   onOpen: () => void;
 }) {
   const stack = row.stacks[0] ?? null;
-  // A thread's row is judged by the PRs it owns; a local review has none, so no mark.
-  const judged = stackRisk(rowStack(row), judgments);
-  const riskFailure = stackRiskFailure(rowStack(row), judgments, riskFailed);
+  // A thread's row is judged by the PRs it owns, a reported branch by its report; a local review has neither, so no mark.
+  const judged = rowRisk(row, judgments);
+  const riskFailure = rowRiskFailure(row, judgments, riskFailed);
   const line = reviewRowLine(row);
   const layers = stack?.layers.length ?? 0;
   const focusPull = stack?.layers.find((pull) => pull.state === 'open' || pull.state === 'draft') ?? stack?.layers[0] ?? null;
@@ -166,7 +168,7 @@ function ReviewRowItem({
             <RefMarkIcon kind="pr" state={focusPull?.state ?? reviewRowLanding(row)?.state ?? 'open'} size={13} />
           </span>
         ) : (
-          <Icon name="laptop" size={14} />
+          <Icon name={line.mark ?? 'laptop'} size={14} />
         )}
         <span className="ib-pv" dir="auto">
           {layers > 1 && stack && (
@@ -231,8 +233,10 @@ export function ReviewsList({
   projectNames,
   selected,
   phone,
+  project = null,
   onOpen,
   onNew,
+  onReviewBranch,
 }: {
   answer: InboxReviewsAnswer;
   model: InboxPullsAnswer;
@@ -248,8 +252,12 @@ export function ReviewsList({
   /** The open thread's id, or the open stack's. */
   selected: string | null;
   phone: boolean;
+  /** The project the list is filtered to: Branch reviews' "Branches nobody reported" is one project's. */
+  project?: string | null;
   onOpen: (row: InboxReviewRow) => void;
   onNew: () => void;
+  /** Branch reviews' safety net: New review with that branch. Absent: no safety net. */
+  onReviewBranch?: (branch: InboxUnreportedBranch, opener: HTMLElement) => void;
 }) {
   const now = useRelativeClock(true);
   const groups = useMemo(() => (risk === 'all' ? inboxReviewGroups(rows) : riskOrder(inboxReviewGroups(rows), judgments)), [rows, risk, judgments]);
@@ -275,6 +283,8 @@ export function ReviewsList({
   // Those High could not place, behind one quiet line; one opened from there keeps them shown.
   const [notRankedFolded, setNotRankedOpen] = useState(false);
   const notRankedOpen = notRankedFolded || notRanked.some(isOpenRow);
+  // Branch reviews' safety net: one project's, while Branch reviews is on, never read until opened.
+  const unreported = answer.branch_reviews && project && onReviewBranch ? <UnreportedBranches key={project} projectId={project} now={now} onStart={onReviewBranch} /> : null;
   const notices = pullsNotices(model, filter);
   const notice =
     notices.length > 0 ? (
@@ -373,6 +383,7 @@ export function ReviewsList({
             New review
           </button>
         </div>
+        {unreported}
       </div>
     );
   }
@@ -386,6 +397,7 @@ export function ReviewsList({
       <FoldedGroup label="Open, not reviewed" name="not_reviewed" rows={groups.not_reviewed} open={listedOpen} onToggle={() => toggle('not_reviewed')} draw={draw} />
       {notJudgedLine}
       {notRankedLine}
+      {unreported}
     </>
   );
 }

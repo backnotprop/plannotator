@@ -94,6 +94,9 @@ export function useScheduledOn(settings: Pick<SettingsModel, 'scheduled_threads'
 
 /** Saved rows go in at once, before the read again. */
 export function putScheduled(row: InboxScheduledRow | null, removed?: string): void {
+  // An answer that comes back after a newer one (two writes in flight) never puts the older row back.
+  const held = row ? snap.rows?.find((r) => r.id === row.id) : undefined;
+  if (row && held && held.updated_at > row.updated_at) return;
   const rows = (snap.rows ?? []).filter((r) => r.id !== (row?.id ?? removed));
   emit({ rows: row ? [...rows, row] : rows, version: snap.version + 1 });
 }

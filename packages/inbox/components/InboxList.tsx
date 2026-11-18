@@ -27,7 +27,7 @@ import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types'
 import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
 import { HeldNoticeLine } from './HeldNoticeLine';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
-import { ThreadRowMenu } from './RowMenu';
+import { ThreadRowMenu, useRowDragA11y } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
 import { rowTimeIso, rowWait } from '../rowDelivery';
 import { UndeliveredBadge, useMinuteClock } from './Undelivered';
@@ -715,7 +715,7 @@ interface RowLook {
 
 function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, statusMark, noPulls, picking, picked, onOpen, onUnstar, tint, tagName }: PickState & RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst' | 'timeBelow' | 'noAgents'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
-  const wordsId = useId();
+  const wordsId = useId(), dragA11y = useRowDragA11y(rowHasBadge(row) ? wordsId : undefined);
   const card = cardOf(row);
   // A wide row in full-width mode says a blocked row's state in words too (`WIDE_ROW_WAIT_WORDS`), in the badge's
   // column; they open the card on keyboard focus, so the marks do not.
@@ -736,7 +736,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
       data-section={row.section}
       data-away={away ? '' : undefined}
       data-lit={lit ? '' : undefined}
-      aria-describedby={rowHasBadge(row) ? wordsId : undefined}
+      {...dragA11y}
       {...tintProps(tint)}
       {...focus}
     >
@@ -896,7 +896,7 @@ function RowWithAction({
 
 function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, timeBelow, statusMark, noAgents, noPulls, picking, picked, onOpen, onUnstar, tint, tagName }: PickState & RowTintProps & { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
-  const wordsId = useId();
+  const wordsId = useId(), dragA11y = useRowDragA11y(rowHasBadge(row) ? wordsId : undefined);
   const lead = <LeadLine row={row} project={project} filtered={filtered} />;
   const avatarRow = useAvatarRow();
   const time = (
@@ -933,7 +933,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       data-section={row.section}
       data-away={away ? '' : undefined}
       data-lit={lit ? '' : undefined}
-      aria-describedby={rowHasBadge(row) ? wordsId : undefined}
+      {...dragA11y}
       {...tintProps(tint)}
       {...focus}
     >
@@ -1190,10 +1190,10 @@ export function InboxList(props: InboxListProps) {
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isComposingKey(event) || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || modalOpen()) return false;
+      if (event.defaultPrevented || isComposingKey(event) || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
       const target = keyTarget(event);
       const body = bodyRef.current;
-      return !!(target && body?.contains(target) && target.matches(LIST_STOPS));
+      return !!(target && body?.contains(target) && target.matches(LIST_STOPS)) && !modalOpen();
     },
     handle: (event: KeyboardEvent) => {
       const body = bodyRef.current;

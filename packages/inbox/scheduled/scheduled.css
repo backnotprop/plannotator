@@ -155,8 +155,6 @@ button.st-chip { cursor: pointer; }
 .st-path { width: 28ch; outline: none; }
 .st-add { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: 0; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); cursor: pointer; border-radius: 6px; }
 .st-add:hover { color: var(--foreground); }
-.st-runs-h { display: flex; align-items: baseline; gap: 10px; }
-.st-runs-h .ib-n { font-weight: 500; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .st-runs { margin-top: 6px; }
 .st-runrow { display: grid; width: calc(100% + 20px); grid-template-columns: 64px minmax(0, 1fr) auto 14px; align-items: baseline; gap: 10px; height: 36px; align-content: center; padding: 0 10px; margin: 0 -10px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); text-align: left; cursor: pointer; }
 .st-runrow:hover { background: color-mix(in oklch, var(--muted) 45%, transparent); }
@@ -165,8 +163,17 @@ button.st-chip { cursor: pointer; }
 .st-runrow svg.ib-ic { color: var(--muted-foreground); }
 .st-all { margin: 6px 0 0 -8px; height: 30px; padding: 0 8px; border: 0; border-radius: 6px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); cursor: pointer; }
 .st-all:hover { background: var(--muted); }
-.st-error { margin-top: 16px; }
-.st-pfoot { display: flex; align-items: center; }
+.st-error { margin: 12px 0 0; }
+/* The header's quiet save status ("Saved", "Saving…"), red with its mark when a save failed. */
+.st-saved { display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 8px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; flex: none; font-variant-numeric: tabular-nums; }
+.st-saved svg.ib-ic { width: 13px; height: 13px; color: var(--muted-foreground); }
+.st-saved[data-bad] { color: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-saved[data-bad] svg.ib-ic { color: currentColor; }
+/* The foot: where it stands, then Run once now (quiet) and Turn on (the filled next step while it is off). */
+.st-pfoot { display: flex; align-items: center; gap: 10px; }
+.st-footline { flex: 1; min-width: 0; font-size: var(--ib-fs-13, 13px); line-height: 18px; color: var(--muted-foreground); }
+.st-footline b { font-weight: 550; color: var(--foreground); }
+.st-once svg.ib-ic { width: 12px; height: 12px; }
 
 /* A thread's run line: the play mark, the run and a hairline; a click shows its prompt. The skip line is quieter: no
    mark, regular weight, a fainter colour, no trailing hairline, because nothing ran. */
@@ -198,6 +205,13 @@ button.st-foot-mark:hover { background: var(--muted); }
 .ib-badge.st-pill { gap: 6px; }
 .ib-badge.st-warn svg.ib-ic { width: 14px; height: 14px; }
 
+/* Beside the editor the list gives the Runs column's room to the name (the editor lists the runs, as on a phone), so a
+   name like "Inbox Usage Data and Feedback" keeps one line. Run stays right of the name, every row in one column. */
+@media (min-width: 761px) {
+  .st-list-split .st-short { grid-template-columns: [name] fit-content(calc(100% - 236px)) [btn] 24px [space] minmax(0, 1fr) [last] 112px [more] 40px [end]; }
+  .st-list-split .st-scols > .st-count { display: none; }
+}
+
 @media (max-width: 760px) {
   .st-list.st-list-split { width: 100%; }
   /* A phone gives the name the room: Runs is in the editor, and a long name takes two lines. */
@@ -205,5 +219,38 @@ button.st-foot-mark:hover { background: var(--muted); }
   .st-scols > .st-count { display: none; }
   .st-kv { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .st-next { margin-left: 0; width: 100%; }
+  .st-pfoot { flex-wrap: wrap; }
+  .st-footline { flex-basis: 100%; }
   .st-pfoot .ib-btn { flex: 1; }
+}
+
+/* The editor's tabs under the routine's name (RoutineTabs.tsx): the Inbox's segmented control, and on Edit one quiet
+   line with the last run, which opens Runs. The pane's width (the row is a container) puts the line beside the tabs,
+   where on Runs it keeps its place unseen, or under them, where on Runs it takes no space (the runs below say it).
+   Always one line, so a run ending never changes its height; the tabs never move on a switch. */
+.st-tabsrow { container-type: inline-size; margin-top: 18px; }
+.st-tabsin { display: flex; align-items: center; gap: 8px 14px; }
+@container (max-width: 560px) {
+  .st-tabsin { flex-direction: column; align-items: flex-start; }
+  .st-tabsin .st-lastrun { max-width: 100%; }
+  .st-tabsin .st-lastrun[data-off] { display: none; }
+}
+.st-tabs .ib-seg-o { gap: 7px; }
+.st-tabs .ib-seg-o:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-tabs .ib-n { font-weight: 500; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.st-tabdot { width: 6px; height: 6px; border-radius: 3px; flex: none; background: var(--ib-badge-stop-fg, var(--destructive)); }
+.st-lastrun { display: inline-flex; align-items: center; gap: 7px; min-width: 0; height: 28px; padding: 0 8px; margin-left: -8px; border: 0; border-radius: 7px; background: none; font: inherit; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; cursor: pointer; }
+.st-lastrun:hover { background: var(--muted); color: var(--foreground); }
+.st-lastrun > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-lastrun svg.ib-ic { flex: none; }
+.st-lastrun:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.st-lastrun[data-off] { visibility: hidden; }
+.st-runspanel { margin-top: 14px; }
+.st-norun { padding: 22px 0 8px; font-size: var(--ib-fs-13-5, 13.5px); }
+.st-norun p { margin: 0; }
+.st-norun p + p { margin-top: 4px; }
+@media (max-width: 760px) {
+  /* The tabs span the screen, a thumb's height each half (Feedback's sheet); the last run is under them. */
+  .st-tabs.ib-seg { display: flex; flex-wrap: nowrap; align-self: stretch; }
+  .st-tabs .ib-seg-o { flex: 1; justify-content: center; font-size: var(--ib-fs-15, 15px); }
 }

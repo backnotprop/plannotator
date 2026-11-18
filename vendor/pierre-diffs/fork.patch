@@ -1,0 +1,337 @@
+diff --git a/packages/diffs/package.json b/packages/diffs/package.json
+index be0fba76..fe242632 100644
+--- a/packages/diffs/package.json
++++ b/packages/diffs/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "@pierre/diffs",
+-  "version": "1.7.0-beta.3",
++  "version": "1.7.0-beta.3-sem.6",
+   "license": "apache-2.0",
+   "files": [
+     "dist",
+diff --git a/packages/diffs/src/components/CodeView.ts b/packages/diffs/src/components/CodeView.ts
+index d56dad27..67052739 100644
+--- a/packages/diffs/src/components/CodeView.ts
++++ b/packages/diffs/src/components/CodeView.ts
+@@ -421,6 +421,7 @@ export const CODE_VIEW_DIFF_OPTION_KEYS = [
+   'lineDiffType',
+   'maxLineDiffLength',
+   'expansionLineCount',
++  'expandColourWaitMs',
+   'lineHoverHighlight',
+   'enableTokenInteractionsOnWhitespace',
+   'enableGutterUtility',
+diff --git a/packages/diffs/src/components/FileDiff.ts b/packages/diffs/src/components/FileDiff.ts
+index 66542ee4..5ab61f03 100644
+--- a/packages/diffs/src/components/FileDiff.ts
++++ b/packages/diffs/src/components/FileDiff.ts
+@@ -1428,10 +1428,10 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
+     ) {
+       return;
+     }
++    // Hosts may hydrate partial diffs externally. Without a loader, keep
++    // rendering the patch; prepareForEditing still requires full contents.
+     if (loadDiffFiles == null) {
+-      throw new Error(
+-        'FileDiff: loadDiffFiles is required to load full files for a partial diff'
+-      );
++      return;
+     }
+ 
+     const promise = this.loadFilesForDiff(fileDiff, loadDiffFiles);
+@@ -1582,7 +1582,7 @@ export class FileDiff<LAnnotation = undefined, Caret = undefined> {
+     );
+     this.setHydratedState(files);
+     if (!this.installHydratedDiff(expectedDiff)) {
+-      await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff));
++      await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff), this.options.expandColourWaitMs);
+       if (!this.enabled || this.getInputDiff() !== expectedDiff) {
+         return;
+       }
+diff --git a/packages/diffs/src/components/SemanticConnector.ts b/packages/diffs/src/components/SemanticConnector.ts
+index 89cf1423..149a3fab 100644
+--- a/packages/diffs/src/components/SemanticConnector.ts
++++ b/packages/diffs/src/components/SemanticConnector.ts
+@@ -30,6 +30,8 @@ export interface Connector {
+   kind: ConnectorKind;
+   /** The host sorts by this rank. Higher paints later and ends up on top. */
+   rank: number;
++  /** Where the operation came from, when a host marked it (e.g. "second-opinion"). */
++  origin?: string;
+ }
+ 
+ interface SemanticConnectorOptions {
+@@ -345,12 +347,21 @@ export class SemanticConnector {
+         const path = document.createElementNS(SVG_NS, 'path');
+         path.setAttribute('data-connector-id', connector.id);
+         path.setAttribute('data-connector-kind', connector.kind);
++        if (connector.origin != null)
++          path.setAttribute('data-connector-origin', connector.origin);
++        markLevel(path, connector);
+         entry = { path, connector };
+         added.push(entry);
+       } else if (!areConnectorsEqual(entry.connector, connector)) {
+         if (entry.connector.kind !== connector.kind) {
+           entry.path.setAttribute('data-connector-kind', connector.kind);
+         }
++        if (entry.connector.origin !== connector.origin) {
++          if (connector.origin != null)
++            entry.path.setAttribute('data-connector-origin', connector.origin);
++          else entry.path.removeAttribute('data-connector-origin');
++        }
++        markLevel(entry.path, connector);
+         entry.connector = connector;
+       }
+       nextEntries.set(connector.id, entry);
+@@ -441,6 +452,18 @@ export class SemanticConnector {
+   }
+ }
+ 
++/**
++ * A band whose two ends span the same rows (an edit or rename on one row) has
++ * no vertical travel, so it draws as a plain rectangle. Mark it so the theme
++ * can drop the edge that would outline it.
++ */
++function markLevel(path: SVGPathElement, connector: Connector): void {
++  const level =
++    connector.base.top === connector.target.top &&
++    connector.base.bottom === connector.target.bottom;
++  path.toggleAttribute('data-connector-level', level);
++}
++
+ function areBoundsEqual(
+   a: SemanticConnectorBounds | undefined,
+   b: SemanticConnectorBounds | undefined
+@@ -461,6 +484,7 @@ function areConnectorsEqual(a: Connector, b: Connector): boolean {
+     a.id === b.id &&
+     a.kind === b.kind &&
+     a.rank === b.rank &&
++    a.origin === b.origin &&
+     a.base.top === b.base.top &&
+     a.base.bottom === b.base.bottom &&
+     a.target.top === b.target.top &&
+diff --git a/packages/diffs/src/components/VirtualizedFileDiff.ts b/packages/diffs/src/components/VirtualizedFileDiff.ts
+index 0f1512fc..dfa585bd 100644
+--- a/packages/diffs/src/components/VirtualizedFileDiff.ts
++++ b/packages/diffs/src/components/VirtualizedFileDiff.ts
+@@ -1330,7 +1330,7 @@ export class VirtualizedFileDiff<
+         files,
+         this.options.parseDiffOptions
+       );
+-      await awaitWithTimeout(() => this.primeHighlightCache(nextDiff));
++      await awaitWithTimeout(() => this.primeHighlightCache(nextDiff), this.options.expandColourWaitMs);
+       if (this.getInputDiff() !== expectedDiff) {
+         return;
+       }
+@@ -1348,7 +1348,7 @@ export class VirtualizedFileDiff<
+       );
+       this.setHydratedState(files);
+       if (!this.installHydratedDiff(expectedDiff)) {
+-        await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff));
++        await awaitWithTimeout(() => this.primeHighlightCache(expectedDiff), this.options.expandColourWaitMs);
+         if (this.getInputDiff() !== expectedDiff) {
+           return;
+         }
+diff --git a/packages/diffs/src/layout/DiffLayout.ts b/packages/diffs/src/layout/DiffLayout.ts
+index 79f7703b..10185460 100644
+--- a/packages/diffs/src/layout/DiffLayout.ts
++++ b/packages/diffs/src/layout/DiffLayout.ts
+@@ -1131,10 +1131,16 @@ export class DiffLayout<LAnnotation = undefined> {
+         : row.marked
+           ? lineDiffRangesFor(model, row.side, row.lineIndex, this.#ranges)
+           : NO_RANGES;
++    // The first row of a semantic region (the one with a gutter icon) is
++    // marked so a host can label the region in its own words.
++    const contentProperties =
++      row.gutterIcon != null
++        ? { ...row.contentProperties, 'data-semantic-start': '' }
++        : row.contentProperties;
+     const content = this.#line(
+       base,
+       ranges,
+-      row.contentProperties,
++      contentProperties,
+       row.lineNumber,
+       row.altLineNumber,
+       row.lineIndexText
+diff --git a/packages/diffs/src/renderers/DiffHunksRenderer.ts b/packages/diffs/src/renderers/DiffHunksRenderer.ts
+index f4dbfccf..0509c04b 100644
+--- a/packages/diffs/src/renderers/DiffHunksRenderer.ts
++++ b/packages/diffs/src/renderers/DiffHunksRenderer.ts
+@@ -795,13 +795,22 @@ export class DiffHunksRenderer<LAnnotation = undefined> {
+         contentProperties: { 'data-line-type': lineType },
+       };
+     }
++    // The last line of a run and the lines of a run a second opinion added
++    // are marked so a host can paint a region whole without reading geometry.
++    const origin = (line.operation as { origin?: unknown }).origin;
+     return {
+       gutterLineType: line.lineType,
+       gutterIcon:
+         line.showsIcon && line.start === lineNumber
+           ? getSemanticLineIcon(line.lineType, side)
+           : undefined,
+-      contentProperties: { 'data-line-type': line.lineType },
++      contentProperties: {
++        'data-line-type': line.lineType,
++        ...(line.end === lineNumber ? { 'data-semantic-end': '' } : {}),
++        ...(typeof origin === 'string'
++          ? { 'data-semantic-origin': origin }
++          : {}),
++      },
+     };
+   }
+ 
+diff --git a/packages/diffs/src/style.css b/packages/diffs/src/style.css
+index e3a74da8..ffacaf29 100644
+--- a/packages/diffs/src/style.css
++++ b/packages/diffs/src/style.css
+@@ -990,7 +990,20 @@
+     user-select: none;
+ 
+     [data-connector-kind] {
+-      opacity: 0.15;
++      fill: light-dark(
++        color-mix(in srgb, var(--diffs-connector-base) 15%, transparent),
++        color-mix(in srgb, var(--diffs-connector-base) 32%, transparent)
++      );
++      stroke: light-dark(
++        transparent,
++        color-mix(in srgb, var(--diffs-connector-base) 50%, transparent)
++      );
++      stroke-width: 1px;
++      vector-effect: non-scaling-stroke;
++    }
++
++    [data-connector-kind][data-connector-level] {
++      stroke: none;
+     }
+ 
+     [data-connector-separator] {
+@@ -1014,23 +1027,23 @@
+     }
+ 
+     [data-connector-kind='added'] {
+-      fill: var(--diffs-addition-base);
++      --diffs-connector-base: var(--diffs-addition-base);
+     }
+ 
+     [data-connector-kind='deleted'] {
+-      fill: var(--diffs-deletion-base);
++      --diffs-connector-base: var(--diffs-deletion-base);
+     }
+ 
+     [data-connector-kind='moved'] {
+-      fill: var(--diffs-moved-base);
++      --diffs-connector-base: var(--diffs-moved-base);
+     }
+ 
+     [data-connector-kind='modified'] {
+-      fill: var(--diffs-edited-base);
++      --diffs-connector-base: var(--diffs-edited-base);
+     }
+ 
+     [data-connector-kind='reformatted'] {
+-      fill: var(--diffs-reformatted-base);
++      --diffs-connector-base: var(--diffs-reformatted-base);
+     }
+   }
+ 
+diff --git a/packages/diffs/src/types.ts b/packages/diffs/src/types.ts
+index 48ffde96..d264a5cd 100644
+--- a/packages/diffs/src/types.ts
++++ b/packages/diffs/src/types.ts
+@@ -731,6 +731,9 @@ export interface BaseDiffOptions extends BaseCodeOptions {
+ 
+   // How many lines to expand per click
+   expansionLineCount?: number; // 100 is default
++  // How long newly loaded or expanded lines wait for their highlighting
++  // before they are drawn plain and coloured when it arrives.
++  expandColourWaitMs?: number; // 300 is default
+ 
+   /**
+    * Parser options used when computing diffs from file contents
+diff --git a/packages/diffs/src/utils/measureSemanticDiffConnectors.ts b/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
+index 05948014..60bbc2d3 100644
+--- a/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
++++ b/packages/diffs/src/utils/measureSemanticDiffConnectors.ts
+@@ -199,6 +199,7 @@ export function measureSemanticDiffConnectors(
+       id: region.id,
+       kind: region.kind,
+       rank: region.rank,
++      ...(region.origin != null ? { origin: region.origin } : {}),
+       base,
+       target,
+     });
+diff --git a/packages/diffs/src/utils/semanticDiffConnectors.ts b/packages/diffs/src/utils/semanticDiffConnectors.ts
+index 3a05887d..4545c8a3 100644
+--- a/packages/diffs/src/utils/semanticDiffConnectors.ts
++++ b/packages/diffs/src/utils/semanticDiffConnectors.ts
+@@ -17,6 +17,7 @@ interface BaseSemanticDiffConnectorRegion {
+   id: string;
+   kind: ConnectorKind;
+   rank: number;
++  origin?: string;
+   /**
+    * Set when the region is drawn in only one state of a semantic fold.
+    * `start` is the fold's first old line. A region with `closed: true` is
+@@ -87,6 +88,8 @@ export function prepareSemanticDiffConnectorRegions(
+   if (operations == null || operations.length === 0) return [];
+   const connectors: SemanticDiffConnectorRegion[] = [];
+   for (const [operationIndex, operation] of operations.entries()) {
++    const marked = (operation as { origin?: unknown }).origin;
++    const origin = typeof marked === 'string' ? { origin: marked } : {};
+     for (const [spanIndex, span] of operation.spans.entries()) {
+       const kind =
+         CONNECTOR_KIND_BY_LINE_TYPE[semanticLineType(operation, span)];
+@@ -106,8 +109,8 @@ export function prepareSemanticDiffConnectorRegions(
+           const id = `${operationIndex}:${spanIndex}:${side}:${run.start}-${run.end}`;
+           connectors.push(
+             side === 'new'
+-              ? { id, kind, rank: 2, target: region, attachment }
+-              : { id, kind, rank: 2, base: region, attachment }
++              ? { id, kind, rank: 2, target: region, attachment, ...origin }
++              : { id, kind, rank: 2, base: region, attachment, ...origin }
+           );
+         }
+         continue;
+@@ -125,6 +128,7 @@ export function prepareSemanticDiffConnectorRegions(
+           rank,
+           base,
+           target,
++          ...origin,
+         });
+       }
+     }
+@@ -220,8 +224,28 @@ function addJoinedRegion(
+   const target = { start: first.top, end: bottom - 1 };
+   regions.push(
+     first.region.base != null
+-      ? { id, kind, rank, fold, base: first.region.base, target }
+-      : { id, kind, rank, fold, target, attachment: first.region.attachment }
++      ? {
++          id,
++          kind,
++          rank,
++          fold,
++          base: first.region.base,
++          target,
++          ...(first.region.origin != null
++            ? { origin: first.region.origin }
++            : {}),
++        }
++      : {
++          id,
++          kind,
++          rank,
++          fold,
++          target,
++          attachment: first.region.attachment,
++          ...(first.region.origin != null
++            ? { origin: first.region.origin }
++            : {}),
++        }
+   );
+ }
+ 

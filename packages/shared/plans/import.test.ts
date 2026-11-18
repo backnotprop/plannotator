@@ -195,6 +195,24 @@ describe("plan import", () => {
     expect(importPlanLibrary(store, { dataDir })).toMatchObject({ versions_added: 0, decisions_added: 0 });
   });
 
+  test("the agent plan review recorded beside a version is that version's agent; one that does not read as one is none", () => {
+    const dataDir = scratch();
+    const store = createPlanStore({ dataDir });
+    version(dataDir, "api", "queue-2026-11-01", 1, "# Queue\n\nv1\n", day(1));
+    version(dataDir, "api", "queue-2026-11-01", 2, "# Queue\n\nv2\n", day(1, 10));
+    put(join(dataDir, "history", "api", "queue-2026-11-01", "002.agent.json"), JSON.stringify({ host: "codex", session: "ses_1", name: "Codex" }), day(1, 10));
+    version(dataDir, "api", "other-2026-11-01", 1, "# Other\n\nv1\n", day(1));
+    put(join(dataDir, "history", "api", "other-2026-11-01", "001.agent.json"), JSON.stringify({ host: "", session: 7 }), day(1));
+    importPlanLibrary(store, { dataDir });
+    const queue = store.list().find((p) => p.name === "Queue")!;
+    expect(store.versions(queue.id).map((v) => [v.agent_host, v.agent_session, v.agent_name])).toEqual([[null, null, null], ["codex", "ses_1", "Codex"]]);
+    expect(queue.head_agent).toEqual({ host: "codex", session: "ses_1", name: "Codex" });
+    const other = store.list().find((p) => p.name === "Other")!;
+    expect(other.head_agent).toBeNull();
+    // No sidecar is a plan of its own, or a version.
+    expect(store.list()).toHaveLength(2);
+  });
+
   test("an unreadable version stops its chain there; the next run goes on from it, in order", () => {
     if (process.platform === "win32" || process.getuid?.() === 0) return;
     const dataDir = scratch();
@@ -242,6 +260,81 @@ describe("plan import", () => {
     expect(importPlanLibrary(store, { dataDir, now: () => t + 9000 })).toMatchObject({ versions_added: 0 });
   });
 
+  test("an empty version file never marks its chain read: written in place long after, it is still picked up", () => {
+    const dataDir = scratch();
+    const t = day(10).getTime();
+    version(dataDir, "api", "stall-2026-11-10", 1, "# Stall\n\n1\n", day(9));
+    const second = join(dataDir, "history", "api", "stall-2026-11-10", "002.md");
+    const store = createPlanStore({ dataDir });
+
+    // Plan review truncated 002.md, then stalled (a laptop asleep mid-write) for well past the settle time.
+    put(second, "", new Date(t));
+    let report = importPlanLibrary(store, { dataDir, now: () => t + 60_000 });
+    expect(report).toMatchObject({ versions_added: 1, empty_files: ["history/api/stall-2026-11-10/002.md"] });
+    expect(store.list()[0]!.head_version_number).toBe(1);
+
+    // The write finishes in place: the folder's time does not move. The next run still reads it.
+    const folder = join(dataDir, "history", "api", "stall-2026-11-10");
+    const folderTime = statSync(folder).mtime;
+    put(second, "# Stall\n\n2, written after the stall\n", new Date(t + 120_000));
+    utimesSync(folder, folderTime, folderTime);
+    report = importPlanLibrary(store, { dataDir, now: () => t + 200_000 });
+    expect(report).toMatchObject({ versions_added: 1, empty_files: [] });
+    const [plan] = store.list();
+    expect(plan!.head_version_number).toBe(2);
+    expect(new TextDecoder().decode(store.versionBytes(plan!.id, plan!.primary_doc_id, 2)!)).toBe("# Stall\n\n2, written after the stall\n");
+  });
+
+  test("a chain waiting on an empty newest file does not write the legacy map again on every pickup", () => {
+    const dataDir = scratch();
+    const t = day(10).getTime();
+    version(dataDir, "api", "idle-2026-11-10", 1, "# Idle\n\n1\n", day(9));
+    put(join(dataDir, "history", "api", "idle-2026-11-10", "002.md"), "", new Date(t));
+    const store = createPlanStore({ dataDir });
+    importPlanLibrary(store, { dataDir, now: () => t + 60_000 });
+    const mapFile = join(dataDir, "plan-library", "legacy-map.json");
+    const before = readFileSync(mapFile, "utf8");
+    const old = new Date(t - 86_400_000);
+    utimesSync(mapFile, old, old);
+    // Pickup after pickup with nothing new: the chain is read again (not marked read), the map is not written.
+    for (let i = 1; i <= 3; i++) {
+      const report = importPlanLibrary(store, { dataDir, now: () => t + 60_000 * (i + 1) });
+      expect(report.empty_files).toEqual(["history/api/idle-2026-11-10/002.md"]);
+    }
+    expect(statSync(mapFile).mtime.getTime()).toBe(old.getTime());
+    expect(readFileSync(mapFile, "utf8")).toBe(before);
+  });
+
+  test("versions follow file numbers, never arrival: an empty file a later one followed is over, and filled late is never taken", () => {
+    const dataDir = scratch();
+    const t = day(10).getTime();
+    const chain = join(dataDir, "history", "api", "order-2026-11-10");
+    version(dataDir, "api", "order-2026-11-10", 1, "# Order\n\n1\n", day(9));
+    put(join(chain, "002.md"), "", new Date(t));
+    version(dataDir, "api", "order-2026-11-10", 3, "# Order\n\n3\n", new Date(t + 1000));
+    const store = createPlanStore({ dataDir });
+    // 003 was written after the empty 002: plan review writes in order, so 002's write is over. v2 is 003.
+    let report = importPlanLibrary(store, { dataDir, now: () => t + 60_000 });
+    expect(report).toMatchObject({ versions_added: 2, empty_files: ["history/api/order-2026-11-10/002.md"] });
+    const id = store.list()[0]!.id;
+    const legacyOrder = () => store.versions(id).map((v) => [v.version_number, v.legacy]);
+    expect(legacyOrder()).toEqual([[1, "history/api/order-2026-11-10/001.md"], [2, "history/api/order-2026-11-10/003.md"]]);
+
+    // 002 is filled in after all, and 004 arrives: 002 is never taken after 003; 004 is v3.
+    put(join(chain, "002.md"), "# Order\n\n2, late\n", new Date(t + 120_000));
+    version(dataDir, "api", "order-2026-11-10", 4, "# Order\n\n4\n", new Date(t + 130_000));
+    // A new file moves the folder's time; set it, as a file system with a coarse clock may not within a test's
+    // milliseconds (Linux CI), and the chain would be skipped as unchanged.
+    utimesSync(chain, new Date(t + 130_000), new Date(t + 130_000));
+    report = importPlanLibrary(store, { dataDir, now: () => t + 300_000 });
+    expect(report).toMatchObject({ versions_added: 1, late_files: ["history/api/order-2026-11-10/002.md"] });
+    expect(legacyOrder()).toEqual([
+      [1, "history/api/order-2026-11-10/001.md"],
+      [2, "history/api/order-2026-11-10/003.md"],
+      [3, "history/api/order-2026-11-10/004.md"],
+    ]);
+  });
+
   test("a decision snapshot caught mid-write makes no plan of its own; written whole, it lands on its version", () => {
     const dataDir = scratch();
     const t = day(10).getTime();
@@ -257,6 +350,20 @@ describe("plan import", () => {
     expect(next).toMatchObject({ snapshot_only_plans: 0, decisions_added: 1 });
     expect(store.list()).toHaveLength(1);
     expect(store.list()[0]!.decision).toMatchObject({ decision: "approved", version_number: 1 });
+  });
+
+  test("a snapshot of an older text lands on the agent's version, never on the person's Restore of it", () => {
+    const dataDir = scratch();
+    version(dataDir, "api", "cache-2026-11-10", 1, "# Cache\n\nv1\n", day(9));
+    version(dataDir, "api", "cache-2026-11-10", 2, "# Cache\n\nv2\n", day(10));
+    const store = createPlanStore({ dataDir });
+    importPlanLibrary(store, { dataDir, now: () => day(11).getTime() });
+    const id = store.list()[0]!.id;
+    const doc = store.get(id)!.primary_doc_id;
+    store.addVersion(id, doc, { bytes: new TextEncoder().encode("# Cache\n\nv1\n"), committed_at: day(12).toISOString(), source: "person", author_via: "person", restored_from: 1 });
+    put(join(dataDir, "plans", "cache-2026-11-10-approved.md"), "# Cache\n\nv1\n", day(13));
+    importPlanLibrary(store, { dataDir, now: () => day(14).getTime() });
+    expect(store.events(id).filter((e) => e.kind === "decision").map((e) => e.decision!.version_number)).toEqual([1]);
   });
 
   test("a feedback line with nothing to land on waits without the file being read again; it lands once its version is in", () => {

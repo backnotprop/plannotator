@@ -389,6 +389,31 @@ test.skipIf(!hasDom)('a phone toast sits above a full-screen file\'s bar, and mo
   delete (window as { innerHeight?: number }).innerHeight;
 });
 
+test.skipIf(!hasDom)("a phone toast sits above a Shape board's dock in its thread, whose foot is hidden under the board", () => {
+  phoneWindow(true);
+  Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+  const page = document.createElement('div');
+  document.body.appendChild(page);
+  host = page;
+  // The thread's foot is display:none while the board shows (it measures 0): the board's dock (y 790) is the floor.
+  const pane = document.createElement('section');
+  pane.className = 'ib-pane';
+  const foot = document.createElement('div');
+  foot.className = 'ib-pfoot';
+  boxAt(foot, 0, 0, 0, 0);
+  const board = document.createElement('section');
+  board.setAttribute('data-shape-layer', '');
+  const dock = document.createElement('div');
+  dock.className = 'shp-dock';
+  boxAt(dock, 55, 790, 280, 42);
+  board.appendChild(dock);
+  pane.append(foot, board);
+  page.appendChild(pane);
+  const toast = show({ icon: 'check', lead: 'Added to your reply', onUndo: () => {} }, true, page, () => {});
+  expect(toast.style.bottom).toBe('62px');
+  delete (window as { innerHeight?: number }).innerHeight;
+});
+
 test('splitErrorAction: what happened, then what to do (the last sentence), together the message itself', () => {
   const two = 'The Inbox could not save your reply because the disk is full. Free some space and try again.';
   expect(splitErrorAction(two)).toEqual({ head: 'The Inbox could not save your reply because the disk is full. ', action: 'Free some space and try again.' });

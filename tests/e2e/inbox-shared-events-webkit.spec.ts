@@ -157,39 +157,43 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
     location.hash = `thread=${thread}&file=${file}`;
   }, [threadId, attachment] as const);
   const streamSamples: number[] = [];
-  // The page takes seconds to load on a busy runner: the takeover is waited for from when the leader stops answering
-  // (an evaluate that does not come back while the script holds its thread), never from the click.
-  const answers = () =>
+  /** The old leader's longest silence between beats so far; null when it does not answer within a second (its thread is held). */
+  const longestSilence = () =>
     Promise.race([
-      leader!.evaluate(() => true).catch(() => true),
-      new Promise<boolean>((done) => setTimeout(() => done(false), 1000)),
+      leader!.evaluate(() => {
+        const beats = (window as unknown as { __beats: number[] }).__beats;
+        const silences = beats.slice(1).map((beat, i) => ({ startedAt: beats[i]!, ms: beat - beats[i]! }));
+        return silences.reduce((longest, silence) => (silence.ms > longest.ms ? silence : longest), { startedAt: 0, ms: 0 });
+      }),
+      new Promise<null>((done) => setTimeout(() => done(null), 1000)),
     ]);
-  await waitFor(
-    async () => {
-      streamSamples.push(await streams(w));
-      return answers();
-    },
-    (answered) => !answered,
-    30_000,
-  );
-  const stalledAt = Date.now() - 1000;
+  // The takeover is waited for until it comes or the script has run out (a silence of eight seconds in the old leader's
+  // beats), never from a moment guessed from outside: a leader that is only slow (loading the thread and the page on a
+  // busy runner) misses a one-second answer too, and the script can start seconds later. Whether the takeover came
+  // inside the script is checked below against the beats.
   const takeover = await waitFor(
     async () => {
       streamSamples.push(await streams(w));
       for (const page of others) {
         const lead = (await logOf(page)).find((e) => e.type === 'lead' && e.at >= at);
-        if (lead) return lead.at - at;
+        if (lead) return { ms: lead.at - at, longestSilenceMs: null };
       }
-      return null;
+      return { ms: null, longestSilenceMs: (await longestSilence())?.ms ?? null };
     },
-    (v) => v !== null,
-    // The check within 3 s and no answer in 2 s, inside the script's eight seconds.
-    10_000,
+    (v) => v.ms !== null || (v.longestSilenceMs ?? 0) >= 8000,
+    // The page's load (seconds on a busy runner) and the script's eight seconds.
+    40_000,
   );
-  while (Date.now() - stalledAt < 9000) {
-    streamSamples.push(await streams(w));
-    await new Promise((done) => setTimeout(done, 100));
-  }
+  expect(takeover.value.ms, `no tab took over while the script held the old leader (${JSON.stringify(takeover.value)})`).not.toBeNull();
+  // The streams are sampled until the script lets the old leader go (it answers again).
+  await waitFor(
+    async () => {
+      streamSamples.push(await streams(w));
+      return longestSilence();
+    },
+    (silence) => silence !== null,
+    15_000,
+  );
   // The script ended: the old leader learns its lock was taken and follows. The agent writes until then, so the
   // front tab's gap below covers the whole stall, however late the page started the script.
   const rejoin = await waitFor(
@@ -206,31 +210,24 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
   // While the agent was writing: the quiet between its last line and the three above is not a gap.
   const frontRecords = (await logOf(front)).filter((e) => e.type === 'record' && e.at >= at - 1000 && e.at <= senderStoppedAt).map((e) => e.at);
   const frontLongestGapMs = Math.max(frontRecords[0]! - at, ...frontRecords.slice(1).map((t, i) => t - frontRecords[i]!), senderStoppedAt - frontRecords.at(-1)!);
-  const stall = await waitFor(
-    () =>
-      leader!.evaluate(() => {
-        const beats = (window as unknown as { __beats: number[] }).__beats;
-        const silences = beats.slice(1).map((beat, i) => ({ startedAt: beats[i]!, ms: beat - beats[i]! }));
-        return silences.reduce((longest, silence) => (silence.ms > longest.ms ? silence : longest), { startedAt: 0, ms: 0 });
-      }),
-    (s) => s.ms >= 8000,
-  );
+  const script = (await waitFor(longestSilence, (s) => s !== null && s.ms >= 8000)).value!;
   // The old leader learned it lost the lock only when the script let go (about eight seconds in): it was stopped all along.
   const stolenAtMs = (await logOf(leader!)).find((e) => e.type === 'stolen' && e.at >= at)!.at - at;
   expect(stolenAtMs).toBeGreaterThan(7000);
   // Counted from the script's start, the last beat before it. The next check comes within 3 s and gets no answer in 2 s,
   // so takeover lands two to five seconds in, plus any delay on the machine.
   // The bound is the script's eight: inside it the old leader cannot have let go, so this is a takeover, not the script ending.
-  const takeoverIntoStallMs = at + takeover.value! - stall.value.startedAt;
+  const takeoverMs = takeover.value.ms!;
+  const takeoverIntoStallMs = at + takeoverMs - script.startedAt;
   expect(takeoverIntoStallMs).toBeGreaterThan(0);
   expect(takeoverIntoStallMs).toBeLessThan(8000);
   // The tab in front never waited out the script: a real freeze is the whole stall, so the bound sits well below it.
-  expect(frontLongestGapMs).toBeLessThan(stall.value.ms - 1000);
+  expect(frontLongestGapMs).toBeLessThan(script.ms - 1000);
   expect(Math.max(...streamSamples)).toBeLessThanOrEqual(2);
   results.stallLeader = {
-    takeoverMs: takeover.value,
-    scriptStartedAtMs: stall.value.startedAt - at,
-    stallMs: stall.value.ms,
+    takeoverMs,
+    scriptStartedAtMs: script.startedAt - at,
+    stallMs: script.ms,
     takeoverIntoStallMs,
     frontLongestGapMs,
     rejoinAfterScriptMs: rejoin.ms,

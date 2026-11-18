@@ -403,7 +403,7 @@ class OpenCodeSession extends BaseSession {
 				}
 
 				try {
-					await this.config.client.session.promptAsync({
+					const result = await this.config.client.session.promptAsync({
 						path: { id: this.config.sessionId },
 						body: {
 							...(!this._firstQuerySent &&
@@ -416,6 +416,11 @@ class OpenCodeSession extends BaseSession {
 							parts: [{ type: "text", text: prompt }],
 						},
 					});
+					// The SDK resolves HTTP errors as result objects by default.
+					if (result.error) {
+						const detail = typeof result.error === "string" ? result.error : result.error.data?.message;
+						throw new Error(detail || `HTTP ${result.response.status}`);
+					}
 				} catch (err) {
 					yield {
 						type: "error",

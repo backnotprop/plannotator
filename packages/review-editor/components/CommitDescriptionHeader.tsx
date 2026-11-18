@@ -33,7 +33,7 @@ export const CommitDescriptionHeader: React.FC<{ info: CommitDiffInfo }> = ({ in
         <div className="mt-1.5 flex items-center gap-2 min-w-0 text-xs text-muted-foreground">
           <Avatar src={info.avatarUrl} name={info.author} size={18} />
           <span className="truncate">{info.author}</span>
-          <span className="font-mono text-[11px]" title={info.sha}>{info.shortSha}</span>
+          <span className="font-mono text-xs" title={info.sha}>{info.shortSha}</span>
           <span className="text-muted-foreground/70">{formatRelativeTime(info.committedAt)}</span>
         </div>
         {info.body && (
@@ -50,7 +50,7 @@ export const CommitDescriptionHeader: React.FC<{ info: CommitDiffInfo }> = ({ in
             {isLong && (
               <button
                 onClick={() => setExpanded((v) => !v)}
-                className="mt-1.5 text-[11px] text-primary/80 underline underline-offset-2 decoration-primary/40 hover:text-primary transition-colors"
+                className="mt-1.5 text-xs text-primary/80 underline underline-offset-2 decoration-primary/40 hover:text-primary transition-colors"
               >
                 {expanded ? 'Show less' : 'Show more'}
               </button>

@@ -39,6 +39,7 @@ export const INBOX_SIDEBAR_ITEMS = [
   { id: 'search', label: 'Search', place: 'stack', stack: 'top', hideable: true },
   { id: 'new-message', label: 'New message', place: 'stack', stack: 'top', hideable: true },
   { id: 'inbox', label: 'Inbox', place: 'stack', stack: 'top', hideable: false },
+  { id: 'plans', label: 'Spaces', place: 'stack', stack: 'top', hideable: true },
   { id: 'board', label: 'Board', place: 'stack', stack: 'top', hideable: true },
   { id: 'scheduled', label: 'Routines', place: 'stack', stack: 'top', hideable: true },
   { id: 'shape', label: 'Shape', place: 'stack', stack: 'top', hideable: true },
