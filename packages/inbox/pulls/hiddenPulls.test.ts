@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxPullStacks, inboxReviewRows, type InboxListRow, type InboxPull, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { forgetHiddenChanges, hideRepo, repoChangeKey, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
+import { forgetHiddenChanges, hiddenInProject, hidLead, hideRepo, repoChangeKey, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
 import { rowMenuActions } from '../rowMenu';
 import { reviewsOnYou } from './reviewsModel';
 import { sheetModel } from '../prs/sheetModel';
@@ -139,4 +139,21 @@ describe('a repository hidden here leaves at once', () => {
       globalThis.fetch = saved;
     }
   });
+});
+
+test("a Hide's toast says its thread for one PR, their thread for several, and counts several threads", () => {
+  expect(hidLead('Hid #7', 0, 1)).toBe('Hid #7');
+  const one = hidLead('Hid #7', 1, 1);
+  const several = hidLead('Hid 2 pull requests', 1, 2);
+  expect(one).toMatch(/\bits thread$/);
+  expect(several).toMatch(/\btheir thread$/);
+  expect(hidLead('Hid 2 pull requests', 2, 2)).toMatch(/\b2 threads$/);
+});
+
+test("Reviews' Hidden fold under a project filter lists that project's hidden PRs only", () => {
+  const records = [{ key: 'github.com/northwind/api#7' }, { key: 'github.com/northwind/web#20' }];
+  const projects = { 'github.com/northwind/api': ['prj_api'], 'github.com/northwind/web': ['prj_web'] };
+  expect(hiddenInProject(records, 'prj_web', projects).map((h) => h.key)).toEqual(['github.com/northwind/web#20']);
+  expect(hiddenInProject(records, null, projects)).toHaveLength(2);
+  expect(hiddenInProject([{ key: 'github.com/northwind/api' }], 'prj_web', projects)).toEqual([]);
 });

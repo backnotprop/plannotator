@@ -26,7 +26,7 @@ import { pullAvatarUrl } from './pullUrls';
 import { UnreportedBranches } from './UnreportedBranches';
 import type { InboxUnreportedBranch } from '@plannotator/core/inbox-types';
 import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
-import { focusWhenGone, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
+import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy, repoChangeKey } from './hiddenPulls';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -542,7 +542,8 @@ export function ReviewsList({
   const draw = (row: InboxReviewRow) => (
     <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} menu={menuRow === row.id} onOpen={() => onOpen(row)} />
   );
-  const hiddenFold = onShowAgain ? <HiddenFold hidden={answer.hidden ?? []} repos={answer.hidden_repos ?? []} onShow={onShowAgain} onShowRepo={onShowRepo} onOpenThread={onOpenThread} /> : null;
+  // Under a project filter, that project's hidden PRs and repositories only, as the rest of the page (its count follows).
+  const hiddenFold = onShowAgain ? <HiddenFold hidden={hiddenInProject(answer.hidden ?? [], project, answer.projects)} repos={hiddenInProject(answer.hidden_repos ?? [], project, answer.projects)} onShow={onShowAgain} onShowRepo={onShowRepo} onOpenThread={onOpenThread} /> : null;
   // High: what it can't place, behind one quiet line in the fold's own shape.
   const notRankedLine =
     notRanked.length > 0 ? (

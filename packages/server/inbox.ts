@@ -2029,7 +2029,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
     const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
     // The sidebar's Agents (inbox-agents-list.ts): this machine's from its own rows, every linked machine's from its list.
-    const ownAgents = agentsOf(own, now);
+    // Its rows before the Hide's filter: a thread left out for its hidden PRs keeps its agent (only the row leaves).
+    const ownAgents = agentsOf(allOwn, now);
     return {
       serverSession,
       version,
@@ -5822,14 +5823,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         });
         // `threads_left`: the threads this write takes out of the Inbox list (the toast says so; Undo brings them back).
         // A repository's hide never takes a thread out of the Inbox list: only PRs hidden one by one do.
-        const hides = hide.length > 0 || rehid.length > 0;
-        const before = hides ? threadsHiddenNow() : new Set<string>();
+        // `threads_back`: the ones it brings back (Undo, Show again): the window puts them back in place at once, as
+        // its own write, never behind "N new".
+        const before = threadsHiddenNow();
         const at = new Date();
         pullHidden.change({ hide, show: input.show, hide_repos: input.hide_repos, show_repos: input.show_repos }, at);
         if (rehid.length > 0 || input.show_threads.length > 0) pullHidden.rehide({ hide: rehid, show: input.show_threads }, at);
-        const left = hides ? [...threadsHiddenNow()].filter((id) => !before.has(id)) : [];
+        const after = threadsHiddenNow();
+        const left = [...after].filter((id) => !before.has(id));
+        const back = [...before].filter((id) => !after.has(id));
         pullHiddenChanged();
-        return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left });
+        return json({ serverSession, hidden: hiddenList(), hidden_repos: pullHidden.repos(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
       }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
