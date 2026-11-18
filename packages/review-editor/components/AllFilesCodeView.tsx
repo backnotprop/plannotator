@@ -2470,7 +2470,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const readAheadOfExpand = (event: Event) => {
       if (event.type === 'pointermove' && event instanceof PointerEvent && event.movementX === 0 && event.movementY === 0) return;
       const path = event.composedPath();
-      if (!path.some((node) => node instanceof Element && node.hasAttribute('data-expand-button'))) return;
+      if (!path.some((node) => node instanceof Element && (node.hasAttribute('data-expand-button') || node.hasAttribute('data-unmodified-lines')))) return;
       const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
       const itemId = host ? nodeToItemIdRef.current.get(host) : undefined;
       if (itemId == null) return;

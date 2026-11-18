@@ -181,11 +181,11 @@ async function headerOf(path: string): Promise<HTMLElement> {
 
 const touchAt = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, composed: true }), { changedTouches: [{ clientX: x, clientY: 0 }] });
 
-async function pressArrow(gesture: string | Event[] = 'pointerdown') {
+async function pressArrow(gesture: string | Event[] = 'pointerdown', marker = 'data-expand-button') {
   const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
   const container = document.createElement('diffs-container');
   const arrow = document.createElement('div');
-  arrow.setAttribute('data-expand-button', '');
+  arrow.setAttribute(marker, '');
   container.appendChild(arrow);
   document.querySelector('[data-mock-scroll]')!.appendChild(container);
   await act(async () => {
@@ -511,6 +511,27 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     });
     expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
   });
+
+  for (const [gesture, shown] of [['pointermove', 'semantic'], ['click', 'off']] as const) {
+    test.skipIf(!hasDom)(`the unmodified-lines label met by ${gesture} before the note arrives: the note ends ${shown === 'off' ? 'offered, the opened lines left alone' : 'shown by itself'}`, async () => {
+      const client: SemDiffClient = {
+        supports: (path) => path.endsWith('.ts'),
+        diff: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return moved;
+        },
+        attempt: async () => ({ result: moved, failed: false }),
+        dispose: () => {},
+      };
+      const { read } = hostReader();
+      await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
+      await pressArrow(gesture, 'data-unmodified-lines');
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      });
+      expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe(shown);
+    });
+  }
 
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();
