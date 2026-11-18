@@ -4,9 +4,10 @@
  * (scripts/inbox-sim.ts). The DOM tests (packages/inbox/listNewPill.test.tsx, showLight.test.tsx) prove the rules
  * with stand-ins; this proves what needs a layout.
  *
- * - The reader is scrolled down: news is held behind the "N new · Show" bar, which sticks to the top of the list's
- *   scroll box (in view, never covering a row at rest) and counts; no pill shows for held news, the rows stay as
- *   they are, and that holds past the seven seconds a fading pill would have taken (the owner, 2026-11-17).
+ * - The reader is scrolled down: news is held behind the bar ("New from Claude Code: “…” · Show", newsWords.ts),
+ *   which sticks to the top of the list's scroll box (in view, never covering a row at rest; its arrival moves no
+ *   row) and says what came; no pill shows for held news, the rows stay as they are, and that holds past the seven
+ *   seconds a fading pill would have taken (the owner, 2026-11-17).
  * - Show on the bar never scrolls the list. The rows it brought in below the view are counted by the pill, which
  *   appears only then; a press goes there, and each row is lit only once it is in view, for the light's whole 3 s.
  * - With the bar in view at the top there is no pill either, and scrolling to where the rows will land draws and
@@ -118,15 +119,24 @@ test('scrolled down, held news sticks the bar at the top and shows no pill; Show
     const order = () => body(page).locator('[data-thread-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-thread-id')));
     const before = await order();
 
+    // The row in the middle of the view: the bar coming in above it while the reader is scrolled down moves nothing.
+    const middle = await page.evaluate(() => {
+      const box = document.querySelector('.ib-listcol .ib-lbody')!.getBoundingClientRect();
+      const mid = (box.top + box.bottom) / 2;
+      const el = [...document.querySelectorAll<HTMLElement>('.ib-lbody [data-thread-id]')].find((node) => node.getBoundingClientRect().top <= mid && node.getBoundingClientRect().bottom >= mid)!;
+      return { id: el.getAttribute('data-thread-id')!, top: el.getBoundingClientRect().top };
+    });
+
     const first = await news();
-    await expect(line(page)).toContainText('1 new');
+    await expect(line(page)).toContainText(/^New from Claude Code: “Fresh update \d+”/);
     await barStuck(page);
+    expect(Math.abs((await page.locator(`.ib-lbody [data-thread-id="${middle.id}"]`).boundingBox())!.y - middle.top)).toBeLessThanOrEqual(1);
     // Held: no pill, and the list held still (the same rows in the same order, the new one not drawn).
     await expect(pill(page)).toHaveAttribute('data-off', '');
     expect(await order()).toEqual(before);
 
     const second = await news();
-    await expect(line(page)).toContainText('2 new');
+    await expect(line(page)).toContainText(/^2 new threads/);
     // Still none, past the time a fading pill would have run.
     await page.waitForTimeout(7000);
     await expect(pill(page)).toHaveAttribute('data-off', '');
@@ -219,7 +229,7 @@ test('at rest the bar covers no row and shows no pill; it stays stuck while the 
     await expect(body(page).locator('[data-thread-id]').first()).toBeVisible();
     const held = await news();
     await expect(line(page)).toBeInViewport();
-    await expect(line(page)).toContainText('1 new');
+    await expect(line(page)).toContainText(/^New from Claude Code: “Fresh update \d+”/);
     await expect(pill(page)).toHaveAttribute('data-off', '');
     // At rest the bar is in the flow: the first row starts below it, uncovered.
     const bar = await placeIn(page, '[data-held-bar]');
@@ -307,7 +317,7 @@ test('a 390 px phone: the bar sticks above the sticky group header; after Show t
     const page = await context.newPage();
     await openScrolled(page);
     const first = await news();
-    await expect(line(page)).toContainText('1 new');
+    await expect(line(page)).toContainText(/^New from Claude Code: “Fresh update \d+”/);
     await barStuck(page);
     await expect(pill(page)).toHaveAttribute('data-off', '');
     // The group header stuck at the top sits under the bar, not behind it.

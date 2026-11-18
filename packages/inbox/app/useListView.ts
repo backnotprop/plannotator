@@ -18,6 +18,7 @@ import { routineHold, useRoutineThreads } from '../listFilterRoutines';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
+import { heldLines } from '../heldLines';
 import { listProjectOf, type Route } from './route';
 import type { RowWrites } from '../data/actions/rows';
 import type { ListModel, ProjectFolder } from '../api';
@@ -142,13 +143,18 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   // The list's name: Inbox, or the project's window name (or the machine's, or the agent's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : filterTag ? filterTag.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
+  // What the line says (heldLines.ts): what came here, and in a project or filter view what came elsewhere.
+  const scoped = listProject !== null || !!filterMachine || !!filterAgent || !!shownTagId;
+  const lines = shown && latest ? heldLines({ shown, latest: latestGroups, view: filterShown, scope: scoped ? filterList : null, openedHere: openedHere.current, open: heldOpen(), names: projectNames }) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
   const notice =
-    heldNews?.text && shown
+    shown && ((heldNews?.text && lines?.here) || lines?.elsewhere)
       ? {
-          count: heldNews.count,
-          project: heldNews.project ?? null,
+          count: heldNews?.text ? heldNews.count : 0,
+          project: heldNews?.project ?? null,
           lands: showLandsIn(filterShown(shown), filterShown(latestGroups)),
+          here: heldNews?.text ? (lines?.here ?? null) : null,
+          elsewhere: lines?.elsewhere ?? null,
         }
       : null;
   return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };

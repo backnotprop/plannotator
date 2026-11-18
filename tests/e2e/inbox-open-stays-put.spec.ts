@@ -199,7 +199,7 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
 
   // An agent writes while the person reads: it waits behind "1 new".
   const late = await world.agent.send({ project_path: path, subject: 'Payout export', body: 'The payout export is ready to review.', agent_session: 'ses_desk_late' } as Parameters<SimAgent['send']>[0]);
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText('New from Claude Code: “Payout export”');
   expect(await rowsOf(page)).toEqual(before);
   await shot(page, '03-two-read-and-an-agent-wrote');
 
@@ -236,7 +236,7 @@ test('desktop: opening rows moves nothing; closing settles with a slide; agent n
   expect(await sectionOf(page, second)).toBeNull();
   const slot = before.slice(before.indexOf(second) + 1).find((rowId) => last.order.includes(rowId))!;
   expect(await focused(page)).toBe(slot);
-  await expect(page.locator('[data-inbox-notice]')).toContainText('1 new in docs-site');
+  await expect(page.locator('[data-inbox-notice]')).toContainText('New from Claude Code: “Payout export”');
   expect(await sectionOf(page, String(late.thread_id))).toBeNull();
   await shot(page, '04-after-close');
 

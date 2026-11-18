@@ -294,7 +294,7 @@ test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind
   const late = await agentSends('A late note from the agent.');
   act(() => pokeStream!());
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^New from .+: “/);
   expect(rowOf(el, late)).toBeNull();
 
   closeThread();
@@ -302,7 +302,7 @@ test.skipIf(!hasDom)("an agent's message that arrives while reading stays behind
   await until(() => rowOf(el, first) === null, 'the settle');
   // Closing settled only the person's own read: the agent's message still waits.
   expect(rowOf(el, late)).toBeNull();
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^New from .+: “/);
 
   // Show from the keyboard: its line goes away, and focus goes to the row it brought in, not to the page.
   const notice = el.querySelector('[data-inbox-notice]') as HTMLButtonElement;
@@ -852,14 +852,14 @@ test.skipIf(!hasDom)("an agent's message in a Priority thread, while the list is
   await agentSends('A late note in the Priority thread.', added);
   act(() => pokeStream!());
   await until(() => el.querySelector('[data-inbox-notice]') !== null, 'the "1 new" notice');
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^.+ replied in “/);
   expect(sectionOfRow(el, added)).toBe('priority');
 
   closeThread();
   await wait(SETTLE_BEAT_MS + 60);
   await until(() => sectionOfRow(el, first) !== 'new', 'the settle');
   expect(sectionOfRow(el, added)).toBe('priority');
-  expect(el.querySelector('[data-inbox-notice]')!.textContent).toContain('1 new in');
+  expect(el.querySelector('[data-inbox-notice]')!.textContent).toMatch(/^.+ replied in “/);
   act(() => (el.querySelector('[data-inbox-notice]') as HTMLButtonElement).click());
   await until(() => el.querySelector('[data-inbox-notice]') === null, 'Show');
   expect(sectionOfRow(el, added)).toBe('priority');

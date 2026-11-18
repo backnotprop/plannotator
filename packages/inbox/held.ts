@@ -124,6 +124,20 @@ function newsRows(shown: readonly InboxListSection[], latest: readonly InboxList
   return [...rowsById(latest).values()].filter((row) => !isOpenRow(row, open) && hasNewAgentActivity(before.get(row.thread_id), row, openedHere));
 }
 
+/**
+ * The news that waits (`newsRows`), each with the row the list on screen has for that thread (undefined: the list
+ * lacks it): what the held line's words read (newsWords.ts), new thread, question or reply.
+ */
+export function heldArrivalRows(
+  shown: readonly InboxListSection[],
+  latest: readonly InboxListSection[],
+  openedHere?: ReadonlySet<string>,
+  open?: OpenThread | null,
+): { row: InboxListRow; was: InboxListRow | undefined }[] {
+  const before = rowsById(shown);
+  return newsRows(shown, latest, openedHere, open).map((row) => ({ row, was: before.get(row.thread_id) }));
+}
+
 /** What "N new" says of the news that waits (`newsRows`): how many threads, and the one project they are in. */
 export function heldNotice(
   shown: readonly InboxListSection[],

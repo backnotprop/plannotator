@@ -344,6 +344,9 @@
       "at",
       "label"
     ],
+    "InboxListRowLastAgent": [
+      "host"
+    ],
     "InboxListRowProject": [
       "id",
       "name"

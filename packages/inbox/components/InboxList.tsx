@@ -25,7 +25,7 @@ import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { useNarrowerThan } from '../narrower';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
 import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
-import { HeldNoticeLine, HeldNoticeSaid } from './HeldNoticeLine';
+import { HeldNoticeLine, HeldNoticeSaid, HoldViewOnBar, noticeLines, type ListNotice } from './HeldNoticeLine';
 import { listBarShows } from '../listNewState';
 import { useShowHold } from '../holdView';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
@@ -96,13 +96,15 @@ export interface InboxListProps {
   narrow: boolean;
   selectedThreadId: string | null;
   /**
-   * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
-   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
+   * The held list's line (HeldNoticeLine.tsx `ListNotice`): how many (held.ts `heldNotice`) and what came (newsWords.ts),
+   * one line each, a long name cut with "…", the whole line then in a tooltip. `lands`: the
    * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
    * the rows it brings in are on screen (List has no groups to open). The line sticks to the list's top while
    * it shows (listNewState.ts): held news has no other sign, and no pill.
    */
-  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[] } | null;
+  notice: ListNotice | null;
+  /** The line for news outside a project or filter view: Show all goes to the whole Inbox (newsWords.ts). */
+  onShowAll?: () => void;
   /** The list is drawn but out of sight (a thread covers it: a phone, a stacked window, full screen): its pill waits. */
   covered?: boolean;
   /**
@@ -1349,6 +1351,7 @@ export function InboxList(props: InboxListProps) {
   }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
   const heldBar = listBarShows(props.notice?.count ?? 0);
+  const bar = noticeLines(props.notice, heldBar, props.onShowAll !== undefined);
   const holdShow = useShowHold(bodyRef); // Show never moves the reader (holdView.ts).
   const showNew = () => {
     holdShow();
@@ -1622,13 +1625,9 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {heldBar && props.notice && (
-            <HeldNoticeLine
-              count={props.notice.count}
-              project={props.notice.project ?? null}
-              onShow={() => showNew()}
-            />
-          )}
+          <HoldViewOnBar body={bodyRef} lines={bar.lines}>
+            <HeldNoticeLine here={bar.here} elsewhere={bar.elsewhere} onShow={() => showNew()} onShowAll={props.onShowAll} />
+          </HoldViewOnBar>
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
           {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
@@ -1673,7 +1672,7 @@ export function InboxList(props: InboxListProps) {
           </LazyRowTips.Provider>
         </ThreadRowMenu>
       {pick.sheet}
-      <HeldNoticeSaid count={heldBar ? props.notice!.count : 0} project={props.notice?.project ?? null} place={`${props.scope ?? ''}\n${props.title}`} />
+      <HeldNoticeSaid words={bar.words} place={`${props.scope ?? ''}\n${props.title}`} />
       {props.reconnecting && (
         <p className="ib-relink" data-inbox-reconnecting="">
           Reconnecting…
