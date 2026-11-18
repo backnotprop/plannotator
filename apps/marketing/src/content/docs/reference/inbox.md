@@ -421,14 +421,23 @@ Then run:
 plannotator inbox cloudflare-access setup --email you@example.com
 ```
 
-It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and, last, two DNS records: one name for the Inbox and a sibling name (the same name with `-s` added) for sessions. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code. Use `--zone` when the token sees several domains, and `--hostname` to choose the name (one level under your domain, for example `plannotator.example.com`).
+It asks for the token (or reads `CLOUDFLARE_API_TOKEN`). It creates a sign-in by one-time code sent to that e-mail, a tunnel, an Access application that lets in only that e-mail, and finally DNS records for the Inbox and for sessions. It then checks from outside that a visit without your sign-in, a forged token, a forged cookie and a wrong name all stay out. Only then does it turn on and print the address with a QR code.
+
+Use `--zone` when the token sees several domains. To choose both names, pass `--hostname` for the Inbox and `--session-hostname` for sessions. Both names must be distinct and one level under the selected zone.
+
+```bash
+plannotator inbox cloudflare-access setup --email you@example.com --zone example.com \
+  --hostname inbox.example.com --session-hostname reviews.example.com
+```
+
+On first setup the sessions name defaults to the Inbox name with `-s` added to its first label, such as `inbox-s.example.com`. Re-running setup keeps the configured sessions name. To change it in a managed setup, run `plannotator inbox cloudflare-access teardown` before setting up the new name.
 
 - **Only you can open it.** Cloudflare asks for your e-mail and a one-time code, and the Inbox checks Cloudflare's signed token on every request itself: the e-mail must be the one you typed. A mistake in the Access policy alone is not enough to let anyone in.
 - **It is on the internet.** Unlike the tailnet, the address is public, behind that sign-in. Treat a signed-in phone like your computer: what you send becomes a turn in an agent session here. The sign-in lasts 24 hours.
-- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens under `/s/…` at the sibling name, with the same sign-in (you sign in once). The Inbox and sessions are kept on separate names, so a page in a review cannot act as the Inbox. Open sessions share the sibling name with each other. If the Inbox is not running, it starts in the background.
+- **Sessions:** add `--cloudflare-access` to `plannotator review`, `annotate` or `last`, and the session opens under `/s/…` at the sessions hostname, with the same sign-in. The Inbox and sessions are kept on separate names, so a page in a review cannot act as the Inbox. Open sessions share a hostname. If the Inbox is not running, it starts in the background.
 - **When this computer sleeps** or the Inbox is stopped, the address shows Cloudflare's own error page. `cloudflared` runs as part of the Inbox and stops with it.
 
-You can do all of this from **Settings → Remote devices → Cloudflare** too: type your e-mail, paste the token, pick the domain, and watch each step tick. The same place shows both addresses with a QR code, whether the tunnel is connected, **Turn off** (keeps the setup) and **Remove**. It cannot be changed from a device signed in through Cloudflare. `plannotator inbox cloudflare-access status` shows the same state in a terminal. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
+For standard setup, open **Settings → Remote devices → Cloudflare**, type your e-mail, paste the token and pick the domain. Use the CLI example above to choose the sessions hostname. Settings also shows both addresses with a QR code, whether the tunnel is connected, **Turn off** (keeps the setup) and **Remove**. It cannot be changed from a device signed in through Cloudflare. `plannotator inbox cloudflare-access status` shows the same state in a terminal. `plannotator inbox cloudflare-access teardown` turns it off and deletes the DNS records, the Access application and the tunnel, in that order (it asks for a token again). `PLANNOTATOR_INBOX_CF_ACCESS=0` keeps it off for one run.
 
 ### Use a tunnel and Access application you already have
 
@@ -452,7 +461,7 @@ If you already run a Cloudflare Tunnel to the Inbox with an Access application i
    `port` is the local port your tunnel's ingress points at (`http://127.0.0.1:<port>`), and the ingress must set the Host header to `host`.
 4. Restart the Inbox (`plannotator inbox restart`).
 
-This opens the Inbox only. Sessions need the second address that setup creates; until then `--cloudflare-access` says so.
+To open sessions too, add `"sessionHost": "reviews.example.com"` to `inboxCloudflareAccess`. Point both names at the tunnel, give each its own ingress rule with its own Host header, and cover both names with the Access application whose AUD appears in the config. Omit `sessionHost` if you only publish the Inbox.
 
 ## Inside another app on this computer
 
