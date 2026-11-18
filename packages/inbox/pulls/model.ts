@@ -213,7 +213,7 @@ export function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
 }
 
 /** What a hand-off asks the agent for first: a guided review (the default), or the person's own curation. */
-export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string };
+export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string } | { kind: 'show_me'; words?: string };
 /** A launchpad's Start a thread (pulls/startThread.ts): the PR handed over with nothing asked for first, no guided review. */
 export type PullHandoffThread = { kind: 'thread' };
 
@@ -295,7 +295,11 @@ export function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 
 export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): string {
   const layers = handoffLayers(stack);
   // The person's words, whole (through 0.28.61 they were cut at 1,000 characters without a word).
-  const custom = ask.kind === 'custom' ? ask.words.trim() : '';
+  const custom = ask.kind === 'guide' ? '' : (ask.words ?? '').trim();
+  if (ask.kind === 'show_me') {
+    const of = layers.length > 1 ? `the whole stack's diff, from ${safeBranch(stack.open_base) ?? "the stack's base branch"} to ${safeBranch(layers[layers.length - 1]!.head) ?? `the top ${pullNounOf(stack)}'s branch`}` : `its diff against ${safeBranch(layers[0]!.base) ?? 'its base branch'}`;
+    return `1. Send me a Show me page of ${of}, using /show-me${custom ? ` ${custom}` : ''} (its instructions are at the end of this message).`;
+  }
   if (layers.length > 1) {
     const top = layers[layers.length - 1]!;
     const from = safeBranch(stack.open_base) ?? "the stack's base branch";

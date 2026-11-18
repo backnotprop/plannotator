@@ -10,7 +10,7 @@ export interface ComposeSent {
   launched?: boolean;
   pullKeys?: readonly string[] | null;
   machine?: string | null;
-  pullAsk?: 'guide' | 'custom' | null;
+  pullAsk?: 'guide' | 'custom' | 'show_me' | null;
 }
 
 export interface ComposeHeld {
