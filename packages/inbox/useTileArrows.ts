@@ -10,9 +10,9 @@ export function useTileArrows(section: { readonly current: HTMLElement | null },
     handlers: {
       move: {
         when: (event) => {
-          if (event.defaultPrevented || event.isComposing || covered || modalOpen()) return false;
+          if (event.defaultPrevented || event.isComposing || covered) return false;
           const list = tileList(keyTarget(event));
-          return !!list && list.querySelectorAll('[data-attachment-id]').length > 1;
+          return !!list && list.querySelectorAll('[data-attachment-id]').length > 1 && !modalOpen();
         },
         handle: (event) => {
           const target = keyTarget(event);
