@@ -14,7 +14,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAgentRow, InboxAgentsModel } from '@plannotator/core/inbox-types';
+import type { InboxAgentRow, InboxAgentsModel, InboxNoteAgentId } from '@plannotator/core/inbox-types';
 import { sized, tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
@@ -69,7 +69,7 @@ function recordFetch(answer: (path: string, body: Record<string, unknown>) => un
   }) as typeof fetch;
 }
 
-function mount(rows: InboxAgentRow[]) {
+function mount(rows: InboxAgentRow[], noteTexts?: Partial<Record<InboxNoteAgentId, string>>) {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.appendChild(host);
@@ -80,6 +80,7 @@ function mount(rows: InboxAgentRow[]) {
       <AgentNoteDialog
         rows={rows}
         noteText={NOTE}
+        noteTexts={noteTexts}
         onModel={(next) => seen.models.push(next)}
         onClosed={() => seen.closed++}
       />,
@@ -283,6 +284,26 @@ test.skipIf(!hasDom)('Show the note opens the exact block', () => {
   act(() => button(el, 'Show the note').click());
   expect(el.querySelector('.ib-anote-note pre')?.textContent).toBe(NOTE);
   expect(button(el, 'Hide the note').getAttribute('aria-expanded')).toBe('true');
+});
+
+test.skipIf(!hasDom)('Show the note previews what each agent really gets: its own rules where it has them, the shared block for the rest', () => {
+  const own = NOTE.replace('<!-- plannotator-inbox:end -->', 'Never send from reviewer sessions.\n<!-- plannotator-inbox:end -->');
+  const { el } = mount([CLAUDE, CODEX, GEMINI], { 'claude-code': own });
+  act(() => button(el, 'Show the note').click());
+  const previews = [...el.querySelectorAll<HTMLElement>('[data-anote-preview]')].map((pre) => ({ agents: pre.dataset.anotePreview, text: pre.textContent }));
+  expect(previews).toEqual([
+    { agents: 'claude-code', text: own },
+    { agents: 'codex gemini', text: NOTE },
+  ]);
+  // Each block says whose it is.
+  expect([...el.querySelectorAll<HTMLElement>('[data-anote-for]')].map((label) => label.dataset.anoteFor)).toEqual(['claude-code', 'codex gemini']);
+  // One block for everyone: shown once, unlabelled, as before.
+  act(() => root?.unmount());
+  host?.remove();
+  const same = mount([CODEX, GEMINI], {});
+  act(() => button(same.el, 'Show the note').click());
+  expect(same.el.querySelectorAll('[data-anote-preview]').length).toBe(1);
+  expect(same.el.querySelector('[data-anote-for]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('a long path is cut in the middle on screen, whole in the DOM and in its tooltip; folder names isolated; the name left to the browser\'s direction', async () => {

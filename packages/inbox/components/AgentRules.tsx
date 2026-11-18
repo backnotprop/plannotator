@@ -90,7 +90,7 @@ const UNSENT_WHY: Record<InboxRulesUnsent['why'], (one: boolean) => string> = {
   stale: (one) => `Plannotator could not update ${one ? 'its note' : 'their notes'}.`,
 };
 const UNSENT_FIX: Record<InboxRulesUnsent['why'], ((one: boolean) => string) | null> = {
-  none: () => ' Turn it on in Settings → Agents.',
+  none: (one) => ` Turn ${one ? 'it' : 'them'} on in Settings → Agents.`,
   edited: (one) => ` Turn the note off and on in Settings → Agents to replace ${one ? 'it' : 'them'}.`,
   stale: null,
 };

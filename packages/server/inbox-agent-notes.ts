@@ -1293,13 +1293,6 @@ export function noteRulesStates(dataDir: string, e: AgentEnvironment, config: un
 }
 
 /**
- * Whether the file `agent` reads its note from holds the note with exactly
- * its rules (inboxNoteHoldsRules: what the hosts' reminders check too). False
- * with no rules, for Cursor, and with no file. Exported for the Inbox's MCP
- * instructions, which can leave the rules out for a client whose agent has
- * them here (not used there yet).
- */
-/**
  * Why the automatic add would leave this agent's file alone (`addInboxNote` with `auto`), or null:
  * `read-only` (no owner write bit), `hard-linked` (other hard links), `pasted` (the note pasted by
  * hand without markers). Settings uses it to tell such a skip, which config.json records as asked
@@ -1318,6 +1311,13 @@ function skippedOnPurpose(agent: InboxNoteAgentId, e: AgentEnvironment): "read-o
   }
 }
 
+/**
+ * Whether the file `agent` reads its note from holds the note with exactly
+ * its rules (inboxNoteHoldsRules: what the hosts' reminders check too). False
+ * with no rules, for Cursor, and with no file. Exported for the Inbox's MCP
+ * instructions, which can leave the rules out for a client whose agent has
+ * them here (not used there yet).
+ */
 export function inboxNoteHoldsAgentRules(agent: InboxNoteAgentId, e: AgentEnvironment, config: unknown): boolean {
   const rules = agentRulesText(agent, config);
   const path = rules === null ? null : noteTarget(agent, e).path;

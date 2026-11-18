@@ -407,6 +407,10 @@ test.skipIf(!hasDom)('an agent the rules do not reach is named under the box the
     { why: 'none', agents: 'opencode', fix: false, named: [INBOX_AGENT_LABELS.opencode], saysWhere: false },
     { why: 'edited', agents: 'codex', fix: true, named: [INBOX_AGENT_LABELS.codex], saysWhere: true },
   ]);
+  // A line naming several agents says how to fix them all, not one of them.
+  const several = el.querySelector<HTMLElement>('[data-rules-slot="shared"] [data-rules-agents="gemini qwen"]')!.textContent ?? '';
+  expect(several.includes('Turn them on')).toBe(true);
+  expect(several.includes('Turn it on')).toBe(false);
   // A note Plannotator could not update: never a way to fix it that Settings → Agents does not have.
   expect(lines('claude-code')).toEqual([{ why: 'stale', agents: 'claude-code', fix: false, named: [INBOX_AGENT_LABELS['claude-code']], saysWhere: false }]);
   // Everyone reached, or an older Inbox that does not say: no line.
