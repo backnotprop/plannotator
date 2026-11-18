@@ -7,14 +7,16 @@ import { semDiffAdvertNow, useSemDiffAdvert } from '../semDiffAdvert';
 
 export function useSemDiffClient(): SemDiffClient | null {
   useSemDiffAdvert();
-  const latched = useRef<{ value: unknown } | null>(null);
-  if (!latched.current && semDiffAdvertNow() !== undefined) latched.current = { value: semDiffAdvertNow() };
-  const raw = latched.current?.value ?? null;
   const enabled = useConfigValue('semanticDiffEnabled');
   const on = useConfigValue('diffSemantic');
   const wanted = useRef(false);
+  const latched = useRef<{ value: unknown } | null>(null);
+  const now = semDiffAdvertNow();
+  const unused = !enabled || !wanted.current;
+  if (now !== undefined && (!latched.current || (latched.current.value == null && now != null && unused))) latched.current = { value: now };
   if (on) wanted.current = true;
   const asked = wanted.current;
+  const raw = latched.current?.value ?? null;
   const advert = useMemo(() => parseSemDiffAdvert(raw), [raw]);
   const client = useMemo(
     () => (advert && enabled && asked ? createSemDiffClient({ advert, origin: window.location.origin, createWorker: loadSemDiffWorker }) : null),
