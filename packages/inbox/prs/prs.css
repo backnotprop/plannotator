@@ -106,8 +106,8 @@
 .ib-prs-stack { display: inline-flex; align-items: center; flex-wrap: wrap; row-gap: 4px; padding: 2px; border-radius: 6px; background: color-mix(in oklch, var(--foreground) 3%, transparent); box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 55%, transparent); }
 .ib-prs-join { display: inline-flex; align-items: center; }
 .ib-prs-link { display: block; width: 8px; height: 1px; background: color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
-.ib-prs-stack .ib-prt { background: var(--card); }
-.ib-prs-stack .ib-prt:hover { background: color-mix(in oklch, var(--card) 85%, var(--foreground)); }
+/* A stack's chips take a lone chip's fill (.ib-prt), over the pod's fainter one: on the board's surface (the list
+   panel's card) a card-coloured chip would vanish into the pod. */
 .ib-prs-stack .ib-prt[data-you] { background: var(--primary); }
 .ib-prs-stack .ib-prt[data-state='draft']:not([data-you]),
 .ib-prs-stack .ib-prt[data-state='merged'] { background: transparent; }
@@ -358,8 +358,6 @@ button.ib-prs-box:focus-visible { outline: 2px solid var(--ring); outline-offset
 .ib-prs[data-selecting] .ib-prt[data-you] { color: var(--primary); font-weight: 600; box-shadow: none; }
 .ib-prs[data-selecting] .ib-prt[data-you]:not([data-picked]) { background: var(--ib-prt-fill); }
 .ib-prs[data-selecting] .ib-prt[data-you]:not([data-picked]):hover { background: var(--ib-prt-hover); }
-.ib-prs[data-selecting] .ib-prs-stack .ib-prt[data-you]:not([data-picked]) { background: var(--card); }
-.ib-prs[data-selecting] .ib-prs-stack .ib-prt[data-you]:not([data-picked]):hover { background: color-mix(in oklch, var(--card) 85%, var(--foreground)); }
 .ib-prs[data-selecting] .ib-prt[data-you][data-state='draft']:not([data-picked]) { background: transparent; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--border) 90%, transparent); }
 .ib-prs[data-selecting] .ib-prt[data-you] .ib-prck:is([data-checks='success'], [data-checks='pending']) { color: var(--ib-prt-quiet); }
 .ib-prs[data-selecting] .ib-prt[data-picked] { background: var(--ib-cur-bg); box-shadow: none; }
