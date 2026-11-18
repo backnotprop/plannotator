@@ -1350,6 +1350,9 @@ describe('register', () => {
         return path === '/api/inbox/bridge/poll' ? { commands: delivered ? [] : [reply] } : { ok: true }
       }),
     })
+    // The kit's session mock is newer than the oldest engine in the matrix (2.1.287), which has no
+    // `$.session.append` either; "an engine older than the API with $.session.append" below covers that engine.
+    if (typeof mock.session !== 'function') return
     const session = mock.session(on)
     on('turn.start', ($: any, e: any) => ({ turnId: e.turnId }))
     // An engine whose API has `$.session.append` (the version decides: validate refuses testing the noun itself).
@@ -1454,8 +1457,9 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
         if (next.event === 'tool.call') {
           const texts = Object.entries(e).filter(([name, value]) => name !== 'tool' && name !== 'tool_use_id' && typeof value === 'string').map(([, value]) => value as string)
           held.set(keyOf(e), { command: e.tool === 'Bash' ? e.command : undefined, texts })
+          await $.ui.log(`early-run: held ${e.tool}`)
         }
-        if (next.event === 'tool.run') held.delete(keyOf(e))
+        if (next.event === 'tool.run' && held.delete(keyOf(e))) await $.ui.log(`early-run: forgot ${e.tool}`)
         return next(e)
       })
       on('process.run', async ($: any, e: any, next: any) => {
@@ -1468,6 +1472,11 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
     },
   }
 
+  // The kit raises a test's `$.tool.call` as a session does once a hook may answer at tool.run: the plugins'
+  // tool.call hooks, classic.PreToolUse, the permission check, the plugins' tool.run hooks, then the test's own
+  // tool.call hook, which stands for the tool itself. The stand-in holds the call from its tool.call to its tool.run
+  // and refuses any start that repeats it meanwhile, so one refused start and then one launch prove that the mod
+  // passed the call on at tool.call and opened it at tool.run.
   test('held by the guard: refused once at tool.call and passed on, then opened once at tool.run; the tool and a taken-over Bash command', { plugins: [EARLY_RUN_GUARD] }, async ($: any, on: any) => {
     const w = world(on)
     const launches = () => w.runs.filter((argv) => argv[3] === 'plannotator-launch').map((argv) => argv.slice(5))
@@ -1477,34 +1486,32 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
       expect(w.tools.map((tool) => tool.name)).toContain('plannotator')
       return
     }
-    // What the engine does beneath every hook: at tool.call, the permission check (here: passed on); at tool.run, the tool.
-    const beneath: string[] = []
+    // The tool itself: never reached, since the mod answers at tool.run.
+    const ran: string[] = []
     on('tool.call', ($: any, e: any) => {
-      beneath.push(`tool.call ${e.tool}`)
-      return e.tool === 'Bash' ? { result: { stdout: 'passed on (test)', stderr: '', interrupted: false } } : { result: 'passed on (test)' }
-    })
-    on('tool.run', ($: any, e: any) => {
-      beneath.push(`tool.run ${e.tool}`)
+      ran.push(e.tool)
       return e.tool === 'Bash' ? { result: { stdout: 'the command ran', stderr: '', interrupted: false } } : { result: 'no hook served it' }
     })
     await $.session.start(SESSION)
 
-    const toolCall = { tool: TOOL, action: 'annotate', target: 'notes.md', gate: true }
-    expect((await $.tool.call(toolCall)).result).toBe('passed on (test)')
-    expect(launches()).toEqual([])
-    const opened = await $.tool.run(toolCall)
+    const opened = await $.tool.call({ tool: TOOL, action: 'annotate', target: 'notes.md', gate: true })
     expect(opened.result).toContain('Opened notes.md in Plannotator: http://localhost:4321')
     expect(launches()).toEqual([['plannotator', 'annotate', 'notes.md', '--gate']])
 
     // Without --json the launch's argv ends in the command, so the guard holds this one too.
-    const bashCall = { tool: 'Bash', command: 'plannotator annotate todo.md --gate' }
-    expect((await $.tool.call(bashCall)).result.stdout).toBe('passed on (test)')
-    const ran = await $.tool.run(bashCall)
-    expect(ran.result.stdout).toContain('Opened todo.md in Plannotator: http://localhost:4321')
+    const taken = await $.tool.call({ tool: 'Bash', command: 'plannotator annotate todo.md --gate' })
+    expect(taken.result.stdout).toContain('Opened todo.md in Plannotator: http://localhost:4321')
     expect(launches()).toEqual([['plannotator', 'annotate', 'notes.md', '--gate'], ['plannotator', 'annotate', 'todo.md', '--gate']])
 
-    expect(beneath).toEqual([`tool.call ${TOOL}`, 'tool.call Bash'])
-    expect(w.logs.filter((line) => line.startsWith('early-run: '))).toEqual(['early-run: refused a start', 'early-run: refused a start'])
+    expect(ran).toEqual([])
+    expect(w.logs.filter((line) => line.startsWith('early-run: '))).toEqual([
+      `early-run: held ${TOOL}`,
+      'early-run: refused a start',
+      `early-run: forgot ${TOOL}`,
+      'early-run: held Bash',
+      'early-run: refused a start',
+      'early-run: forgot Bash',
+    ])
   })
 
   // Review M2. The engine picks a module's hooks for an event by pattern, so `tool.*` puts the mod in the chain of
@@ -1534,7 +1541,10 @@ describe("Claude Code's guard from 2.1.326 (early run)", () => {
 
   test("a guard that sends an organization tool's tool.describe past the user tier reports the mod's tool.* hook skipped; a tool_use_id matcher key does not avoid it", { plugins: [DESCRIBE_GUARD, MATCHER_PROBE] }, async ($: any, on: any) => {
     const w = world(on)
-    if (typeof $.tool?.describe !== 'function') return
+    // `$.tool.describe` is among the engine's own calls from 2.1.318 at the latest: there the case must run.
+    const describes = typeof $.tool?.describe === 'function'
+    if (CLAUDE_CODE_VERSION && atLeast(CLAUDE_CODE_VERSION, '2.1.318')) expect(`${CLAUDE_CODE_VERSION} raises tool.describe: ${describes}`).toBe(`${CLAUDE_CODE_VERSION} raises tool.describe: true`)
+    if (!describes) return
     on('tool.describe', ($: any, e: any) => ({ description: e.description }))
     await $.session.start(SESSION)
 
