@@ -24,6 +24,7 @@ import type { InboxSteps } from "./inbox-steps";
 import type { InboxThreadPull, InboxThreadPullsSummary } from "./inbox-thread-pulls";
 import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxScheduledChange, InboxScheduledRun, InboxScheduledThread } from "./inbox-scheduled-types";
+import type { InboxShowMePage } from "./show-me-page";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
@@ -629,6 +630,7 @@ export interface InboxMessage {
    * it was sent (packages/server/inbox-live.ts). Absent otherwise.
    */
   live_sites?: InboxLiveSiteRef[];
+  show_me?: InboxShowMePage;
   /**
    * On a person's reply: it reached the asking agent's session as a turn
    * through an agent connection (the Claude Code mod), and when. Absent until
