@@ -15,6 +15,7 @@ import { COMPACT_FILE_HEADER_HEIGHT, FILE_HEADER_HEIGHT } from '../../utils/diff
 import { isImagePreviewCandidate } from '@plannotator/core/diff-paths';
 import { MarkdownViewMenu } from '../../components/MarkdownViewMenu';
 import { PackageChangesCard } from '../../components/PackageChangesCard';
+import { useCommitFolding } from './commitFolding';
 // Lazy: loaded the first time a Markdown file is previewed.
 const MarkdownFilePreview = React.lazy(async () => ({ default: (await import('../../components/MarkdownFilePreview')).MarkdownFilePreview }));
 import type { DiffFile } from '../../types';
@@ -89,6 +90,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
   // file list the shape, and each file expands on demand. The card rides
   // INSIDE the scroller (leadingContent), so it scrolls away with the diff.
   const commitInfo = state.commitInfo;
+  // Folded per commit, unless Expand all was pressed on a commit: then the next commit opens expanded too.
+  const commitFolding = useCommitFolding(commitInfo?.sha ?? null);
   // Before/After previews for changed images (#1598), only when the server
   // advertised it. Stable per snapshot so header slots do not churn.
   const snapshotId = state.snapshotId;
@@ -344,7 +347,8 @@ export const ReviewAllFilesDiffPanel: React.FC<IDockviewPanelProps> = () => {
       isAILoading={state.isAILoading}
       onViewAIResponse={state.onViewAIResponse}
       getAIHistoryForFile={state.getAIHistoryForFile}
-      defaultCollapsed={!!commitInfo}
+      defaultCollapsed={commitFolding.defaultCollapsed}
+      onCollapseAllPressed={commitFolding.onCollapseAllPressed}
       leadingContent={leadingContent}
       minimap
       // EXPERIMENTAL edit-to-suggestion mode. This plain all-files panel is
