@@ -22,21 +22,28 @@ export interface RunView {
   waiting_for_input: boolean;
   needs_terminal: boolean;
   error: string | null;
+  /** The Inbox ended while it ran: it quit and stopped it ("closed"), or died and found it after ("lost"). */
+  interrupted: 'closed' | 'lost' | null;
 }
 
 export interface RunBlockView {
   /** Where it runs, as the person reads it (`~/projects/x`); null when the project has no folder. */
   folder: string | null;
   folder_missing: boolean;
-  hidden: { what: string; code: string; line: number; column: number; words: string } | null;
-  /** Secrets this command names that the agent asked for and the person has not saved. */
+  hidden: { what: string; code: string; line: number; column: number; words: string; where: 'command' | 'folder' } | null;
+  /** The saved secrets this run gets (`$NAME` in its command, or its `Uses:` line). */
+  uses: string[];
+  /** Those of `uses` not saved yet: the card shows a field for each. */
   needs: string[];
+  /** Letters that look like Latin ones (Cyrillic, Greek…), in words, or null. */
+  lookalike: string | null;
+  /** Why it may not work in the shell it runs in (PowerShell on a PC with no Git Bash), or null. */
+  shell_note: string | null;
 }
 
 export interface SavedSecret {
   name: string;
   saved_at: string;
-  last4: string | null;
   store: string;
 }
 
@@ -45,6 +52,8 @@ export interface RunStateWire {
   computer: string;
   /** Where a saved value goes, in words ("saved in your Keychain"). */
   store: string;
+  /** The shell a command runs in ("zsh", "Git Bash", "PowerShell"); null before the computer has read it. */
+  shell: string | null;
   blocks: Record<string, RunBlockView>;
   runs: Record<string, RunView>;
   secrets: SavedSecret[];
@@ -56,7 +65,8 @@ export const runApi = {
   state: (messageId: string) => apiGet<RunStateWire>(url(messageId, 'run')),
   start: (messageId: string, key: string, command: string) => apiPost<{ ok: true }>(url(messageId, 'run'), { key, op: 'start', command }),
   stop: (messageId: string, key: string) => apiPost<{ ok: true }>(url(messageId, 'run'), { key, op: 'stop' }),
-  terminal: (messageId: string, key: string, command: string) => apiPost<{ ok: true; terminal: string }>(url(messageId, 'run'), { key, op: 'terminal', command }),
+  /** `copied`: the command is on the clipboard of the computer where the terminal opened. */
+  terminal: (messageId: string, key: string, command: string) => apiPost<{ ok: true; terminal: string; copied: boolean }>(url(messageId, 'run'), { key, op: 'terminal', command }),
   saveSecret: (messageId: string, name: string, value: string) => apiPost<{ ok: true }>(url(messageId, 'secret'), { name, value }),
   removeSecret: (messageId: string, name: string) => apiPost<{ ok: true }>(url(messageId, 'secret'), { name, value: null }),
 };

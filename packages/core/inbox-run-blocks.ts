@@ -16,8 +16,10 @@
  *   :::
  *
  * The first non-empty line is the title. `Folder:` (optional) is where it
- * runs, relative to the thread's project folder. Every other line outside the
- * fence is the reason. The one fenced code block is the command, byte for
+ * runs, relative to the thread's project folder. `Uses: NAME, OTHER`
+ * (optional) names saved secrets a program reads from its environment itself.
+ * Every other line outside the fence is the reason. A run gets a saved secret
+ * only when it names it: `$NAME` in the command, or `Uses:`. The one fenced code block is the command, byte for
  * byte: what the card shows is what runs. A block with no fence, or with more
  * than one, is not a run block (the window draws it as text, each fence with
  * its own Copy).
@@ -47,6 +49,38 @@ export const INBOX_RUN_KEY_RE = /^r-[0-9a-f]{8}(?:-\d{1,3})?$/;
 /** A secret's name: env-var style, upper case, 2 to 64 characters. */
 export const INBOX_SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
 
+/**
+ * Names a secret may not have: programs read them to decide what runs and how it starts (a shell, its startup
+ * files, a library preloaded, an interpreter's options, git's helpers), or every command needs them as they are
+ * (PATH, HOME). A value saved under one could make a command do something other than what the card shows, or
+ * break every run. The one list the parser, the card and the server read.
+ */
+export const INBOX_SECRET_REFUSED_NAMES: ReadonlySet<string> = new Set([
+  // The shell and the session.
+  "PATH", "HOME", "SHELL", "USER", "LOGNAME", "PWD", "OLDPWD", "IFS", "CDPATH", "ENV", "BASH_ENV", "ZDOTDIR",
+  "PROMPT_COMMAND", "PS1", "PS2", "PS4", "TMPDIR", "TERM", "LANG", "TZ", "DISPLAY", "SSH_AUTH_SOCK",
+  // Programs a command may hand control to.
+  "EDITOR", "VISUAL", "PAGER", "MANPAGER", "BROWSER", "SSH_ASKPASS", "SUDO_ASKPASS",
+  // Interpreters' startup options and module paths.
+  "NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",
+  "CLASSPATH", "LUA_INIT", "LUA_PATH", "LUA_CPATH", "GEM_HOME", "GEM_PATH", "BUNDLE_GEMFILE", "GOFLAGS",
+  "CARGO_HOME", "RUSTC_WRAPPER", "RUSTFLAGS", "CC", "CXX", "LESSOPEN", "LESSCLOSE",
+  // Windows: how a program is found and started.
+  "COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR", "PSMODULEPATH", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
+]);
+/** Name prefixes refused the same way: the loader, interpreters, git, npm, bash functions, Bun, this Inbox. */
+export const INBOX_SECRET_REFUSED_PREFIXES: readonly string[] = ["LD_", "DYLD_", "PYTHON", "PERL", "GIT_", "NPM_CONFIG_", "BASH_FUNC", "BUN_", "DENO_", "LC_", "XDG_", "PLANNOTATOR_"];
+
+/** Whether a name may hold a secret (it has the shape, and no program reads it to start). */
+export function inboxSecretNameRefused(name: string): boolean {
+  return INBOX_SECRET_REFUSED_NAMES.has(name) || INBOX_SECRET_REFUSED_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/** Why a refused name cannot hold a secret, for the card and the route's error. */
+export function inboxSecretRefusedWords(name: string): string {
+  return `${name} can't hold a secret: programs read it to decide how they start, so a value saved under it could change what every command runs.`;
+}
+
 export interface ParsedInboxRun {
   key: string;
   title: string;
@@ -56,6 +90,8 @@ export interface ParsedInboxRun {
   folder: string | null;
   /** The command, exactly the fence's lines joined with `\n`. */
   command: string;
+  /** `Uses:` names: saved secrets the program reads from its environment itself. [] when none. */
+  uses: string[];
   /** 1-based line of the block's opening `:::run`, as the Viewer's block has it. */
   startLine: number;
 }
@@ -68,18 +104,28 @@ export interface ParsedInboxSecret {
   where: string | null;
   /** `Where:` when it is an http(s) URL. */
   where_url: string | null;
+  /** The name is one no secret may have (inboxSecretNameRefused): the card says so and offers no field. */
+  refused: boolean;
   startLine: number;
 }
 
 const FENCE_RE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
 const FOLDER_RE = /^folder\s*:\s*(.*)$/i;
+const USES_RE = /^uses\s*:\s*(.*)$/i;
 const WHERE_RE = /^where\s*:\s*(.*)$/i;
+
+/** Direction marks and invisible characters, taken out of words the card draws (a title, a reason, a place). */
+// eslint-disable-next-line no-misleading-character-class
+const INVISIBLE_WORDS_RE = /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff\u00ad\u034f\u115f\u1160\u17b4\u17b5\u180b-\u180f\u2800\u3164\uffa0\ufe00-\ufe0f]|[\u{E0000}-\u{E01EF}]/gu;
+/** Words as the card may draw them: no direction mark or invisible character. */
+export const inboxRunPlainWords = (text: string): string => text.replace(INVISIBLE_WORDS_RE, "");
 
 /** One `:::run` block's inner text, or null when it is not one (no title, no fence, more than one fence). */
 export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | "startLine"> | null {
   const lines = inner.replace(/\r\n?/g, "\n").split("\n");
   let title: string | null = null;
   let folder: string | null = null;
+  let uses: string[] | null = null;
   const why: string[] = [];
   let command: string | null = null;
   let fences = 0;
@@ -104,7 +150,16 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
     const line = raw.trim();
     if (line === "") continue;
     if (title === null) {
-      title = line;
+      title = inboxRunPlainWords(line);
+      continue;
+    }
+    const usesLine = USES_RE.exec(line);
+    if (usesLine && uses === null) {
+      uses = [];
+      for (const word of usesLine[1]!.split(/[\s,]+/)) {
+        const name = word.replace(/^`|`$/g, "").replace(/^\$\{?|\}$/g, "");
+        if (INBOX_SECRET_NAME_RE.test(name) && !uses.includes(name)) uses.push(name);
+      }
       continue;
     }
     const folderLine = FOLDER_RE.exec(line);
@@ -113,10 +168,10 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
       folder = value === "" ? null : value;
       continue;
     }
-    why.push(line);
+    why.push(inboxRunPlainWords(line));
   }
   if (title === null || command === null || fences !== 1 || command.trim() === "") return null;
-  return { title, why: why.length > 0 ? why.join("\n") : null, folder, command };
+  return { title, why: why.length > 0 ? why.join("\n") : null, folder, command, uses: uses ?? [] };
 }
 
 /** Every `:::run` block of a message body, in order, keys de-duplicated. [] when none. */
@@ -148,13 +203,13 @@ export function parseInboxSecretBlock(inner: string): Omit<ParsedInboxSecret, "k
   for (const line of lines) {
     const label = WHERE_RE.exec(line);
     if (label && where === null) {
-      where = label[1]!.trim() || null;
+      where = inboxRunPlainWords(label[1]!.trim()) || null;
       continue;
     }
-    why.push(line);
+    why.push(inboxRunPlainWords(line));
   }
   const url = where !== null && /^https?:\/\/\S+$/i.test(where) ? where : null;
-  return { name, why: why.length > 0 ? why.join("\n") : null, where, where_url: url };
+  return { name, why: why.length > 0 ? why.join("\n") : null, where, where_url: url, refused: inboxSecretNameRefused(name) };
 }
 
 /** Every `:::secret` block of a message body, in order; a name asked twice in one message is the first. */
@@ -170,10 +225,23 @@ export function parseInboxSecretBlocks(markdown: string): ParsedInboxSecret[] {
   return out;
 }
 
-/** The `$NAME` / `${NAME}` a command names that look like a secret's name, in order, once each. */
+/** The `$NAME`, `${NAME}` and `$env:NAME` a command names that look like a secret's name, in order, once each. */
 export function inboxRunNames(command: string): string[] {
   const out: string[] = [];
-  for (const match of command.matchAll(/\$\{?([A-Z][A-Z0-9_]{1,63})\b\}?/g)) if (!out.includes(match[1]!)) out.push(match[1]!);
+  for (const match of command.matchAll(/\$(?:\{|env:)?([A-Z][A-Z0-9_]{1,63})\b\}?/gi)) {
+    const name = match[1]!;
+    if (INBOX_SECRET_NAME_RE.test(name) && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * The saved secrets a run may get: the names its command names and its `Uses:` line, never a refused one. A run
+ * gets these and no other; the card shows them ("Uses NAME").
+ */
+export function inboxRunSecretNames(block: Pick<ParsedInboxRun, "command" | "uses">): string[] {
+  const out: string[] = [];
+  for (const name of [...inboxRunNames(block.command), ...block.uses]) if (!inboxSecretNameRefused(name) && !out.includes(name)) out.push(name);
   return out;
 }
 
@@ -203,10 +271,11 @@ const NAMED: Record<number, string> = {
   0xfeff: "a zero-width no-break space",
   0x2028: "a line separator",
   0x2029: "a paragraph separator",
+  0x2800: "a blank braille character",
 };
 
 /** Characters that render as nothing or as something else: control and format characters, odd spaces, fillers. */
-const HIDDEN_RE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}͏ᅟᅠㅤﾠ︀-️]|[\u{E0100}-\u{E01EF}]/u;
+const HIDDEN_RE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}͏ᅟᅠㅤﾠ︀-️\u17b4\u17b5\u180b-\u180f\u2800]|[\u{E0100}-\u{E01EF}]/u;
 
 const isBidi = (cp: number): boolean => (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069) || cp === 0x200e || cp === 0x200f || cp === 0x061c;
 
@@ -244,7 +313,34 @@ export function inboxRunShowHidden(command: string): string {
   return out;
 }
 
-/** The refusal in words, for the card and the route's error. */
-export function inboxRunHiddenWords(hidden: InboxRunHiddenChar): string {
+/** The refusal in words, for the card and the route's error. A folder's says where in the folder line. */
+export function inboxRunHiddenWords(hidden: InboxRunHiddenChar, where: "command" | "folder" = "command"): string {
+  if (where === "folder") {
+    return `Its folder has ${hidden.what} (${hidden.code}) at character ${hidden.column}. Hidden characters can make a folder read as another one, so it can't be run from here.`;
+  }
   return `This command has ${hidden.what} (${hidden.code}) at line ${hidden.line}, character ${hidden.column}. Hidden characters can make a command do something other than what it shows, so it can't be run or copied from here.`;
+}
+
+/** The first hidden character of a block that the card must refuse: its command's, else its folder's. */
+export function inboxRunBlockHidden(block: Pick<ParsedInboxRun, "command" | "folder">): { hidden: InboxRunHiddenChar; words: string; where: "command" | "folder" } | null {
+  const inCommand = inboxRunHiddenChar(block.command);
+  if (inCommand) return { hidden: inCommand, words: inboxRunHiddenWords(inCommand), where: "command" };
+  const inFolder = block.folder === null ? null : inboxRunHiddenChar(block.folder);
+  return inFolder ? { hidden: inFolder, words: inboxRunHiddenWords(inFolder, "folder"), where: "folder" } : null;
+}
+
+const LOOKALIKE_SCRIPTS: readonly [RegExp, string][] = [
+  [/\p{Script=Cyrillic}/u, "Cyrillic"],
+  [/\p{Script=Greek}/u, "Greek"],
+  [/\p{Script=Armenian}/u, "Armenian"],
+  [/\p{Script=Cherokee}/u, "Cherokee"],
+];
+
+/**
+ * Letters, anywhere in a command, from an alphabet with look-alikes of Latin ones (Cyrillic `а` for `a`): the
+ * card says so in a quiet line, and the command still runs. Null for a command with none.
+ */
+export function inboxRunLookalikes(command: string): string | null {
+  const found = LOOKALIKE_SCRIPTS.filter(([re]) => re.test(command)).map(([, name]) => name);
+  return found.length === 0 ? null : `This command has ${found.join(" and ")} letters, which can look like Latin ones. Check it before you run it.`;
 }

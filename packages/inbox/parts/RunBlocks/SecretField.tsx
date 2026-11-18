@@ -1,6 +1,10 @@
 /**
  * The field a secret's value is typed or pasted into, and its Save. The value lives in this field only until Save
  * sends it to the computer that keeps it; then the field is emptied. Never stored here, never logged.
+ *
+ * Not a sign-in form: no `<form>`, no `name`, `autocomplete="off"` and the password managers' own "ignore" marks,
+ * so the browser does not offer to save the value as this site's password (and sync it) after Save. The field
+ * stays a password field, so a manager the person calls on can still fill it.
  */
 import { useId, useState } from 'react';
 import { runApi } from '../../data/runApi';
@@ -27,31 +31,33 @@ export function SecretField({ messageId, name, onDone, onCancel, autoFocus }: { 
     }
   };
   return (
-    <form
-      className="ib-sec-form"
-      data-secret-form={name}
-      onSubmit={(event) => {
-        event.preventDefault();
-        void save();
-      }}
-    >
+    <div className="ib-sec-form" data-secret-form={name}>
       <label className="ib-sr" htmlFor={id}>{`Value of ${name}`}</label>
       <input
         id={id}
         className="ib-sec-input"
         type="password"
-        name={name}
-        autoComplete="current-password"
+        autoComplete="off"
         autoCapitalize="off"
         autoCorrect="off"
         spellCheck={false}
+        data-1p-ignore=""
+        data-lpignore="true"
+        data-bwignore=""
+        data-form-type="other"
         placeholder="Paste the value"
         value={value}
         autoFocus={autoFocus}
         onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            void save();
+          }
+        }}
         data-secret-input=""
       />
-      <button type="submit" className="ib-btn ib-pri" disabled={value === '' || saving} data-secret-save="">
+      <button type="button" className="ib-btn ib-pri" disabled={value === '' || saving} onClick={() => void save()} data-secret-save="">
         {saving ? 'Saving…' : 'Save'}
       </button>
       {onCancel && (
@@ -64,6 +70,6 @@ export function SecretField({ messageId, name, onDone, onCancel, autoFocus }: { 
           {error}
         </p>
       )}
-    </form>
+    </div>
   );
 }

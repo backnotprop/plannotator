@@ -17,6 +17,8 @@
 .pn-inbox .ib-rb-copy { flex: none; margin: -4px -6px 0 0; }
 .pn-inbox .ib-rb-copy .ib-ic { width: 13px; height: 13px; }
 .pn-inbox .ib-rb-where { margin: 6px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.pn-inbox .ib-rb-uses { display: flex; gap: 6px; align-items: center; margin: 4px 0 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.pn-inbox .ib-rb-uses .ib-ic { width: 12px; height: 12px; flex: none; }
 .pn-inbox .ib-rb-out { margin-top: 10px; padding-top: 10px; border-top: 1px solid color-mix(in oklch, var(--border) 70%, transparent); min-width: 0; }
 .pn-inbox .ib-rb-lines { margin: 0; max-height: 320px; overflow: auto; font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--foreground); background: none; padding: 0; }
 .pn-inbox .ib-rb-more, .pn-inbox .ib-rb-none { margin: 0 0 6px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }

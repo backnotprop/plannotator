@@ -138,7 +138,6 @@ import {
   type PlannotatorConfig,
   type ThemeConfig,
 } from "@plannotator/shared/config";
-import { childPath } from "@plannotator/shared/child-env";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { decodePathSegment } from "@plannotator/shared/path-segment";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
@@ -270,10 +269,7 @@ import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
-import { createInboxRuns } from "./inbox-run";
-import { createInboxRunRoutes, openRunTerminal } from "./inbox-run-routes";
-import { createInboxSecrets } from "./inbox-secrets";
-import { fileVault, spawnVaultRun, systemSecretVault } from "./inbox-secret-vault";
+import { createInboxRunSetup } from "./inbox-run-setup";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
 import { createInboxTakeBack } from "./inbox-take-back";
@@ -5367,24 +5363,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
 
-  // Run and Secret (`:::run`, `:::secret`; inbox-run-routes.ts): the person's press runs a command here, as them; a
+  // Run and Secret (`:::run`, `:::secret`; inbox-run-setup.ts): the person's press runs a command here, as them; a
   // secret's value goes to this computer's keychain (a sandboxed test Inbox: a file in its own folder, never a keychain).
-  const runVault = process.env.PLANNOTATOR_TEST_SANDBOX
-    ? fileVault(join(dataDir, "inbox", "secrets"))
-    : systemSecretVault({ platform: process.platform, dir: join(dataDir, "inbox", "secrets"), run: spawnVaultRun, env: process.env, which: (cmd) => Bun.which(cmd, { PATH: childPath() }) });
-  const runRoutes = createInboxRunRoutes({
+  const runRoutes = createInboxRunSetup({
     store,
     serverSession,
+    dataDir,
+    sandbox: !!process.env.PLANNOTATOR_TEST_SANDBOX,
     readBody,
     json,
-    runs: createInboxRuns({ messageAlive: (id) => store.message(id) !== null }),
-    secrets: createInboxSecrets({ file: join(dataDir, "inbox", "secrets.json"), vault: runVault }),
-    vault: runVault,
-    loginEnv: process.platform === "win32" && !process.env.PLANNOTATOR_TEST_SANDBOX ? async () => launchPlainEnv(launchOwnEnv(), [], "win32") : loginEnv,
+    readLoginEnv: process.platform === "win32" && !process.env.PLANNOTATOR_TEST_SANDBOX ? async () => launchPlainEnv(launchOwnEnv(), [], "win32") : loginEnv,
     door: (req) => fromDeviceDoor.get(req),
     computer: () => phones?.machineDoor.computerName() ?? (process.platform === "darwin" ? "your Mac" : process.platform === "win32" ? "your PC" : "your computer"),
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
-    openTerminal: (folder) => openRunTerminal(openInLauncher, folder),
+    openInLauncher,
   });
 
   /**

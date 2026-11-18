@@ -2,10 +2,13 @@
  * Run and Secret wired into a running Inbox: an agent sends a `:::run` and a `:::secret` over MCP, the person's
  * window saves the secret and presses Run, and the result comes back to the agent. What regresses: the routes not
  * reached, an agent's bare call pressing Run or saving, the saved name missing from the run's env, a value in the
- * store's files, a read or what the agent reads, and the result not reaching the thread. A sandboxed Inbox (its
- * own data dir, a file vault inside it, no login shell, no keychain); the command uses shell builtins only.
+ * store's files (the debug log turned on included), a read, the agent's wake text, MCP search, stderr or what the
+ * agent reads, the result not reaching the thread, and an Inbox that quits mid-run leaving the agent no word. A
+ * sandboxed Inbox (its own data dir, a file vault inside it, no login shell, no keychain); the command uses shell
+ * builtins only.
  */
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +20,7 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
 let sandbox: string | undefined;
+const restores: (() => void)[] = [];
 
 beforeEach(() => {
   // A sandboxed Inbox: the file vault in its own data dir and no login shell, never the person's keychain.
@@ -24,6 +28,7 @@ beforeEach(() => {
   process.env.PLANNOTATOR_TEST_SANDBOX = "1";
 });
 afterEach(async () => {
+  for (const restore of restores.splice(0)) restore();
   for (const client of clients.splice(0)) await client.close().catch(() => {});
   for (const server of servers.splice(0)) server.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
@@ -33,6 +38,7 @@ afterEach(async () => {
 
 type Json = Record<string, any>;
 const BODY = [":::secret", "API_TOKEN", "The check needs it.", ":::", "", ":::run", "Say hello", "", "```sh", 'echo "hi $API_TOKEN"; exit 4', "```", ":::"].join("\n");
+const AGENT = { agent_session: "ses_run", agent_host: "claude-code", agent_name: "Claude Code" };
 
 const filesUnder = (dir: string, skip: string): string[] =>
   readdirSync(dir, { recursive: true, withFileTypes: true })
@@ -45,12 +51,15 @@ test("the window saves a secret and runs the block; the agent gets the result an
   const project = join(root, "site");
   mkdirSync(project);
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, binaryPath: null });
+  const logged: string[] = [];
+  const stderr = spyOn(process.stderr, "write").mockImplementation((chunk: unknown) => (logged.push(String(chunk)), true));
+  restores.push(() => stderr.mockRestore());
+  const server = await startInboxServer({ dataDir, binaryPath: null, debug: true });
   servers.push(server);
   const client = new Client({ name: "inbox-run-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
-  const sent = ((await client.callTool({ name: "send_message", arguments: { project_path: project, body: BODY } })) as { structuredContent: Json }).structuredContent;
+  const sent = ((await client.callTool({ name: "send_message", arguments: { ...AGENT, project_path: project, body: BODY } })) as { structuredContent: Json }).structuredContent;
   const origin = `http://127.0.0.1:${server.port}`;
   const route = (what: "run" | "secret") => `${origin}/api/inbox/messages/${sent.message_id}/${what}`;
   const windowPost = (what: "run" | "secret", body: Json) =>
@@ -85,6 +94,49 @@ test("the window saves a secret and runs the block; the agent gets the result an
   expect(thread).toContain("Saved API_TOKEN");
   expect(thread).not.toContain(SENTINEL);
   expect(JSON.stringify(state)).not.toContain(SENTINEL);
-  // Only the sandbox's own vault file holds it: no store file, index or log does.
+  // What wakes the agent, and what it can search, never carry the value.
+  const wake = await (await fetch(`${origin}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` }, body: JSON.stringify({ session: AGENT.agent_session, waitMs: 0 }) })).text();
+  expect(wake).not.toContain(SENTINEL);
+  for (const query of [SENTINEL, "API_TOKEN", "hi"]) {
+    const found = JSON.stringify(await client.callTool({ name: "search", arguments: { ...AGENT, query, all_projects: true } }));
+    expect(found).not.toContain(SENTINEL);
+  }
+  stderr.mockRestore();
+  expect(logged.join("")).not.toContain(SENTINEL);
+  // Only the sandbox's own vault file holds it: no store file, index, run record or log (the debug log is on) does.
+  expect(filesUnder(dataDir, "/nothing/").some((file) => file.endsWith("debug.log"))).toBe(true);
   for (const file of filesUnder(dataDir, join(dataDir, "inbox", "secrets") + "/")) expect([file, readFileSync(file, "utf8").includes(SENTINEL)]).toEqual([file, false]);
+});
+
+test("an Inbox that quits while a command runs stops it and tells the agent; the card says so after a restart", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-run-")));
+  roots.push(root);
+  const project = join(root, "site");
+  mkdirSync(project);
+  const dataDir = join(root, "data");
+  const body = [":::run", "Wait a while", "", "```sh", "echo started; sleep 30", "```", ":::"].join("\n");
+  const first = await startInboxServer({ dataDir, binaryPath: null });
+  servers.push(first);
+  const client = new Client({ name: "inbox-run-test", version: "1.0.0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${first.port}/mcp`)));
+  const sent = ((await client.callTool({ name: "send_message", arguments: { ...AGENT, project_path: project, body } })) as { structuredContent: Json }).structuredContent;
+  await client.close();
+  const origin = `http://127.0.0.1:${first.port}`;
+  const route = `${origin}/api/inbox/messages/${sent.message_id}/run`;
+  const key = Object.keys(((await (await fetch(route)).json()) as Json).blocks)[0]!;
+  const press = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ key, op: "start", command: "echo started; sleep 30", serverSession: first.serverSession }) });
+  expect(press.status).toBe(200);
+  for (let i = 0; i < 200; i++) {
+    const runs = ((await (await fetch(route)).json()) as Json).runs;
+    if (runs[key]?.lines?.length) break;
+    await Bun.sleep(25);
+  }
+  servers.splice(servers.indexOf(first), 1);
+  first.stop();
+  const again = await startInboxServer({ dataDir, binaryPath: null });
+  servers.push(again);
+  const after = (await (await fetch(`http://127.0.0.1:${again.port}/api/inbox/messages/${sent.message_id}/run`)).json()) as Json;
+  expect(after.runs[key]).toMatchObject({ state: "stopped", interrupted: "closed" });
+  const notes = JSON.stringify(await (await fetch(`http://127.0.0.1:${again.port}/api/inbox/threads/${sent.thread_id}`)).json());
+  expect(notes).toContain("The Inbox closed while it ran");
 });

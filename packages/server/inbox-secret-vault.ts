@@ -30,6 +30,14 @@ export const INBOX_SECRET_STORE_WORDS: Record<InboxSecretStoreKind, string> = {
   file: "saved to a file only you can read",
 };
 
+/** Where a value is read from, in words, for "Couldn't read NAME from your Keychain." */
+export const INBOX_SECRET_STORE_FROM: Record<InboxSecretStoreKind, string> = {
+  keychain: "from your Keychain",
+  "secret-service": "from your system keyring",
+  dpapi: "with Windows data protection",
+  file: "from its file",
+};
+
 export interface InboxSecretVault {
   kind: InboxSecretStoreKind;
   get: (account: string) => Promise<string | null>;
@@ -75,7 +83,9 @@ export function keychainVault(run: VaultRun): InboxSecretVault {
     },
     remove: async (account) => {
       checkAccount(account);
-      await run(["/usr/bin/security", "delete-generic-password", "-s", SERVICE, "-a", account], {});
+      const out = await run(["/usr/bin/security", "delete-generic-password", "-s", SERVICE, "-a", account], {});
+      // 44: there was no such item, which is what Remove wants.
+      if (out.code !== 0 && out.code !== 44) throw new Error(`The Keychain did not remove it${out.stderr.trim() ? `: ${out.stderr.trim()}` : "."}`);
     },
   };
 }
@@ -96,7 +106,8 @@ export function secretServiceVault(run: VaultRun, tool = "secret-tool"): InboxSe
     },
     remove: async (account) => {
       checkAccount(account);
-      await run([tool, "clear", "service", SERVICE, "account", account], {});
+      const out = await run([tool, "clear", "service", SERVICE, "account", account], {});
+      if (out.code !== 0 && out.stderr.trim() !== "") throw new Error(`The system keyring did not remove it: ${out.stderr.trim()}`);
     },
   };
 }
@@ -167,14 +178,21 @@ export function fileVault(dir: string): InboxSecretVault {
   };
 }
 
-/** For tests: values in memory only. `fail` makes the next set throw (a locked keychain). */
-export function memoryVault(kind: InboxSecretStoreKind = "keychain"): InboxSecretVault & { values: Map<string, string>; failNext: boolean } {
+/** For tests: values in memory only. `failNext` makes the next set throw (a locked keychain). */
+export function memoryVault(kind: InboxSecretStoreKind = "keychain"): InboxSecretVault & { values: Map<string, string>; failNext: boolean; failRemove: boolean; locked: Set<string> } {
   const values = new Map<string, string>();
   const vault = {
     kind,
     values,
     failNext: false,
-    get: async (account: string) => values.get(account) ?? null,
+    /** Remove throws (a Keychain that refuses). */
+    failRemove: false,
+    /** Accounts whose read fails (a locked Keychain, a denied read). */
+    locked: new Set<string>(),
+    get: async (account: string) => {
+      if (vault.locked.has(account)) throw new Error("The Keychain is locked.");
+      return values.get(account) ?? null;
+    },
     set: async (account: string, value: string) => {
       if (vault.failNext) {
         vault.failNext = false;
@@ -183,6 +201,7 @@ export function memoryVault(kind: InboxSecretStoreKind = "keychain"): InboxSecre
       values.set(account, value);
     },
     remove: async (account: string) => {
+      if (vault.failRemove) throw new Error("The Keychain did not remove it.");
       values.delete(account);
     },
   };
@@ -220,8 +239,13 @@ export function withFileFallback(primary: InboxSecretVault, file: InboxSecretVau
       }
     },
     remove: async (account) => {
-      await primary.remove(account).catch(() => {});
+      let failure: unknown = null;
+      await primary.remove(account).catch((error: unknown) => {
+        failure = error;
+      });
       await file.remove(account);
+      // Say so only when the value is still there to read: a keyring that is not running holds nothing reachable.
+      if (failure && (await primary.get(account).catch(() => null)) !== null) throw failure;
     },
   };
   return vault;

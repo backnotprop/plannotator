@@ -1,7 +1,8 @@
 /**
  * Where a secret's value goes. Every store runs through a fake `VaultRun`: no test runs `security`, `secret-tool` or
  * PowerShell, or touches a real keychain. What regresses: a value on a command line (`ps` shows it), a value in an
- * error the person or a log sees, a file another account can read, and the wrong store for a platform.
+ * error the person or a log sees, a file another account can read, the wrong store for a platform, and a Remove
+ * the store refused reading as done.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -55,6 +56,11 @@ describe("the Keychain (macOS)", () => {
     expect(error).toBeInstanceOf(Error);
     expect(String(error)).not.toContain(SENTINEL);
     expect(String(error)).not.toContain(Buffer.from(SENTINEL).toString("hex"));
+  });
+
+  test("Remove: no such item is fine; any other refusal is an error", async () => {
+    await keychainVault(fakeRun(() => ({ code: 44 })).run).remove("prj_1:API_KEY");
+    expect(keychainVault(fakeRun(() => ({ code: 51, stderr: "User interaction is not allowed." })).run).remove("prj_1:API_KEY")).rejects.toThrow("The Keychain did not remove it: User interaction is not allowed.");
   });
 
   test("an account name that could break the command line is refused before anything runs", async () => {

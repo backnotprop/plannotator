@@ -13,6 +13,7 @@ export const INBOX_RUN_EXAMPLE = [
   "Run the payment tests",
   "They call the payments sandbox with your test key; about a minute.",
   "Folder: apps/payments",
+  "Uses: PAYMENTS_TEST_KEY",
   "",
   "```sh",
   "bun test payments",
@@ -29,10 +30,19 @@ export const INBOX_SECRET_EXAMPLE = [
   ":::",
 ].join("\n");
 
-/** When to write each block, and what comes back. Rides send_message's `body` description and the agent guide. */
+/**
+ * The short form, on send_message's `body` description (every tool listing carries it, so it stays short): when
+ * to write each block and its shape. The full text is INBOX_RUN_GUIDE, in `plannotator inbox --help` and /llms.
+ */
+export const INBOX_RUN_TOOL_TEXT = [
+  "`:::run` (Inbox only): a command the person runs on their computer with one press (it needs their machine, sign-in or secret). Lines: title; why; optional `Folder: <path in the project>`; optional `Uses: NAME` for a secret the program reads itself; the command in one ``` fence (POSIX shell). You get the exit code and last output lines. A command needing typing goes in a plain code block.",
+  "`:::secret`: first line NAME, then why, optional `Where: <url>`. They save it on their computer; you hear only that. A run gets it only by naming it: `$NAME` in the command, or `Uses: NAME`. Details: `plannotator inbox --help`.",
+].join("\n");
+
+/** When to write each block, and what comes back: `plannotator inbox --help` and /llms carry it whole. */
 export const INBOX_RUN_GUIDE = [
-  "A command the person should run on their own computer, as themselves (it needs their machine, their sign-in or a secret you do not have, or they asked to run it): write an Inbox-only `:::run` block. First line: what it does, short. Then one line of why. Optional `Folder: <path>` (relative to the project; default the project folder). Then the command in one fenced code block (```), exactly as it should run: one command or a short script per block, one block per command. The person sees a Run button and presses it; it runs on their computer in that folder with their login shell's environment, and you get the exit code and the last lines of output in a reply. A command that asks for typing (a password, a sign-in, y/n) cannot be answered there: give it as a plain fenced code block for their own terminal, and a `:::run` that checks it worked if you need to know. Use a plain fenced code block too for a command you only show or can run yourself.",
-  "When a command needs a secret (an API key, a token, a password), never ask for it in chat, in a :::question or in a file. Write a `:::secret` block: first line its name, env-var style (PAYMENTS_TEST_KEY); then why, in one line; optional `Where: <url or place>` for where to find it. Put it before the `:::run` that uses it, in the same message or an earlier one; a run card that uses a name not saved yet shows the field too. The person saves it on their computer (the Keychain or its like); you get a reply naming it, never the value. From then on every `:::run` in this project, in any folder, has it as `$PAYMENTS_TEST_KEY`. Never print a secret, write it to a file, or put it in a command's text.",
+  "A command the person should run on their own computer, as themselves (it needs their machine, their sign-in or a secret you do not have, or they asked to run it): write an Inbox-only `:::run` block. First line: what it does, short. Then one line of why. Optional `Folder: <path>` (relative to the project; default the project folder). Optional `Uses: NAME, OTHER`: saved secrets the program reads from its environment itself. Then the command in one fenced code block (```), exactly as it should run, in POSIX shell syntax (on Windows it runs in Git Bash when Git for Windows is there, else in PowerShell): one command or a short script per block, one block per command. The person sees a Run button and presses it; it runs on their computer in that folder with their login shell's environment, and you get the exit code and the last lines of output in a reply. What it starts in the background (`&`, `nohup`) is stopped when it ends, so a run cannot leave a server going. A command that asks for typing (a password, a sign-in, y/n) cannot be answered there: give it as a plain fenced code block for their own terminal, and a `:::run` that checks it worked if you need to know. Use a plain fenced code block too for a command you only show or can run yourself.",
+  "When a command needs a secret (an API key, a token, a password), never ask for it in chat, in a :::question or in a file. Write a `:::secret` block: first line its name, env-var style (PAYMENTS_TEST_KEY; not a name programs read to start, like PATH, HOME, NODE_OPTIONS, LD_* or GIT_*, which the person cannot save); then why, in one line; optional `Where: <url or place>` for where to find it. Put it before the `:::run` that uses it, in the same message or an earlier one; a run card that uses a name not saved yet shows the field too. The person saves it on their computer (the Keychain or its like); you get a reply naming it, never the value. A `:::run` gets a saved secret only when it names it: `$PAYMENTS_TEST_KEY` in the command, or `Uses: PAYMENTS_TEST_KEY` for a program that reads it itself; no other run gets it. Never print a secret, write it to a file, or put it in a command's text.",
 ].join("\n");
 
 /** The heading of a run's report, so the agent can find it in a reply. */
@@ -43,7 +53,11 @@ export interface InboxRunReportInput {
   command: string;
   /** Where it ran, as the card showed it ("~/projects/x/apps/payments"). */
   folder: string;
-  outcome: "exited" | "stopped" | "failed_to_start";
+  /**
+   * `inbox_closed`: the Inbox quit while it ran and stopped it. `inbox_lost`: the Inbox ended without a word (a
+   * crash, a kill) and found the run unfinished when it started again.
+   */
+  outcome: "exited" | "stopped" | "failed_to_start" | "inbox_closed" | "inbox_lost";
   exit_code: number | null;
   signal: string | null;
   duration_ms: number;
@@ -74,20 +88,24 @@ export function inboxRunReportText(run: InboxRunReportInput): string {
   const ended =
     run.outcome === "failed_to_start"
       ? `It did not start: ${run.error ?? "the command could not be started"}.`
-      : run.outcome === "stopped"
-        ? `The person pressed Stop after ${seconds(run.duration_ms)}${run.waited_for_input ? "; it was waiting for someone to type something" : ""}.`
-        : run.exit_code !== null
-          ? `It exited with code ${run.exit_code} after ${seconds(run.duration_ms)}.`
-          : `It ended on signal ${run.signal ?? "unknown"} after ${seconds(run.duration_ms)}.`;
+      : run.outcome === "inbox_closed"
+        ? `The Inbox closed while it ran, after ${seconds(run.duration_ms)}, and the command was stopped with it. Ask the person to run it again if you still need it.`
+        : run.outcome === "inbox_lost"
+          ? "The Inbox stopped while it ran, so its result was not recorded; it may have gone on by itself. Ask the person to run it again if you still need it."
+          : run.outcome === "stopped"
+            ? `The person pressed Stop after ${seconds(run.duration_ms)}${run.waited_for_input ? "; it was waiting for someone to type something" : ""}.`
+            : run.exit_code !== null
+              ? `It exited with code ${run.exit_code} after ${seconds(run.duration_ms)}.`
+              : `It ended on signal ${run.signal ?? "unknown"} after ${seconds(run.duration_ms)}.`;
   const tail = run.tail.slice(-INBOX_RUN_REPORT_LINES);
   const lines = [head, ended];
-  if (run.outcome !== "failed_to_start") {
+  if (run.outcome !== "failed_to_start" && run.outcome !== "inbox_lost") {
     if (tail.length === 0) lines.push("", "It printed nothing.");
     else {
       const text = tail.join("\n");
       const fence = fenceFor(text);
       const which = tail.length < run.total_lines ? `The last ${tail.length} of ${run.total_lines} lines of output` : "Its output";
-      lines.push("", `${which} (saved secrets hidden as ••••):`, "", `${fence}text`, text, fence);
+      lines.push("", `${which} (secrets hidden as ••••):`, "", `${fence}text`, text, fence);
     }
   }
   return lines.join("\n");
@@ -95,5 +113,5 @@ export function inboxRunReportText(run: InboxRunReportInput): string {
 
 /** The person reply a Save writes: the name, never the value. */
 export function inboxSecretSavedText(name: string, replaced: boolean): string {
-  return `${replaced ? "Replaced" : "Saved"} ${name} on this computer. Every :::run in this project now has it as $${name}; its value is never shown to you.`;
+  return `${replaced ? "Replaced" : "Saved"} ${name} on this computer. A :::run in this project that names $${name} in its command, or has \`Uses: ${name}\`, gets it; its value is never shown to you.`;
 }

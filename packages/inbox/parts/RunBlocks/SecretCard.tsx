@@ -1,9 +1,10 @@
 /**
  * A `:::secret` block's card: what the agent asks for and why, where to find it, and the field to save it on the
- * computer that owns the thread. Saved: its name, when, the last 4 characters of a long value, Replace and Remove.
+ * computer that owns the thread. Saved: its name, when and where, Replace and Remove; no part of the value. A name
+ * programs read to start (PATH, NODE_OPTIONS…) gets no field: the card says why.
  */
 import { useState } from 'react';
-import type { ParsedInboxSecret } from '@plannotator/core/inbox-run-blocks';
+import { inboxSecretRefusedWords, type ParsedInboxSecret } from '@plannotator/core/inbox-run-blocks';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { runApi, type RunStateWire } from '../../data/runApi';
 import { refreshRunState } from '../../data/runStore';
@@ -38,11 +39,11 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
     }
   };
   return (
-    <section className="ib-rb ib-sec" data-secret-card={secret.name} data-secret-state={saved ? 'saved' : 'empty'} aria-label={`Secret ${secret.name}`}>
+    <section className="ib-rb ib-sec" data-secret-card={secret.name} data-secret-state={secret.refused ? 'refused' : saved ? 'saved' : 'empty'} aria-label={`Secret ${secret.name}`}>
       <div className="ib-rb-head">
         <Icon name="lock" />
         <span className="ib-sec-name">{secret.name}</span>
-        {saved && (
+        {saved && !secret.refused && (
           <span className="ib-rb-status ib-ok" data-secret-saved="">
             <Icon name="check" />
             Saved
@@ -64,10 +65,15 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
           {`Where to find it: ${secret.where}`}
         </p>
       ) : null}
-      {saved && !replacing ? (
+      {secret.refused ? (
+        <p className="ib-rb-warn" data-secret-refused="">
+          <Icon name="warn" />
+          <span>{`${inboxSecretRefusedWords(secret.name)} Ask ${agent} for another name.`}</span>
+        </p>
+      ) : saved && !replacing ? (
         <>
           <p className="ib-rb-where" data-secret-detail="">
-            {`Saved ${clockTime(saved.saved_at)}${saved.last4 ? ` · ends in ${saved.last4}` : ''} · ${state?.store ?? ''}`}
+            {`Saved ${clockTime(saved.saved_at)} · ${state?.store ?? ''}`}
           </p>
           <div className="ib-rb-acts">
             <button type="button" className="ib-btn" onClick={() => setReplacing(true)} data-secret-replace="">
