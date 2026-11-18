@@ -212,6 +212,14 @@ export interface Block {
   orderedStart?: number; // For ordered list items: integer parsed from the marker (e.g. 5 for "5.")
   alertKind?: AlertKind; // For blockquotes starting with [!NOTE] / [!TIP] / etc.
   directiveKind?: string; // For directive containers (e.g. ':::note' → 'note')
+  /**
+   * Set on a GFM footnote definition (`[^label]: …`, with its indented
+   * continuation lines): the label as written. The block is a 'paragraph'
+   * whose `content` is the definition's source, marker included, so a surface
+   * that does not draw footnotes shows it as written. Footnote-aware surfaces
+   * (`utils/footnotes.ts`) draw it in the notes list at the end instead.
+   */
+  footnoteLabel?: string;
   order: number; // Sorting order
   startLine: number; // 1-based line number in source
   blankLinesBefore?: number; // Paragraph only, with parse option keepBlankLines: the blank lines (2+) typed before it

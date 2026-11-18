@@ -20,6 +20,7 @@ import {
 import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
+import { quoteAsRendered } from '../utils/footnotes';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
 import { useHighlightCopy } from '../utils/highlightCopy';
 import { TOUCH_PRIMARY_QUERY, touchHighlightDueAt } from '../utils/touchSelection';
@@ -1279,7 +1280,16 @@ export function useAnnotationHighlighter({
 
     const transformed = transformPlainText(searchText);
     if (transformed !== searchText) {
-      return searchOnce(transformed);
+      const found = searchOnce(transformed);
+      if (found) return found;
+    }
+
+    // A quote saved before footnote references and character references
+    // were drawn holds them as written (`claim.[^1]`, `&amp;`): look for it
+    // as the page now shows it.
+    const rendered = quoteAsRendered(searchText, containerRef.current);
+    if (rendered !== searchText) {
+      return searchOnce(rendered) ?? searchOnce(transformPlainText(rendered));
     }
 
     return null;

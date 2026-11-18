@@ -26,6 +26,29 @@ import {
   type TagCloseIndex,
 } from '@plannotator/core/markdown-structure';
 import { skillReferenceExportBlock } from './skillReferences';
+import { FOOTNOTE_DEF_RE, footnoteDefinitionEnd } from './footnotes';
+
+/**
+ * Whether an unindented line starts a block of its own in the loop below, so
+ * it is not a lazy continuation of a footnote definition's text.
+ */
+function startsOwnBlock(lines: string[], j: number, htmlCloseCache: Map<string, TagCloseIndex>): boolean {
+  const t = lines[j].trim();
+  return (
+    /^#{1,6}(?:\s|$)/.test(t) ||
+    t === '---' ||
+    t === '***' ||
+    /^(?:\*|-|\d+\.)\s/.test(t) ||
+    t.startsWith('>') ||
+    t.startsWith('```') ||
+    t.startsWith('$$') ||
+    t.startsWith('\\[') ||
+    t.startsWith('|') ||
+    DIRECTIVE_OPEN_RE.test(t) ||
+    FOOTNOTE_DEF_RE.test(lines[j]) ||
+    htmlBlockEndAt(lines, j, htmlCloseCache) !== -1
+  );
+}
 
 // The structural helpers moved to `@plannotator/core/markdown-structure` so
 // `findQuestionBlocks` (core) splits a document exactly as this parser does.
@@ -695,6 +718,25 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     ) {
       const sep = prevLineWasBlank ? '\n\n' : '\n';
       blocks[blocks.length - 1].content += sep + trimmed;
+      continue;
+    }
+
+    // GFM footnote definition (`[^label]: …`): one block holding the
+    // definition as written, with its lazy and indented continuation lines
+    // (utils/footnotes.ts). Like a heading, it may interrupt a paragraph.
+    const footnoteDef = line.startsWith('[^') || line.startsWith(' ') ? FOOTNOTE_DEF_RE.exec(line) : null;
+    if (footnoteDef) {
+      flush();
+      const end = footnoteDefinitionEnd(lines, i, (j) => startsOwnBlock(lines, j, htmlCloseCache));
+      blocks.push({
+        id: `block-${currentId++}`,
+        type: 'paragraph',
+        content: lines.slice(i, end + 1).map((l) => l.trimEnd()).join('\n'),
+        footnoteLabel: footnoteDef[1],
+        order: currentId,
+        startLine: currentLineNum,
+      });
+      i = end;
       continue;
     }
 
