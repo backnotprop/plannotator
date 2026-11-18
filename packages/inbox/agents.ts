@@ -37,15 +37,16 @@ export function notesAskedOf(model: InboxAgentsModel): readonly InboxNoteAgentId
 /**
  * Who the dialog asks about: the candidates not asked yet (each agent is
  * asked once) whose note is not written by itself (the Inbox writes it for
- * the agents proven to load it, INBOX_NOTE_AUTO_AGENT_IDS; Qwen Code and
- * Cursor are still asked), Claude Code last as in the approved dialog ("Add
+ * the agents INBOX_NOTE_AUTO_AGENT_IDS names; Cline, and Cursor where its
+ * note is copied by hand, are still asked), Claude Code last as in the approved dialog ("Add
  * to Codex, Gemini CLI and Claude Code"). None with PLANNOTATOR_INBOX_NOTES=0.
  */
 export function noteQuestionRows(model: InboxAgentsModel): InboxAgentRow[] {
   if (model.notes_env_off) return [];
   const asked = new Set<string>(notesAskedOf(model));
   const auto = new Set<string>(INBOX_NOTE_AUTO_AGENT_IDS);
-  const rows = noteCandidates(model).filter((row) => !asked.has(row.id) && !auto.has(row.id));
+  // Cursor's note copied by hand (its editor not found) is never written by itself: still asked.
+  const rows = noteCandidates(model).filter((row) => !asked.has(row.id) && (!auto.has(row.id) || row.note?.state === 'manual'));
   return [...rows.filter((row) => row.id !== 'claude-code'), ...rows.filter((row) => row.id === 'claude-code')];
 }
 

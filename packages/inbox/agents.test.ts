@@ -30,6 +30,7 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
       row('codex'),
       row('gemini'),
       row('qwen'),
+      row('cline'),
       row('pi', { reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null } }),
       row('cursor', { note: { agent: 'cursor', path: null, target: null, state: 'manual', create: false, created: false, reason: null } }),
       row('opencode', { note: null }),
@@ -48,20 +49,25 @@ function model(over: Partial<InboxAgentsModel> = {}): InboxAgentsModel {
 const ids = (m: InboxAgentsModel) => noteQuestionRows(m).map((r) => r.id);
 
 test('every candidate not asked yet whose note is not written by itself; not reaching, no file, or failed this run: not a candidate', () => {
-  // Claude Code, Codex and Gemini CLI are candidates too, but their notes are written by themselves.
-  expect(ids(model())).toEqual(['qwen', 'cursor']);
-  const failed = model({ last_report: { at: '', first: true, added: [], already: [], failed: [{ agent: 'qwen', reason: 'x', path: null }], foreign: [], manual: [], unfinished: [], claude_code: false } });
+  // Claude Code, Codex, Gemini CLI and Qwen Code are candidates too, but their notes are written by themselves;
+  // Cursor's is copied by hand here (state manual), so it is still asked.
+  expect(ids(model())).toEqual(['cline', 'cursor']);
+  const failed = model({ last_report: { at: '', first: true, added: [], already: [], failed: [{ agent: 'cline', reason: 'x', path: null }], foreign: [], manual: [], unfinished: [], claude_code: false } });
   expect(ids(failed)).toEqual(['cursor']);
+  // Cursor with its editor here: its plugin note is written by itself, so it is not asked.
+  const editor = model();
+  editor.agents = editor.agents.map((r) => (r.id === 'cursor' ? row('cursor') : r));
+  expect(ids(editor)).toEqual(['cline']);
 });
 
 test('each agent is asked once: an agent asked before is left out, one that connects later is asked alone', () => {
-  expect(ids(model({ notes_offered: true, notes_asked: ['qwen'] }))).toEqual(['cursor']);
-  expect(ids(model({ notes_offered: true, notes_asked: ['qwen', 'cursor'] }))).toEqual([]);
+  expect(ids(model({ notes_offered: true, notes_asked: ['cline'] }))).toEqual(['cursor']);
+  expect(ids(model({ notes_offered: true, notes_asked: ['cline', 'cursor'] }))).toEqual([]);
 });
 
 test('an Inbox of 0.28.18 or older (no notes_asked): answered means nobody is asked; never answered means everyone not written by itself', () => {
   expect(ids(model({ notes_asked: undefined, notes_offered: true }))).toEqual([]);
-  expect(ids(model({ notes_asked: undefined, notes_offered: false }))).toEqual(['qwen', 'cursor']);
+  expect(ids(model({ notes_asked: undefined, notes_offered: false }))).toEqual(['cline', 'cursor']);
 });
 
 test('PLANNOTATOR_INBOX_NOTES=0: nobody is asked', () => {

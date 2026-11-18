@@ -440,9 +440,9 @@ test("the run that connects an agent writes its note by itself, once; the window
   expect(later.notes_asked).toEqual(["codex", "gemini"]);
   expect(row(later, "gemini")).toMatchObject({ detected: true, reach: { on: true }, note: { state: "added" } });
   expect(later.notes_auto).toEqual([{ agent: "gemini", path: "~/.gemini/GEMINI.md" }]);
-  // The dialog's answer (now for Qwen Code and Cursor) still records the agents it showed.
-  const notNow = (await (await post(s, "/api/inbox/agents/notes", { add: [], asked: ["qwen"] })).json()) as Asked;
-  expect(notNow.notes_asked).toEqual(["codex", "gemini", "qwen"]);
+  // The dialog's answer (now for Cline, and Cursor copied by hand) still records the agents it showed.
+  const notNow = (await (await post(s, "/api/inbox/agents/notes", { add: [], asked: ["cline"] })).json()) as Asked;
+  expect(notNow.notes_asked).toEqual(["codex", "gemini", "cline"]);
 });
 
 test("someone who answered the old dialog with Not now keeps that answer: the run writes nothing for that agent", async () => {
@@ -546,16 +546,17 @@ test("a note already in an agent's file (written by hand or an older Inbox, no r
 });
 
 test("a window older than the dialog (no asked list): the agents that can take a note now count as asked", async () => {
-  // Qwen Code: still asked in the dialog (Codex's note would be written by itself, so asked already).
-  fake.install("qwen");
-  mkdirSync(join(fake.home, ".qwen"), { recursive: true });
+  // Cursor without its editor (the CLI alone): still asked in the dialog, its note copied by hand (Codex's
+  // note would be written by itself, so asked already).
+  fake.install("cursor-agent");
+  mkdirSync(join(fake.home, ".cursor"), { recursive: true });
   const s = await start();
   await s.connectAgents();
   const before = (await get(s)) as Asked;
   expect(before.notes_asked).toEqual([]);
-  expect(row(before, "qwen").note?.state).toBe("absent");
+  expect(row(before, "cursor").note?.state).toBe("manual");
   const answer = (await (await post(s, "/api/inbox/agents/notes", { add: [] })).json()) as Asked;
-  expect(answer.notes_asked).toEqual(["qwen"]);
+  expect(answer.notes_asked).toEqual(["cursor"]);
 });
 
 test("the answer's fields are checked", async () => {

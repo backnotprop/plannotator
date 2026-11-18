@@ -402,7 +402,7 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, autoAddInboxNotes, inboxNoteBlockFor, inboxNoteBlockWith, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, noteRulesStates, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, sharedNoteRules, unsaidAutoNotes } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, inboxNoteBlockFor, inboxNoteBlockWith, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, noteCopiedByHand, noteRulesStates, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, sharedNoteRules, unsaidAutoNotes } from "./inbox-agent-notes";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -2447,7 +2447,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const own: Partial<Record<InboxNoteAgentId, string>> = {};
     for (const id of INBOX_NOTE_AGENT_IDS) {
       // What that agent's file gets: one several agents read carries the rules they share (inboxNoteBlockFor).
-      const block = id === "cursor" ? shared : inboxNoteBlockFor(id, dataDir, agentEnvironment, config);
+      const block = noteCopiedByHand(id, agentEnvironment) ? shared : inboxNoteBlockFor(id, dataDir, agentEnvironment, config);
       if (block !== shared) own[id] = block;
     }
     return { note_text: shared, note_texts: own };
@@ -2594,7 +2594,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     if (typeof body.note === "boolean") {
       if (!(INBOX_NOTE_AGENT_IDS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "note: this agent has no Inbox note workflow.", { field: "note" });
-      if (agent === "cursor") throw new InboxError("validation_error", "note: Cursor's note is copied by hand into Customize → Rules; Show note in Settings → Agents.", { field: "note" });
+      if (noteCopiedByHand(agent as InboxNoteAgentId, agentEnvironment)) throw new InboxError("validation_error", "note: Cursor's note is copied by hand into Customize → Rules; Show note in Settings → Agents.", { field: "note" });
       if (inboxNotesDisabled(agentEnvironment.env) && body.note) throw new InboxError("notes_disabled", "PLANNOTATOR_INBOX_NOTES=0 is set: notes are off.");
       // Adding one needs the agent here, as the note dialog and --notes ask; switching one off never does.
       if (body.note && !agentSpec(agent).detect(agentEnvironment)) {
@@ -2636,8 +2636,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Never a note, written or to copy, for an agent that is not on this computer.
       !agentSpec(agent).detect(agentEnvironment)
         ? ({ ok: false, agent, reason: `${INBOX_AGENT_LABELS[agent]} was not found on this computer`, path: null } as const)
-        : agent === "cursor"
-          ? // Cursor keeps its rules in the app: nothing is written, the window shows the note to copy.
+        : noteCopiedByHand(agent, agentEnvironment)
+          ? // Cursor without its editor here: nothing is written, the window shows the note to copy.
             ({ ok: true, agent, action: "manual", path: null } as const)
           : addInboxNote(agent, dataDir, agentEnvironment),
     );

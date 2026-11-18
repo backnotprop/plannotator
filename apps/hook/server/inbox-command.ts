@@ -77,7 +77,7 @@ import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
 import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
-import { addInboxNote, inboxNoteBodyWith, inboxNotesDisabled, markNotesAsked, sharedNoteRules } from "@plannotator/server/inbox-agent-notes";
+import { addInboxNote, inboxNoteBodyWith, inboxNotesDisabled, markNotesAsked, noteCopiedByHand, sharedNoteRules } from "@plannotator/server/inbox-agent-notes";
 import { loadConfig } from "@plannotator/shared/config";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
@@ -511,8 +511,8 @@ async function writeNotes(dataDir: string, list: string): Promise<number> {
       process.stderr.write(`${label}: not added (${label} was not found on this computer).\n`);
       continue;
     }
-    if (id === "cursor") {
-      // Cursor keeps its rules in the app: nothing is written; the note (without the markers) goes to stdout to copy.
+    if (noteCopiedByHand(id, environment)) {
+      // Cursor without its editor here: nothing is written; the note (without the markers) goes to stdout to copy.
       // With the person's rules for all agents after it, as the other notes carry them (a copy: changed rules need a new copy).
       process.stdout.write(`${inboxNoteBodyWith(sharedNoteRules(loadConfig()))}\n\n`);
       process.stderr.write("Cursor: nothing written. Cursor keeps its rules in the app: copy the note above into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.\n");
@@ -541,7 +541,7 @@ async function writeNotes(dataDir: string, list: string): Promise<number> {
   }
   // The window never asks about an agent whose note is there now; the others are still asked, once each.
   await markNotesAsked(added, { dataDir, selfCommand: selfCommand(), environment });
-  if (ok && added.some((id) => id !== "cursor")) process.stderr.write("Each agent reads it from its next session. Remove it in the Inbox's Settings or with plannotator uninstall.\n");
+  if (ok && added.some((id) => !noteCopiedByHand(id, environment))) process.stderr.write("Each agent reads it from its next session. Remove it in the Inbox's Settings or with plannotator uninstall.\n");
   return ok ? 0 : 1;
 }
 

@@ -1459,7 +1459,7 @@ export const AGENTS: Agent[] = [
       { do: 'Install Plannotator.', code: INSTALL },
       openInbox('The terminal says `Connected Cursor … to the Inbox`. Settings → Agents lists Cursor through `MCP server`.'),
       {
-        do: 'Copy the Inbox note into Cursor’s Customize → Rules. Settings → Agents has it under Show note. Or print it:',
+        do: 'With Cursor’s editor on this computer, the Inbox adds its note as a local plugin: restart Cursor (or run Developer: Reload Window) to load it. With only the Cursor CLI, copy the note into Customize → Rules. Settings → Agents has it under Show note. Or print it:',
         code: 'plannotator inbox --notes cursor',
         see: 'Cursor knows when to write to the Inbox.',
       },
@@ -1474,7 +1474,7 @@ export const AGENTS: Agent[] = [
       { symptom: 'Settings → Agents says `Not found on this computer`', fix: 'The Inbox looks for `~/.cursor` or `cursor` or `cursor-agent` on your `PATH`. Open Cursor once or add the server by hand.', src: 'IB:82' },
       dockPath,
       neverWoken('Cursor'),
-      { symptom: 'Cursor forgets to use the Inbox', fix: 'Cursor has no global rules file, so Plannotator can’t add its note for you. Paste it into Customize → Rules.', src: 'IB:109-111' },
+      { symptom: 'Cursor forgets to use the Inbox', fix: 'With Cursor’s editor on this computer, restart Cursor (or run Developer: Reload Window) so it loads the note’s plugin. With only the Cursor CLI, Plannotator can’t add its note for you: paste it into Customize → Rules.', src: 'IB:100-118' },
     ],
     limits: [{ text: 'You can run `plannotator review` or `plannotator annotate` in a terminal next to Cursor.', src: 'apps/hook/server/cli.ts' }],
     examples: ['Ask Cursor to send you a question when it needs a decision. Answer it in the Inbox.'],

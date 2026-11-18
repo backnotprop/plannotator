@@ -2733,17 +2733,21 @@ export interface InboxConnectReport {
 }
 
 /** The agents whose own instructions file can carry the Inbox note (packages/server/inbox-agent-notes.ts). */
-export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini" | "qwen" | "cursor";
-export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "qwen", "pi", "opencode", "cursor"];
+export type InboxNoteAgentId = "claude-code" | "codex" | "opencode" | "pi" | "gemini" | "qwen" | "cursor" | "kiro" | "windsurf" | "amp" | "cline" | "antigravity" | "dsh";
+export const INBOX_NOTE_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "qwen", "pi", "opencode", "cursor", "kiro", "windsurf", "amp", "cline", "antigravity", "dsh"];
 
 /**
  * The agents whose note is written by itself, without asking (approval
- * "inbox-agent-note-auto", which superseded the one-time dialog): only agents
- * proven to load the file where Plannotator writes it (their own code, source
- * and docs, plus a live check). Qwen Code is not proven (likely only): its note
- * is still offered, and Cursor's is copied by hand.
+ * "inbox-agent-note-auto", which superseded the one-time dialog; the owner,
+ * 2026-11-17, for every agent whose docs verify a global rules file it loads
+ * by itself: "Just add it, with the quiet line"). Claude Code, Codex, Gemini
+ * CLI, Pi and OpenCode are proven by a live check too; the others by their
+ * docs only until checked live (the check per agent: "Where" in
+ * docs/agent-guides/inbox-foundation.md). Cline is still
+ * offered (its docs do not say whether a new rule file starts switched on),
+ * and Cursor's note is copied by hand where its editor is not found.
  */
-export const INBOX_NOTE_AUTO_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode"];
+export const INBOX_NOTE_AUTO_AGENT_IDS: readonly InboxNoteAgentId[] = ["claude-code", "codex", "gemini", "pi", "opencode", "qwen", "cursor", "kiro", "windsurf", "amp", "antigravity", "dsh"];
 
 /** A note Plannotator wrote by itself that the window has not said yet. `path` is shown with `~`. */
 export interface InboxNoteAutoAdd {
