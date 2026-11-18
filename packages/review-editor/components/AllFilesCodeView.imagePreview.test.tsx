@@ -81,6 +81,7 @@ mock.module('@pierre/diffs/react', () => ({
         getHeight: () => 0,
         getTopForItem: () => 0,
         scrollTo: () => {},
+        render: () => {},
       }),
     }));
     return <div ref={props.containerRef} className={props.className} />;

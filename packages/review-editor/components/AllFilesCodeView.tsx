@@ -2113,6 +2113,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useEffect(() => () => {
     if (augmentFlushTimerRef.current != null) clearTimeout(augmentFlushTimerRef.current);
   }, []);
+  const landingsRef = useRef(new Map<string, () => boolean>());
+  const landingFrameRef = useRef<number | null>(null);
+  const landInFrame = useCallback((itemId: string, decide: () => boolean) => {
+    landingsRef.current.set(itemId, decide);
+    landingFrameRef.current ??= requestAnimationFrame(() => {
+      landingFrameRef.current = null;
+      const decisions = [...landingsRef.current.values()];
+      landingsRef.current.clear();
+      if (decisions.map((decide) => decide()).includes(true)) viewerRef.current?.getInstance()?.render(true);
+    });
+  }, []);
+  useEffect(() => () => {
+    if (landingFrameRef.current != null) cancelAnimationFrame(landingFrameRef.current);
+  }, []);
 
   const [semanticNotes, setSemanticNotes] = useState<ReadonlyMap<string, SemanticMinimapNote[]>>(new Map());
   const openHeldFolds = useStableCallback((itemId: string, fileDiff: FileDiffMetadata, annotations: readonly { side: string; lineNumber: number }[] | undefined): FileDiffMetadata => {
@@ -2259,17 +2273,22 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
       const previous = semDiffsRef.current.get(itemId);
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
-      const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
-      semDiffsRef.current.set(itemId, { plain, semantic });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
-        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-        pendingSummaryRef.current.delete(itemId);
-        showSemantic(itemId, semanticEnabledRef.current);
-        return;
-      }
-      if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
-      else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      refreshItem(itemId);
+      const landed = { plain, semantic };
+      semDiffsRef.current.set(itemId, landed);
+      landInFrame(itemId, () => {
+        if (stale() || semDiffsRef.current.get(itemId) !== landed) return false;
+        const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
+        if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
+          semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+          pendingSummaryRef.current.delete(itemId);
+          showSemantic(itemId, semanticEnabledRef.current);
+          return true;
+        }
+        if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
+        else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+        refreshItem(itemId);
+        return false;
+      });
     });
   });
 

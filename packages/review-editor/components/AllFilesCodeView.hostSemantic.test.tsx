@@ -69,6 +69,7 @@ mock.module('@pierre/diffs/react', () => ({
         getHeight: () => 0,
         getTopForItem: () => 0,
         scrollTo: () => {},
+        render: () => {},
       }),
     }));
     return <div ref={props.containerRef} className={props.className} data-mock-scroll="" />;
@@ -710,6 +711,25 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     document.dispatchEvent(new Event('wheel'));
     await page.land();
     expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('a file below when its note is worked out but on screen by the frame that would draw it is offered the note', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 3000 });
+    document.dispatchEvent(new Event('wheel'));
+    const realFrame = globalThis.requestAnimationFrame;
+    const frames: FrameRequestCallback[] = [];
+    globalThis.requestAnimationFrame = (callback) => frames.push(callback);
+    try {
+      await page.land();
+      page.move('a.ts', 100);
+      await act(async () => {
+        for (const frame of frames.splice(0)) frame(performance.now());
+      });
+    } finally {
+      globalThis.requestAnimationFrame = realFrame;
+    }
+    expect(page.swapped('a.ts')).toBe(false);
+    expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('off');
   });
 
   test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
