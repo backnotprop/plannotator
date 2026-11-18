@@ -425,3 +425,27 @@ test('an engine that answered at all, even with an error, is warm: a stall after
   expect(outcome).toBe('warm limit');
   client.dispose();
 });
+
+test('the cold limit starts when the engine and its grammar have arrived, so a slow download is not a stall and is not started again', async () => {
+  const timers: ReturnType<typeof setTimeout>[] = [];
+  let made = 0;
+  const createWorker = () => {
+    made++;
+    return {
+      onmessage: null as ((e: MessageEvent<unknown>) => void) | null,
+      onerror: null,
+      postMessage(request: SemDiffRequest) {
+        const say = (data: unknown, ms: number) => timers.push(setTimeout(() => this.onmessage?.({ data } as MessageEvent<unknown>), ms));
+        say({ download: 'start', language: 'typescript' }, 0);
+        say({ download: 'done', language: 'typescript' }, 150);
+        say({ id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' }, 180);
+      },
+      terminate() {},
+    } as unknown as Worker;
+  };
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker, timeoutMs: 30, coldTimeoutMs: 60 });
+  expect(await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).toEqual({ result: null, failed: false });
+  expect(made).toBe(1);
+  client.dispose();
+  for (const timer of timers) clearTimeout(timer);
+});

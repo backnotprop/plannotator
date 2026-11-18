@@ -3,7 +3,7 @@ import { languageForPath } from '@plannotator/sem-jiff/languages';
 import { reviewSummary, SKIM_KINDS, type ReviewSummary } from '@plannotator/sem-jiff/summary';
 import type { SemDiffAdvert } from '@plannotator/shared/sem-diff-assets';
 import { SEM_DIFF_GRAMMARS } from '@plannotator/sem-jiff/grammars';
-import type { SemDiffReply, SemDiffRequest } from './protocol';
+import type { SemDiffDownload, SemDiffReply, SemDiffRequest } from './protocol';
 
 export const SEM_DIFF_TIMEOUT_MS = 3_000;
 export const SEM_DIFF_OPINION_TIMEOUT_MS = 30_000;
@@ -58,6 +58,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS } = options;
   const warm = new Set<string>();
   const coldTimedOut = new Set<string>();
+  const downloading = new Set<string>();
   let worker: Promise<Worker> | null = null;
   let nextId = 1;
   interface Pending {
@@ -74,6 +75,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     if (head.done) return;
     const id = head.value;
     const { request } = pending.get(id)!;
+    if (downloading.has(languageForPath(request.path) ?? '')) return;
     const limit = request.opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : warm.has(languageForPath(request.path) ?? '') || coldTimedOut.has(languageForPath(request.path) ?? '') ? timeoutMs : Math.max(timeoutMs, coldTimeoutMs);
     watchdog = setTimeout(() => headTimedOut(id), limit);
   };
@@ -88,6 +90,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const old = worker;
     worker = null;
     warm.clear();
+    downloading.clear();
     void old?.then((w) => w.terminate(), () => {});
   };
   const post = (id: number) => {
@@ -114,10 +117,24 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     for (const other of pending.keys()) post(other);
     watchHead();
   };
-  const ensureWorker = (): Promise<Worker> => {
+  const heard = ({ download, language }: SemDiffDownload) => {
+    if (download === 'start') downloading.add(language);
+    else downloading.delete(language);
+    const head = pending.values().next();
+    if (head.done || (languageForPath(head.value.request.path) ?? '') !== language) return;
+    if (download === 'start' && watchdog) {
+      clearTimeout(watchdog);
+      watchdog = null;
+    } else if (download === 'done' && !watchdog) watchHead();
+  };
+    const ensureWorker = (): Promise<Worker> => {
     if (worker) return worker;
     const created = Promise.resolve().then(createWorker).then((w) => {
-      w.onmessage = (event: MessageEvent<SemDiffReply>) => {
+      w.onmessage = (event: MessageEvent<SemDiffReply | SemDiffDownload>) => {
+        if ('download' in event.data) {
+          if (worker === created) heard(event.data);
+          return;
+        }
         if (!pending.has(event.data.id)) return;
         settle(event.data.id, event.data);
         watchHead();
