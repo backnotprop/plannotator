@@ -13,6 +13,7 @@ import {
   inboxRunSecretNames,
   inboxRunShowHidden,
   inboxRunUnusableWords,
+  inboxSecretRefusedWords,
   inboxSecretNameRefused,
   parseInboxRunBlocks,
   parseInboxSecretBlocks,
@@ -67,6 +68,15 @@ describe(":::run blocks", () => {
     expect(inboxRunUnusableWords([])).toBeNull();
   });
 
+  test("a Uses word that is not a name is said once, as written; a trust-file name gets its own true reason", () => {
+    const [block] = parseInboxRunBlocks(run("Deploy\nUses: not-a-name, SSL_CERT_FILE, NODE_OPTIONS, A_KEY.\n```\nls\n```"));
+    expect(block!.uses).toEqual(["A_KEY"]);
+    expect(block!.uses_unusable).toEqual(["not-a-name", "SSL_CERT_FILE", "NODE_OPTIONS"]);
+    expect(inboxRunUnusableWords(block!.uses_unusable)).toBe("Its Uses line names what this run can't get: NODE_OPTIONS can't hold a secret (programs read it to decide how they start); SSL_CERT_FILE can't hold a secret (it changes which servers programs trust); \"not-a-name\" isn't a secret's name.");
+    expect(inboxSecretRefusedWords("REQUESTS_CA_BUNDLE")).toBe("REQUESTS_CA_BUNDLE can't hold a secret: it changes which servers programs trust, so a value saved under it could change who every command talks to.");
+    expect(inboxSecretRefusedWords("NODE_OPTIONS")).toContain("programs read it to decide how they start");
+  });
+
   test("the title and why lose direction marks and invisible characters; the command keeps its bytes", () => {
     const [block] = parseInboxRunBlocks(run("Safe‮ title\nWhy​ not\n```\nls\n```"));
     expect(block).toMatchObject({ title: "Safe title", why: "Why not" });
@@ -79,7 +89,7 @@ describe("names a secret may not have", () => {
     "OPENSSL_CONF", "OPENSSL_ENGINES", "OPENSSL_MODULES", "GCONV_PATH", "KUBECONFIG", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT",
     "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "CURL_HOME", "WGETRC", "RSYNC_RSH", "MAKEFLAGS", "MAKEFILES", "PHPRC",
     "PHP_INI_SCAN_DIR", "GOTOOLCHAIN", "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOINSECURE", "SSL_CERT_FILE", "SSL_CERT_DIR",
-    "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "AWS_CA_BUNDLE", "NODE_TLS_REJECT_UNAUTHORIZED", "SSLKEYLOGFILE", "_JAVA_OPTIONS",
+    "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "AWS_CA_BUNDLE", "NODE_TLS_REJECT_UNAUTHORIZED", "SSLKEYLOGFILE",
     "DOTNET_STARTUP_HOOKS", "COREHOST_TRACE", "COR_PROFILER", "CORECLR_PROFILER_PATH", "COMPLUS_ETWENABLED", "CARGO_HOME",
     "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER", "CARGO_BUILD_RUSTC_WRAPPER", "RUSTUP_TOOLCHAIN", "GIT_CONFIG_KEY_0",
     "PLANNOTATOR_API_KEY", "PLANNOTATOR_TOKEN",

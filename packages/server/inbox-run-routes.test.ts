@@ -21,7 +21,7 @@ import type { InboxRunStart, InboxRunView } from "./inbox-run";
 import type { InboxRunRecord } from "./inbox-run-journal";
 import { createInboxRunRoutes, inboxRunFolder } from "./inbox-run-routes";
 import { inboxRunArgv, inboxRunShellNote, isPowerShellOwnVariable, posixRunShell, powerShellEncoded, runShellFor, WINDOWS_CLIPBOARD_SCRIPT, type InboxRunShell } from "./inbox-run-shell";
-import { keptLoginEnv, lostRunStillRunning, macTmp } from "./inbox-run-setup";
+import { keptLoginEnv, lostRunStillRunning, macTmp, processStartedAt } from "./inbox-run-setup";
 import { checkSecretValue, createInboxSecrets, hideSecretPrefixTail, loginEnvCredentials, redactSecrets } from "./inbox-secrets";
 import { inboxSecretStorePlace, memoryVault } from "./inbox-secret-vault";
 
@@ -38,7 +38,7 @@ const RUN_BODY = [":::secret", "API_TOKEN", "The deploy check needs it.", ":::",
 const SH: InboxRunShell = { kind: "posix", path: "/bin/sh", name: "sh" };
 const LOGIN = { PATH: "/usr/bin", SHELL: "/bin/sh", HOME: "/home/p", OPENAI_API_KEY: "sk-login-env-token-1234" };
 
-function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string; vault?: ReturnType<typeof memoryVault> } = {}) {
+function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string; vault?: ReturnType<typeof memoryVault>; login?: Record<string, string>; stopLost?: InboxRunRecord | null } = {}) {
   const dir = options.dir ?? mkdtempSync(join(tmpdir(), "plannotator-run-routes-"));
   if (!options.dir) dirs.push(dir);
   const root = join(dir, "project");
@@ -52,6 +52,8 @@ function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string
   const stopped: string[] = [];
   const clipboard: string[] = [];
   const shells: Record<string, string>[] = [];
+  const changed: (readonly string[] | null)[] = [];
+  const login = options.login ?? LOGIN;
   const doors = new WeakMap<Request, InboxDoorCaller>();
   const routes = createInboxRunRoutes({
     store,
@@ -63,7 +65,9 @@ function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string
         started.push(start);
         return {} as InboxRunView;
       },
-      stop: (_id: string, key: string) => (stopped.push(key), true),
+      stop: (_id: string, key: string) => (stopped.push(key), options.stopLost === undefined),
+      stopLost: async () => options.stopLost ?? null,
+      recheck: () => {},
       views: () => ({}),
       running: () => 0,
       recover: async (onLost: (record: InboxRunRecord) => void) => {
@@ -73,7 +77,7 @@ function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string
     },
     secrets,
     vault,
-    loginEnv: { get: async () => LOGIN, forPress: async () => LOGIN, peek: () => LOGIN },
+    loginEnv: { get: async () => login, forPress: async () => login, peek: () => login },
     shellFor: (env) => {
       shells.push({ ...env });
       return SH;
@@ -83,6 +87,7 @@ function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string
     computer: (viaDoor) => (viaDoor ? "Studio Mac" : "your Mac"),
     displayFolder: (path) => path.replace(dir, "~"),
     openTerminal: async () => ({ ok: true, app: "Terminal" }),
+    changed: (ids) => void changed.push(ids),
   });
   const request = (what: "run" | "secret", body: Record<string, unknown>, from: "window" | "bare" | "bearer" | InboxDoorCaller = "window") => {
     const headers: Record<string, string> = { "Content-Type": "application/json", Host: HOST };
@@ -101,7 +106,7 @@ function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string
     if (door) doors.set(req, door);
     return (await (await routes.route(req, `/api/inbox/messages/${message.id}/run`))!.json()) as Record<string, any>;
   };
-  return { dir, root, store, project, message, vault, secrets, started, stopped, clipboard, shells, request, read, routes };
+  return { dir, root, store, project, message, vault, secrets, started, stopped, clipboard, shells, changed, request, read, routes };
 }
 
 const keyOf = async (w: ReturnType<typeof world>) => Object.keys((await w.read()).blocks)[0]!;
@@ -348,6 +353,10 @@ describe("hiding values", () => {
     expect(loginEnvCredentials({ OPENAI_API_KEY: "sk-abcdefgh123", SSH_AUTH_SOCK: "/tmp/agent.sock", GH_TOKEN: "short", HOME: "/home/p", NPM_TOKEN: "npm_abcdefghij" })).toEqual(["sk-abcdefgh123", "npm_abcdefghij"]);
     // Named by how they end: an author's email or a session manager's name is not a credential.
     expect(loginEnvCredentials({ GIT_AUTHOR_EMAIL: "person@example.invalid", GIT_COMMITTER_NAME: "Person Name", SESSION_MANAGER: "local/host:@/tmp/.ICE", AUTHOR_KEYWORDS: "plannotator", AWS_SESSION_TOKEN: "FwoGZXIvYXdzEJr", AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMIK7MDENG" })).toEqual(["FwoGZXIvYXdzEJr", "wJalrXUtnFEMIK7MDENG"]);
+    // Names that end without an underscore, and the short forms.
+    expect(loginEnvCredentials({ PGPASSWORD: "pg-secret-1234", MYSQL_PWD: "my-secret-1234", STRIPE_APIKEY: "stripeapikey99", GH_AUTH_TOKEN: "ghauthtoken99", SVC_PASSWD: "svc-passwd-99", PWD: "/home/p/work", OLDPWD: "/home/p" })).toEqual(["pg-secret-1234", "my-secret-1234", "stripeapikey99", "ghauthtoken99", "svc-passwd-99"]);
+    // A URL with a password, whatever its variable is called: the password, as written and decoded.
+    expect(loginEnvCredentials({ DATABASE_URL: "postgres://app:s3cr%40t-pass@db.example.invalid:5432/app", REDIS_URL: "redis://:only-pass-99@cache.invalid", SITE_URL: "https://example.invalid/a:b@c", NO_PASS: "https://user@example.invalid" })).toEqual(["s3cr%40t-pass", "s3cr@t-pass", "only-pass-99"]);
   });
 });
 
@@ -447,7 +456,7 @@ describe("the review's second round", () => {
       serverSession: SESSION,
       readBody: async (req) => (await req.json()) as Record<string, unknown>,
       json: (value, status = 200) => Response.json(value, { status }),
-      runs: { start: () => ({}) as InboxRunView, stop: () => true, views: () => ({}), running: () => 0, recover: async () => {}, stopAll: () => {} },
+      runs: { start: () => ({}) as InboxRunView, stop: () => true, stopLost: async () => null, recheck: () => {}, views: () => ({}), running: () => 0, recover: async () => {}, stopAll: () => {} },
       secrets: w.secrets,
       vault: w.vault,
       loginEnv: { get: async () => LOGIN, forPress: async () => LOGIN, peek: () => LOGIN },
@@ -456,11 +465,12 @@ describe("the review's second round", () => {
       door: () => undefined,
       computer: () => "your Mac",
       displayFolder: (path) => path,
-      openTerminal: async () => ({ ok: false, error: "No terminal app was found on this computer." }),
+      openTerminal: async () => ({ ok: false, error: "Ghostty not found" }),
     });
     const answer = (await routes.route(new Request(`http://${HOST}/api/inbox/messages/${w.message.id}/run`, { method: "POST", headers: { "Content-Type": "application/json", Host: HOST, Origin: `http://${HOST}` }, body: JSON.stringify({ key, op: "terminal", command: COMMAND, serverSession: SESSION }) }), `/api/inbox/messages/${w.message.id}/run`))!;
     expect(answer.status).toBe(409);
-    expect(await answer.json()).toEqual({ error: "No terminal app was found on this computer.", code: "terminal_failed" });
+    // The launcher's own words ("Ghostty not found", an app the person never picked) never reach the card.
+    expect(await answer.json()).toEqual({ error: "No terminal app could be opened on your Mac.", code: "terminal_failed" });
   });
 
   test("a value gone from the store (removed in Keychain Access): said truly, and the card asks for it again", async () => {
@@ -515,6 +525,39 @@ describe("the review's second round", () => {
     expect(note).toContain("It is still running on their computer, and its card lets the person stop it.");
     expect(note).toContain("QA started");
   });
+
+  test("Stop on a lost run that still ran: the agent hears the person stopped it; nothing when it was not stopped", async () => {
+    const view = { key: "r-00000001", run_id: "run_1", state: "stopped", exit_code: null, signal: "SIGTERM", started_at: "", ended_at: null, duration_ms: 0, lines: [], total_lines: 0, partial: "", waiting_for_input: false, needs_terminal: false, error: null, interrupted: "lost", left_running: false } as InboxRunView;
+    const w = world(RUN_BODY, { stopLost: { message_id: "", key: "r-00000001", title: "Check the deploy", folder: "~/project", view, live: false } });
+    const key = await keyOf(w);
+    const notes = () => w.store.thread(w.message.thread_id)!.messages.filter((m) => m.author.kind === "person").map((m) => m.body);
+    expect((await w.request("run", { key, op: "stop" }))!.status).toBe(200);
+    expect(notes()).toEqual(['Command you asked the person to run: "Check the deploy", in ~/project.\nThe person stopped it. It had gone on running after the Inbox stopped, so its result was never recorded. Ask them to run it again if you still need it.']);
+    const quiet = world(RUN_BODY, { stopLost: null });
+    await quiet.request("run", { key: await keyOf(quiet), op: "stop" });
+    expect(quiet.store.thread(quiet.message.thread_id)!.messages.filter((m) => m.author.kind === "person")).toEqual([]);
+  });
+
+  test("a name the person's shell sets is not waited for: no field, the run goes ahead, and their value is hidden", async () => {
+    const own = "TEST_ONLY_NOT_A_KEY_FROM_SHELL_456";
+    const w = world(RUN_BODY, { login: { ...LOGIN, API_TOKEN: own } });
+    const key = await keyOf(w);
+    expect((await w.read()).blocks[key]).toMatchObject({ uses: ["API_TOKEN"], from_shell: ["API_TOKEN"], needs: [], fields: [] });
+    expect((await w.request("run", { key, op: "start", command: COMMAND }))!.status).toBe(200);
+    const prepared = await w.started[0]!.prepare();
+    // The person's own value flows from their login env; nothing was read from the vault, and it is hidden in output.
+    expect(prepared.env.API_TOKEN).toBe(own);
+    expect(prepared.redact).toContain(own);
+  });
+
+  test("windows hear when a card's state changed: a start names its message, a save or remove names every card", async () => {
+    const w = world();
+    const key = await keyOf(w);
+    await w.request("secret", { name: "API_TOKEN", value: SENTINEL });
+    await w.request("run", { key, op: "start", command: COMMAND });
+    await w.request("secret", { name: "API_TOKEN", value: null });
+    expect(w.changed).toEqual([null, [w.message.id], null]);
+  });
 });
 
 describe("the exact bytes reach the shell (Windows parses a command line again)", () => {
@@ -553,7 +596,41 @@ describe("the exact bytes reach the shell (Windows parses a command line again)"
 });
 
 describe("the kept login env", () => {
-  test("a press uses the kept copy at once and reads it again behind itself; a fallback is never kept", async () => {
+  test("a login shell that does not answer: its stand-in serves presses for a minute (no 5 s wait each), read again behind each", async () => {
+    let clock = 0;
+    let reads = 0;
+    const fallback = { PATH: "/fallback" };
+    let next: Record<string, string> = fallback;
+    let slow: Promise<void> | null = null;
+    const kept = keptLoginEnv(
+      async () => {
+        reads++;
+        await slow;
+        return next;
+      },
+      { isFallback: (env) => env === fallback, now: () => clock },
+    );
+    expect(await kept.forPress()).toBe(fallback);
+    expect(reads).toBe(1);
+    // A press within the minute is answered at once (the slow read behind it is never waited for).
+    let release: () => void = () => {};
+    slow = new Promise((resolve) => (release = resolve));
+    clock = 30_000;
+    expect(await kept.forPress()).toBe(fallback);
+    expect(reads).toBe(2);
+    release();
+    await Bun.sleep(1);
+    // Past the minute it is not used: the press waits for a fresh read (a good one now), which is kept for good.
+    clock = 61_000;
+    next = { PATH: "/usr/bin" };
+    slow = null;
+    expect(await kept.forPress()).toEqual({ PATH: "/usr/bin" });
+    clock = 10 * 60_000;
+    next = fallback;
+    expect(await kept.get()).toEqual({ PATH: "/usr/bin" });
+  });
+
+  test("a press uses the kept copy at once and reads it again behind itself; a fallback never replaces a good copy", async () => {
     let reads = 0;
     let next: Record<string, string> = { PATH: "/usr/bin" };
     const fallback = { PATH: "/fallback" };
@@ -571,9 +648,22 @@ describe("the kept login env", () => {
     await kept.forPress();
     await Bun.sleep(1);
     expect(kept.peek()).toEqual({ PATH: "/usr/bin:/new/tool" });
-    const cold = keptLoginEnv(async () => fallback, { isFallback: (env) => env === fallback });
+    let clock = 0;
+    const cold = keptLoginEnv(async () => fallback, { isFallback: (env) => env === fallback, now: () => clock });
     expect(await cold.get()).toBe(fallback);
+    clock = 61_000;
     expect(cold.peek()).toBeNull();
+  });
+
+  test("ps that fails or has no lstart is unknown, never a run still going; no such process is gone only when ps answers for this one", async () => {
+    const answers = (asked: { code: number; text: string } | null, self: { code: number; text: string } | null) => async (pid: number) => (pid === process.pid ? self : asked);
+    const works = { code: 0, text: "Wed Nov 18 13:36:52 2026\n" };
+    expect(await processStartedAt(4242, answers(works, works))).toBe(Date.UTC(2026, 10, 18, 13, 36, 52));
+    expect(await processStartedAt(4242, answers({ code: 1, text: "" }, works))).toBe("gone");
+    // BusyBox (no -o lstart), or a ps that fails for any reason: unknown.
+    expect(await processStartedAt(4242, answers({ code: 1, text: "" }, { code: 1, text: "" }))).toBeNull();
+    expect(await processStartedAt(4242, answers({ code: 1, text: "" }, { code: 0, text: "13:36" }))).toBeNull();
+    expect(await processStartedAt(4242, answers(null, null))).toBeNull();
   });
 
   test("a lost run still runs: its group and the same start time; gone or another process: no", async () => {

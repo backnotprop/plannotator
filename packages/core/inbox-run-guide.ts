@@ -117,6 +117,11 @@ export function inboxRunReportText(run: InboxRunReportInput): string {
   return lines.join("\n");
 }
 
+/** The person reply when they stop a run the Inbox lost that was still going: it ended, and its result is still unknown. */
+export function inboxRunLostStoppedText(title: string, folder: string): string {
+  return `${INBOX_RUN_REPORT_HEADING}: "${title}", in ${folder}.\nThe person stopped it. It had gone on running after the Inbox stopped, so its result was never recorded. Ask them to run it again if you still need it.`;
+}
+
 /** The person reply a Save writes: the name, never the value. */
 export function inboxSecretSavedText(name: string, replaced: boolean): string {
   return `${replaced ? "Replaced" : "Saved"} ${name} on this computer. A :::run in this project that names $${name} in its command, or has \`Uses: ${name}\`, gets it; its value is never shown to you.`;

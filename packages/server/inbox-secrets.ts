@@ -196,17 +196,32 @@ export function hideSecretPrefixTail(text: string, values: readonly string[]): s
 }
 
 /**
- * Names in a login environment that hold a credential (OPENAI_API_KEY, GH_TOKEN, DB_PASSWORD, AWS_SESSION_TOKEN): by
- * how they end, so GIT_AUTHOR_EMAIL or SESSION_MANAGER are not taken for one.
+ * Names in a login environment that hold a credential (OPENAI_API_KEY, GH_TOKEN, DB_PASSWORD, AWS_SESSION_TOKEN,
+ * PGPASSWORD, MYSQL_PWD, STRIPE_APIKEY, SENTRY_DSN): by how they end, so GIT_AUTHOR_EMAIL or SESSION_MANAGER are not
+ * taken for one. (PWD and OLDPWD end so too; their values are paths, which are never taken.)
  */
-const CREDENTIAL_NAME_RE = /(?:^|_)(?:KEY|KEYS|TOKEN|TOKENS|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIALS?|AUTH|COOKIE|PAT)$/i;
+const CREDENTIAL_NAME_RE = /(?:(?:^|_)(?:KEY|KEYS|TOKEN|TOKENS|SECRET|CREDENTIALS?|AUTH|COOKIE|PAT|DSN)|PASSWORD|PASSWD|PASSPHRASE|APIKEY|PWD)$/i;
+
+/** A URL with a password in it (`postgres://user:pass@host/db`): the password, from any variable (DATABASE_URL…). */
+const URL_PASSWORD_RE = /[a-z][a-z0-9+.-]*:\/\/[^/\s:@]*:([^@\s/]+)@/gi;
 
 /** The login env's credential-like values, hidden in a run's output too (it goes to the agent). Not paths. */
 export function loginEnvCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
   const out: string[] = [];
   for (const [name, value] of Object.entries(env)) {
-    if (!value || value.length < 8 || !CREDENTIAL_NAME_RE.test(name) || /^[/~.]|^[A-Za-z]:[\\/]/.test(value) || /\s/.test(value)) continue;
+    if (!value) continue;
+    // A password inside a URL, whatever the variable is called: hidden on its own (the rest of the URL is not secret).
+    for (const match of value.matchAll(URL_PASSWORD_RE)) if (match[1]!.length >= 4) out.push(match[1]!, safeDecode(match[1]!));
+    if (value.length < 8 || !CREDENTIAL_NAME_RE.test(name) || /^[/~.]|^[A-Za-z]:[\\/]/.test(value) || /\s/.test(value)) continue;
     out.push(value);
   }
-  return out;
+  return [...new Set(out)];
 }
+
+const safeDecode = (text: string): string => {
+  try {
+    return decodeURIComponent(text);
+  } catch {
+    return text;
+  }
+};

@@ -73,7 +73,15 @@ export interface InboxRunPrepared {
   env: Record<string, string>;
   /** Values to hide in output: the secrets it gets, and the login env's tokens. */
   redact: readonly string[];
+  /**
+   * Its stdin is closed at once (PowerShell, spawned with a pipe, waits for its input to close before it exits), so
+   * it cannot wait for typing and is not watched for a prompt.
+   */
+  closeStdin?: boolean;
 }
+
+/** Words for a command too long for Windows' one command line (a spawn's ENAMETOOLONG, or found before it). */
+export const INBOX_RUN_TOO_LONG_WORDS = "This command is too long to run here on Windows. Run it in your terminal.";
 
 export interface InboxRunStart {
   message_id: string;
@@ -109,7 +117,12 @@ interface Run {
   ended: boolean;
   /** When its process was started (this Inbox's clock), for the journal. */
   spawnedAt: number | null;
+  /** Not watched for a prompt (its stdin is closed). */
+  noPrompt: boolean;
 }
+
+/** A lost run whose command still ran is looked at again at most this often while its card is read. */
+export const INBOX_RUN_LOST_RECHECK_MS = 5_000;
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[@-Z\\-_]|[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g;
@@ -201,6 +214,13 @@ export class RunLineBuffer {
 }
 
 /** Stops a process group (POSIX) or tree (Windows); quiet when it is already gone. Never blocks the Inbox. */
+/** A spawn's failure in words: a command too long for Windows' command line says so plainly. */
+const spawnWords = (error: unknown): string => {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "ENAMETOOLONG" || code === "E2BIG") return INBOX_RUN_TOO_LONG_WORDS;
+  return error instanceof Error ? error.message : String(error);
+};
+
 export function killRunTree(pid: number | undefined, signal: "SIGTERM" | "SIGKILL", platform: NodeJS.Platform = process.platform): void {
   if (!pid) return;
   if (platform === "win32") {
@@ -258,7 +278,16 @@ export function createInboxRuns(options: {
    * false (it ended), null (this computer cannot tell). Absent: unknown.
    */
   stillRunning?: (pid: number, startedAt: number) => Promise<boolean | null>;
+  /** A message's run changed (it started, ended, was stopped, or a lost one was found ended): its cards read again. */
+  onChange?: (messageId: string) => void;
 }) {
+  const changed = (messageId: string) => {
+    try {
+      options.onChange?.(messageId);
+    } catch {
+      // A listener's failure is not the run's.
+    }
+  };
   const now = options.now ?? (() => Date.now());
   const platform = options.platform ?? process.platform;
   const quietMs = options.quietMs ?? INBOX_RUN_QUIET_MS;
@@ -312,19 +341,48 @@ export function createInboxRuns(options: {
   if (lost.length > 0) writeJournal();
 
   const live = () => [...runs.values()].filter((run) => !run.ended);
-  /** Stop on a lost run's card whose command still runs: its group goes (TERM, then KILL). */
-  const stopLeftRunning = (messageId: string, key: string): boolean => {
+  /**
+   * Whether a lost run's command still runs, looked at again now: its pid may since have gone to another program
+   * (the start time tells them apart). A record found otherwise stops offering Stop: false, it ended; null, this
+   * computer cannot tell. Never a signal here.
+   */
+  const lostChecked = new Map<InboxRunRecord, number>();
+  const recheckLost = async (record: InboxRunRecord): Promise<boolean | null> => {
+    lostChecked.set(record, now());
+    const pid = record.pid ?? null;
+    const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at).catch(() => null) : null;
+    if (left !== true && record.view.left_running === true) {
+      record.pid = null;
+      record.view = { ...record.view, left_running: left };
+      writeJournal();
+      changed(record.message_id);
+    }
+    return left;
+  };
+  /**
+   * Stop on a lost run's card whose command still runs: TERM to its group, then KILL after a grace, each only after
+   * looking again that it is still that command (a pid given to another program since is never signalled). The
+   * record, or null when there was nothing of its own to stop.
+   */
+  const stopLeftRunning = async (messageId: string, key: string): Promise<InboxRunRecord | null> => {
     const record = past.get(id(messageId, key));
-    if (!record || record.view.left_running !== true || !record.pid) return false;
+    if (!record || record.view.left_running !== true || !record.pid || !record.spawned_at) return null;
     const pid = record.pid;
+    const startedAt = record.spawned_at;
+    if ((await recheckLost(record)) !== true) return null;
     killRunTree(pid, "SIGTERM", platform);
-    const timer = setTimeout(() => killRunTree(pid, "SIGKILL", platform), STOP_GRACE_MS);
+    const timer = setTimeout(() => {
+      void (async () => {
+        if (options.stillRunning && (await options.stillRunning(pid, startedAt).catch(() => null)) === true) killRunTree(pid, "SIGKILL", platform);
+      })();
+    }, STOP_GRACE_MS);
     (timer as { unref?: () => void }).unref?.();
     record.pid = null;
     // The person stopped it: the card says so, not that it ended by itself.
     record.view = { ...record.view, left_running: false, signal: "SIGTERM" };
     writeJournal();
-    return true;
+    changed(messageId);
+    return record;
   };
   const killAllNow = () => {
     for (const run of live()) killRunTree(run.child?.pid, "SIGKILL", platform);
@@ -346,6 +404,7 @@ export function createInboxRuns(options: {
           writeJournal();
           continue;
         }
+        if (run.noPrompt) continue;
         const quiet = now() - run.lastOutput >= quietMs;
         const partial = run.view.partial.trim();
         const lastLine = run.view.lines[run.view.lines.length - 1] ?? "";
@@ -404,6 +463,7 @@ export function createInboxRuns(options: {
     if (live().length === 0) unwatch();
     writeJournal();
     letGo(id(run.start.message_id, run.start.key));
+    changed(run.start.message_id);
     if (options.messageAlive(run.start.message_id)) run.start.onEnd({ message_id: run.start.message_id, view: { ...view, lines: [...view.lines] }, outcome, waited_for_input: waited });
   };
 
@@ -417,6 +477,7 @@ export function createInboxRuns(options: {
       return;
     }
     run.redact = prepared.redact;
+    run.noPrompt = prepared.closeStdin === true;
     if (run.stopping || run.ended) {
       if (!run.ended) finish(run, "stopped", null, null);
       return;
@@ -426,7 +487,7 @@ export function createInboxRuns(options: {
       const [file, ...args] = prepared.argv;
       child = spawn(file!, args, { cwd: run.start.cwd, env: prepared.env, detached: platform !== "win32", stdio: ["pipe", "pipe", "pipe"], windowsHide: true });
     } catch (error) {
-      finish(run, "failed_to_start", null, null, error instanceof Error ? error.message : String(error));
+      finish(run, "failed_to_start", null, null, spawnWords(error));
       return;
     }
     run.child = child;
@@ -434,12 +495,14 @@ export function createInboxRuns(options: {
     run.view.state = "running";
     // Its process is in the journal from here: an Inbox that dies can find it again (recover).
     writeJournal();
+    changed(run.start.message_id);
+    if (prepared.closeStdin) child.stdin?.end();
     run.lastOutput = now();
     const decoders = { out: new StringDecoder("utf8"), err: new StringDecoder("utf8") };
     child.stdout?.on("data", (chunk: Buffer) => push(run, "out", decoders.out.write(chunk)));
     child.stderr?.on("data", (chunk: Buffer) => push(run, "err", decoders.err.write(chunk)));
     child.stdin?.on("error", () => {});
-    child.on("error", (error) => finish(run, "failed_to_start", null, null, error.message));
+    child.on("error", (error) => finish(run, "failed_to_start", null, null, spawnWords(error)));
     child.on("exit", (code, signal) => {
       // The output may still be arriving: give the pipes a moment, then end whether or not they closed.
       const end = () => finish(run, run.stopping ? "stopped" : "exited", code, signal);
@@ -468,6 +531,7 @@ export function createInboxRuns(options: {
         timers: new Set(),
         ended: false,
         spawnedAt: null,
+        noPrompt: false,
       };
       const runId = id(start.message_id, start.key);
       const index = finishedOrder.indexOf(runId);
@@ -479,10 +543,10 @@ export function createInboxRuns(options: {
       void begin(run);
       return run.view;
     },
-    /** Stop: TERM to the group, KILL after a grace; before it started, it never starts. False when nothing runs. */
+    /** Stop: TERM to the group, KILL after a grace; before it started, it never starts. False when nothing runs here. */
     stop(messageId: string, key: string): boolean {
       const run = runs.get(id(messageId, key));
-      if (!run || run.ended) return stopLeftRunning(messageId, key);
+      if (!run || run.ended) return false;
       run.stopping = true;
       if (!run.child) return true;
       killRunTree(run.child.pid, "SIGTERM", platform);
@@ -490,6 +554,19 @@ export function createInboxRuns(options: {
       (timer as { unref?: () => void }).unref?.();
       run.timers.add(timer);
       return true;
+    },
+    /** Stop on a lost run that still runs (looked at again first); its record when it was stopped. */
+    stopLost: stopLeftRunning,
+    /**
+     * A card of this message is being read: a lost run said to be still running is looked at again (at most every
+     * few seconds), so its words and its Stop stay true once it ends or its pid goes to another program.
+     */
+    recheck(messageId: string): void {
+      for (const record of past.values()) {
+        if (record.message_id !== messageId || record.view.left_running !== true) continue;
+        if (now() - (lostChecked.get(record) ?? 0) < INBOX_RUN_LOST_RECHECK_MS) continue;
+        void recheckLost(record);
+      }
     },
     /** A message's runs, the running and the last finished of each key (from before a restart too), as the card reads them. */
     views(messageId: string): Record<string, InboxRunView> {
@@ -516,6 +593,7 @@ export function createInboxRuns(options: {
         const pid = record.pid ?? null;
         const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at).catch(() => null) : null;
         record.view = { ...record.view, left_running: left };
+        lostChecked.set(record, now());
         if (left !== true) record.pid = null;
       }
       if (fresh.length > 0 || again.length > 0) writeJournal();

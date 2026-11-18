@@ -25,7 +25,7 @@ export function secretKeptWords(state: RunStateWire | null, agent: string, next:
   return `Stays on ${state?.computer ?? 'your computer'}, ${state?.store ?? 'where only you can read it'}. ${agent} gets only the name. ${next}`;
 }
 
-export function SecretCard({ messageId, secret, state, agent }: { messageId: string; secret: ParsedInboxSecret; state: RunStateWire | null; agent: string }) {
+export function SecretCard({ messageId, secret, state, agent, cardRef }: { messageId: string; secret: ParsedInboxSecret; state: RunStateWire | null; agent: string; cardRef?: (element: Element | null) => (() => void) | undefined }) {
   const saved = state?.secrets.find((s) => s.name === secret.name) ?? null;
   const [replacing, setReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,7 +48,7 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
     }
   };
   return (
-    <section className="ib-rb ib-sec" data-secret-card={secret.name} data-secret-state={secret.refused ? 'refused' : saved ? 'saved' : 'empty'} aria-label={`Secret ${secret.name}`}>
+    <section ref={cardRef} className="ib-rb ib-sec" data-secret-card={secret.name} data-secret-state={secret.refused ? 'refused' : saved ? 'saved' : 'empty'} aria-label={`Secret ${secret.name}`}>
       <div className="ib-rb-head">
         <Icon name="lock" />
         <span className="ib-sec-name">{secret.name}</span>

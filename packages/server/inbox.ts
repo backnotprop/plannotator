@@ -1319,6 +1319,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * which writes no record: the windows' streams say `event: thread-pulls` and each reads those threads' PRs again.
    */
   const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
+  // A `:::run` card's state changed (a run started, ended or was stopped; a secret saved or removed: null, every card).
+  const runStateListeners = new Set<(messageIds: readonly string[] | null) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
@@ -4157,6 +4159,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // again. Windows only (additive; a window that predates it skips the frame).
         const onThreadPullsLive = (threadIds: readonly string[]) => send(`event: thread-pulls\ndata: ${JSON.stringify({ thread_ids: threadIds })}\n\n`);
         if (windowId) threadPullLiveListeners.add(onThreadPullsLive);
+        // A run card's state changed here (any window's press, a phone's, a run ending): the cards showing it read
+        // again, so a window polls only while a command it shows is running. Windows only (additive).
+        const onRunState = (messageIds: readonly string[] | null) => send(`event: runs\ndata: ${JSON.stringify(messageIds ? { message_ids: messageIds } : { all: true })}\n\n`);
+        if (windowId) runStateListeners.add(onRunState);
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
@@ -4236,6 +4242,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           showListeners.delete(onShow);
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
+          runStateListeners.delete(onRunState);
           rowsListeners.delete(onRows);
           stopShowArchived();
           sidebarListeners.delete(onSidebar);
@@ -5481,6 +5488,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     computer: (viaDoor) => (viaDoor ? phones?.machineDoor.computerName() : null) ?? (process.platform === "darwin" ? "your Mac" : process.platform === "win32" ? "your PC" : "your computer"),
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
     openInLauncher,
+    changed: (messageIds) => {
+      for (const listener of runStateListeners) listener(messageIds);
+    },
   });
 
   /**

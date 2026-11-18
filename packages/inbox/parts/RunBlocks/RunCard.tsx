@@ -5,7 +5,7 @@
  * command on that computer's clipboard. A command (or folder) with a hidden character cannot be run or copied, and
  * the card says why: it knows that from the block itself, before and without the computer's answer.
  */
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { inboxRunBlockHidden, inboxRunShowHidden, inboxRunUnusableWords, type ParsedInboxRun } from '@plannotator/core/inbox-run-blocks';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -13,47 +13,11 @@ import { runApi, type RunStateWire, type RunView } from '../../data/runApi';
 import { refreshRunState } from '../../data/runStore';
 import { Icon } from '../../icons';
 import { RunOutput } from './RunOutput';
+import { goToField, runHint, runStatus, useFieldPlaces, useMoreBelow } from './runCardWords';
 import { secretKeptWords } from './SecretCard';
 import { SecretField } from './SecretField';
 
-const secs = (ms: number) => (ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`);
-
-/** How a run stands, in words, and its tone. */
-export function runStatus(run: RunView): { text: string; tone: 'live' | 'ok' | 'bad' | 'mut' } {
-  if (run.state === 'starting') return { text: 'Starting…', tone: 'live' };
-  if (run.state === 'running') return { text: `Running · ${Math.floor(run.duration_ms / 1000)} s`, tone: 'live' };
-  if (run.interrupted === 'lost') return { text: 'The Inbox stopped while this ran', tone: 'mut' };
-  if (run.interrupted === 'closed') return { text: `Stopped: the Inbox closed after ${secs(run.duration_ms)}`, tone: 'mut' };
-  if (run.state === 'stopped') return { text: `Stopped after ${secs(run.duration_ms)}`, tone: 'mut' };
-  if (run.exit_code === null && run.error) return { text: "Couldn't start", tone: 'bad' };
-  const how = run.exit_code !== null ? `exit code ${run.exit_code}` : `ended by ${run.signal ?? 'a signal'}`;
-  return { text: `${run.state === 'done' ? 'Done' : 'Failed'} · ${how} · ${secs(run.duration_ms)}`, tone: run.state === 'done' ? 'ok' : 'bad' };
-}
-
-/** What the agent was told, in one line, for a run that ended (true for each way it can end). */
-export function runHint(run: RunView, agent: string, computer: string): string {
-  if (run.interrupted === 'lost') {
-    if (run.left_running === true) return `It is still running on ${computer}: Stop ends it. ${agent} was told the Inbox stopped while it ran.`;
-    if (run.left_running === false && run.signal) return `You stopped it. ${agent} was told the Inbox stopped while it ran.`;
-    if (run.left_running === false) return `It ended while the Inbox was away. ${agent} was told the Inbox stopped while it ran.`;
-    return `It may still be running on ${computer}. ${agent} was told the Inbox stopped while it ran.`;
-  }
-  if (run.interrupted === 'closed') return `${agent} was told the Inbox closed while it ran${run.total_lines > 0 ? ', with the last lines of output' : ''}.`;
-  if (run.error && run.exit_code === null && run.total_lines === 0) return `${agent} was told why it couldn't start.`;
-  if (run.state === 'stopped') return `${agent} was told you stopped it${run.total_lines > 0 ? ', with the last lines of output' : ''}.`;
-  if (run.exit_code === null) return `${agent} got how it ended and the last lines of output.`;
-  return `${agent} got the exit code and the last lines of output.`;
-}
-
-/** Brings a secret's one field into view and into focus (it sits on its secret card, or another run's card). */
-const goToField = (name: string) => {
-  const input = document.querySelector<HTMLInputElement>(`[data-secret-form="${name}"] input`);
-  if (!input) return;
-  input.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  input.focus({ preventScroll: true });
-};
-
-export function RunCard({ messageId, block, state, agent }: { messageId: string; block: ParsedInboxRun; state: RunStateWire | null; agent: string }) {
+export function RunCard({ messageId, block, state, agent, cardRef }: { messageId: string; block: ParsedInboxRun; state: RunStateWire | null; agent: string; cardRef?: (element: Element | null) => (() => void) | undefined }) {
   const view = state?.blocks[block.key] ?? null;
   const run = state?.runs[block.key] ?? null;
   const [note, setNote] = useState<string | null>(null);
@@ -69,7 +33,23 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
   const hidden = inboxRunBlockHidden(block);
   const computer = state?.computer ?? 'your computer';
   const needs = view?.needs ?? [];
-  const using = view?.uses.filter((name) => !needs.includes(name)) ?? [];
+  const fromShell = view?.from_shell ?? [];
+  const using = view?.uses.filter((name) => !needs.includes(name) && !fromShell.includes(name)) ?? [];
+  const [card, setCard] = useState<HTMLElement | null>(null);
+  const [commandRef, commandMore] = useMoreBelow<HTMLPreElement>(block.command);
+  const places = useFieldPlaces(card, needs.filter((name) => !(view?.fields.includes(name) ?? false)));
+  // Stable, so the store sees each card come on and off screen once, not on every redraw.
+  const sectionRef = useCallback(
+    (element: HTMLElement | null) => {
+      setCard(element);
+      const done = cardRef?.(element);
+      return () => {
+        setCard(null);
+        done?.();
+      };
+    },
+    [cardRef],
+  );
   const unusable = inboxRunUnusableWords(block.uses_unusable);
 
   const act = async (work: () => Promise<unknown>) => {
@@ -110,7 +90,10 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
   } as const;
 
   return (
-    <section className="ib-rb" data-run-card={block.key} data-run-state={hidden ? 'refused' : (run?.state ?? 'idle')} aria-label={block.title.replace(/[*_`~]/g, '')}>
+    <section
+      ref={sectionRef}
+      className="ib-rb"
+      data-run-card={block.key} data-run-state={hidden ? 'refused' : (run?.state ?? 'idle')} aria-label={block.title.replace(/[*_`~]/g, '')}>
       <div className="ib-rb-head">
         <Icon name="terminal" />
         <span className="ib-rb-title">
@@ -134,7 +117,7 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
       ) : (
         <>
           <div className="ib-rb-cmdrow">
-            <pre className="ib-rb-cmd" data-run-command="" tabIndex={0} aria-label="Command">
+            <pre className="ib-rb-cmd" ref={commandRef} data-run-command="" data-more={commandMore ? '' : undefined} tabIndex={0} aria-label="Command">
               {block.command}
             </pre>
             <button type="button" className="ib-btn ib-ghost ib-sm ib-rb-copy" onClick={() => void copy()} data-run-copy="">
@@ -149,6 +132,12 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
             <p className="ib-rb-uses" data-run-uses="">
               <Icon name="lock" />
               {`Uses ${using.join(', ')}`}
+            </p>
+          )}
+          {fromShell.length > 0 && (
+            <p className="ib-rb-uses" data-run-from-shell="">
+              <Icon name="lock" />
+              {`Uses ${fromShell.join(', ')} from your shell`}
             </p>
           )}
           {unusable && (
@@ -178,7 +167,7 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
                   {`Needs ${name}`}
                   {!here && (
                     <button type="button" className="ib-btn ib-ghost ib-sm" onClick={() => goToField(name)} data-run-needs-go="">
-                      Save it above
+                      {places[name] ? `Save it ${places[name]}` : 'Save it in its card'}
                     </button>
                   )}
                 </p>
@@ -242,7 +231,7 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
                 if (unavailable) return;
                 void (stopping ? stop() : start());
               }}
-              {...(stopping ? { 'data-run-stop': '' } : { 'data-run-start': '' })}
+              {...(stopping ? { 'data-run-card-stop': '' } : { 'data-run-start': '' })}
             >
               <Icon name={main.icon} />
               {main.label}

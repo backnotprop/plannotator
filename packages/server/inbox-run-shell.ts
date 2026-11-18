@@ -133,6 +133,18 @@ export function inboxRunShellNote(command: string, shell: InboxRunShell, compute
 }
 
 /** Windows: the clipboard from stdin, read as UTF-8. */
+/** Windows' limit for one command line (CreateProcess), and for one environment value, less some room. */
+export const INBOX_RUN_WINDOWS_MAX = 32_000;
+
+/**
+ * Whether a program is too long for Windows to start: its command line (PowerShell's -EncodedCommand makes about
+ * 2.7 characters of each one, so about 12,000 characters of command) or Git Bash's command variable. POSIX: never.
+ */
+export function inboxRunTooLong(program: { argv: readonly string[]; env: Readonly<Record<string, string>> }, shell: InboxRunShell): boolean {
+  if (shell.kind === "posix") return false;
+  return program.argv.join(" ").length > INBOX_RUN_WINDOWS_MAX || (program.env[INBOX_RUN_COMMAND_VAR]?.length ?? 0) > INBOX_RUN_WINDOWS_MAX;
+}
+
 export const WINDOWS_CLIPBOARD_SCRIPT = "[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())";
 
 /**

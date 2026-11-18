@@ -123,7 +123,7 @@ describe('the run card', () => {
     const html = draw('bun run build', {}, { state: 'running' });
     expect(html).toContain('Running · 4 s');
     expect(html).toMatch(/aria-live="polite"[^>]*>Running</);
-    expect(html).toContain('data-run-stop=""');
+    expect(html).toContain('data-run-card-stop=""');
     expect(html).not.toContain('data-run-start');
     expect(html).toContain('building…');
   });
@@ -206,6 +206,8 @@ describe('the review\'s second round', () => {
     expect(html).toContain('Needs API_TOKEN');
     expect(html).not.toContain('type="password"');
     expect(html).toContain('data-run-needs-go=""');
+    // Its field is on no page drawn here: the button says so rather than "above" (the DOM test proves above and below).
+    expect(html).toContain('Save it in its card');
   });
 
   test('each way a run ends says what the agent truly got', () => {
@@ -223,8 +225,15 @@ describe('the review\'s second round', () => {
     const html = draw('bun test', {}, { state: 'stopped', interrupted: 'lost', left_running: true, lines: ['QA started'], total_lines: 1 });
     expect(html).toContain('It is still running on your Mac: Stop ends it.');
     expect(html).toContain('QA started');
-    expect(html).toContain('data-run-stop=""');
+    expect(html).toContain('data-run-card-stop=""');
     expect(html).not.toContain('data-run-start');
+  });
+
+  test('a lost run the person stopped here reads "Stopped", not that the Inbox stopped while it ran', () => {
+    const html = draw('bun test', {}, { state: 'stopped', interrupted: 'lost', left_running: false, signal: 'SIGTERM', lines: [], total_lines: 0 });
+    expect(html).not.toContain('The Inbox stopped while this ran');
+    expect(html).toMatch(/>Stopped</);
+    expect(html).toContain('You stopped it.');
   });
 
   test('a Uses word it cannot use is said on the card', () => {
@@ -238,5 +247,12 @@ describe('the review\'s second round', () => {
     expect(html).toMatch(/<pre class="ib-rb-cmd"[^>]*tabindex="0"/);
     const css = readFileSync(join(import.meta.dir, 'parts/RunBlocks/runBlocks.css'), 'utf8');
     expect(css).toMatch(/\.ib-rb-cmd \{[^}]*max-height: [^;]+;[^}]*overflow: auto;/);
+  });
+
+  test("a name the person's shell already sets: no field, no wait; the card says the run uses theirs", () => {
+    const html = draw('curl -H "Bearer $OPENAI_API_KEY" x', { uses: ['OPENAI_API_KEY'], from_shell: ['OPENAI_API_KEY'], needs: [] });
+    expect(html).toContain('Uses OPENAI_API_KEY from your shell');
+    expect(html).not.toContain('type="password"');
+    expect(html).not.toMatch(/aria-disabled="true"[^>]*data-run-start/);
   });
 });

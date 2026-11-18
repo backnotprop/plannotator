@@ -59,9 +59,9 @@ export function fileRunJournal(file: string): InboxRunJournal {
 }
 
 /** For tests: records in memory, shared across "restarts" by passing the same journal. */
-export function memoryRunJournal(): InboxRunJournal & { records: InboxRunRecord[] } {
+export function memoryRunJournal(records: InboxRunRecord[] = []): InboxRunJournal & { records: InboxRunRecord[] } {
   const journal = {
-    records: [] as InboxRunRecord[],
+    records: records.map((r) => structuredClone(r)),
     load: () => journal.records.map((r) => structuredClone(r)),
     save: (records: readonly InboxRunRecord[]) => {
       journal.records = records.map((r) => structuredClone(r));

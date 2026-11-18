@@ -26,10 +26,10 @@ export function runBlockFor(message: { id: string; body: string }, block: { star
 }
 
 function RunBlock({ message, startLine, kind, agent }: { message: { id: string; body: string }; startLine: number; kind: 'run' | 'secret'; agent: string }) {
-  const { state } = useRunState(message.id);
+  const { state, cardRef } = useRunState(message.id);
   const run = useMemo(() => (kind === 'run' ? (parseInboxRunBlocks(message.body).find((b) => b.startLine === startLine) ?? null) : null), [message.body, startLine, kind]);
   const secret = useMemo(() => (kind === 'secret' ? (parseInboxSecretBlocks(message.body).find((b) => b.startLine === startLine) ?? null) : null), [message.body, startLine, kind]);
-  if (run) return <RunCard messageId={message.id} block={run} state={state} agent={agent} />;
-  if (secret) return <SecretCard messageId={message.id} secret={secret} state={state} agent={agent} />;
+  if (run) return <RunCard messageId={message.id} block={run} state={state} agent={agent} cardRef={cardRef} />;
+  if (secret) return <SecretCard messageId={message.id} secret={secret} state={state} agent={agent} cardRef={cardRef} />;
   return null;
 }

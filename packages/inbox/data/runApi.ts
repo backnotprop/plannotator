@@ -35,7 +35,9 @@ export interface RunBlockView {
   hidden: { what: string; code: string; line: number; column: number; words: string; where: 'command' | 'folder' } | null;
   /** The saved secrets this run gets (`$NAME` in its command, or its `Uses:` line). */
   uses: string[];
-  /** Those of `uses` not saved yet: Run waits for them. */
+  /** Those of `uses` not saved here that the person's shell sets: the run gets their own value ("from your shell"). */
+  from_shell?: string[];
+  /** Those of `uses` neither saved nor set by the shell: Run waits for them. */
   needs: string[];
   /** Of `needs`, those whose one field in the thread is on this card (the others' is on the secret's card or another run's). */
   fields: string[];

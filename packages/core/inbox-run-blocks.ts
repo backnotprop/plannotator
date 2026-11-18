@@ -56,6 +56,11 @@ export const INBOX_SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
  * something other than what the card shows, or break every run. The one list the parser, the card and the server
  * read. Proxy and package-index URLs stay allowed: they often carry the credential itself.
  */
+const TRUST_NAMES = [
+  "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOINSECURE", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+  "CURL_CA_BUNDLE", "AWS_CA_BUNDLE", "NODE_TLS_REJECT_UNAUTHORIZED", "SSLKEYLOGFILE",
+];
+const TRUST_NAME_SET: ReadonlySet<string> = new Set(TRUST_NAMES);
 export const INBOX_SECRET_REFUSED_NAMES: ReadonlySet<string> = new Set([
   // The shell and the session.
   "PATH", "HOME", "SHELL", "USER", "LOGNAME", "PWD", "OLDPWD", "IFS", "CDPATH", "ENV", "BASH_ENV", "ZDOTDIR",
@@ -64,7 +69,7 @@ export const INBOX_SECRET_REFUSED_NAMES: ReadonlySet<string> = new Set([
   "EDITOR", "VISUAL", "PAGER", "MANPAGER", "BROWSER", "SSH_ASKPASS", "SUDO_ASKPASS", "RSYNC_RSH",
   // Interpreters' and build tools' startup options and module paths.
   "NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",
-  "_JAVA_OPTIONS", "JAVA_HOME", "JAVA_OPTS", "MAVEN_OPTS", "MAVEN_ARGS", "GRADLE_OPTS", "GRADLE_USER_HOME", "SBT_OPTS",
+  "JAVA_HOME", "JAVA_OPTS", "MAVEN_OPTS", "MAVEN_ARGS", "GRADLE_OPTS", "GRADLE_USER_HOME", "SBT_OPTS",
   "CLASSPATH", "LUA_INIT", "LUA_PATH", "LUA_CPATH", "GEM_HOME", "GEM_PATH", "BUNDLE_GEMFILE", "GOFLAGS", "GOTOOLCHAIN",
   "RUSTC_WRAPPER", "RUSTFLAGS", "CC", "CXX", "LESSOPEN", "LESSCLOSE", "ELECTRON_RUN_AS_NODE", "MAKEFLAGS", "MAKEFILES",
   "PHPRC", "PHP_INI_SCAN_DIR",
@@ -72,8 +77,7 @@ export const INBOX_SECRET_REFUSED_NAMES: ReadonlySet<string> = new Set([
   "OPENSSL_CONF", "OPENSSL_ENGINES", "OPENSSL_MODULES", "GCONV_PATH", "KUBECONFIG", "DOCKER_HOST", "DOCKER_CONFIG",
   "DOCKER_CONTEXT", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "CURL_HOME", "WGETRC",
   // Which code and certificates are trusted.
-  "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOINSECURE", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
-  "CURL_CA_BUNDLE", "AWS_CA_BUNDLE", "NODE_TLS_REJECT_UNAUTHORIZED", "SSLKEYLOGFILE",
+  ...TRUST_NAMES,
   // Windows: how a program is found and started.
   "COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR", "PSMODULEPATH", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
 ]);
@@ -105,13 +109,17 @@ export function inboxRunUnusableWords(words: readonly string[]): string | null {
   const refused = words.filter((w) => INBOX_SECRET_NAME_RE.test(w));
   const odd = words.filter((w) => !INBOX_SECRET_NAME_RE.test(w));
   const parts: string[] = [];
-  if (refused.length > 0) parts.push(`${refused.join(", ")} can't hold a secret (programs read ${refused.length === 1 ? "it" : "them"} to decide how they start)`);
+  const starts = refused.filter((w) => !TRUST_NAME_SET.has(w));
+  const trusts = refused.filter((w) => TRUST_NAME_SET.has(w));
+  if (starts.length > 0) parts.push(`${starts.join(", ")} can't hold a secret (programs read ${starts.length === 1 ? "it" : "them"} to decide how they start)`);
+  if (trusts.length > 0) parts.push(`${trusts.join(", ")} can't hold a secret (${trusts.length === 1 ? "it changes" : "they change"} which servers programs trust)`);
   if (odd.length > 0) parts.push(`${odd.map((w) => `"${w}"`).join(", ")} ${odd.length === 1 ? "isn't a secret's name" : "aren't secrets' names"}`);
   return `Its Uses line names what this run can't get: ${parts.join("; ")}.`;
 }
 
 /** Why a refused name cannot hold a secret, for the card and the route's error. */
 export function inboxSecretRefusedWords(name: string): string {
+  if (TRUST_NAME_SET.has(name)) return `${name} can't hold a secret: it changes which servers programs trust, so a value saved under it could change who every command talks to.`;
   return `${name} can't hold a secret: programs read it to decide how they start, so a value saved under it could change what every command runs.`;
 }
 
@@ -193,8 +201,9 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
     const usesLine = USES_RE.exec(line);
     if (usesLine && uses === null) {
       uses = [];
-      for (const word of usesLine[1]!.split(/[^A-Za-z0-9_$`{}]+/)) {
-        const name = word.replace(/^`|`$/g, "").replace(/^\$\{?|\}$/g, "");
+      // Split where a person would (spaces, commas, semicolons, bars), so a word that is not a name is said as written.
+      for (const word of usesLine[1]!.split(/[\s,;|]+/)) {
+        const name = word.replace(/[.:]+$/, "").replace(/^`|`$/g, "").replace(/^\$\{?|\}$/g, "");
         if (name === "" || /^(and|or)$/i.test(name)) continue;
         if (INBOX_SECRET_NAME_RE.test(name) && !inboxSecretNameRefused(name)) {
           if (!uses.includes(name)) uses.push(name);

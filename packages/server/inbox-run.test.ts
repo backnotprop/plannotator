@@ -13,7 +13,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanRunLine, createInboxRuns, INBOX_RUN_LINE_MAX, RunLineBuffer, type InboxRunEnded, type InboxRunPrepared, type InboxRuns } from "./inbox-run";
+import { cleanRunLine, createInboxRuns, INBOX_RUN_LINE_MAX, INBOX_RUN_TOO_LONG_WORDS, RunLineBuffer, type InboxRunEnded, type InboxRunPrepared, type InboxRuns } from "./inbox-run";
 import { lostRunStillRunning } from "./inbox-run-setup";
 import { memoryRunJournal, type InboxRunJournal } from "./inbox-run-journal";
 
@@ -193,10 +193,73 @@ describe.if(posix)("a run", () => {
     expect(told).toEqual([true]);
     expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ interrupted: "lost", left_running: true, lines: [String(pid), "started"] });
     expect(gone(pid)).toBe(false);
-    expect(again.stop("msg_1", "r-0000000a")).toBe(true);
+    expect(again.stop("msg_1", "r-0000000a")).toBe(false);
+    expect(await again.stopLost("msg_1", "r-0000000a")).toMatchObject({ title: "Run it" });
     await until(() => gone(pid), 4_000);
     expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: false, signal: "SIGTERM" });
     again.stopAll();
+  });
+
+  test("Stop on a lost run whose pid is now another program's (another start time) signals nothing; the card says it ended", async () => {
+    const journal = memoryRunJournal();
+    const first = world(() => true, journal);
+    first.start("echo $$; sleep 30");
+    await until(() => first.view().lines.length === 1);
+    const pid = Number(first.view().lines[0]);
+    await until(() => journal.records.some((r) => r.pid === pid), 5_000);
+    // At the restart it is ours; by the time Stop is pressed its pid reads as a process started at another time
+    // (the run ended and the pid went to another program). The real group stands in for that other program here.
+    let same = true;
+    const asked: number[] = [];
+    const changed: string[] = [];
+    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: async (p) => (asked.push(p), same), onChange: (id) => changed.push(id) });
+    await again.recover(() => {});
+    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: true });
+    same = false;
+    expect(await again.stopLost("msg_1", "r-0000000a")).toBeNull();
+    expect(asked).toEqual([pid, pid]);
+    // No signal reached it: the group still runs.
+    await Bun.sleep(300);
+    expect(gone(pid)).toBe(false);
+    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: false });
+    expect(changed).toEqual(["msg_1"]);
+    process.kill(-pid, "SIGKILL");
+    again.stopAll();
+  });
+
+  test("a lost run said to be running is looked at again when its card is read (at most every few seconds)", async () => {
+    let clock = 1_000_000;
+    let left: boolean | null = true;
+    let asked = 0;
+    const journal = memoryRunJournal([{ message_id: "msg_1", key: "r-0000000a", title: "Run it", folder: "~/p", live: true, pid: 4242, spawned_at: 999_000, view: { key: "r-0000000a", run_id: "run_1", state: "running", exit_code: null, signal: null, started_at: "", ended_at: null, duration_ms: 0, lines: [], total_lines: 0, partial: "", waiting_for_input: false, needs_terminal: false, error: null, interrupted: null, left_running: null } }]);
+    const runs = createInboxRuns({ messageAlive: () => true, journal, now: () => clock, stillRunning: async () => (asked++, left) });
+    await runs.recover(() => {});
+    expect(asked).toBe(1);
+    runs.recheck("msg_1");
+    expect(asked).toBe(1);
+    clock += 5_000;
+    left = null;
+    runs.recheck("msg_1");
+    await Bun.sleep(10);
+    expect(asked).toBe(2);
+    // ps cannot tell now: no Stop is offered, and the words say it may still be running.
+    expect(runs.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: null });
+    expect(await runs.stopLost("msg_1", "r-0000000a")).toBeNull();
+  });
+
+  test("PowerShell's run has its stdin closed at once (it would wait for it to close), and is not watched for a prompt", async () => {
+    const w = world();
+    // `cat` reads stdin to its end: with stdin closed it ends at once; held open it would wait forever.
+    w.start("", {}, [], "r-0000000a", async () => ({ argv: ["/bin/sh", "-c", 'printf "Password: "; cat'], env: { PATH: process.env.PATH ?? "/usr/bin:/bin" }, redact: [], closeStdin: true }));
+    await until(() => w.ended.length === 1, 3_000);
+    expect(w.ended[0]).toMatchObject({ outcome: "exited", waited_for_input: false, view: { state: "done", exit_code: 0 } });
+  });
+
+  test("a command too long for Windows' command line fails in plain words, not ENAMETOOLONG", async () => {
+    const w = world();
+    w.start("", {}, [], "r-0000000a", async () => ({ argv: [`/nonexistent/${"x".repeat(5_000)}`], env: {}, redact: [] }));
+    await until(() => w.ended.length === 1, 3_000);
+    expect(w.ended[0]!.view.error).toBe(INBOX_RUN_TOO_LONG_WORDS);
   });
 
   test("finished runs past the first twenty keep only their record's last lines in memory", async () => {
