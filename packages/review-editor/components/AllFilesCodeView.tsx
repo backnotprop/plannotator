@@ -2177,6 +2177,46 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     handle.updateItem(item);
   });
 
+  const heldLengthRef = useRef<(() => void) | null>(null);
+  const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
+    const root = scrollRef.current;
+    const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
+    if (root && page && !heldLengthRef.current) {
+      const top = page.scrollTop;
+      const height = page.scrollHeight;
+      let px = 0;
+      const fit = () => {
+        const want = Math.max(0, height - (page.scrollHeight - px));
+        if (want === px) return;
+        const grew = want > px;
+        px = want;
+        root.style.paddingBottom = px > 0 ? `${px}px` : '';
+        if (grew && page.scrollTop < top) page.scrollTop = top;
+      };
+      const observer = new ResizeObserver(fit);
+      for (const element of new Set([root, ...root.children, ...page.children])) observer.observe(element);
+      const moves = page === document.documentElement ? window : page;
+      const check = () => {
+        if (px > 0 && page.scrollTop + page.clientHeight <= page.scrollHeight - px) heldLengthRef.current?.();
+      };
+      const gesture = () => {
+        if (px === 0) heldLengthRef.current?.();
+      };
+      const gestures = ['wheel', 'touchstart', 'keydown'] as const;
+      moves.addEventListener('scroll', check, { passive: true });
+      for (const type of gestures) document.addEventListener(type, gesture, { capture: true, passive: true });
+      heldLengthRef.current = () => {
+        observer.disconnect();
+        moves.removeEventListener('scroll', check);
+        for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
+        root.style.paddingBottom = '';
+        heldLengthRef.current = null;
+      };
+    }
+    showSemantic(itemId, on);
+  });
+  useEffect(() => () => heldLengthRef.current?.(), [fileSetKey]);
+
   const allMinimapMarks = useMemo(
     () => (semanticNotes.size === 0 ? minimapMarks : [...(minimapMarks ?? []), ...[...semanticNotes.values()].flat()]),
     [minimapMarks, semanticNotes],
@@ -4085,7 +4125,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         semanticNote={(() => {
           const semState = semStateRef.current.get(item.id);
           if (!semState || !semanticEnabledRef.current) return undefined;
-          return <SemanticFileNote state={semState} onToggle={() => showSemantic(item.id, semState.status !== 'semantic')} />;
+          return <SemanticFileNote state={semState} onToggle={() => toggleInPlace(item.id, semState.status !== 'semantic')} />;
         })()}
         />
         {/* A collapsed generated file must read as an intentional fold, never

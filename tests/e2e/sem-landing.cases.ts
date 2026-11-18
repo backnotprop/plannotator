@@ -346,18 +346,23 @@ export function landingCases(type: BrowserType) {
   const inbox = inboxWorld(() => browser);
   const open = (host: Host, held: string[] = []) => (host === 'review' ? reviewWindow(browser, held) : inboxReview(browser, inbox(), held));
 
+  const onPhone = async (host: Host, held: string[], file: string) => {
+    const view = host === 'review' ? await reviewWindow(browser, held, true) : await inboxReview(browser, inbox(), held, true);
+    if (host === 'review') {
+      await view.page.locator(`[data-changes-tree] [data-type="item"][data-item-path$="${file}.ts"]`).first().tap({ timeout: 10_000 });
+      await view.page.getByText('All changes', { exact: true }).first().tap({ timeout: 10_000 });
+      await expect.poll(() => view.page.locator('diffs-container').count(), { timeout: 10_000 }).toBeGreaterThan(0);
+      await markScroller(view.page);
+      await expect.poll(async () => (await edgeOf(view, file))?.top ?? null, { timeout: 10_000, message: 'precondition: the diff shows after picking the file' }).not.toBeNull();
+    }
+    return view;
+  };
+
   for (const host of ['review', 'inbox'] as const) {
   test(`${host} on a phone: a touch scroll before the notes land moves nothing, the header offers the note, a tap shows it`, async () => {
-    const view = host === 'review' ? await reviewWindow(browser, ['money'], true) : await inboxReview(browser, inbox(), ['money'], true);
+    const view = await onPhone(host, ['money'], 'a-money');
     try {
       const shell = view.shell('a-money');
-      if (host === 'review') {
-        await view.page.locator('[data-changes-tree] [data-type="item"][data-item-path$="a-money.ts"]').first().tap({ timeout: 10_000 });
-        await view.page.getByText('All changes', { exact: true }).first().tap({ timeout: 10_000 });
-        await expect.poll(() => view.page.locator('diffs-container').count(), { timeout: 10_000 }).toBeGreaterThan(0);
-        await markScroller(view.page);
-        await expect.poll(async () => (await edgeOf(view, 'a-money'))?.top ?? null, { timeout: 10_000, message: 'precondition: the diff shows after picking the file' }).not.toBeNull();
-      }
       await view.page.locator(shell).scrollIntoViewIfNeeded();
       await atRest(view);
       await bring(view, "a-money's header clear of the app's top bar", async () => (await edgeOf(view, 'a-money'))?.top ?? null, host === 'review' ? 0 : 200, host === 'review' ? 40 : 80);
@@ -383,6 +388,62 @@ export function landingCases(type: BrowserType) {
       expect(box.width, 'the note shows its words').toBeGreaterThan(30);
       await view.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
       await expect(note).toHaveAttribute('data-semantic-note', 'semantic');
+    } finally {
+      await view.close();
+    }
+  });
+
+  test(`${host} on a phone: at the very end of the page, a tap on the last file's offered note leaves its header where it is`, async () => {
+    const view = await onPhone(host, ['tail'], 'a-money');
+    try {
+      const shell = view.shell('f-tail');
+      const header = view.page.locator(`${shell} [data-file-header]`).first();
+      const atEnd = () =>
+        view.page.evaluate((selector) => {
+          const page = document.querySelector(selector) as HTMLElement;
+          return page.scrollHeight - page.scrollTop - page.clientHeight;
+        }, view.scroller);
+      for (let i = 0; i < 10 && (await atEnd()) > 1; i++) {
+        await view.page.evaluate((selector) => {
+          const page = document.querySelector(selector) as HTMLElement;
+          page.dispatchEvent(new Event('touchstart', { bubbles: true }));
+          page.scrollTop = page.scrollHeight;
+        }, view.scroller);
+        await atRest(view);
+      }
+      expect(await atEnd(), 'precondition: at the very end of the page').toBeLessThanOrEqual(1);
+      await heldUntilWatched(view, 'tail', 'f-tail', 'off');
+      await moved(view);
+      await expect(header, "precondition: f-tail's header on screen").toBeInViewport();
+      const note = view.page.locator(`${shell} [data-semantic-note]`).first();
+      const box = (await note.boundingBox())!;
+      await view.page.evaluate((selector) => {
+        const w = window as unknown as { __noteTops: number[]; __noteOn: boolean };
+        w.__noteTops = [];
+        w.__noteOn = true;
+        const painted = new MessageChannel();
+        painted.port1.onmessage = () => {
+          const top = document.querySelector(selector)?.getBoundingClientRect().top;
+          if (top != null) w.__noteTops.push(top);
+        };
+        const step = () => {
+          if (!w.__noteOn) return;
+          painted.port2.postMessage(0);
+          requestAnimationFrame(step);
+        };
+        step();
+      }, `${shell} [data-semantic-note]`);
+      await view.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+      await expect(note).toHaveAttribute('data-semantic-note', 'semantic');
+      await view.page.waitForTimeout(1_000);
+      const tops = await view.page.evaluate(() => {
+        const w = window as unknown as { __noteTops: number[]; __noteOn: boolean };
+        w.__noteOn = false;
+        return w.__noteTops;
+      });
+      console.log(`[sem-landing] end tap ${JSON.stringify({ frames: tops.length, from: box.y, worst: Math.max(...tops.map((top) => Math.abs(top - box.y))) })}`);
+      expect(tops.length).toBeGreaterThan(30);
+      expect(Math.max(...tops.map((top) => Math.abs(top - box.y))), "f-tail's header stays put in every frame").toBeLessThanOrEqual(1);
     } finally {
       await view.close();
     }
