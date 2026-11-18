@@ -208,9 +208,10 @@ export function bulkWrites(host: BulkHost) {
     );
   };
 
-  const markRead = async (rows: readonly InboxListRow[]) => {
+  /** False when the warning was cancelled: nothing was written (a drop on Quiet keeps the picks then, listDrops.tsx). */
+  const markRead = async (rows: readonly InboxListRow[]): Promise<boolean> => {
     // Questions these would close unanswered: the warning asks once for all of them, as Mark all as read does.
-    if (!(await host.warnSetAside(setAsideCount(rows), true))) return;
+    if (!(await host.warnSetAside(setAsideCount(rows), true))) return false;
     const patch = readRowPatch(new Date().toISOString());
     const drawings = rows.map((row) => rowWrites.draw(row.thread_id, { patch }));
     setShown((current) => (current ? rows.reduce((sections, row) => patchShownRow(sections, row.thread_id, patch), current) : current));
@@ -222,6 +223,7 @@ export function bulkWrites(host: BulkHost) {
       await inboxApi.markRead(row.thread_id, false);
       await host.restoreSnooze(row.thread_id, row.snoozed);
     }));
+    return true;
   };
 
   const markUnread = async (rows: readonly InboxListRow[]) => {

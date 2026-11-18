@@ -168,8 +168,8 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       // Neither the edited file nor the unchanged one gets the submitted comments back.
       const edited = await openFile("spec.md", "# Spec\n\nv2\n");
       const missing = await fetch(`${edited.url}/api/draft`);
-      expect(missing.status).toBe(404);
-      expect((await missing.json()).draftGeneration).toBeGreaterThanOrEqual(2);
+      expect(missing.status).toBe(204);
+      expect(Number(missing.headers.get("Plannotator-Draft-Generation"))).toBeGreaterThanOrEqual(2);
       // A stale tab's save at or below the decision's generation is refused
       // and reported; a newer one lands.
       const stale = await post(edited, "/api/draft", draftBody(2, ["ghost"]));
@@ -178,7 +178,7 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       const refusal = await stale.json();
       expect(refusal.ok).toBe(false);
       expect(refusal.draftGeneration).toBeGreaterThanOrEqual(2);
-      expect((await fetch(`${edited.url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${edited.url}/api/draft`)).status).toBe(204);
       expect((await post(edited, "/api/draft", draftBody(3, ["fresh"]))).ok).toBe(true);
       close(edited);
 
@@ -200,10 +200,10 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
 
       // The sent comments do not come back, on the same text or an edited one.
       const same = await openFile("decided.md", "# Decided\n\nv1\n");
-      expect((await fetch(`${same.url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${same.url}/api/draft`)).status).toBe(204);
       close(same);
       const edited = await openFile("decided.md", "# Decided\n\nv2\n");
-      expect((await fetch(`${edited.url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${edited.url}/api/draft`)).status).toBe(204);
     });
 
     test("an agent close keeps the draft, its path copy and document copies, and a late save completes it", async () => {
@@ -243,7 +243,7 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       expect((await fetch(`${first.url}/api/exit?generation=2`, { method: "POST" })).ok).toBe(true);
       close(first);
       const reopened = await openFile("close.md", "# Close\n\nv2\n");
-      expect((await fetch(`${reopened.url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${reopened.url}/api/draft`)).status).toBe(204);
     });
 
     test("local-file and folder sessions advertise document copies", async () => {
@@ -377,7 +377,7 @@ export function defineAnnotateDraftScenarios(runtime: string, start: StartDraftS
       close(folder);
 
       const next = await openFolder();
-      expect((await fetch(`${next.url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${next.url}/api/draft`)).status).toBe(204);
       for (const path of files) {
         expect((await fetch(`${next.url}/api/draft/document?path=${encodeURIComponent(path)}`)).status).toBe(404);
       }

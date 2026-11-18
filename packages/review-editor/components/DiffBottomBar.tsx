@@ -17,6 +17,7 @@ interface Lane {
 const MIN_CODE_IN_VIEW = 40;
 /** Pierre's room under the last row (its bar and padding): once the last row is on screen, the bar goes, so it never covers it. */
 const CODE_END_ROOM = 8;
+const SCROLL_SETTLE_MS = 150;
 
 /** The element that scrolls `el` up and down: itself, or the nearest ancestor that does. */
 function scrollportOf(el: HTMLElement): HTMLElement | null {
@@ -42,10 +43,27 @@ export function DiffBottomBar({ root }: { root: HTMLElement | null }) {
   useEffect(() => {
     if (!root) return;
     let frame = 0;
+    let settle: ReturnType<typeof setTimeout> | undefined;
+    let watched: HTMLElement | null = null;
+    const queue = () => {
+      if (!frame) frame = requestAnimationFrame(measure);
+    };
+    const queueWhenSettled = () => {
+      clearTimeout(settle);
+      settle = setTimeout(queue, SCROLL_SETTLE_MS);
+    };
+    const watch = (scroller: HTMLElement | null) => {
+      const target = scroller === document.scrollingElement ? null : scroller;
+      if (target === watched) return;
+      watched?.removeEventListener('scroll', queueWhenSettled);
+      watched = target;
+      watched?.addEventListener('scroll', queueWhenSettled, { passive: true });
+    };
     const measure = () => {
       frame = 0;
       const scroller = scrollportOf(root);
       setPort(scroller);
+      watch(scroller);
       if (!scroller) return;
       const bottom = Math.min(scroller.getBoundingClientRect().bottom, window.innerHeight);
       let found: HTMLElement[] = [];
@@ -67,21 +85,18 @@ export function DiffBottomBar({ root }: { root: HTMLElement | null }) {
       });
       setLanes((last) => (JSON.stringify(last) === JSON.stringify(next) ? last : next));
     };
-    const queue = () => {
-      if (!frame) frame = requestAnimationFrame(measure);
-    };
     measure();
-    // A pane's own scroll does not bubble; captured at the window, every light-DOM scroller's does.
-    window.addEventListener('scroll', queue, { capture: true, passive: true });
     window.addEventListener('resize', queue, { passive: true });
-    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queue);
+    window.addEventListener('scroll', queueWhenSettled, { passive: true });
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(queueWhenSettled);
     resized?.observe(root);
-    // Files mount as they scroll into view, after the scroll that brought them.
-    const mounted = new MutationObserver(queue);
+    const mounted = new MutationObserver(queueWhenSettled);
     mounted.observe(root, { childList: true, subtree: true });
     return () => {
       cancelAnimationFrame(frame);
-      window.removeEventListener('scroll', queue, { capture: true });
+      clearTimeout(settle);
+      watched?.removeEventListener('scroll', queueWhenSettled);
+      window.removeEventListener('scroll', queueWhenSettled);
       window.removeEventListener('resize', queue);
       resized?.disconnect();
       mounted.disconnect();

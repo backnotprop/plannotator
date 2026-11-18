@@ -349,7 +349,7 @@ test('code review: a PR link in a changed Markdown file shows its card', async (
     const session = await start('review');
     try {
       const page = await open(browser, session.url, scheme, [['plannotator-markdown-view', 'read']]);
-      await page.getByText('doc.md', { exact: true }).first().click();
+      await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
       const link = page.locator('a[href="https://github.com/acme/widgets/pull/14"]').first();
       await expect(link).toBeVisible();
       await page.waitForTimeout(600);
@@ -454,7 +454,7 @@ test('code review: a long description shows about eight lines before it scrolls'
   const session = await start('review');
   try {
     const page = await open(browser, session.url, 'light', [['plannotator-markdown-view', 'read']]);
-    await page.getByText('doc.md', { exact: true }).first().click();
+    await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
     await page.locator('a[href="https://github.com/acme/widgets/issues/21"]').first().hover();
     const card = page.locator('[data-ref-card]');
     await expect(card).toContainText('Widget list jitters after a cold load');
@@ -478,7 +478,7 @@ test('code review in a short window: the header scrolls with the description and
     // 480: the card kept its footer but squeezed the description to a line. 400: the footer was cut off.
     for (const height of [480, 400]) {
       const page = await open(browser, session.url, 'light', [['plannotator-markdown-view', 'read']], height);
-      await page.getByText('doc.md', { exact: true }).first().click();
+      await page.locator('[data-review-sidebar] [data-item-type="file"][title$="doc.md"]').first().click();
       const link = page.locator('a[href="https://github.com/acme/widgets/pull/14"]').first();
       await link.evaluate((el) => el.scrollIntoView({ block: 'center' }));
       await page.waitForTimeout(300);

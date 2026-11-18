@@ -16,6 +16,7 @@ import React from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { act } from 'react';
 import * as InlineMarkdownModule from './InlineMarkdown';
+import { LocalLinkContext, LocalLinkMatchContext } from './LocalLinkContext';
 
 // Capture real function references at import time (before configure.test.ts's
 // mock.module() runs and replaces setDocPreviewFetcher with a no-op spy).
@@ -117,5 +118,37 @@ describe('DocPreviewFetcher seam', () => {
     // Fake was NOT called (the reset restored the default);
     // the default fetcher would have called /api/doc instead.
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe('LocalLinkMatchContext seam', () => {
+  async function draw(node: React.ReactElement): Promise<HTMLElement> {
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    await act(async () => {
+      createRoot(host).render(node);
+    });
+    return host;
+  }
+  const TEXT = '[spec](docs/spec.md) [mail](mailto:a@example.com) [site](https://example.com/) <b@example.com>';
+  const inert = (href: string) => ({ kind: 'unavailable' as const, title: href });
+
+  test.skipIf(!hasDom)('absent, the resolver is asked about local paths only; given, about what the host’s test takes', async () => {
+    const asIs = await draw(
+      <LocalLinkContext.Provider value={inert}>
+        <InlineMarkdown text={TEXT} />
+      </LocalLinkContext.Provider>,
+    );
+    expect(Array.from(asIs.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'))).toEqual(['mailto:a@example.com', 'https://example.com/', 'mailto:b@example.com']);
+
+    const wider = await draw(
+      <LocalLinkMatchContext.Provider value={(href) => !/^https?:/.test(href)}>
+        <LocalLinkContext.Provider value={inert}>
+          <InlineMarkdown text={TEXT} />
+        </LocalLinkContext.Provider>
+      </LocalLinkMatchContext.Provider>,
+    );
+    expect(Array.from(wider.querySelectorAll('a[href]')).map((a) => a.getAttribute('href'))).toEqual(['https://example.com/']);
+    expect(Array.from(wider.querySelectorAll('[data-local-link="unavailable"]')).map((s) => s.textContent)).toEqual(['spec', 'mail', 'b@example.com']);
   });
 });

@@ -1,0 +1,79 @@
+/* Overlays over a layout (`@pierre/layouts/overlays`). The script sets the
+   insets of each overlay from the workspace's box, and the custom properties
+   `--layout-workspace-width` and `--layout-workspace-height` on the overlay. */
+
+.pierre-overlay {
+  box-sizing: border-box;
+  padding: 0;
+  border: 1px solid var(--layout-border, #dce1e8);
+  background: var(--layout-pane-background, #fff);
+  color: inherit;
+}
+
+/* A modal centers in the workspace and stays inside it. */
+.pierre-modal {
+  max-width: calc(var(--layout-workspace-width, 100vw) - 32px);
+  max-height: calc(var(--layout-workspace-height, 100vh) - 32px);
+  border-radius: 12px;
+  box-shadow: 0 16px 48px rgb(15 20 28 / 24%);
+}
+
+/* The backdrop of a `<dialog>` modal, and the shield under a popover modal:
+   Chromium lets the pointer through the `::backdrop` of a popover. */
+dialog.pierre-modal::backdrop,
+.pierre-modal-shield {
+  background: var(--layout-backdrop, rgb(15 20 28 / 40%));
+}
+
+.pierre-modal-shield {
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* An opaque backdrop hides the page, so no pane renders under it. */
+dialog.pierre-modal[data-backdrop='opaque']::backdrop,
+.pierre-modal-shield[data-backdrop='opaque'] {
+  background: var(--layout-backdrop-opaque, #eef1f5);
+}
+
+/* A drawer fills one edge of the workspace. Its depth comes from
+   `--layout-drawer-size` and never exceeds the workspace. */
+.pierre-drawer {
+  margin: 0;
+  max-width: none;
+  max-height: none;
+  overflow: auto;
+  box-shadow: 0 0 32px rgb(15 20 28 / 18%);
+}
+
+.pierre-drawer[data-edge='left'],
+.pierre-drawer[data-edge='right'] {
+  width: min(
+    var(--layout-drawer-size, 360px),
+    var(--layout-workspace-width, 100vw)
+  );
+  height: auto;
+}
+
+.pierre-drawer[data-edge='top'],
+.pierre-drawer[data-edge='bottom'] {
+  width: auto;
+  height: min(
+    var(--layout-drawer-size, 320px),
+    var(--layout-workspace-height, 100vh)
+  );
+}
+
+/* A pane that an overlay covers completely skips the style, layout, and paint
+   of its content, as a pane under a zoomed pane does. */
+.pierre-layout-pane[data-overlay-covered='true'] {
+  content-visibility: hidden;
+}
+
+.pierre-overlay:focus-visible {
+  outline: 2px solid var(--layout-accent, #5489ed);
+  outline-offset: 2px;
+}

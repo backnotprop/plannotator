@@ -41,6 +41,7 @@ import {
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
   checkInboxActionResult,
@@ -149,6 +150,8 @@ import {
   type InboxLiveSiteRef,
 } from "@plannotator/core/inbox-types";
 import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSave, settleReplyDraftAfterSend } from "@plannotator/core/inbox-reply-draft";
+import { remapReplyMentions } from "@plannotator/core/inbox-thread-mention";
+import type { InboxReplyMention } from "@plannotator/core/inbox-types";
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
@@ -220,6 +223,9 @@ import {
   type InboxInitiative,
   inboxNextTagColour,
   isInboxTagColour,
+  inboxTagOwnColour,
+  inboxTagLook,
+  inboxTagLookColour,
   INBOX_TAG_RECENT_MAX,
   type InboxTagColours,
   type InboxTagLook,
@@ -345,6 +351,8 @@ export interface InboxAnswerEntry {
 
 export interface InboxReplyInput {
   words?: string;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
@@ -5156,6 +5164,8 @@ export class InboxStore {
       ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
+      ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
+      ...(input.review_batch ? { review_batch: input.review_batch } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer
@@ -6179,7 +6189,7 @@ export class InboxStore {
   ): InboxReplyDraft | null {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
-    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote } = checkInboxReplyDraftInput(this.dir, input);
+    const { body, base, baseBody, files: incoming, baseFiles, allFiles, ops, recipients: given, quote, mentions } = checkInboxReplyDraftInput(this.dir, input);
     const existing = this.replyDrafts.get(threadId) ?? null;
     if (ops) {
       // This Inbox's page: the box's file changes, applied to the files as they are now (another window's stay).
@@ -6203,7 +6213,7 @@ export class InboxStore {
         this.deleteReplyDraft(threadId);
         return null;
       }
-      return this.writeReplyDraft(threadId, existing, body, after, given, quote);
+      return this.writeReplyDraft(threadId, existing, body, after, given, quote, mentions);
     }
     // An older page (no `all_files`) names long pastes only: the draft's other files stay (a file it does not know
     // is never dropped by it).
@@ -6235,13 +6245,14 @@ export class InboxStore {
       this.deleteReplyDraft(threadId);
       return null;
     }
-    return this.writeReplyDraft(threadId, existing, body, files, given, quote);
+    return this.writeReplyDraft(threadId, existing, body, files, given, quote, mentions);
   }
 
   /**
    * Write a thread's draft whole, its `updated_at` strictly later than the last one's. `recipients`: who the reply
    * goes to as the save names it (the recipient pill; empty: none chosen); null keeps the draft's own. `quote`: the
-   * message the reply quotes; null takes it away, undefined keeps the draft's own.
+   * message the reply quotes; null takes it away, undefined keeps the draft's own. `mentions`: the threads mentioned
+   * in the words; undefined keeps the draft's own that still stand once its words become these (remapped, never matched).
    */
   private writeReplyDraft(
     threadId: string,
@@ -6250,6 +6261,7 @@ export class InboxStore {
     files: readonly InboxDraftFile[],
     recipients: readonly string[] | null = null,
     quote: InboxReplyQuote | null | undefined = undefined,
+    mentions: readonly InboxReplyMention[] | undefined = undefined,
   ): InboxReplyDraft {
     const at = this.stamp();
     // Strictly later than the last save, so a compare-and-set within one millisecond still tells the two apart.
@@ -6267,6 +6279,9 @@ export class InboxStore {
     // The quote (approval "inbox-reply-quote"): a save that names one sets it, `null` takes it away, absent keeps it.
     const quoted = quote === undefined ? (existing?.quote ?? null) : quote;
     if (quoted) draft.quote = { ...quoted };
+    // The mentions (approval "inbox-drag-threads"): a save that names them sets them; absent, the draft's own move with its words.
+    const mentioned = mentions ?? remapReplyMentions(existing?.mentions ?? [], existing?.body ?? "", body);
+    if (mentioned.length > 0) draft.mentions = mentioned.map((m) => ({ ...m }));
     writeInboxReplyDraft(this.dir, draft);
     this.replyDrafts.set(threadId, draft);
     this.changes += 1;
@@ -6653,6 +6668,7 @@ export class InboxStore {
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
     if (message.delivery || !owner) return false;
+    if (message.review_batch && !message.review_batch.lead) return false;
     // A Tidy note in a thread other than the one carrying the session's wake is never delivered.
     if (message.tidy && !message.tidy.wake) return false;
     // A 👍 taken back before it went is never delivered.
@@ -7227,6 +7243,9 @@ export class InboxStore {
     rows_ask?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
+    review_live?: InboxReviewLive;
+    review_anchor?: InboxReviewAnchor;
+    review_batch?: InboxReviewBatch;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -7268,6 +7287,9 @@ export class InboxStore {
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
       ...(input.launch ? { launch: input.launch } : {}),
+      ...(input.review_live ? { review_live: input.review_live } : {}),
+      ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
+      ...(input.review_batch ? { review_batch: input.review_batch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };
@@ -7319,6 +7341,42 @@ export class InboxStore {
   }
 
   /** The thread the person started with this idempotency key, for a replayed Send. */
+  reviewLiveThread(projectId: string, key: string): InboxMessage | null {
+    let found: InboxMessage | null = null;
+    for (const message of this.messages.values()) {
+      if (message.project_id !== projectId || message.thread_id !== message.id || message.review_live?.key !== key) continue;
+      if (message.resolved_at) continue;
+      if (!found || message.created_at > found.created_at) found = message;
+    }
+    return found;
+  }
+
+  reviewAnchorAbove(message: InboxMessage): InboxReviewAnchor | null {
+    let at = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    for (let hops = 0; at && hops < 200; hops++) {
+      if (at.review_anchor) return at.review_anchor;
+      if (at.review_batch?.lead) return null;
+      at = at.reply_to ? this.messages.get(at.reply_to) : undefined;
+    }
+    return null;
+  }
+
+  reviewBatchOf(message: InboxMessage): InboxMessage[] {
+    const batch = message.review_batch;
+    if (!batch?.lead) return [];
+    return this.threadMessages(message.thread_id).filter((m) => m.review_batch?.id === batch.id && !m.review_batch.lead && m.review_anchor);
+  }
+
+  setReviewResolved(messageId: string, resolved: boolean): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || !message.review_anchor) throw new InboxError("message_not_found", `No review comment ${messageId}.`);
+    if (!!message.review_resolved === resolved) return message;
+    const at = this.stamp();
+    const next: InboxMessage = { ...message, review_resolved: resolved ? { at } : null };
+    this.appendMessage(next, at);
+    return next;
+  }
+
   personThreadByKey(key: string): InboxMessage | null {
     for (const message of this.messages.values()) if (message.started_by_person && message.idempotency_key === key) return message;
     return null;
@@ -7502,6 +7560,11 @@ export class InboxStore {
   scheduledThread(id: string): InboxScheduledThread | null {
     const record = this.scheduledById.get(id);
     return record && !record.deleted_at ? record : null;
+  }
+
+  /** A routine was ever made here, deleted ones included (the Routines intro is for someone who never met them). */
+  scheduledEverMade(): boolean {
+    return this.scheduledById.size > 0;
   }
 
   /** A deleted routine, which the window's Undo brings back. */
@@ -8248,7 +8311,7 @@ export class InboxStore {
     if (missing.length === 0) return false;
     const next = new Map(looks);
     for (const tag of missing) {
-      const used = live.flatMap((t) => (next.has(t.id) ? [next.get(t.id)!.colour] : []));
+      const used = live.flatMap((t) => (next.has(t.id) ? [inboxTagLookColour(next.get(t.id))] : []));
       next.set(tag.id, { colour: inboxNextTagColour(used), by: "auto", at: tag.created_at });
     }
     const state = { ...this.tagColourState, looks: next };
@@ -8274,20 +8337,22 @@ export class InboxStore {
   }
 
   /**
-   * The person picked a tag's colour (a preset, their own `#rrggbb`, or null for None). `at` is when they picked it,
-   * the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own colour
-   * goes first in the recent ones. Writes no store line.
+   * The person picked a tag's colour (a preset or their own `#rrggbb`), or turned Highlight rows off (null), keeping
+   * `kept` (the colour it had) so turning it on brings it back; an older Inbox's None sends no `kept`. `at` is when
+   * they chose, the same on every machine the window writes it to, so the merged tag's colour agrees everywhere. An own
+   * colour (not a quick swatch) goes first in the recent ones. Writes no store line.
    */
-  setTagColour(tagId: unknown, colour: unknown, at: unknown): InboxTagLook {
+  setTagColour(tagId: unknown, colour: unknown, at: unknown, kept?: unknown): InboxTagLook {
     const tag = this.liveInitiative(tagId);
     if (colour !== null && !isInboxTagColour(colour)) throw new InboxError("validation_error", "colour: accent, green, amber, red, grey, a #rrggbb, or null.", { field: "colour" });
+    if (kept !== undefined && kept !== null && !isInboxTagColour(kept)) throw new InboxError("validation_error", "kept_colour: a preset or a #rrggbb.", { field: "kept_colour" });
     const when = this.colourStamp(at);
     // A pick held on the way (an outbox, a machine asleep) can land after a newer one: the newer stays.
-    const kept = this.tagColourState.looks.get(tag.id);
-    if (kept?.by === "person" && this.colourKeptAt(kept.at) > Date.parse(when)) return kept;
-    const look: InboxTagLook = { colour, by: "person", at: when };
+    const had = this.tagColourState.looks.get(tag.id);
+    if (had?.by === "person" && this.colourKeptAt(had.at) > Date.parse(when)) return had;
+    const look = inboxTagLook(colour, "person", when, kept as string | null | undefined);
     const looks = new Map(this.tagColourState.looks).set(tag.id, look);
-    const recent = typeof colour === "string" && colour.startsWith("#") ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
+    const recent = inboxTagOwnColour(colour) ? [{ colour, at: when }, ...this.tagColourState.recent.filter((r) => r.colour !== colour)].slice(0, INBOX_TAG_RECENT_MAX) : this.tagColourState.recent;
     this.commitTagColours({ ...this.tagColourState, looks, recent });
     return look;
   }

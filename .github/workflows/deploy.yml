@@ -50,6 +50,8 @@ jobs:
       paste: ${{ steps.changes.outputs.paste }}
       waitlist: ${{ steps.changes.outputs.waitlist }}
     steps:
+      # A Test preview (a manual run given as_if_changed, named "Test preview: ...")
+      # runs only part of Test, so it does not count.
       - name: Manual run needs a passed Test run on this commit
         if: github.event_name == 'workflow_dispatch'
         env:
@@ -58,7 +60,7 @@ jobs:
           COMMIT_SHA: ${{ github.sha }}
         run: |
           conclusion="$(gh api "repos/${REPOSITORY}/actions/workflows/test.yml/runs?head_sha=${COMMIT_SHA}&per_page=100" \
-            --jq '[.workflow_runs[] | select(.event == "push" or .event == "workflow_dispatch")] | sort_by(.created_at) | last | .conclusion // "missing"')"
+            --jq '[.workflow_runs[] | select(.event == "push" or (.event == "workflow_dispatch" and ((.display_title // "") | startswith("Test preview:") | not)))] | sort_by(.created_at) | last | .conclusion // "missing"')"
           if [[ "$conclusion" != "success" ]]; then
             echo "The latest Test run on ${COMMIT_SHA} is ${conclusion}, not success. Run Test on this commit first." >&2
             exit 1

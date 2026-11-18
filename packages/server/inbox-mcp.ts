@@ -56,6 +56,8 @@ import { notePullFoundLater, pullsToLookUp, quietHint, type InboxKnownPulls } fr
 import { registerInboxScheduledTool, type InboxScheduledMcpContext } from "./inbox-mcp-scheduled";
 import type { ProjectHostOf } from "./inbox-thread-pulls";
 import { applyAgentPriority, priorityLine, PRIORITY_FIELD } from "./inbox-mcp-priority";
+import { BRANCH_FIELD, branchReportOf, checkBranchSend, planBranchSend, type BranchSendPlan, type InboxBranchMcpContext } from "./inbox-mcp-branch";
+import { inboxBranchReportedLine, inboxBranchSameLine } from "@plannotator/core/inbox-branch-reports";
 import { changePullsAsAgent, checkProjectPullRefs, checkPullRefs, pullsActor, pullsChangeText, PULLS_FIELD, registerInboxThreadPullsTool, threadPullsText, type InboxPullsMcpLive } from "./inbox-mcp-pulls";
 
 export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "thread_pulls", "get_guide_brief", "submit_guide", "card", "steps", "routine"] as const;
@@ -261,7 +263,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext, InboxScheduledMcpContext, InboxBranchMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -1213,6 +1215,8 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           priority: PRIORITY_FIELD.optional(),
           // Thread steps (approval "inbox-thread-steps"): a message and its list together, only while the person has steps on.
           ...(context.stepsOn?.() ? { steps: STEPS_FIELD.optional() } : {}),
+          // Branch reviews (inbox-mcp-branch.ts): the agent reports its branch ready for review, only while it is on.
+          ...(context.branches?.on() ? { branch: BRANCH_FIELD.optional() } : {}),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
@@ -1227,11 +1231,39 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         }
         // PRs that do not read are refused before anything is sent, so a message never lands without them.
         let pullRefs = input.pulls ? checkPullRefs(input.pulls, "pulls") : [];
-        const project = await sendProject(context, input);
+        const branchInput = (input as { branch?: unknown }).branch;
+        const branchField = branchInput === undefined ? null : checkBranchSend(context, branchInput);
+        let project = await sendProject(context, input);
+        // A branch report: its own project and thread, and a head already reported sends nothing.
+        let branchPlan: BranchSendPlan | null = null;
+        if (branchField) {
+          // The thread the agent's own reply_to or thread name points at: a first report never lands in another report's.
+          const agentThread = input.reply_to ? (context.store.message(ownMessageId(context.store, input.reply_to))?.thread_id ?? null) : input.thread?.trim() ? context.store.threadRoutedBy(project.id, input.thread) : null;
+          branchPlan = await planBranchSend(context, project, branchField, callerWorkingFolder(ctx), agentThread);
+          if (branchPlan.step === "same") {
+            const kept = branchPlan.existing!;
+            return ok(inboxBranchSameLine(kept.branch, kept.head, kept.thread_id), { thread_id: kept.thread_id, message_id: kept.message_id, branch: kept.branch, head: kept.head, reported: false });
+          }
+          project = branchPlan.project;
+        }
         if (pullRefs.length > 0) pullRefs = await checkProjectPullRefs(context, input.pulls, "pulls", project.id);
         const wakes = await senderWakes(context, ctx, input);
-        const { steps: _steps, pulls: _pulls, ...message } = input as typeof input & { steps?: unknown };
-        const sent = await sendAgentMessage(context, project, { ...message, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        const { steps: _steps, pulls: _pulls, branch: _branch, ...message } = input as typeof input & { steps?: unknown; branch?: unknown };
+        // A report goes in its branch's thread, or (detached) starts its own: the agent's reply_to and thread then go.
+        const placed = branchPlan && (branchPlan.replyTo || branchPlan.detach) ? { reply_to: branchPlan.replyTo ?? undefined, thread: undefined } : {};
+        // A report's own new thread with no subject (a detached reply, say) is titled with its branch.
+        const startsThread = !!branchPlan && !branchPlan.replyTo && (branchPlan.detach || (!input.reply_to && !input.thread?.trim()));
+        const titled = startsThread && !input.subject?.trim() ? { subject: branchPlan!.field.name } : {};
+        const sent = await sendAgentMessage(context, project, { ...message, ...placed, ...titled, working_folder: callerWorkingFolder(ctx) }, undefined, wakes);
+        // The report is kept once it is in its thread (a replay keeps the first one's record).
+        let branchLine = "";
+        if (branchPlan && context.branches && !sent.replayed) {
+          const at = String(context.store.message(String(sent.structured.message_id))?.created_at ?? new Date().toISOString());
+          const agent = { host: input.agent_host?.trim() || null, session: input.agent_session?.trim() || null, name: input.agent_name?.trim() || null };
+          const report = branchReportOf(branchPlan, { thread_id: String(sent.structured.thread_id), message_id: String(sent.structured.message_id), at }, agent, context.branches.canonicalId(project.id));
+          context.branches.recorded(report, branchPlan.reachable);
+          branchLine = inboxBranchReportedLine(report.branch, report.head, branchPlan.step === "update");
+        }
         // A replay (the same idempotency key) answers the first send and writes nothing: a list the session sent
         // since (the steps action) is never put back to this older one.
         const stepsLine =
@@ -1322,7 +1354,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
           }, 0);
         }
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
+          `${sent.replayed ? "Already sent" : "Sent"} to the Plannotator Inbox${asked} (thread ${sent.structured.thread_id}, ${sent.structured.url}).${branchLine}${stepsLine}${pullsLine}${priorityLine(sent.priority)}${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host, await t3WokenOnlyWhileRunning(context, wakes, input), antigravityHandsOver(ctx, wakes, input))}${hints.join("")}`,
           stale ? { ...sent.structured, not_read_since: lastContactOf(stale) } : sent.structured,
         );
       }),

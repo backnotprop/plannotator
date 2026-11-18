@@ -63,6 +63,7 @@
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-reply-quote": "./inbox-reply-quote.ts",
+    "./inbox-thread-mention": "./inbox-thread-mention.ts",
     "./inbox-delivery-line": "./inbox-delivery-line.ts",
     "./inbox-run-line": "./inbox-run-line.ts",
     "./inbox-scheduled": "./inbox-scheduled.ts",
@@ -71,6 +72,7 @@
     "./inbox-launch-ready": "./inbox-launch-ready.ts",
     "./inbox-scratch": "./inbox-scratch.ts",
     "./inbox-git-url": "./inbox-git-url.ts",
+    "./inbox-branch-reports": "./inbox-branch-reports.ts",
     "./inbox-permission": "./inbox-permission.ts",
     "./inbox-open-questions": "./inbox-open-questions.ts",
     "./inbox-format": "./inbox-format.ts",
@@ -83,6 +85,7 @@
     "./shape-scene": "./shape-scene.ts",
     "./shape-animate": "./shape-animate.ts",
     "./shape-skill": "./shape-skill.ts",
+    "./create-routine-skill": "./create-routine-skill.ts",
     "./shape-kit.mjs": "./shape-kit.mjs",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",
     "./inbox-review": "./inbox-review.ts",
@@ -100,10 +103,13 @@
     "./workspace-status-types": "./workspace-status-types.ts",
     "./ai-context": "./ai-context.ts",
     "./model-catalog": "./model-catalog.ts",
+    "./model-fallbacks": "./model-fallbacks.ts",
     "./types": "./types.ts",
     ".": "./index.ts",
     "./guide-format-fixtures": "./guide-format-fixtures.ts",
-    "./guide-viewer-manifest": "./guide-viewer-manifest.ts"
+    "./guide-viewer-manifest": "./guide-viewer-manifest.ts",
+    "./line-anchor": "./line-anchor.ts",
+    "./review-threads": "./review-threads.ts"
   },
   "files": [
     "**/*.ts",

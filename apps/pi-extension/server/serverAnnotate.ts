@@ -62,6 +62,7 @@ import {
 	handleReferenceSkillsRequest,
 	handleReferenceSkillContentRequest,
 	readDraftGenerationFromBody,
+	sendMissingDraft,
 	readDraftGenerationFromUrl,
 	handleSaveNotesRequest,
 	handleUploadRequest,
@@ -1269,7 +1270,7 @@ export async function startAnnotateServer(options: {
 			} else {
 				const loaded = annotateDrafts.load();
 				if (loaded.found) json(res, loaded.draft);
-				else json(res, { found: false, ...(loaded.draftGeneration !== null ? { draftGeneration: loaded.draftGeneration } : {}) }, 404);
+				else sendMissingDraft(res, loaded.draftGeneration);
 			}
 		} else if (url.pathname === "/api/draft/document") {
 			if (req.method === "GET") {

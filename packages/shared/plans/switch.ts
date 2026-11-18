@@ -15,6 +15,16 @@ export function plansOn(): boolean {
   return loadConfig({ quiet: true }).inboxPlans === true;
 }
 
+/** The Spaces home's view the person chose (config.json `inboxSpacesView`): "cards" unless it says "list". */
+export function spacesView(): "cards" | "list" {
+  return loadConfig({ quiet: true }).inboxSpacesView === "list" ? "list" : "cards";
+}
+
+/** Keep the Spaces home's view; false when config.json could not be saved. */
+export function setSpacesView(view: "cards" | "list"): boolean {
+  return saveConfig({ inboxSpacesView: view }) && spacesView() === view;
+}
+
 /** Turn Plans on or off; false when config.json could not be saved (nothing changed). */
 export function setPlansSwitch(on: boolean): boolean {
   return saveConfig({ inboxPlans: on }) && plansOn() === on;

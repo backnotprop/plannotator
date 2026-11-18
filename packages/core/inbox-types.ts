@@ -14,6 +14,7 @@
  * Browser-safe and dependency-free apart from core's own question model.
  */
 
+import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive, InboxReviewResolved } from "./review-threads";
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
@@ -59,6 +60,8 @@ export * from "./inbox-pulls";
 export * from "./inbox-pull-risk";
 // Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
 export * from "./inbox-reviews";
+// Branch reviews (inbox-branch-reports.ts): an agent reports its branch ready for review.
+export * from "./inbox-branch-reports";
 // A thread's PRs (approval "inbox-pr-binding"), the same way.
 export * from "./inbox-thread-pulls";
 // Every word an agent reads about the list's rows ("tell your agent", Settings → Rows): one file, the owner's words.
@@ -879,6 +882,10 @@ export interface InboxMessage {
    * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
    */
   took_over?: boolean;
+  review_live?: InboxReviewLive;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
+  review_resolved?: InboxReviewResolved | null;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -3302,6 +3309,33 @@ export interface InboxReplyDraft {
   recipients?: string[];
   /** The message the reply quotes (approval "inbox-reply-quote"), kept with the words. Absent: none. */
   quote?: InboxReplyQuote;
+  /**
+   * The threads mentioned in the words (approval "inbox-drag-threads"), each where its label stands in `body`, kept
+   * with the words so any window or device that opens the draft has them. Absent: none, or an older Inbox's draft.
+   */
+  mentions?: InboxReplyMention[];
+}
+
+/**
+ * A thread mentioned in a reply box (approval "inbox-drag-threads"): a token in the words, carried as an id and a
+ * range, never recovered from the words. `label` stands in the draft's words at `at`; an edit inside it ends the
+ * mention (the words stay as plain words).
+ */
+export interface InboxReplyMention {
+  /** The mentioned thread (its root message id). */
+  thread_id: string;
+  /** Its title when it was mentioned: one line, capped (`inboxThreadMentionTitle`). */
+  title: string;
+  /** What the box shows: the title, with ` · project` when that differs from the reply's project. */
+  label: string;
+  /** Where `label` starts in the words (UTF-16 offset). */
+  at: number;
+  /** Its project's name, when known. */
+  project?: string;
+  /** It was archived when mentioned (read_thread still reads it). */
+  archived?: boolean;
+  /** The Inbox that holds it (`ibx_…`), when the window knew. Absent: the window's own Inbox. */
+  machine?: string;
 }
 
 /** The quote a person's reply carries (approval "inbox-reply-quote"): a message of the thread and, when the person selected some, its words. */
@@ -3357,7 +3391,7 @@ export const INBOX_DRAFT_PASTED_LEAD_MAX = 2;
  * this Inbox's threads, through its door. `pulls-looked` (approval "inbox-pr-dashboard"): the PR page's look at a PR
  * it lists is kept there ("Changed since you looked").
  */
-export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked"] as const;
+export const INBOX_LINKED_MARKS = ["star", "priority", "agent-face", "agent-name", "take-back", "tags", "cards", "pulls", "tag-colours", "file-refs", "tidy", "combine", "pulls-looked", "branches"] as const;
 export type InboxLinkedMark = (typeof INBOX_LINKED_MARKS)[number];
 
 /**
