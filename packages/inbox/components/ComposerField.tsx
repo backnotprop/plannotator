@@ -184,6 +184,9 @@ export function InboxComposerField({
     onCommand: runCommand,
     // Plannotator's built-ins are one group at the top of the list (the owner, 2026-11-09), whatever was typed.
     hostRowsFirst: true,
+    // A list opens when the person types, not when they delete (the owner, 2026-11-17): Backspace held back over a
+    // `/name` or `@name` in the words never pops a list; one open for the name being typed stays through a typo's fix.
+    quietOnDelete: true,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;
@@ -206,7 +209,7 @@ export function InboxComposerField({
         : undefined,
     [options, people, onTagsChange],
   );
-  const mention = useMentionAutocomplete({ text: value, setText, textareaRef: innerRef, source });
+  const mention = useMentionAutocomplete({ text: value, setText, textareaRef: innerRef, source, quietOnDelete: true });
   // `#` names an initiative (approval "board-hashtags"): the skill list's menu, the skill list's keys.
   const initiativeTags = useInitiativeTags();
   const hash = useHashtagPicker({ text: value, setText, fieldRef: innerRef, tags: initiativeTags, bareEscapeDismisses: escapeClosesMenu });
@@ -310,8 +313,8 @@ export function InboxComposerField({
           // The browser's undo and redo bring back the thread mentions the words had (threadMentions.ts).
           const kind = (event.nativeEvent as InputEvent).inputType;
           setText(event.target.value, event.target.selectionEnd, kind === 'historyUndo' || kind === 'historyRedo');
-          skills.onSelect();
-          mention.onSelect();
+          skills.onEdit(kind);
+          mention.onEdit(kind);
           hash.onSelect();
         }}
         onKeyDown={(event) => {

@@ -140,7 +140,7 @@ describe('PR review drafts across a push', () => {
       });
       for (const patch of [PATCH_BEFORE_PUSH, PATCH_AFTER_PUSH]) {
         await withSession(patch, prMetadata, async (url) => {
-          expect((await fetch(`${url}/api/draft`)).status).toBe(404);
+          expect((await fetch(`${url}/api/draft`)).status).toBe(204);
         });
       }
     });
@@ -161,12 +161,12 @@ describe('PR review drafts across a push', () => {
         body: JSON.stringify(draftBody(4)),
       });
       expect(late.status).toBe(409);
-      expect((await fetch(`${staleTab}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${staleTab}/api/draft`)).status).toBe(204);
     });
     await withSession(PATCH_AFTER_PUSH, prMetadata, async (url) => {
       const res = await fetch(`${url}/api/draft`);
-      expect(res.status).toBe(404);
-      expect((await res.json()).draftGeneration).toBe(4);
+      expect(res.status).toBe(204);
+      expect(Number(res.headers.get("Plannotator-Draft-Generation"))).toBe(4);
     });
   });
 });
@@ -188,7 +188,7 @@ describe('reviews without a Git identity', () => {
     expect(files).toHaveLength(1);
     expect(files[0]).toMatch(/^[0-9a-f]{16}\.json$/);
     await withSession(PATCH_AFTER_PUSH, undefined, async (url) => {
-      expect((await fetch(`${url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${url}/api/draft`)).status).toBe(204);
     });
   });
 });
@@ -252,10 +252,10 @@ describe('in-place PR switches', () => {
     });
     // A teammate pushes to #42; reopening it must not offer the submitted comments.
     await withSession(PATCH_AFTER_PUSH, prMetadata, async (url) => {
-      expect((await fetch(`${url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${url}/api/draft`)).status).toBe(204);
     });
     await withSession(PATCH_PR_43, pr43, async (url) => {
-      expect((await fetch(`${url}/api/draft`)).status).toBe(404);
+      expect((await fetch(`${url}/api/draft`)).status).toBe(204);
     });
   });
 

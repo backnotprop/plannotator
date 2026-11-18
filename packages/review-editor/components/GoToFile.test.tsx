@@ -133,4 +133,15 @@ describe.skipIf(!hasDom)('GoToFile', () => {
     expect(document.activeElement).toBe(opener);
     opener.remove();
   });
+
+  test('a deleted file, gone from the disk listing, still comes first for its own name (csv.ts, not server.ts)', async () => {
+    const deleted: DiffFile = { path: 'src/legacy/csv.ts', patch: '', additions: 0, deletions: 3, status: 'deleted' };
+    const { onOpen } = await mount({ files: [...files, deleted], repo: ready([...paths, 'src/server.ts']) });
+    await type('csv.ts');
+    expect(rowPaths()[0]).toBe('src/legacy/csv.ts');
+    expect(document.querySelector('[data-goto-path="src/legacy/csv.ts"] [data-goto-status]')!.className).toContain('text-destructive');
+    await key('Enter');
+    expect(onOpen).toHaveBeenCalledWith('src/legacy/csv.ts', { side: false });
+  });
 });
+
