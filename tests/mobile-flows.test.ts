@@ -7,10 +7,11 @@
  *  - a check added or edited without saying where the window does it: every
  *    check line ends with ` (path:line)`, several joined by `; `, or with
  *    `(phone only)`, and a phone-only check says `phone differs:`;
- *  - a cited file moved or deleted, or shortened past the cited line, so the
- *    citation points at nothing.
+ *  - a cited file moved or deleted, so the citation points at nothing.
  *
- * Reads the flow files and the cited files as text; no React, no server.
+ * Only the file is checked, never the line: line numbers are a reader's
+ * guide, and a window change that moves lines must never fail here. Reads
+ * the flow files as text; no React, no server.
  */
 import { describe, expect, test } from 'bun:test';
 import { existsSync, readFileSync } from 'node:fs';
@@ -41,22 +42,14 @@ describe('the flow checks', () => {
     expect(bad).toEqual([]);
   });
 
-  test('every cited file exists and is long enough for the cited line', () => {
-    const lines = new Map<string, number>();
+  test('every cited file exists', () => {
     const bad: string[] = [];
     for (const { file, id, text } of checks()) {
       const cited = CITED.exec(text);
       if (!cited) continue;
       for (const ref of cited[1]!.split('; ')) {
-        const at = ref.lastIndexOf(':');
-        const path = ref.slice(0, at);
-        const line = Number(ref.slice(at + 1));
-        if (!existsSync(join(ROOT, path))) {
-          bad.push(`${file} [${id}]: ${path} does not exist`);
-          continue;
-        }
-        if (!lines.has(path)) lines.set(path, readFileSync(join(ROOT, path), 'utf8').split('\n').length);
-        if (line < 1 || line > lines.get(path)!) bad.push(`${file} [${id}]: ${path} has no line ${line}`);
+        const path = ref.slice(0, ref.lastIndexOf(':'));
+        if (!existsSync(join(ROOT, path))) bad.push(`${file} [${id}]: ${path} does not exist; cite where the window does it now`);
       }
     }
     expect(bad).toEqual([]);

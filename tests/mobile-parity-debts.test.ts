@@ -1,26 +1,15 @@
 /**
  * The parity ledger's clock (scripts/mobile/parity-debts.ts,
- * docs/agent-guides/mobile.md): an `undecided` row or an `owed` debt older
- * than 14 days fails. Apart from tests/mobile-parity.test.ts and importing
- * nothing that reads the product, so the picker selects it only when the
- * ledger or this clock changes; main's full run checks it every merge. A pull
- * request that only changes the Inbox never fails for a debt it did not make.
+ * docs/agent-guides/mobile.md). This file checks the rule on fixed dates
+ * only, never the real ledger: the ledger's own dates are checked by
+ * mobile-ios.yml's `ledger` job alone, so a mobile debt never turns a
+ * `bun test` red (scripts/ci-affected-map.test.ts holds this).
  *
- * What can regress: an old decision or debt passing unnoticed ("the ledger"),
- * or the clock failing a fresh one ("the clock").
+ * What can regress: the clock passing an old decision or debt, or failing a
+ * fresh one.
  */
 import { describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { debtProblems } from '../scripts/mobile/parity-debts';
-
-describe('the ledger', () => {
-  test('no decision is left undecided, and no debt owed, for more than 14 days', () => {
-    const ledger = JSON.parse(readFileSync(join(import.meta.dir, '../apps/mobile/contract/parity/ledger.json'), 'utf8')) as { rows: Parameters<typeof debtProblems>[0] };
-    const problems = debtProblems(ledger.rows, new Date());
-    if (problems.length) throw new Error(`${problems.length} old decision(s) or debt(s):\n${problems.join('\n')}`);
-  });
-});
 
 describe('the clock', () => {
   const now = new Date('2026-12-01T00:00:00Z');
