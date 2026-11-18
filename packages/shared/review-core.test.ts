@@ -645,6 +645,7 @@ describe("review-core", () => {
       expect(staged.patch).toContain(`-Subproject commit ${first}`);
       expect(staged.patch).toContain(`+Subproject commit ${second}`);
       expect(staged.patch).not.toContain("module.txt");
+      expect(staged.patch).not.toContain("Binary files");
       expect(listPatchFiles(staged.patch).map((file) => file.path)).toEqual(["deps/module"]);
     }
     const firstFingerprint = await getGitDiffFingerprint(runtime, "staged", "main");
@@ -874,8 +875,9 @@ describe("review-core", () => {
     );
     expect(rendered.length).toBeGreaterThan(0);
     for (const { args, options } of rendered) {
-      expect(options?.config).toMatchObject({
+      expect(options?.config).toEqual({
         "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
+        "diff.submodule": "short",
       });
       expect(args.some((arg) => arg.includes("bigFileThreshold"))).toBe(false);
     }
