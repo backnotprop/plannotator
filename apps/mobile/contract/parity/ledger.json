@@ -19833,9 +19833,9 @@
         "door:GET update"
       ],
       "flows": [],
-      "mobile": "never",
-      "why": "N-self: a route between linked computers (grant machine); a phone's token never reaches it.",
-      "reason": "N-self",
+      "mobile": "later",
+      "why": "L-door: after v1, slice S9 (owner, 2026-11-18: managing the computer comes later): reading the update state belongs with doing the update (foundation-036).",
+      "reason": "L-door",
       "source": "seed: the door's table (F1)",
       "ios": {
         "state": "not-started"
