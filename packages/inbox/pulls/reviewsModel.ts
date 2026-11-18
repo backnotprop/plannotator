@@ -19,7 +19,7 @@ import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, req
 import { person, wordsText, type Words } from './words';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
-import { branchContextWords, branchNoteOf, branchReportOf, branchRowLead, type BranchNote } from './branchReviews';
+import { branchAskedAlready, branchContextWords, branchNoteOf, branchReportOf, branchRowLead, type BranchNote } from './branchReviews';
 
 /** The rows a project and a view keep: a local review is the person's own, and belongs to its thread's project. */
 export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null, filter: PullFilter): InboxReviewRow[] {
@@ -236,9 +236,10 @@ export interface ReviewView {
   pullUrl: string | null;
   /**
    * A reported branch with no review yet (Branch reviews): what the agent reported, and the message a review request
-   * replies to, so the review stays in this thread. Null for every other thread, and once a review is in.
+   * replies to, so the review stays in this thread, and whether the person already asked for it (`asked`). Null for
+   * every other thread, and once a review is in.
    */
-  branch: (BranchNote & { projectName: string | null; replyTo: string | null }) | null;
+  branch: (BranchNote & { projectName: string | null; replyTo: string | null; asked?: boolean }) | null;
 }
 
 /**
@@ -299,7 +300,7 @@ export function reviewOpenPlan(input: {
  */
 export function reviewViewOf(
   row: InboxReviewRow,
-  thread: { messages: readonly { id: string }[]; subject: string | null; thread_name?: string | null },
+  thread: { messages: readonly { id: string; author?: { kind: string }; body?: string; created_at?: string }[]; subject: string | null; thread_name?: string | null },
   options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void },
 ): ReviewView {
   const line = reviewRowLine(row);
@@ -312,7 +313,9 @@ export function reviewViewOf(
   const stack = row.stacks[0];
   const report = row.review ? null : branchReportOf(row);
   return {
-    branch: report ? { ...branchNoteOf(report), projectName: options.projectName, replyTo: thread.messages[thread.messages.length - 1]?.id ?? null } : null,
+    branch: report
+      ? { ...branchNoteOf(report), projectName: options.projectName, replyTo: thread.messages[thread.messages.length - 1]?.id ?? null, asked: branchAskedAlready(thread.messages, report, options.projectName) }
+      : null,
     context: reviewContextLine(row, options.projectName),
     kind: line.kind === 'local' ? 'local' : 'pr',
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
