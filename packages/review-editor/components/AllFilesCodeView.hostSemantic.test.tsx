@@ -672,6 +672,15 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.swapped('a.ts')).toBe(true);
   });
 
+  test.skipIf(!hasDom)('a restored position that leaves the page where it is does not count as the person moving', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { initialScrollPosition: 400 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+  });
+
   const powerUp = { active: true, rejected: [], provider: 'jev', retry: 0 } as never;
 
   test.skipIf(!hasDom)('a second opinion landing after the switch was turned on by hand is offered, not drawn under the reader', async () => {

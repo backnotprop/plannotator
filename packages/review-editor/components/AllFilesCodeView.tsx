@@ -983,7 +983,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const scrollRef = useRef<HTMLDivElement>(null);
   const engagedRef = useRef(false);
   const readingRef = useRef<Reading | null>(null);
+  const restoringRef = useRef(false);
   const engage = useCallback(() => {
+    if (restoringRef.current) return;
     engagedRef.current = true;
     readingRef.current?.engage();
   }, []);
@@ -1600,7 +1602,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const restoreId = filePathToItemId.get(previousVisible);
       if (restoreId != null) {
         requestAnimationFrame(() => {
+          restoringRef.current = true;
           viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start', offset });
+          restoringRef.current = false;
         });
       }
     }
@@ -3465,7 +3469,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (hasRestoredInitialScrollRef.current || initialScrollPosition <= 0) return;
     hasRestoredInitialScrollRef.current = true;
     const raf = requestAnimationFrame(() => {
+      restoringRef.current = true;
       viewerRef.current?.scrollTo({ type: 'position', position: initialScrollPosition });
+      restoringRef.current = false;
     });
     return () => cancelAnimationFrame(raf);
   }, [fileSetKey, initialScrollPosition]);
