@@ -1137,6 +1137,8 @@ interface BoundedTrackedDiff {
  */
 const BOUNDED_DIFF_GIT_CONFIG: Record<string, string> = {
   "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
+  // Keep gitlinks as parseable pointer hunks even if interactive Git uses log or inline diffs.
+  "diff.submodule": "short",
 };
 
 /**
