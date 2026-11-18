@@ -133,7 +133,7 @@ function hostReader(texts: { oldContent: string; newContent: string } = { oldCon
   return { read, reads };
 }
 
-async function mount(files: DiffFile[], props: Partial<React.ComponentProps<typeof AllFilesCodeView>>) {
+async function mount(files: DiffFile[], props: Partial<React.ComponentProps<typeof AllFilesCodeView>>, settleMs = 260) {
   host = document.createElement('div');
   document.body.appendChild(host);
   root = createRoot(host);
@@ -164,7 +164,7 @@ async function mount(files: DiffFile[], props: Partial<React.ComponentProps<type
       options.onPostRender(document.createElement('div'), {}, 'mount', { item });
       options.onPostRender(document.createElement('div'), {}, 'update', { item });
     }
-    await new Promise((resolve) => setTimeout(resolve, 260));
+    await new Promise((resolve) => setTimeout(resolve, settleMs));
   });
 }
 
@@ -340,6 +340,31 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     const note = (await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]');
     expect([note?.dataset.semanticNote === 'working', note?.textContent?.includes('1 moved')]).toEqual([false, true]);
   });
+
+  for (const [when, engineMs, settleMs] of [['before the engine answers', 400, 40], ['while its answer waits to be drawn', 20, 80]] as const) {
+    test.skipIf(!hasDom)(`an arrow loaded after the first read landed, ${when}: the header ends offering the note, never reading and never blank`, async () => {
+      const client: SemDiffClient = {
+        supports: (path) => path.endsWith('.ts'),
+        diff: async () => {
+          await new Promise((resolve) => setTimeout(resolve, engineMs));
+          return moved;
+        },
+        attempt: async () => ({ result: moved, failed: false }),
+        dispose: () => {},
+      };
+      const { read } = hostReader();
+      await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, settleMs);
+      const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
+      await act(async () => {
+        await options.loadDiffFiles({ name: 'a.ts' });
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      });
+      const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
+      expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
+      await act(async () => offered!.click());
+      expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
+    });
+  }
 
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();

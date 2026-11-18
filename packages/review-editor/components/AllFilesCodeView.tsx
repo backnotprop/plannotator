@@ -1275,6 +1275,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   semClientRef.current = semDiffClient ?? null;
   const semStateRef = useRef(new Map<string, SemanticFileState>());
   const semTextsRef = useRef(new Map<string, { file: DiffFile; oldText: string; newText: string; generation: string; signal: AbortSignal }>());
+  const arrowLoadedRef = useRef(new Set<string>());
+  const viewRunsRef = useRef(new AbortController());
+  useEffect(() => {
+    const runs = new AbortController();
+    viewRunsRef.current = runs;
+    return () => runs.abort();
+  }, []);
   const powerUpFilesRef = useRef(new Map<string, PowerUpFileState>());
   const powerUpRef = useRef(powerUp ?? null);
   powerUpRef.current = powerUp ?? null;
@@ -2116,7 +2123,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     swap = true,
   ) => {
     queueAugmentApply(itemId, () => {
-      if (stale()) return;
+      if (stale()) {
+        if (fileSetKeyRef.current === generation && semStateRef.current.get(itemId)?.status === 'working') onDropped();
+        return;
+      }
       const liveHandle = viewerRef.current;
       const item = liveHandle?.getItem(itemId);
       if (liveHandle == null || item == null || item.type !== 'diff' || itemId === editSession.editingItemIdRef.current) {
@@ -2147,7 +2157,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
       semDiffsRef.current.set(itemId, { plain, semantic });
       semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      if (swap) showSemantic(itemId, semanticEnabledRef.current);
+      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`)) showSemantic(itemId, semanticEnabledRef.current);
       else refreshItem(itemId);
     });
   });
@@ -2305,7 +2315,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const [itemId, file] = entry;
     if (previewAppliedRef.current.has(itemId)) return new Promise<never>(() => {});
     const controller = new AbortController();
-    augmentRef.current.get(itemId)?.controller.abort();
+    const prior = augmentRef.current.get(itemId);
+    if (prior?.status === 'pending') prior.controller.abort();
+    arrowLoadedRef.current.add(`${generation}::${itemId}`);
     augmentRef.current.set(itemId, { status: 'pending', controller, generation });
     // The arrows say a read is on its way (SCROLLS_WITH_PAGE_CSS): the click's rows arrive with it.
     const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId)?.element;
@@ -2316,7 +2328,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (data?.oldContent == null || data.newContent == null) return none();
         // The file may have moved on since this diff was captured: whole text that no longer fits would break the layout.
         if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) return none();
-        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, new AbortController().signal, false);
+        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, viewRunsRef.current.signal, false);
         return {
           oldFile: { name: file.oldPath || file.path, contents: data.oldContent },
           newFile: { name: file.path, contents: data.newContent },
