@@ -44,6 +44,20 @@ describe('a match', () => {
     expect(searchHit('Last 7 days', '7 d')).toEqual([5, 8]);
   });
 
+  test('other scripts, emoji and long names: the bold lands on the matched characters', () => {
+    expect(searchHit('数据管道', '管道')).toEqual([2, 4]);
+    expect(searchHit('ユーザー管理', 'ザー')).toEqual([2, 4]);
+    expect(searchHit('لوحة-التحكم', 'التحكم')).toEqual([5, 11]);
+    // An emoji is two UTF-16 units: the match after it starts after both, and an emoji itself is found whole.
+    expect(searchHit('🚀 launch-pad', 'launch')).toEqual([3, 9]);
+    expect(searchHit('🚀 launch-pad', '🚀')).toEqual([0, 2]);
+    // A capital whose lower case is longer (İ is i plus a dot mark) still maps back to its one character.
+    expect(searchHit('İstanbul ops', 'stan')).toEqual([1, 5]);
+    expect(searchHit('Überwachung', 'uber')).toEqual([0, 4]);
+    const long = `reports-${'x'.repeat(64)}-quarterly-review`;
+    expect(searchHit(long, 'quarterly')).toEqual([long.indexOf('quarterly'), long.indexOf('quarterly') + 9]);
+  });
+
   test('a blank query or an absent one is no match', () => {
     expect(searchHit('Billing', '')).toBeNull();
     expect(searchHit('Billing', '   ')).toBeNull();

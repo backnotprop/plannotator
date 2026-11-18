@@ -7,7 +7,10 @@
  * tick the highlighted row; Space that ticks instead of typing; Escape that closes before it empties the field; a ticked
  * row that goes when it does not match; no line when nothing matches; Custom range… not opening its panel from the
  * search; the field taking focus (and a phone's keyboard) on a touch open; the count said on every key; focus not back on
- * the funnel after Escape closes the menu (the funnel is a detached trigger), or `aria-expanded` not following the menu.
+ * the funnel after Escape closes the menu (the funnel is a detached trigger), or `aria-expanded` not following the menu;
+ * the field on eight rows or missing on nine; Tags or the Routine group left out of the narrowing; Home or End taken from
+ * the field's caret; Clear filters gone or dead while searching; the × with no name; a list of 200 tags that narrows
+ * wrong.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -15,10 +18,14 @@ import { afterEach, beforeEach, describe, expect, setSystemTime, test } from 'bu
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxInitiative } from '@plannotator/core/inbox-types';
+import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import type { ListFilter } from './listFilter';
+import type { ThreadTagsHost } from './threadTags';
 
 const hasDom = typeof document !== 'undefined';
 const { ListFilterButton } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
+const { ThreadTagsContext } = await import('./threadTags');
 const { NO_LIST_FILTER, resetListFilterForTests } = await import('./listFilter');
 const { resetScheduledForTests } = await import('./scheduled/store');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
@@ -74,11 +81,19 @@ function row(id: string, project: string): InboxListRow {
 
 /** Ten projects: one more than the plain menu's longest section, so the search shows. */
 const LONG = ['api', 'billing', 'docs', 'infra', 'ios', 'payments', 'rebill', 'search', 'web', 'worker'];
-const rowsOf = (projects: readonly string[]) => projects.map((p, i) => row(`t${i}`, p));
+const rowsOf = (projects: readonly string[], tagNames: readonly string[] = []) =>
+  projects.map((p, i) => ({ ...row(`t${i}`, p), tags: tagNames.map((_, n) => `tag_${n}`) }) as InboxListRow);
+const tagsOf = (names: readonly string[]) => names.map((name, i) => ({ id: `tag_${i}`, name, created_at: NOW.toISOString() }) as unknown as InboxInitiative);
+/** One of this computer's routines, running in `thread`. */
+const routine = (thread: string) => ({ id: `sch_${thread}`, name: `Routine ${thread}`, thread_id: thread, state: 'off', last_run: null, last_change: null }) as unknown as InboxScheduledRow;
 
-function Harness({ rows, start }: { rows: readonly InboxListRow[]; start: ListFilter }) {
+function Harness({ rows, start, tagNames }: { rows: readonly InboxListRow[]; start: ListFilter; tagNames: readonly string[] }) {
   const [filter, setFilter] = useState(start);
+  const tags = tagsOf(tagNames);
+  const host: ThreadTagsHost | null =
+    tagNames.length === 0 ? null : { tags, tagsOf: () => [], counts: new Map(), can: () => true, set: () => {}, createAndSet: () => {}, listed: null, rows, rowTags: (r) => r.tags ?? [] };
   return (
+    <ThreadTagsContext.Provider value={host}>
     <ListFilterButton
       phone={false}
       source={{
@@ -92,16 +107,17 @@ function Harness({ rows, start }: { rows: readonly InboxListRow[]; start: ListFi
         },
       }}
     />
+    </ThreadTagsContext.Provider>
   );
 }
 
-function render(projects: readonly string[], start: ListFilter = NO_LIST_FILTER) {
+function render(projects: readonly string[], start: ListFilter = NO_LIST_FILTER, tagNames: readonly string[] = []) {
   picks = start;
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
   root = createRoot(host);
-  act(() => root!.render(<Harness rows={rowsOf(projects)} start={start} />));
+  act(() => root!.render(<Harness rows={rowsOf(projects, tagNames)} start={start} tagNames={tagNames} />));
 }
 
 async function settle() {
@@ -178,6 +194,18 @@ describe.skipIf(!hasDom)('the filter menu with short lists', () => {
     expect(menu()).toBeNull();
     expect(funnel().getAttribute('aria-expanded')).toBe('false');
     expect(document.activeElement).toBe(funnel());
+  });
+
+  test('eight projects is still short: no field; a ninth brings it', async () => {
+    render(LONG.slice(0, 8));
+    await press(funnel());
+    expect(field()).toBeNull();
+    await key('Escape');
+    act(() => root?.unmount());
+    host?.remove();
+    render(LONG.slice(0, 9));
+    await press(funnel());
+    expect(field()).not.toBeNull();
   });
 
   test("a letter still jumps to the first row it starts (the menu's type-ahead)", async () => {
@@ -308,5 +336,89 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     await press(funnel(), 'touch');
     expect(field()).not.toBeNull();
     expect(document.activeElement === field()).toBe(false);
+  });
+
+  test('Home and End stay with the field: they move its caret, not the highlight', async () => {
+    render(LONG);
+    await press(funnel());
+    await type('bil');
+    expect(highlighted()).toBe('billing');
+    expect(await key('End')).toBe(true);
+    expect(highlighted()).toBe('billing');
+    await key('ArrowDown');
+    expect(highlighted()).toBe('rebill');
+    expect(await key('Home')).toBe(true);
+    expect(highlighted()).toBe('rebill');
+    expect(document.activeElement).toBe(field());
+  });
+
+  test('the × has a name, and Clear filters stays at the foot while searching and clears every pick', async () => {
+    render(LONG, { ...NO_LIST_FILTER, projects: ['prj_web'], notSeen: true });
+    await press(funnel());
+    await type('bil');
+    expect($('[data-list-filter-search-clear]')!.getAttribute('aria-label')).toBe('Clear search');
+    expect(rowWords().at(-1)).toBe('Clear filters');
+    await press($('[data-list-filter-clear]')!);
+    expect(picks).toEqual(NO_LIST_FILTER);
+  });
+});
+
+describe.skipIf(!hasDom)('a long name', () => {
+  const NAME = `reports-and-exports-for-the-${'x'.repeat(40)}-quarterly-review`;
+  test('a match past the cut drops the start ("…"), so the bold shows; the row keeps its full name', async () => {
+    render([...LONG, NAME]);
+    await press(funnel());
+    await type('quarterly');
+    const item = menu()!.querySelector<HTMLElement>(`[data-list-filter-project="prj_${NAME}"]`)!;
+    const words = item.querySelector('.ib-pmi-l')!.textContent!;
+    expect(words.startsWith('…')).toBe(true);
+    expect(words.length).toBeLessThan(30);
+    expect(item.querySelector('.ib-lflt-hit')!.textContent).toBe('quarterly');
+    expect(item.getAttribute('aria-label')).toBe(NAME);
+  });
+
+  test('a match near the start draws the whole name, with no name of its own', async () => {
+    render([...LONG, NAME]);
+    await press(funnel());
+    await type('reports');
+    const item = menu()!.querySelector<HTMLElement>(`[data-list-filter-project="prj_${NAME}"]`)!;
+    expect(item.querySelector('.ib-pmi-l')!.textContent).toBe(NAME);
+    expect(item.hasAttribute('aria-label')).toBe(false);
+  });
+});
+
+describe.skipIf(!hasDom)('the search covers every section', () => {
+  test('a long Tag list alone brings the field, and typing narrows the tags with the projects', async () => {
+    const TAGS = ['billing-bugs', 'mobile', 'stability', 'docs', 'perf', 'design', 'ops', 'api', 'release'];
+    render(['billing', 'web'], NO_LIST_FILTER, TAGS);
+    await press(funnel());
+    expect(field()).not.toBeNull();
+    await type('bil');
+    expect(groups()).toEqual(['Tag', 'Project']);
+    expect(rowWords()).toEqual(['billing-bugs', 'mobile', 'stability', 'billing']);
+  });
+
+  test('the Routine group, Pull request and Updated narrow like the rest', async () => {
+    resetScheduledForTests([routine('t0')]);
+    render(LONG);
+    await press(funnel());
+    await type('threads');
+    expect(groups()).toEqual(['Routine']);
+    expect(rowWords()).toEqual(['Routine threads', 'Other threads']);
+    await type('days');
+    expect(groups()).toEqual(['Updated']);
+  });
+
+  test('200 tags: typing narrows to the few that match, a ticked one kept after them', async () => {
+    const TAGS = Array.from({ length: 200 }, (_, i) => `tag-${String(i).padStart(3, '0')}`);
+    TAGS[17] = 'Billing ✨';
+    TAGS[150] = 'rebilled';
+    render(['api', 'web'], { ...NO_LIST_FILTER, tags: ['tag_3'] }, TAGS);
+    await press(funnel());
+    await type('BIL');
+    expect(groups()).toEqual(['Tag']);
+    expect(rowWords()).toEqual(['Billing ✨', 'rebilled', 'tag-003', 'Clear filters']);
+    await pause();
+    expect(status()).toBe('2 matches');
   });
 });

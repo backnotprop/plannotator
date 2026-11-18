@@ -19,8 +19,10 @@
  *   "Nothing matches “…”" when no row matches); the menu keeps its one scroll. Base UI's filterable menu
  *   (`Menu.FilterProvider`, `Menu.Input`, `Menu.List`): the field keeps focus while ↑ ↓ move the highlight
  *   (`aria-activedescendant`, wrapping as the plain menu does), Enter ticks the highlighted row, Space types a space,
- *   Escape empties the field first and then closes, Tab closes. A touch or pen open leaves the field unfocused, so a
- *   phone's keyboard stays down. With short lists none of this: the plain menu, its type-ahead included.
+ *   Escape empties the field first and then closes, Tab closes, Home and End stay the field's caret keys. A touch or pen
+ *   open leaves the field unfocused, so a phone's keyboard stays down; the phone's sheet then sits on the keyboard
+ *   (inbox.css). The menu keeps one width while typing. With short lists none of this: the plain menu, its type-ahead
+ *   included.
  * - Nothing matches: `ListFilterEmpty` in the list's body, "No threads match" and Clear filters.
  *
  * No shortcut of its own.
@@ -91,15 +93,36 @@ const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="ch
 
 /** The search's words (the field's placeholder and name; the line and the count a screen reader hears). */
 const FIND_WORDS = 'Search filters';
+/** The × in the field: its name, for a screen reader's touch or virtual cursor (Escape does the same from the keyboard). */
+const CLEAR_WORDS = 'Clear search';
 const nothingMatches = (query: string) => `Nothing matches “${query}”`;
 const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : n === 1 ? '1 match' : `${formatCount(n)} matches`);
 
-/** A row's label with the search's match drawn bold. */
+/** About as many characters as a row shows before its end is cut with "…" (300 px menu, a phone's sheet). */
+const ROW_FITS = 26;
+/** How much of the label stays before a match when its start is dropped. */
+const LEAD = 8;
+
+/**
+ * Where a row's label starts when drawn: 0, or past its start when the match would sit in the part the row cuts off
+ * (an 80-character project name matched near its end), so the bold always shows. Never inside a character or before
+ * an accent mark.
+ */
+export function labelStart(label: string, hit: readonly [number, number] | null): number {
+  if (!hit || label.length <= ROW_FITS || hit[1] <= ROW_FITS) return 0;
+  let at = Math.max(0, hit[0] - LEAD);
+  while (at > 0 && (/[\uDC00-\uDFFF]/.test(label[at]!) || /\p{M}/u.test(label[at]!))) at -= 1;
+  return at;
+}
+
+/** A row's label with the search's match drawn bold, from `labelStart` ("…" for what it drops). */
 function lit(label: string, hit: readonly [number, number] | null) {
   if (!hit) return label;
+  const from = labelStart(label, hit);
   return (
     <>
-      {label.slice(0, hit[0])}
+      {from > 0 && <span aria-hidden="true">…</span>}
+      {label.slice(from, hit[0])}
       <b className="ib-lflt-hit">{label.slice(hit[0], hit[1])}</b>
       {label.slice(hit[1])}
     </>
@@ -126,7 +149,7 @@ interface FilterSection {
 
 function CheckRow({ label, hit, on, count, onToggle, mark, data }: { label: string; hit: readonly [number, number] | null; on: boolean; count: number; onToggle: () => void; mark: React.ReactNode; data: Record<string, string> }) {
   return (
-    <Menu.CheckboxItem className="ib-pmi" label={label} checked={on} onCheckedChange={onToggle} closeOnClick={false} {...data}>
+    <Menu.CheckboxItem className="ib-pmi" label={label} aria-label={labelStart(label, hit) > 0 ? label : undefined} checked={on} onCheckedChange={onToggle} closeOnClick={false} {...data}>
       {mark}
       <span className="ib-pmi-l" dir="auto">
         {lit(label, hit)}
@@ -424,7 +447,7 @@ function FilterMenu({
     <Menu.Root handle={handle} open={open} onOpenChange={onOpenChange} modal={phone}>
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
-        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
+        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined} data-list-filter-searchable={searchable ? '' : undefined}>
           <Menu.Popup className="ib-pm ib-pc-menu ib-lflt-menu" aria-label="Filter" data-list-filter-menu="" data-list-filter-searchable={searchable ? '' : undefined}>
             <div className="ib-pm-title" aria-hidden="true">
               Filter
@@ -447,7 +470,7 @@ function FilterMenu({
                       }}
                       data-list-filter-search=""
                     />
-                    <Menu.Clear className="ib-lflt-clear" data-list-filter-search-clear="">
+                    <Menu.Clear className="ib-lflt-clear" aria-label={CLEAR_WORDS} data-list-filter-search-clear="">
                       <Icon name="x" />
                     </Menu.Clear>
                   </div>
@@ -460,6 +483,7 @@ function FilterMenu({
                     {nothingMatches(typed)}
                   </div>
                 )}
+                {found.searching && found.matches === 0 && (found.sections.length > 0 || onClear) && <div className="ib-pm-sep" aria-hidden="true" />}
                 <Menu.List className="ib-lflt-list">{items}</Menu.List>
               </>
             ) : (
