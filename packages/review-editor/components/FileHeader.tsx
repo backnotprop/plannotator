@@ -237,7 +237,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
         <SemanticFileBadge filePath={filePath} />
-        {semanticNote && <span className={`contents ${TIGHT_LABEL}`}>{semanticNote}</span>}
+        {semanticNote}
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
@@ -361,6 +361,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           </button>
         )}
       </div>}
+      {isCompactTouchLayout && semanticNote}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
       {isCompactTouchLayout && !readOnly && (
         <CompactFileActions

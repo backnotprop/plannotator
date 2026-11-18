@@ -40,6 +40,7 @@ import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { keepArrowClicks } from '../utils/keepArrowClicks';
+import { joinReading, type Reading } from '../utils/readingEngaged';
 import { scrollWithPage, type PageScroll } from '../utils/scrollWithPage';
 import { newLineOf } from '../utils/newLineOf';
 import { fileKind } from '@plannotator/core/file-kind';
@@ -851,6 +852,13 @@ const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
+const SCROLL_SPEED_FRESH_MS = 100;
+const SWAP_LEAD_MS = 100;
+
+function stickyHeaderHeight(node: HTMLElement | undefined): number {
+  return node?.shadowRoot?.querySelector('[data-diffs-header]')?.getBoundingClientRect().height || FILE_HEADER_HEIGHT;
+}
+
 export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   files,
   diffStyle,
@@ -976,6 +984,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   useWorkerPoolThemeSync(pierreTheme.syntaxTheme);
   const viewerRef = useRef<CodeViewHandle<DiffAnnotationMetadata> | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const engagedRef = useRef(false);
+  const readingRef = useRef<Reading | null>(null);
+  const restoringRef = useRef(false);
+  const scrollSpeedRef = useRef({ pxPerMs: 0, at: 0 });
+  const engage = useCallback(() => {
+    if (restoringRef.current) return;
+    engagedRef.current = true;
+    readingRef.current?.engage();
+  }, []);
   const selectionSnapshotRef = useRef<DiffSelectionSnapshot | null>(null);
   // State mirror of the scroll container so the leading-content portal can
   // mount once CodeView has rendered it (a plain ref can't trigger that).
@@ -995,12 +1012,19 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         ? {
             ...viewer,
             scrollTo: (target) => {
+              engage();
               pageScrollRef.current?.expectJump();
               return viewer.scrollTo(target);
             },
           }
-        : viewer;
-  }, []);
+        : viewer && {
+            ...viewer,
+            scrollTo: (target) => {
+              engage();
+              return viewer.scrollTo(target);
+            },
+          };
+  }, [engage]);
   // Measured height of the leading content (commit description card) — becomes
   // CodeView's layout.paddingTop so the virtualized items start below it and
   // the card scrolls away with the content like normal document flow.
@@ -1277,6 +1301,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semStateRef = useRef(new Map<string, SemanticFileState>());
   const semTextsRef = useRef(new Map<string, { file: DiffFile; oldText: string; newText: string; generation: string; signal: AbortSignal }>());
   const arrowLoadedRef = useRef(new Set<string>());
+  const pendingSummaryRef = useRef(new Map<string, SemDiffResult['summary']>());
   const retiredControllersRef = useRef<{ controller: AbortController; generation: string }[]>([]);
   const viewRunsRef = useRef(new AbortController());
   useEffect(() => {
@@ -1311,6 +1336,37 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   );
   const fileSetKey = `${contentKey}:${semDiffClient ? 'sem' : 'plain'}`;
   const restoredContentKeyRef = useRef(contentKey);
+  useEffect(() => {
+    engagedRef.current = false;
+    const page = scrollsWithPageRef.current ? pageScrollRef.current?.page : scrollEl;
+    const reading = page ? joinReading(page) : null;
+    readingRef.current = reading;
+    if (scrollsWithPageRef.current && page && page.scrollTop > 0) engage();
+    const engaged = engage;
+    const focused = (event: FocusEvent) => {
+      const target = event.composedPath()[0];
+      if (target instanceof HTMLElement && (target.isContentEditable || target instanceof HTMLTextAreaElement)) engaged();
+    };
+    const types = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
+    for (const type of types) document.addEventListener(type, engaged, { capture: true, passive: true });
+    document.addEventListener('focusin', focused, true);
+    const moves = page === document.documentElement ? window : page;
+    let last = { top: page?.scrollTop ?? 0, at: performance.now() };
+    const moved = () => {
+      if (!page) return;
+      const now = { top: page.scrollTop, at: performance.now() };
+      scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / Math.max(1, now.at - last.at), at: now.at };
+      last = now;
+    };
+    moves?.addEventListener('scroll', moved, { passive: true });
+    return () => {
+      for (const type of types) document.removeEventListener(type, engaged, { capture: true });
+      document.removeEventListener('focusin', focused, true);
+      moves?.removeEventListener('scroll', moved);
+      reading?.leave();
+      if (readingRef.current === reading) readingRef.current = null;
+    };
+  }, [fileSetKey, scrollEl, engage]);
 
   // CodeView seeds its items once per mount (keyed on fileSetKey): a new mount
   // starts previewed files hunkless. An identity rebuilt without a remount
@@ -1325,6 +1381,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     previewAppliedRef.current = new Set();
     semStateRef.current = new Map();
     semDiffsRef.current = new Map();
+    pendingSummaryRef.current = new Map();
     semTextsRef.current = new Map();
     powerUpFilesRef.current = new Map();
     for (const item of identity.items) {
@@ -1560,7 +1617,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const restoreId = filePathToItemId.get(previousVisible);
       if (restoreId != null) {
         requestAnimationFrame(() => {
-          viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start', offset });
+          restoringRef.current = true;
+          try {
+            viewerRef.current?.scrollTo({ type: 'item', id: restoreId, align: 'start', offset });
+          } finally {
+            restoringRef.current = false;
+          }
         });
       }
     }
@@ -2076,7 +2138,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (!pair || handle == null || item == null || item.type !== 'diff') return;
     if (itemId === editSession.editingItemIdRef.current) return;
     const state = semStateRef.current.get(itemId);
-    if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: state.summary });
+    const pending = pendingSummaryRef.current.get(itemId);
+    pendingSummaryRef.current.delete(itemId);
+    if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: pending ?? state.summary });
     const next = on ? openHeldFolds(itemId, pair.semantic, item.annotations) : pair.plain;
     const notePath = itemIdToFilePath.get(itemId);
     setSemanticNotes((current) => {
@@ -2101,7 +2165,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     [minimapMarks, semanticNotes],
   );
 
+  const semanticWasEnabledRef = useRef(semanticEnabled);
+  const semanticAskedForRef = useRef(new Set<string>());
   useEffect(() => {
+    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
+    semanticWasEnabledRef.current = semanticEnabled;
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
     for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
   }, [semanticEnabled, showSemantic, refreshItem]);
@@ -2122,6 +2190,29 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     onPowerUpStatus({ asking, answered, links, unavailable });
   });
 
+  const swapsUnseen = useStableCallback((itemId: string, secondOpinion: boolean) => {
+    const scroller = scrollRef.current;
+    const page = scroller && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : scroller);
+    const engaged = engagedRef.current || readingRef.current?.engaged() === true || (page?.scrollTop ?? 0) > 0;
+    const asked = !secondOpinion && semanticAskedForRef.current.delete(`${fileSetKeyRef.current}::${itemId}`);
+    if (!engaged || asked) return true;
+    if (!page) return false;
+    const pageBox = page === document.documentElement ? { top: 0, bottom: window.innerHeight } : page.getBoundingClientRect();
+    const viewTop = Math.max(0, pageBox.top);
+    const viewBottom = Math.min(window.innerHeight, pageBox.bottom);
+    const ownBox = scroller.getBoundingClientRect();
+    if (viewBottom <= viewTop || ownBox.width === 0 || ownBox.height === 0) return false;
+    if (page.scrollHeight - page.scrollTop - page.clientHeight <= viewBottom - viewTop) return false;
+    const node = itemNodeRef.current.get(itemId);
+    const anyNode = node?.isConnected ? node : [...itemNodeRef.current.values()].find((candidate) => candidate.isConnected);
+    const speed = performance.now() - scrollSpeedRef.current.at < SCROLL_SPEED_FRESH_MS ? scrollSpeedRef.current.pxPerMs : 0;
+    const margin = Math.max(stickyHeaderHeight(anyNode), speed * SWAP_LEAD_MS);
+    if (node?.isConnected) return node.getBoundingClientRect().top >= viewBottom + margin;
+    const viewer = viewerRef.current?.getInstance();
+    const top = viewer?.getTopForItem(itemId);
+    return top != null && viewer != null && top >= viewer.getScrollTop() + viewer.getHeight() + margin;
+  });
+
   const applySemanticResult = useStableCallback((
     itemId: string,
     file: DiffFile,
@@ -2133,6 +2224,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     onDropped: () => void,
     swap = true,
     signal?: AbortSignal,
+    secondOpinion = false,
   ) => {
     queueAugmentApply(itemId, () => {
       if (stale()) {
@@ -2167,10 +2259,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       semantic.cacheKey = `${generation}::${itemId}#semantic${links.length > 0 ? `:${links.map((link) => link.candidateId).join(',')}` : ''}`;
       const previous = semDiffsRef.current.get(itemId);
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
+      const drawnSemantic = previous != null && semStateRef.current.get(itemId)?.status === 'semantic';
       semDiffsRef.current.set(itemId, { plain, semantic });
-      semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`)) showSemantic(itemId, semanticEnabledRef.current);
-      else refreshItem(itemId);
+      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) {
+        semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+        pendingSummaryRef.current.delete(itemId);
+        showSemantic(itemId, semanticEnabledRef.current);
+        return;
+      }
+      if (drawnSemantic) pendingSummaryRef.current.set(itemId, result.summary);
+      else semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
+      refreshItem(itemId);
     });
   });
 
@@ -2200,7 +2299,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       powerUpFilesRef.current.set(itemId, { state: 'ok', links: report.links });
       reportPowerUp();
       if (report.links.length === 0 && !hadLinks && !semDiffsRef.current.has(itemId)) return;
-      applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+      applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
     });
   });
 
@@ -3393,7 +3492,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (hasRestoredInitialScrollRef.current || initialScrollPosition <= 0) return;
     hasRestoredInitialScrollRef.current = true;
     const raf = requestAnimationFrame(() => {
-      viewerRef.current?.scrollTo({ type: 'position', position: initialScrollPosition });
+      restoringRef.current = true;
+      try {
+        viewerRef.current?.scrollTo({ type: 'position', position: initialScrollPosition });
+      } finally {
+        restoringRef.current = false;
+      }
     });
     return () => cancelAnimationFrame(raf);
   }, [fileSetKey, initialScrollPosition]);
@@ -3414,6 +3518,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // handle; token semantics allow the same file to be requested repeatedly.
   useEffect(() => {
     if (!fileScrollTarget) return;
+    engage();
     const itemId = filePathToItemId.get(fileScrollTarget.filePath);
     if (itemId == null) return;
     const raf = requestAnimationFrame(() => {
@@ -3432,7 +3537,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       revealOnArrival(itemId);
     });
     return () => cancelAnimationFrame(raf);
-  }, [fileScrollTarget?.filePath, fileScrollTarget?.token, fileSetKey, filePathToItemId, syncAllCollapsedMirror, reportFileCollapsed]);
+  }, [fileScrollTarget?.filePath, fileScrollTarget?.token, fileSetKey, filePathToItemId, syncAllCollapsedMirror, reportFileCollapsed, engage]);
 
   // --- Selected-annotation highlight + navigation ----------------------------
 
