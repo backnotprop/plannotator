@@ -65,6 +65,7 @@ import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups
 import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, serveStatusProxy, TAILSCALE_CLI_TIMEOUT_MS, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner, type TailscaleRunResult } from "@plannotator/shared/tailscale";
 import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
+import { APP_HEADER, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
@@ -382,6 +383,84 @@ export function doorWriteRoutes(): { route: string; raw: boolean }[] {
   return ALLOWLIST.filter((entry) => entry.method === "POST").map((entry) => ({ route: entry.route.source, raw: entry.raw !== undefined }));
 }
 
+/**
+ * One route the door answers, in words (`health.door.routes`, and apps/mobile/contract's door table). `route` has
+ * every alternation written out (`messages/:id/reply`); `:id` is one path segment, `:path` the rest of the path.
+ */
+export interface DoorRouteRow {
+  method: "GET" | "POST";
+  route: string;
+  /** `<method> <route>`: what `health.door.routes` lists. */
+  name: string;
+  /** The pattern it comes from, a RegExp source relative to `DOOR_PREFIX`. */
+  pattern: string;
+  /** Whose token reaches it: a phone's reaches `phone`; a linked computer's reaches both. */
+  grant: "phone" | "machine";
+  /** The body is a file and the key rides the query; never carried by the relay. */
+  raw: boolean;
+}
+
+/** A route pattern in words: `(a|b)` of plain words written out, `(.+)` as `:path`, any other group as `:id`. */
+function routeWords(source: string): string[] {
+  const body = source.replace(/^\^/, "").replace(/\$$/, "");
+  let out = [""];
+  for (let i = 0; i < body.length; ) {
+    if (body[i] === "\\") {
+      out = out.map((words) => words + body[i + 1]);
+      i += 2;
+      continue;
+    }
+    if (body[i] !== "(") {
+      out = out.map((words) => words + body[i]);
+      i += 1;
+      continue;
+    }
+    let depth = 0;
+    let end = i;
+    for (; end < body.length; end++) {
+      if (body[end] === "\\") end += 1;
+      else if (body[end] === "(") depth += 1;
+      else if (body[end] === ")" && --depth === 0) break;
+    }
+    const inner = body.slice(i + 1, end);
+    const options = /^[a-z-]+(?:\\\/[a-z-]+)*(?:\|[a-z-]+(?:\\\/[a-z-]+)*)*$/.test(inner) ? inner.replaceAll("\\/", "/").split("|") : [inner === ".+" ? ":path" : ":id"];
+    out = out.flatMap((words) => options.map((option) => words + option));
+    i = end + 1;
+  }
+  return out;
+}
+
+/** The door's own routes beside the allowlist: `pair` (no token) and `revoke`, then a linked computer's own. */
+const DOOR_OWN_ROUTES: readonly { method: "GET" | "POST"; route: string; grant: "phone" | "machine" }[] = [
+  { method: "POST", route: "pair", grant: "phone" },
+  { method: "POST", route: "revoke", grant: "phone" },
+  { method: "GET", route: MACHINE_DOOR_ACCOUNTS, grant: "machine" },
+  { method: "GET", route: MACHINE_DOOR_UPDATE, grant: "machine" },
+  ...MACHINE_DOOR_WRITES.map((route) => ({ method: "POST" as const, route, grant: "machine" as const })),
+];
+
+/** Every route the door answers, one row per route in words: the one source `health.door.routes` and the contract kit read. */
+export function doorRouteTable(): DoorRouteRow[] {
+  const rows: DoorRouteRow[] = ALLOWLIST.flatMap((entry) =>
+    routeWords(entry.route.source).map((route) => ({
+      method: entry.method,
+      route,
+      name: `${entry.method} ${route}`,
+      pattern: entry.route.source,
+      grant: entry.machineOnly ? ("machine" as const) : ("phone" as const),
+      raw: entry.raw !== undefined,
+    })),
+  );
+  for (const own of DOOR_OWN_ROUTES) rows.push({ ...own, name: `${own.method} ${own.route}`, pattern: `^${own.route}$`, raw: false });
+  return rows;
+}
+
+/** `health.door.routes` for a caller: a phone's token reaches the `phone` rows; a linked computer's reaches every row. */
+export function doorRoutesFor(platform: string): string[] {
+  const machine = platform === MACHINE_PLATFORM;
+  return [...new Set(doorRouteTable().filter((row) => machine || row.grant === "phone").map((row) => row.name))];
+}
+
 /** Where a pairing attempt reached the door: the Wi-Fi's listener, the tailnet's, or this computer's own port (the simulator). */
 export type PairingVia = "wifi" | "tailnet" | "local";
 
@@ -678,6 +757,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
   const inFlight = new Map<string, Promise<unknown>>();
   /** Each device's open event streams, closed when it is removed. */
   const streams = new Map<string, Set<AbortController>>();
+  /** The app each device last named (`X-Plannotator-App`), in memory only: the devices list's `app`. */
+  const apps = new Map<string, DoorDeviceApp>();
   let offer: Offer | null = null;
   /** The last offer made, kept after it closes so the window can say what reached the door while it showed. */
   let lastOffer: Offer | null = null;
@@ -974,7 +1055,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
     const run = (async () => {
       const result = await apply();
-      if (result.record && result.status !== undefined && result.status < 500) {
+      if (result.record && result.status !== undefined && result.status < 500 && !routeMissing(result.status, result.answer)) {
         let parsed: unknown = null;
         try {
           parsed = JSON.parse(result.answer ?? "");
@@ -995,6 +1076,19 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
   };
 
+  /**
+   * A 404 that says a route is not there (`device_route_not_found`: from a linked machine's older door, behind a
+   * route that passes its answer on) is never kept under the key: once that Inbox has the route, the same key runs.
+   */
+  const routeMissing = (status: number, answer: string | undefined): boolean => {
+    if (status !== 404 || !answer) return false;
+    try {
+      return (JSON.parse(answer) as { code?: unknown } | null)?.code === "device_route_not_found";
+    } catch {
+      return false;
+    }
+  };
+
   const caught = (error: unknown): Response => {
     if (error instanceof InboxError) return json({ error: error.message, code: error.code, ...error.details }, error.code === "validation_error" ? 422 : 400);
     const full = inboxDiskFullError(error);
@@ -1004,7 +1098,14 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   /** One request from a known, live device: its own revoke, or an allowlisted route handed to the window. */
   const serve = async (req: Request, url: URL, route: string, device: InboxDevice): Promise<Response> => {
-    devices.touch(device.id, now().toISOString());
+    const at = now().toISOString();
+    devices.touch(device.id, at);
+    // The app names itself (section 14); the header is never handed to the window. Below the floor: 426, but it
+    // still reads `health` (where it learns the floor) and can remove itself.
+    const app = parseAppHeader(req.headers.get(APP_HEADER));
+    if (app) apps.set(device.id, { app_version: app.app_version, contract: app.contract, seen_at: at });
+    const belowFloor = appBelowFloor(app, route);
+    if (belowFloor) return json(belowFloor, 426);
     if (route === "revoke" && req.method === "POST") return json({ device: publicDevice(revoke(device)) });
     if (device.platform === MACHINE_PLATFORM) {
       // A machine reads this Inbox's own threads only (PLAN rule 3): never the merged view, so links both ways cannot echo.
@@ -1094,7 +1195,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
    * `413 result_too_large` otherwise, without reading it (inbox-relay.ts).
    * A phone plays a video over the Wi-Fi or the tailnet; relay ranges are v1.1.
    */
-  const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown }): Promise<Response> => {
+  const asDevice = async (deviceId: string, input: { method: string; path: string; body?: unknown; app?: unknown }): Promise<Response> => {
     try {
       const device = devices.get(deviceId);
       if (!device) return refuse(401, "device_token_invalid", "This token does not belong to a paired phone.");
@@ -1116,9 +1217,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (input.method === "POST" && ALLOWLIST.some((entry) => entry.raw && entry.method === "POST" && entry.route.test(route))) {
         return refuse(413, "relay_upload_unavailable", "Files and drawings are sent over the Wi-Fi or the tailnet, not the relay.");
       }
+      const headers: Record<string, string> = input.method === "POST" ? { "Content-Type": "application/json" } : {};
+      // A sealed command names its app as `app` beside `v`, in the header's words: the same floor applies.
+      if (typeof input.app === "string") headers[APP_HEADER] = input.app;
       const req = new Request(url, {
         method: input.method,
-        headers: input.method === "POST" ? { "Content-Type": "application/json" } : {},
+        headers,
         body: input.method === "POST" ? JSON.stringify(input.body ?? {}) : undefined,
       });
       return await serve(req, url, route, device);
@@ -1715,7 +1819,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     }
     if (path === "/api/inbox/devices") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
-      return json({ devices: devices.list().filter((d) => d.platform !== AGENT_PLATFORM).map(publicDevice) });
+      return json({ devices: devices.list().filter((d) => d.platform !== AGENT_PLATFORM).map((d) => ({ ...publicDevice(d), app: apps.get(d.id) ?? null })) });
     }
     const revokeMatch = /^\/api\/inbox\/devices\/([A-Za-z0-9_]+)\/revoke$/.exec(path);
     if (revokeMatch) {
