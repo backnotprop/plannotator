@@ -329,3 +329,12 @@ export function closedLinks(hosts: readonly { host: string; cli: 'gh' | 'glab' }
 export function topFirst(stack: Pick<InboxPullStack, 'layers'>): InboxPull[] {
   return [...stack.layers].reverse();
 }
+
+/**
+ * The filtered project's name for the board ("Nothing open in checkout-web"): from the list's threads (`names`), else
+ * from the Inbox's projects, so a project whose every thread is hidden (or never had one) is still named.
+ */
+export function boardProjectName(project: string | null, names: ReadonlyMap<string, string>, projects: readonly { id: string; name: string }[]): string | null {
+  if (!project) return null;
+  return names.get(project) ?? projects.find((p) => p.id === project)?.name ?? null;
+}

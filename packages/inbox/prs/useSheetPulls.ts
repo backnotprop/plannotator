@@ -4,7 +4,7 @@ import { inboxApi } from '../api';
 import { PULLS_FOCUS_MS, PULLS_PENDING_MS, PULLS_TICK_MS } from '../pulls/usePulls';
 import { onHiddenWritten, pullsShown, settleHidden, useHiddenChanges } from '../pulls/hiddenPulls';
 import type { Route } from '../app/route';
-import { boardInProject, sheetModel } from './sheetModel';
+import { boardInProject, boardProjectName, sheetModel } from './sheetModel';
 
 export interface SheetPullsState {
   model: InboxPullsAnswer | null;
@@ -107,9 +107,10 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
  * The board as the window shows it: it follows Reviews' project filter, in Reviews' pane, on its own page (a phone's)
  * and beside a thread opened from Reviews (`project`), and its head (the sidebar's summary) counts that project's.
  */
-export function useBoardInProject(model: InboxPullsAnswer | null, route: Pick<Route, 'page' | 'project' | 'reviews'>) {
+export function useBoardInProject(model: InboxPullsAnswer | null, route: Pick<Route, 'page' | 'project' | 'reviews'>, names: ReadonlyMap<string, string>, projects: readonly { id: string; name: string }[]) {
   const project = route.page === 'reviews' || route.page === 'prs' ? (route.project ?? null) : (route.reviews?.project ?? null);
   const board = useMemo(() => (model ? boardInProject(model, project) : null), [model, project]);
   const head = useMemo(() => (board ? sheetModel(board, Date.now(), {}).head : null), [board]);
-  return { project, board, head };
+  return { project, board, head, name: boardProjectName(project, names, projects) };
 }
+
