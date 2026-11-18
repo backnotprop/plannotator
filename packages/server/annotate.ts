@@ -79,6 +79,8 @@ import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/s
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { createHtmlAssetRegistry, framedDocumentNotFound } from "./html-assets";
+import { annotateMediaFile } from "@plannotator/shared/html-assets-node";
+import { htmlAssetHeaders } from "@plannotator/shared/html-assets";
 import { createBunAgentTerminalBridge, type AgentTerminalSocketData } from "./agent-terminal";
 import { startLiveAppProxy, type LiveAppProxy } from "./live-proxy";
 import {
@@ -742,6 +744,8 @@ export async function startAnnotateServer(
   const bundleSourceSavePaths = bundleFiles ? resolveBundleSourceSavePaths(bundlePaths) : null;
   const openedSourceFilePaths = new Set<string>();
   if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+  const servedMediaDocuments = new Set<string>();
+  if (initialSingleFileSourcePath) servedMediaDocuments.add(initialSingleFileSourcePath);
   const getPrimarySource = () => {
     if (mode === "annotate-last") {
       return { plan: markdown, sourceSave: disabledSourceSave("message-mode") };
@@ -1267,6 +1271,13 @@ export async function startAnnotateServer(
             return handleImage(req);
           }
 
+          if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+            if (!isSameOriginRequest(req)) return new Response("Access denied", { status: 403 });
+            const media = annotateMediaFile(url.searchParams.get("path"), url.searchParams.get("base"), servedMediaDocuments);
+            if (media.status !== 200) return new Response("Video unavailable", { status: media.status });
+            return new Response(Bun.file(media.path), { headers: htmlAssetHeaders(media.contentType) });
+          }
+
           const htmlAssetResponse = await htmlAssets.handle(req, url);
           if (htmlAssetResponse) {
             return htmlAssetResponse;
@@ -1299,6 +1310,7 @@ export async function startAnnotateServer(
               sourceSaveFolderPath: mode === "annotate-folder" ? folderPath : undefined,
               sourceSaveBundlePaths: bundleSourceSavePaths ?? undefined,
               onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
+              onDocumentServed: (path) => servedMediaDocuments.add(path),
               rootPaths: getReferenceRootPaths(),
               anyPath: isThisMachineRequest(req),
               annotateHistory:

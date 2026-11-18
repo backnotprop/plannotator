@@ -331,6 +331,7 @@ packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
 packages/ui/components/blocks/BlockquoteBlock.test.tsx
 packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+packages/ui/components/blocks/HtmlBlock.media.test.tsx
 packages/ui/components/plan-diff/PlanCleanDiffView.codeDocument.test.tsx
 packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
 packages/ui/components/AnnotationPanel.questions.test.tsx

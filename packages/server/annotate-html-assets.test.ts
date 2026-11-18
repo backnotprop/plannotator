@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHtmlAssetRegistry, framedDocumentNotFound, inlineHtmlLocalAssets } from "./html-assets";
@@ -497,6 +497,46 @@ describe("annotate catch-all: framed requests", () => {
 });
 
 for (const [runtime, startServer] of [["Bun", startAnnotateServer], ["Pi", startPiAnnotateServer]] as const) {
+  test(`${runtime} serves local Markdown videos only from beside or below the document`, async () => {
+    const parent = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-markdown-video-")));
+    const docDir = join(parent, "proof");
+    mkdirSync(join(docDir, "media"), { recursive: true });
+    const filePath = join(docDir, "proof.md");
+    writeFileSync(filePath, '<video controls src="media/demo.webm"></video>');
+    writeFileSync(join(docDir, "media", "demo.webm"), "WEBM_BYTES");
+    writeFileSync(join(parent, "private.webm"), "PRIVATE_BYTES");
+    symlinkSync(join(parent, "private.webm"), join(docDir, "media", "escape.webm"));
+    const linkedDir = join(parent, "linked");
+    mkdirSync(linkedDir);
+    const linkedDocument = join(linkedDir, "linked.md");
+    writeFileSync(linkedDocument, '<video src="clip.webm"></video>');
+    writeFileSync(join(linkedDir, "clip.webm"), "LINKED_VIDEO");
+    const oversized = join(docDir, "media", "large.mp4");
+    writeFileSync(oversized, "");
+    truncateSync(oversized, 50 * 1024 * 1024 + 1);
+    const server = await startServer({ markdown: '<video controls src="media/demo.webm"></video>', filePath, htmlContent: "<html></html>" });
+    const get = (path: string, base = docDir) => fetch(`${server.url}/api/annotate-media?path=${encodeURIComponent(path)}&base=${encodeURIComponent(base)}`);
+    try {
+      const playable = await get("media/demo.webm");
+      expect(playable.status).toBe(200);
+      expect(playable.headers.get("content-type")).toContain("video/webm");
+      expect(await playable.text()).toBe("WEBM_BYTES");
+      expect((await get("media/large.mp4")).status).toBe(413);
+      for (const path of ["../private.webm", "media/escape.webm", "/private.webm", "media/demo.txt"]) {
+        expect((await get(path)).status).not.toBe(200);
+      }
+      expect((await get("private.webm", parent)).status).not.toBe(200);
+      expect((await get("clip.webm", linkedDir)).status).toBe(403);
+      expect((await fetch(`${server.url}/api/doc?path=${encodeURIComponent(linkedDocument)}`)).status).toBe(200);
+      expect(await (await get("clip.webm", linkedDir)).text()).toBe("LINKED_VIDEO");
+      expect((await fetch(`${server.url}/api/annotate-media?path=media%2Fdemo.webm&base=${encodeURIComponent(docDir)}`, {
+        headers: { "Sec-Fetch-Site": "cross-site" },
+      })).status).toBe(403);
+    } finally {
+      server.stop();
+      rmSync(parent, { recursive: true, force: true });
+    }
+  });
   test(`${runtime} folder API resolves shared assets within the selected folder`, async () => {
     const parent = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-folder-api-")));
     const root = join(parent, "course");

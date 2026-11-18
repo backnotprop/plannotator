@@ -10,6 +10,35 @@ import {
 
 export const MAX_HTML_ASSET_BYTES = 50 * 1024 * 1024;
 
+/** Resolve a local Markdown video's URL without granting access outside its document folder. */
+export function annotateMediaFile(
+  path: string | null,
+  base: string | null,
+  servedDocuments: ReadonlySet<string>,
+): { path: string; contentType: string; status: 200 } | { status: 403 | 404 | 413 } {
+  if (!path || !base || !isAbsolute(base) || isAbsolute(path) || /^[a-z][a-z\d+.-]*:/i.test(path) || path.includes('\\')) {
+    return { status: 403 };
+  }
+  const extension = pathPosix.extname(path).toLowerCase();
+  const contentType = extension === '.mp4' ? 'video/mp4'
+    : extension === '.webm' ? 'video/webm'
+      : extension === '.ogg' ? 'video/ogg' : null;
+  if (!contentType) return { status: 403 };
+  const directory = resolvePath(base);
+  // The caller's base is untrusted. It must be the folder of a document this
+  // session opened, including a linked document outside the original roots.
+  if (![...servedDocuments].some((document) => {
+    const docDir = dirname(resolvePath(document));
+    return isWithinDirectory(directory, docDir) && isWithinDirectory(docDir, directory);
+  })) return { status: 403 };
+  const resolved = resolvePath(directory, path);
+  if (!isWithinDirectory(resolved, directory)) return { status: 403 };
+  const state = htmlAssetFileState(resolved, MAX_HTML_ASSET_BYTES);
+  if (state === 'too-large') return { status: 413 };
+  if (state !== 'ok') return { status: 404 };
+  return { status: 200, path: resolved, contentType };
+}
+
 /**
  * The CSP of an HTML document served from an asset root outside the session's
  * roots (#2291): no network, so a page opened from anywhere cannot send what

@@ -156,6 +156,13 @@ function rewriteRelativeRefs(
       if (/^(https?:|data:|blob:)/i.test(src)) return;
       img.setAttribute('src', getImageSrc(src, imageBaseDir));
     });
+    if (imageBaseDir && !/^https?:\/\//i.test(imageBaseDir)) {
+      root.querySelectorAll('video[src], video source[src]').forEach((media) => {
+        const src = media.getAttribute('src');
+        if (!src || /^(?:[a-z][a-z\d+.-]*:|\/)/i.test(src)) return;
+        media.setAttribute('src', `/api/annotate-media?path=${encodeURIComponent(src)}&base=${encodeURIComponent(imageBaseDir)}`);
+      });
+    }
   }
 
   root.querySelectorAll('a').forEach((a) => {

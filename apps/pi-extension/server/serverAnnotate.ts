@@ -67,7 +67,7 @@ import {
 	handleSaveNotesRequest,
 	handleUploadRequest,
 } from "./handlers.ts";
-import { handleApiNotFound, serveApp, json, parseBody, requestUrl } from "./helpers.ts";
+import { handleApiNotFound, serveApp, json, parseBody, requestUrl, send } from "./helpers.ts";
 import { createPiAIRuntime, handlePiAIRequest } from "./ai-runtime.ts";
 import type { SessionBridge } from "../generated/ai/session-bridge.ts";
 
@@ -107,7 +107,7 @@ import {
 	resolveHtmlAssetRoute,
 	rewriteHtmlAssetReferences,
 } from "../generated/html-assets.ts";
-import { folderSessionAssetAllowed, htmlAssetContext, htmlAssetFileState, htmlAssetPathRefused, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, OUTSIDE_ROOT_HTML_DOCUMENT_CSP, outsideRootAssetAllowsCors, refusesOutsideRootHtmlAsset } from "../generated/html-assets-node.ts";
+import { annotateMediaFile, folderSessionAssetAllowed, htmlAssetContext, htmlAssetFileState, htmlAssetPathRefused, inlineHtmlLocalAssets, isWithinDirectory, MAX_HTML_ASSET_BYTES, OUTSIDE_ROOT_HTML_DOCUMENT_CSP, outsideRootAssetAllowsCors, refusesOutsideRootHtmlAsset } from "../generated/html-assets-node.ts";
 import {
 	supportsAnnotateAgentTerminalMode,
 	type AgentTerminalCapability,
@@ -858,6 +858,8 @@ export async function startAnnotateServer(options: {
 	const bundleSourceSavePaths = bundleFiles ? resolveBundleSourceSavePaths(bundlePaths) : null;
 	const openedSourceFilePaths = new Set<string>();
 	if (initialSingleFileSourcePath) openedSourceFilePaths.add(initialSingleFileSourcePath);
+	const servedMediaDocuments = new Set<string>();
+	if (initialSingleFileSourcePath) servedMediaDocuments.add(initialSingleFileSourcePath);
 	const getPrimarySource = () => {
 		const mode = options.mode || "annotate";
 		if (mode === "annotate-last") {
@@ -1232,6 +1234,11 @@ export async function startAnnotateServer(options: {
 			if (!(await handleStarAskRequest(req, res, url, "annotate", isRemoteSession()))) handleApiNotFound(res, url.pathname);
 		} else if (url.pathname === "/api/image") {
 			handleImageRequest(res, url);
+		} else if (url.pathname === "/api/annotate-media" && req.method === "GET") {
+			if (!isSameOriginRequest(req)) return send(res, "Access denied", 403);
+			const media = annotateMediaFile(url.searchParams.get("path"), url.searchParams.get("base"), servedMediaDocuments);
+			if (media.status !== 200) return send(res, "Video unavailable", media.status);
+			send(res, readFileSync(media.path), 200, htmlAssetHeaders(media.contentType));
 		} else if (htmlAssets.handle(req, res, url)) {
 			return;
 		} else if (url.pathname === "/api/upload" && req.method === "POST") {
@@ -1323,6 +1330,7 @@ export async function startAnnotateServer(options: {
 				sourceSaveFolderPath: options.mode === "annotate-folder" ? options.folderPath : undefined,
 				sourceSaveBundlePaths: bundleSourceSavePaths ?? undefined,
 				onSourceDocumentServed: (path) => openedSourceFilePaths.add(path),
+				onDocumentServed: (path) => servedMediaDocuments.add(path),
 				rootPaths: getReferenceRootPaths(),
 				anyPath: isThisMachineRequest(req),
 				annotateHistory:
