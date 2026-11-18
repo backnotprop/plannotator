@@ -680,6 +680,23 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect(page.swapped('a.ts')).toBe(false);
   });
 
+  test.skipIf(!hasDom)('a page left scrolled with no input still counts as read while its panel is detached and reads the top', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    const scrollTo = async (top: number, announce: boolean) => {
+      await act(async () => {
+        for (const element of document.querySelectorAll('div')) {
+          Object.defineProperty(element, 'scrollTop', { configurable: true, value: top });
+          if (announce) element.dispatchEvent(new Event('scroll'));
+        }
+      });
+    };
+    await scrollTo(400, true);
+    await scrollTo(0, false);
+    hidden = true;
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
   test.skipIf(!hasDom)('a hidden view nobody has read yet draws its notes as they land', async () => {
     const page = await reading(['a.ts'], { 'a.ts': 100 });
     hidden = true;

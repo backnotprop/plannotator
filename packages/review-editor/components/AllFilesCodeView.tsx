@@ -1359,6 +1359,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const gap = now.at - last.at;
       scrollSpeedRef.current = { pxPerMs: Math.abs(now.top - last.top) / (gap > SCROLL_SPEED_FRESH_MS ? FRAME_MS : Math.max(1, gap)), at: now.at };
       last = now;
+      if (now.top > 0) engage();
     };
     moves?.addEventListener('scroll', moved, { passive: true });
     return () => {
