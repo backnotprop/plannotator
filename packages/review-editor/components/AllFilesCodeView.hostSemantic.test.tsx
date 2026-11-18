@@ -471,6 +471,15 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(late).toEqual([]);
   });
 
+  test.skipIf(!hasDom)('a comment over several old lines that starts inside a moved block and ends past it opens that block', async () => {
+    const folded: SemDiffResult = { ...moved, semanticFolds: [{ old: { start: 1, end: 2 }, operations: [0], counts: { moved: 2, edited: 0, removed: 0 } }] as never };
+    const { client } = fakeClient(folded);
+    const { read } = hostReader();
+    const comment = { id: 'span', type: 'comment', filePath: 'a.ts', lineStart: 2, lineEnd: 4, side: 'old', text: 'These go together.', createdAt: 0 } as unknown as React.ComponentProps<typeof AllFilesCodeView>['annotations'][number];
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read, annotations: [comment] });
+    expect(([...items.values()][0]!.fileDiff as { semanticFolds?: unknown[] }).semanticFolds?.length ?? 0).toBe(0);
+  });
+
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });

@@ -2052,6 +2052,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const folds = (fileDiff as { semanticFolds?: readonly { old: { start: number; end: number } }[] }).semanticFolds;
     if (!folds?.length) return fileDiff;
     const held = (annotations ?? []).filter((a) => a.side === 'deletions').map((a) => [a.lineNumber, a.lineNumber]);
+    const path = itemIdToFileRef.current.get(itemId)?.path;
+    for (const a of annotationsRef.current) if (a.filePath === path && a.side === 'old' && (a.scope ?? 'line') === 'line') held.push([a.lineStart, a.lineEnd]);
     const pick = selectedLinesRef.current;
     if (pick?.id === itemId) {
       const { start, end, side, endSide } = pick.range;
