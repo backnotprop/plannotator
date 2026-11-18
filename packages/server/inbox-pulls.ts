@@ -706,6 +706,8 @@ export class InboxPullsError extends Error {
   }
 }
 
+const READ_CLOSED = new InboxPullsError("pull_diff_failed", "The request was closed.");
+
 export interface InboxPulls {
   /**
    * The PRs of these repositories, with the hosts asked, what each CLI asked was found to be (`clis`), and the
@@ -788,7 +790,7 @@ export interface InboxPulls {
    * the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
-  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string): Promise<InboxFileContents>;
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string, signal?: AbortSignal): Promise<InboxFileContents>;
 }
 
 export type PullFileCheck = PatchBlobIds | { patch: string };
@@ -1172,7 +1174,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   // A diff's base commit, by its head (a pushed head has its own), and each file's text by commit: a commit's file
   // never changes, so a settled answer stays until the bound. A failed read is forgotten, for the next look to retry.
   const mergeBases = new Map<string, Promise<string | null>>();
-  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number }>();
+  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number; callers: (AbortSignal | undefined)[]; settled: boolean }>();
   let fileTextBytes = 0;
   let readsRunning = 0;
   const readsWaiting: (() => void)[] = [];
@@ -1952,7 +1954,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
       return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
-    async fileContents(key, scope, path, roots, ids, oldPath, from) {
+    async fileContents(key, scope, path, roots, ids, oldPath, from, signal) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
       if (!ids) return none;
       // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
@@ -2018,6 +2020,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
         return read;
       };
+      const stillWanted = (read: Promise<string | null>, sha: string, filePath: string): Promise<string | null> =>
+        read.catch((cause: unknown) => (cause === READ_CLOSED && !signal?.aborted ? textAt(sha, filePath) : Promise.reject(cause)));
       const textAt = (sha: string, filePath: string): Promise<string | null> => {
         const textKey = `${pull.host}/${pull.repo}\u0000${sha}\u0000${filePath}`;
         const hit = fileTexts.get(textKey);
@@ -2025,9 +2029,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           // Used again: the last to go.
           fileTexts.delete(textKey);
           fileTexts.set(textKey, hit);
-          return hit.read;
+          if (!hit.settled) hit.callers.push(signal);
+          return stillWanted(hit.read, sha, filePath);
         }
+        const callers: (AbortSignal | undefined)[] = [signal];
         const read = inTurn(async () => {
+          if (callers.every((caller) => caller?.aborted)) throw READ_CLOSED;
           for (const root of roots) {
             const local = await gitRead(root, sha, filePath, INBOX_PULL_FILE_MAX_BYTES).catch(() => null);
             if (local === "none") return null;
@@ -2040,10 +2047,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           const text = await ask(endpoint, pull.platform === "github" ? ["-H", "Accept: application/vnd.github.v3.raw"] : []);
           return text === null || text.slice(0, 8000).includes("\u0000") ? null : text;
         });
-        const entry = { read, bytes: 0 };
+        const entry = { read, bytes: 0, callers, settled: false };
         fileTexts.set(textKey, entry);
         read.then(
           (text) => {
+            entry.settled = true;
+            entry.callers.length = 0;
             // Still the one kept (the bound may have dropped it while it ran).
             if (fileTexts.get(textKey) !== entry) return;
             // Only a text is kept: an empty answer or a 404 can be a passing sign-in problem, and the next click asks again.
@@ -2061,10 +2070,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             }
           },
           () => {
+            entry.settled = true;
+            entry.callers.length = 0;
             if (fileTexts.get(textKey) === entry) fileTexts.delete(textKey);
           },
         );
-        return read;
+        return stillWanted(read, sha, filePath);
       };
       try {
         const newContent = await textAt(head, path);
