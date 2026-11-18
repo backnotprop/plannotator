@@ -29,7 +29,7 @@ import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, 
 import { layerVerdictLink } from './topology';
 
 import { pullsStateOf } from './reviewsTestState';
-import { LAST, link, model, pull, STACK_ID, stack } from './pullReviewFixtures';
+import { keepComment, LAST, link, model, pull, SHA, STACK_ID, stack } from './pullReviewFixtures';
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
@@ -366,12 +366,6 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
 
 // --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
 
-const SHA = 'a'.repeat(40);
-/** A comment kept for a layer's review, as the review keeps them (per head commit). */
-function keepComment(p: InboxPull, text: string) {
-  const comment = { id: `c-${p.number}`, type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text, createdAt: 1 };
-  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.head_sha ?? SHA}`, JSON.stringify({ comments: [comment], viewed: [] }));
-}
 const dialogButton = (words: string) => {
   const found = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === words);
   if (!found) throw new Error(`no "${words}" in the dialog: ${[...document.querySelectorAll('[role="dialog"] button')].map((b) => b.textContent).join(' | ')}`);
