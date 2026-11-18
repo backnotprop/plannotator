@@ -10,7 +10,9 @@
  * (as New review keeps its words, `threadStarts.ts`), and come back when it opens again; Send clears them. Send starts
  * the thread with the words first and the PR's details after, keeps the PR as its own, and the window opens the thread
  * (`onStarted`), which is the PR's page from then on. A press while one is on its way does nothing; once a thread
- * started, a press only ties it (`threadStarts.ts`); a PR given to a thread meanwhile opens that one (`onTaken`).
+ * started, a press only ties it (`threadStarts.ts`): the words it went with show as sent, and anything typed after
+ * goes into the thread's reply box, not sent. A PR given to another thread meanwhile opens that one (`onTaken`), with
+ * the words not sent in its reply box. Words are never dropped: what a Send did not send is carried, never cleared.
  * No keyboard shortcuts of its own: the registry's Send and Close (⌘↵, Escape), as in the reply box; Escape closes an
  * open list (`/`) first.
  */
@@ -32,8 +34,8 @@ import { inboxSkillFilter } from '../skills';
 import { useVoiceSession } from '../voice';
 import { PullBar } from './PullLaunchpad';
 import { PullContextLine } from './PullContextLine';
-import { sendPullThread } from './startThread';
-import { keepUnsentPullWords, unsentPullWords, untiedPullThread } from './threadStarts';
+import { PullThreadNoAgent, sendPullThread } from './startThread';
+import { keepUnsentPullWords, unsentPullWords, untiedPullStart } from './threadStarts';
 import { pullThreadDefault, pullThreadOptions } from './threadTo';
 
 /** The empty thread's one line. */
@@ -46,9 +48,17 @@ export const PULL_THREAD_UNTIED = 'The thread started, but it isn’t tied to th
 export const PULL_THREAD_NO_AGENT = 'No agent is running in this project, and none can start here. Start one, then come back.';
 /** The chosen session ended before the Send. */
 export const PULL_THREAD_SESSION_GONE = 'That agent isn’t running any more, so nothing was sent. Pick another in To.';
-/** Another window gave the PR to a thread first: that one opened (a toast). */
+/** The PR already has another thread (another window's, a hand-off): that one opened, and a toast says so. */
 export const PULL_THREAD_TAKEN = 'Already has a thread';
-export const PULL_THREAD_TAKEN_DETAIL = 'This pull request was given to a thread before yours went. Nothing new started; that thread is open.';
+/** Nothing was sent: the words are in that thread's reply box. */
+export const PULL_THREAD_TAKEN_DETAIL = 'This pull request already has a thread, so nothing new started. That thread is open, with your words in its reply box, not sent.';
+/** This page's thread had started but wasn't tied: it stays in the Inbox; anything typed after is in the other's box. */
+export const PULL_THREAD_TAKEN_MINE = 'This pull request was given to another thread before yours was tied to it. That thread is open; yours stays in the Inbox.';
+export const PULL_THREAD_TAKEN_MINE_WORDS = 'This pull request was given to another thread before yours was tied to it. That thread is open, with your new words in its reply box, not sent; yours stays in the Inbox.';
+/** Over the words a thread that isn't tied yet went with. */
+export const PULL_THREAD_SENT = 'Sent';
+/** The box's placeholder while a Send only ties the thread. */
+export const PULL_THREAD_MORE = 'Anything more you write goes into the thread’s reply box, not sent.';
 /** Words of whitespace only. */
 export const PULL_THREAD_NO_WORDS = 'Write a message first.';
 
@@ -86,10 +96,10 @@ export function PullThreadStart({
   /** Guided review: New review filled in with this PR (the launchpad's Start a guided review). Null: not offered. */
   onGuide: ((opener: HTMLElement) => void) | null;
   onDiff: () => void;
-  /** The thread started and is kept as the PR's: the window opens it. */
-  onStarted: (threadId: string) => void;
-  /** The PR was already given to a thread (another window's Start a thread): nothing started; the window opens that one. */
-  onTaken: (threadId: string) => void;
+  /** The thread started and is kept as the PR's: the window opens it, with `carried` (words not sent) in its reply box. */
+  onStarted: (threadId: string, carried: string) => void;
+  /** The PR already has another thread: nothing started or tied; the window opens that one with `carried`, and says `detail`. */
+  onTaken: (threadId: string, carried: string, detail: string) => void;
 }) {
   const labelId = useId();
   const textRef = useRef<HTMLTextAreaElement | null>(null);
@@ -104,8 +114,9 @@ export function PullThreadStart({
   const chosen = options.find((o) => o.row.session === chosenId) ?? null;
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState(false);
-  // A thread that started before and isn't tied yet: said at once; Send only ties it.
-  const [error, setError] = useState<string | null>(() => (untiedPullThread(pr.key) ? PULL_THREAD_UNTIED : null));
+  // A thread that started before and isn't tied yet: said at once; Send only ties it, and needs no agent.
+  const [untied, setUntied] = useState(() => untiedPullStart(pr.key));
+  const [error, setError] = useState<string | null>(() => (untied ? PULL_THREAD_UNTIED : null));
   const voice = useVoiceSession();
   // The reply box's own Send keys (the thread's registry), named for screen readers as every Send names them.
   const sendAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
@@ -113,7 +124,7 @@ export function PullThreadStart({
   const folderOf = (session: string) => options.find((o) => o.row.session === session)?.projectName ?? '';
   // Known once the sessions are read: no agent can take the thread here.
   const noAgent = model !== null && options.length === 0;
-  const tieOnly = untiedPullThread(pr.key) !== null;
+  const tieOnly = untied !== null;
 
   useEffect(() => {
     textRef.current?.focus({ preventScroll: true });
@@ -130,7 +141,7 @@ export function PullThreadStart({
       textRef.current?.focus();
       return;
     }
-    if (!chosen) {
+    if (!chosen && !tieOnly) {
       if (noAgent) setError(PULL_THREAD_NO_AGENT);
       return;
     }
@@ -138,18 +149,27 @@ export function PullThreadStart({
     inFlight.current = true;
     setSending(true);
     try {
-      const result = await sendPullThread({ stack, pr: pr.key, words: text, to: chosen.to, project: chosen.project });
+      const result = await sendPullThread({ stack, pr: pr.key, words: text, to: chosen?.to ?? null, project: chosen?.project ?? null });
       if (result.kind === 'untied') {
+        // Words that just went are sent: they show as such, and the box is for anything more.
+        if (!tieOnly) {
+          keepUnsentPullWords(pr.key, '');
+          setWords('');
+        }
+        setUntied(untiedPullStart(pr.key));
         setError(`${PULL_THREAD_UNTIED} ${result.why}`);
         inFlight.current = false;
         setSending(false);
         return;
       }
+      // What this Send did not send goes with the window into the thread's reply box: never lost.
+      const carried = result.kind === 'taken' || tieOnly ? text : '';
       keepUnsentPullWords(pr.key, '');
       setWords('');
-      (result.kind === 'taken' ? onTaken : onStarted)(result.threadId);
+      if (result.kind === 'taken') onTaken(result.threadId, carried, result.mine ? (carried ? PULL_THREAD_TAKEN_MINE_WORDS : PULL_THREAD_TAKEN_MINE) : PULL_THREAD_TAKEN_DETAIL);
+      else onStarted(result.threadId, carried);
     } catch (cause) {
-      setError(cause instanceof InboxApiError && cause.code === 'session_not_live' ? PULL_THREAD_SESSION_GONE : whyOf(cause));
+      setError(cause instanceof PullThreadNoAgent ? PULL_THREAD_NO_AGENT : cause instanceof InboxApiError && cause.code === 'session_not_live' ? PULL_THREAD_SESSION_GONE : whyOf(cause));
       inFlight.current = false;
       setSending(false);
     }
@@ -175,9 +195,17 @@ export function PullThreadStart({
           New thread about {pr.title}
         </h2>
         <PullContextLine pr={pr} onGuide={onGuide ? () => onGuide(sectionRef.current?.querySelector<HTMLElement>('[data-pull-context-go="guide"]') ?? sectionRef.current!) : null} onDiff={onDiff} />
-        <div className="ib-pth-empty" data-pull-thread-empty={noAgent ? 'no-agent' : ''}>
-          <p>{noAgent ? PULL_THREAD_NO_AGENT : PULL_THREAD_EMPTY}</p>
-        </div>
+        {untied ? (
+          // The words the thread went with: sent, so fixed here; the box below is for anything more.
+          <div className="ib-pth-sent" data-pull-thread-sent="">
+            <span className="ib-pth-sent-h">{PULL_THREAD_SENT}</span>
+            <p dir="auto">{untied.sent}</p>
+          </div>
+        ) : (
+          <div className="ib-pth-empty" data-pull-thread-empty={noAgent ? 'no-agent' : ''}>
+            <p>{noAgent ? PULL_THREAD_NO_AGENT : PULL_THREAD_EMPTY}</p>
+          </div>
+        )}
       </div>
       <div className="ib-pfoot">
         <div className="ib-rbox" onMouseDown={(event) => event.target === event.currentTarget && textRef.current?.focus()}>
@@ -192,7 +220,7 @@ export function PullThreadStart({
               voice={voice}
               voiceNoteGlide
               ariaLabel={`Ask about ${pr.title}`}
-              placeholder={PULL_THREAD_PLACEHOLDER}
+              placeholder={tieOnly ? PULL_THREAD_MORE : PULL_THREAD_PLACEHOLDER}
               destination="your message"
               skillFilter={SKILLS}
               escapeClosesMenu
@@ -227,8 +255,8 @@ export function PullThreadStart({
                 type="button"
                 className="ib-btn ib-pri ib-rsend"
                 aria-keyshortcuts={sendAria}
-                // Pale while there is nothing to send (the mock), or no agent to take it.
-                disabled={sending || voice.busy || noAgent || (!tieOnly && words.length === 0)}
+                // Pale while there is nothing to send (the mock), or no agent to take it; a Send that only ties needs neither.
+                disabled={sending || voice.busy || (!tieOnly && (noAgent || words.length === 0))}
                 onClick={() => void send()}
                 data-reply-send=""
               >

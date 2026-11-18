@@ -13,7 +13,7 @@
  *  - the guided review request's words drifting from the hand-off's own step.
  */
 import { expect, test } from 'bun:test';
-import { inboxPullStacks, inboxReviewRows, type InboxPull, type InboxPullLink } from '@plannotator/core/inbox-types';
+import { inboxPullStacks, inboxPullUrlsIn, inboxReviewRows, type InboxPull, type InboxPullLink } from '@plannotator/core/inbox-types';
 import { pullHandoffMessage } from './model';
 import { reviewRowLaunchpad, reviewRowLine, reviewViewOf } from './reviewsModel';
 import { canStartPullThread, isPullThread, pullThreadMessage, splitPullThreadDetails } from './startThread';
@@ -157,6 +157,13 @@ test("a guided review asked in the PR's thread: the row moves to With your agent
   expect(view.curating).toBe('Curating the review…');
   expect(view.asked).toBe(null);
   expect(!!view.pullLine).toBe(true);
+});
+
+test("the server's rule finds the PR in a started thread's first message (only in its details), so a thread never tied still links it", () => {
+  const stack = stackOf(pr());
+  const first = pullThreadMessage(stack, `Compare with https://github.com/${REPO}/pull/12 first.`);
+  const split = splitPullThreadDetails(first)!;
+  expect(inboxPullUrlsIn(split.details)).toEqual([pr().url]);
 });
 
 test("the guided review request's words: the hand-off's own step, /review-curate on the PR's diff against its base", () => {

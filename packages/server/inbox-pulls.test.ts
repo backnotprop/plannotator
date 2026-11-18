@@ -30,7 +30,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { INBOX_REPO_TTL_MS, inboxId, type InboxPullHidden, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer, type InboxReviewsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_REPO_TTL_MS, inboxId, PULL_DETAILS_START, PULL_THREAD_STEP, type InboxPullHidden, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer, type InboxReviewsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
@@ -981,6 +981,20 @@ describe("on", () => {
     expect(await (await w.check(["github.com/northwind/billing-svc#412"], projectId)).json()).toMatchObject({ ok: true, owner: null });
     expect((await w.own(["github.com/northwind/billing-svc#412"], talk, { ask: "thread" })).status).toBe(200);
     expect(await (await w.check(["github.com/northwind/billing-svc#412"], projectId)).json()).toMatchObject({ ok: true, owner: talk });
+  });
+
+  test("a thread started from a PR's page and never tied (a failed tie, then a reload): the list links it as the PR's own, and validate_only names it", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const body = `Tell me about it.\n\n${PULL_DETAILS_START}pull request.\n\nPull request\n- Link: https://github.com/northwind/billing-svc/pull/412\n\nWhat to do\n${PULL_THREAD_STEP} Talk.`;
+    const started = await fetch(`${w.base}/api/inbox/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: { session: "ses_talk" }, body, idempotency_key: "started-412" }) });
+    expect(started.status).toBe(200);
+    const threadId = ((await started.json()) as { message: { thread_id: string } }).message.thread_id;
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links[key]).toMatchObject({ via: "owner", ask: "thread", page: true, thread_id: threadId });
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect(await (await w.check([key], projectId)).json()).toMatchObject({ ok: true, owner: threadId });
   });
 
   test("checked before the send: validate_only writes nothing, refuses another project, and needs no thread", async () => {

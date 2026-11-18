@@ -51,6 +51,7 @@ import {
   inboxPullRepoKey,
   inboxPullStacks,
   inboxPullUrlsIn,
+  splitPullThreadDetails,
   type InboxCard,
   type InboxFileContents,
   type InboxMessage,
@@ -2177,8 +2178,20 @@ export function linkInboxPulls(
 
   // The PR links in agents' own messages, per project of the PR's repository.
   const urlThread = new Map<string, { thread: string; project: string; at: string }>();
+  // Threads the person started from a PR's page (Start a thread): their first message carries that PR's details with
+  // the thread's step (`splitPullThreadDetails`). The PR's own thread even when the window could not keep it as the PR's
+  // owner (a failed tie, a window reloaded or closed before the tie), so no second thread starts. The first one counts.
+  const startedThread = new Map<string, { thread: string; project: string; at: string }>();
   for (const projectId of new Set([...projectsByRepo.values()].flat())) {
     for (const summary of store.threadsOf(projectId)) {
+      const root = store.message(summary.thread_id);
+      const details = root && root.author.kind === "person" ? splitPullThreadDetails(root.body)?.details : undefined;
+      for (const url of details ? inboxPullUrlsIn(details) : []) {
+        const key = keyOfUrl(url);
+        if (!key || !wanted.has(key) || !projectsOf(byKey.get(key)!).includes(projectId)) continue;
+        const seen = startedThread.get(key);
+        if (!seen || root!.created_at < seen.at) startedThread.set(key, { thread: summary.thread_id, project: projectId, at: root!.created_at });
+      }
       for (const id of store.threadMessageIds(summary.thread_id)) {
         const message = store.message(id);
         if (!message || message.author.kind !== "agent") continue;
@@ -2215,6 +2228,11 @@ export function linkInboxPulls(
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
       links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
+      continue;
+    }
+    const started = startedThread.get(pull.key);
+    if (started) {
+      links[pull.key] = { ...linkOf("owner", started.thread, started.project), ask: "thread", page: true };
       continue;
     }
     const url = urlThread.get(pull.key);

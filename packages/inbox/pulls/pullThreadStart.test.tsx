@@ -187,7 +187,7 @@ function mount(model: InboxPullsAnswer, extra: Partial<PullsPageProps> = {}) {
     onOpenStack: (id) => went.push(`stack ${id}`),
     onScope: () => {},
     onReview: (stack, key, scope) => went.push(`diff ${stack} ${key} ${scope}`),
-    onOpenThread: (thread, replace, reply) => went.push(`thread ${thread}${replace ? ' in place' : ''}${reply ? ', reply open' : ''}`),
+    onOpenThread: (thread, replace, reply) => went.push(`thread ${thread}${replace ? ' in place' : ''}${reply === true ? ', reply open' : typeof reply === 'string' ? `, reply: ${reply}` : ''}`),
     onNew: () => {},
     onNewReview: (pick) => went.push(`new review ${pick.id}`),
     ...extra,
@@ -398,15 +398,19 @@ test.skipIf(!hasDom)("the thread's first message shows the person's words, and t
 
 const ties = () => posts.filter((p) => p.path.endsWith('/pulls/owner') && !p.body.validate_only);
 
-test.skipIf(!hasDom)("a thread that started but isn't tied is never started again: edited words, another To, or the page left and opened again only tie it", async () => {
+test.skipIf(!hasDom)("a thread that started but isn't tied is never started again: edited words, another To, or the page left and opened again only tie it; the words it went with show as sent, and what was typed after reaches the thread's box unsent", async () => {
   await start();
   await type(ASK);
   tieFails = 3;
   await click('[data-pull-thread-start] [data-reply-send]');
   expect(sends()).toHaveLength(1);
   expect($('[data-pull-thread-error]')!.textContent!.startsWith('The thread started, but it isn’t tied to this pull request yet. Press Send again to tie it.')).toBe(true);
+  // The words that went are shown as sent, out of the box; the box is for anything more.
+  expect($('[data-pull-thread-sent] p')!.textContent).toBe(ASK);
+  expect(field().value).toBe('');
+  expect(field().placeholder).toBe('Anything more you write goes into the thread’s reply box, not sent.');
   // Edited words: a tie, no start.
-  await type(`${ASK} And the tests?`);
+  await type('And the tests?');
   await click('[data-pull-thread-start] [data-reply-send]');
   // Another To: a tie, no start.
   await click('[data-pull-thread-start] [data-recipient]');
@@ -414,6 +418,7 @@ test.skipIf(!hasDom)("a thread that started but isn't tied is never started agai
   await click('[data-pull-thread-start] [data-reply-send]');
   expect(sends()).toHaveLength(1);
   expect(ties().map((p) => p.body.thread_id)).toEqual(['thr_new', 'thr_new', 'thr_new']);
+  expect(field().value).toBe('And the tests?');
   // Left and opened again: the PR's page offers the thread, and the empty thread says so at once.
   await escape();
   expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('A thread started here, but it isn’t tied to this pull request yet.');
@@ -422,14 +427,48 @@ test.skipIf(!hasDom)("a thread that started but isn't tied is never started agai
   act(() => root!.unmount());
   host!.remove();
   await start();
-  expect(!!$('[data-pull-thread-error]')).toBe(true);
+  expect(!!$('[data-pull-thread-error]') && $('[data-pull-thread-sent] p')!.textContent === ASK).toBe(true);
   await click('[data-pull-thread-start] [data-reply-send]');
   expect(sends()).toHaveLength(1);
   expect(ties()).toHaveLength(4);
-  expect(went).toEqual(['thread thr_new', 'thread thr_new in place, reply open']);
+  // The words typed after the start were never sent: they open in the thread's reply box, unsent.
+  expect(went).toEqual(['thread thr_new', 'thread thr_new in place, reply: And the tests?']);
 });
 
-test.skipIf(!hasDom)('a PR another window gave to a thread first: Send starts nothing and opens that thread, saying so', async () => {
+test.skipIf(!hasDom)("tying needs no agent: with none left, a Send that only ties still goes", async () => {
+  await start();
+  await type(ASK);
+  tieFails = 1;
+  await click('[data-pull-thread-start] [data-reply-send]');
+  act(() => root!.unmount());
+  host!.remove();
+  liveHere = [];
+  canLaunch = false;
+  await start();
+  const button = $<HTMLButtonElement>('[data-pull-thread-start] [data-reply-send]')!;
+  expect(button.disabled).toBe(false);
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()).toHaveLength(1);
+  expect(ties().map((p) => p.body.thread_id)).toEqual(['thr_new', 'thr_new']);
+  expect(went).toEqual(['thread thr_new in place, reply open']);
+});
+
+test.skipIf(!hasDom)("a PR given to another thread while this page's thread wasn't tied: no tie over it; that thread opens with the new words unsent, and the toast says both", async () => {
+  const toasts: string[] = [];
+  await start({ onToast: (toast) => toasts.push(`${toast.lead}: ${toast.detail}`) });
+  await type(ASK);
+  tieFails = 1;
+  await click('[data-pull-thread-start] [data-reply-send]');
+  await type('And the tests?');
+  ownerNow = 'thr_other';
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()).toHaveLength(1);
+  expect(ties()).toHaveLength(1);
+  expect(went).toEqual(['thread thr_other in place, reply: And the tests?']);
+  expect(toasts).toEqual(['Already has a thread: This pull request was given to another thread before yours was tied to it. That thread is open, with your new words in its reply box, not sent; yours stays in the Inbox.']);
+});
+
+test.skipIf(!hasDom)('a PR another window gave to a thread first: Send starts nothing and opens that thread with the words in its reply box, unsent, saying so', async () => {
   const toasts: string[] = [];
   await start({ onToast: (toast) => toasts.push(`${toast.lead}: ${toast.detail}`) });
   await type(ASK);
@@ -437,8 +476,8 @@ test.skipIf(!hasDom)('a PR another window gave to a thread first: Send starts no
   await click('[data-pull-thread-start] [data-reply-send]');
   expect(sends()).toHaveLength(0);
   expect(ties()).toHaveLength(0);
-  expect(went).toEqual(['thread thr_other in place']);
-  expect(toasts).toEqual(['Already has a thread: This pull request was given to a thread before yours went. Nothing new started; that thread is open.']);
+  expect(went).toEqual([`thread thr_other in place, reply: ${ASK}`]);
+  expect(toasts).toEqual(['Already has a thread: This pull request already has a thread, so nothing new started. That thread is open, with your words in its reply box, not sent.']);
 });
 
 test.skipIf(!hasDom)('Send is pale while the box is empty; words of spaces only say to write first', async () => {

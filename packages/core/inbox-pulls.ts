@@ -690,3 +690,23 @@ export function inboxPullUrlsIn(text: string): string[] {
   }
   return found;
 }
+
+/** How a PR hand-off's details begin (the window's `pullHandoffMessage` opening): what tells them apart from the words. */
+export const PULL_DETAILS_START = "You're being asked to help me review and understand a ";
+/** Only a Start a thread's details have this step (`pullHandoffMessage`'s `thread` kind). */
+export const PULL_THREAD_STEP = "We discuss it in this thread.";
+
+/**
+ * A person's message split into their words and the PR's details that went with them (a PR page's Start a thread),
+ * or null for any other message. The details are the LAST block that starts with the hand-off's opening after a blank
+ * line and holds the thread's step, so words that quote it stay words, and a hand-off with nothing before it (New
+ * review's) is not split. The window folds the details; the server finds the PR a started thread is about by them.
+ */
+export function splitPullThreadDetails(body: string): { words: string; details: string } | null {
+  const at = body.lastIndexOf(`\n\n${PULL_DETAILS_START}`);
+  if (at <= 0) return null;
+  const words = body.slice(0, at).trimEnd();
+  const details = body.slice(at + 2).trimEnd();
+  if (!words.trim() || !details.includes(`\nWhat to do\n${PULL_THREAD_STEP}`)) return null;
+  return { words, details };
+}

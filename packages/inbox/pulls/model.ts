@@ -13,6 +13,7 @@ import {
   inboxPullLandsNext,
   inboxPullSafeBranch,
   inboxPullStacks,
+  PULL_THREAD_STEP,
   type InboxPull,
   type InboxPullGroups,
   type InboxPullItem,
@@ -341,7 +342,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk | 
     : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
   const whatToDo =
     ask.kind === 'thread'
-      ? `What to do\nWe discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`
+      ? `What to do\n${PULL_THREAD_STEP} ${PULL_HANDOFF_TALK} ${feedback}`
       : `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
   if (!many) {
     const pull = layers[0]!;

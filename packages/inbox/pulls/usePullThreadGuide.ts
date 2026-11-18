@@ -9,7 +9,8 @@
  *
  * One request per thread: a press while one is on its way does nothing; a request that went but whose link did not
  * change is not sent again (the next press only changes the link); a request that did not go is retried with its key.
- * Kept per thread while the window is open, so leaving and coming back keeps it.
+ * Kept per thread while the window is open, so leaving and coming back keeps it; after a reload (or from another
+ * window) the thread itself says so: a message of the person's in it that is the request (`pullThreadGuideAsked`).
  */
 import { useRef, useState } from 'react';
 import type { InboxThread } from '@plannotator/core/inbox-types';
@@ -23,6 +24,12 @@ import type { ReviewView } from './reviewsModel';
 /** The request's words: the hand-off's guided review step, as one message (no step number). */
 export function pullThreadGuideWords(stack: NonNullable<ReviewView['pullLine']>['stack']): string {
   return pullHandoffAskLine(stack, { kind: 'guide' }).replace(/^1\. /, '');
+}
+
+/** Whether the thread already holds the request (the person's own message with its words): it is not sent again. */
+export function pullThreadGuideAsked(thread: InboxThread, stack: NonNullable<ReviewView['pullLine']>['stack']): boolean {
+  const words = pullThreadGuideWords(stack);
+  return thread.messages.some((message) => message.author.kind === 'person' && message.body.trimStart().startsWith(words));
 }
 
 /** The request did not go. */
@@ -58,7 +65,7 @@ export function usePullThreadGuide(
     const request = requests.get(thread.thread_id) ?? { key: newUuid(), sent: false };
     requests.set(thread.thread_id, request);
     try {
-      if (!request.sent) {
+      if (!request.sent && !pullThreadGuideAsked(thread, line.stack)) {
         const words = pullThreadGuideWords(line.stack);
         const skills = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE);
         await inboxApi.reply(target.message.id, { idempotency_key: request.key, words: withSkillsBlock(words, skills), questions: [] });

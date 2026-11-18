@@ -191,3 +191,12 @@ test.skipIf(!hasDom)("a thread whose PR's link names another thread: no Guided r
   expect(!!$('[data-pull-context-go="guide"]')).toBe(false);
   expect(posts).toEqual([]);
 });
+
+test.skipIf(!hasDom)('after a reload, a request already in the thread (the link still unchanged) is not sent again: the press only changes the link', async () => {
+  const request = { ...first, id: 'msg_3', reply_to: 'msg_2', body: `${pullThreadGuideWords(stack)}\n\n## Skills\n…`, created_at: '2026-11-03T09:50:00.000Z' } as unknown as InboxMessageWire;
+  mount(linkOf(), [first, agentSaid, request]);
+  await press('[data-pull-context-go="guide"]');
+  expect(replies()).toHaveLength(0);
+  expect(ties().map((p) => p.body)).toEqual([{ keys: [pull.key], thread_id: 'thr_pr', ask: 'guide' }]);
+  expect($('[data-pull-context-guide="asked"]')!.textContent).toBe('Guided review on the way');
+});

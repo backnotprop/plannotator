@@ -5140,8 +5140,8 @@ function Inbox() {
           : null
       }
       onOpenThread={(id, replace, reply) => {
-        // A thread the person just started from the PR's page opens with its reply box open (the mock).
         if (reply) setReplyFor(id);
+        if (typeof reply === 'string') setAskReply({ threadId: id, words: reply });
         writeRoute({ page: 'inbox', reviews: { project, view }, project: null, thread: id }, { replace: !!replace });
       }}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}

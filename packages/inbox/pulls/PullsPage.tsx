@@ -65,7 +65,7 @@ import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
 import { canStartPullThread, isPullThread } from './startThread';
-import { PULL_THREAD_TAKEN, PULL_THREAD_TAKEN_DETAIL, PullThreadStart } from './PullThreadStart';
+import { PULL_THREAD_TAKEN, PullThreadStart } from './PullThreadStart';
 import { untiedPullThread } from './threadStarts';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
@@ -128,9 +128,10 @@ export interface PullsPageProps {
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
   /**
    * `replace`: in place of the PR's page in history (a PR whose page is its thread, `isPullThread`). `reply`: its reply
-   * box open (a thread the person just started from the PR's page).
+   * box open (a thread the person just started from the PR's page); words: also these words in it, not sent (what a
+   * Start a thread's Send did not send).
    */
-  onOpenThread: (threadId: string, replace?: boolean, reply?: boolean) => void;
+  onOpenThread: (threadId: string, replace?: boolean, reply?: boolean | string) => void;
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
@@ -579,14 +580,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           }}
           onGuide={canStart ? newReview : null}
           onDiff={() => props.onReview(stack.id, start.key, 'layer')}
-          onStarted={(threadId) => {
+          onStarted={(threadId, carried) => {
             props.state.reload();
-            props.onOpenThread(threadId, true, true);
+            props.onOpenThread(threadId, true, carried || true);
           }}
-          onTaken={(threadId) => {
+          onTaken={(threadId, carried, detail) => {
             props.state.reload();
-            props.onOpenThread(threadId, true);
-            props.onToast?.({ icon: 'check', lead: PULL_THREAD_TAKEN, detail: PULL_THREAD_TAKEN_DETAIL }, 6000);
+            props.onOpenThread(threadId, true, carried || undefined);
+            props.onToast?.({ icon: 'check', lead: PULL_THREAD_TAKEN, detail }, 8000);
           }}
         />
       );

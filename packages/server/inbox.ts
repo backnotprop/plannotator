@@ -6194,7 +6194,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         }
         // Already given to a thread (another window's Start a thread, a hand-off): which, so that window opens it, not a second.
-        if (validateOnly) return json({ serverSession, ok: true, owner: (keys as string[]).map((key) => pullOwnersNow().get(key)?.thread_id).find((id) => !!id && !!pullLinkStore.threadProject(id)) ?? null });
+        // Its own thread as the list links it: a hand-off's, or a thread started from the PR's page and not tied yet.
+        if (validateOnly) {
+          const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
+          return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
+        }
         if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
         pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
         couplePulls(keys as string[], threadId);
