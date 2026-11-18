@@ -7530,7 +7530,7 @@ export class InboxStore {
    */
   settleLaunch(
     messageId: string,
-    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
+    outcome: { to: InboxAddressee; session_ref: string; rex?: InboxLaunchRecord["rex"] } | { error: InboxLaunchError | null; rex?: InboxLaunchRecord["rex"] } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
   ): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
@@ -7541,9 +7541,9 @@ export class InboxStore {
       "clone" in outcome
         ? { ...message, launch: { ...(outcome.made_inode === null ? unmade : message.launch), clone: outcome.clone, ...(outcome.made_inode ? { made_folder: true as const, made_inode: outcome.made_inode } : {}) } }
         : "to" in outcome
-        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null } }
+        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null, ...(outcome.rex ? { rex: outcome.rex } : {}) } }
         : "error" in outcome
-          ? { ...message, launch: { ...message.launch, error: outcome.error } }
+          ? { ...message, launch: { ...message.launch, error: outcome.error, ...(outcome.rex ? { rex: outcome.rex } : {}) } }
           : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };
     this.appendMessage(next, this.stamp());
     return next;

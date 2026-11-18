@@ -10,7 +10,7 @@ import { agentVersionRun, openCodeGeneration, openCodePluginInstalled, type Agen
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
-import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext } from "./inbox-launch-host";
+import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchLive, type LaunchPermissionContext, type LaunchStartFailure } from "./inbox-launch-host";
 import { createOpenCodePermissions, OPENCODE, OPENCODE_NAME, type OpenCodePermissionAsked } from "./inbox-launch-opencode-permission";
 
 export { OPENCODE, OPENCODE_NAME };
@@ -140,6 +140,8 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   const binOf = (e: AgentEnvironment): string | null => e.which("opencode2") ?? (openCodeGeneration(e) === "2" ? e.which("opencode") : null);
 
   const procs = new Map<string, OpenCodeServer>();
+  /** Every server this host runs, one still making its session (not in `procs` yet) included: `close` ends them all. */
+  const serving = new Set<OpenCodeServer>();
   const spawning = new Map<string, Spawning>();
   let threads: LaunchPermissionContext | null = null;
   let permissions: ReturnType<typeof createOpenCodePermissions> | null = null;
@@ -265,6 +267,8 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       return code;
     });
     if (session) procs.set(session, s);
+    serving.add(s);
+    void s.ended.then(() => serving.delete(s));
     void (async () => {
       const decoder = new TextDecoder();
       try {
@@ -323,6 +327,38 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   type ResumeResult = LaunchHostResult & { failure: { code: "untrusted" | "failed"; text: string } | null };
   const nothing = (text: string): ResumeResult => ({ exitCode: 0, text, failure: null });
 
+  /** OpenCode's session for a launch, on a server made for it: `start` keeps that server, `rexCommand` ends it. */
+  const makeSession = async (launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; server: OpenCodeServer } | ({ ok: false } & LaunchStartFailure)> => {
+    const result = await spawnServer(launch, null, input.login, () => false);
+    if (!result.ok) {
+      ctx.startLog(launch.id, result.output);
+      return { ok: false as const, code: result.missing ? ("missing" as const) : ("failed" as const), text: result.text };
+    }
+    const s = result.server;
+    const failed = async (text: string) => {
+      await end(s, "close");
+      return { ok: false as const, code: "failed" as const, text: openCodeCause(text) };
+    };
+    const model = await sessionModel(s, launch);
+    if (launch.model && !model) return failed("OpenCode takes a model as provider/model, such as opencode/big-pickle");
+    // OpenCode's own agent (build, plan, …) as picked beside the model; absent, OpenCode's default.
+    const agent = inboxLaunchTokenOk(launch.primary_agent) ? launch.primary_agent : null;
+    const created = await json<{ data?: { id?: unknown } }>(s, "POST", "/api/session", {
+      location: { directory: launch.folder },
+      title: input.name.trim() || "Inbox",
+      ...(model ? { model } : {}),
+      ...(agent ? { agent } : {}),
+    }).catch((error: unknown) => {
+      ctx.startLog(launch.id, `POST /api/session: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    });
+    const session = created?.data?.id;
+    if (!openCodeSessionIdOk(session)) return failed("OpenCode did not make a session");
+    s.session = session;
+    ctx.startLog(launch.id, `session ${session}${model ? ` on ${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}` : ""}${agent ? `, agent ${agent}` : ""}`);
+    return { ok: true as const, session, server: s };
+  };
+
   let binName = "opencode2";
   let choiceKey: string | null = null;
   const choiceLists = launchChoiceCache(async () => {
@@ -377,35 +413,31 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     trusts: () => true,
 
     async start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }) {
-      const result = await spawnServer(launch, null, input.login, () => false);
-      if (!result.ok) {
-        ctx.startLog(launch.id, result.output);
-        return { ok: false as const, code: result.missing ? ("missing" as const) : ("failed" as const), text: result.text };
+      const made = await makeSession(launch, input);
+      if (!made.ok) return made;
+      procs.set(made.session, made.server);
+      return { ok: true as const, session: made.session, ref: made.session };
+    },
+
+    /**
+     * Start in Rex: OpenCode's session is made as for `start` (its id exists only once a server makes it), that
+     * server ends, and the tab runs OpenCode's own terminal UI on it, as Open in Terminal does. The plugin there
+     * connects as that session at its start and takes the root as its first turn. `resume`: the same session again.
+     */
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
+      let session = input.resume ? (launch.session_ref ?? "") : "";
+      if (!session) {
+        const made = await makeSession(launch, input);
+        if (!made.ok) return made;
+        await end(made.server, "close");
+        session = made.session;
       }
-      const s = result.server;
-      const failed = async (text: string) => {
-        await end(s, "close");
-        return { ok: false as const, code: "failed" as const, text: openCodeCause(text) };
-      };
-      const model = await sessionModel(s, launch);
-      if (launch.model && !model) return failed("OpenCode takes a model as provider/model, such as opencode/big-pickle");
-      // OpenCode's own agent (build, plan, …) as picked beside the model; absent, OpenCode's default.
-      const agent = inboxLaunchTokenOk(launch.primary_agent) ? launch.primary_agent : null;
-      const created = await json<{ data?: { id?: unknown } }>(s, "POST", "/api/session", {
-        location: { directory: launch.folder },
-        title: input.name.trim() || "Inbox",
-        ...(model ? { model } : {}),
-        ...(agent ? { agent } : {}),
-      }).catch((error: unknown) => {
-        ctx.startLog(launch.id, `POST /api/session: ${error instanceof Error ? error.message : String(error)}`);
-        return null;
-      });
-      const session = created?.data?.id;
-      if (!openCodeSessionIdOk(session)) return failed("OpenCode did not make a session");
-      s.session = session;
-      procs.set(session, s);
-      ctx.startLog(launch.id, `session ${session}${model ? ` on ${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}` : ""}${agent ? `, agent ${agent}` : ""}`);
-      return { ok: true as const, session, ref: session };
+      // Its name as found now (an Inbox just restarted has not checked it yet: `opencode2`, or OpenCode 2 as `opencode`).
+      const found = binOf(await ctx.environment());
+      if (found) binName = basename(found);
+      const command = `cd ${shellQuote(launch.folder)} && exec env ${openCodeTerminalRun(binName, session, dataDirArg())}`;
+      ctx.startLog(launch.id, `rex: ${command}`);
+      return { ok: true as const, session, ref: session, command };
     },
 
     async sessions() {
@@ -514,7 +546,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
 
     close() {
       for (const mark of spawning.values()) mark.cancel = "stop";
-      for (const s of procs.values()) {
+      for (const s of new Set([...procs.values(), ...serving])) {
         if (s.exited) continue;
         s.ending ??= "close";
         s.proc.kill("SIGTERM");

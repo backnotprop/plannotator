@@ -122,6 +122,14 @@ export function createInboxScheduled(deps: {
     const outcome = !divider.launch || divider.launch.error || run.failed ? "didnt_start" : line && RUNNING.has(line.state) ? "running" : replied ? "replied" : "didnt_finish";
     return { message_id: divider.id, run: run.run!, due_at: run.due_at, started_at: divider.created_at, late: run.late === true, outcome };
   };
+  /**
+   * A routine's Stop and Delete stop its run's session. A run in Rex (from before routines started only in the
+   * background) is Rex's: the Inbox lets go of it, and the Stop or Delete still goes through.
+   */
+  const stopRunning = (messageId: string): Promise<void> =>
+    launch.stopMessage(messageId).catch((error: unknown) => {
+      if (!(error instanceof InboxError && error.code === "launch_in_rex")) throw error;
+    });
   /** Run starts under way here (the clock's and Run now's alike): one at a time per routine. */
   const starting = new Set<string>();
   const runningOf = (record: InboxScheduledThread): InboxScheduledRunSummary | null => {
@@ -332,7 +340,8 @@ export function createInboxScheduled(deps: {
       let prepared: Awaited<ReturnType<InboxLaunch["prepare"]>>;
       try {
         if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
-        prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
+        // A routine's run starts in the background whatever "Start new agents in" says: never a new Rex tab per run.
+        prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject, background: true });
       } catch (error) {
         const before = currentForRun();
         const project = projectOf(before) ?? (await firstProject(before));
@@ -576,7 +585,7 @@ export function createInboxScheduled(deps: {
     async stopRun(id: string): Promise<InboxScheduledThread> {
       const record = found(id);
       const running = runningOf(record);
-      if (running) await launch.stopMessage(running.message_id);
+      if (running) await stopRunning(running.message_id);
       return record;
     },
 
@@ -584,7 +593,7 @@ export function createInboxScheduled(deps: {
     async remove(id: string, by: InboxScheduledBy): Promise<{ told: string | null }> {
       const record = found(id);
       const running = runningOf(record);
-      if (running) await launch.stopMessage(running.message_id);
+      if (running) await stopRunning(running.message_id);
       save(found(id), { deleted_at: iso() });
       return { told: await tell(by, record, `Deleted the routine ${record.name}. Its thread and past runs stay.`, { op: "delete" }) };
     },
