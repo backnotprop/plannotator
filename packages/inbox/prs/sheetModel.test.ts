@@ -6,7 +6,7 @@ import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull } from '@plannotator/core/inbox-types';
 import { listProjectOf, routeOf } from '../app/route';
 import { hashOf } from '../app/writeRoute';
-import { boardInProject, FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, tileOpens, topFirst } from './sheetModel';
+import { boardInProject, boardProjectName, FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, tileOpens, topFirst } from './sheetModel';
 
 const NOW = Date.parse('2026-11-09T12:00:00Z');
 const day = (n: number) => new Date(NOW - n * 86_400_000).toISOString();
@@ -252,4 +252,11 @@ test("the board's own page (a phone's) keeps Reviews' project filter in its addr
   expect(listProjectOf(route)).toBeNull();
   expect(listProjectOf(routeOf('#reviews&project=prj_ledger'))).toBeNull();
   expect(listProjectOf(routeOf('#project=prj_ledger'))).toBe('prj_ledger');
+});
+
+test("the board names a filtered project whose threads are all hidden, from the Inbox's projects", () => {
+  const projects = [{ id: 'prj_web', name: 'checkout-web' }];
+  expect(boardProjectName('prj_web', new Map(), projects)).toBe('checkout-web');
+  expect(boardProjectName('prj_web', new Map([['prj_web', 'web (list)']]), projects)).toBe('web (list)');
+  expect(boardProjectName(null, new Map(), projects)).toBeNull();
 });
