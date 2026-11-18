@@ -567,6 +567,23 @@ describe("the list (rule 5)", () => {
     expect(peer.cards!.threads.msg_01K0000000000000000000000A!.machine).toBe(B);
   });
 
+  test("a second Board request retries the linked machine after its first read fails", async () => {
+    const d = door({
+      cursor: 3,
+      threads: () => Response.json({ cursor: 3, sections: [], marks: ["cards"] }),
+      cards: () => d.stats.cards === 1 ? new Response(null, { status: 503 }) : board(3),
+    });
+    const { peer } = link(d.url);
+    peer.start();
+    await until("the machine's list", () => peer.list !== null);
+    await peer.wantCards();
+    expect(peer.cards).toBeNull();
+
+    await peer.wantCards();
+    expect(peer.cards?.cards.map((card) => card.id)).toEqual([BOARD_CARD.id]);
+    expect(d.stats.cards).toBe(2);
+  });
+
   test("a card record on its stream reads its Board again, and the windows hear it after the read", async () => {
     const cursors: number[] = [];
     const d = door({
