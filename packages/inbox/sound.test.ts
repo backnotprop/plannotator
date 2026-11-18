@@ -1,20 +1,21 @@
 /**
- * When the question sound rings (sound.ts `decideRing`): once per burst,
+ * When the question sound rings (ringGate.ts `decideRing`): once per burst,
  * only while no Inbox tab is in front, never with the sound off. A burst is
  * questions less than 30 s apart; coming to the front ends it; a ring another
  * tab reported joins this tab to that burst.
  */
 import { describe, expect, test } from 'bun:test';
-import { decideRing, heardRing, QUIET_GATE, RING_BURST_MS, type RingGate } from './sound';
+import { decideRing, heardRing, QUIET_GATE, RING_BURST_MS, type RingGate } from './ringGate';
+import type { InboxSoundKind } from './feltSound';
 import { inboxNotificationOptions } from './notify';
 
-const away = { enabled: true, inFront: false, otherTabInFront: false };
+const away = { kind: 'question' as InboxSoundKind, enabled: true, inFront: false, otherTabInFront: false };
 
 /** Questions arriving at these times (ms), all while away: which of them ring. */
-function rings(times: number[], start: RingGate = QUIET_GATE): boolean[] {
+function rings(times: number[], start: RingGate = QUIET_GATE, kinds: InboxSoundKind[] = []): boolean[] {
   let gate = start;
-  return times.map((now) => {
-    const decided = decideRing(gate, { ...away, now });
+  return times.map((now, i) => {
+    const decided = decideRing(gate, { ...away, now, kind: kinds[i] ?? 'question' });
     gate = decided.gate;
     return decided.ring;
   });
@@ -46,16 +47,37 @@ describe('decideRing', () => {
   });
 
   test('sound off: never rings, and leaves the burst as it was', () => {
-    const gate = { lastAt: 5 };
+    const gate = { lastAt: 5, asked: true };
     expect(decideRing(gate, { ...away, now: 10, enabled: false })).toEqual({ ring: false, gate });
     expect(decideRing(QUIET_GATE, { ...away, now: 10, enabled: false }).ring).toBe(false);
   });
 
   test('a ring another tab reported puts this tab in the same burst', () => {
-    const gate = heardRing(QUIET_GATE, 1000);
+    const gate = heardRing(QUIET_GATE, 1000, 'question');
     expect(decideRing(gate, { ...away, now: 2500 }).ring).toBe(false);
     // An older report never shortens a later burst.
-    expect(heardRing({ lastAt: 9000 }, 1000)).toEqual({ lastAt: 9000 });
+    expect(heardRing({ lastAt: 9000, asked: false }, 1000, 'thread')).toEqual({ lastAt: 9000, asked: false });
+  });
+});
+
+describe('a new thread that asks nothing', () => {
+  test('rings its quiet note while away, never in front or with the sound off', () => {
+    expect(rings([0], QUIET_GATE, ['thread'])).toEqual([true]);
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, kind: 'thread', inFront: true }).ring).toBe(false);
+    expect(decideRing(QUIET_GATE, { ...away, now: 0, kind: 'thread', enabled: false }).ring).toBe(false);
+  });
+
+  test('one sound per burst, except that the first question of a burst still rings after a thread note', () => {
+    expect(rings([0, 1000, 2000], QUIET_GATE, ['thread', 'thread', 'question'])).toEqual([true, false, true]);
+    expect(rings([0, 1000, 2000], QUIET_GATE, ['thread', 'question', 'question'])).toEqual([true, true, false]);
+    expect(rings([0, 1000], QUIET_GATE, ['question', 'thread'])).toEqual([true, false]);
+  });
+
+  test('a thread note another tab rang still lets this tab ring the burst\'s first question', () => {
+    const gate = heardRing(QUIET_GATE, 1000, 'thread');
+    expect(decideRing(gate, { ...away, now: 1500, kind: 'thread' }).ring).toBe(false);
+    expect(decideRing(gate, { ...away, now: 1500 }).ring).toBe(true);
+    expect(decideRing(heardRing(gate, 1200, 'question'), { ...away, now: 1500 }).ring).toBe(false);
   });
 });
 

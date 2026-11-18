@@ -14,7 +14,7 @@
  * check is off and points at a dead port, so nothing asks GitHub.
  *
  * Proves: a question while the tab is hidden rings once; a burst of three
- * rings once; a visible tab rings nothing; a plain message rings nothing; the
+ * rings once; a visible tab rings nothing; a new thread that asks nothing rings the quiet note; the
  * sound off rings nothing (and notifications stop being silent); two tabs
  * ring once; a fresh install never shows the dialog; after an update the
  * dialog shows once, in one of two tabs, and not again on reload.
@@ -177,6 +177,7 @@ async function agent(world: World, name = 'Claude Code', host = 'claude-code'): 
 const config = (world: World): { inboxSound?: Record<string, unknown> } => savedConfig(world.dataDir);
 
 const rings = (page: Page) => page.evaluate(() => window.__sound.freqs.filter((f) => Math.abs(f - 391.995) < 0.01).length);
+const quietNotes = (page: Page) => page.evaluate(() => window.__sound.freqs.filter((f) => Math.abs(f - 587.33) < 0.01).length - window.__sound.freqs.filter((f) => Math.abs(f - 391.995) < 0.01).length);
 
 /** Put the tab in front or away, with the events a browser fires when that happens. */
 async function setFront(page: Page, visible: boolean, focused: boolean): Promise<void> {
@@ -295,12 +296,15 @@ test('with the tab visible and focused nothing rings', async () => {
   expect(await rings(page)).toBe(before);
 });
 
-test('a plain message rings nothing; the next question in that burst-free moment does', async () => {
+test('a new thread that asks nothing rings the quiet note and a silent notice; the next question in that burst still rings', async () => {
   await awayAgain(page);
   const before = await rings(page);
+  const quietBefore = await quietNotes(page);
   const plain = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.' });
   await settled(page, plain.thread_id);
   expect(await rings(page)).toBe(before);
+  await expect.poll(() => quietNotes(page)).toBe(quietBefore + 1);
+  await expect.poll(() => page.evaluate(() => window.__notified.at(-1))).toMatchObject({ silent: true });
   const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Delete the backup now?') });
   await settled(page, asked.thread_id);
   await expect.poll(() => rings(page)).toBe(before + 1);

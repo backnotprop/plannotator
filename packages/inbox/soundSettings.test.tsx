@@ -67,7 +67,7 @@ function fakeSound(over: Partial<InboxSound> = {}) {
     armed: true,
     playing: false,
     preview: (volume) => void seen.push(`preview:${volume ?? 'saved'}`),
-    questionsArrived: () => {},
+    arrived: () => {},
     otherTabInFront: () => false,
     setEnabled: async (next) => (seen.push(`enabled:${next}`), true),
     setVolume: async (next) => (seen.push(`volume:${next}`), true),
@@ -225,7 +225,7 @@ describe.if(hasDom)('useInboxSound', () => {
   test('before the first click a question rings nothing; the first click arms it; then a hidden tab rings once per burst', () => {
     const el = mount(<Probe />);
     front = { visible: false, focused: false };
-    act(() => api.questionsArrived());
+    act(() => api.arrived('question'));
     expect(rings()).toBe(0);
     expect(el.querySelector('[data-armed]')?.getAttribute('data-armed')).toBe('no');
     act(() => {
@@ -239,9 +239,9 @@ describe.if(hasDom)('useInboxSound', () => {
       window.dispatchEvent(new Event('focus'));
     });
     front = { visible: false, focused: false };
-    act(() => api.questionsArrived());
-    act(() => api.questionsArrived());
-    act(() => api.questionsArrived());
+    act(() => api.arrived('question'));
+    act(() => api.arrived('question'));
+    act(() => api.arrived('question'));
     expect(rings()).toBe(1);
   });
 
@@ -272,11 +272,25 @@ describe.if(hasDom)('useInboxSound', () => {
     act(() => {
       window.dispatchEvent(new Event('pointerdown'));
     });
-    act(() => api.questionsArrived());
+    act(() => api.arrived('question'));
     expect(rings()).toBe(0);
     act(() => api.preview());
     expect(rings()).toBe(1);
     expect(api.playing).toBe(true);
+  });
+
+  test('a new thread that asks nothing rings the quiet note alone (D5, no G4) while away; a question still rings Felt after it', () => {
+    mount(<Probe />);
+    act(() => {
+      window.dispatchEvent(new Event('pointerdown'));
+    });
+    front = { visible: false, focused: false };
+    act(() => api.arrived('thread'));
+    expect([timesPlayed(recorder, FELT_D5), timesPlayed(recorder, FELT_G4)]).toEqual([1, 0]);
+    act(() => api.arrived('thread'));
+    expect(timesPlayed(recorder, FELT_D5)).toBe(1);
+    act(() => api.arrived('question'));
+    expect(rings()).toBe(1);
   });
 
   test('the question sound is Felt: G4, then D5 above it', () => {

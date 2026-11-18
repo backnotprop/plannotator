@@ -80,7 +80,7 @@ let host: HTMLElement | null = null;
 /** One hook per tab: tabs[0] is this tab; a second Probe stands for another tab (same storage). */
 const tabs: InboxNotifications[] = [];
 let onScreen: string | null = null;
-let questionsHeard = 0;
+let heard: string[] = [];
 let bell = false;
 let otherTabInFront = false;
 /** Settings → General's notifications switch. */
@@ -95,8 +95,8 @@ function Probe({ index }: { index: number }) {
     onSettings: () => {},
     openThread: (threadId) => onOpenThread(threadId),
     openList: () => onOpenList(),
-    onQuestions: () => {
-      questionsHeard++;
+    onArrival: (kind) => {
+      heard.push(kind);
     },
     bellCovers: () => bell,
     otherTabInFront: () => otherTabInFront,
@@ -198,7 +198,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
   beforeEach(async () => {
     front = { visible: true, focused: true };
     onScreen = null;
-    questionsHeard = 0;
+    heard = [];
     bell = false;
     otherTabInFront = false;
     enabled = true;
@@ -220,12 +220,12 @@ describe.if(hasDom)('useInboxNotifications', () => {
     window.localStorage.clear();
   });
 
-  test('a new thread that asks nothing notifies with the tab in front, and the sound hears nothing', async () => {
+  test('a new thread that asks nothing notifies with the tab in front, and the sound hears a thread', async () => {
     await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
     expect(raised).toHaveLength(1);
     expect(raised[0]!.title.startsWith('billing-svc: Claude Code')).toBe(true);
     expect(raised[0]!.body).toBe('Subject t1');
-    expect(questionsHeard).toBe(0);
+    expect(heard).toEqual(['thread']);
   });
 
   test('an Unarchive of a thread archived before the page loaded is not a new thread', async () => {
@@ -240,7 +240,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     expect(raised).toHaveLength(0);
     // The sound still hears it (it decides for itself, and rings only with no Inbox tab in front).
-    expect(questionsHeard).toBe(1);
+    expect(heard).toEqual(['question']);
 
     away();
     await batch([message('m2', 'old'), question('m2', 'q-2')], list([{ id: 'old', section: 'waiting' }]));
@@ -304,19 +304,18 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(raised[1]!.body).toBe('Subject t2');
   });
 
-  test('silent only when the bell owns the sound: a question, this tab away, the bell on', async () => {
+  test('silent only when the bell owns the sound: a question or a new thread, this tab away, the bell on', async () => {
     bell = true;
     // In front: the bell never rings here, so the notice keeps the system's sound.
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
     away();
-    // Away, a new thread that asks nothing: the bell does not ring for it.
     await batch([message('t1', 't1')], list([{ id: 'old', section: 'waiting' }, { id: 't1', section: 'new' }]));
     // Away, a question: the bell's.
     await batch([message('t2', 't2'), question('t2', 'q-2')], list([{ id: 't2', section: 'waiting' }]));
     // The bell off (or not armed): the system's sound again.
     bell = false;
     await batch([message('t3', 't3'), question('t3', 'q-3')], list([{ id: 't3', section: 'waiting' }]));
-    expect(raised.map((r) => r.silent)).toEqual([false, false, true, false]);
+    expect(raised.map((r) => r.silent)).toEqual([false, true, true, false]);
   });
 
   test('two tabs raise each item once; a tab away defers to another tab in front', async () => {
@@ -557,8 +556,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
       expect(raised[0]!.title).toMatch(/^billing-svc: Claude Code couldn't answer$/);
       expect(raised[1]!.title).toBe("billing-svc: Codex couldn't answer");
       expect(raised[2]!.title).toBe("billing-svc: Pi couldn't answer");
-      // Not a question: the bell is not asked to ring.
-      expect(questionsHeard).toBe(0);
+      expect(heard).toEqual([]);
     });
 
     test('an agent\'s own plain message never notifies, and only the note\'s first line does (a restart\'s catch-up writes no first line)', async () => {

@@ -32,7 +32,7 @@ export function SoundRow({ sound }: { sound: InboxSound }) {
           <span className="ib-l" id="ib-sound-label">
             Play a sound
           </span>
-          <span className="ib-desc">When an agent asks you, while no Inbox tab is in front</span>
+          <span className="ib-desc">When an agent asks you or starts a thread, while no Inbox tab is in front</span>
         </span>
         <span className="ib-ctl">
           <input

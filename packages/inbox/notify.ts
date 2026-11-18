@@ -14,8 +14,7 @@
  * and a click opens the list. Away, a burst lasts until the tab comes to the
  * front; in front, notices within `FRONT_BURST_MS` of each other are one.
  * Several Inbox tabs raise each item once: a tab in front raises it, else
- * the first tab to claim it (`claimNotices`). A notice is silent only when
- * the Inbox's bell owns its sound (a question, every tab away, the bell on).
+ * the first tab to claim it (`claimNotices`).
  *
  * The settings live on the Inbox server (config.json), not in localStorage:
  * the permission is per origin and the Inbox can move to another port, so
@@ -29,6 +28,7 @@ import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } from './api';
 import { agentName, plural } from './format';
 import { pageInFront } from './sound';
+import type { InboxSoundKind } from './feltSound';
 import { inboxEventsServedBy } from './sharedEvents';
 import { signalNotificationClick } from './history';
 
@@ -345,14 +345,7 @@ export function useInboxNotifications(options: {
   /** `questionId`: the question it notified about (`<message id>/<key>`), absent for a new thread. */
   openThread: (threadId: string, questionId?: string) => void;
   openList: () => void;
-  /** New questions arrived (before any notification rule): the sound decides for itself (sound.ts). */
-  onQuestions?: () => void;
-  /**
-   * The Inbox's bell owns a question's sound (on, armed, no other Inbox tab in
-   * front). A notice about a question raised while this tab is away is then
-   * silent, so there is one sound on every OS; every other notice (a new
-   * thread that asks nothing, anything raised in front) keeps the system's.
-   */
+  onArrival?: (kind: InboxSoundKind) => void;
   bellCovers?: () => boolean;
   /** Another Inbox tab is in front: it raises what arrives, so this one does not. */
   otherTabInFront?: () => boolean;
@@ -376,8 +369,8 @@ export function useInboxNotifications(options: {
   openRef.current = { thread: options.openThread, list: options.openList };
   const onSettingsRef = useRef(options.onSettings);
   onSettingsRef.current = options.onSettings;
-  const soundRef = useRef({ questions: options.onQuestions, bellCovers: options.bellCovers });
-  soundRef.current = { questions: options.onQuestions, bellCovers: options.bellCovers };
+  const soundRef = useRef({ arrival: options.onArrival, bellCovers: options.bellCovers });
+  soundRef.current = { arrival: options.onArrival, bellCovers: options.bellCovers };
   const tabsRef = useRef({ onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront });
   tabsRef.current = { onScreen: options.threadOnScreen, otherInFront: options.otherTabInFront };
   const messages = useRef(new Map<string, { threadId: string; author: InboxAuthor }>());
@@ -559,8 +552,7 @@ export function useInboxNotifications(options: {
       );
       open = () => openRef.current.list();
     }
-    // Silent only when the bell owns this notice's sound: a question, this tab away, the bell on and armed.
-    const silent = !front && items.some((item) => item.asks) && soundRef.current.bellCovers?.() === true;
+    const silent = !front && items.some((item) => item.asks || item.fresh) && soundRef.current.bellCovers?.() === true;
     try {
       const notification = new Notification(text.title, inboxNotificationOptions(text, { silent }));
       notification.onclick = () => {
@@ -632,9 +624,9 @@ export function useInboxNotifications(options: {
         });
       }
       if (threads.size === 0) return;
-      const asks = [...threads.values()].some((item) => item.asks);
-      // The sound does not depend on notifications (off, not allowed or blocked, it still rings), and rings for questions only.
-      if (asks) soundRef.current.questions?.();
+      const arrived = [...threads.values()];
+      const kind: InboxSoundKind | null = arrived.some((item) => item.asks) ? 'question' : arrived.some((item) => item.fresh) ? 'thread' : null;
+      if (kind) soundRef.current.arrival?.(kind);
       const settings = settingsRef.current;
       if (!settings || !settings.enabled || !supported()) return;
       const now = Notification.permission;

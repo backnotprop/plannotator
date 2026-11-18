@@ -1,22 +1,8 @@
-/**
- * When it rings: a new question in an agent's message (the same items
- * notify.ts notifies about; plain messages never ring), only while no Inbox
- * tab is in front, and once per burst: the first question rings, more within
- * 30 s of the last one stay silent, and the burst ends when a tab comes to the
- * front. It does not depend on notifications. Several Inbox tabs ring once:
- * they share a BroadcastChannel (who is in front, who rang) and a tab rings
- * only while it holds a short lock (a Web Lock, or localStorage without one).
- *
- * Chrome lets a page play sound only after a click or key press in that tab,
- * so the AudioContext is made and resumed on the first gesture ("armed");
- * before that a ring would be lost without an error, and the Settings line
- * and the sidebar hint say so.
- */
-
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_SOUND_DEFAULT_VOLUME, type InboxSoundSettings } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
-import { INBOX_SOUND_MS, INBOX_SOUNDS, scheduleFelt } from './feltSound';
+import { INBOX_SOUND_MS, INBOX_SOUNDS, scheduleFelt, type InboxSoundKind } from './feltSound';
+import { decideRing, heardRing, QUIET_GATE, type RingGate } from './ringGate';
 
 type AudioContextCtor = new () => AudioContext;
 
@@ -37,13 +23,12 @@ class InboxAudio {
     if (ctx && ctx.state === 'suspended') void ctx.resume().catch(() => {});
   }
 
-  /** Play the sound at `volume` (10–100). Without a context yet, nothing (a ring before the first gesture is lost). */
-  play(volume: number, options: { create: boolean }): boolean {
+  play(volume: number, kind: InboxSoundKind, options: { create: boolean }): boolean {
     const ctx = options.create ? this.ensure() : this.ctx;
     if (!ctx || !this.master) return false;
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     this.master.gain.value = Math.max(0, Math.min(1, volume / 100));
-    for (const note of INBOX_SOUNDS.question) scheduleFelt(ctx, this.master, note);
+    for (const note of INBOX_SOUNDS[kind]) scheduleFelt(ctx, this.master, note);
     return true;
   }
 
@@ -63,40 +48,6 @@ class InboxAudio {
   }
 }
 
-// ───────────────────────────── When it rings ─────────────────────────────
-
-/** A burst: questions within this long of the last one stay silent. */
-export const RING_BURST_MS = 30_000;
-
-export interface RingGate {
-  /** When the last question of the current burst arrived (in this tab, or a ring another tab reported); null: no burst. */
-  lastAt: number | null;
-}
-
-export const QUIET_GATE: RingGate = { lastAt: null };
-
-/**
- * New questions arrived: ring or not, and the burst after. Pure.
- *
- * - Sound off: nothing, and the burst is left as it was.
- * - An Inbox tab in front (this one or another): nothing; the person sees the
- *   list, so the burst ends.
- * - Within 30 s of the last question of a burst: nothing; the burst goes on
- *   from this question.
- * - Otherwise: ring, and a burst starts.
- */
-export function decideRing(gate: RingGate, input: { now: number; enabled: boolean; inFront: boolean; otherTabInFront: boolean }): { ring: boolean; gate: RingGate } {
-  if (!input.enabled) return { ring: false, gate };
-  if (input.inFront || input.otherTabInFront) return { ring: false, gate: QUIET_GATE };
-  if (gate.lastAt !== null && input.now - gate.lastAt < RING_BURST_MS) return { ring: false, gate: { lastAt: input.now } };
-  return { ring: true, gate: { lastAt: input.now } };
-}
-
-/** Another tab rang at `at`: this tab is in that burst too. */
-export function heardRing(gate: RingGate, at: number): RingGate {
-  return { lastAt: gate.lastAt === null ? at : Math.max(gate.lastAt, at) };
-}
-
 // ───────────────────────────── Several tabs ─────────────────────────────
 
 export const SOUND_CHANNEL = 'plannotator-inbox-sound';
@@ -110,26 +61,26 @@ type ChannelMessage =
   | { type: 'hello'; id: string }
   | { type: 'front'; id: string; front: boolean }
   | { type: 'bye'; id: string }
-  | { type: 'rang'; id: string; at: number };
+  | { type: 'rang'; id: string; at: number; kind?: InboxSoundKind };
 
 /** The Inbox tab is in front: visible and focused (the same test notifications use). */
 export function pageInFront(): boolean {
   return document.visibilityState === 'visible' && document.hasFocus();
 }
 
-const LOCK_KEY = `${SOUND_CHANNEL}-lock`;
-/** Lets go of the ring lock this tab holds, if any. */
-let releaseHold: (() => void) | null = null;
+const lockName = (kind: InboxSoundKind) => (kind === 'question' ? SOUND_CHANNEL : `${SOUND_CHANNEL}-${kind}`);
+const lockKey = (kind: InboxSoundKind) => `${lockName(kind)}-lock`;
+const releaseHolds = new Set<() => void>();
 
 /**
  * The burst ended (an Inbox tab came to the front): let go of the ring lock
  * at once, so the next burst can ring even within RING_LOCK_MS.
  */
 function endRingHold(): void {
-  releaseHold?.();
-  releaseHold = null;
+  for (const release of [...releaseHolds]) release();
+  releaseHolds.clear();
   try {
-    window.localStorage.removeItem(LOCK_KEY);
+    for (const kind of Object.keys(INBOX_SOUNDS) as InboxSoundKind[]) window.localStorage.removeItem(lockKey(kind));
   } catch {
     // No storage.
   }
@@ -141,21 +92,22 @@ function endRingHold(): void {
  * is one; else a timestamp in localStorage (the same origin as the channel),
  * which is close enough for a doorbell.
  */
-async function withRingLock(ring: () => void): Promise<boolean> {
+async function withRingLock(kind: InboxSoundKind, ring: () => void): Promise<boolean> {
   const locks = typeof navigator !== 'undefined' ? navigator.locks : undefined;
   if (locks?.request) {
     try {
-      return await locks.request(SOUND_CHANNEL, { ifAvailable: true }, async (lock) => {
+      return await locks.request(lockName(kind), { ifAvailable: true }, async (lock) => {
         if (!lock) return false;
         ring();
         await new Promise<void>((resolve) => {
-          const timer = setTimeout(resolve, RING_LOCK_MS);
-          releaseHold = () => {
+          const release = () => {
             clearTimeout(timer);
+            releaseHolds.delete(release);
             resolve();
           };
+          const timer = setTimeout(release, RING_LOCK_MS);
+          releaseHolds.add(release);
         });
-        releaseHold = null;
         return true;
       });
     } catch {
@@ -163,10 +115,10 @@ async function withRingLock(ring: () => void): Promise<boolean> {
     }
   }
   try {
-    const held = Number(window.localStorage.getItem(LOCK_KEY) ?? 0);
+    const held = Number(window.localStorage.getItem(lockKey(kind)) ?? 0);
     const now = Date.now();
     if (now - held < RING_LOCK_MS) return false;
-    window.localStorage.setItem(LOCK_KEY, String(now));
+    window.localStorage.setItem(lockKey(kind), String(now));
   } catch {
     // No storage: this tab rings.
   }
@@ -185,8 +137,7 @@ export interface InboxSound {
   playing: boolean;
   /** Play: always plays, tab in front or not, at `volume` (default: the saved one). */
   preview: (volume?: number) => void;
-  /** New questions arrived (notify.ts's items, after the list read). */
-  questionsArrived: () => void;
+  arrived: (kind: InboxSoundKind) => void;
   /** Another Inbox tab said it is in front (within the last 15 s): it handles what arrives (notify.ts). */
   otherTabInFront: () => boolean;
   /** Save the switch; false when the Inbox did not keep it (the switch goes back). */
@@ -285,7 +236,7 @@ export function useInboxSound(options: {
         }
       }
       else if (message.type === 'bye') others.current.delete(message.id);
-      else if (message.type === 'rang' && typeof message.at === 'number') gate.current = heardRing(gate.current, message.at);
+      else if (message.type === 'rang' && typeof message.at === 'number') gate.current = heardRing(gate.current, message.at, message.kind ?? 'question');
     };
     const report = () => {
       const front = pageInFront();
@@ -345,16 +296,16 @@ export function useInboxSound(options: {
     return [...others.current.values()].some((tab) => tab.front && now - tab.at < FRONT_FRESH_MS);
   }, []);
 
-  const questionsArrived = useCallback(() => {
+  const arrived = useCallback((kind: InboxSoundKind) => {
     const now = Date.now();
-    const decided = decideRing(gate.current, { now, enabled: settingsRef.current.enabled, inFront: pageInFront(), otherTabInFront: otherTabInFront() });
+    const decided = decideRing(gate.current, { now, kind, enabled: settingsRef.current.enabled, inFront: pageInFront(), otherTabInFront: otherTabInFront() });
     gate.current = decided.gate;
     // Before the first click Chrome keeps the context suspended: the ring would be lost, so none is tried.
     if (!decided.ring || !armedRef.current) return;
-    void withRingLock(() => {
-      audio.current?.play(settingsRef.current.volume, { create: true });
+    void withRingLock(kind, () => {
+      audio.current?.play(settingsRef.current.volume, kind, { create: true });
       try {
-        channel.current?.postMessage({ type: 'rang', id: id.current, at: now } satisfies ChannelMessage);
+        channel.current?.postMessage({ type: 'rang', id: id.current, at: now, kind } satisfies ChannelMessage);
       } catch {
         // Closed.
       }
@@ -365,7 +316,7 @@ export function useInboxSound(options: {
     // Play is a click: it arms the sound too.
     audio.current?.arm();
     setArmed(true);
-    audio.current?.play(volume ?? settingsRef.current.volume, { create: true });
+    audio.current?.play(volume ?? settingsRef.current.volume, 'question', { create: true });
     setPlaying(true);
     if (playingTimer.current) clearTimeout(playingTimer.current);
     playingTimer.current = setTimeout(() => setPlaying(false), INBOX_SOUND_MS.question);
@@ -386,5 +337,5 @@ export function useInboxSound(options: {
   const setEnabled = useCallback((next: boolean) => save({ enabled: next }), [save]);
   const setVolume = useCallback((next: number) => save({ volume: next }), [save]);
 
-  return { settings, armed, playing, preview, questionsArrived, otherTabInFront, setEnabled, setVolume };
+  return { settings, armed, playing, preview, arrived, otherTabInFront, setEnabled, setVolume };
 }
