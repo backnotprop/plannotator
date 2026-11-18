@@ -104,7 +104,7 @@ interface User {
   moment: (id: RevealId, day: number) => boolean;
   /** The dialogs this person closes with Not now. */
   notNow?: readonly RevealId[];
-  /** Code review was never decided (config.json `inboxCodeReview` unset) and is no longer held: its offer is open. */
+  /** Code review was never decided (config.json `inboxCodeReview` unset) and its offer is shown at all (`CODE_REVIEW_OFFER_SHOWN`, false for now): its offer is open. */
   codeReviewOff?: boolean;
   /** The day the person's third question card is answered (grill-me-tip.ts `revealGrillMeGap`): from then the tip is open. Absent: never. */
   grillMeGap?: number;
@@ -405,6 +405,8 @@ describe("the grill-me tip (the owner: \"Sooner: after 3 answered questions, wha
   });
 });
 
+// Its slot, kept for the day `CODE_REVIEW_OFFER_SHOWN` is true again: for now the server never opens it (the owner chose
+// the switch without the offer, 2026-11-17; packages/server/inbox-reveal.test.ts proves it is never next).
 describe("Code review's offer (approval \"code-review-offer-card\": show up about immediately)", () => {
   test("a new user with Code review off: the offer on day 0, before the agent note, which follows on the next load the same day; the offers keep their slots", () => {
     const shown = simulate({ ...HEAVY, codeReviewOff: true });
@@ -444,7 +446,7 @@ describe("Code review's offer (approval \"code-review-offer-card\": show up abou
     expectSpaced(shown);
   });
 
-  test("Code review decided (on, or switched off by the person) or held: never offered", () => {
+  test("Code review decided (on, or switched off by the person) or the offer not shown: never offered", () => {
     expect(simulate(HEAVY).some((s) => s.id === "code_review")).toBe(false);
   });
 });

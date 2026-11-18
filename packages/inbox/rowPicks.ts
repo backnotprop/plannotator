@@ -45,7 +45,7 @@ export function boxState(ids: readonly string[], picked: ReadonlySet<string>): B
 }
 
 /** What the bar and a picked row's menu do to the picked rows. */
-export type BulkAction = 'archive' | 'snooze' | 'read' | 'unread' | 'star' | 'unstar' | 'priority-add' | 'priority-remove';
+export type BulkAction = 'archive' | 'snooze' | 'read' | 'unread' | 'star' | 'unstar' | 'priority-add' | 'priority-remove' | 'hide-pulls';
 
 /** What a row can take: the menus' own rules (rowMenu.ts), and its machine's (machines.ts). */
 export interface PickRules {
@@ -77,6 +77,9 @@ export function bulkTargets(rows: readonly InboxListRow[], action: BulkAction, r
       case 'priority-add':
       case 'priority-remove':
         return rules.prioritizes(row) && priorityAction(row) === action;
+      case 'hide-pulls':
+        // Rows with open PRs not hidden (`hide_pulls`, this Inbox's own rows only): Hide takes those PRs.
+        return row.resolved_at === null && (row.hide_pulls?.length ?? 0) > 0;
     }
   });
 }

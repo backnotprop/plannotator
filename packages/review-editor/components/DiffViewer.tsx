@@ -1044,8 +1044,8 @@ export const DiffViewer: React.FC<DiffViewerProps> = ({
   // Token interaction handlers (code area clicks)
   const handleTokenClick = useCallback((props: DiffTokenEventBaseProps, event: MouseEvent) => {
     onTokenTarget?.('click', props, filePath);
-    // Alt is an unadvertised alias for the same References-panel path; the
-    // meta/ctrl branch itself is unchanged.
+    // Alt is an unadvertised alias for the same path as Cmd/Ctrl (the host
+    // opens one clear definition at once, else the References panel).
     if ((event.metaKey || event.ctrlKey || event.altKey) && onCodeNavRequest) {
       onCodeNavRequest(buildCodeNavRequest(props, filePath));
       return;

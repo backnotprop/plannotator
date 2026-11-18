@@ -273,6 +273,29 @@ export interface LaunchHost {
    * session (`settleLaunch`) and its own channel delivers it. It writes its own start.log entries.
    */
   start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
+   * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
+   * at its start, as the session id given here (so the root, addressed to it, is its first turn through its own
+   * channel, as for `start`): never the person's message on the command line. `resume`: the same session again (a
+   * reply to one that ended). It writes what the session needs (Claude Code's settings file), or makes the session
+   * first when only the agent's server can (OpenCode: a short server of its own, ended before the tab opens); the
+   * agent itself runs only in the tab. No member: this agent always starts in the background (Codex: a Codex in a tab
+   * never tells the Inbox between turns whether it runs, so its line could not say).
+   */
+  rexCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex: whether a process on this computer runs `session`, by `listing` (`ps -A -o pid=,ppid=,command=`),
+   * for an agent whose running process does not keep its argv (Pi sets `process.title`). No member: its argv names
+   * the session (inbox-rex-resume.ts reads it).
+   */
+  runsSession?(session: string, listing: string): boolean;
+  /**
+   * The processes in `listing` that run `session` (the same check as `runsSession`, as pids), for Stop of an agent in
+   * a Rex pane the Inbox did not open: only ones it is sure are that agent now (a signal goes to each). No member: its
+   * argv names the session (inbox-rex-resume.ts finds them).
+   */
+  sessionPids?(session: string, listing: string): number[] | Promise<number[]>;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */

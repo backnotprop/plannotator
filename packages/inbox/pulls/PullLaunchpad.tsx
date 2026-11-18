@@ -5,7 +5,8 @@
  * Guided review (wide, the primary), The diff, Review thread, Shape board (only while Shape is on) and System (coming,
  * from Workspaces, no button; only while System shows). Shape and System are both off in 0.29, so the page has three
  * doors there. Then the PR's Details (`PullDetails`, laid in the page), and Reply to the agent at the foot. A stack of several PRs keeps the stack page (`PullsPage` `StackView`), which owns
- * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in. No keyboard
+ * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in, and the Review
+ * thread door's Start a thread (the page becomes an empty thread for the PR, `PullThreadStart.tsx`). No keyboard
  * shortcuts of its own.
  */
 import { useId, useRef, type ReactNode, type RefObject } from 'react';
@@ -39,6 +40,12 @@ export interface LaunchpadStart {
   /** The New review box, filled in with this PR; focus comes back to `opener` when it closes. */
   onStart: (opener: HTMLElement) => void;
 }
+
+/** The Review thread door's words with no thread yet, and its Start a thread (`pulls/startThread.ts`). */
+export const THREAD_NONE_YET = 'None yet. Start one, or start a guided review.';
+export const START_THREAD = 'Start a thread';
+/** A thread started here that isn't tied to the PR yet (`threadStarts.ts`): the door offers it. */
+export const THREAD_UNTIED_DOOR = 'A thread started here, but it isn’t tied to this pull request yet.';
 
 function Door({ kind, icon, title, sub, soon, wide, thread, children }: { kind: string; icon: ReactNode; title: string; sub: ReactNode; soon?: boolean; wide?: boolean; thread?: string; children?: ReactNode }) {
   return (
@@ -90,6 +97,54 @@ export function PullPaneBack({ phone, stacked, onClose }: { phone: boolean; stac
   );
 }
 
+/**
+ * The PR's bar: the way back (a phone, a covering pane), the PR's mark, number and repository, Open on GitHub, Close.
+ * The launchpad's, and an empty thread's for the PR (Start a thread, `PullThreadStart`). A phone's bar gives way as a
+ * thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the PR's number and repository (its
+ * subject) lose their room.
+ */
+export function PullBar({ stack, pr, phone, stacked, onClose, onHide }: { stack: InboxPullStack; pr: InboxPull; phone: boolean; stacked: boolean; onClose: () => void; onHide?: () => void }) {
+  const forge = forgeName(stack);
+  const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
+  const bar = useRef<HTMLDivElement>(null);
+  usePhoneHeadFit(bar, phone, [stacked, inboxPullLabel(pr), repo, useInboxTextSize()].join('|'));
+  return (
+    <div ref={bar} className="ib-pr-bar ib-lp-bar">
+      <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
+      <span className="ib-lp-id" data-fit-subject={SUBJECT_FLOOR_PX}>
+        <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
+          <RefMarkIcon kind="pr" state={pr.state} size={15} />
+        </span>
+        <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
+        <Tip cut content={repo}>
+          <span className="ib-lp-repo" dir="auto">
+            {repo}
+          </span>
+        </Tip>
+      </span>
+      <a className="ib-pr-ext" href={pr.url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
+        <Icon name="external" size={15} />
+        {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
+      </a>
+      {onHide && (
+        <Tip content={`Hide from your lists. It stays open on ${forge}.`}>
+          <button type="button" className="ib-pr-ext" onClick={onHide} data-pulls-hide="">
+            <Icon name="eyeOff" size={15} />
+            {phone ? <span className="ib-sr">Hide</span> : 'Hide'}
+          </button>
+        </Tip>
+      )}
+      {!phone && !stacked && (
+        <Tip content="Close">
+          <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
+            <Icon name="x" />
+          </button>
+        </Tip>
+      )}
+    </div>
+  );
+}
+
 export function PullLaunchpad({
   stack,
   pr,
@@ -100,6 +155,8 @@ export function PullLaunchpad({
   now,
   heading,
   start,
+  startThread = null,
+  untiedThread = null,
   shapes,
   system = false,
   risk = null,
@@ -108,6 +165,7 @@ export function PullLaunchpad({
   onThread,
   onGuide,
   onShape,
+  onHide,
   foot,
 }: {
   stack: InboxPullStack;
@@ -122,6 +180,13 @@ export function PullLaunchpad({
   /** The title: it takes focus when the page opens on a phone. */
   heading: RefObject<HTMLHeadingElement | null>;
   start: LaunchpadStart | null;
+  /**
+   * Start a thread (`canStartPullThread`): the page becomes an empty thread for this PR (`PullThreadStart`), no guided
+   * review asked for. Null: none (a thread about the PR already, a closed or merged PR, or no project an agent can take it in).
+   */
+  startThread?: (() => void) | null;
+  /** A thread Start a thread started that isn't tied to the PR yet: the door says so and offers it. */
+  untiedThread?: string | null;
   /** Shape boards by thread; null while Shape is off (no Shape board door then). */
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
   /** System shows (`systemShown`, the Reviews page's `system`): only then the System door. */
@@ -133,6 +198,8 @@ export function PullLaunchpad({
   onThread: (threadId: string) => void;
   onGuide: (threadId: string, messageId: string) => void;
   onShape: (shape: InboxShapeSummary) => void;
+  /** Hide the PR from the lists (hiddenPulls.ts); nothing changes on the forge. Absent: no Hide. */
+  onHide?: () => void;
   foot: ReactNode;
 }) {
   const forge = forgeName(stack);
@@ -146,46 +213,17 @@ export function PullLaunchpad({
   // A guided review is there once the agent's arrives (the stack page's rule, `ThreadLine`).
   const guide = link?.guide?.review ? link.guide : null;
   // The person asked for it (the hand-off) and it has not arrived yet.
-  const onItsWay = !!link && !ended && !guide && link.via === 'owner' && !!link.ask;
+  const onItsWay = !!link && !ended && !guide && link.via === 'owner' && (link.ask === 'guide' || link.ask === 'custom');
   const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
-  const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
   const checks = checksWords(pr);
   // The grid lays itself out by how many doors there are (inbox.css `data-doors`), so no slot is left empty.
   const doors = 3 + (shapes ? 1 : 0) + (system ? 1 : 0);
   const agentMark = <HostMark host={given?.agent?.host ?? null} />;
   // The thread door's thread: the review thread, or the one that only named the PR.
   const named = mentioned ? given : null;
-  // A phone's bar gives way as a thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the
-  // PR's number and repository (its subject) lose their room.
-  const bar = useRef<HTMLDivElement>(null);
-  usePhoneHeadFit(bar, phone, [stacked, inboxPullLabel(pr), repo, useInboxTextSize()].join('|'));
   return (
     <section className="ib-pane ib-prpane ib-lp" aria-labelledby={titleId} data-pulls-stack={stack.id} data-launchpad="">
-      <div ref={bar} className="ib-pr-bar ib-lp-bar">
-        <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
-        <span className="ib-lp-id" data-fit-subject={SUBJECT_FLOOR_PX}>
-          <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
-            <RefMarkIcon kind="pr" state={pr.state} size={15} />
-          </span>
-          <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
-          <Tip cut content={repo}>
-            <span className="ib-lp-repo" dir="auto">
-              {repo}
-            </span>
-          </Tip>
-        </span>
-        <a className="ib-pr-ext" href={pr.url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
-          <Icon name="external" size={15} />
-          {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
-        </a>
-        {!phone && !stacked && (
-          <Tip content="Close">
-            <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
-              <Icon name="x" />
-            </button>
-          </Tip>
-        )}
-      </div>
+      <PullBar stack={stack} pr={pr} phone={phone} stacked={stacked} onClose={onClose} onHide={onHide} />
       <div className="ib-pr-body ib-lp-body">
         <div className="ib-lp-wrap">
           <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">
@@ -315,11 +353,27 @@ export function PullLaunchpad({
                       !ended && <>{'\u00a0· '}No answer yet</>
                     )}
                   </>
+                ) : untiedThread ? (
+                  <>{THREAD_UNTIED_DOOR}</>
+                ) : startThread ? (
+                  <>{THREAD_NONE_YET}</>
                 ) : (
                   <>None yet. Starting a guided review starts one.</>
                 )
               }
             >
+              {startThread && !link && !named && (
+                <div className="ib-lp-go">
+                  {untiedThread && (
+                    <button type="button" className="ib-btn" onClick={() => onThread(untiedThread)} data-launch-go="untied-thread">
+                      Open the thread
+                    </button>
+                  )}
+                  <button type="button" className="ib-btn" onClick={startThread} data-launch-go="start-thread">
+                    {START_THREAD}
+                  </button>
+                </div>
+              )}
               {link && (
                 <div className="ib-lp-go">
                   <button type="button" className="ib-btn" onClick={() => onThread(link.thread_id)} data-launch-go="thread">

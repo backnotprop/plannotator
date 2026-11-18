@@ -339,8 +339,14 @@ export function hostHasMark(host: string | null | undefined): boolean {
 }
 
 /** The mark for an agent host: the real brand marks for the hosts ui carries, a neutral glyph otherwise. */
-export function HostMark({ host, big }: { host: string | null | undefined; big?: boolean }) {
-  return <span className={`ib-mk${big ? ' ib-big' : ''}`}>{ownMark(host) ?? <Icon name="code" />}</span>;
+/** `children`: drawn inside the mark's box after it (the Inbox's Rex status mark on its corner). */
+export function HostMark({ host, big, children }: { host: string | null | undefined; big?: boolean; children?: React.ReactNode }) {
+  return (
+    <span className={`ib-mk${big ? ' ib-big' : ''}`}>
+      {ownMark(host) ?? <Icon name="code" />}
+      {children}
+    </span>
+  );
 }
 
 export function AuthorMark({ author, big }: { author: InboxAuthor | null | undefined; big?: boolean }) {

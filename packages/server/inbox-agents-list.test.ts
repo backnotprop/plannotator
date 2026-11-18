@@ -121,6 +121,16 @@ describe("who is listed, and how", () => {
     expect(byId("lch_starting")).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
   });
 
+  test("a launch the person stopped reads idle at once, though its session's last poll still said busy", () => {
+    const launch = (id: string, run: InboxAgentsEvidence["launches"][number]["run"]) => ({ launch_id: id, session: `ses-${id}`, thread_id: `msg_${id}`, host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", started: true, run, scratch: null });
+    const busy = (session: string) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live: true, busy: true, label: null });
+    const group = inboxAgentsGroup(evidence({ sessions: [busy("ses-lch_stopped"), busy("ses-lch_running")], launches: [launch("lch_stopped", "stopped"), launch("lch_running", null)] }));
+    expect(group.agents.map((agent) => [agent.id, agent.state]).sort()).toEqual([
+      ["lch_running", "working"],
+      ["lch_stopped", "idle"],
+    ]);
+  });
+
   test("a routine is one agent, its newest run's; an earlier run's session only while it is live; other launches as before", () => {
     const run = (id: string, day: number, session: string, thread = "msg_digest") => ({ launch_id: id, session, thread_id: thread, host: "claude-code", project_id: "prj_ledger", started_at: `2026-11-0${day}T07:16:00.000Z`, started: true, run: "stopped" as const, scratch: null, scheduled: true });
     const ended = (session: string, live = false) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live, busy: null, label: null });
@@ -496,6 +506,16 @@ describe("linked machines", () => {
     const group = inboxPeerAgentsGroup([{ agents: [{ id: "a", session: "a", state: "idle" }, { id: "b", state: "idle" }, null, { id: "c", session: "c", state: "dancing" }], total: -1 }], "ibx_far") as InboxAgentsGroup;
     expect(group.agents.map((agent) => agent.id)).toEqual(["a"]);
     expect(group).toMatchObject({ machine: "ibx_far", total: 1, ended_today: 0 });
+  });
+
+  test("another machine's agent keeps where it lives in that machine's Rex, its pane's status and mark, but never Show in Rex (that machine's screen)", () => {
+    const sent = { id: "a", session: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y", show: true }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } };
+    const [agent] = inboxPeerAgentsGroup([{ agents: [sent] }], "ibx_far")!.agents;
+    expect(agent).toMatchObject({ id: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y" }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } });
+    expect(agent!.place?.show).toBeUndefined();
+    // A malformed one is dropped, as any field that does not parse.
+    const [odd] = inboxPeerAgentsGroup([{ agents: [{ ...sent, place: { kind: "elsewhere", line: 3 }, rex_mark: { state: "dancing" } }] }], "ibx_far")!.agents;
+    expect([odd!.place, odd!.rex_mark]).toEqual([undefined, undefined]);
   });
 
   test("a machine keeps a tile choice only when its list says so: an older Inbox's group never claims it", () => {

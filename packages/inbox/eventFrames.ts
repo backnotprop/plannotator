@@ -20,7 +20,7 @@ export interface InboxEventWindow {
   origin: string;
 }
 
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'pulls-hidden', 'priority', 'artifact-pins', 'tags', 'show', 'snoozes', 'thread-pulls', 'rows', 'sidebar', 'show-archived', 'agent-faces', 'reactions', 'capabilities', 'tailscale', 'shapes', 'machine', 'machines', 'cards', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -37,6 +37,8 @@ export interface InboxEventHandlers {
   onDrafts?: (threadId: string | null) => void;
   onAsk?: (threadId: string) => void;
   onPins?: () => void;
+  /** Hidden PRs changed (the server's inbox-pull-hidden.ts): the list, Reviews and the board read again. */
+  onPullsHidden?: () => void;
   onPriority?: () => void;
   onArtifactPins?: () => void;
   onTags?: () => void;
@@ -106,6 +108,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
     }
     case 'pins':
       handlers.onPins?.();
+      return;
+    case 'pulls-hidden':
+      handlers.onPullsHidden?.();
       return;
     case 'priority':
       handlers.onPriority?.();

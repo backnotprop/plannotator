@@ -18,7 +18,7 @@ import type { SettingValue } from '@plannotator/ui/config';
 import type { InboxDiffOptions } from './api';
 
 /** The settings the Inbox shows and saves. */
-export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffExpandUnchanged' | 'diffHideWhitespace' | 'diffSemantic' | 'diffMinimap'>;
+export type InboxDiffSetting = 'diffStyle' | Exclude<DiffDisplaySetting, 'diffExpandUnchanged' | 'diffHideWhitespace' | 'diffMinimap'>;
 type WireKey = keyof InboxDiffOptions;
 
 /** Each setting's name on the wire, and its field in config.json `diffOptions` (what the config store's sync payload carries). */
@@ -31,6 +31,7 @@ const FIELDS: Record<InboxDiffSetting, { wire: WireKey; config: string }> = {
   diffShowBackground: { wire: 'background', config: 'showDiffBackground' },
   diffLineBgIntensity: { wire: 'background_intensity', config: 'lineBgIntensity' },
   diffTabSize: { wire: 'tab_size', config: 'tabSize' },
+  diffSemantic: { wire: 'semantic', config: 'semantic' },
 };
 const SETTINGS = Object.keys(FIELDS) as InboxDiffSetting[];
 
