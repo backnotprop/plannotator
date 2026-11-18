@@ -88,8 +88,14 @@ function makeTempDir(prefix: string): string {
   return dir;
 }
 
+/**
+ * Git in these tests reads only the repository's config and the test's own,
+ * never the developer's (a global signing program would fail or prompt).
+ */
+const TEST_GIT_ENV: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+
 function git(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf-8" });
+  const result = spawnSync("git", args, { cwd, encoding: "utf-8", env: TEST_GIT_ENV });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
@@ -104,6 +110,7 @@ function makeRuntime(baseCwd: string): ReviewGitRuntime {
         encoding: "utf-8",
         maxBuffer: MAX_REVIEW_FILE_CONTENT_BYTES * 4,
         input: options?.stdin,
+        env: TEST_GIT_ENV,
       });
 
       return {
@@ -166,13 +173,13 @@ function makeConfigForwardingRuntime(
     async runGit(args: string[], options?: GitCommandOptions) {
       const intercepted = intercept?.(args);
       if (intercepted) return intercepted;
-      const command = prepareGitCommand(args, options, process.env);
+      const command = prepareGitCommand(args, options, TEST_GIT_ENV);
       const result = spawnSync("git", command.args, {
         cwd: options?.cwd ?? baseCwd,
         encoding: "utf-8",
         maxBuffer: MAX_REVIEW_FILE_CONTENT_BYTES * 4,
         input: options?.stdin,
-        env: command.env as NodeJS.ProcessEnv | undefined,
+        env: (command.env as NodeJS.ProcessEnv | undefined) ?? TEST_GIT_ENV,
       });
       return {
         stdout: result.stdout ?? "",
@@ -415,8 +422,8 @@ describe("review-core", () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
     writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 10, 1));
-    spawnSync("git", ["add", "photo.png"], { cwd: repoDir });
-    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "photo"], { cwd: repoDir });
+    spawnSync("git", ["add", "photo.png"], { cwd: repoDir, env: TEST_GIT_ENV });
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "photo"], { cwd: repoDir, env: TEST_GIT_ENV });
     writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 20, 2));
 
     const result = await runGitDiff(runtime, "uncommitted", "main");
@@ -637,10 +644,12 @@ describe("review-core", () => {
     const key = join(keyDir, "key");
     const made = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "review-core", "-f", key]);
     if (made.status !== 0) throw new Error(String(made.stderr));
+    // Signed and checked by ssh-keygen with this throwaway key only (every git call here leaves out the developer's config).
     git(repoDir, ["config", "gpg.format", "ssh"]);
+    git(repoDir, ["config", "gpg.ssh.program", "ssh-keygen"]);
     git(repoDir, ["config", "user.signingkey", key]);
     writeFileSync(join(repoDir, "tracked.txt"), "signed\n", "utf-8");
-    git(repoDir, ["commit", "-q", "-S", "-am", "signed change"]);
+    git(repoDir, ["-c", "gpg.ssh.program=ssh-keygen", "commit", "-q", "-S", "-am", "signed change"]);
     const sha = git(repoDir, ["rev-parse", "HEAD"]);
     const shortSha = git(repoDir, ["rev-parse", "--short", "HEAD"]);
     // With it on, log and show print a signature check ("No signature", "Good ... signature") before the fields.
