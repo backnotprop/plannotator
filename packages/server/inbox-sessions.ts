@@ -1212,15 +1212,6 @@ export function createInboxLiveSessions(options: {
    */
   const claudeRowFix = (fix: string | undefined): boolean => fix === "restart" || fix === "update_plugin";
 
-  /** Live Claude Code sessions the sidebar's "Reload Claude Code N" counts (claudeRowFix). */
-  const restartCount = (): number => {
-    let count = 0;
-    for (const entry of sessions.values()) {
-      if (entry.host === "claude-code" && isLive(entry) && claudeRowFix(outdatedOf(entry)?.fix)) count += 1;
-    }
-    return count;
-  };
-
   /**
    * Live sessions the sidebar's row counts, per runtime (owner approval
    * "reload-hosts"): Claude Code's `restart` and `update_plugin` (its plugin
@@ -1307,11 +1298,17 @@ export function createInboxLiveSessions(options: {
           return label ? { ...session, label } : session;
         }),
       };
-      const asker = new URL(req.url).searchParams.get("asker");
-      const recipients = (new URL(req.url).searchParams.get("recipients") ?? "")
-        .split(",")
-        .map((session) => session.trim())
-        .filter((session) => session !== "");
+      const { searchParams } = new URL(req.url);
+      const asker = searchParams.get("asker");
+      const askerConnection = asker ? connectionOf(asker) : null;
+      // A connection may inspect the filesystem to judge whether it needs a restart.
+      // Read each session once, including when it is both the asker and a recipient.
+      const recipients = new Set(
+        (searchParams.get("recipients") ?? "")
+          .split(",")
+          .map((session) => session.trim())
+          .filter((session) => session !== ""),
+      );
       return answer({
         serverSession,
         home: homedir(),
@@ -1319,9 +1316,9 @@ export function createInboxLiveSessions(options: {
         sessions: live.sessions,
         // `connection` (additive): how that session is connected now, for the line under the person's message ("Queued", "Sending", Send now).
         // `stuck` (additive, absent when none): its items that session claimed and will never deliver.
-        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: connectionOf(asker), ...stuckField(sessionsMatch[1]!, asker) } } : {}),
+        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: askerConnection, ...stuckField(sessionsMatch[1]!, asker) } } : {}),
         // `recipients` (additive, "inbox-tag-agents"): how each session a reply tags is connected now, for its own line.
-        ...(recipients.length > 0 ? { recipients: Object.fromEntries(recipients.map((session) => [session, connectionOf(session)])) } : {}),
+        ...(recipients.size > 0 ? { recipients: Object.fromEntries([...recipients].map((session) => [session, session === asker ? askerConnection : connectionOf(session)])) } : {}),
       });
     }
     const sendNowMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/send-now$/.exec(path);
@@ -1470,7 +1467,6 @@ export function createInboxLiveSessions(options: {
     hostSessions,
     reloadOfferFor,
     reloadAnswerFor,
-    restartCount,
     restartAgents,
     mcpAgents,
     tagTargets,

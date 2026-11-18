@@ -108,6 +108,7 @@ import {
   type InboxMessage,
   type InboxProject,
   type InboxProjectRepo,
+  type InboxRestartAgents,
   type InboxTag,
   inboxStepsProgress,
 } from "@plannotator/core/inbox-types";
@@ -343,7 +344,7 @@ import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullSafeBranch, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
-import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull } from "@plannotator/core/inbox-types";
+import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { createInboxBranchService } from "./inbox-branch-service";
@@ -1290,7 +1291,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let port = 0;
   let baseUrl = "";
   let portChanged = false;
-  const statusListeners = new Set<() => void>();
+  const statusListeners = new Set<(restartAgents: InboxRestartAgents) => void>();
   /**
    * A reply draft was saved or deleted (inbox-reply-drafts.ts), or a compose draft saved, deleted or sent
    * (inbox-compose.ts, no thread: null): the windows' streams say `event: drafts`.
@@ -1362,7 +1363,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     installerPath: () => (launchReady ? launch.loginPath() : []),
     ...options.updates,
     onChange: () => {
-      for (const listener of statusListeners) listener();
+      if (statusListeners.size === 0) return;
+      const restartAgents = live.restartAgents();
+      for (const listener of statusListeners) listener(restartAgents);
     },
     onRestartWanted: () => requestRestart(),
   });
@@ -1588,15 +1591,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
   // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
   // listed again and a new review can start. Unarchived, it owns the PR again, unless the PR was handed on since.
-  const pullOwnersNow = () => {
+  /**
+   * Which threads may own a PR now: not one whose first message the person took back (it is a draft again, and no
+   * thread: a root is taken back only while it is the thread's only message), and not archived unless it holds a
+   * review (archiving frees the PR).
+   */
+  const pullOwnable = () => {
     const reviewed = new Set(reviewIndex.threads().map((thread) => thread.thread_id));
-    return new Map(
-      [...pullOwners.all()].filter(([, owner]) => {
-        if (reviewed.has(owner.thread_id)) return true;
-        const row = store.listRow(owner.thread_id);
-        return !row || !inboxRowArchived(row);
-      }),
-    );
+    return (threadId: string) => {
+      if (store.message(threadId)?.taken_back_at) return false;
+      if (reviewed.has(threadId)) return true;
+      const row = store.listRow(threadId);
+      return !row || !inboxRowArchived(row);
+    };
+  };
+  const pullOwnersNow = () => {
+    const ownable = pullOwnable();
+    return new Map([...pullOwners.all()].filter(([, owner]) => ownable(owner.thread_id)));
   };
   const pullStates = createInboxPullStates({ run: options.refRunner, onLand: (record, forget) => pullOwners.land(record, forget) });
   const pullLinkStore: InboxPullLinkStore = {
@@ -1611,6 +1622,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
     sessionLive: (session) => live.isSessionLive(session),
     launchDead: (threadId) => launch.didNotStart(threadId),
+    // A thread started from a PR's page is found by the same rule a hand-off's owner is kept by.
+    ownable: () => pullOwnable(),
   };
   // The folders of this computer's clones of a PR's repository.
   const pullRoots = async (key: string): Promise<string[]> => {
@@ -1932,6 +1945,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return rest;
   };
 
+  // Both fields describe the same sessions. The old Claude-only field reads
+  // from this response's snapshot so it never rechecks the plugin folders.
+  const restartStatus = (agents = live.restartAgents()) => ({
+    restart_claude_code: agents.runtimes["claude-code"] ?? 0,
+    restart_agents: agents,
+  });
+
   /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
@@ -2050,10 +2070,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       update: updates.current(),
       /** This Inbox started on a newer version than the last one: the sidebar's "What's new in X" link. */
       updated: updates.updated(),
-      /** Claude Code sessions a restart would bring up to date (inbox-restart.ts): the sidebar's "Reload Claude Code N". Additive. */
-      restart_claude_code: live.restartCount(),
-      /** Every runtime's sessions a reload brings up to date (Claude Code, Pi, Oh My Pi, OpenCode 2): "Reload agents N". Additive. */
-      restart_agents: live.restartAgents(),
+      ...restartStatus(),
       /** Checking for updates has failed for hours: the sidebar's quiet "Can't check for updates". Additive. */
       update_check_failing: updates.checkFailing(),
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
@@ -4084,9 +4101,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const unsubscribe = store.subscribe(sendLine);
         // `updated` (additive): the "What's new in X" link appears or goes once its notes are fetched or cannot be.
         // `restart_claude_code` (additive): the sidebar's "Reload Claude Code N" follows the sessions as they restart.
-        const onStatus = () =>
+        const onStatus = (restartAgents: InboxRestartAgents) =>
           send(
-            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), restart_claude_code: live.restartCount(), restart_agents: live.restartAgents(), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
+            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), ...restartStatus(restartAgents), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
           );
         statusListeners.add(onStatus);
         // An Inbox window (not the phone's door): counted while its stream is open, with what it reported.
@@ -4871,10 +4888,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The sidebar's "Reload Claude Code N" is pushed as it changes (a session restarts, goes away, or an update lands).
   let lastRestartCount = "";
   const restartWatch = setInterval(() => syncSection("timer:restart", () => {
-    const count = JSON.stringify(live.restartAgents());
+    const restartAgents = live.restartAgents();
+    const count = JSON.stringify(restartAgents);
     if (count === lastRestartCount) return;
     lastRestartCount = count;
-    for (const listener of statusListeners) listener();
+    for (const listener of statusListeners) listener(restartAgents);
   }), INBOX_RESTART_WATCH_MS);
   (restartWatch as { unref?: () => void }).unref?.();
 
@@ -5109,6 +5127,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (refs.length > 0) store.changeThreadPulls({ thread_id: threadId, add: refs, by: { kind: "person" } });
     } catch {
       // The hand-off stands without the coupling.
+    }
+  };
+  /**
+   * A thread started from a PR's page that the window never tied (a list found it by its first message,
+   * `linkInboxPulls`): kept as the PR's owner now, as the tie would have, with the same coupling (`theirs`, the
+   * thread's PR list, `pull_keys`), so its reviews follow that PR's rules (no verdict on a teammate's PR).
+   */
+  const adoptStartedThreads = (listed: readonly InboxPull[], links: Readonly<Record<string, InboxPullLink>>, owners: ReadonlyMap<string, unknown>) => {
+    const byThread = new Map<string, InboxPull[]>();
+    for (const pull of listed) {
+      const link = links[pull.key];
+      if (!link || link.via !== "owner" || link.ask !== "thread" || owners.has(pull.key)) continue;
+      byThread.set(link.thread_id, [...(byThread.get(link.thread_id) ?? []), pull]);
+    }
+    for (const [threadId, found] of byThread) {
+      const keys = found.map((pull) => pull.key);
+      pullOwners.set(keys, threadId, { ask: "thread", theirs: found.every((pull) => !pull.mine) });
+      couplePulls(keys, threadId);
     }
   };
   // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
@@ -6085,7 +6121,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]));
+        const owners = new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]);
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, owners);
+        adoptStartedThreads(listed.pulls, links, owners);
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         // Hidden PRs leave the window's lists (a linked machine reading this board gets them all: its window hides by its own).
@@ -6127,6 +6165,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const byWindow = fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM;
         if (!cached && pullHidden.settle(listed.pulls)) pullHiddenChanged();
         if (!cached) notePullThreads(listed.pulls, links);
+        if (!cached) adoptStartedThreads(listed.pulls, links, owners);
         const shownPulls = byWindow ? pullHidden.shown(listed.pulls) : listed.pulls;
         const hiddenKeys = byWindow ? listed.pulls.filter((pull) => pullHidden.has(pull.key)).map((pull) => pull.key) : [];
         const stacks = inboxPullStacks(shownPulls);
@@ -6293,9 +6332,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
           }
         }
-        if (validateOnly) return json({ serverSession, ok: true });
-        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom") throw new InboxError("validation_error", "ask: guide or custom.", { field: "ask" });
-        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | undefined) ?? null, theirs });
+        // Already given to a thread (another window's Start a thread, a hand-off): which, so that window opens it, not a second.
+        // Its own thread as the list links it: a hand-off's, or a thread started from the PR's page and not tied yet.
+        if (validateOnly) {
+          const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
+          return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
+        }
+        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
+        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
         couplePulls(keys as string[], threadId);
         return json({ serverSession, ok: true });
       }
