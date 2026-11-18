@@ -36,30 +36,79 @@ export async function inboxProcessListing(): Promise<string | null> {
 }
 
 /**
+ * When process `pid` started (ms, at most a second early: `ps` gives its elapsed time in whole seconds), or null
+ * when `ps` could not tell (no such process, no `ps`).
+ */
+export async function inboxProcessStartedAt(pid: number, now: () => number = Date.now): Promise<number | null> {
+  try {
+    const ps = Bun.spawn(["/bin/ps", "-o", "etime=", "-p", String(pid)], { env: { PATH: "/usr/bin:/bin" }, stdin: "ignore", stdout: "pipe", stderr: "ignore", windowsHide: true });
+    const [text, code] = await Promise.all([new Response(ps.stdout).text(), ps.exited]);
+    // `[[dd-]hh:]mm:ss`
+    const m = code === 0 ? /^\s*(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)\s*$/.exec(text) : null;
+    if (!m) return null;
+    const seconds = ((Number(m[1] ?? 0) * 24 + Number(m[2] ?? 0)) * 60 + Number(m[3])) * 60 + Number(m[4]);
+    return now() - seconds * 1000 - 1000;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Whether `listing` has a process whose command line names `session` as the one it starts or resumes: Claude Code's
  * and Pi's `--session-id <id>` or `--resume <id>`, OpenCode's `--session <id>`.
  */
 export function inboxListingRunsSession(listing: string, session: string): boolean {
-  return inboxListingSessionPids(listing, session).length > 0;
+  return listingNamesSession(listing, session);
+}
+
+/** The rows of `listing` (`pid ppid command`) whose command line names `session`, by pid: its parent and command. */
+function sessionRows(listing: string, session: string): Map<number, { ppid: number; command: string }> {
+  const found = new Map<number, { ppid: number; command: string }>();
+  // Claude Code's and Pi's ids are UUIDs, OpenCode's `ses_<alnum>`: only those characters, never a pattern.
+  const id = session.replace(/[^0-9A-Za-z_-]/g, "");
+  if (!id) return found;
+  // Quoted (the tab's `sh -c`) or not (the agent's own argv), and never a longer id that starts the same.
+  const names = new RegExp(`(?:--session-id|--session|--resume)\\s+'?${id}(?![0-9A-Za-z_-])`, "i");
+  for (const line of listing.split("\n")) {
+    const row = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (row && names.test(row[3]!)) found.set(Number(row[1]), { ppid: Number(row[2]), command: row[3]! });
+  }
+  return found;
+}
+
+/** The agents' own programs, by the basename of a command's first word (or of a script `node` or `bun` runs). */
+const AGENT_PROGRAMS = new Set(["claude", "pi", "opencode", "opencode2"]);
+
+/** Whether `command` runs an agent itself, not a shell or wrapper (`sh -c`, `tmux`, `env`) with the agent's argv in it. */
+export function inboxCommandIsAgent(command: string, programs: readonly string[] = []): boolean {
+  const words = command.trim().split(/\s+/);
+  const base = (word: string | undefined) => (word ?? "").split("/").pop()!.toLowerCase();
+  const known = (name: string) => AGENT_PROGRAMS.has(name) || programs.includes(name);
+  // Claude Code's installed binary is its version file (`…/claude/versions/2.1.327`).
+  if (/\/claude\/versions\/[^/]+$/.test(words[0] ?? "")) return true;
+  if (known(base(words[0]))) return true;
+  return (base(words[0]) === "node" || base(words[0]) === "bun") && known(base(words[1]).replace(/\.(c|m)?js$/, ""));
 }
 
 /**
- * The processes in `listing` (`pid ppid command` rows) whose command line names `session`, without one whose child
- * names it too: the agent itself, never a shell or wrapper it runs under (a `sh -c '… claude --resume <id>'` keeps
- * its pane's shell). Stop ends these when the agent is not in the pane the Inbox had Rex make for it.
+ * The agent processes in `listing` (`pid ppid command` rows) whose command line names `session`: the agent's own
+ * program (`inboxCommandIsAgent`), never a shell or wrapper with its argv (a `sh -c '… claude --resume <id>'`, a
+ * `tmux new 'claude …'` client), and none whose child is that agent too. `wrapped`: such a wrapper names it while no
+ * agent program does (the agent runs where `ps` cannot tell, so Stop must not say it stopped). Stop ends `agents`
+ * when the agent is not in the pane the Inbox had Rex make for it. `programs`: more names the agent's program goes by
+ * (the engine passes its host's own name, as a test's fake agent is named).
  */
-export function inboxListingSessionPids(listing: string, session: string): number[] {
-  const id = session.replace(/[^0-9A-Za-z-]/g, "");
-  if (!id) return [];
-  // Quoted (the tab's `sh -c`) or not (the agent's own argv), and never a longer id that starts the same.
-  const names = new RegExp(`(?:--session-id|--session|--resume)\\s+'?${id}(?![0-9A-Za-z-])`, "i");
-  const found = new Map<number, number>();
-  for (const line of listing.split("\n")) {
-    const row = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
-    if (row && names.test(row[3]!)) found.set(Number(row[1]), Number(row[2]));
-  }
-  const parents = new Set(found.values());
-  return [...found.keys()].filter((pid) => !parents.has(pid));
+export function inboxListingSessionAgents(listing: string, session: string, programs: readonly string[] = []): { agents: number[]; wrapped: boolean } {
+  const rows = sessionRows(listing, session);
+  const agentRows = [...rows].filter(([, row]) => inboxCommandIsAgent(row.command, programs));
+  const parents = new Set(agentRows.map(([, row]) => row.ppid));
+  const agents = agentRows.map(([pid]) => pid).filter((pid) => !parents.has(pid));
+  return { agents, wrapped: agents.length === 0 && rows.size > 0 };
+}
+
+/** Whether any process in `listing` names `session` (an agent, or a shell or wrapper about to run or running it). */
+function listingNamesSession(listing: string, session: string): boolean {
+  return sessionRows(listing, session).size > 0;
 }
 
 /**

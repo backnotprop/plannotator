@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
-import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_MARK_STALE_MS, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
+import { createInboxRex, inboxAppBundleOf, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_MARK_STALE_MS, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 
 /** Every method the Inbox may call: view (ids and labels), status records (`block.method` `program_status` only), a new session or tab with its command, focus, Stop's close of a pane. */
@@ -291,6 +291,13 @@ describe("Show in Rex", () => {
     expect(select.payload.action).toBe("session.select");
     expect(select.payload.args).toEqual({ session_id: ids.session, window_id: ids.window });
     expect(fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
+  });
+
+  test("the app brought to the front is the outermost bundle of its executable, never a helper app inside it", () => {
+    expect(inboxAppBundleOf("/Applications/Rex Beta.app/Contents/MacOS/Rex")).toBe("/Applications/Rex Beta.app");
+    expect(inboxAppBundleOf("/Applications/Rex.app/Contents/Frameworks/Rex Helper.app/Contents/MacOS/Rex Helper")).toBe("/Applications/Rex.app");
+    expect(inboxAppBundleOf("/usr/local/bin/rex")).toBeNull();
+    expect(inboxAppBundleOf("Rex.app/Contents/MacOS/Rex")).toBeNull();
   });
 
   test("Rex's app comes to the front once it went to the pane (by its process id); never when it did not go there", async () => {

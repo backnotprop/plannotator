@@ -4992,11 +4992,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     return hints;
   };
-  /**
-   * Where a session runs in Rex: the place its connection reports (Claude Code's), else, for one the Inbox started in
-   * Rex, the pane Rex made for it (Pi and OpenCode report none): while it is live, or before it connected (a prompt
-   * in its tab, such as the agent's own trust question, shows then too; Rex confirms the pane is still there).
-   */
   /** The engine's not-yet-connected Rex sessions (`rexUnconnected`), less any whose connection was heard since its start. */
   const rexUnconnectedNow = (): Set<string> => {
     const out = new Set<string>();
@@ -5006,6 +5001,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     return out;
   };
+  /**
+   * Where a session runs in Rex: the place its connection reports (Claude Code's), else, for one the Inbox started in
+   * Rex, the pane Rex made for it (Pi and OpenCode report none): while it is live, or before it connected (a prompt
+   * in its tab, such as the agent's own trust question, shows then too; Rex confirms the pane is still there).
+   */
   const rexPlaceOf = (session: string, inRex: ReadonlyMap<string, InboxPlace | null> | null, unconnected: ReadonlySet<string>): InboxPlace | null =>
     live.placeOf(session) ?? (live.isSessionLive(session) || unconnected.has(session) ? (inRex?.get(session) ?? null) : null);
   /**

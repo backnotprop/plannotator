@@ -278,6 +278,8 @@ test.skipIf(!hasDom)("a reply waiting on a Rex session that may still run: the l
     expect(stopped(held)).not.toContain('Your reply starts it again.');
     expect(stopped(held)).toContain('Your reply waits');
   }
+  // The process found may be one the person resumed in another pane or terminal: never placed in its own tab.
+  expect(stopped('still_runs')).not.toContain('in its tab');
   const why = "It's still running in its tab in Rex. Look there.";
   globalThis.fetch = (async () => Response.json({ error: why, code: 'launch_in_rex' }, { status: 409 })) as unknown as typeof fetch;
   const failed = draw({ state: 'failed', rex: { line: LINE }, cause: 'Its tab' });

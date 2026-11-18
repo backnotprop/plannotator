@@ -1313,7 +1313,7 @@ export interface InboxRun {
    */
   /**
    * `held`: a reply waits to start it again, as its old process may still run (`may_run`: the Inbox just started and
-   * has not heard from it yet) or still does (`still_runs`: a process runs that session). `stops``stops`: the Inbox knows its own
+   * has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own
    * pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
    */
   rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs"; stops?: true };

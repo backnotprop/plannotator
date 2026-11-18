@@ -49,13 +49,14 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { childEnv } from "@plannotator/shared/child-env";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
-import { readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
+import { piSessionClaimFileOf, readPiSessionClaims, type PiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
 import { agentVersionRun, createAgentEnvironmentFor } from "./inbox-agents";
+import { inboxProcessStartedAt } from "./inbox-rex-resume";
 import { launchChoiceArgs, parsePiChoices } from "@plannotator/core/inbox-launch-choice";
 import { LAUNCH_CHOICES_RUN_MS, launchChoiceCache } from "./inbox-launch-choice";
 import { shellQuote, versionAtLeast } from "./inbox-launch-claude";
@@ -764,8 +765,31 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       return piRexPids(session, listing).length > 0;
     },
 
-    sessionPids(session: string, listing: string) {
-      return piRexPids(session, listing);
+    /**
+     * The Pis Stop signals: one whose argv names the session, or one by its claim only while that claim is from this
+     * process's own life (written after it started). A pid another Pi reused, under a claim a Pi that died left, never.
+     */
+    async sessionPids(session: string, listing: string) {
+      const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
+      const byArgv = new Set(piSessionProcesses(listing, session, own, []).map((found) => found.pid));
+      const claims = readPiSessionClaims(ctx.dataDir);
+      const out: number[] = [];
+      for (const pid of piRexPids(session, listing)) {
+        if (byArgv.has(pid)) {
+          out.push(pid);
+          continue;
+        }
+        const claim = claims.find((c) => c.pid === pid && c.session.toLowerCase() === session.toLowerCase());
+        let written: number | null = null;
+        try {
+          written = claim ? statSync(piSessionClaimFileOf(ctx.dataDir, claim.session, claim.pid)).mtimeMs : null;
+        } catch {
+          written = null;
+        }
+        const started = written === null ? null : await inboxProcessStartedAt(pid);
+        if (written !== null && started !== null && started <= written + 1000) out.push(pid);
+      }
+      return out;
     },
 
     async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {

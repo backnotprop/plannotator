@@ -175,6 +175,14 @@ export interface InboxRexOptions {
 }
 
 /**
+ * The `.app` bundle that holds an executable (an absolute path), or null: the outermost one, so a helper app inside
+ * the main one (`Rex.app/Contents/Frameworks/Rex Helper.app/…`) is never what `open -a` gets.
+ */
+export function inboxAppBundleOf(executable: string): string | null {
+  return /^(\/[^\n]*?\.app)\/Contents\//.exec(executable)?.[1] ?? null;
+}
+
+/**
  * Bring a Mac app to the front by its process id: the `.app` that holds its executable, opened with `open -a` (which
  * only activates an app that runs). Best effort and in the background; nothing on other systems.
  */
@@ -184,7 +192,7 @@ export function inboxRaiseApp(pid: number, platform: NodeJS.Platform = process.p
     try {
       const ps = Bun.spawn(["/bin/ps", "-o", "comm=", "-p", String(pid)], { env: process.env, stdout: "pipe", stderr: "ignore", stdin: "ignore", windowsHide: true });
       const executable = (await new Response(ps.stdout).text()).trim();
-      const app = /^(\/.+?\.app)\/Contents\/MacOS\//.exec(executable)?.[1];
+      const app = inboxAppBundleOf(executable);
       if (!app) return;
       Bun.spawn(["/usr/bin/open", "-a", app], { env: process.env, stdout: "ignore", stderr: "ignore", stdin: "ignore", windowsHide: true });
     } catch {
@@ -216,7 +224,7 @@ export function createInboxRex(options: InboxRexOptions) {
   const showTimeout = options.showTimeoutMs ?? INBOX_REX_SHOW_TIMEOUT_MS;
   const showRefused = options.showRefusedMs ?? INBOX_REX_SHOW_REFUSED_MS;
   const raiseApp = options.raiseApp ?? ((pid: number) => inboxRaiseApp(pid));
-  const kept =sessionsKept(options.sessionsFile ?? null);
+  const kept = sessionsKept(options.sessionsFile ?? null);
   const socketPath = () => (options.socketPath && inboxRexSocketOk(options.socketPath, uid) ? options.socketPath : null);
 
   /** No asking before this (a Rex that did not answer in time). */

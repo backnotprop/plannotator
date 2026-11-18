@@ -39,8 +39,8 @@ export const INBOX_TURN_FAILED_WORDS = "couldn't answer";
 export const INBOX_RUN_REX_NOT_CONNECTED = "Look at its tab there.";
 /** Try again on a Rex session the Inbox may not have heard from yet since it started (its connection retries every minute at most). */
 export const INBOX_REX_MAY_RUN = "It may still be running in Rex. Try again in a minute.";
-/** Try again, or a reply's restart, on a Rex session whose process still runs (its tab has it): nothing starts beside it. */
-export const INBOX_REX_STILL_RUNS = "It's still running in its tab in Rex. Look there.";
+/** Try again, or a reply's restart, on a Rex session whose process still runs (its tab, or wherever it was resumed): nothing starts beside it. */
+export const INBOX_REX_STILL_RUNS = "It's still running, so it can't start again yet.";
 /** Stop of a session that runs in Rex when Rex said no to closing its pane. */
 export const INBOX_RUN_IN_REX_STOP = "Rex didn't close its tab. Stop it in its tab there.";
 /** Stop of a session that runs in Rex when Rex did not answer in time (it may still close it). */
@@ -49,6 +49,8 @@ export const INBOX_RUN_IN_REX_NO_ANSWER = "Rex didn't answer. Stop it in its tab
 export const INBOX_RUN_IN_REX_NO_TAB = "The Inbox doesn't know its tab in Rex. Stop it in its tab there.";
 /** Stop of a session in a Rex pane the Inbox did not open, when its process could not be found: nothing was closed. */
 export const INBOX_RUN_IN_REX_ELSEWHERE = "It runs in a tab the Inbox didn't open. Stop it there.";
+/** Stop of an agent in Rex whose process could not be found or ended (`ps` unread, a wrapper only, the signal refused). */
+export const INBOX_RUN_IN_REX_COULDNT = "Couldn't stop it. Stop it in its tab.";
 /** A reply to a session that ran in Rex, while Rex is not on this computer: the failed line's cause. */
 export const INBOX_REX_NOT_HERE_AGAIN = "Rex isn't open on this computer.";
 /** A reply to a session that ran in Rex, when Rex said no to its new tab (an error answer): the failed line's cause. */

@@ -328,7 +328,8 @@ export function RunLine({
         run.rex?.held === 'may_run'
           ? `${name} may still be running in Rex. Your reply waits for it to connect, or starts it again in a minute or two.`
           : run.rex?.held === 'still_runs'
-            ? `${name} is still running in its tab in Rex. Your reply waits for it there.`
+            ? // The process found may be in its tab or wherever the person resumed it: never says which.
+              `${name} is still running. Your reply waits for it.`
             : run.stopped_by_person && run.since
               ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
               : run.cause

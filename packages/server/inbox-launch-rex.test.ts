@@ -19,7 +19,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_REX_NOT_CONNECTED, INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
+import { INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_COULDNT, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_REX_NOT_CONNECTED, INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
@@ -70,9 +70,11 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
   // How often Rex was asked whether its app is attached (each ask is a connection to the person's Rex).
   const asked = { attached: 0 };
   // Rex's word on a pane (null: no answer), whether it closes one, and the panes it was asked about or to close.
-  const panes = { gone: false as boolean | null, closes: "closed" as InboxRexClosed, asked: [] as string[], closed: [] as string[] };
-  // The processes Stop ended (SIGTERM), by pid: never a real signal here.
+  // `hold`: Rex's answer about a pane waits for it (a slow Rex).
+  const panes = { gone: false as boolean | null, closes: "closed" as InboxRexClosed, asked: [] as string[], closed: [] as string[], hold: null as Promise<void> | null };
+  // The processes Stop ended (SIGTERM), by pid: never a real signal here. `kills.ok` false: every signal is refused.
   const ended: number[] = [];
+  const kills = { ok: true };
   // Where live sessions say they run (their polls' place hints).
   const places = new Map<string, { kind: "rex"; session: string; block: string }>();
   const launch = createInboxLaunch({
@@ -95,13 +97,13 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
     rex: {
       open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)),
       appAttachedNow: async () => (asked.attached++, options.attached ?? true),
-      paneGone: async (place) => (panes.asked.push(`${place.session}/${place.block}`), panes.gone),
+      paneGone: async (place) => (panes.asked.push(`${place.session}/${place.block}`), await panes.hold, panes.gone),
       closePane: async (place) => (panes.closed.push(`${place.session}/${place.block}`), panes.closes),
     },
     placeOf: (session) => places.get(session) ?? null,
     rexStatus: (session) => statuses.get(session) ?? null,
     processListing: async () => processes.listing,
-    endProcess: (pid) => (ended.push(pid), true),
+    endProcess: (pid) => (ended.push(pid), kills.ok),
     now: () => clock.now,
   });
   restore.push(() => launch.stop());
@@ -126,7 +128,7 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
       "/api/inbox/launch/settings",
       "local",
     );
-  return { store, clock, project, fake, launch, opens, statuses, processes, asked, panes, places, ended, post, send, setStartIn, loginBin, dataDir };
+  return { store, clock, project, fake, launch, opens, statuses, processes, asked, panes, places, ended, kills, post, send, setStartIn, loginBin, dataDir };
 }
 
 describe("Start in Rex", () => {
@@ -265,6 +267,46 @@ describe("Start in Rex", () => {
     const done = (await (await quiet.post(second.id, "stop"))!.json()) as { run: { state: string } };
     expect(quiet.ended).toEqual([]);
     expect(done.run.state).toBe("stopped");
+  });
+
+  test("Stop when its own pane is gone and it could not be stopped: the words say so, never that it runs in a tab the Inbox didn't open, and nothing counts as stopped", async () => {
+    const cases: [string, (w: ReturnType<typeof setup>) => void][] = [
+      // `ps` could not be read.
+      ["ps unread", (w) => (w.processes.listing = null)],
+      // Only a wrapper names it (`tmux new 'fake-agent …'`): the agent runs where `ps` cannot tell.
+      ["a wrapper only", (w) => (w.processes.listing = "  1     0 /sbin/launchd\n  700   600 tmux new fake-agent --session session-r1\n")],
+      // Its process is there but every signal was refused.
+      ["signal refused", (w) => ((w.processes.listing = "  5150     1 fake-agent --session session-r1\n"), (w.kills.ok = false))],
+    ];
+    for (const [, arrange] of cases) {
+      const w = setup();
+      const { root, id } = await w.send();
+      w.fake.poll("session-r1", true, w.clock.now);
+      w.store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
+      w.panes.closes = "gone";
+      arrange(w);
+      await expect(w.post(id, "stop")).rejects.toMatchObject({ code: "launch_in_rex", message: INBOX_RUN_IN_REX_COULDNT });
+      expect(w.ended.filter((pid) => pid === 700)).toEqual([]);
+      expect((await w.launch.runOf(root.thread_id))?.state).not.toBe("stopped");
+    }
+  });
+
+  test("a check of its pane that Rex answers after the Inbox stopped starts nothing", async () => {
+    const { clock, fake, store, opens, panes, send, launch } = setup();
+    const { root } = await send();
+    fake.poll("session-r1", false, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
+    const answer = store.sendMessage({ project_id: root.project_id, author: { kind: "agent", host: FAKE, session: "session-r1", name: "Fake Agent" }, body: "Done.", reply_to: root.id, idempotency_key: "answer-late" }).message;
+    let answerNow = () => {};
+    panes.hold = new Promise<void>((done) => (answerNow = done));
+    panes.gone = true;
+    clock.now += 5_000;
+    store.sendReply(answer.id, { words: "Still there?", idempotency_key: "reply-late" });
+    await until(() => panes.asked.length === 1);
+    launch.stop();
+    answerNow();
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(1);
   });
 
   test("Stop before the agent took its first message: the line says stopped by the person, never that it didn't connect", async () => {

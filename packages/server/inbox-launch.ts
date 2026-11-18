@@ -91,9 +91,9 @@ import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstat
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 import type { InboxRex, InboxRexStatus } from "./inbox-rex";
-import { inboxListingSessionPids, inboxProcessListing, inboxRexResumeHeld, type InboxRexHeld } from "./inbox-rex-resume";
+import { inboxListingSessionAgents, inboxProcessListing, inboxRexResumeHeld, type InboxRexHeld } from "./inbox-rex-resume";
 import { inboxId, inboxLaunchInRex, inboxLaunchRexUnstoppable, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_COULDNT, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -1201,15 +1201,19 @@ ${result.text}`);
     }
     return out;
   };
-  /** The processes that run a launch's session now (its argv names it, or its host's own check: Pi's claims); null when `ps` could not be read. */
-  const sessionPidsOf = async (launch: InboxLaunchRecord, host: LaunchHost): Promise<number[] | null> => {
+  /**
+   * The agent processes that run a launch's session now (its own program whose argv names it, or its host's own check:
+   * Pi's claims), and whether only a shell or wrapper names it (`wrapped`); null when `ps` could not be read.
+   */
+  const sessionPidsOf = async (launch: InboxLaunchRecord, host: LaunchHost): Promise<{ pids: number[]; wrapped: boolean } | null> => {
     const session = launch.session ?? launch.session_ref;
-    if (!session) return [];
+    if (!session) return { pids: [], wrapped: false };
     const listing = await (options.processListing ?? inboxProcessListing)();
     if (listing === null) return null;
-    const pids = new Set([...inboxListingSessionPids(listing, session), ...(host.sessionPids?.(session, listing) ?? [])]);
+    const byArgv = inboxListingSessionAgents(listing, session, [host.agent]);
+    const pids = new Set([...byArgv.agents, ...((await host.sessionPids?.(session, listing)) ?? [])]);
     pids.delete(process.pid);
-    return [...pids];
+    return { pids: [...pids], wrapped: pids.size === 0 && byArgv.wrapped };
   };
   const endProcess = options.endProcess ?? ((pid: number) => {
     try {
@@ -1241,11 +1245,17 @@ ${result.text}`);
       }
     }
     // Its own pane is gone (it may run on elsewhere), or it runs in a pane the Inbox did not open.
-    const pids = await sessionPidsOf(launch, host);
-    if (pids === null || (elsewhere && pids.length === 0)) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_ELSEWHERE);
-    const ended = pids.filter((pid) => endProcess(pid));
-    if (pids.length > 0 && ended.length === 0) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_ELSEWHERE);
-    return { exitCode: 0, text: ended.length ? `rex: ended ${ended.join(", ")}` : `rex: ${own.block} already gone` };
+    // Nothing counts as stopped unless it was: `ps` unread, only a wrapper naming it (a `tmux` client: the agent runs
+    // where `ps` cannot tell), or every signal refused says it couldn't.
+    const found = await sessionPidsOf(launch, host);
+    if (found === null || found.wrapped) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_COULDNT);
+    if (found.pids.length === 0) {
+      if (elsewhere) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_ELSEWHERE);
+      return { exitCode: 0, text: `rex: ${own.block} already gone` };
+    }
+    const ended = found.pids.filter((pid) => endProcess(pid));
+    if (ended.length === 0) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_COULDNT);
+    return { exitCode: 0, text: `rex: ended ${ended.join(", ")}` };
   };
   /** Try again on a Rex launch: refused while its old process may still run (the words say why). */
   const refuseIfRexHeld = async (launch: InboxLaunchRecord) => {
@@ -1253,6 +1263,8 @@ ${result.text}`);
     const held = await rexHeld(launch);
     if (held) throw new InboxError("launch_in_rex", held === "may_run" ? INBOX_REX_MAY_RUN : INBOX_REX_STILL_RUNS);
   };
+  /** The Inbox stopped (`stop`): a Rex check that answers after it starts nothing. */
+  let closed = false;
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
@@ -1310,7 +1322,8 @@ ${result.text}`);
           .catch(() => null)
           .then((gone) => {
             memo.paneCheck = { at: now(), pending: false };
-            if (gone !== true || stopping.has(launch.id)) return;
+            // The Inbox stopped meanwhile: nothing starts (a pane check outlives no Inbox).
+            if (gone !== true || closed || stopping.has(launch.id)) return;
             memo.paneClosed = true;
             // From now it counts as live only once it polls anew (as after a Stop).
             if (polls !== null && memo.quietPolls === null) memo.quietPolls = polls;
@@ -1335,6 +1348,7 @@ ${result.text}`);
           .then((held) => {
             const was = memo.rexCheck?.held ?? null;
             memo.rexCheck = { at: now(), held, pending: false };
+            if (closed) return;
             if (held !== was) options.onChange();
             if (!held) maybeRespawn(store.message(root.id) ?? root);
           });
@@ -1940,6 +1954,7 @@ ${result.text}`);
     route,
     sweep,
     stop: () => {
+      closed = true;
       unsubscribe();
       for (const host of hostList) host.close?.();
     },

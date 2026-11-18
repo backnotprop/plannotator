@@ -5,7 +5,7 @@
  * starting a second process on the same session id.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REX_RESUME_AFTER_BOOT_MS, inboxListingRunsSession, inboxListingSessionPids, inboxProcessListing, inboxRexResumeHeld } from "./inbox-rex-resume";
+import { INBOX_REX_RESUME_AFTER_BOOT_MS, inboxListingRunsSession, inboxListingSessionAgents, inboxProcessListing, inboxProcessStartedAt, inboxRexResumeHeld } from "./inbox-rex-resume";
 
 const ID = "0b9f6c1e-2d3a-4c5b-8e7f-123456789abc";
 const CLAUDE = `  412   401 claude --resume ${ID} --settings /tmp/s.json --permission-mode auto`;
@@ -25,19 +25,42 @@ describe("which process runs a session", () => {
     expect(inboxListingRunsSession(PI, ID)).toBe(false);
   });
 
-  test("an OpenCode in its Rex tab (`--session <id>`) runs it, so a reply never opens a second OpenCode on it", () => {
-    const OPENCODE = `  733   720 opencode2 --standalone --session ${ID}`;
-    expect(inboxListingRunsSession(`  1     0 /sbin/launchd\n${OPENCODE}\n`, ID)).toBe(true);
-    expect(inboxListingRunsSession(OPENCODE.replace(ID, `${ID}0`), ID)).toBe(false);
+  test("an OpenCode in its Rex tab (`--session ses_<id>`, its own id shape) runs it, so a reply never opens a second OpenCode on it", () => {
+    const SES = "ses_1f6c2b4e8a9d0K3mQx";
+    const OPENCODE = `  733   720 opencode2 --standalone --session ${SES}`;
+    expect(inboxListingRunsSession(`  1     0 /sbin/launchd\n${OPENCODE}\n`, SES)).toBe(true);
+    expect(inboxListingRunsSession(`  720     1 /bin/sh -c cd '/work/app' && exec env PLANNOTATOR_INBOX_TOOL=1 opencode2 --standalone --session '${SES}'\n`, SES)).toBe(true);
+    // A longer id sharing the prefix (with an underscore or more letters) is another session.
+    expect(inboxListingRunsSession(OPENCODE.replace(SES, `${SES}_2`), SES)).toBe(false);
+    expect(inboxListingRunsSession(OPENCODE.replace(SES, `${SES}x`), SES)).toBe(false);
+    expect(inboxListingSessionAgents(`  1     0 /sbin/launchd\n${OPENCODE}\n`, SES)).toEqual({ agents: [733], wrapped: false });
   });
 
-  test("the processes Stop may end are the agent itself, never the shell it was started from", () => {
+  test("the processes Stop may end are the agent itself, never the shell or wrapper it was started from", () => {
     // A person's own shell pane ran `sh -c '… claude --resume <id>'`: only the Claude Code under it is named.
     const wrapper = `  640   600 /bin/sh -c claude --resume '${ID}'`;
     const agent = `  641   640 claude --resume ${ID}`;
-    expect(inboxListingSessionPids(`  600     1 -zsh\n${wrapper}\n${agent}\n`, ID)).toEqual([641]);
-    expect(inboxListingSessionPids(`  1     0 /sbin/launchd\n${CLAUDE}\n`, ID)).toEqual([412]);
-    expect(inboxListingSessionPids(`  9 1 grep ${ID}\n${PI}\n`, ID)).toEqual([]);
+    expect(inboxListingSessionAgents(`  600     1 -zsh\n${wrapper}\n${agent}\n`, ID)).toEqual({ agents: [641], wrapped: false });
+    expect(inboxListingSessionAgents(`  1     0 /sbin/launchd\n${CLAUDE}\n`, ID)).toEqual({ agents: [412], wrapped: false });
+    expect(inboxListingSessionAgents(`  9 1 grep ${ID}\n${PI}\n`, ID)).toEqual({ agents: [], wrapped: false });
+    // `tmux new 'claude --resume <id>'` in a pane: the client (a leaf) and the server name it; Claude runs under the
+    // server. Only Claude is the agent; the client never gets the signal.
+    const client = `  700   600 tmux new claude --resume ${ID}`;
+    const server = `  701     1 tmux new claude --resume ${ID}`;
+    const underTmux = `  702   701 /Users/me/.local/share/claude/versions/2.1.327 --resume ${ID}`;
+    expect(inboxListingSessionAgents(`${client}\n${server}\n${underTmux}\n`, ID)).toEqual({ agents: [702], wrapped: false });
+    // Only the wrapper is listed (its agent runs where `ps` does not name it): nothing to end, and it is not gone.
+    expect(inboxListingSessionAgents(`${client}\n`, ID)).toEqual({ agents: [], wrapped: true });
+    // An agent run by node (an npm install): the agent too.
+    expect(inboxListingSessionAgents(`  800   1 node /usr/local/lib/node_modules/opencode/bin/opencode --session ses_abc\n`, "ses_abc")).toEqual({ agents: [800], wrapped: false });
+  });
+
+  test("when a process started: this one, a moment ago or earlier; none for a pid with no process", async () => {
+    const started = await inboxProcessStartedAt(process.pid);
+    expect(started).not.toBeNull();
+    expect(started!).toBeLessThanOrEqual(Date.now());
+    expect(started!).toBeGreaterThan(Date.now() - 24 * 60 * 60_000);
+    expect(await inboxProcessStartedAt(2 ** 22 + 12_345)).toBeNull();
   });
 
   test("the listing is this computer's processes, this one among them", async () => {

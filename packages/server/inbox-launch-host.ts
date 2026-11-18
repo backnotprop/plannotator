@@ -292,9 +292,10 @@ export interface LaunchHost {
   runsSession?(session: string, listing: string): boolean;
   /**
    * The processes in `listing` that run `session` (the same check as `runsSession`, as pids), for Stop of an agent in
-   * a Rex pane the Inbox did not open. No member: its argv names the session (inbox-rex-resume.ts finds them).
+   * a Rex pane the Inbox did not open: only ones it is sure are that agent now (a signal goes to each). No member: its
+   * argv names the session (inbox-rex-resume.ts finds them).
    */
-  sessionPids?(session: string, listing: string): number[];
+  sessionPids?(session: string, listing: string): number[] | Promise<number[]>;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */

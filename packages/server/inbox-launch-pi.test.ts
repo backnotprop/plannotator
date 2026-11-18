@@ -7,7 +7,7 @@
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord, InboxMessage } from "@plannotator/core/inbox-types";
@@ -219,7 +219,13 @@ describe("Pi's launch host, against the fake pi", () => {
       writePiSessionClaim(dataDir, { session, pid: tab.pid, rpc: false, title: "pi", owner: "tab" });
       expect(host.runsSession!(session, listing)).toBe(true);
       // Stop of a Pi in a pane the Inbox did not open ends that process (its pid by the claim).
-      expect(host.sessionPids!(session, listing)).toEqual([tab.pid]);
+      expect(await host.sessionPids!(session, listing)).toEqual([tab.pid]);
+      // A claim older than the process under its pid (a Pi that died left it; another process took the pid): the
+      // reply still waits (it may be that Pi), but Stop never signals that process.
+      const old = new Date(Date.now() - 60 * 60_000);
+      utimesSync(piSessionClaimFileOf(dataDir, session, tab.pid), old, old);
+      expect(host.runsSession!(session, listing)).toBe(true);
+      expect(await host.sessionPids!(session, listing)).toEqual([]);
       expect(host.runsSession!(randomUUID(), listing)).toBe(false);
       // Not listed, or its pid now another program: not that Pi.
       expect(host.runsSession!(session, "  1     0 /sbin/launchd\n")).toBe(false);
