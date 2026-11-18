@@ -155,10 +155,10 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(trail(el, 'committed.ts')).toEqual(['+1']);
   });
 
-  test('a renamed file names its old path on hover', async () => {
+  test('a renamed file names its old path then its new path on hover', async () => {
     const el = await mount(<Tree files={[{ ...file('docs/setup.md'), status: 'renamed', oldPath: 'docs/old-setup.md' }, file('src/a.ts')]} activeFileIndex={1} />);
     const path = rows(el).find((p) => p?.endsWith('setup.md'))!;
-    expect(row(el, path).getAttribute('title')).toBe('Renamed from docs/old-setup.md');
+    expect(row(el, path).getAttribute('title')).toBe('docs/old-setup.md → docs/setup.md');
   });
 
   test('hide viewed files drops viewed rows but keeps the open one', async () => {
