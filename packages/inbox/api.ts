@@ -7,7 +7,7 @@
 
 import type { InboxCloudAgentView, InboxCloudPreset, InboxCloudSetup } from '@plannotator/core/inbox-cloud';
 import type { InboxSidebarLayout } from '@plannotator/core/inbox-sidebar';
-import type { DecisionDataSummary, InboxAgentFaceChange, InboxPriorityBefore } from '@plannotator/core/inbox-types';
+import type { DecisionDataSummary, InboxAgentFaceChange, InboxPriorityBefore, InboxPullAsk } from '@plannotator/core/inbox-types';
 import type { FaviconStyle } from '@plannotator/core/favicon';
 import type { InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { SystemSetup, SystemSetupAnswer, SystemSetupInput } from '@plannotator/core/inbox-system-setup';
@@ -29,7 +29,6 @@ import type { ArchivedModel, ListModel, MachineUpdateView, MachineView, OutboxVi
 export type { ArchivedModel, ListModel, MachineUpdateView, MachineView, OutboxView, ProjectFolder, ReplyResult, ThreadModel, UpdateCheckFailing } from '@plannotator/core/inbox-wire-models';
 import type {
   InboxCardMark,
-  InboxPullAsk,
   InboxInitiative,
   InboxDecisionsModel,
   InboxGuideRef,
