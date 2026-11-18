@@ -1114,6 +1114,13 @@ describe("FCM: an Android phone gets its pushes through Google's hosts, played l
           { label: "No", recommended: false },
         ],
       },
+      kind: "question",
+      badge: expect.any(Number),
+      time_sensitive: false,
+      actions: [
+        { id: "choice.0", label: "Yes" },
+        { id: "choice.1", label: "No" },
+      ],
     });
     // The JWT the relay signed: RS256 under the service account's key, checked by the token endpoint.
     expect(google.exchanges).toHaveLength(1);
