@@ -7562,6 +7562,11 @@ export class InboxStore {
     return record && !record.deleted_at ? record : null;
   }
 
+  /** A routine was ever made here, deleted ones included (the Routines intro is for someone who never met them). */
+  scheduledEverMade(): boolean {
+    return this.scheduledById.size > 0;
+  }
+
   /** A deleted routine, which the window's Undo brings back. */
   deletedScheduledThread(id: string): InboxScheduledThread | null {
     const record = this.scheduledById.get(id);

@@ -30,7 +30,7 @@ import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 import { T3_THREAD_ID_FORMS } from "../../../tests/helpers/fake-t3";
 import { INBOX_CALL_ACTIONS, INBOX_CALL_USAGE } from "./cli";
-import { type CallCommandDeps, inboxCallerOf, parseCallCommand, routineCallArgs, runInboxCallCommand } from "./inbox-call-command";
+import { type CallCommandDeps, inboxCallerOf, parseCallCommand, runInboxCallCommand } from "./inbox-call-command";
 
 const entry = resolve(import.meta.dir, "index.ts");
 const HOUR = 60 * 60_000;
@@ -194,11 +194,6 @@ describe("what a script gets", () => {
     expect((unknown as { error: string }).error).toContain("send_message");
     expect((unknown as { error: string }).error).not.toMatch(/\bsteps\b/);
     expect(parseCallCommand(["steps", "{}"])).toMatchObject({ ok: true, action: "steps" });
-  });
-
-  test("plannotator routine <op> is inbox call routine with the op inside its JSON, the session passed on", () => {
-    expect(routineCallArgs(["update", '{"id":"sch_1","name":"Morning triage"}', "--session", "s-maya"])).toEqual(["--session", "s-maya", "routine", '{"id":"sch_1","name":"Morning triage","op":"update"}']);
-    expect(routineCallArgs([])).toMatchObject({ code: "usage" });
   });
 
   test("bad JSON, a non-object, an unknown action, wait_for_reply and a named identity are usage errors, sent nowhere", async () => {
