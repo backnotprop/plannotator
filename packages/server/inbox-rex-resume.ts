@@ -22,7 +22,7 @@ export const INBOX_REX_RESUME_AFTER_BOOT_MS = INBOX_RETRY_MS.max + INBOX_SESSION
 /** Every process's pid, parent and whole command line, or null when ps could not run. */
 export function inboxProcessListing(): string | null {
   try {
-    const ps = Bun.spawnSync(["/bin/ps", "-A", "-ww", "-o", "pid=,ppid=,command="], { env: { PATH: "/usr/bin:/bin" }, stdout: "pipe", stderr: "ignore" });
+    const ps = Bun.spawnSync(["/bin/ps", "-A", "-ww", "-o", "pid=,ppid=,command="], { env: { PATH: "/usr/bin:/bin" }, stdout: "pipe", stderr: "ignore", windowsHide: true });
     return ps.exitCode === 0 ? ps.stdout.toString() : null;
   } catch {
     return null;
