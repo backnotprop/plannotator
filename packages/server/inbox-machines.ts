@@ -39,6 +39,7 @@ import { createMachinePulls } from "./inbox-machine-pulls";
 import { MACHINE_IMAGE_CSP, MACHINE_LINKED_PAGE_ROUTE, MACHINE_MARKDOWN_IMAGE_ROUTE, machineLinkedPageAnswer, machineMarkdownImageAnswer } from "./inbox-machine-files";
 import { farCsp, MACHINE_ASSET_ROUTE, MACHINE_PAGE_ROUTE, MACHINE_VIEW_ROUTE, machineAssetAnswer, machineAssetCsp, machinePageAnswer, machineViewAnswer } from "./inbox-machine-page";
 import { createMachineLaunchReads, MACHINE_SESSIONS_ROUTE } from "./inbox-machine-launch-reads";
+import { INBOX_RUN_WINDOW_ONLY_BODY } from "./inbox-run-routes";
 import { doorWriteKind, forwardsNow, InboxOutbox, MACHINE_WINDOW_HEADER, type OutboxEntry } from "./inbox-outbox";
 import { createMachineBranches } from "./inbox-machine-branches";
 import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerCards, type PeerLinkTimings, type PeerRecord, type PeerRereadEvent } from "./inbox-peer-link";
@@ -921,7 +922,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     // person comments on it (the window needs the attachment now); a Combine, or a Tidy with the person's words, which
     // held for days would act on threads nobody is looking at. A Tidy without words stays held like any append.
     if (forwardsNow(route, body)) {
-      if (!window) return json(route === "open-in/file/attach" ? INBOX_MACHINE_FILE_WINDOW_ONLY_BODY : INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+      if (!window) return json(route === "open-in/file/attach" ? INBOX_MACHINE_FILE_WINDOW_ONLY_BODY : /^messages\/[^/]+\/(run|secret)$/.test(route) ? INBOX_RUN_WINDOW_ONLY_BODY : INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
       if (peer.state !== "online") return offline();
       delete body.serverSession;
       try {

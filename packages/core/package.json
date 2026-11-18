@@ -60,6 +60,8 @@
     "./inbox-file-question-twin": "./inbox-file-question-twin.ts",
     "./inbox-choice-twins": "./inbox-choice-twins.ts",
     "./inbox-actions": "./inbox-actions.ts",
+    "./inbox-run-blocks": "./inbox-run-blocks.ts",
+    "./inbox-run-guide": "./inbox-run-guide.ts",
     "./inbox-search": "./inbox-search.ts",
     "./inbox-folding": "./inbox-folding.ts",
     "./inbox-reply-quote": "./inbox-reply-quote.ts",

@@ -1,0 +1,250 @@
+/**
+ * Plannotator Inbox: commands the person runs with one press (`:::run`) and
+ * secrets they save on their own computer (`:::secret`).
+ *
+ * An agent writes a `:::run` block when a command must run on the person's
+ * computer, as them:
+ *
+ *   :::run
+ *   Run the payment tests
+ *   They call the sandbox with your test key; about a minute.
+ *   Folder: apps/payments
+ *
+ *   ```sh
+ *   bun test payments
+ *   ```
+ *   :::
+ *
+ * The first non-empty line is the title. `Folder:` (optional) is where it
+ * runs, relative to the thread's project folder. Every other line outside the
+ * fence is the reason. The one fenced code block is the command, byte for
+ * byte: what the card shows is what runs. A block with no fence, or with more
+ * than one, is not a run block (the window draws it as text, each fence with
+ * its own Copy).
+ *
+ * A `:::secret` block names a value the person keeps on their computer:
+ *
+ *   :::secret
+ *   PAYMENTS_TEST_KEY
+ *   The payment tests need your Stripe test-mode secret key.
+ *   Where: https://dashboard.stripe.com/test/apikeys
+ *   :::
+ *
+ * First line: the name, env-var style. `Where:` (optional): a URL or a place
+ * in words. Other lines: the reason.
+ *
+ * Both grammars are the Inbox's only; plan review draws either as a callout.
+ * Pure: no I/O. Never throws on any input.
+ */
+
+import { blockKeyHash8, findDirectiveBlocks } from "./question-block";
+
+export const INBOX_RUN_DIRECTIVE = "run";
+export const INBOX_SECRET_DIRECTIVE = "secret";
+
+/** A run block's key on the wire: `r-` + 8 hex, `-2`… for a repeat in one message. */
+export const INBOX_RUN_KEY_RE = /^r-[0-9a-f]{8}(?:-\d{1,3})?$/;
+/** A secret's name: env-var style, upper case, 2 to 64 characters. */
+export const INBOX_SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
+
+export interface ParsedInboxRun {
+  key: string;
+  title: string;
+  /** The reason, or null. Markdown. */
+  why: string | null;
+  /** `Folder:` as written, or null (the project folder). */
+  folder: string | null;
+  /** The command, exactly the fence's lines joined with `\n`. */
+  command: string;
+  /** 1-based line of the block's opening `:::run`, as the Viewer's block has it. */
+  startLine: number;
+}
+
+export interface ParsedInboxSecret {
+  key: string;
+  name: string;
+  why: string | null;
+  /** `Where:` as written, or null. */
+  where: string | null;
+  /** `Where:` when it is an http(s) URL. */
+  where_url: string | null;
+  startLine: number;
+}
+
+const FENCE_RE = /^[ \t]*(`{3,}|~{3,})(.*)$/;
+const FOLDER_RE = /^folder\s*:\s*(.*)$/i;
+const WHERE_RE = /^where\s*:\s*(.*)$/i;
+
+/** One `:::run` block's inner text, or null when it is not one (no title, no fence, more than one fence). */
+export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | "startLine"> | null {
+  const lines = inner.replace(/\r\n?/g, "\n").split("\n");
+  let title: string | null = null;
+  let folder: string | null = null;
+  const why: string[] = [];
+  let command: string | null = null;
+  let fences = 0;
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i]!;
+    const open = FENCE_RE.exec(raw);
+    if (open) {
+      const marker = open[1]!;
+      const indent = /^[ \t]*/.exec(raw)![0].length;
+      const body: string[] = [];
+      let j = i + 1;
+      for (; j < lines.length; j++) {
+        const close = FENCE_RE.exec(lines[j]!);
+        if (close && close[1]![0] === marker[0] && close[1]!.length >= marker.length && close[2]!.trim() === "") break;
+        body.push(lines[j]!.slice(Math.min(indent, /^[ \t]*/.exec(lines[j]!)![0].length)));
+      }
+      fences += 1;
+      if (fences === 1) command = body.join("\n");
+      i = j;
+      continue;
+    }
+    const line = raw.trim();
+    if (line === "") continue;
+    if (title === null) {
+      title = line;
+      continue;
+    }
+    const folderLine = FOLDER_RE.exec(line);
+    if (folderLine && folder === null) {
+      const value = folderLine[1]!.trim().replace(/^`(.*)`$/, "$1").trim();
+      folder = value === "" ? null : value;
+      continue;
+    }
+    why.push(line);
+  }
+  if (title === null || command === null || fences !== 1 || command.trim() === "") return null;
+  return { title, why: why.length > 0 ? why.join("\n") : null, folder, command };
+}
+
+/** Every `:::run` block of a message body, in order, keys de-duplicated. [] when none. */
+export function parseInboxRunBlocks(markdown: string): ParsedInboxRun[] {
+  if (typeof markdown !== "string" || !/:::\s*run/i.test(markdown)) return [];
+  const out: ParsedInboxRun[] = [];
+  const seen = new Map<string, number>();
+  for (const block of findDirectiveBlocks(markdown, { frontmatter: false })) {
+    if (block.directiveKind !== INBOX_RUN_DIRECTIVE) continue;
+    const parsed = parseInboxRunBlock(block.inner);
+    if (!parsed) continue;
+    const base = `r-${blockKeyHash8(parsed.command)}`;
+    const count = (seen.get(base) ?? 0) + 1;
+    seen.set(base, count);
+    out.push({ ...parsed, key: count === 1 ? base : `${base}-${count}`, startLine: block.startLine });
+  }
+  return out;
+}
+
+/** One `:::secret` block's inner text, or null when its first line is not a name. */
+export function parseInboxSecretBlock(inner: string): Omit<ParsedInboxSecret, "key" | "startLine"> | null {
+  const lines = inner.replace(/\r\n?/g, "\n").split("\n").map((line) => line.trim()).filter((line) => line !== "");
+  const first = lines.shift();
+  if (first === undefined) return null;
+  const name = first.replace(/^`(.*)`$/, "$1").replace(/^\$\{?([^}]*)\}?$/, "$1").trim();
+  if (!INBOX_SECRET_NAME_RE.test(name)) return null;
+  let where: string | null = null;
+  const why: string[] = [];
+  for (const line of lines) {
+    const label = WHERE_RE.exec(line);
+    if (label && where === null) {
+      where = label[1]!.trim() || null;
+      continue;
+    }
+    why.push(line);
+  }
+  const url = where !== null && /^https?:\/\/\S+$/i.test(where) ? where : null;
+  return { name, why: why.length > 0 ? why.join("\n") : null, where, where_url: url };
+}
+
+/** Every `:::secret` block of a message body, in order; a name asked twice in one message is the first. */
+export function parseInboxSecretBlocks(markdown: string): ParsedInboxSecret[] {
+  if (typeof markdown !== "string" || !/:::\s*secret/i.test(markdown)) return [];
+  const out: ParsedInboxSecret[] = [];
+  for (const block of findDirectiveBlocks(markdown, { frontmatter: false })) {
+    if (block.directiveKind !== INBOX_SECRET_DIRECTIVE) continue;
+    const parsed = parseInboxSecretBlock(block.inner);
+    if (!parsed || out.some((s) => s.name === parsed.name)) continue;
+    out.push({ ...parsed, key: `s-${parsed.name}`, startLine: block.startLine });
+  }
+  return out;
+}
+
+/** The `$NAME` / `${NAME}` a command names that look like a secret's name, in order, once each. */
+export function inboxRunNames(command: string): string[] {
+  const out: string[] = [];
+  for (const match of command.matchAll(/\$\{?([A-Z][A-Z0-9_]{1,63})\b\}?/g)) if (!out.includes(match[1]!)) out.push(match[1]!);
+  return out;
+}
+
+// ─────────────────────────────── Hidden characters ───────────────────────────────
+
+export interface InboxRunHiddenChar {
+  /** The character in words, for the card ("a text-direction mark"). */
+  what: string;
+  /** `U+202E`. */
+  code: string;
+  /** 1-based line and character of the first one. */
+  line: number;
+  column: number;
+}
+
+const NAMED: Record<number, string> = {
+  0x0d: "a carriage return",
+  0x1b: "an escape character",
+  0x00: "a null character",
+  0x7f: "a delete character",
+  0xa0: "a no-break space",
+  0xad: "a soft hyphen",
+  0x200b: "a zero-width space",
+  0x200c: "a zero-width non-joiner",
+  0x200d: "a zero-width joiner",
+  0x2060: "a word joiner",
+  0xfeff: "a zero-width no-break space",
+  0x2028: "a line separator",
+  0x2029: "a paragraph separator",
+};
+
+/** Characters that render as nothing or as something else: control and format characters, odd spaces, fillers. */
+const HIDDEN_RE = /[\p{Cc}\p{Cf}\p{Co}\p{Cn}\p{Zl}\p{Zp}\p{Zs}͏ᅟᅠㅤﾠ︀-️]|[\u{E0100}-\u{E01EF}]/u;
+
+const isBidi = (cp: number): boolean => (cp >= 0x202a && cp <= 0x202e) || (cp >= 0x2066 && cp <= 0x2069) || cp === 0x200e || cp === 0x200f || cp === 0x061c;
+
+/**
+ * The first character of a command that could make it do something other than what it shows, or null. A command
+ * may hold line breaks, tabs and plain spaces; nothing else that is invisible, a control or a direction mark.
+ */
+export function inboxRunHiddenChar(command: string): InboxRunHiddenChar | null {
+  let line = 1;
+  let column = 0;
+  for (const char of command) {
+    const cp = char.codePointAt(0)!;
+    if (cp === 0x0a) {
+      line += 1;
+      column = 0;
+      continue;
+    }
+    column += 1;
+    if (cp === 0x09 || cp === 0x20) continue;
+    if (!HIDDEN_RE.test(char)) continue;
+    const code = `U+${cp.toString(16).toUpperCase().padStart(4, "0")}`;
+    const what = isBidi(cp) ? "a text-direction mark" : (NAMED[cp] ?? (/\p{Zs}/u.test(char) ? "an unusual space" : "an invisible character"));
+    return { what, code, line, column };
+  }
+  return null;
+}
+
+/** The command with each hidden character shown as `⟨U+XXXX⟩`, for the refusal's view of it. */
+export function inboxRunShowHidden(command: string): string {
+  let out = "";
+  for (const char of command) {
+    const cp = char.codePointAt(0)!;
+    out += cp !== 0x0a && cp !== 0x09 && cp !== 0x20 && HIDDEN_RE.test(char) ? `⟨U+${cp.toString(16).toUpperCase().padStart(4, "0")}⟩` : char;
+  }
+  return out;
+}
+
+/** The refusal in words, for the card and the route's error. */
+export function inboxRunHiddenWords(hidden: InboxRunHiddenChar): string {
+  return `This command has ${hidden.what} (${hidden.code}) at line ${hidden.line}, character ${hidden.column}. Hidden characters can make a command do something other than what it shows, so it can't be run or copied from here.`;
+}

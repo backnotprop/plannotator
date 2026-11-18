@@ -27,6 +27,7 @@ import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
 import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
+import { INBOX_RUN_EXAMPLE, INBOX_RUN_GUIDE, INBOX_RUN_REPORT_HEADING, INBOX_SECRET_EXAMPLE } from "@plannotator/core/inbox-run-guide";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { HERMES_PLUGIN_INSTALL, HERMES_WAKE_GRANT_LINE } from "@plannotator/core/inbox-hermes";
 import { join } from "node:path";
@@ -528,6 +529,18 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "```",
     "",
     "The first line is the action item; every other line that is not `Where:`, `Run:`, `Stopped:`, `Holds up:`, `Watching:` or `Replaces:` is the why. An action item counts like an open question in the person's list (`Stopped:` puts the thread under \"" + SECTION_LABEL("stopped") + "\"), and its key starts with `a-`.",
+    "",
+    "### Commands the person runs, and secrets",
+    "",
+    INBOX_RUN_GUIDE,
+    "",
+    "```markdown",
+    INBOX_RUN_EXAMPLE,
+    "",
+    INBOX_SECRET_EXAMPLE,
+    "```",
+    "",
+    "Each block draws as a card in the window and on the person's phone. Their reply after a run starts with \"" + INBOX_RUN_REPORT_HEADING + "\"; after a save, it names the secret only. In a viewer that does not know these blocks, each still reads as its title, its why and its command in a code block.",
     "",
     "Attach the files a question points to (send_message's `attachments`, here `[\"load-test.html\"]`) and link them from its context, as above: the link opens the file beside the thread; " + INBOX_ATTACHMENTS_PROTOTYPE_CLAUSE + " A link to a file you did not attach shows as \"Not attached\". Add a screenshot (`![alt](path)`) when the question is about something visual.",
     "",

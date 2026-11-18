@@ -3601,6 +3601,31 @@ export class InboxStore {
   }
 
   /**
+   * A note written as the person, at once, about what they did on an agent's message: a `:::run` they ran, a
+   * `:::secret` they saved (packages/server/inbox-run-routes.ts). Delivered like any reply (the wake). The caller
+   * makes sure it never carries a secret's value.
+   */
+  appendPersonNote(messageId: string, body: string): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
+    const at = this.stamp();
+    const note: InboxMessage = {
+      id: inboxId("msg"),
+      project_id: message.project_id,
+      thread_id: message.thread_id,
+      reply_to: message.id,
+      author: { kind: "person" },
+      subject: null,
+      body,
+      created_at: at,
+      resolved_at: null,
+      idempotency_key: null,
+    };
+    this.appendMessage(note, at);
+    return note;
+  }
+
+  /**
    * Whether a thread's owner can be known to have ended: it has a waking message, or it holds the thread by address
    * (only a connection can be addressed) and wrote nothing here. An agent that only reads through MCP cannot.
    */

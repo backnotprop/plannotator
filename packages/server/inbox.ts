@@ -268,7 +268,11 @@ import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHI
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
-import { createLoginEnv } from "./inbox-launch-env";
+import { createLoginEnv, launchPlainEnv } from "./inbox-launch-env";
+import { createInboxRuns } from "./inbox-run";
+import { createInboxRunRoutes, openRunTerminal } from "./inbox-run-routes";
+import { createInboxSecrets } from "./inbox-secrets";
+import { fileVault, spawnVaultRun, systemSecretVault } from "./inbox-secret-vault";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxCommentDrafts } from "./inbox-comment-drafts";
 import { createInboxTakeBack } from "./inbox-take-back";
@@ -4949,6 +4953,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The plain env launch finds agents on: this Inbox's own, or a sandboxed test's fakes.
   const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
     process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
+  // The person's login-shell env: a launch's, and a `:::run` command's (inbox-run-routes.ts).
+  const loginEnv = process.env.PLANNOTATOR_TEST_SANDBOX
+    ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" })
+    : createLoginEnv({
+        run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
+        env: () => process.env,
+        log: (line) => process.stderr.write(`${line}\n`),
+      });
   const launch = createInboxLaunch({
     store,
     live,
@@ -4958,13 +4970,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     homeDir: process.env.PLANNOTATOR_TEST_SANDBOX ? join(dataDir, "agents-home") : homedir(),
     platform: process.platform,
     // A sandboxed test Inbox finds agents only on the PATH its test names (PLANNOTATOR_TEST_LAUNCH_PATH: the fakes), never the person's.
-    loginEnv: process.env.PLANNOTATOR_TEST_SANDBOX
-      ? async () => ({ HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" })
-      : createLoginEnv({
-          run: (argv, o) => createAgentEnvironmentFor({ platform: process.platform, homeDir: homedir(), env: o.env }).run(argv, { timeoutMs: o.timeoutMs }),
-          env: () => process.env,
-          log: (line) => process.stderr.write(`${line}\n`),
-        }),
+    loginEnv,
     ownEnv: launchOwnEnv,
     installDirs: process.env.PLANNOTATOR_TEST_SANDBOX ? [] : [join(homedir(), ".local", "bin"), join(homedir(), ".claude", "local")],
     // Read once: the env this Inbox started with. Over SSH, macOS keeps Claude Code's login locked (remote launch);
@@ -5327,13 +5333,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const accounts = createInboxAccountsFor(agentEnvironment, options.accounts);
 
   /** "Open in" for attachments: launches an app on this computer, so local only (never the tailnet, never the device door). */
+  const openInLauncher = options.openInLauncher ?? systemOpenInLauncher();
   const openInRoute = createInboxOpenInRoute({
     store,
     serverSession,
     readBody,
     json,
     localOnly,
-    launcher: options.openInLauncher ?? systemOpenInLauncher(),
+    launcher: openInLauncher,
     home: options.openInHome,
     doorOf: (req) => fromDeviceDoor.get(req) ?? null,
     codeReviewOn,
@@ -5357,6 +5364,26 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (!pulls.find(pull)) await findPulls([pull], wanted);
       return pulls.file(pull, path, wanted);
     },
+  });
+
+  // Run and Secret (`:::run`, `:::secret`; inbox-run-routes.ts): the person's press runs a command here, as them; a
+  // secret's value goes to this computer's keychain (a sandboxed test Inbox: a file in its own folder, never a keychain).
+  const runVault = process.env.PLANNOTATOR_TEST_SANDBOX
+    ? fileVault(join(dataDir, "inbox", "secrets"))
+    : systemSecretVault({ platform: process.platform, dir: join(dataDir, "inbox", "secrets"), run: spawnVaultRun, env: process.env, which: (cmd) => Bun.which(cmd) });
+  const runRoutes = createInboxRunRoutes({
+    store,
+    serverSession,
+    readBody,
+    json,
+    runs: createInboxRuns({ messageAlive: (id) => store.message(id) !== null }),
+    secrets: createInboxSecrets({ file: join(dataDir, "inbox", "secrets.json"), vault: runVault }),
+    vault: runVault,
+    loginEnv: process.platform === "win32" && !process.env.PLANNOTATOR_TEST_SANDBOX ? async () => launchPlainEnv(launchOwnEnv(), [], "win32") : loginEnv,
+    door: (req) => fromDeviceDoor.get(req),
+    computer: () => phones?.machineDoor.computerName() ?? (process.platform === "darwin" ? "your Mac" : process.platform === "win32" ? "your PC" : "your computer"),
+    displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
+    openTerminal: (folder) => openRunTerminal(openInLauncher, folder),
   });
 
   /**
@@ -7716,6 +7743,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
       const taggable = tagsRoute.route(req, path);
       if (taggable) return taggable;
+      // Run on a `:::run` block and Save on a `:::secret` block (inbox-run-routes.ts): the person's press only.
+      const ran = await runRoutes.route(req, path);
+      if (ran) return ran;
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
       if (steps) return steps;
@@ -8050,6 +8080,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     launch.stop();
     unsubscribeLaunchTip();
     unsubscribeAgentWork();
+    // Every `:::run` still running stops with the Inbox: no command outlives it.
+    runRoutes.stop();
     combine.close();
     codexWake.stop();
     qwenWake.stop();

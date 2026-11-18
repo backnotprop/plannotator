@@ -267,6 +267,11 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "POST", route: /^messages\/([^/]+)\/handoff\/undo$/, window: (m) => `/api/inbox/messages/${m[1]}/handoff/undo` },
   // An action item's Done or Can't do it, and its Undo (approval "inbox-next-actions", contract 7.63).
   { method: "POST", route: /^messages\/([^/]+)\/actions\/(a-[0-9a-f]{8}(?:-\d{1,3})?)$/, window: (m) => `/api/inbox/messages/${m[1]}/actions/${m[2]}` },
+  // Run on a `:::run` block, its Stop and Open in terminal, and Save or Remove on a `:::secret` block: the person on
+  // their phone, or a press in a window on their linked machine (inbox-run-routes.ts checks which; never held).
+  { method: "GET", route: /^messages\/([^/]+)\/run$/, window: (m) => `/api/inbox/messages/${m[1]}/run` },
+  { method: "POST", route: /^messages\/([^/]+)\/run$/, window: (m) => `/api/inbox/messages/${m[1]}/run` },
+  { method: "POST", route: /^messages\/([^/]+)\/secret$/, window: (m) => `/api/inbox/messages/${m[1]}/secret` },
   { method: "POST", route: /^threads\/([^/]+)\/delete$/, window: (m) => `/api/inbox/threads/${m[1]}/delete` },
   // The thread's reply draft (the words typed on the computer and not sent), read only: contract 7.62.
   { method: "GET", route: /^threads\/([^/]+)\/draft$/, window: (m) => `/api/inbox/threads/${m[1]}/draft` },
