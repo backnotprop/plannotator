@@ -58,42 +58,42 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
     });
 
   return (
-    <section className="ib-run" data-run-card={block.key} data-run-state={hidden ? 'refused' : (run?.state ?? 'idle')} aria-label={block.title}>
-      <div className="ib-run-head">
+    <section className="ib-rb" data-run-card={block.key} data-run-state={hidden ? 'refused' : (run?.state ?? 'idle')} aria-label={block.title}>
+      <div className="ib-rb-head">
         <Icon name="terminal" />
-        <span className="ib-run-title">
+        <span className="ib-rb-title">
           <InlineMarkdown text={block.title} />
         </span>
         {run && !hidden && <RunStatusLine run={run} />}
       </div>
       {block.why && (
-        <p className="ib-run-why">
+        <p className="ib-rb-why">
           <InlineMarkdown text={block.why} />
         </p>
       )}
       {hidden ? (
-        <div className="ib-run-refused" data-run-refused="">
-          <p className="ib-run-warn" role="note">
+        <div className="ib-rb-refused" data-run-refused="">
+          <p className="ib-rb-warn" role="note">
             <Icon name="warn" />
             <span>{`${hidden.words} Ask ${agent} to send it again without it.`}</span>
           </p>
-          <pre className="ib-run-cmd">{inboxRunShowHidden(block.command)}</pre>
+          <pre className="ib-rb-cmd">{inboxRunShowHidden(block.command)}</pre>
         </div>
       ) : (
         <>
-          <div className="ib-run-cmdrow">
-            <pre className="ib-run-cmd" data-run-command="">{block.command}</pre>
-            <button type="button" className="ib-btn ib-ghost ib-sm ib-run-copy" onClick={() => void copy()} data-run-copy="">
+          <div className="ib-rb-cmdrow">
+            <pre className="ib-rb-cmd" data-run-command="">{block.command}</pre>
+            <button type="button" className="ib-btn ib-ghost ib-sm ib-rb-copy" onClick={() => void copy()} data-run-copy="">
               <Icon name={copied === 'ok' ? 'check' : 'copy'} />
               {copied === 'ok' ? 'Copied' : copied === 'failed' ? "Couldn't copy" : 'Copy'}
             </button>
           </div>
-          <p className="ib-run-where" data-run-where="">
+          <p className="ib-rb-where" data-run-where="">
             {view?.folder_missing ? `That folder isn't on ${computer}: ${view.folder ?? 'the project has no folder'}` : `On ${computer} · in ${view?.folder ?? '…'}`}
           </p>
           {view?.needs.map((name) => (
-            <div key={name} className="ib-run-need" data-run-needs={name}>
-              <p className="ib-run-needs-l">
+            <div key={name} className="ib-rb-need" data-run-needs={name}>
+              <p className="ib-rb-needs-l">
                 <Icon name="lock" />
                 {`Needs ${name}`}
               </p>
@@ -102,34 +102,34 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
           ))}
           {run && !(run.error && run.total_lines === 0) && <RunOutput run={run} />}
           {run?.error && (
-            <p className="ib-run-warn" data-run-error="">
+            <p className="ib-rb-warn" data-run-error="">
               <Icon name="warn" />
               <span>{run.error}</span>
             </p>
           )}
           {run?.waiting_for_input && (
-            <p className="ib-run-warn" data-run-waiting="">
+            <p className="ib-rb-warn" data-run-waiting="">
               <Icon name="keyboard" />
               <span>It looks like it's waiting for you to type something. You can't type into it here: stop it and run it in your terminal.</span>
             </p>
           )}
           {run?.needs_terminal && (
-            <p className="ib-run-warn" data-run-needs-terminal="">
+            <p className="ib-rb-warn" data-run-needs-terminal="">
               <Icon name="keyboard" />
               <span>It needs a terminal to finish (it asked for a password or a sign-in). Run it in your terminal instead.</span>
             </p>
           )}
-          {run && !live && <p className="ib-run-hint">{`${agent} got the exit code and the last lines of output.`}</p>}
-          <div className="ib-run-acts">
+          {run && !live && <p className="ib-rb-hint">{`${agent} got the exit code and the last lines of output.`}</p>}
+          <div className="ib-rb-acts">
             {live ? (
-              <button type="button" className="ib-btn ib-pri" disabled={pressing} onClick={() => void act(() => runApi.stop(messageId, block.key))} data-run-stop="">
+              <button type="button" className={`ib-btn ${run?.waiting_for_input ? '' : 'ib-pri'}`} disabled={pressing} onClick={() => void act(() => runApi.stop(messageId, block.key))} data-run-stop="">
                 <Icon name="stop" />
                 Stop
               </button>
             ) : (
               <button
                 type="button"
-                className={`ib-btn ${run?.needs_terminal ? '' : 'ib-pri'}`}
+                className={`ib-btn ${run?.needs_terminal || (view?.needs.length ?? 0) > 0 ? '' : 'ib-pri'}`}
                 disabled={pressing || !view || view.folder_missing}
                 onClick={() => void act(() => runApi.start(messageId, block.key, block.command))}
                 data-run-start=""
@@ -151,7 +151,7 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
           </div>
         </>
       )}
-      <p className="ib-run-note" role="status" data-run-note="">
+      <p className="ib-rb-note" role="status" data-run-note="">
         {note ?? ''}
       </p>
     </section>
@@ -161,8 +161,8 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
 function RunStatusLine({ run }: { run: RunView }) {
   const status = runStatus(run);
   return (
-    <span className={`ib-run-status ib-${status.tone}`} data-run-status="">
-      {status.tone === 'live' && <span className="ib-run-dot" aria-hidden="true" />}
+    <span className={`ib-rb-status ib-${status.tone}`} data-run-status="">
+      {status.tone === 'live' && <span className="ib-rb-dot" aria-hidden="true" />}
       {status.text}
     </span>
   );

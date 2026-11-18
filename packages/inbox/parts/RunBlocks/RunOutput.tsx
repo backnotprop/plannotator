@@ -15,18 +15,18 @@ export function RunOutput({ run }: { run: RunView }) {
   const live = run.state === 'starting' || run.state === 'running';
   const empty = run.lines.length === 0 && run.partial === '';
   return (
-    <div className="ib-run-out" data-run-output="">
+    <div className="ib-rb-out" data-run-output="">
       {run.total_lines > run.lines.length && (
-        <p className="ib-run-more" data-run-more="">
+        <p className="ib-rb-more" data-run-more="">
           {`Showing the last ${count(run.lines.length)} of ${count(run.total_lines)} lines`}
         </p>
       )}
       {empty ? (
-        <p className="ib-run-none">{live ? 'No output yet.' : 'It printed nothing.'}</p>
+        <p className="ib-rb-none">{live ? 'No output yet.' : 'It printed nothing.'}</p>
       ) : (
         <pre
           ref={ref}
-          className="ib-run-lines"
+          className="ib-rb-lines"
           tabIndex={0}
           aria-label="Output"
           onScroll={(event) => {

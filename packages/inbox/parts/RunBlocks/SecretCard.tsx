@@ -38,38 +38,38 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
     }
   };
   return (
-    <section className="ib-run ib-sec" data-secret-card={secret.name} data-secret-state={saved ? 'saved' : 'empty'} aria-label={`Secret ${secret.name}`}>
-      <div className="ib-run-head">
+    <section className="ib-rb ib-sec" data-secret-card={secret.name} data-secret-state={saved ? 'saved' : 'empty'} aria-label={`Secret ${secret.name}`}>
+      <div className="ib-rb-head">
         <Icon name="lock" />
         <span className="ib-sec-name">{secret.name}</span>
         {saved && (
-          <span className="ib-run-status ib-ok" data-secret-saved="">
+          <span className="ib-rb-status ib-ok" data-secret-saved="">
             <Icon name="check" />
             Saved
           </span>
         )}
       </div>
       {secret.why && (
-        <p className="ib-run-why">
+        <p className="ib-rb-why">
           <InlineMarkdown text={secret.why} />
         </p>
       )}
       {secret.where_url ? (
-        <a className="ib-run-link" href={secret.where_url} target="_blank" rel="noopener noreferrer" data-secret-where="">
+        <a className="ib-rb-link" href={secret.where_url} target="_blank" rel="noopener noreferrer" data-secret-where="">
           {`Find it on ${hostOf(secret.where_url)}`}
           <Icon name="external" />
         </a>
       ) : secret.where ? (
-        <p className="ib-run-where" data-secret-where="">
+        <p className="ib-rb-where" data-secret-where="">
           {`Where to find it: ${secret.where}`}
         </p>
       ) : null}
       {saved && !replacing ? (
         <>
-          <p className="ib-run-where" data-secret-detail="">
+          <p className="ib-rb-where" data-secret-detail="">
             {`Saved ${clockTime(saved.saved_at)}${saved.last4 ? ` · ends in ${saved.last4}` : ''} · ${state?.store ?? ''}`}
           </p>
-          <div className="ib-run-acts">
+          <div className="ib-rb-acts">
             <button type="button" className="ib-btn" onClick={() => setReplacing(true)} data-secret-replace="">
               Replace
             </button>
@@ -81,7 +81,7 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
       ) : (
         <>
           <SecretField messageId={messageId} name={secret.name} autoFocus={replacing} onDone={() => setReplacing(false)} {...(replacing ? { onCancel: () => setReplacing(false) } : {})} />
-          <p className="ib-run-hint">{secretKeptWords(state, agent)}</p>
+          <p className="ib-rb-hint">{secretKeptWords(state, agent)}</p>
         </>
       )}
       {error && (
