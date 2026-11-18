@@ -5,6 +5,7 @@
  * `/api/inbox/pulls/repo-files`, drawn by the review app's own tree (`guide/PullRepoParts.tsx`).
  */
 import type { TreeScope } from '@plannotator/ui/hooks/useTreeScope';
+import { modalOpen } from '../shortcuts/guards';
 import { pullUrl } from './pullMachines';
 
 const FOCUS =
@@ -44,15 +45,22 @@ export function RailScopeSwitch({ scope, changed, onSelect }: { scope: TreeScope
   );
 }
 
-export function focusScopeWhenLost(rail: HTMLElement | null, scope: TreeScope, frames = 12): void {
-  const attempt = (left: number) => {
+export function focusScopeWhenLost(rail: HTMLElement | null, scope: TreeScope): void {
+  if (!rail) return;
+  const from = document.activeElement;
+  const observer = new MutationObserver(() => {
     const active = document.activeElement;
-    if (active && active !== document.body && active.isConnected) return;
-    const button = rail?.querySelector<HTMLElement>(`[data-tree-scope="${scope}"]`);
-    if (button) button.focus({ preventScroll: true });
-    else if (left > 0) requestAnimationFrame(() => attempt(left - 1));
-  };
-  requestAnimationFrame(() => attempt(frames));
+    if (modalOpen() || !rail.isConnected) return observer.disconnect();
+    if (active && active !== document.body && active.isConnected) {
+      if (active !== from) observer.disconnect();
+      return;
+    }
+    const button = rail.querySelector<HTMLElement>(`[data-tree-scope="${scope}"]`);
+    if (!button) return;
+    observer.disconnect();
+    button.focus({ preventScroll: true });
+  });
+  observer.observe(rail, { childList: true, subtree: true });
 }
 
 /**
