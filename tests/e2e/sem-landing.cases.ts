@@ -75,20 +75,25 @@ function delay(page: Page, pattern: string, reads: Set<string>, held: string[]) 
   return (name: string) => gates.get(name)?.open();
 }
 
-const firstRows = (page: Page) =>
-  expect.poll(() => page.evaluate(() => [...document.querySelectorAll('diffs-container')].some((host) => host.shadowRoot?.querySelector('[data-line]'))), { timeout: 30_000 }).toBe(true);
-
-async function reviewWindow(browser: Browser, held: string[]): Promise<View> {
-  const session = await reviewOf(`sem-landing-${Math.random().toString(36).slice(2, 8)}`, base, head);
-  const reads = new Set<string>();
-  let release = (_name: string) => {};
-  const { context, page } = await openReviewWindow(browser, session.url, async (page) => void (release = delay(page, '**/api/file-content?*', reads, held)));
-  await firstRows(page);
-  await page.evaluate(() => {
+const markScroller = (page: Page) =>
+  page.evaluate(() => {
     let scroller: HTMLElement | null = document.querySelector('diffs-container')!.parentElement;
     while (scroller && !/(auto|scroll)/.test(getComputedStyle(scroller).overflowY)) scroller = scroller.parentElement;
     scroller!.setAttribute('data-e2e-scroller', '');
   });
+
+const firstRows = (page: Page) =>
+  expect.poll(() => page.evaluate(() => [...document.querySelectorAll('diffs-container')].some((host) => host.shadowRoot?.querySelector('[data-line]'))), { timeout: 30_000 }).toBe(true);
+
+const PHONE = (browser: Browser) => ({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: browser.browserType().name() === 'chromium', colorScheme: 'light' as const });
+
+async function reviewWindow(browser: Browser, held: string[], phone = false): Promise<View> {
+  const session = await reviewOf(`sem-landing-${Math.random().toString(36).slice(2, 8)}`, base, head);
+  const reads = new Set<string>();
+  let release = (_name: string) => {};
+  const { context, page } = await openReviewWindow(browser, session.url, async (page) => void (release = delay(page, '**/api/file-content?*', reads, held)), phone ? PHONE(browser) : undefined);
+  await firstRows(page);
+  await markScroller(page);
   return {
     page,
     scroller: '[data-e2e-scroller]',
@@ -185,9 +190,7 @@ async function inboxReview(browser: Browser, world: Inbox, held: string[], phone
     review: true,
   } as never);
   const context: BrowserContext = await browser.newContext(
-    phone
-      ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: browser.browserType().name() === 'chromium', colorScheme: 'light', reducedMotion: 'reduce' }
-      : { viewport: { width: 1280, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' },
+    phone ? { ...PHONE(browser), reducedMotion: 'reduce' } : { viewport: { width: 1280, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' },
   );
   const page = await context.newPage();
   const reads = new Set<string>();
@@ -336,6 +339,49 @@ export function landingCases(type: BrowserType) {
   });
   const inbox = inboxWorld(() => browser);
   const open = (host: Host, held: string[] = []) => (host === 'review' ? reviewWindow(browser, held) : inboxReview(browser, inbox(), held));
+
+  for (const host of ['review', 'inbox'] as const) {
+  test(`${host} on a phone: a touch scroll before the notes land moves nothing, the header offers the note, a tap shows it`, async () => {
+    const view = host === 'review' ? await reviewWindow(browser, ['money'], true) : await inboxReview(browser, inbox(), ['money'], true);
+    try {
+      const shell = view.shell('a-money');
+      if (host === 'review') {
+        await view.page.locator('[data-changes-tree] [data-type="item"][data-item-path$="a-money.ts"]').first().tap({ timeout: 10_000 });
+        await view.page.getByText('All changes', { exact: true }).first().tap({ timeout: 10_000 });
+        await expect.poll(() => view.page.locator('diffs-container').count(), { timeout: 10_000 }).toBeGreaterThan(0);
+        await markScroller(view.page);
+        await expect.poll(async () => (await edgeOf(view, 'a-money'))?.top ?? null, { timeout: 10_000, message: 'precondition: the diff shows after picking the file' }).not.toBeNull();
+      }
+      await view.page.locator(shell).scrollIntoViewIfNeeded();
+      await atRest(view);
+      await bring(view, "a-money's header clear of the app's top bar", async () => (await edgeOf(view, 'a-money'))?.top ?? null, host === 'review' ? 0 : 200, host === 'review' ? 40 : 80);
+      await view.page.evaluate((selector) => {
+        const page = document.querySelector(selector) as HTMLElement;
+        page.dispatchEvent(new Event('touchstart', { bubbles: true }));
+        page.scrollTop += 40;
+      }, view.scroller);
+      await atRest(view);
+      const note = view.page.locator(`${shell} [data-semantic-note]`).first();
+      const header = view.page.locator(`${shell} [data-file-header]`).first();
+      try {
+        await heldUntilWatched(view, 'money', 'a-money', 'off');
+      } finally {
+        if (process.env.SEM_LANDING_SHOT) await header.screenshot({ path: `${process.env.SEM_LANDING_SHOT}-${host}-${type.name()}.png` });
+      }
+      await still(view);
+      await expect(note).toHaveAttribute('data-semantic-note', 'off');
+      await expect(note).toBeVisible();
+      const box = (await note.boundingBox())!;
+      const edge = (await header.boundingBox())!;
+      expect(box.x >= edge.x && box.x + box.width <= edge.x + edge.width, 'the note sits inside the header').toBe(true);
+      expect(box.width, 'the note shows its words').toBeGreaterThan(30);
+      await view.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
+      await expect(note).toHaveAttribute('data-semantic-note', 'semantic');
+    } finally {
+      await view.close();
+    }
+  });
+  }
 
   test('inbox, 20 files: a jump to file 18 from the menu of files, hands off, moves nothing as its note lands, and the note is offered', async () => {
     const view = await inboxReview(browser, inbox(), ['far'], false, MANY);
