@@ -907,3 +907,130 @@ describe('external (tool-sourced) annotations never cause injection', () => {
     expect(humanOnly).toContain('--- BEGIN SKILL INSTRUCTIONS: plannotator-review ---');
   });
 });
+
+/**
+ * The scan used to test the word before each `/name` with a regex over a copy of all the text before it: a pass over
+ * the whole text per token, every key. It now walks back from the trigger. These compare the scan with the one it
+ * replaced, kept here as it was, over generated texts, so a token is found, dropped or switched to `$` exactly as before.
+ */
+describe('the prose check finds what the whole-text regex found', () => {
+  const RESERVED = new Set(['bin', 'boot', 'dev', 'etc', 'home', 'lib', 'lib64', 'media', 'mnt', 'opt', 'proc', 'root', 'run', 'sbin', 'srv', 'sys', 'tmp', 'usr', 'var']);
+  const PROSE = new Set(['get', 'head', 'post', 'put', 'delete', 'options', 'patch', 'can', 'could', 'may', 'might', 'must', 'shall', 'should', 'will', 'would']);
+  const wasProse = (text: string, triggerIndex: number) => {
+    const word = /([A-Za-z]+)[ \t]+$/.exec(text.slice(0, triggerIndex))?.[1];
+    return word !== undefined && PROSE.has(word.toLowerCase());
+  };
+  const tokensBefore = (text: string, skills: SkillCatalogEntry[]) => {
+    if (!text || skills.length === 0) return [];
+    const byExactName = new Map<string, SkillCatalogEntry>();
+    const byLowerName = new Map<string, SkillCatalogEntry>();
+    for (const s of skills) {
+      if (!byExactName.has(s.name)) byExactName.set(s.name, s);
+      const lower = s.name.toLowerCase();
+      if (!byLowerName.has(lower)) byLowerName.set(lower, s);
+    }
+    const lookup = (n: string) => byExactName.get(n) ?? byLowerName.get(n.toLowerCase());
+    const tokens: { start: number; end: number; entry: SkillCatalogEntry }[] = [];
+    const re = /(^|[\s(])([$/])([A-Za-z0-9][A-Za-z0-9._-]*)/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text)) !== null) {
+      const after = text[m.index + m[0].length];
+      if (after === '/' || after === '\\') continue;
+      if (m[1] === '(' && text[m.index - 1] === ']') continue;
+      const name = m[3]!.toLowerCase();
+      const trimmed = m[3]!.replace(/\.+$/, '');
+      const trimmedName = trimmed.toLowerCase();
+      if (m[2] === '/' && (RESERVED.has(name) || RESERVED.has(trimmedName))) continue;
+      if (m[2] === '/' && wasProse(text, m.index + m[1]!.length)) continue;
+      const exact = lookup(m[3]!);
+      const entry = exact ?? lookup(trimmed);
+      if (!entry) continue;
+      const start = m.index + m[1]!.length;
+      tokens.push({ start, end: start + 1 + (exact ? m[3]!.length : trimmed.length), entry });
+    }
+    return tokens;
+  };
+
+  const skills: SkillCatalogEntry[] = [
+    ...catalog,
+    { name: 'simplify', root: 'claude', humanOnly: false },
+    { name: 'Simplify', root: 'codex', humanOnly: true },
+    { name: 'run', root: 'claude', humanOnly: false },
+    { name: 'show', root: 'claude', humanOnly: false },
+    { name: 'a.b', root: 'claude', humanOnly: false },
+  ];
+
+  // A small seeded generator, so a failing text can be made again.
+  const random = (seed: number) => () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const pieces = [
+    'the', 'and', 'use', 'get', 'GET', 'Get', 'post', 'could', 'Would', 'shall', 'must', 'xcould', 'couldx', 'options', 'deleted',
+    `${'a'.repeat(120)}should`,
+    'café', 'naïve', 'résumé', '日本語', 'ß', '🙂', '👩‍💻', '🇫🇷', 'é',
+    '/write-better', '$write-better', '/simplify', '$simplify', '/Simplify', '/SIMPLIFY', '/run', '$run', '/show', '/humanizer.', '/humanizer...',
+    '/code-review/', '/code-review\\x', '[x](/simplify)', '(/simplify)', '(/simplify', '/a.b', '/a.b.', '/', '$', '/-x', '/9lives', '$x/y',
+    '/write-better/simplify', '$simplify$simplify', '//simplify', 'and/or', 'a/simplify',
+  ];
+  const gaps = [' ', ' ', ' ', '  ', '\t', ' \t ', '\n', '\r\n', '\r', ' ', ' ', '', ' '.repeat(73)];
+  const generate = (next: () => number, length: number) => {
+    let text = '';
+    while (text.length < length) text += pieces[Math.floor(next() * pieces.length)]! + gaps[Math.floor(next() * gaps.length)]!;
+    return text;
+  };
+
+  const texts: string[] = [
+    '',
+    '/simplify',
+    'could /simplify',
+    'could\t\t/simplify',
+    'could\n/simplify',
+    'could\r\n/simplify',
+    'COULD /simplify and GET /show and get\t/write-better',
+    'xcould /simplify',
+    `${'a'.repeat(70)}could /simplify`,
+    `could${' '.repeat(200)}/simplify`,
+    `could${'\t '.repeat(100)}/simplify`,
+    '/simplify/simplify /simplify $simplify(/simplify) /simplify',
+    '🙂 could /simplify 🙂/simplify 👩‍💻 /simplify',
+    'café could /simplify',
+    'shouldcould /simplify',
+    'will/simplify will /simplify',
+  ];
+  for (let seed = 1; seed <= 400; seed++) {
+    const next = random(seed);
+    texts.push(generate(next, seed % 50 === 0 ? 20_000 : 20 + Math.floor(next() * 600)));
+  }
+  // A token at the very start and at the very end of a long text.
+  texts.push(`/simplify ${generate(random(9001), 5_000)} could /simplify`);
+  texts.push(`$write-better${generate(random(9002), 5_000)}/write-better`);
+
+  test('every token, its span and its skill, over generated texts', () => {
+    for (const text of texts) {
+      const want = tokensBefore(text, skills);
+      const got = findSkillReferenceTokens(text, skills);
+      if (got.length !== want.length || got.some((t, i) => t.start !== want[i]!.start || t.end !== want[i]!.end || t.entry !== want[i]!.entry)) {
+        throw new Error(`differs from the earlier scan for ${JSON.stringify(text.length > 300 ? `${text.slice(0, 300)}…` : text)}`);
+      }
+      expect(extractSkillReferences(text, skills)).toEqual([...new Map(want.map((t) => [t.entry.name, t.entry])).values()]);
+    }
+  });
+
+  test('a pick switches `/` to `$` after exactly the same words', () => {
+    const pick = skills.find((s) => s.name === 'simplify')!;
+    const seen = { switched: 0, kept: 0 };
+    for (const text of texts) {
+      if (text.length > 6_000) continue; // the earlier check is a pass over the text per `/`
+      for (let at = text.indexOf('/'); at !== -1; at = text.indexOf('/', at + 1)) {
+        const trigger = { start: at, trigger: '/' as const, query: '' };
+        const switched = insertSkillReference(text, at + 1, trigger, pick).text.startsWith('$', at);
+        if (switched !== wasProse(text, at)) throw new Error(`a pick at ${at} differs in ${JSON.stringify(text.slice(Math.max(0, at - 80), at + 20))}`);
+        seen[switched ? 'switched' : 'kept']++;
+      }
+    }
+    // The texts reach both sides of the rule, many times.
+    expect(seen.switched).toBeGreaterThan(200);
+    expect(seen.kept).toBeGreaterThan(2_000);
+  });
+});

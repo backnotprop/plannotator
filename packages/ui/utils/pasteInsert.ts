@@ -119,16 +119,37 @@ export function plainTextPasteInsertion(event: PasteLike, composing = false): Pa
   return { field, text, start, end };
 }
 
-/** Insert as typing would: an undo step and an `input` event. */
+/**
+ * Ends the browser's open typing run in a focused field, leaving the selection as it is. `execCommand('insertText')`
+ * joins the typing run that is open, so words the page inserts (a paste, a dictation) and the keys typed around them
+ * would come back as one ⌘Z. Setting the selection closes the run (Blink and WebKit close typing on a script's
+ * `setSelectionRange`, whether or not it moves). Call it before and after such an insertion: its own undo step.
+ */
+export function endTypingRun(field: PlainTextField): void {
+  const start = field.selectionStart;
+  const end = field.selectionEnd;
+  if (start === null || end === null) return;
+  try {
+    field.setSelectionRange(start, end, field.selectionDirection ?? undefined);
+  } catch {
+    // A field with no selection API: no typing run to end.
+  }
+}
+
+/** Insert as a paste would: its own undo step and an `input` event. */
 export function insertPastedText({ field, text, start, end }: PasteInsertion): void {
   const doc = field.ownerDocument;
   let inserted = false;
+  endTypingRun(field);
   try {
     inserted = typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, text) === true;
   } catch {
     inserted = false;
   }
-  if (inserted) return;
+  if (inserted) {
+    endTypingRun(field);
+    return;
+  }
   field.setRangeText(text, start, end, 'end');
   const caret = start + text.length;
   field.setSelectionRange(caret, caret); // some engines put the caret elsewhere after setRangeText

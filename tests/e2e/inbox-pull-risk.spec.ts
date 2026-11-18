@@ -312,7 +312,7 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
     await agentList.getByRole('button').first().click();
     await agentList.getByRole('button', { name, exact: true }).click();
   };
-  await expect(dialog.getByRole('heading', { name: 'No slop zone rules' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'Set risk rules' })).toBeVisible();
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toBeFocused();
   await expect(agentList).toHaveAttribute('data-pull-risk-agent', 'claude-agent-sdk');
   await expect(modelList).toHaveAttribute('data-pull-risk-model', 'sonnet');

@@ -585,10 +585,13 @@ interface CornerRoom {
   hidden: boolean;
 }
 
-/** Inside a `<pre>`: a code fence's own text and highlight spans. */
-function inCodeFence(node: Node): boolean {
+/**
+ * Changes that move nothing measured here: a code fence's own text and highlight spans (inside a `<pre>`), and the reply
+ * box's words and their chip layer, which change on every key. The box growing with them resizes the foot, which is watched.
+ */
+function movesNothing(node: Node): boolean {
   const element = node.nodeType === 1 ? (node as Element) : node.parentElement;
-  return element?.closest('pre') != null;
+  return element?.closest('pre, .ib-rmirror, .ib-rtext') != null;
 }
 
 /**
@@ -640,9 +643,9 @@ function useCornerRoom(on: boolean, phone: boolean): CornerRoom {
     }
     measure();
     // A code fence's highlight (ui's codeHighlight writes off-screen fences' markup in idle time, many a second on
-    // a long thread) moves nothing measured here: it costs no measure, whose queries walk the whole page.
+    // a long thread) and a key in the reply box move nothing measured here: no measure, whose queries walk the whole page.
     const changes = new MutationObserver((records) => {
-      if (records.some((record) => !inCodeFence(record.target))) schedule();
+      if (records.some((record) => !movesNothing(record.target))) schedule();
     });
     const root = document.querySelector('.pn-inbox') ?? document.body;
     changes.observe(root, { childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'class', 'data-full-view-bar'] });
