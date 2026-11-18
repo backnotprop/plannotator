@@ -37,7 +37,7 @@ export interface HeldNotice {
   count: number;
   /**
    * The questions those threads asked since the rows on screen (a thread new
-   * to the list: all its open ones), when more than the threads: "2 new · 13
+   * to the list: all its open ones), when more than the threads: "2 new · 5
    * questions" rather than a bare "2 new". Absent otherwise. Action items are
    * not questions.
    */
@@ -164,7 +164,7 @@ function openQuestions(row: InboxListRow): number {
   return Math.max(0, (row.questions?.open ?? 0) - (row.questions?.actions ?? 0));
 }
 
-/** "N new", and the questions when they are more: "2 new · 13 questions". */
+/** "N new", and the questions when they are more: "2 new · 5 questions". */
 export function heldNoticeHead(count: number, questions?: number): string {
   return questions ? `${count} new · ${questions} questions` : `${count} new`;
 }

@@ -138,12 +138,12 @@ test.skipIf(!hasDom)('news across projects reads just "N new"', () => {
 
 // More questions than threads behind the line: it says so, in the part that never shrinks, before the project.
 test.skipIf(!hasDom)('the questions the threads asked, when more than the threads, read in the count', () => {
-  const el = render({ count: 2, questions: 13, project: 'appnotes' });
+  const el = render({ count: 2, questions: 5, project: 'appnotes' });
   const button = el.querySelector<HTMLElement>('[data-inbox-notice]')!;
-  expect(button.querySelector('.ib-notice-n')!.textContent).toBe('2 new · 13 questions in');
-  expect(button.textContent).toBe('2 new · 13 questions in appnotesShow');
+  expect(button.querySelector('.ib-notice-n')!.textContent).toBe('2 new · 5 questions in');
+  expect(button.textContent).toBe('2 new · 5 questions in appnotesShow');
   act(() => root?.unmount());
   host?.remove();
   sheet?.remove();
-  expect(render({ count: 2, questions: 13 }).querySelector('[data-inbox-notice]')!.textContent).toBe('2 new · 13 questionsShow');
+  expect(render({ count: 2, questions: 5 }).querySelector('[data-inbox-notice]')!.textContent).toBe('2 new · 5 questionsShow');
 });

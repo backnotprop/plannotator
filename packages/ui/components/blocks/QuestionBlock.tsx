@@ -1525,7 +1525,12 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
                   name={name}
                   checked={checked}
                   onChange={(e) => onPick(choice.label, e.target.checked)}
-                  onClick={inputType === 'radio' && checked ? () => onPick(choice.label, false) : undefined}
+                  // The host's own click first (the Inbox's Decision mode answers on it); then a checked radio, which
+                  // fires no change, is un-picked by a click (a Space too).
+                  onClick={(event) => {
+                    input?.onClick?.(event);
+                    if (inputType === 'radio' && checked) onPick(choice.label, false);
+                  }}
                   className="mt-[3px] h-[15px] w-[15px] shrink-0 cursor-pointer accent-primary disabled:cursor-default"
                   data-question-control=""
                   disabled={readOnly}

@@ -8,7 +8,7 @@ import { isTextCut, Tip } from './Tip';
  * while it is cut the whole line is the tooltip.
  */
 export function HeldNoticeLine({ count, questions, project, onShow }: { count: number; questions?: number; project: string | null; onShow: () => void }) {
-  // "2 new · 13 questions" when the threads asked more questions than there are threads (held.ts `heldNotice`).
+  // "2 new · 5 questions" when the threads asked more questions than there are threads (held.ts `heldNotice`).
   const head = heldNoticeHead(count, questions);
   const full = project ? `${head} in ${project}` : head;
   return (

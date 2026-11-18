@@ -95,7 +95,7 @@ export interface InboxListProps {
   narrow: boolean;
   selectedThreadId: string | null;
   /**
-   * The held list's "N new" (held.ts `heldNotice`): how many, the questions they asked when more ("2 new · 13
+   * The held list's "N new" (held.ts `heldNotice`): how many, the questions they asked when more ("2 new · 5
    * questions"), and the one project they are in when all are in one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
    * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
    * the rows it brings in are on screen (List has no groups to open). `news`: the threads it counts (held.ts

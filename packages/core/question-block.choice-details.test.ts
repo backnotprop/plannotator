@@ -1,13 +1,15 @@
 /**
  * Lines that describe a choice (`Why:`, `Trade-off:`, `Pros:`, `Cons:`),
  * written under it as a plain indented line or a nested bullet, belong to
- * that choice: never a choice of their own, never part of its label. And a
- * pick-one `Recommended:` line that begins with a choice's label and then
- * gives its reasons (or a number) names that choice.
+ * that choice: never a choice of their own, never part of its label; a
+ * bullet beside such a line is still a choice. And a pick-one
+ * `Recommended:` line names a choice by its label or its number only: any
+ * other text is one more answer, as agents are told.
  *
  * What regresses if this fails: a `- Trade-off: …` bullet under a choice
- * shows as one more answer, a plain `Why:` line is glued onto the label, or
- * `Recommended: B, because …` turns into an extra answer row.
+ * shows as one more answer, a plain `Why:` line is glued onto the label, a
+ * choice after a `Why:` line disappears into it, or `Recommended: Yes, but
+ * only on weekdays` quietly becomes a plain Yes.
  */
 import { describe, expect, test } from 'bun:test';
 import { parseQuestionBlock } from './question-block';
@@ -61,35 +63,45 @@ describe('choice details', () => {
     const q = parseQuestionBlock('question', ['Which?', '- A', '  - A2', '- B'].join('\n'))!;
     expect(q.choices.map((c) => c.label)).toEqual(['A', 'A2', 'B']);
   });
+
+  test('a bullet beside a detail is a choice, not part of the detail; one nested under the detail continues it', () => {
+    const q = parseQuestionBlock('question', ['Which?', '- A', '  - Why: x', '  - A2', '- B'].join('\n'))!;
+    expect(q.choices.map((c) => c.label)).toEqual(['A', 'A2', 'B']);
+    expect(q.choices[0]).toMatchObject({ details: ['Why: x'] });
+    const under = parseQuestionBlock('question', ['Which?', '- A', '  - Pros:', '    - fast', '  - A2', '- B'].join('\n'))!;
+    expect(under.choices.map((c) => c.label)).toEqual(['A', 'A2', 'B']);
+    expect(under.choices[0]).toMatchObject({ details: ['Pros: fast'] });
+    // Under a task-list choice a bullet beside the detail stays the choice's own words, never the detail's.
+    const task = parseQuestionBlock('question', ['Which?', '- [ ] A', '  - Why: x', '  - also cheap', '- [ ] B'].join('\n'))!;
+    expect(task.choices.map((c) => c.label)).toEqual(['A', 'B']);
+    expect(task.choices[0]!.details).toEqual(['Why: x']);
+  });
 });
 
-describe('a pick-one Recommended: line names the choice it begins', () => {
+describe('a pick-one Recommended: line names a choice by its label or its number only', () => {
   const choices = ['- [ ] Ship it', '- [ ] Wait'];
   const body = (line: string, list = choices) => ['Which?', ...list, '', `Recommended: ${line}`].join('\n');
 
-  test('the label, then its reasons', () => {
-    expect(recommendedOf(body('Ship it, because the tests pass'))).toEqual(['Ship it']);
-    expect(recommendedOf(body('Wait (the freeze starts Monday)'))).toEqual(['Wait']);
-    expect(recommendedOf(body('**Wait** because the freeze starts Monday'))).toEqual(['Wait']);
-    expect(parseQuestionBlock('question', body('Ship it, because the tests pass'))!.suggestedText).toBeUndefined();
+  test('the label, exactly or in any case', () => {
+    expect(recommendedOf(body('Wait'))).toEqual(['Wait']);
+    expect(recommendedOf(body('ship IT'))).toEqual(['Ship it']);
   });
 
-  test('the longest label it begins wins; the same words without a pause name nothing', () => {
-    const list = ['- [ ] Yes', '- [ ] Yes, but later', '- [ ] No'];
-    expect(recommendedOf(body('Yes, but later, after the freeze', list))).toEqual(['Yes, but later']);
-    expect(recommendedOf(body('Yes, now', list))).toEqual(['Yes']);
-    const none = parseQuestionBlock('question', body('No strong preference', list))!;
-    expect(none.choices.some((c) => c.recommended)).toBe(false);
-    expect(none.suggestedText).toBe('No strong preference');
+  test('a number names the choice at that place; its words, when given, must be that choice', () => {
+    for (const line of ['2', '2.', '2)', '2. Wait']) expect(recommendedOf(body(line)), line).toEqual(['Wait']);
+    for (const line of ['2. Ship it', '3', '0']) {
+      const q = parseQuestionBlock('question', body(line))!;
+      expect(q.choices.some((c) => c.recommended), line).toBe(false);
+      expect(q.suggestedText).toBe(line);
+    }
   });
 
-  test('a numbered recommendation names the choice its words name', () => {
-    expect(recommendedOf(['Which?', '1. [ ] Ship it', '2. [ ] Wait', '', 'Recommended: 2. Wait'].join('\n'))).toEqual(['Wait']);
-  });
-
-  test('pick any is unchanged: a line with a part that names nothing stays a suggested answer', () => {
-    const q = parseQuestionBlock('question-multi', body('Ship it, because the tests pass'))!;
-    expect(q.choices.some((c) => c.recommended)).toBe(false);
-    expect(q.suggestedText).toBe('Ship it, because the tests pass');
+  test('any other text is one more answer, tagged Recommended: its qualifier is never dropped', () => {
+    const list = ['- [ ] Yes', '- [ ] No'];
+    for (const line of ['Yes, but only on weekdays', 'No, unless the freeze slips', 'Yes, because the tests pass']) {
+      const q = parseQuestionBlock('question', body(line, list))!;
+      expect(q.choices.some((c) => c.recommended), line).toBe(false);
+      expect(q.suggestedText).toBe(line);
+    }
   });
 });
