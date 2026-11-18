@@ -147,6 +147,18 @@ describe("a PR's file", () => {
     expect(f.reads.length).toBe(asked);
   });
 
+  test("a closed request asks the forge nothing, and the next one reads as usual", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    const closed = new AbortController();
+    closed.abort();
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS, undefined, undefined, closed.signal).catch(() => "refused")).not.toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(f.reads).toEqual([]);
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
+  });
+
   test("the whole stack: the list's head, and where it left the stack's base", async () => {
     const f = scripted();
     f.files.set(fileAt("src/a.ts", HEAD), "new\n");

@@ -787,7 +787,7 @@ export interface InboxPulls {
    * the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
-  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string): Promise<InboxFileContents>;
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PullFileCheck | null, oldPath?: string, from?: string, signal?: AbortSignal): Promise<InboxFileContents>;
 }
 
 export type PullFileCheck = PatchBlobIds | { patch: string };
@@ -1951,7 +1951,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
       return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null, ...(heldBack ? { held_back: heldBack } : {}), ...(perFile ? { per_file: true as const } : {}) };
     },
-    async fileContents(key, scope, path, roots, ids, oldPath, from) {
+    async fileContents(key, scope, path, roots, ids, oldPath, from, signal) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
       if (!ids) return none;
       // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
@@ -1973,6 +1973,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const project = encodeURIComponent(pull.repo);
       /** A forge read: the command's output, null when the forge says there is none, and a throw for anything passing. */
       const ask = async (endpoint: string, extra: string[] = []): Promise<string | null> => {
+        if (signal?.aborted) throw new InboxPullsError("pull_diff_failed", "The request was closed.");
         if (now() < Math.max(holdUntil.get(pull.host) ?? 0, fileHoldUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", "rate limited");
         const result = await diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...extra], INBOX_PULL_FILE_MAX_BYTES);
         if (result.tooLarge) return null;
