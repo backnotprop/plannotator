@@ -111,6 +111,10 @@ export async function readRelayBody(answer: Response, cap: number): Promise<Buff
 const RECONNECT_FIRST_MS = 1_000;
 const RECONNECT_LAST_MS = 60_000;
 
+const RELAY_HEARTBEAT = { intervalMs: 30_000, timeoutMs: 10_000 };
+
+type RelaySocket = WebSocket & Pick<Bun.WebSocket, "ping" | "terminate">;
+
 export interface InboxRelayFile {
   v: 1;
   url: string;
@@ -241,6 +245,8 @@ export interface InboxRelayContext {
   log?: (line: string) => void;
   phones?: boolean;
   agents?: InboxRelayAgents;
+  /** Timing override for the loopback relay test. */
+  heartbeat?: typeof RELAY_HEARTBEAT;
 }
 
 export function createInboxRelay(context: InboxRelayContext) {
@@ -254,6 +260,8 @@ export function createInboxRelay(context: InboxRelayContext) {
   let making: Promise<InboxRelayFile | null> | null = null;
   let socket: WebSocket | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  const heartbeat = context.heartbeat ?? RELAY_HEARTBEAT;
   let delay = RECONNECT_FIRST_MS;
   let stopped = false;
   let reachable: boolean | null = null;
@@ -539,28 +547,29 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
   };
 
-  /** The one socket, open while the mailbox has a paired phone; it reconnects when it drops. */
+  const clearHeartbeat = () => {
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    heartbeatTimer = null;
+  };
+
+  /** The one socket, open while the mailbox has a paired device; it reconnects when it drops. */
   const connect = () => {
     if (stopped || socket || retry || !mailbox || served().length === 0) return;
     const url = `${mailbox.url.replace(/^http/, "ws")}${mailboxPath("/socket")}`;
     // Bun's WebSocket takes headers: the Inbox's bearer goes in Authorization, never in the URL.
-    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]);
+    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]) as RelaySocket;
     socket = ws;
-    let opened = false;
-    ws.onopen = () => {
-      opened = true;
-      reachable = true;
-    };
-    ws.onmessage = (event) => {
-      if (typeof event.data !== "string") return;
-      const text = event.data;
-      frames = frames.then(() => (socket === ws ? onFrame(text) : undefined)).catch((error) => log(`frame failed: ${error instanceof Error ? error.message : String(error)}`));
-    };
-    ws.onclose = () => {
+    let awaiting: Buffer | null = null;
+    const dropped = (reason?: string) => {
       if (socket !== ws) return;
-      if (!opened) reachable = false;
+      clearHeartbeat();
       socket = null;
       sent.clear();
+      reachable = false;
+      if (reason) {
+        log(reason);
+        ws.terminate();
+      }
       if (stopped || served().length === 0) return;
       retry = setTimeout(() => {
         retry = null;
@@ -568,11 +577,40 @@ export function createInboxRelay(context: InboxRelayContext) {
       }, delay);
       delay = Math.min(delay * 2, RECONNECT_LAST_MS);
     };
+    const schedulePing = () => {
+      heartbeatTimer = setTimeout(() => {
+        if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+        // Cloudflare answers protocol pings without waking the mailbox or changing its wire format.
+        awaiting = randomBytes(8);
+        heartbeatTimer = setTimeout(() => dropped("socket heartbeat timed out"), heartbeat.timeoutMs);
+        ws.ping(awaiting);
+      }, heartbeat.intervalMs);
+    };
+    ws.onopen = () => {
+      if (socket !== ws) return;
+      reachable = true;
+      schedulePing();
+    };
+    ws.addEventListener("pong", (event) => {
+      if (socket !== ws || !awaiting || !(event instanceof MessageEvent)) return;
+      if (!Buffer.isBuffer(event.data) || !awaiting.equals(event.data)) return;
+      awaiting = null;
+      clearHeartbeat();
+      schedulePing();
+    });
+    ws.onmessage = (event) => {
+      if (typeof event.data !== "string") return;
+      const text = event.data;
+      frames = frames.then(() => (socket === ws ? onFrame(text) : undefined)).catch((error) => log(`frame failed: ${error instanceof Error ? error.message : String(error)}`));
+    };
+    ws.onerror = () => dropped("socket error");
+    ws.onclose = () => dropped();
   };
 
   const disconnect = () => {
     if (retry) clearTimeout(retry);
     retry = null;
+    clearHeartbeat();
     const ws = socket;
     socket = null;
     ws?.close(1000, "closed");
