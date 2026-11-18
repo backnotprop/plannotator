@@ -37,7 +37,7 @@ export function RunCard({ messageId, block, state, agent, cardRef }: { messageId
   const using = view?.uses.filter((name) => !needs.includes(name) && !fromShell.includes(name)) ?? [];
   const [card, setCard] = useState<HTMLElement | null>(null);
   const [commandRef, commandMore] = useMoreBelow<HTMLPreElement>(block.command);
-  const places = useFieldPlaces(card, needs.filter((name) => !(view?.fields.includes(name) ?? false)));
+  const places = useFieldPlaces(card, needs.filter((name) => !(view?.fields.includes(name) ?? false)), view?.field_at);
   // Stable, so the store sees each card come on and off screen once, not on every redraw.
   const sectionRef = useCallback(
     (element: HTMLElement | null) => {
@@ -167,7 +167,7 @@ export function RunCard({ messageId, block, state, agent, cardRef }: { messageId
                   <Icon name="lock" />
                   {`Needs ${name}`}
                   {!here && (
-                    <button type="button" className="ib-btn ib-ghost ib-sm" onClick={() => goToField(name)} data-run-needs-go="">
+                    <button type="button" className="ib-btn ib-ghost ib-sm" onClick={() => void goToField(name, view?.field_at?.[name])} data-run-needs-go="">
                       {places[name] ? `Save it ${places[name]}` : 'Save it in its card'}
                     </button>
                   )}

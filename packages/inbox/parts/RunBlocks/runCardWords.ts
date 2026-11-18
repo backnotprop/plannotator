@@ -35,30 +35,67 @@ export function runHint(run: RunView, agent: string, computer: string): string {
   return `${agent} got the exit code and the last lines of output.`;
 }
 
-/** Brings a secret's one field into view and into focus (it sits on its secret card, or another run's card). */
-export const goToField = (name: string) => {
-  const input = document.querySelector<HTMLInputElement>(`[data-secret-form="${name}"] input`);
+const fieldOf = (name: string) => document.querySelector<HTMLElement>(`[data-secret-form="${CSS.escape(name)}"]`);
+/** A message's folded line, when it is folded (its body, and so the field, is not on the page). */
+const foldedArticle = (messageId: string | undefined) =>
+  messageId ? document.querySelector<HTMLElement>(`[data-message-article="${CSS.escape(messageId)}"][data-folded]`) : null;
+const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+
+/**
+ * Brings a secret's one field into view and into focus (it sits on its secret card, or another run's card). Its
+ * message folded: that message opens first, and the field is focused once it is drawn.
+ */
+export async function goToField(name: string, messageId?: string): Promise<void> {
+  let field = fieldOf(name);
+  if (!field) {
+    foldedArticle(messageId)?.querySelector<HTMLElement>('[data-fold-head]')?.click();
+    for (let i = 0; i < 30 && !field; i++) {
+      await nextFrame();
+      field = fieldOf(name);
+    }
+  }
+  const input = field?.querySelector<HTMLInputElement>('input');
   if (!input) return;
   input.scrollIntoView({ block: 'center', behavior: 'smooth' });
   input.focus({ preventScroll: true });
-};
+}
 
 /**
- * Where a secret's one field is from this card, for its "Save it …" button: above or below in the page, or "in its
- * card" when it is not on the page (a folded message).
+ * Where a secret's one field is from this card, for its "Save it …" button: above or below in the page (its message
+ * open, or folded to its line), or "in its card" when it is not on the page at all. Looked at again whenever the
+ * thread around it changes (a message folded or opened), not only when this card redraws.
  */
-export function useFieldPlaces(card: HTMLElement | null, names: readonly string[]): Record<string, 'above' | 'below' | null> {
+export function useFieldPlaces(card: HTMLElement | null, names: readonly string[], fieldAt: Readonly<Record<string, string>> = {}): Record<string, 'above' | 'below' | null> {
   const [places, setPlaces] = useState<Record<string, 'above' | 'below' | null>>({});
   const key = names.join(',');
+  const where = JSON.stringify(fieldAt);
   useLayoutEffect(() => {
     if (!card || names.length === 0) return;
-    const next: Record<string, 'above' | 'below' | null> = {};
-    for (const name of names) {
-      const field = document.querySelector(`[data-secret-form="${name}"]`);
-      next[name] = field ? (field.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING ? 'above' : 'below') : null;
-    }
-    setPlaces((was) => (names.every((name) => was[name] === next[name]) ? was : next));
-  });
+    const look = () => {
+      const next: Record<string, 'above' | 'below' | null> = {};
+      for (const name of names) {
+        const field = fieldOf(name) ?? foldedArticle(fieldAt[name]);
+        next[name] = field ? (field.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING ? 'above' : 'below') : null;
+      }
+      setPlaces((was) => (names.every((name) => was[name] === next[name]) ? was : next));
+    };
+    look();
+    if (typeof MutationObserver === 'undefined') return;
+    let frame = 0;
+    const observer = new MutationObserver(() => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        look();
+      });
+    });
+    observer.observe(card.ownerDocument.body, { childList: true, subtree: true });
+    return () => {
+      observer.disconnect();
+      if (frame) cancelAnimationFrame(frame);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [card, key, where]);
   return key === '' ? {} : places;
 }
 

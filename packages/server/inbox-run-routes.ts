@@ -151,11 +151,15 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
 
   /**
    * Where each secret this thread needs and has not saved gets its one field: the `:::secret` card when the thread
-   * asks for it, else the first run card (in thread order) that needs it. `${message id}/${key}`, or "secret".
+   * asks for it, else the first run card (in thread order) that needs it. `${message id}/${key}`, or
+   * `${message id}/secret` for the first `:::secret` card that asks for it.
    */
   const fieldOwners = (message: InboxMessage, saved: Set<string>, asked: Set<string>, shellHas: (name: string) => boolean): Map<string, string> => {
     const owners = new Map<string, string>();
-    for (const name of asked) if (!saved.has(name)) owners.set(name, "secret");
+    for (const m of store.thread(message.thread_id)?.messages ?? [message]) {
+      if (m.author.kind !== "agent") continue;
+      for (const s of parseInboxSecretBlocks(m.body)) if (asked.has(s.name) && !saved.has(s.name) && !owners.has(s.name)) owners.set(s.name, `${m.id}/secret`);
+    }
     for (const m of store.thread(message.thread_id)?.messages ?? [message]) {
       if (m.author.kind !== "agent") continue;
       for (const block of parseInboxRunBlocks(m.body)) {
@@ -186,6 +190,11 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
       needs,
       // Of `needs`, those whose one field in this thread is on this card (the others' field is elsewhere).
       fields: needs.filter((name) => owners.get(name) === `${message.id}/${block.key}`),
+      // The others: the message whose card has the field, so "Save it …" can open that message when it is folded.
+      field_at: Object.fromEntries(needs.flatMap((name) => {
+        const owner = owners.get(name);
+        return owner && owner !== `${message.id}/${block.key}` ? [[name, owner.slice(0, owner.indexOf("/"))]] : [];
+      })),
       lookalike: inboxRunLookalikes(block.command),
       shell_note: shell ? inboxRunShellNote(block.command, shell, computer, uses) : null,
     };

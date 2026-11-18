@@ -259,6 +259,29 @@ describe.if(posix)("a run", () => {
     expect(runs.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: false });
   });
 
+  test("a lost run last said to be running that ends by itself: the agent is told once that it ended", async () => {
+    let clock = 1_000_000;
+    let left: boolean | null = true;
+    const record = { message_id: "msg_1", key: "r-0000000a", title: "Run it", folder: "~/p", live: true, pid: 4242, spawned_at: 999_000, view: { key: "r-0000000a", run_id: "run_1", state: "running", exit_code: null, signal: null, started_at: "", ended_at: null, duration_ms: 0, lines: ["QA started"], total_lines: 1, partial: "", waiting_for_input: false, needs_terminal: false, error: null, interrupted: null, left_running: null } } as const;
+    const runs = createInboxRuns({ messageAlive: () => true, journal: memoryRunJournal([structuredClone(record) as never]), now: () => clock, stillRunning: async () => left });
+    const told: (boolean | null | undefined)[] = [];
+    await runs.recover((r) => told.push(r.view.left_running));
+    expect(told).toEqual([true]);
+    left = false;
+    for (let i = 0; i < 3; i++) {
+      clock += 5_000;
+      runs.recheck("msg_1");
+      await Bun.sleep(5);
+    }
+    expect(told).toEqual([true, false]);
+    // An Inbox started later, with the journal saying it still ran: it finds it ended, and says so once.
+    const journal = memoryRunJournal([{ ...structuredClone(record), live: false, view: { ...structuredClone(record.view), state: "stopped", interrupted: "lost", left_running: true } } as never]);
+    const later = createInboxRuns({ messageAlive: () => true, journal, stillRunning: async () => false });
+    const heard: (boolean | null | undefined)[] = [];
+    await later.recover((r) => heard.push(r.view.left_running));
+    expect(heard).toEqual([false]);
+  });
+
   test("PowerShell's run has its stdin closed at once (it would wait for it to close), and is not watched for a prompt", async () => {
     const w = world();
     // `cat` reads stdin to its end: with stdin closed it ends at once; held open it would wait forever.

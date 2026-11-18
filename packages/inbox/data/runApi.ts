@@ -37,6 +37,8 @@ export interface RunBlockView {
   uses: string[];
   /** Those of `uses` not saved here that the person's shell sets: the run gets their own value ("from your shell"). */
   from_shell?: string[];
+  /** For a needed name whose field is on another card: the message that card is in. */
+  field_at?: Record<string, string>;
   /** Those of `uses` neither saved nor set by the shell: Run waits for them. */
   needs: string[];
   /** Of `needs`, those whose one field in the thread is on this card (the others' is on the secret's card or another run's). */

@@ -444,7 +444,8 @@ describe("the review's second round", () => {
   test("one field per secret per thread: the secret's own card, else the first run card that needs it", async () => {
     const asked = world([RUN_BODY, "", ":::run", "Again", "```", 'echo "$API_TOKEN"', "```", ":::"].join("\n"));
     const blocks = (await asked.read()).blocks;
-    for (const view of Object.values(blocks) as { needs: string[]; fields: string[] }[]) expect(view).toMatchObject({ needs: ["API_TOKEN"], fields: [] });
+    // Each says which message has the field, so "Save it …" can open it when it is folded.
+    for (const view of Object.values(blocks) as { needs: string[]; fields: string[] }[]) expect(view).toMatchObject({ needs: ["API_TOKEN"], fields: [], field_at: { API_TOKEN: asked.message.id } });
     const runsOnly = world([":::run", "One", "Uses: PAY_KEY", "```", 'echo "$PAY_KEY"', "```", ":::", "", ":::run", "Two", "Uses: PAY_KEY", "```", "env", "```", ":::"].join("\n"));
     const views = Object.values((await runsOnly.read()).blocks) as { needs: string[]; fields: string[] }[];
     expect(views.map((v) => v.needs)).toEqual([["PAY_KEY"], ["PAY_KEY"]]);

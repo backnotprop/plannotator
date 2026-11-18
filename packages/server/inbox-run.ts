@@ -349,6 +349,16 @@ export function createInboxRuns(options: {
    * could not tell (null) leaves "still running" as it was (and Stop, pressed then, signals nothing). Never a signal here.
    */
   const lostChecked = new Map<InboxRunRecord, number>();
+  /** Who hears of a lost run (`recover`'s listener): told again, once, when one it heard "still running" ends by itself. */
+  let tellLost: ((record: InboxRunRecord) => void) | null = null;
+  const toldEnded = (record: InboxRunRecord) => {
+    if (!options.messageAlive(record.message_id)) return;
+    try {
+      tellLost?.(record);
+    } catch {
+      // A listener's failure is not the run's.
+    }
+  };
   const recheckLost = async (record: InboxRunRecord): Promise<boolean | null> => {
     lostChecked.set(record, now());
     const pid = record.pid ?? null;
@@ -358,6 +368,8 @@ export function createInboxRuns(options: {
       record.view = { ...record.view, left_running: left };
       writeJournal();
       changed(record.message_id);
+      // It ended by itself: the agent, last told it still ran, hears that it ended.
+      toldEnded(record);
     }
     return left;
   };
@@ -590,19 +602,23 @@ export function createInboxRuns(options: {
      * looking whether each command still runs. Those found running before keep being looked at too.
      */
     async recover(onLost: (record: InboxRunRecord) => void): Promise<void> {
+      tellLost = onLost;
       const fresh = lost.splice(0);
+      const endedSince: InboxRunRecord[] = [];
       const again = [...past.values()].filter((record) => record.view.left_running === true && !fresh.includes(record));
       for (const record of [...fresh, ...again]) {
         const pid = record.pid ?? null;
         const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at, record.seen_at ?? record.spawned_at).catch(() => null) : null;
         // One `ps` that could not tell never undoes "still running" found before (only a definite end does).
         const kept = left === null && record.view.left_running === true && !fresh.includes(record) ? true : left;
+        if (kept === false && record.view.left_running === true && !fresh.includes(record)) endedSince.push(record);
         record.view = { ...record.view, left_running: kept };
         lostChecked.set(record, now());
         if (kept !== true) record.pid = null;
       }
       if (fresh.length > 0 || again.length > 0) writeJournal();
       for (const record of fresh) if (options.messageAlive(record.message_id)) onLost(record);
+      for (const record of endedSince) toldEnded(record);
     },
     /** The Inbox stops: every run's group goes now, and each is reported as the Inbox closing. */
     stopAll(): void {

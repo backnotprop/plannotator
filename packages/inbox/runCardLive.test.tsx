@@ -410,3 +410,67 @@ test.if(hasDom)('after Open in terminal, the note names only the secrets not set
   expect(card().textContent).toContain("PAY_KEY isn't set in that terminal.");
   expect(card().textContent).not.toContain('OPENAI_API_KEY and');
 });
+
+/** A secret's message (its own React root, as another message is) that folds and opens, and a run card after it. */
+async function foldingThread() {
+  const secretBody = [':::secret', 'PAY_KEY', 'For the payment tests.', ':::'].join('\n');
+  const runBody = [':::run', 'Pay', 'Uses: PAY_KEY', '', '```sh', 'bun test pay', '```', ':::'].join('\n');
+  const runKey = parseInboxRunBlocks(runBody)[0]!.key;
+  runApi.state = async (id) => ({ ...wire(null), blocks: id === 'msg_run' ? { [runKey]: blockView({ uses: ['PAY_KEY'], needs: ['PAY_KEY'], fields: [], field_at: { PAY_KEY: 'msg_secret' } }) } : {} });
+  host = document.createElement('div');
+  host.className = 'pn-inbox';
+  document.body.appendChild(host);
+  const above = document.createElement('div');
+  const below = document.createElement('div');
+  host.append(above, below);
+  const secretRoot = createRoot(above);
+  root = createRoot(below);
+  const draw = (shown: 'open' | 'folded' | 'hidden') =>
+    act(() =>
+      secretRoot.render(
+        shown === 'open' ? (
+          <article data-message-article="msg_secret">{runBlockFor({ id: 'msg_secret', body: secretBody }, { startLine: 1, directiveKind: 'secret' }, 'Claude')}</article>
+        ) : shown === 'folded' ? (
+          <article data-message-article="msg_secret" data-folded="">
+            <button type="button" data-fold-head="" onClick={() => draw('open')}>Claude: For the payment tests.</button>
+          </article>
+        ) : null,
+      ),
+    );
+  draw('open');
+  act(() => root!.render(<article data-message-article="msg_run">{runBlockFor({ id: 'msg_run', body: runBody }, { startLine: 1, directiveKind: 'run' }, 'Claude')}</article>));
+  const go = () => host!.querySelector<HTMLButtonElement>('[data-run-needs-go]');
+  await until(() => go()?.textContent === 'Save it above', 2_000);
+  return { draw, go, secretRoot };
+}
+
+test.if(hasDom)('the field\'s message folding or leaving the page changes "Save it …" on the other card with no redraw of it', async () => {
+  const { draw, go, secretRoot } = await foldingThread();
+  try {
+    // Folded to its line, it is still above.
+    draw('folded');
+    await settle(40);
+    expect(go()!.textContent).toBe('Save it above');
+    // Hidden behind "N earlier messages": not on the page, so "in its card".
+    draw('hidden');
+    await until(() => go()!.textContent === 'Save it in its card', 1_000);
+    draw('open');
+    await until(() => go()!.textContent === 'Save it above', 1_000);
+  } finally {
+    act(() => secretRoot.unmount());
+  }
+});
+
+test.if(hasDom)('"Save it above" with the field\'s message folded: that message opens, and its field takes focus', async () => {
+  const { draw, go, secretRoot } = await foldingThread();
+  try {
+    draw('folded');
+    await settle(40);
+    expect(host!.querySelector('[data-secret-input]')).toBeNull();
+    act(() => go()!.click());
+    await until(() => document.activeElement === host!.querySelector('[data-secret-input]'), 2_000);
+    expect(host!.querySelector('[data-message-article="msg_secret"]')!.hasAttribute('data-folded')).toBe(false);
+  } finally {
+    act(() => secretRoot.unmount());
+  }
+});

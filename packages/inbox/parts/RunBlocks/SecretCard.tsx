@@ -81,7 +81,8 @@ export function SecretCard({ messageId, secret, state, agent, cardRef }: { messa
       ) : saved && !replacing ? (
         <>
           <p className="ib-rb-where" data-secret-detail="">
-            {`Saved ${clockTime(saved.saved_at)} · ${state?.store ?? ''}`}
+            {/* The head already says Saved: when, and where. */}
+            {`${clockTime(saved.saved_at)} · ${state?.store ?? ''}`}
           </p>
           <div className="ib-rb-acts">
             <button ref={replaceRef} type="button" className="ib-btn" onClick={() => setReplacing(true)} data-secret-replace="">
