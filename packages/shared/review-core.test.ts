@@ -30,6 +30,7 @@ import {
   getGitContext,
   getGitDiffFingerprint,
   getWorkingTreeDiffFromBase,
+  getSinceBaseSections,
   gitAddFile,
   gitResetFile,
   isBinaryPatchFile,
@@ -1449,6 +1450,22 @@ describe("review-core", () => {
     expect(review.patch).toContain("+current content");
     expect(review.patch).toContain("+untracked content");
     expect(await getGitDiffFingerprint(runtime, mode, "main", repo)).not.toBe(before);
+  });
+
+  test("review preserves whitespace at the start of an untracked file's name", async () => {
+    const repo = initRepo();
+    const runtime = makeRuntime(repo);
+    const path = " draft.txt";
+    writeFileSync(join(repo, path), "first draft\n");
+
+    const before = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
+    expect(before).not.toBeNull();
+    const review = await runGitDiff(runtime, "uncommitted", "main", repo);
+    expect(listPatchFiles(review.patch).map((file) => file.path)).toContain(path);
+    expect((await getSinceBaseSections(runtime, "main", repo))?.files[path]).toEqual({ group: "untracked", staged: false });
+
+    writeFileSync(join(repo, path), "other draft\n");
+    expect(await getGitDiffFingerprint(runtime, "uncommitted", "main", repo)).not.toBe(before);
   });
 
   test("uncommitted diff includes untracked files with C-quoted (unicode) names", async () => {
