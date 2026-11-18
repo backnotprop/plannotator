@@ -318,22 +318,51 @@
     "DoorPicksBody": {
       "type": "object",
       "properties": {
-        "idempotency_key": {
-          "type": "string"
-        },
         "questions": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/DoorQuestionPick"
+            "type": "object",
+            "properties": {
+              "key": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "integer"
+              },
+              "answer": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/QuestionAnswer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "key",
+              "revision",
+              "answer"
+            ],
+            "additionalProperties": true
           }
         },
         "unsent_only": {
-          "type": "boolean"
+          "type": "boolean",
+          "const": true
+        },
+        "confirm_full": {
+          "type": "boolean",
+          "const": true
+        },
+        "idempotency_key": {
+          "type": "string"
         }
       },
       "required": [
-        "idempotency_key",
-        "questions"
+        "questions",
+        "idempotency_key"
       ],
       "additionalProperties": true,
       "x-source": "scripts/mobile/door-shapes.ts"

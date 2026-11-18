@@ -61,6 +61,11 @@
       "idempotency_key",
       "questions"
     ],
+    "DoorPicksBodyQuestionsItem": [
+      "answer",
+      "key",
+      "revision"
+    ],
     "DoorQuestionPick": [
       "key",
       "revision"

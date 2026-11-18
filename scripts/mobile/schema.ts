@@ -44,9 +44,9 @@ export const ROOTS: Record<string, string[]> = {
 
 /**
  * Every repository file the compiler reads for the schema, as literals, so
- * scripts/ci-affected.ts selects the contract's test when one changes (a file
- * reached only by `import type` is invisible to its import scan). buildSchema
- * fails when the list and what the compiler read differ.
+ * scripts/ci-affected.ts selects the contract's test when one changes whatever
+ * its import scan sees. buildSchema fails when the list and what the compiler
+ * read differ.
  */
 export const SCHEMA_SOURCES = [
   'packages/core/annotatable.ts',
@@ -57,6 +57,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/forge-refs.ts',
   'packages/core/guide-notes.ts',
   'packages/core/guide.ts',
+  'packages/core/inbox-answers.ts',
   'packages/core/inbox-antigravity.ts',
   'packages/core/inbox-attachments.ts',
   'packages/core/inbox-branch-reports.ts',

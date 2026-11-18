@@ -70,4 +70,4 @@ If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 - `health.door` is not in the schema until brief F1 lands and its type joins `ROOTS`. After F1, match `health.door.routes` against `DoorRoute.name`.
 - Decode list rows one by one, so one bad row does not blank the list.
 - Seqs, cursors and revisions are `Int64`. Other numbers are `Double`.
-- `DoorPicksBody` in `door-shapes.ts` does not have `confirm_full` yet. Until it is made from the product's `inboxPickBody`, build picks the way `inboxPickBody` does.
+- `DoorPicksBody` is the window's own pick body (`inboxPickBody` in `packages/core/inbox-answers.ts`) plus `idempotency_key`, so it has `unsent_only` and `confirm_full`. A pick's `answer: null` takes it back, and `Wire.swift` writes the null. The other bodies in `door-shapes.ts` (pair, seen, reply, the error and the frames) are still written by hand until the product has types for them.
