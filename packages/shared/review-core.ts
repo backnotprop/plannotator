@@ -2823,37 +2823,7 @@ export function isP4DiffType(diffType: string): boolean {
 export function listPatchFiles(
   patch: string,
 ): { path: string; additions: number; deletions: number }[] {
-  if (!patch) return [];
-
-  const chunkStarts = [...patch.matchAll(/^diff --git /gm)];
-  if (chunkStarts.length === 0) return [];
-
-  const files: { path: string; additions: number; deletions: number }[] = [];
-
-  for (let i = 0; i < chunkStarts.length; i++) {
-    const start = chunkStarts[i].index ?? 0;
-    const end = chunkStarts[i + 1]?.index ?? patch.length;
-    const lines = patch.slice(start, end).split("\n");
-
-    // Prefer the --- /+++ path lines (present on every non-mode-only chunk);
-    // fall back to the "diff --git a/x b/y" header for the rare chunk that
-    // lacks them (e.g. a pure mode change).
-    const { oldPath: bodyOldPath, newPath: bodyNewPath } = parseDiffFilePathLines(lines);
-    const headerPaths = parseDiffGitHeader(lines[0] ?? "");
-    const path = bodyNewPath ?? bodyOldPath ?? headerPaths.newPath ?? headerPaths.oldPath;
-    if (!path) continue;
-
-    let additions = 0;
-    let deletions = 0;
-    for (const line of lines) {
-      if (line.startsWith("+") && !line.startsWith("+++")) additions++;
-      else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
-    }
-
-    files.push({ path, additions, deletions });
-  }
-
-  return files;
+  return parseDiffToFiles(patch).map(({ path, additions, deletions }) => ({ path, additions, deletions }));
 }
 
 /** One changed file's chunk in a patch, as the server sees it. */
