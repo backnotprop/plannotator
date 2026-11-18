@@ -36,6 +36,11 @@ export function contractVersion(): number {
   return Number(text);
 }
 
+/** Write a repository file, by its path from the root (always a path named as a literal by the caller). */
+export function writeRepoText(path: string, text: string): void {
+  writeFileSync(join(ROOT, path), text);
+}
+
 /** Whether a repository file exists, by its path from the root (always a path named as a literal by the caller). */
 export function repoFileExists(path: string): boolean {
   return existsSync(join(ROOT, path));
