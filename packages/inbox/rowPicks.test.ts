@@ -78,6 +78,10 @@ describe('bulkTargets', () => {
     expect(bulkTargets(rows, 'priority-add', r).map((x) => x.thread_id)).toEqual(['a']);
     expect(bulkTargets(rows, 'priority-remove', r).map((x) => x.thread_id)).toEqual(['b']);
   });
+  test('Hide takes only the rows with open PRs not hidden (never an archived one, nor a linked machine\'s, which carries none)', () => {
+    const rows = [row('a', { hide_pulls: ['github.com/o/r#1'] }), row('b'), row('c', { hide_pulls: ['github.com/o/r#2'], resolved_at: '2026-11-01T00:00:00.000Z' }), row('d', { hide_pulls: [] })];
+    expect(bulkTargets(rows, 'hide-pulls', rules()).map((x) => x.thread_id)).toEqual(['a']);
+  });
   test('Mark read only where the row offers it (never Quiet); Mark unread only on a read row an agent wrote last in', () => {
     const quiet = row('q', { section: 'quiet', waiting_on_person: false, questions: { open: 0, picked: 0, stopped: false, holds_up: [], prompt: null, actions: 0 } as InboxListRow['questions'] });
     const rows = [row('a'), quiet];

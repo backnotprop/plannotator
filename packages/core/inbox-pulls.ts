@@ -176,6 +176,39 @@ export interface InboxPullsAnswer {
   machines?: Record<string, { read_at: string | null; pending: boolean; name?: string; looked?: true }>;
   /** The merged board only: the linked machines' risk judgments of the PRs they list, by pull key. */
   far_risk?: Record<string, InboxPullRiskJudgment>;
+  /**
+   * The PRs the person hid on this machine (server's inbox-pull-hidden.ts), newest first: left out of `pulls`, kept
+   * here so Reviews can list them with Show again. Absent from an older Inbox.
+   */
+  hidden?: InboxPullHidden[];
+  /** The repositories hidden (every PR in them left out): Hidden lists them too. Absent from an older Inbox. */
+  hidden_repos?: InboxRepoHidden[];
+}
+
+/** A PR the person hid from their lists: nothing is done on the forge. `at`: when, ISO. */
+export interface InboxPullHidden {
+  key: string;
+  title: string;
+  url: string;
+  at: string;
+  /** The Inbox thread it belongs to (its review, hand-off or the thread's own PR list), when one does: Hidden opens it. */
+  thread_id?: string;
+  /** Its head repository (`owner/repo`) when it came from a fork, as the list knew it at hide time: the project rule's fork case. */
+  head_repo?: string;
+}
+
+/** A repository the person hid from their lists (every PR in it, new ones too): nothing is done on the forge. */
+export interface InboxRepoHidden {
+  /** `inboxPullRepoKey`: `host/owner/repo`, lowercased. */
+  key: string;
+  /** Its name as the board showed it. */
+  label: string;
+  at: string;
+}
+
+/** A PR key's repository key (`host/owner/repo#12` → `host/owner/repo`; GitLab's `…#12:pull` too). */
+export function inboxPullRepoOfKey(key: string): string {
+  return key.replace(/#\d+(?::[a-z]+)?$/, "").toLowerCase();
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */

@@ -14,6 +14,7 @@
  * Browser-safe and dependency-free apart from core's own question model.
  */
 
+import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive, InboxReviewResolved } from "./review-threads";
 import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage, InboxLiveSiteRef } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
@@ -881,6 +882,10 @@ export interface InboxMessage {
    * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
    */
   took_over?: boolean;
+  review_live?: InboxReviewLive;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
+  review_resolved?: InboxReviewResolved | null;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -1184,6 +1189,8 @@ export interface InboxLaunchRecord {
   /** Fixed at Send, so Try again and every restart start the same. */
   model?: string;
   effort?: string;
+  /** OpenCode's own primary agent the session started as (build, plan, …); absent: its default. */
+  primary_agent?: string;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;
@@ -1855,6 +1862,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * from an older Inbox.
    */
   pulls?: InboxThreadPullsSummary;
+  /**
+   * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
+   * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.
+   * A thread whose open PRs are all hidden is left out of that list (it stays in search and in Reviews' Hidden).
+   */
+  hide_pulls?: string[];
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -3229,7 +3242,7 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
-  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  /** The film or recording's length, when its metadata can be read. */
   duration_ms?: number;
   /** The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload. */
   shown_sha256?: string;

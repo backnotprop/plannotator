@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   isOversizedReviewStubPatch,
+  oversizedReviewStubBytes,
   OVERSIZED_REVIEW_STUB_LIMIT_LABEL,
 } from "./diff-paths";
 import { spawnSync } from "node:child_process";
@@ -407,6 +408,21 @@ describe("review-core", () => {
     // produces the same `Binary files ... differ` line, so the marker is the
     // only thing that tells the two apart.
     expect(isOversizedReviewStubPatch(result.patch)).toBe(true);
+    expect(oversizedReviewStubBytes(result.patch)).toEqual({ new: MAX_REVIEW_FILE_CONTENT_BYTES + 1 });
+  });
+
+  test("a committed oversized file's stub carries both sides' byte sizes, so the page never fetches a side over the image cap", async () => {
+    const repoDir = initRepo();
+    const runtime = makeRuntime(repoDir);
+    writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 10, 1));
+    spawnSync("git", ["add", "photo.png"], { cwd: repoDir });
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "photo"], { cwd: repoDir });
+    writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 20, 2));
+
+    const result = await runGitDiff(runtime, "uncommitted", "main");
+
+    expect(isOversizedReviewStubPatch(result.patch)).toBe(true);
+    expect(oversizedReviewStubBytes(result.patch)).toEqual({ old: MAX_REVIEW_FILE_CONTENT_BYTES + 10, new: MAX_REVIEW_FILE_CONTENT_BYTES + 20 });
   });
 
   test("the oversized-stub marker is absent from ordinary and genuinely binary diffs", async () => {
@@ -638,11 +654,16 @@ describe("review-core", () => {
     git(superproject, ["-C", "deps/module", "-c", "core.hooksPath=/dev/null", "checkout", second]);
     git(superproject, ["add", "deps/module"]);
 
-    const runtime = makeRuntime(superproject);
-    const staged = await runGitDiff(runtime, "staged", "main");
-    expect(staged.patch).toContain(`-Subproject commit ${first}`);
-    expect(staged.patch).toContain(`+Subproject commit ${second}`);
-    expect(staged.patch).not.toContain("Binary files");
+    const runtime = makeConfigForwardingRuntime(superproject);
+    for (const format of ["short", "log", "diff"]) {
+      git(superproject, ["config", "diff.submodule", format]);
+      const staged = await runGitDiff(runtime, "staged", "main");
+      expect(staged.patch).toContain(`-Subproject commit ${first}`);
+      expect(staged.patch).toContain(`+Subproject commit ${second}`);
+      expect(staged.patch).not.toContain("module.txt");
+      expect(staged.patch).not.toContain("Binary files");
+      expect(listPatchFiles(staged.patch).map((file) => file.path)).toEqual(["deps/module"]);
+    }
     const firstFingerprint = await getGitDiffFingerprint(runtime, "staged", "main");
 
     writeFileSync(join(submoduleSource, "module.txt"), "third\n", "utf-8");
@@ -872,6 +893,7 @@ describe("review-core", () => {
     for (const { args, options } of rendered) {
       expect(options?.config).toEqual({
         "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
+        "diff.submodule": "short",
       });
       expect(args.some((arg) => arg.includes("bigFileThreshold"))).toBe(false);
     }
@@ -1410,6 +1432,25 @@ describe("review-core", () => {
     expect(result.patch).toContain("+first");
   });
 
+  test.each(["since-base", "uncommitted"] as const)("%s reviews staged and untracked files before the first commit", async (mode) => {
+    const repo = makeTempDir("plannotator-review-core-unborn-index-");
+    git(repo, ["init"]);
+    const runtime = makeRuntime(repo);
+    writeFileSync(join(repo, "first.txt"), "staged content\n");
+    git(repo, ["add", "first.txt"]);
+    writeFileSync(join(repo, "draft.txt"), "untracked content\n");
+
+    const before = await getGitDiffFingerprint(runtime, mode, "main", repo);
+    expect(before).not.toBeNull();
+    writeFileSync(join(repo, "first.txt"), "current content\n");
+
+    const review = await runGitDiff(runtime, mode, "main", repo);
+    expect(review.error).toBeUndefined();
+    expect(review.patch).toContain("+current content");
+    expect(review.patch).toContain("+untracked content");
+    expect(await getGitDiffFingerprint(runtime, mode, "main", repo)).not.toBe(before);
+  });
+
   test("uncommitted diff includes untracked files with C-quoted (unicode) names", async () => {
     // git ls-files C-quotes unusual paths ("caf\303\251.txt"); without
     // unquoting, the --no-index diff can't access the literal quoted name
@@ -1451,6 +1492,22 @@ describe("review-core", () => {
       const root = await getFileContentsForDiff(runtime, diffType, "main", "tracked.txt", undefined, subCwd);
       expect(root.newContent).toBe("root after\n");
     }
+  });
+
+  test("stage and unstage affect only the selected file when its name contains brackets", async () => {
+    const repo = initRepo();
+    const runtime = makeRuntime(repo);
+    const selected = "row[1].txt";
+    const neighbor = "row1.txt";
+    writeFileSync(join(repo, selected), "selected\n");
+    writeFileSync(join(repo, neighbor), "neighbor\n");
+
+    await gitAddFile(runtime, selected);
+    expect(git(repo, ["diff", "--cached", "--name-only"])).toBe(selected);
+
+    git(repo, ["add", "--", neighbor]);
+    await gitResetFile(runtime, selected);
+    expect(git(repo, ["diff", "--cached", "--name-only"])).toBe(neighbor);
   });
 
   test("stage/unstage resolves root-relative pathspecs from a subdirectory CWD", async () => {
@@ -1858,6 +1915,19 @@ describe("commit diff mode", () => {
     expect(result.patch).toContain("+second");
     expect(result.patch).not.toContain("third.txt");
     expect(result.patch).not.toContain("dirty");
+  });
+
+  test("Last commit on a one-commit branch shows committed changes only", async () => {
+    const repo = initRepo();
+    const runtime = makeRuntime(repo);
+    const clean = await runGitDiff(runtime, "last-commit", "main");
+    expect(clean.error).toBeUndefined();
+    expect(clean.patch).toContain("new file mode");
+    expect(clean.patch).toContain("+before");
+
+    writeFileSync(join(repo, "tracked.txt"), "later working-tree edit\n");
+    const dirty = await runGitDiff(runtime, "last-commit", "main");
+    expect(dirty.patch).toBe(clean.patch);
   });
 
   test("a root commit diffs against the empty tree", async () => {

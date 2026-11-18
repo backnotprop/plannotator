@@ -13,6 +13,7 @@ import { questionKey, type QuestionAnswer } from "@plannotator/core/question-blo
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { packApp } from "@plannotator/shared/packed-app";
+import { SEM_DIFF_FILES, type SemDiffSources } from "@plannotator/shared/sem-diff-assets";
 import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
@@ -411,6 +412,21 @@ describe("security refusals, by real requests", () => {
     // Only a packed name answers: never the page under another path, never a file from disk.
     expect((await fetch(`${base}/assets/other.js`)).status).toBe(404);
     expect((await fetch(`${base}/assets/../package.json`)).status).toBe(404);
+  });
+
+  test("the semantic diff engine: its advert, and its wasm served beside the packed window", async () => {
+    const plain = await start(join(tempRoot(), "data"));
+    expect(await (await fetch(`http://127.0.0.1:${plain.port}/api/inbox/sem-diff`)).json()).toEqual({ advert: null });
+    const semDiff = Object.fromEntries(SEM_DIFF_FILES.map((name, i) => [name, new Uint8Array([0, 97, 115, 109, i + 1])])) as SemDiffSources;
+    const server = await start(join(tempRoot(), "data"), { htmlContent: packApp("<!doctype html>", {}), semDiff });
+    const base = `http://127.0.0.1:${server.port}`;
+    const { advert } = (await (await fetch(`${base}/api/inbox/sem-diff`)).json()) as { advert: { runtime: string; grammars: Record<string, string> } };
+    const grammar = Object.values(advert.grammars)[0]!;
+    for (const path of [advert.runtime, grammar]) {
+      const wasm = await fetch(`${base}${path}`);
+      expect([path, wasm.status, wasm.headers.get("content-type")]).toEqual([path, 200, "application/wasm"]);
+    }
+    expect((await fetch(`${base}/assets/sem-diff/unknown.wasm`)).status).toBe(404);
   });
 
   test("an HTTP/1.0 request with no Host (allowed by the guard) is answered, not a 500", async () => {
@@ -1212,7 +1228,7 @@ describe("the window's routes: settings, restart, favicon", () => {
       const onDisk = () => (JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { diffOptions?: Record<string, unknown> }).diffOptions;
       const save = (body: Record<string, unknown>) => post(server, "/api/inbox/settings", { serverSession: server.serverSession, ...body });
       // A value no build writes reads as never chosen.
-      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4 });
+      expect((await read()).diff_options).toEqual({ diff_style: null, overflow: null, indicators: null, line_diff_type: "char", line_numbers: null, background: null, background_intensity: null, tab_size: 4, semantic: null });
 
       // Every field is checked, and the refusal names it; nothing is written.
       const refusals: [unknown, string][] = [
@@ -1235,6 +1251,7 @@ describe("the window's routes: settings, restart, favicon", () => {
         [{ tab_size: 9 }, "diff_options.tab_size"],
         [{ tab_size: 2.5 }, "diff_options.tab_size"],
         [{ overflow: "wrap", tab_size: "4" }, "diff_options.tab_size"],
+        [{ semantic: "off" }, "diff_options.semantic"],
       ];
       for (const [bad, field] of refusals) {
         const refused = await save({ diff_options: bad });
@@ -1248,11 +1265,11 @@ describe("the window's routes: settings, restart, favicon", () => {
       expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 4, expandUnchanged: true, fontSize: "13", diffIndicators: "sideways" });
 
       // A change saves only its fields; the others, code review's included, stay.
-      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8 } });
+      const saved = await save({ diff_options: { overflow: "wrap", indicators: "classic", line_numbers: false, background_intensity: "strong", tab_size: 8, semantic: false } });
       expect(saved.status).toBe(200);
       const answer = (await saved.json()) as { diff_options: Record<string, unknown> };
-      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8 });
-      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong" });
+      expect(answer.diff_options).toEqual({ diff_style: null, overflow: "wrap", indicators: "classic", line_diff_type: "char", line_numbers: false, background: null, background_intensity: "strong", tab_size: 8, semantic: false });
+      expect(onDisk()).toEqual({ lineDiffType: "char", tabSize: 8, expandUnchanged: true, fontSize: "13", diffIndicators: "classic", overflow: "wrap", showLineNumbers: false, lineBgIntensity: "strong", semantic: false });
       expect((await read()).diff_options).toEqual(answer.diff_options);
 
       // `diff_style` alone (pages from before) sets the same field and is answered both ways.

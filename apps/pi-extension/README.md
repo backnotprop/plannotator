@@ -265,7 +265,7 @@ Use these inside `instructions` strings. They render once, when the phase is ent
 Run `/plannotator-review` to open your current VCS changes in the code review UI. Annotate specific lines, switch between the modes supported by the detected Git, GitButler, or JJ provider, and submit feedback that gets sent to the agent. Pass `--git` or `--gitbutler` to force that provider; GitButler requires `but` 0.21.0 or newer on `PATH`. Pass `--patch-file <path>` to review a static caller-supplied unified diff without a repository.
 ### Ask this session
 
-In plan review, code review, annotate and `/plannotator-last`, Ask AI is answered by your Pi session ("Ask this session"). It is the only Ask AI option there, so there is no provider picker. Your question shows in Pi's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode you pick a separate provider instead. Review agents, Code Tour and Guided Review still run their own models.
+In plan review, code review, annotate and `/plannotator-last`, Ask AI is answered by your Pi session ("Ask this session"). It is the only Ask AI option there, so there is no provider picker. Your question shows in Pi's chat. If the agent is busy, choose **Ask when it finishes** or **Interrupt and ask now**. In remote mode you pick a separate provider instead. Review agents and Guided Review still run their own models.
 
 ### Shared Plannotator event API
 

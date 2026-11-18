@@ -14,6 +14,7 @@ import {
   parseDiffGitHeader,
   parseDiffMetadataPathLines,
   OVERSIZED_REVIEW_STUB_MARKER,
+  oversizedReviewStubBytesLine,
 } from "./diff-paths";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 
@@ -393,7 +394,7 @@ export const GIT_COLOR_FREE_ARGS: readonly string[] = Object.freeze([
 
 /**
  * The same color-off settings as `GIT_CONFIG_*` environment variables, for
- * processes Plannotator spawns that run git themselves (review, tour and
+ * processes Plannotator spawns that run git themselves (review and
  * guide agent jobs). Inherited `GIT_CONFIG_*` entries are kept. Git 2.31+
  * reads these; an older git ignores them, which only costs color in the
  * agent's own tool output.
@@ -939,6 +940,8 @@ interface RawDiffEntry {
 interface OversizedTrackedDiffEntry extends RawDiffEntry {
   oldObjectId: string;
   newObjectId: string;
+  oldSize?: number | null;
+  newSize?: number | null;
 }
 
 const NULL_OBJECT_ID = /^0+$/;
@@ -1089,6 +1092,8 @@ function buildOversizedTrackedStub(entry: OversizedTrackedDiffEntry): string {
     `diff --git ${headerOldToken} ${headerNewToken}`,
     OVERSIZED_REVIEW_STUB_MARKER,
   ];
+  const bytesLine = oversizedReviewStubBytesLine({ old: entry.oldPath ? entry.oldSize : null, new: entry.newPath ? entry.newSize : null });
+  if (bytesLine) lines.push(bytesLine);
 
   if (!entry.oldPath) lines.push(`new file mode ${entry.newMode}`);
   if (!entry.newPath) lines.push(`deleted file mode ${entry.oldMode}`);
@@ -1132,6 +1137,8 @@ interface BoundedTrackedDiff {
  */
 const BOUNDED_DIFF_GIT_CONFIG: Record<string, string> = {
   "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
+  // Keep gitlinks as parseable pointer hunks even if interactive Git uses log or inline diffs.
+  "diff.submodule": "short",
 };
 
 /**
@@ -1268,6 +1275,8 @@ async function buildBoundedTrackedDiff(
     oversized.push({
       ...entry,
       newObjectId: workingObjectId ?? entry.newObjectId,
+      oldSize,
+      newSize,
     });
   }
 
@@ -1514,6 +1523,7 @@ async function getUntrackedFileDiffs(
           // Same size-cap marker the tracked stub carries (see
           // buildOversizedTrackedStub) so the UI explains both the same way.
           OVERSIZED_REVIEW_STUB_MARKER,
+          oversizedReviewStubBytesLine({ new: fileInfo.size })!,
           `new file mode ${mode}`,
           `Binary files /dev/null and ${newToken} differ`,
           "",
@@ -1820,49 +1830,28 @@ export async function runGitDiff(
         const hasHead =
           (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd }))
             .exitCode === 0;
-        let trackedPatch = "";
+        let base: string;
         if (hasHead) {
-          // Resolve the merge-base with the requested base. When the base
-          // doesn't exist (repo with no main/master/origin — e.g. a `trunk`
-          // default and no remote) merge-base fails; degrade to HEAD so the
-          // reviewer still sees their working-tree changes instead of a raw
-          // git error. The sections sidecar degrades the same way.
+          // Fall back to HEAD when the requested branch cannot be resolved.
           const mergeBaseResult = await runtime.runGit(
             ["merge-base", "--end-of-options", defaultBranch, "HEAD"],
             { cwd },
           );
-          const mergeBase = mergeBaseResult.exitCode === 0
-            ? mergeBaseResult.stdout.trim()
-            : "HEAD";
-          trackedPatch = await getWorkingTreeDiffFromBase(runtime, mergeBase, cwd, options, "best-effort", fileIdentities);
-        }
-        if (hasHead) {
-          patch = trackedPatch;
+          base = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : "HEAD";
         } else {
-          const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options, "best-effort", false, fileIdentities);
-          patch = untracked.diff;
+          base = await getEmptyTreeSha(runtime, cwd);
         }
+        patch = await getWorkingTreeDiffFromBase(runtime, base, cwd, options, "best-effort", fileIdentities);
         label = `All changes since ${displayRef(defaultBranch)}`;
         break;
       }
 
       case "uncommitted": {
-        const trackedDiffArgs = [
-          "diff",
-          "--no-ext-diff",
-          ...wFlag,
-          "--src-prefix=a/",
-          "--dst-prefix=b/",
-          "HEAD",
-        ];
         const hasHead =
           (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd }))
             .exitCode === 0;
-        const trackedPatch = hasHead
-          ? await runBoundedTrackedDiff(runtime, trackedDiffArgs, cwd, fileIdentities)
-          : "";
-        const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options, "best-effort", false, fileIdentities);
-        patch = removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
+        const base = hasHead ? "HEAD" : await getEmptyTreeSha(runtime, cwd);
+        patch = await getWorkingTreeDiffFromBase(runtime, base, cwd, options, "best-effort", fileIdentities);
         label = "Uncommitted changes";
         break;
       }
@@ -1903,10 +1892,8 @@ export async function runGitDiff(
           ["rev-parse", "--verify", "HEAD~1"],
           { cwd },
         );
-        const args =
-          hasParent.exitCode === 0
-            ? ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "HEAD~1..HEAD"]
-            : ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", "--root", "HEAD"];
+        const baseRef = hasParent.exitCode === 0 ? "HEAD~1" : await getEmptyTreeSha(runtime, cwd);
+        const args = ["diff", "--no-ext-diff", ...wFlag, "--src-prefix=a/", "--dst-prefix=b/", `${baseRef}..HEAD`];
         patch = await runBoundedTrackedDiff(runtime, args, cwd, fileIdentities);
         label = "Last commit";
         break;
@@ -2225,12 +2212,13 @@ export async function getGitDiffFingerprint(
           const mergeBase = mb.exitCode === 0 ? mb.stdout.trim() : "HEAD";
           parts.push(mergeBase);
           if (!(await hashDiffOutput(["--end-of-options", mergeBase]))) return null;
-        }
+        } else if (!(await hashDiffOutput([await getEmptyTreeSha(runtime, cwd)]))) return null;
         if (!(await hashUntracked())) return null;
         break;
       }
       case "uncommitted": {
-        if (headSha !== "no-head" && !(await hashDiffOutput(["HEAD"]))) return null;
+        const base = headSha === "no-head" ? await getEmptyTreeSha(runtime, cwd) : "HEAD";
+        if (!(await hashDiffOutput([base]))) return null;
         if (!(await hashUntracked())) return null;
         break;
       }
@@ -2797,7 +2785,7 @@ export async function gitAddFile(
   // Patch paths are repo-root-relative; from a subdirectory launch the
   // pathspec must be applied at the toplevel or `git add` fails with
   // "did not match any files".
-  await ensureGitSuccess(runtime, ["add", "--", filePath], await resolveRepoToplevel(runtime, cwd));
+  await ensureGitSuccess(runtime, ["add", "--", `:(top,literal)${filePath}`], await resolveRepoToplevel(runtime, cwd));
 }
 
 export async function gitResetFile(
@@ -2807,7 +2795,7 @@ export async function gitResetFile(
 ): Promise<void> {
   validateFilePath(filePath);
   // Toplevel for the same reason as gitAddFile.
-  await ensureGitSuccess(runtime, ["reset", "HEAD", "--", filePath], await resolveRepoToplevel(runtime, cwd));
+  await ensureGitSuccess(runtime, ["reset", "HEAD", "--", `:(top,literal)${filePath}`], await resolveRepoToplevel(runtime, cwd));
 }
 
 export function parseP4DiffType(

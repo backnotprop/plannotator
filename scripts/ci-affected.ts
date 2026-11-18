@@ -49,6 +49,7 @@ export const RUN_ALL: { glob: string; why: string }[] = [
   { glob: '**/bunfig.toml', why: 'a bunfig (test preloads and loaders)' },
   { glob: '**/tsconfig*.json', why: 'a tsconfig (how imports resolve)' },
   { glob: 'patches/**', why: 'a dependency patch' },
+  { glob: 'vendor/**', why: 'a vendored dependency' },
   { glob: 'tests/setup/**', why: 'the test preloads' },
   { glob: 'tests/helpers/**', why: 'a shared test helper' },
   { glob: 'packages/ui/test-setup/**', why: 'the DOM test setup' },
@@ -74,7 +75,7 @@ export const CORE_GUARDS = [
 
 /** Top-level entries the picker knows. A change under any other one runs everything. */
 export const KNOWN_TOP = [
-  'apps', 'packages', 'scripts', 'tests', 'build', 'docs', 'adr', 'spec', 'bin', 'patches', '.github', '.agents',
+  'apps', 'packages', 'scripts', 'tests', 'build', 'docs', 'adr', 'spec', 'bin', 'patches', 'vendor', '.github', '.agents',
   '.claude-plugin', '.factory-plugin', '.product', '.adr-dir', '.gitignore', '.gitattributes', '.gitleaks.toml', '.semgrep.yml', '.semgrepignore',
   'AGENTS.md', 'CLAUDE.md', 'CONTRIBUTING.md', 'README.md', 'SECURITY.md', 'LICENSE-MIT', 'LICENSE-APACHE', 'bun.lock', 'bunfig.toml',
   'openpackage.yml', 'package.json',
@@ -84,7 +85,7 @@ export const KNOWN_TOP = [
 const KNOWN_EXT = new Set([
   'ts', 'tsx', 'js', 'jsx', 'mjs', 'cjs', 'mts', 'cts', 'md', 'mdx', 'json', 'jsonc', 'jsonl', 'ndjson', 'yaml', 'yml', 'toml', 'txt',
   'css', 'html', 'astro', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'icns', 'woff', 'woff2', 'mp4', 'webm',
-  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin',
+  'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz',
 ]);
 const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
 

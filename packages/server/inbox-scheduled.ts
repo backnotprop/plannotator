@@ -88,6 +88,12 @@ export function createInboxScheduled(deps: {
 
   // ── Runs, read from the thread ──
 
+  const sameSchedule = (before: InboxScheduledThread, after: InboxScheduledThread) =>
+    before.enabled === after.enabled &&
+    before.approved_at === after.approved_at &&
+    before.handled_through === after.handled_through &&
+    JSON.stringify(before.schedule) === JSON.stringify(after.schedule);
+
   /** Every run's divider, oldest first (the detail's run list reads it; the clock and the list read only the newest). */
   const dividersOf = (record: InboxScheduledThread): InboxMessage[] =>
     record.thread_id
@@ -205,12 +211,10 @@ export function createInboxScheduled(deps: {
   };
 
   /** The fields an input sets, checked; nothing is written when one is refused. */
-  const fieldsOf = async (input: InboxScheduledInput, before: InboxScheduledThread | null): Promise<Partial<InboxScheduledThread>> => {
-    const creating = before === null;
+  const fieldsOf = async (input: InboxScheduledInput, creating: boolean): Promise<Partial<InboxScheduledThread>> => {
     const out: Partial<InboxScheduledThread> = {};
     if (creating || input.name !== undefined) out.name = text(input.name, "name", NAME_MAX);
     if (creating || input.prompt !== undefined) out.prompt = text(input.prompt, "prompt", 100_000);
-    if (creating || input.schedule !== undefined) out.schedule = scheduleOf(input.schedule, before?.schedule);
     if (input.if_missed !== undefined) {
       if (input.if_missed !== "run_once" && input.if_missed !== "skip") throw new InboxError("validation_error", "if_missed: run_once or skip.", { field: "if_missed" });
       out.if_missed = input.if_missed;
@@ -303,6 +307,13 @@ export function createInboxScheduled(deps: {
     starting.add(id);
     try {
       const first = found(id);
+      const currentForRun = (): InboxScheduledThread => {
+        const record = found(id);
+        if (due.by === "schedule" && (!deps.on() || !deps.launchOn() || !sameSchedule(first, record))) {
+          throw new InboxError("routine_schedule_changed", "The routine's schedule or settings changed while it was starting.");
+        }
+        return record;
+      };
       const bodyOf = (record: InboxScheduledThread) =>
         `${record.prompt}${due.late && record.schedule ? `\n\n${inboxScheduledLateLine(new Date(due.due_at), new Date(now()), record.schedule.tz)}` : ""}`;
       const runOf = (record: InboxScheduledThread): InboxScheduledRun => ({
@@ -323,8 +334,9 @@ export function createInboxScheduled(deps: {
         if (!deps.launchOn()) throw new InboxError("launch_off", "Starting agents from the Inbox is off. Turn it on in Settings → Agents.");
         prepared = await launch.prepare(target, { name: first.name, body: bodyOf(first), resolveProject: deps.resolveProject });
       } catch (error) {
-        const record = found(id);
-        const project = projectOf(record) ?? (await firstProject(record));
+        const before = currentForRun();
+        const project = projectOf(before) ?? (await firstProject(before));
+        const record = currentForRun();
         const run = runOf(record);
         log(`Inbox scheduled ${id}: run ${run.run} did not start (${error instanceof InboxError ? error.code : "error"})`);
         if (!project) throw error;
@@ -334,12 +346,13 @@ export function createInboxScheduled(deps: {
         if (record.thread_id !== message.thread_id) save(record, { thread_id: message.thread_id });
         return message;
       }
-      // Deleted while it was starting: the run doesn't start, and what the launch made for it goes.
       const live = (): InboxScheduledThread => {
-        const record = store.scheduledThread(id);
-        if (record) return record;
-        launch.abandon(prepared.launch, prepared.project);
-        throw new InboxError("routine_not_found", `No routine ${id}.`);
+        try {
+          return currentForRun();
+        } catch (error) {
+          launch.abandon(prepared.launch, prepared.project);
+          throw error;
+        }
       };
       const record = live();
       let attachments: InboxAttachment[] = [];
@@ -420,8 +433,10 @@ export function createInboxScheduled(deps: {
     lastCheck = at;
     checking = true;
     try {
-      for (const record of store.scheduledThreads()) {
-        if (!record.enabled || record.done_at || !record.approved_at || !record.schedule) continue;
+      for (const { id } of store.scheduledThreads()) {
+        if (!deps.on() || !deps.launchOn()) break;
+        const record = store.scheduledThread(id);
+        if (!record?.enabled || record.done_at || !record.approved_at || !record.schedule) continue;
         const running = starting.has(record.id) || runningOf(record) !== null;
         const decision = inboxScheduledDecide({ schedule: record.schedule, if_missed: record.if_missed, handled_through: handledThrough(record), now: new Date(at), why, running });
         if (decision.kind === "wait") continue;
@@ -433,7 +448,7 @@ export function createInboxScheduled(deps: {
           log(`Inbox scheduled ${record.id}: ${error instanceof InboxError ? error.code : error instanceof Error ? error.name : "error"}`);
         }
         const after = store.scheduledThread(record.id);
-        if (!after) continue;
+        if (!after || !deps.on() || !deps.launchOn() || !sameSchedule(record, after)) continue;
         const once = "at" in record.schedule;
         const behind = (handledThrough(after) ?? "") < decision.handled_through;
         if (once || behind) save(after, { ...(behind ? { handled_through: decision.handled_through } : {}), ...(once ? { done_at: iso(), enabled: false } : {}) });
@@ -469,10 +484,17 @@ export function createInboxScheduled(deps: {
       return { scheduled: rowOf(record), runs: dividersOf(record).slice(-20).reverse().map(summaryOf) };
     },
 
-    /** `createKey`: the window's key, kept on the record (inbox-scheduled-once.ts). */
-    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string): Promise<{ record: InboxScheduledThread; told: string | null }> {
-      const fields = await fieldsOf(input, null);
-      const on = by.kind === "person" && input.enabled === true;
+    /**
+     * `createKey`: the window's key, kept on the record (inbox-scheduled-once.ts). `asked`: an agent's create the
+     * person asked for with `/create-routine` (a grant it took, inbox-routine-grants.ts): made approved and on, as
+     * the person's own would be. Every field is checked the same either way. `checked`: called once every field passed,
+     * just before the routine is saved: a throw after it may have left the routine written.
+     */
+    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string, asked = false, checked?: () => void): Promise<{ record: InboxScheduledThread; told: string | null }> {
+      const fields = await fieldsOf(input, true);
+      const schedule = scheduleOf(input.schedule);
+      checked?.();
+      const on = (by.kind === "person" && input.enabled === true) || (by.kind === "agent" && asked);
       const at = iso();
       const record = store.putScheduledThread({
         id: inboxId("sch"),
@@ -480,7 +502,7 @@ export function createInboxScheduled(deps: {
         enabled: on,
         approved_at: on ? at : null,
         prompt: fields.prompt!,
-        schedule: fields.schedule ?? null,
+        schedule,
         if_missed: fields.if_missed ?? "run_once",
         runs_on: "this_computer",
         folder: fields.folder!,
@@ -495,13 +517,17 @@ export function createInboxScheduled(deps: {
         created_at: at,
         updated_at: at,
       });
-      const told = await tell(by, record, `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
+      const told = await tell(by, record, on ? `Made the routine ${linkOf(record)}. It is on, as you asked with /create-routine.` : `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
       return { record: found(record.id), told };
     },
 
     async update(id: string, input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+      found(id);
+      const fields = await fieldsOf(input, false);
+      // Folder validation can yield to a concurrent edit or delete. Apply only the fields
+      // this caller sent to the record that still exists when validation finishes.
       const before = found(id);
-      const fields = await fieldsOf(input, before);
+      if (input.schedule !== undefined) fields.schedule = scheduleOf(input.schedule, before.schedule);
       const changed = (Object.keys(fields) as (keyof InboxScheduledThread)[]).filter((key) => JSON.stringify(fields[key] ?? null) !== JSON.stringify(before[key] ?? null));
       if (changed.length === 0) return { record: before, told: null };
       // An agent that changes where it works or which agent runs it hands the switch back to the person.

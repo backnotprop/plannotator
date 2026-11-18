@@ -17,7 +17,7 @@ import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
-import { awayLine, outboxLine } from '../machines';
+import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
@@ -25,6 +25,7 @@ import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OW
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
+import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
@@ -46,7 +47,7 @@ import { takeArrivalFocus } from '../threadStep';
 import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
 import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
-import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText } from '../folding';
+import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, keptFirstWords, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, HostMark, Icon } from '../icons';
 import { createCountStore, NewPill } from '../parts/NewPill';
@@ -71,7 +72,7 @@ import { replyBoxSetAside } from '../floaters/model';
 import { landInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { createTypedSaves, isTypedChange } from '../typedAnswers';
 import { conflictRevision, onPickConflict } from '../pickConflict';
-import { useReplyHasWords, useReplyTextStore, useReplyTextWhile } from '../replyText';
+import { useReplyHasWords, useReplyTextStore } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DRAFT_OFFER_TEXT, DraftHead, DraftFootNote, DraftOffer, DraftStamp, unsentWords } from './DraftLabel';
 import { canMarkUnread, canToggleRead } from '../markRead';
@@ -2114,13 +2115,13 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // Mod+Enter is no character, so a field is where it is most needed. A menu, dialog or popover layer keeps its
           // keys, a link keeps ⌘Enter (open in a tab), a held key sends once (and `send` ignores a second). Never while
           // something covers the thread (a file in full screen, a guide, Artifacts): its Send is not on screen.
-          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || paneCovered || modalOpen()) return false;
+          if (event.defaultPrevented || event.repeat || event.isComposing || event.keyCode === 229 || paneCovered) return false;
           // The open-items list is up (focus may not have reached its first row yet): its keys are the menu's.
           if (reaskRef.current?.getAttribute('aria-expanded') === 'true') return false;
           const target = keyTarget(event);
           if (target && (inOverlay(target) || target.closest('[role="menu"], [role="listbox"], iframe, a[href]'))) return false;
           const origin = keyOrigin(event);
-          if (origin !== 'thread' && origin !== 'row' && origin !== 'file') return false;
+          if ((origin !== 'thread' && origin !== 'row' && origin !== 'file') || modalOpen()) return false;
           const button = sendRef.current;
           if (button && button.isConnected && !button.disabled && button.getClientRects().length > 0) return true;
           // Typed or picked an instant ago: the Send is drawn once the save has landed. The key waits for it.
@@ -3927,8 +3928,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       </button>
     </>
   );
-  // The card draws the words, so while it shows, this pane follows them key by key (as the field does).
-  const composerText = useReplyTextWhile(replyText, composerShown);
+  // The card reads the open box's words from `replyText` itself (`words`): a key re-renders the card, never this pane.
   const composer: FullScreenComposerValue | null =
     composerShown
       ? {
@@ -3936,7 +3936,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           phone,
           reply: {
             to: replyTo,
-            value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            value: box.open ? '' : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
+            words: box.open ? replyText : undefined, hasWords,
             onChange: (text) => changeReply(text, true),
             quote: quote && quotedMessage ? { message: quotedMessage, words: quote.words, onRemove: () => setQuote(null) } : null,
             onLateVoice,
@@ -4886,13 +4887,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             </button>
           </p>
         )}
-        {machine && (
-          // Another machine's thread: which machine, or since when it is away (its rows are greyed in the list).
-          <div className="ib-tmeta" data-thread-machine={machine.id} data-away={awayLine(machine) ? '' : undefined}>
-            <span>{awayLine(machine) ?? `On ${machine.name}`}</span>
-          </div>
-        )}
-        {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
+        <ThreadMeta machine={machine} cardChip={cardChip} messages={thread.messages} />
         {notice}
         {launched && <StartedBy launched={launched} root={thread.messages[0]} project={thread.project.name} />}
         {confirmDelete && launched && (
@@ -5136,7 +5131,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 return pending.has(id) ? pending.get(id) !== null : q.state === 'picked';
               },
             });
-            const snippet = foldSnippet(message, thread.messages);
+            const snippet = foldSnippet(message, thread.messages, keptFirstWords);
             const label = `${nameSaid}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
             before.push(
               <article

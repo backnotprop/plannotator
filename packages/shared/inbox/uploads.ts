@@ -22,6 +22,7 @@
  * An upload no draft names is swept after INBOX_UPLOAD_KEEP_MS.
  */
 
+import { reviewAnchorBlock, reviewBatchBlock, reviewFollowUpLine, type InboxReviewAnchor } from "@plannotator/core/review-threads";
 import { INBOX_ROWS_ASK_BLOCK } from "@plannotator/core/inbox-types";
 import { randomBytes } from "node:crypto";
 import {
@@ -123,8 +124,17 @@ export function inboxBodyForAgent(message: {
   decision_ask?: true;
   rows_ask?: true;
   viewing?: InboxReplyViewing | null;
-}): string {
-  const after = [inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
+  id?: string;
+  review_anchor?: InboxReviewAnchor | null;
+}, batch: readonly { id: string; body: string; review_anchor?: InboxReviewAnchor | null }[] = [], within: InboxReviewAnchor | null = null): string {
+  const review = message.id
+    ? batch.length > 0
+      ? reviewBatchBlock({ id: message.id }, batch)
+      : message.review_anchor
+        ? reviewAnchorBlock({ id: message.id, review_anchor: message.review_anchor })
+        : reviewFollowUpLine({ id: message.id }, within)
+    : "";
+  const after = [review, inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
   // A reply of pasted files alone may have no words.
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
@@ -290,7 +300,7 @@ export async function receiveInboxUpload(
     const path = inboxBlobPath(inboxDirPath, scan.sha256);
     if (existsSync(path)) unlinkSync(temp);
     else renameSync(temp, path);
-    const decided = decideInboxAttachmentKind(name as string, scan.head, scan.text, scan.size);
+    const decided = decideInboxAttachmentKind(name as string, scan.head, scan.text, scan.size, scan.video);
     const upload: InboxUpload = {
       upload_id: inboxId("upl"),
       name: name as string,
@@ -300,6 +310,7 @@ export async function receiveInboxUpload(
       created_at: options.at,
       ...(decided.media_type ? { media_type: decided.media_type } : {}),
       ...(decided.width !== undefined && decided.height !== undefined ? { width: decided.width, height: decided.height } : {}),
+      ...(decided.duration_ms !== undefined ? { duration_ms: decided.duration_ms } : {}),
       ...(options.shownSha256 ? { shown_sha256: options.shownSha256 } : {}),
     };
     recordPendingUpload(inboxDirPath, upload);

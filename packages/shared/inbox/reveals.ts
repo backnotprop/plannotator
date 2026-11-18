@@ -5,7 +5,7 @@
  * `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`, and `reveal.setup` for the agent note) and spends
  * every claim against it.
  *
- * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, not shipped), the
+ * In the line, in this order (the owner's, 2026-11-10): Code review's day-0 offer (`CODE_REVIEW_OFFER`, never shown: `CODE_REVIEW_OFFER_SHOWN`), the
  * same-day group (the tab icon, themes, List view "Grouping", list options "Rows", the sound, voice: no tenure, the
  * gap apart), then the later group, later only by tenure (Snooze, personal agents, Priority, the Board, the Checklist, Bro mode,
  * "Set the rules"). The agent note is a setup dialog: never in the queue, but it keeps the gap
@@ -47,7 +47,7 @@
  */
 
 /** Every dialog the queue orders. A registered dialog adds its id here. */
-export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "list_view" | "personal_agents" | "priority";
+export type RevealId = "code_review" | "sound" | "list_intro" | "voice" | "tab_icon" | "theme_chooser" | "snooze" | "bro" | "grill_me_tip" | "board" | "steps" | "agent_rules" | "star" | "list_view" | "personal_agents" | "priority" | "routines";
 /** Every dialog that keeps the line's day: the queue's, and the agent note (setup). */
 export type LineDialogId = RevealId | "agent_note";
 
@@ -102,9 +102,19 @@ export interface RevealEntry {
  */
 export const CODE_REVIEW_OFFER: RevealEntry = { id: "code_review", kind: "offer", tenureMs: 0, minThreads: 0, enabled: true };
 
+/**
+ * Whether Code review's one-time offer is ever shown. The owner chose the switch without the offer for this release
+ * (2026-11-17: "keep code review, no need for the code review dialogue, but enable it in the capabilities"): Settings →
+ * Capabilities shows the Code review switch to everyone, off unless the person turns it on, and nobody is offered it.
+ * False: the server never lists the offer as open (packages/server/inbox.ts `codeReviewUndecided`), so it is never
+ * next and never claimed; its slot (`CODE_REVIEW_OFFER`) and any stamp already in config.json are kept as they are.
+ * To offer it again, set this to true.
+ */
+export const CODE_REVIEW_OFFER_SHOWN = false;
+
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
-  // Not shipped yet (held until 0.29, packages/server/inbox.ts `switchesHeld`): its slot is kept as it was.
+  // Never shown for now (`CODE_REVIEW_OFFER_SHOWN`): its slot is kept as it was.
   CODE_REVIEW_OFFER,
   // The order below is the owner's (2026-11-10, "Alright, let's ship it"). First the same-day group: no tenure, so each
   // may show on a person's first day, the line's gap apart (`REVEAL_SPACING_MS`), as each one's own "who" holds. Then
@@ -149,6 +159,15 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // 10. The Board. The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps
   // it; the dialog's "Turn it on" writes inboxBoard (unset -> true), "Not now" leaves it unset.
   { id: "board", kind: "offer", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
+  // Routines (the owner, 2026-11-17: "Once we have at least like three days of good usage from a user, we should
+  // introduce routines, or if they've already been here for three days, show them the routines dialogue"). Open while
+  // the person sent messages on 3 different local days with 2 or more sends on each, Routines are offered on this
+  // computer and never decided, and no routine exists (shared/inbox/routines-intro.ts; the server reads it live). Three
+  // good days need two days of tenure, which `tenureMs` restates. Spaced from the other dialogs only by the line's gap
+  // (`REVEAL_SPACING_MS`), both ways (the owner, 2026-11-17: "Feel like this shouldn't be huge blocker, just separate
+  // them 20min or so"; it had a local day of its own). Opt-in, as the Board: the claim only stamps it, `RoutinesIntro`
+  // opens, and only its "Turn on" writes inboxScheduledThreads.
+  { id: "routines", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
   // 11. The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and
   // the Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro`
   // opens, and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.

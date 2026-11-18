@@ -130,7 +130,7 @@ export type InboxLaunchTarget = (
 function choiceOfTarget(value: Record<string, unknown>): { choice?: InboxLaunchChoice } {
   try {
     const choice = parseLaunchChoice(value, null);
-    return choice.model || choice.effort ? { choice } : {};
+    return choice.model || choice.effort || choice.primary_agent ? { choice } : {};
   } catch (error) {
     const field = error instanceof LaunchChoiceError ? error.field : "model";
     throw new InboxError("validation_error", (error as Error).message, { field: `to.launch.${field}` });
@@ -158,6 +158,13 @@ interface Memo {
   again: boolean;
   stoppedAt: number | null;
   waitingSince: number | null;
+  /** The session's state was known here at least once (a host read had it). */
+  known?: boolean;
+  /**
+   * The wait in `waitingSince` was already there the first time this Inbox knew the session, for a launch from before
+   * it started: a restart, not a new prompt (the Inbox list's Hide does not read it as new activity).
+   */
+  waitedFromBefore?: boolean;
   /**
    * After Stop or a respawn, the session's earlier polls keep it "live" for a
    * while: it counts as live again only once it starts a poll past this count.
@@ -247,6 +254,8 @@ export function createInboxLaunch(options: {
 }) {
   const { store, json } = options;
   const now = options.now ?? Date.now;
+  /** When this Inbox started: a launch from before it may have been waiting already (`waitedFromBefore`). */
+  const bootAt = now();
   const log = options.log ?? (() => {});
   // config.json, parsed again only when the file changed: the list, the sweep and every route ask, flag off included.
   let configCache: { key: string; value: ReturnType<typeof resolveInboxLaunch> } | null = null;
@@ -634,8 +643,15 @@ export function createInboxLaunch(options: {
     // A host read from before the last answer settled still shows our own prompt: never "waiting on Terminal".
     const settled = state.permissions.settledAfter?.(launch.id) ?? null;
     const hostState = settled !== null && (state.view?.at ?? 0) < settled ? null : sessionIn(host, launch.session_ref);
-    if (hostState && hostState !== "absent" && hostState.status === "waiting" && hostState.waitingFor) memo.waitingSince ??= now();
-    else memo.waitingSince = null;
+    const firstKnown = !!hostState && !memo.known;
+    if (hostState) memo.known = true;
+    if (hostState && hostState !== "absent" && hostState.status === "waiting" && hostState.waitingFor) {
+      if (memo.waitingSince === null) memo.waitedFromBefore = firstKnown && memo.startedAt < bootAt;
+      memo.waitingSince ??= now();
+    } else {
+      memo.waitingSince = null;
+      memo.waitedFromBefore = false;
+    }
     const project = store.project(root.project_id)?.name ?? launch.folder;
     const last = state.lastAvailable;
     return inboxRunOf({
@@ -1786,6 +1802,12 @@ ${result.text}`);
       if (target.choice?.effort && modelEfforts && !modelEfforts.includes(target.choice.effort)) {
         throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
+      // OpenCode's own agent (build, plan, …): one it lists, and only for an agent CLI that lists them.
+      const primaryAgent = target.choice?.primary_agent;
+      if (primaryAgent && lists && !lists.primary_agents) throw new InboxError("validation_error", `${host.name} takes no agent from the Inbox. Nothing was sent.`, { field: "to.launch.primary_agent" });
+      if (primaryAgent && lists?.primary_agents && !lists.primary_agents.includes(primaryAgent)) {
+        throw new InboxError("validation_error", `${host.name} has no agent ${primaryAgent}: ${lists.primary_agents.join(", ") || "none listed"}. Nothing was sent.`, { field: "to.launch.primary_agent" });
+      }
       const model = target.choice?.model;
       const effort = target.choice?.effort;
       const id = inboxId("lch");
@@ -1850,6 +1872,7 @@ ${result.text}`);
         ...(start.bypass ? { bypass_available: true } : {}),
         ...(model ? { model } : {}),
         ...(effort ? { effort } : {}),
+        ...(primaryAgent ? { primary_agent: primaryAgent } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
       };
       if (host.choices) {
@@ -1954,7 +1977,7 @@ ${result.text}`);
           if (!ok.ok) return [];
           const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
           const last = lists ? readLastLaunchChoice(options.dataDir, host.agent) : null;
-          const choices = lists ? { ...lists, ...(last && (last.model || last.effort) ? { last } : {}) } : null;
+          const choices = lists ? { ...lists, ...(last && (last.model || last.effort || last.primary_agent) ? { last } : {}) } : null;
           return [{ agent: host.agent, name: host.name, scratch_trusted: host.trusts(root), ...(owner ? { untrusted: untrustedOf(host, owner.pick) } : {}), ...(choices ? { choices } : {}) }];
         }),
       );
@@ -2093,6 +2116,26 @@ ${result.text}`);
       // One pass over the launches per list read, not one per row.
       const latest = new Map(roots().map((m) => [m.thread_id, m]));
       return (row) => decorate(row, latest.get(row.thread_id) ?? null);
+    },
+
+    /**
+     * When each launched thread's agent last asked something of the person through its run line: a prompt in the
+     * window or Terminal, a stop or a failure (`since`). The Inbox list's Hide (inbox-pull-hidden.ts) reads it as new
+     * activity, which brings a thread hidden for its PRs back. Not the person's own Stop, and not a Terminal wait that
+     * was there already when this Inbox started (its time is when this Inbox first saw it: a restart alone must not bring
+     * a hidden thread back). One pass over the launches per list read.
+     */
+    attentionSince(): (threadId: string) => string | null {
+      const latest = new Map(roots().map((m) => [m.thread_id, m]));
+      return (threadId) => {
+        const root = latest.get(threadId);
+        const run = root ? runOfRoot(root) : null;
+        if (!run || !root) return null;
+        const memo = memoOf(root.launch!);
+        if (run.state === "stopped" && memo.stoppedAt !== null) return null;
+        if (run.state === "waiting_terminal" && memo.waitedFromBefore) return null;
+        return run.state === "waiting_answer" || run.state === "waiting_terminal" || run.state === "stopped" || run.state === "failed" ? run.since : null;
+      };
     },
 
     /**
