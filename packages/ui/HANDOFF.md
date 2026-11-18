@@ -3291,3 +3291,9 @@ On the inline path the guard is placed without scanning the page, so no script o
 
 - **Protocol 2.** A host serving `bridge-script.asset.js` must serve the asset of the same package version: an older cached asset reports 1, gets the version-mismatch banner, and its link clicks are not followed.
 - **`<meta name="plannotator-network" content="none">`** in `rawHtml` (Plannotator's servers add it to a document opened outside the session's roots) makes the viewer put `<meta http-equiv="Content-Security-Policy" content="connect-src 'none'">` right after the doctype. It names no `script-src`. A page without the tag gets no policy from the viewer, as before.
+
+## Questions: a choice's details under it, and a pick-one choice un-picked by a second click (unreleased; every host, no opt-in; needs the core with `QuestionChoice.details`)
+
+- **Details.** core's parser reads a choice's `Why:`, `Trade-off:`, `Pros:` and `Cons:` lines (plain indented, or a nested bullet) into `QuestionChoice.details`; they also stay the end of `description`, word for word. `QuestionBlock` draws the description's lead after the label as before and each detail on its own muted line under the choice (`data-question-part="choice-detail"`, `choiceDetailParts`). A nested `- Trade-off: …` bullet under a plain-bullet choice was a choice of its own, and a plain `Why:` line under one was glued onto its label; both are the choice's detail now (the old label stays an alias).
+- **Un-pick.** On a pick-one card, a click on the chosen choice (its row or radio; Space on the radio is a click) un-picks it. A host's `onAnswer` gets the answer without the pick (null when nothing is left). Pick any is unchanged.
+- **Recommendation.** On pick one, `Recommended: Ship it, because…` (the label, a pause, its reasons) and `Recommended: 2. Wait` name that choice instead of becoming the extra answer row.

@@ -135,6 +135,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
     heldNews?.text && shown
       ? {
           count: heldNews.count,
+          ...(heldNews.questions ? { questions: heldNews.questions } : {}),
           project: heldNews.project ?? null,
           lands: showLandsIn(filterShown(shown), filterShown(latestGroups)),
           news: heldNewsOf(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen()),

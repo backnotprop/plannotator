@@ -35,6 +35,13 @@ function groupOf(row: InboxListRow): InboxListGroupId {
 
 export interface HeldNotice {
   count: number;
+  /**
+   * The questions those threads asked since the rows on screen (a thread new
+   * to the list: all its open ones), when more than the threads: "2 new · 13
+   * questions" rather than a bare "2 new". Absent otherwise. Action items are
+   * not questions.
+   */
+  questions?: number;
   /** "1 new in docs-site", or "3 new" across projects; null when nothing waits. */
   text: string | null;
   /** The one project the news is in ("docs-site"), drawn apart so a long name is cut, not wrapped; absent across projects. */
@@ -140,9 +147,26 @@ export function heldNotice(
   const projects = new Map<string, string>();
   for (const row of rows) projects.set(row.project.id, names?.get(row.project.id) ?? row.project.name);
   if (count === 0) return { count, text: null };
-  if (projects.size !== 1) return { count, text: `${count} new` };
+  const before = rowsById(shown);
+  const asked = rows.reduce((sum, row) => {
+    const old = before.get(row.thread_id);
+    return sum + Math.max(0, openQuestions(row) - (old ? openQuestions(old) : 0));
+  }, 0);
+  const questions = asked > count ? asked : undefined;
+  const head = heldNoticeHead(count, questions);
+  if (projects.size !== 1) return { count, ...(questions ? { questions } : {}), text: head };
   const project = [...projects.values()][0]!;
-  return { count, text: `${count} new in ${project}`, project };
+  return { count, ...(questions ? { questions } : {}), text: `${head} in ${project}`, project };
+}
+
+/** A row's open questions, its action items left out. */
+function openQuestions(row: InboxListRow): number {
+  return Math.max(0, (row.questions?.open ?? 0) - (row.questions?.actions ?? 0));
+}
+
+/** "N new", and the questions when they are more: "2 new · 13 questions". */
+export function heldNoticeHead(count: number, questions?: number): string {
+  return questions ? `${count} new · ${questions} questions` : `${count} new`;
 }
 
 /**

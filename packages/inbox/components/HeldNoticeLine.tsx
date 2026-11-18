@@ -1,3 +1,4 @@
+import { heldNoticeHead } from '../held';
 import { Icon } from '../icons';
 import { isTextCut, Tip } from './Tip';
 
@@ -6,14 +7,16 @@ import { isTextCut, Tip } from './Tip';
  * wrapped onto two). "N new in" and Show never shrink; the project's name takes the rest and is cut with "…", and
  * while it is cut the whole line is the tooltip.
  */
-export function HeldNoticeLine({ count, project, onShow }: { count: number; project: string | null; onShow: () => void }) {
-  const full = project ? `${count} new in ${project}` : `${count} new`;
+export function HeldNoticeLine({ count, questions, project, onShow }: { count: number; questions?: number; project: string | null; onShow: () => void }) {
+  // "2 new · 13 questions" when the threads asked more questions than there are threads (held.ts `heldNotice`).
+  const head = heldNoticeHead(count, questions);
+  const full = project ? `${head} in ${project}` : head;
   return (
     <Tip content={full} when={(button) => isTextCut(button.querySelector('.ib-notice-proj'))}>
       <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="">
         <Icon name="inbox" size={15} />
         <span className="ib-notice-text">
-          <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
+          <span className="ib-notice-n">{project ? `${head} in` : head}</span>
           {/* A space for the line's text and accessible name; the flex gap draws it. */}
           {project && ' '}
           {project && (

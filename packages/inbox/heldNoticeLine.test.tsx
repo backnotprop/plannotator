@@ -42,7 +42,7 @@ function noticeRules(): string {
     .join('\n');
 }
 
-function render(notice: { count: number; project?: string | null } | null): HTMLElement {
+function render(notice: { count: number; questions?: number; project?: string | null } | null): HTMLElement {
   sheet = document.createElement('style');
   sheet.textContent = noticeRules();
   document.head.append(sheet);
@@ -134,4 +134,16 @@ test.skipIf(!hasDom)('news across projects reads just "N new"', () => {
     sheet?.remove();
   }
   expect(render(null).querySelector('[data-inbox-notice]')).toBeNull();
+});
+
+// More questions than threads behind the line: it says so, in the part that never shrinks, before the project.
+test.skipIf(!hasDom)('the questions the threads asked, when more than the threads, read in the count', () => {
+  const el = render({ count: 2, questions: 13, project: 'appnotes' });
+  const button = el.querySelector<HTMLElement>('[data-inbox-notice]')!;
+  expect(button.querySelector('.ib-notice-n')!.textContent).toBe('2 new · 13 questions in');
+  expect(button.textContent).toBe('2 new · 13 questions in appnotesShow');
+  act(() => root?.unmount());
+  host?.remove();
+  sheet?.remove();
+  expect(render({ count: 2, questions: 13 }).querySelector('[data-inbox-notice]')!.textContent).toBe('2 new · 13 questionsShow');
 });

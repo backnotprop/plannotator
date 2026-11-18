@@ -95,13 +95,13 @@ export interface InboxListProps {
   narrow: boolean;
   selectedThreadId: string | null;
   /**
-   * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
-   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
+   * The held list's "N new" (held.ts `heldNotice`): how many, the questions they asked when more ("2 new · 13
+   * questions"), and the one project they are in when all are in one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
    * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
    * the rows it brings in are on screen (List has no groups to open). `news`: the threads it counts (held.ts
    * `heldNews`), for the pill at the list's edge while this line is out of view (ListNewPill.tsx).
    */
-  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[]; news?: readonly HeldNews[] } | null;
+  notice: { count: number; questions?: number; project?: string | null; lands?: readonly InboxListGroupId[]; news?: readonly HeldNews[] } | null;
   /** The list is drawn but out of sight (a thread covers it: a phone, a stacked window, full screen): its pill waits. */
   covered?: boolean;
   /**
@@ -1632,6 +1632,7 @@ export function InboxList(props: InboxListProps) {
           {props.notice && (
             <HeldNoticeLine
               count={props.notice.count}
+              questions={props.notice.questions}
               project={props.notice.project ?? null}
               onShow={() => showNew()}
             />

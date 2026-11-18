@@ -172,6 +172,13 @@ export interface QuestionChoice {
   /** `Prototype:` (or `Try:`) under a `- [ ]` choice: the page that shows
    *  this option, as `QuestionPrototype`. Option lines only. */
   prototype?: QuestionPrototype;
+  /** The lines written under the choice that describe it (`Why:`,
+   *  `Trade-off:`, `Pros:`, `Cons:`, as a plain indented line or a nested
+   *  bullet), each without its bullet, with the lines that continue it. They
+   *  are also the end of `description`, word for word, so every reader that
+   *  shows the description still shows them; a card draws them under the
+   *  choice. Absent when there are none. */
+  details?: string[];
 }
 
 /**
@@ -291,6 +298,11 @@ export const MAX_QUESTION_NOTE_CHARS = 2000;
 
 const CHOICE_RE = /^\s*(?:[-*+]|\d{1,3}[.)])\s+\[([ xX])\]\s+(.*)$/;
 const PLAIN_BULLET_RE = /^\s*[-*+]\s+(.*)$/;
+// A line under a choice that describes it (`Why:`, `Trade-off:`, `Pros:`,
+// `Cons:`), emphasis around the name allowed: the choice's detail, never a
+// choice of its own and never part of its label.
+const CHOICE_DETAIL_RE = /^[*_]{0,2}(?:why|trade-?offs?|pros?|cons?)[*_]{0,2}\s*:/i;
+const NESTED_BULLET_RE = /^[-*+]\s+/;
 const RECOMMENDED_RE = /^\s*(?:[*_]{1,2})?(?:recommended|recommendation)(?:[*_]{1,2})?\s*:\s*(?:[*_]{1,2})?\s*(.*)$/i;
 const ARROW_RE = /^\s*(?:➡️|➡|->|=>|→)\s*(.*)$/;
 const LABEL_DESC_SEP_RE = /\s+(?:—|–|-)\s+/;
@@ -706,7 +718,56 @@ const matchRecommendation = (
     }
   }
   const fallback = fallbackHit(text);
-  return fallback !== -1 ? [fallback] : [];
+  if (fallback !== -1) return [fallback];
+  if (multi) return [];
+  // Pick one only (pick any splits its line into parts above): a numbered
+  // recommendation (`2. Ship it`, `Option b) Ship it`) names the choice its
+  // rest names.
+  const unnumbered = text.replace(/^(?:option\s+)?(?:[A-Za-z]|\d{1,2})[.)]\s+/i, '');
+  if (unnumbered !== text) {
+    const hit = match(unnumbered);
+    if (hit !== -1) return [hit];
+  }
+  // Then the choice whose label the line begins, followed by a pause and its
+  // reasons (`Recommended: Ship it, because…`, `Ship it (cheaper)`): the
+  // longest such label, when exactly one choice has it.
+  const lead = leadChoice(text, choices.map((c, i) => [c.label, ...(names[i] ?? [])]));
+  return lead !== -1 ? [lead] : [];
+};
+
+/** A choice's detail continued by the line after it: a nested bullet is one
+ *  more item (`Pros:` then `- fast` reads `Pros: fast`), any other line wraps. */
+const joinDetail = (detail: string, line: string): string => {
+  const item = line.trim().replace(NESTED_BULLET_RE, '');
+  if (item === line.trim()) return `${detail} ${item}`;
+  return /:$/.test(detail) ? `${detail} ${item}` : `${detail}; ${item}`;
+};
+
+const LEAD_PAUSE_RE =/^(?:\s*[,;:(—–.!?]|\s+-\s|\s+(?:because|since|as|so|given)\b)/;
+
+/** The one choice whose label (or other name) the text begins, then a pause
+ *  (`,` `;` `:` `(` a dash, a sentence end, or "because" and the like); the
+ *  longest label wins, and -1 when none does or two choices tie. */
+const leadChoice = (text: string, names: ReadonlyArray<ReadonlyArray<string>>): number => {
+  const fold = (value: string) => value.replace(/[*_`]+/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+  const target = fold(text);
+  let best = -1;
+  let bestLength = 0;
+  let tie = false;
+  names.forEach((list, i) => {
+    for (const name of list) {
+      const head = normalizeQuestionText(name);
+      if (!head || !target.startsWith(head) || !LEAD_PAUSE_RE.test(target.slice(head.length))) continue;
+      if (head.length > bestLength) {
+        best = i;
+        bestLength = head.length;
+        tie = false;
+      } else if (head.length === bestLength && best !== i) {
+        tie = true;
+      }
+    }
+  });
+  return tie ? -1 : best;
 };
 
 type ContractField = 'stakes' | 'shows' | 'why' | 'reversible' | 'prototype';
@@ -967,11 +1028,17 @@ export const parseQuestionBlock = (
   const contextLines: string[] = [];
   const choices: QuestionChoice[] = [];
   const raws: string[] = [];
+  // Each choice's details (`Why:`, `Trade-off:`, `Pros:`, `Cons:` under it), by index.
+  const choiceDetails: string[][] = [];
   // Further names a recommendation may use per choice (plain bullets only).
   const choiceNames: string[][] = [];
   // A plain bullet's context lines: its own line plus every continuation
   // line, so all of them leave the context when the bullets become choices.
-  const plainBullets: { text: string; first: string; contextIndices: number[]; legacyText?: string }[] = [];
+  // `details`: its detail lines, kept out of its label. `joined`: its text as
+  // builds before details read it (every plain continuation line joined on),
+  // for an alias; it stops at a nested bullet (`joinedEnds`), which those
+  // builds read as a choice of its own.
+  const plainBullets: { text: string; first: string; contextIndices: number[]; legacyText?: string; details: string[]; joined: string; joinedEnds?: true }[] = [];
   // Context lines to drop at the end: plain bullets that became choices, and
   // the lines that wrap the final recommendation.
   const dropContext = new Set<number>();
@@ -1167,19 +1234,27 @@ export const parseQuestionBlock = (
     // An indented line right under a choice continues that choice (a
     // `Context:` line never does: it is context).
     if (lastChoice !== -1 && /^\s+\S/.test(line) && !contextLine) {
+      const fenced = !!continuationFence;
       trackContinuationFence(line);
       const c = choices[lastChoice];
       const extra = line.trim();
+      // A nested bullet under the choice (`  - Pros: …`) reads as its text.
+      const item = extra.replace(NESTED_BULLET_RE, '');
       // An option line (`Pros:`, `Cons:`, `Prototype:`), read once per field: never the description.
-      const optionLine = readOptionLines && !continuationFence ? readOptionLine(extra) : null;
+      const optionLine = readOptionLines && !continuationFence ? readOptionLine(item) : null;
       if (optionLine && c[optionLine.field] === undefined) {
         if (optionLine.field === 'prototype') c.prototype = optionLine.value;
         else c[optionLine.field] = optionLine.value;
         continue;
       }
-      if (c.description) c.description = `${c.description} ${extra}`;
-      else c.description = extra;
       raws[lastChoice] = `${raws[lastChoice]} ${extra}`;
+      // `Why:`, `Trade-off:`, `Pros:`, `Cons:` start a detail; what follows
+      // continues the last one (the description gets them at the end).
+      const details = (choiceDetails[lastChoice] ??= []);
+      if (!fenced && !continuationFence && CHOICE_DETAIL_RE.test(item)) details.push(item);
+      else if (details.length > 0) details[details.length - 1] = joinDetail(details[details.length - 1]!, extra);
+      else if (c.description) c.description = `${c.description} ${extra}`;
+      else c.description = extra;
       continue;
     }
     lastChoice = -1;
@@ -1202,8 +1277,31 @@ export const parseQuestionBlock = (
           pushContext(line.trimEnd());
           continue;
         }
+        const fenced = !!continuationFence;
         trackContinuationFence(line);
-        target.text = `${target.text} ${line.trim()}`;
+        const extra = line.trim();
+        if (!target.joinedEnds) target.joined = `${target.joined} ${extra}`;
+        // `Why:`, `Trade-off:`, `Pros:`, `Cons:` start a detail of the bullet,
+        // never its label; what follows continues the last one.
+        if (!fenced && CHOICE_DETAIL_RE.test(extra)) target.details.push(extra);
+        else if (target.details.length > 0) target.details[target.details.length - 1] = joinDetail(target.details[target.details.length - 1]!, extra);
+        else target.text = `${target.text} ${extra}`;
+        target.contextIndices.push(contextLines.length);
+        pushContext(line.trimEnd());
+        continue;
+      }
+    }
+    // A bullet nested in the open one (indented to its content) that is a
+    // detail (`  - Trade-off: …`), or follows one, belongs to that bullet: it
+    // is never a choice of its own.
+    if (openBullet && !openBullet.legacy && bullet && !continuationFence && indentWidth(line) >= openBullet.contentColumn) {
+      const target = plainBullets[openBullet.index]!;
+      const item = bullet[1].trim();
+      if (CHOICE_DETAIL_RE.test(item) || target.details.length > 0) {
+        if (CHOICE_DETAIL_RE.test(item)) target.details.push(item);
+        else target.details[target.details.length - 1] = joinDetail(target.details[target.details.length - 1]!, line);
+        target.joinedEnds = true;
+        openBullet.afterBlank = false;
         target.contextIndices.push(contextLines.length);
         pushContext(line.trimEnd());
         continue;
@@ -1212,7 +1310,7 @@ export const parseQuestionBlock = (
     openBullet = null;
     continuationFence = null;
     if (bullet && bullet[1].trim()) {
-      plainBullets.push({ text: bullet[1].trim(), first: bullet[1].trim(), contextIndices: [contextLines.length] });
+      plainBullets.push({ text: bullet[1].trim(), first: bullet[1].trim(), contextIndices: [contextLines.length], details: [], joined: bullet[1].trim() });
       openBullet = {
         index: plainBullets.length - 1,
         contentColumn: indentWidth(line) + (line.trimStart().length - bullet[1].length),
@@ -1249,8 +1347,19 @@ export const parseQuestionBlock = (
           return [bullet.legacyText, capChoiceLabel(preferred).label, preferred.label, plain.label];
         })()
         : [];
-      const aliases = [...new Set([bullet.text, ...names[i], ...legacy])]
+      // A bullet with a detail on a plain line under it: builds before
+      // details read the line into its label, so an answer stored then still
+      // selects it.
+      const joined = bullet.joined !== bullet.text
+        ? (() => {
+          const plain = splitLabel(bullet.joined);
+          const preferred = splitBoldLead(bullet.joined) ?? plain;
+          return [bullet.joined, capChoiceLabel(preferred).label, preferred.label, plain.label];
+        })()
+        : [];
+      const aliases = [...new Set([bullet.text, ...names[i], ...legacy, ...joined])]
         .filter((name) => name && normalizeQuestionText(name) !== normalizeQuestionText(label));
+      if (bullet.details.length > 0) choiceDetails[choices.length] = bullet.details;
       choices.push({
         label,
         ...(description ? { description } : {}),
@@ -1258,19 +1367,38 @@ export const parseQuestionBlock = (
         settled: false,
         recommended: false,
       });
-      raws.push(bullet.text);
+      // The text with its plain continuation lines, as before details: a
+      // recommendation that named the whole text still names it.
+      raws.push(bullet.joined);
       choiceNames.push(names[i]);
       for (const index of bullet.contextIndices) dropContext.add(index);
     });
   }
+  // Each choice's details: with option lines, the first `Pros:` and the
+  // first `Cons:` (or `Trade-off:`) are its pros and cons; the rest end its
+  // description, word for word, and are its `details`.
+  choices.forEach((c, i) => {
+    const details = (choiceDetails[i] ?? []).filter((detail) => {
+      const option = readOptionLines ? readOptionLine(detail) : null;
+      if (!option || option.field === 'prototype' || c[option.field] !== undefined) return true;
+      c[option.field] = option.value;
+      return false;
+    });
+    if (details.length === 0) return;
+    c.description = [c.description, ...details].filter(Boolean).join(' ');
+    c.details = details;
+  });
   // Two choices whose text before the dash is the same ("Yes — keep it", "Yes — drop it") would be one answer: each
   // takes its whole text as its label, so a pick, a stored answer and the reply name one choice.
   const labelCount = new Map<string, number>();
   for (const c of choices) labelCount.set(normalizeQuestionText(c.label), (labelCount.get(normalizeQuestionText(c.label)) ?? 0) + 1);
   choices.forEach((c, i) => {
     if (!c.description || (labelCount.get(normalizeQuestionText(c.label)) ?? 0) < 2) return;
-    const { description: _d, ...rest } = c;
-    choices[i] = { ...rest, label: raws[i]!.trim() };
+    const { description: _d, details: _x, ...rest } = c;
+    const label = raws[i]!.trim();
+    // A detail the whole text does not hold (a nested bullet's) stays drawn under it.
+    const details = (c.details ?? []).filter((detail) => !label.includes(detail));
+    choices[i] = { ...rest, label, ...(details.length > 0 ? { description: details.join(' '), details } : {}) };
   });
   if (choices.some((c) => c.label.includes('![') || c.description?.includes('!['))) {
     choices.splice(0, choices.length, ...withPictureChoices(choices));
