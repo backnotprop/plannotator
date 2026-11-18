@@ -418,9 +418,9 @@ test('the comment card on picked words: "/" lists the skills on top, a pick writ
  * The reply box's undo after a pick (QA of main after 0.28.67): type `alpha beta gamma`, select all, Backspace,
  * type `Run /dep`, pick `deploy-preview`, ⌘Z three times, and the box read `Run /deploy-preview alpha beta gamma`.
  * The pick wrote the words outside the browser's undo stack; it is the browser's own edit now
- * (ui's utils/undoableEdit.ts). ⌘Z takes back the pick, then the typing and the deletion (Chrome may keep the
- * deletion and the typing after it as one step), then the first words, and stops at an empty box; ⌘⇧Z walks forward
- * again to the pick. No step ever shows deleted words beside the picked ones.
+ * (ui's utils/undoableEdit.ts). ⌘Z takes back the pick alone, then the typing (Chrome may split it while the list is
+ * open) and the deletion, then the first words, and stops at an empty box; ⌘⇧Z walks forward again to the pick. No
+ * step ever shows deleted words beside the picked ones.
  */
 test('the reply box: undo after a skill pick steps back through the pick, the typing and the deletion, and redo forward', async ({ browser }: { browser: Browser }) => {
   const UNDO = process.platform === 'darwin' ? 'Meta+z' : 'Control+z';
@@ -446,21 +446,24 @@ test('the reply box: undo after a skill pick steps back through the pick, the ty
 
     const FIRST = 'alpha beta gamma';
     /** A state the box really had: the first words (or part of them), empty, the typing, the pick. */
-    const real = (words: string) => words === '' || FIRST.startsWith(words) || words === 'Run /dep' || words === 'Run /deploy-preview ';
+    // Chrome may end the typing run while the list is open, so part of the typing can be its own step (`Run /de`).
+    const real = (words: string) => FIRST.startsWith(words) || 'Run /dep'.startsWith(words) || words === 'Run /deploy-preview ';
     const press = async (key: string) => {
       await page.keyboard.press(key);
       await page.waitForTimeout(60);
       return field.inputValue();
     };
+    // Undo until the first words are back, then twice more: an empty box, and nothing further.
     const back: string[] = [];
-    for (let i = 0; i < 5; i++) back.push(await press(UNDO));
+    for (let i = 0; i < 12 && !back.includes(FIRST); i++) back.push(await press(UNDO));
+    back.push(await press(UNDO), await press(UNDO));
     expect(back[0], `undo after the pick: ${JSON.stringify(back)}`).toBe('Run /dep');
     expect(back.every(real), `every undo is a state the box had: ${JSON.stringify(back)}`).toBe(true);
     expect(back, 'the first words come back').toContain(FIRST);
     expect(back.slice(-2), 'undo stops at an empty box').toEqual(['', '']);
 
     const forward: string[] = [];
-    for (let i = 0; i < 6 && forward[forward.length - 1] !== 'Run /deploy-preview '; i++) forward.push(await press(REDO));
+    for (let i = 0; i < 14 && forward[forward.length - 1] !== 'Run /deploy-preview '; i++) forward.push(await press(REDO));
     expect(forward.every(real), `every redo is a state the box had: ${JSON.stringify(forward)}`).toBe(true);
     expect(forward, 'redo comes back through the typing').toContain('Run /dep');
     expect(forward[forward.length - 1], `redo ends at the pick: ${JSON.stringify(forward)}`).toBe('Run /deploy-preview ');
