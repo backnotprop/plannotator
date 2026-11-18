@@ -1,6 +1,7 @@
 /**
- * A Ctrl+click on an arrow opens the context menu and nothing else: no lines open under it. Real Chromium against
- * the compiled binary's code review, on a scratch repository.
+ * A Ctrl+click on an arrow opens the context menu and nothing else: no lines open under it. macOS sends a press, a
+ * context menu and a release with no click, so the spec sends that sequence itself and runs the same on Linux. Real
+ * Chromium against the compiled binary's code review, on a scratch repository.
  */
 
 import { chromium, expect, test, type Browser, type Page } from '@playwright/test';
@@ -36,9 +37,14 @@ test('a Ctrl+click on an arrow opens no lines', async () => {
     const at = (await arrow(page))!;
     await page.mouse.move(at.x, at.y);
     await page.waitForTimeout(500);
-    await page.keyboard.down('Control');
-    await page.mouse.click(at.x, at.y);
-    await page.keyboard.up('Control');
+    await page.evaluate(({ x, y }) => {
+      const target = document.querySelector('diffs-container')?.shadowRoot?.querySelector('[data-expand-button]');
+      if (!target) throw new Error('no arrow');
+      const init = { bubbles: true, composed: true, cancelable: true, clientX: x, clientY: y, button: 0, ctrlKey: true, pointerType: 'mouse', pointerId: 1, isPrimary: true };
+      target.dispatchEvent(new PointerEvent('pointerdown', init));
+      target.dispatchEvent(new MouseEvent('contextmenu', init));
+      target.dispatchEvent(new PointerEvent('pointerup', init));
+    }, at);
     await page.waitForTimeout(1_000);
     expect(await opened(page)).toBe(false);
     await page.mouse.click(at.x, at.y);
