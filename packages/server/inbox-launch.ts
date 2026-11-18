@@ -177,6 +177,8 @@ interface Memo {
   paneCheck?: { at: number; pending: boolean };
   /** Rex said its own pane closed since the latest start: no start grace to wait out (its program ended with it). */
   paneClosed?: boolean;
+  /** The session read live (a poll past `quietPolls`) since the latest start. */
+  seenLive?: boolean;
   /**
    * After Stop or a respawn, the session's earlier polls keep it "live" for a
    * while: it counts as live again only once it starts a poll past this count.
@@ -621,6 +623,7 @@ export function createInboxLaunch(options: {
       memo.stoppedAt = null;
     }
     if (state && memo.respawn) memo.respawn.connected = true;
+    if (state) memo.seenLive = true;
     if (state?.busy === true) memo.busySeen = true;
     return state;
   };
@@ -899,6 +902,7 @@ export function createInboxLaunch(options: {
     memo.heldReply = null;
     memo.paneClosed = false;
     memo.paneCheck = undefined;
+    memo.seenLive = false;
     starting.add(launch.id);
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
@@ -1126,6 +1130,7 @@ ${result.text}`);
     memo.heldReply = null;
     memo.paneClosed = false;
     memo.paneCheck = undefined;
+    memo.seenLive = false;
     const attempt = memo.respawn;
     options.onChange();
     // One that runs in Rex starts again in a new Rex tab, as the same session.
@@ -1162,6 +1167,11 @@ ${result.text}`);
     }
     return { exitCode: 1, text: made.text, failure: { code: made.code === "untrusted" ? "untrusted" : "failed", text: made.text } };
   };
+  /**
+   * How long after a start in Rex an agent that has not connected yet is looked for in its own pane (a prompt there,
+   * such as its own trust question, waits on the person): past it, its tab is no longer read for it.
+   */
+  const INBOX_REX_UNCONNECTED_MS = 15 * 60_000;
   /** How often a reply waiting on a Rex session whose old process may still run is looked at again. */
   const REX_HELD_RECHECK_MS = 5_000;
   /** Why a Rex session must not get a new tab now (its old process may still run), or null (inbox-rex-resume.ts). */
@@ -2474,19 +2484,21 @@ ${result.text}`);
 
     /**
      * The sessions started in Rex that have not connected since their latest start (a first message not taken yet, or
-     * a reply's restart): their own pane is where they are (a pane closes with its program), so its status shows before
-     * they connect (a trust or permission prompt in the tab, which no connection reports).
+     * a reply's restart), with that start's time: their own pane is where they are (a pane closes with its program), so
+     * its status shows before they connect (a trust or permission prompt in the tab, which no connection reports). The
+     * Inbox drops any its bridge heard from since that start.
      */
-    rexUnconnected(): ReadonlySet<string> {
-      const out = new Set<string>();
+    rexUnconnected(): ReadonlyMap<string, number> {
+      const out = new Map<string, number>();
       if (!enabled()) return out;
       for (const root of roots()) {
         const launch = root.launch!;
         const session = inboxLaunchedSession(root);
-        if (launch.deleted_at || launch.error || !session || !inboxLaunchInRex(launch) || !ownPaneOf(launch)) continue;
-        const memo = memos.get(launch.id);
-        if (memo?.stoppedAt != null) continue;
-        if (!root.delivery || (memo?.respawn && !memo.respawn.connected)) out.add(session);
+        const host = hostOf(launch);
+        if (!host || launch.deleted_at || launch.error || !session || !inboxLaunchInRex(launch) || !ownPaneOf(launch)) continue;
+        const memo = memoOf(launch);
+        if (memo.stoppedAt !== null || now() - memo.startedAt >= INBOX_REX_UNCONNECTED_MS) continue;
+        if (!liveOf(host, root, memo) && !memo.seenLive) out.set(session, memo.startedAt);
       }
       return out;
     },

@@ -310,7 +310,8 @@ describe("the Agents list and Rex", () => {
     w.fake.setStatus(made.windows[0]!.blocks[0]!, [{ state: "blocked", kind: "permission", app: "claude-code" }]);
     const root = w.server.store.launchedRoots().find((m) => m.launch?.session === session)!;
     const runOf = async () => ((await (await fetch(`${w.base}/api/inbox/threads/${root.thread_id}`, { headers: { "Sec-Fetch-Site": "same-origin", Origin: w.base } })).json()) as { run: { state: string; rex?: { waiting?: string } } | null }).run;
-    await until(async () => (await runOf())?.state === "waiting_terminal");
+    // A list read keeps Rex's read fresh (as an open window's stream does).
+    await until(async () => (await w.agentsOf(), (await runOf())?.state === "waiting_terminal"));
     expect((await runOf())?.rex?.waiting).toBe("permission");
     await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_mark !== undefined);
     expect((await w.agentsOf()).find((a) => a.session === session)).toMatchObject({ place: { kind: "rex", line: "Rex · my-app / Fake Agent" }, rex_mark: { state: "blocked", kind: "permission" } });

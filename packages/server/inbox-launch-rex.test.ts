@@ -420,18 +420,25 @@ describe("Start in Rex", () => {
     await until(() => store.message(root.id)!.launch!.rex?.block === "block:new");
   });
 
-  test("a session started in Rex counts as not connected (its tab is where it is) until it takes its first message; stopped: no longer", async () => {
-    const { clock, fake, store, launch, send } = setup();
-    const { root } = await send();
-    expect([...launch.rexUnconnected()]).toEqual(["session-r1"]);
+  test("a session started in Rex counts as not connected (its tab is where it is) until it connects, for a quarter of an hour at most; stopped, or connected once and ended: no longer", async () => {
+    const { clock, fake, launch, send } = setup();
+    await send();
+    expect([...launch.rexUnconnected().keys()]).toEqual(["session-r1"]);
     fake.poll("session-r1", true, clock.now);
-    store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
-    expect([...launch.rexUnconnected()]).toEqual([]);
+    expect([...launch.rexUnconnected().keys()]).toEqual([]);
+    // It ended (no poll for long): it stays out (Rex is not read for a tab it left).
+    fake.ended("session-r1");
+    clock.now += 60_000;
+    expect([...launch.rexUnconnected().keys()]).toEqual([]);
     const again = setup();
     const started = await again.send();
-    expect([...again.launch.rexUnconnected()]).toEqual(["session-r1"]);
+    expect([...again.launch.rexUnconnected().keys()]).toEqual(["session-r1"]);
     expect((await again.post(started.id, "stop")).status).toBe(200);
-    expect([...again.launch.rexUnconnected()]).toEqual([]);
+    expect([...again.launch.rexUnconnected().keys()]).toEqual([]);
+    const late = setup();
+    await late.send();
+    late.clock.now += 15 * 60_000;
+    expect([...late.launch.rexUnconnected().keys()]).toEqual([]);
   });
 
   test("its pane closed while it reads live and its start's grace runs: a reply starts it again in a new tab at once; its pane still there: the running agent takes the reply", async () => {

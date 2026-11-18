@@ -4983,7 +4983,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const inRex = launch.rexPanes();
     if (!every && (!inRex || inRex.size === 0)) return hints;
     const background = launch.backgroundSessions();
-    const unconnected = launch.rexUnconnected();
+    const unconnected = rexUnconnectedNow();
     for (const session of sessions) {
       if (background.has(session)) continue;
       if (!every && !inRex!.has(session) && !live.continuesOf(session).some((old) => inRex!.has(old))) continue;
@@ -4997,6 +4997,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Rex, the pane Rex made for it (Pi and OpenCode report none): while it is live, or before it connected (a prompt
    * in its tab, such as the agent's own trust question, shows then too; Rex confirms the pane is still there).
    */
+  /** The engine's not-yet-connected Rex sessions (`rexUnconnected`), less any whose connection was heard since its start. */
+  const rexUnconnectedNow = (): Set<string> => {
+    const out = new Set<string>();
+    for (const [session, startedAt] of launch.rexUnconnected()) {
+      const heard = live.lastHeardOf(session);
+      if (heard === null || heard < startedAt) out.add(session);
+    }
+    return out;
+  };
   const rexPlaceOf = (session: string, inRex: ReadonlyMap<string, InboxPlace | null> | null, unconnected: ReadonlySet<string>): InboxPlace | null =>
     live.placeOf(session) ?? (live.isSessionLive(session) || unconnected.has(session) ? (inRex?.get(session) ?? null) : null);
   /**
@@ -5037,7 +5046,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Only a session the Inbox started in Rex (`rexPanes` reads no runs: no loop).
     const inRex = launch.rexPanes();
     if (!inRex?.has(session)) return null;
-    const place = rexPlaceOf(session, inRex, launch.rexUnconnected());
+    const place = rexPlaceOf(session, inRex, rexUnconnectedNow());
     return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
   };
   const launch = createInboxLaunch({
