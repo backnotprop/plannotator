@@ -11,6 +11,7 @@
 import type { InboxDevicePublic } from '../../packages/shared/inbox/devices';
 import type { InboxMessageWire, InboxQuestion, InboxRecordKind } from '../../packages/core/inbox-types';
 import type { QuestionAnswer } from '../../packages/core/question-block';
+import type { inboxPickBody } from '../../packages/core/inbox-answers';
 
 /** Every refusal: `{ error, code, ...details }`. Act on `code`, never the words (packages/server/inbox-devices.ts `refuse`). */
 export interface DoorError {
@@ -93,13 +94,8 @@ export interface DoorQuestionPick {
   answer?: QuestionAnswer | null;
 }
 
-/** `POST messages/:id/picks`. */
-export interface DoorPicksBody {
-  idempotency_key: string;
-  questions: DoorQuestionPick[];
-  /** Refuse a question a reply already sent (`409 question_already_sent`). */
-  unsent_only?: boolean;
-}
+/** `POST messages/:id/picks`: the window's own body (packages/core/inbox-answers.ts inboxPickBody), with the door's key. */
+export type DoorPicksBody = ReturnType<typeof inboxPickBody> & { idempotency_key: string };
 
 /** `POST messages/:id/picks` answers. */
 export interface DoorPicksAnswer {

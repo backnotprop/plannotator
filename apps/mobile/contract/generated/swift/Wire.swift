@@ -530,34 +530,71 @@ public struct DoorPicksAnswer: Codable, Hashable, Sendable {
 
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorPicksBody: Codable, Hashable, Sendable {
-  public var idempotencyKey: String
-  public var questions: [DoorQuestionPick]
+  public var questions: [DoorPicksBodyQuestionsItem]
   public var unsentOnly: Bool?
+  public var confirmFull: Bool?
+  public var idempotencyKey: String
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["idempotency_key", "questions", "unsent_only"]
+  static let knownKeys: Set<String> = ["questions", "unsent_only", "confirm_full", "idempotency_key"]
 
-  public init(idempotencyKey: String, questions: [DoorQuestionPick], unsentOnly: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
-    self.idempotencyKey = idempotencyKey
+  public init(questions: [DoorPicksBodyQuestionsItem], unsentOnly: Bool? = nil, confirmFull: Bool? = nil, idempotencyKey: String, unknownFields: [String: JSONValue] = [:]) {
     self.questions = questions
     self.unsentOnly = unsentOnly
+    self.confirmFull = confirmFull
+    self.idempotencyKey = idempotencyKey
     self.unknownFields = unknownFields
   }
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
-    self.idempotencyKey = try c.decode(String.self, forKey: WireKey("idempotency_key"))
-    self.questions = try c.decode([DoorQuestionPick].self, forKey: WireKey("questions"))
+    self.questions = try c.decode([DoorPicksBodyQuestionsItem].self, forKey: WireKey("questions"))
     self.unsentOnly = try c.decodeIfPresent(Bool.self, forKey: WireKey("unsent_only"))
+    self.confirmFull = try c.decodeIfPresent(Bool.self, forKey: WireKey("confirm_full"))
+    self.idempotencyKey = try c.decode(String.self, forKey: WireKey("idempotency_key"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
   public func encode(to encoder: Encoder) throws {
     var c = encoder.container(keyedBy: WireKey.self)
-    try c.encode(self.idempotencyKey, forKey: WireKey("idempotency_key"))
     try c.encode(self.questions, forKey: WireKey("questions"))
     try c.encodeIfPresent(self.unsentOnly, forKey: WireKey("unsent_only"))
+    try c.encodeIfPresent(self.confirmFull, forKey: WireKey("confirm_full"))
+    try c.encode(self.idempotencyKey, forKey: WireKey("idempotency_key"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
+public struct DoorPicksBodyQuestionsItem: Codable, Hashable, Sendable {
+  public var key: String
+  public var revision: Int64
+  public var answer: QuestionAnswer?
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["key", "revision", "answer"]
+
+  public init(key: String, revision: Int64, answer: QuestionAnswer? = nil, unknownFields: [String: JSONValue] = [:]) {
+    self.key = key
+    self.revision = revision
+    self.answer = answer
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.key = try c.decode(String.self, forKey: WireKey("key"))
+    self.revision = try c.decode(Int64.self, forKey: WireKey("revision"))
+    self.answer = try c.decodeIfPresent(QuestionAnswer.self, forKey: WireKey("answer"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.key, forKey: WireKey("key"))
+    try c.encode(self.revision, forKey: WireKey("revision"))
+    try c.encode(self.answer, forKey: WireKey("answer"))
     try WireKey.write(unknownFields, to: &c)
   }
 }

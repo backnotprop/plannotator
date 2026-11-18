@@ -153,4 +153,4 @@ If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 - About 33 v1 features use door routes that a phone token cannot reach today (`grant: machine`: the Board, pulls, launch, open-in and more), and `window-door-gap` lists v1 features with no door route at all. S1 should use only `grant: phone` routes.
 - Only the words in `words.json` (about 30) are generated. Any other window word needs a product constant first, in its own pull request.
 - `tokens.json` names the fonts Inter and Geist Mono. Bundling them in the app needs their OFL notices.
-- `DoorPicksBody` in `door-shapes.ts` does not have `confirm_full` yet. Until it is made from the product's `inboxPickBody`, build picks the way `inboxPickBody` does.
+- `DoorPicksBody` is the window's own pick body (`inboxPickBody` in `packages/core/inbox-answers.ts`) plus `idempotency_key`, so it has `unsent_only` and `confirm_full`. A pick's `answer: null` takes it back, and `Wire.swift` writes the null. The other bodies in `door-shapes.ts` (pair, seen, reply, the error and the frames) are still written by hand until the product has types for them.
