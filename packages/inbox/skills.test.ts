@@ -341,12 +341,3 @@ describe('/show-me, the built-in every thread lists', () => {
     expect(builtinSkillContent(entry)).toEqual({ content: SHOW_ME_SKILL.body, truncated: false, dir: '', path: '' });
   });
 });
-
-describe("the server's block for built-in skills", () => {
-  test('is the block the window writes for the same skills, so an automatic hand-off carries what a Send would', async () => {
-    const { inboxBuiltinSkillsBlock } = await import('@plannotator/core/inbox-builtin-skills-block');
-    const refs = ['show-me', 'review-curate'].map((name) => ({ name, root: 'plannotator' as const, humanOnly: true }));
-    const contents = new Map(refs.map((ref) => [ref.name, builtinSkillContent(ref)!]));
-    expect(inboxBuiltinSkillsBlock(['show-me', 'review-curate'], INBOX_MESSAGE_SKILL_AUDIENCE)).toBe(composeInboxSkillsBlock(refs, contents, INBOX_MESSAGE_SKILL_AUDIENCE));
-  });
-});

@@ -25,7 +25,10 @@ import { INBOX_BUILTIN_SKILL_ROOT, INBOX_REVIEW_SKILLS } from "@plannotator/core
 import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { CREATE_ROUTINE_SKILL } from "@plannotator/core/create-routine-skill";
 import { SHOW_ME_SKILL } from "@plannotator/core/show-me-skill";
-import { listReferenceSkills } from "./review-skill-loader";
+import { composeInboxSkillsBlock, inboxBuiltinSkillContent } from "@plannotator/core/inbox-skills-compose";
+import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
+import type { SkillCatalogEntry, SkillExportContent } from "@plannotator/core/skill-references-render";
+import { listReferenceSkills, readReferenceSkillContent, type ReferenceSkillContent } from "./review-skill-loader";
 import { handleReferenceSkillContent } from "./shared-handlers";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
 
@@ -49,6 +52,10 @@ function noStore(res: Response): Response {
  * `/create-routine` while Routines are on. `/show-me` always, first.
  */
 export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills> = listReferenceSkills, shape = false, routines = false): Response {
+  return Response.json({ skills: inboxSkillEntries(codeReview, discovered, shape, routines) });
+}
+
+function inboxSkillEntries(codeReview: boolean, discovered: () => ReturnType<typeof listReferenceSkills>, shape: boolean, routines: boolean): SkillCatalogEntry[] {
   let skills: ReturnType<typeof listReferenceSkills>;
   try {
     skills = discovered();
@@ -61,11 +68,34 @@ export function inboxSkillCatalog(codeReview: boolean, discovered: () => ReturnT
   const offered = [SHOW_ME_SKILL, ...(codeReview ? INBOX_REVIEW_SKILLS : []), ...(shape ? [SHAPE_SKILL] : []), ...(routines ? [CREATE_ROUTINE_SKILL] : [])];
   const builtins = offered.filter((skill) => !own.has(skill.name)).map((skill) => ({
     name: skill.name,
-    root: INBOX_BUILTIN_SKILL_ROOT,
+    root: INBOX_BUILTIN_SKILL_ROOT as SkillCatalogEntry["root"],
     description: skill.description,
     humanOnly: true,
   }));
-  return Response.json({ skills: [...builtins, ...skills] });
+  return [...builtins, ...skills];
+}
+
+export interface InboxSkillSwitches {
+  codeReview: boolean;
+  shape: boolean;
+  routines: boolean;
+  diagrams: boolean;
+}
+
+export function inboxSkillsBlockFor(
+  names: readonly string[],
+  switches: InboxSkillSwitches,
+  sources: { discovered: () => ReturnType<typeof listReferenceSkills>; read: (name: string) => ReferenceSkillContent | null } = { discovered: listReferenceSkills, read: readReferenceSkillContent },
+): string {
+  const catalog = inboxSkillEntries(switches.codeReview, sources.discovered, switches.shape, switches.routines);
+  const refs = names.flatMap((name) => catalog.find((entry) => entry.name === name) ?? []);
+  const contents = new Map<string, SkillExportContent>();
+  for (const ref of refs) {
+    if (!ref.humanOnly) continue;
+    const read = ref.root === INBOX_BUILTIN_SKILL_ROOT ? inboxBuiltinSkillContent(ref, switches.shape, switches.diagrams) : sources.read(ref.name);
+    if (read?.content) contents.set(ref.name, { content: read.content, truncated: read.truncated, dir: read.dir, path: read.path });
+  }
+  return composeInboxSkillsBlock(refs, contents, INBOX_MESSAGE_SKILL_AUDIENCE);
 }
 
 /** The answer for a skills path, or null for any other path. `codeReview`, `shape`, `routines`: the person's switches. */

@@ -5,6 +5,9 @@ import { join } from "node:path";
 import { inboxPullStacks, type InboxPull, type InboxPullRiskAuto, type InboxPullRiskLevel } from "@plannotator/core/inbox-types";
 import { createPullRiskAuto, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
 import { pullRiskAutoBody } from "./inbox-pull-risk-auto-start";
+import { inboxSkillsBlockFor } from "./inbox-skills";
+import { inboxReviewSkill } from "@plannotator/core/inbox-review";
+import { SHOW_ME_SKILL } from "@plannotator/core/show-me-skill";
 
 const dirs: string[] = [];
 afterAll(() => {
@@ -178,16 +181,17 @@ test("a restart mid-queue starts each waiting PR once its list is read, and none
 
 test("the hand-off it sends asks for what was chosen, with those skills' text, and never to comment, approve or merge", () => {
   const one = (pull: InboxPull) => inboxPullStacks([pull])[0]!;
-  const both = pullRiskAutoBody({ stack: one(pr(880)), made: "both" }).body;
+  const blocks = (names: readonly string[]) => inboxSkillsBlockFor(names, { codeReview: true, shape: false, routines: false, diagrams: true }, { discovered: () => [], read: () => null });
+  const both = pullRiskAutoBody({ stack: one(pr(880)), made: "both" }, blocks).body;
   expect(both).toContain("1. Send me a guided review of its diff against main, using /review-curate");
   expect(both).toContain("2. Then send me a Show me page of its diff against main, using /show-me");
   expect(both).toContain("3. After that, we discuss it in this thread.");
   expect(both).toContain("--- BEGIN SKILL INSTRUCTIONS: review-curate ---");
   expect(both).toContain("--- BEGIN SKILL INSTRUCTIONS: show-me ---");
   expect(both).toContain("Don't push to the branch, comment on the pull request, approve it or merge it.");
-  const showMe = pullRiskAutoBody({ stack: one(pr(880)), made: "show_me" }).body;
+  const showMe = pullRiskAutoBody({ stack: one(pr(880)), made: "show_me" }, blocks).body;
   expect(showMe).not.toContain("/review-curate");
-  expect(pullRiskAutoBody({ stack: one(pr(880)), made: "guide" }).name).toBe("Review #880: PR 880");
+  expect(pullRiskAutoBody({ stack: one(pr(880)), made: "guide" }, blocks).name).toBe("Review #880: PR 880");
 });
 
 test("a start run again after a restart replays the same thread: no second agent, the PR kept by that thread", async () => {
@@ -214,6 +218,7 @@ test("a start run again after a restart replays the same thread: no second agent
     } as never,
     resolveProject: async () => ({}) as never,
     projectOf: async () => "prj_web",
+    skillsBlock: () => "",
     own: (layers, threadId, made) => owned.push([layers.map((layer) => layer.key), threadId, made]),
   });
   const job = { key: pr(880).key, stack: inboxPullStacks([pr(880)])[0]!, made: "both" as const, agent: null };
@@ -286,6 +291,7 @@ test("the thread is the start: a PR link that can't be kept leaves it started, i
     } as never,
     resolveProject: async () => ({}) as never,
     projectOf: async () => "prj_web",
+    skillsBlock: () => "",
     own: () => {
       throw new Error("pull-links.json can't be written");
     },
@@ -332,4 +338,20 @@ test("turned on, or after a crash, it covers PRs judged before: each open one at
   again.auto.resume();
   await again.auto.idle();
   expect(again.started.map((job) => job.stack.layers.at(-1)!.number)).toEqual([2]);
+});
+
+test("the hand-off pastes the skills the window would: the person's own show-me wins, and Shape and Chapter diagrams apply", () => {
+  const curateOff = inboxReviewSkill("review-curate", { shape: false, diagrams: false })!.body;
+  const curateOn = inboxReviewSkill("review-curate", { shape: true, diagrams: true })!.body;
+  expect(curateOff).not.toBe(curateOn);
+  const own = { name: "show-me", root: "claude" as const, humanOnly: true, dir: "/skills/show-me" };
+  const body = pullRiskAutoBody({ stack: inboxPullStacks([pr(880)])[0]!, made: "both" }, (names) =>
+    inboxSkillsBlockFor(names, { codeReview: true, shape: false, routines: false, diagrams: false }, {
+      discovered: () => [own],
+      read: (name) => (name === "show-me" ? { name, dir: own.dir, path: `${own.dir}/SKILL.md`, content: "Draw it my way.", truncated: false, humanOnly: true } : null),
+    }),
+  ).body;
+  expect(body).toContain("Draw it my way.");
+  expect(body).not.toContain(SHOW_ME_SKILL.body);
+  expect(body).toContain(curateOff);
 });

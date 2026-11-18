@@ -150,7 +150,7 @@ import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/sha
 import { DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines } from "@plannotator/shared/inbox/decision-data";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { createInboxCombine } from "./inbox-combine";
-import { inboxSkillsRoute } from "./inbox-skills";
+import { inboxSkillsBlockFor, inboxSkillsRoute } from "./inbox-skills";
 import { assertTestHome } from "./test-home-guard";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { answerSemDiffRequest, createSemDiffAssets, isSemDiffRequest, type SemDiffSource } from "@plannotator/shared/sem-diff-assets";
@@ -5169,6 +5169,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       launch,
       resolveProject,
       projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
+      skillsBlock: (names) => inboxSkillsBlockFor(names, { codeReview: codeReviewOn(), shape: shapeOn(), routines: scheduledCap.on(), diagrams: chapterDiagramsOn() }),
       own: (layers, threadId, made) => {
         const keys = layers.map((layer) => layer.key);
         const theirs = layers.every((layer) => !layer.mine);

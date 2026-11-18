@@ -1,7 +1,5 @@
-import { inboxBuiltinSkillsBlock } from "@plannotator/core/inbox-builtin-skills-block";
 import { openLayers, pullHandoffMessage, pullHandoffThreadName } from "@plannotator/core/inbox-pull-handoff";
 import { type InboxLaunchAgent, type InboxPull, type InboxProject, type InboxPullRiskAutoMake } from "@plannotator/core/inbox-types";
-import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { InboxLaunch } from "./inbox-launch";
@@ -13,13 +11,14 @@ export interface PullRiskAutoStartDeps {
   resolveProject: (path: string) => Promise<InboxProject>;
   projectOf: (job: PullRiskAutoJob) => Promise<string | null>;
   own: (layers: InboxPull[], threadId: string, made: InboxPullRiskAutoMake) => void;
+  skillsBlock: (names: readonly string[]) => string;
 }
 
 const SKILLS: Record<InboxPullRiskAutoMake, string[]> = { guide: ["review-curate"], show_me: ["show-me"], both: ["review-curate", "show-me"] };
 
-export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "stack" | "made">): { name: string; body: string } {
+export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "stack" | "made">, skillsBlock: (names: readonly string[]) => string): { name: string; body: string } {
   const words = pullHandoffMessage(job.stack, { kind: job.made });
-  return { name: pullHandoffThreadName(job.stack, null), body: `${words}\n\n${inboxBuiltinSkillsBlock(SKILLS[job.made], INBOX_MESSAGE_SKILL_AUDIENCE)}` };
+  return { name: pullHandoffThreadName(job.stack, null), body: `${words}\n\n${skillsBlock(SKILLS[job.made])}`.trimEnd() };
 }
 
 export function pullRiskAutoStart(deps: PullRiskAutoStartDeps): (job: PullRiskAutoJob) => Promise<{ thread_id: string }> {
@@ -29,7 +28,7 @@ export function pullRiskAutoStart(deps: PullRiskAutoStartDeps): (job: PullRiskAu
     if (!projectId) throw new InboxError("project_not_found", "No project here is this pull request's repository.");
     const agent = (job.agent ?? (await deps.launch.composeBlock())?.agents[0]?.agent ?? null) as InboxLaunchAgent | null;
     if (!agent) throw new InboxError("agent_unavailable", "No agent can be started here.");
-    const { name, body } = pullRiskAutoBody(job);
+    const { name, body } = pullRiskAutoBody(job, deps.skillsBlock);
     const prepared = await deps.launch.prepare({ agent, project_id: projectId }, { name, body, resolveProject: deps.resolveProject, background: true });
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
