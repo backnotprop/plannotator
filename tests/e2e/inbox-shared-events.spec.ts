@@ -347,7 +347,7 @@ test('notifications once and the sound once across the tabs; a follower in front
     await setFront(page, false, false);
   }
   const notices = async () => (await Promise.all(w.pages.map((p) => p.evaluate(() => window.__notified.length)))).reduce((a, b) => a + b, 0);
-  const rings = async () => (await Promise.all(w.pages.map((p) => p.evaluate(() => window.__sound.oscillators / 4)))).reduce((a, b) => a + b, 0);
+  const rings = async () => (await Promise.all(w.pages.map((p) => p.evaluate(() => window.__sound.freqs.filter((f) => Math.abs(f - 391.995) < 0.01).length)))).reduce((a, b) => a + b, 0);
   const sim = w.agents[0]!;
   const pi = await agent(w, 'Pi', 'pi');
   const [leader] = await leaders(w.pages);

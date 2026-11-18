@@ -13,6 +13,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxSound } from './sound';
 import type { SettingsModel } from './api';
+import { FELT_D5, FELT_G4 } from './feltSound';
+import { newAudioRecord, recordingAudioContext, timesPlayed, type AudioRecord } from '../../tests/helpers/recording-audio';
 
 const hasDom = typeof document !== 'undefined';
 const { SettingsPage } = (hasDom ? await import('./components/Settings') : {}) as typeof import('./components/Settings');
@@ -180,39 +182,13 @@ describe.if(hasDom)('around the page', () => {
 
 // ───────────────────────────── The hook, against a recording AudioContext ─────────────────────────────
 
-interface Recorder {
-  contexts: number;
-  oscillators: number;
-  gains: number[];
-}
-
-let recorder: Recorder;
+let recorder: AudioRecord;
 let front = { visible: true, focused: true };
 const saved: { ctx?: unknown; hasFocus?: () => boolean; visibility?: PropertyDescriptor } = {};
 
 function installStubs() {
-  recorder = { contexts: 0, oscillators: 0, gains: [] };
-  const rec = recorder;
-  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
-  class StubContext {
-    state = 'running';
-    currentTime = 0;
-    destination = {};
-    constructor() {
-      rec.contexts++;
-    }
-    resume() {
-      return Promise.resolve();
-    }
-    createGain() {
-      const gain = { gain: param(), connect: (to: unknown) => to };
-      return gain;
-    }
-    createOscillator() {
-      rec.oscillators++;
-      return { type: 'sine', frequency: param(), connect: (to: unknown) => to, start() {}, stop() {} };
-    }
-  }
+  recorder = newAudioRecord();
+  const StubContext = recordingAudioContext(recorder);
   saved.ctx = (window as unknown as { AudioContext?: unknown }).AudioContext;
   (window as unknown as { AudioContext: unknown }).AudioContext = StubContext;
   saved.hasFocus = document.hasFocus;
@@ -231,8 +207,7 @@ function restoreStubs() {
   } catch {}
 }
 
-/** Rings so far: the sound is four oscillators. */
-const rings = () => recorder.oscillators / 4;
+const rings = () => timesPlayed(recorder, FELT_G4);
 
 let api: InboxSound;
 function Probe() {
@@ -302,5 +277,12 @@ describe.if(hasDom)('useInboxSound', () => {
     act(() => api.preview());
     expect(rings()).toBe(1);
     expect(api.playing).toBe(true);
+  });
+
+  test('the question sound is Felt: G4, then D5 above it', () => {
+    mount(<Probe />);
+    act(() => api.preview());
+    const fundamentals = recorder.freqs.filter((f) => Math.abs(f - FELT_G4) < 0.01 || Math.abs(f - FELT_D5) < 0.01);
+    expect(fundamentals).toEqual([FELT_G4, FELT_D5]);
   });
 });

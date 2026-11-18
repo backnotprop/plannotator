@@ -1,5 +1,5 @@
 /**
- * The Inbox's question sound ("Ding-dong") and its one-time dialog, proved in
+ * The Inbox's question sound ("Felt") and its one-time dialog, proved in
  * a real Chromium against a compiled binary. The spec compiles its own binary
  * with a release version (0.29.0; the shared e2e binary is 0.0.0-dev, and a
  * dev build never reports an update), into a temp dir, from the built apps
@@ -7,7 +7,7 @@
  * (scripts/inbox-sim.ts).
  *
  * Never audible: an init script replaces AudioContext with a stub that only
- * counts oscillators (the sound is four, so four oscillators are one ring).
+ * records each oscillator's frequency (a question's ring is one G4, its first note).
  * Whether the tab is in front is set the way notifications.spec.ts sets it
  * (document.visibilityState and document.hasFocus()). A fake `tailscale`
  * that always fails is first on PATH, so the real one never runs; the update
@@ -37,7 +37,7 @@ const VERSION = '0.29.0';
 
 declare global {
   interface Window {
-    __sound: { oscillators: number; contexts: number };
+    __sound: { freqs: number[]; contexts: number };
     __front: { visible: boolean; focused: boolean };
     __notified: { title: string; silent: boolean }[];
   }
@@ -45,17 +45,18 @@ declare global {
 
 /** Runs in every page before its own code. */
 function stubPage(): void {
-  const sound = { oscillators: 0, contexts: 0 };
+  const sound = { freqs: [] as number[], contexts: 0 };
   window.__sound = sound;
-  const param = () => ({ value: 1, setValueAtTime() {}, exponentialRampToValueAtTime() {} });
+  const param = (onSet?: (value: number) => void) => ({ value: 1, setValueAtTime: (value: number) => onSet?.(value), linearRampToValueAtTime() {}, exponentialRampToValueAtTime() {} });
   class CountingAudioContext {
-    state = 'running';
+    state = 'suspended';
     currentTime = 0;
     destination = {};
     constructor() {
       sound.contexts++;
     }
     resume() {
+      this.state = 'running';
       return Promise.resolve();
     }
     close() {
@@ -65,8 +66,7 @@ function stubPage(): void {
       return { gain: param(), connect: (to: unknown) => to };
     }
     createOscillator() {
-      sound.oscillators++;
-      return { type: 'sine', frequency: param(), connect: (to: unknown) => to, start() {}, stop() {} };
+      return { type: 'sine', frequency: param((value) => sound.freqs.push(value)), connect: (to: unknown) => to, start() {}, stop() {} };
     }
   }
   (window as unknown as { AudioContext: unknown }).AudioContext = CountingAudioContext;
@@ -176,7 +176,7 @@ async function agent(world: World, name = 'Claude Code', host = 'claude-code'): 
 /** config.json with state.json, where the dialog's marks live (#2852). */
 const config = (world: World): { inboxSound?: Record<string, unknown> } => savedConfig(world.dataDir);
 
-const rings = (page: Page) => page.evaluate(() => window.__sound.oscillators / 4);
+const rings = (page: Page) => page.evaluate(() => window.__sound.freqs.filter((f) => Math.abs(f - 391.995) < 0.01).length);
 
 /** Put the tab in front or away, with the events a browser fires when that happens. */
 async function setFront(page: Page, visible: boolean, focused: boolean): Promise<void> {
@@ -384,7 +384,7 @@ test('after an update the dialog shows once: in one of two tabs opened together,
   await other.close();
   const dialog = shown.locator('dialog[data-dialog="sound-intro"]');
   await expect(dialog.getByRole('heading', { name: 'The Inbox can ring now' })).toBeVisible();
-  await expect(dialog).toContainText('A soft doorbell when an agent asks you something and this tab is hidden.');
+  await expect(dialog).toContainText('A soft two-note sound when an agent asks you something and this tab is hidden.');
   // This browser has not decided about notifications: the one line says so.
   await expect(dialog.locator('[data-sound-nline="not-allowed"]')).toHaveText("Notifications aren't allowed yet.Allow");
   await expect(dialog.getByRole('button', { name: 'Keep it on' })).toBeFocused();

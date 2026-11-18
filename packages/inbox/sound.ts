@@ -1,9 +1,4 @@
 /**
- * The Inbox's question sound: a soft two-tone doorbell ("Ding-dong", chosen
- * by the owner from twelve), generated live with Web Audio, so there are no
- * audio files. Design of record: .product/approved/inbox-sound/ (kept
- * privately, not in this repo).
- *
  * When it rings: a new question in an agent's message (the same items
  * notify.ts notifies about; plain messages never ring), only while no Inbox
  * tab is in front, and once per burst: the first question rings, more within
@@ -21,47 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_SOUND_DEFAULT_VOLUME, type InboxSoundSettings } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
-
-// ───────────────────────────── The sound ─────────────────────────────
-
-interface Note {
-  freq: number;
-  /** Start offset, seconds. */
-  t: number;
-  dur: number;
-  type: OscillatorType;
-  vol: number;
-}
-
-/** Semitones from C4 (0 = C4), as the sound picker computes them. */
-const N = (semis: number) => 440 * Math.pow(2, (semis - 9) / 12);
-
-/** Tile #9 of the approved sound picker, unchanged: two triangle notes, each with a quiet sine an octave above. */
-export const DING_DONG: readonly Note[] = [
-  { freq: N(16), t: 0, dur: 0.55, type: 'triangle', vol: 0.3 },
-  { freq: N(16) * 2, t: 0, dur: 0.3, type: 'sine', vol: 0.06 },
-  { freq: N(12), t: 0.32, dur: 0.75, type: 'triangle', vol: 0.3 },
-  { freq: N(12) * 2, t: 0.32, dur: 0.4, type: 'sine', vol: 0.06 },
-];
-
-/** How long the sound lasts, for "Playing…". */
-export const DING_DONG_MS = 1100;
-
-const ATTACK = 0.005;
-
-function scheduleNote(ctx: AudioContext, master: GainNode, note: Note): void {
-  const now = ctx.currentTime + note.t;
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.type = note.type;
-  osc.frequency.setValueAtTime(note.freq, now);
-  gain.gain.setValueAtTime(0.0001, now);
-  gain.gain.exponentialRampToValueAtTime(note.vol, now + ATTACK);
-  gain.gain.exponentialRampToValueAtTime(0.0001, now + note.dur);
-  osc.connect(gain).connect(master);
-  osc.start(now);
-  osc.stop(now + note.dur + 0.02);
-}
+import { INBOX_SOUND_MS, INBOX_SOUNDS, scheduleFelt } from './feltSound';
 
 type AudioContextCtor = new () => AudioContext;
 
@@ -88,7 +43,7 @@ class InboxAudio {
     if (!ctx || !this.master) return false;
     if (ctx.state === 'suspended') void ctx.resume().catch(() => {});
     this.master.gain.value = Math.max(0, Math.min(1, volume / 100));
-    for (const note of DING_DONG) scheduleNote(ctx, this.master, note);
+    for (const note of INBOX_SOUNDS.question) scheduleFelt(ctx, this.master, note);
     return true;
   }
 
@@ -413,7 +368,7 @@ export function useInboxSound(options: {
     audio.current?.play(volume ?? settingsRef.current.volume, { create: true });
     setPlaying(true);
     if (playingTimer.current) clearTimeout(playingTimer.current);
-    playingTimer.current = setTimeout(() => setPlaying(false), DING_DONG_MS);
+    playingTimer.current = setTimeout(() => setPlaying(false), INBOX_SOUND_MS.question);
   }, []);
 
   const save = useCallback(async (change: { enabled?: boolean; volume?: number }) => {

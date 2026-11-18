@@ -5,7 +5,7 @@
  * tab reported joins this tab to that burst.
  */
 import { describe, expect, test } from 'bun:test';
-import { DING_DONG, decideRing, heardRing, QUIET_GATE, RING_BURST_MS, type RingGate } from './sound';
+import { decideRing, heardRing, QUIET_GATE, RING_BURST_MS, type RingGate } from './sound';
 import { inboxNotificationOptions } from './notify';
 
 const away = { enabled: true, inFront: false, otherTabInFront: false };
@@ -56,16 +56,6 @@ describe('decideRing', () => {
     expect(decideRing(gate, { ...away, now: 2500 }).ring).toBe(false);
     // An older report never shortens a later burst.
     expect(heardRing({ lastAt: 9000 }, 1000)).toEqual({ lastAt: 9000 });
-  });
-});
-
-describe('the sound itself', () => {
-  // Pinned on purpose: the owner chose this exact sound (tile #9, "Ding-dong") from twelve.
-  test('two triangle notes a major third apart, the second at +0.32 s, each with a quiet sine an octave up', () => {
-    const triangles = DING_DONG.filter((n) => n.type === 'triangle');
-    expect(triangles.map((n) => n.t)).toEqual([0, 0.32]);
-    expect(triangles[0]!.freq / triangles[1]!.freq).toBeCloseTo(Math.pow(2, 4 / 12), 6);
-    for (const tri of triangles) expect(DING_DONG.some((n) => n.type === 'sine' && n.t === tri.t && n.freq === tri.freq * 2)).toBe(true);
   });
 });
 
