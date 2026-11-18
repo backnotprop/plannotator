@@ -142,6 +142,7 @@ import { changeRuns, stepChange, type ChangeStep } from './utils/explorerChangeN
 import { GoToFile } from './components/GoToFile';
 import type { FileTokenHandlers } from './components/RepoFileView';
 import type { CodeNavLocation, CodeNavResponse } from '@plannotator/shared/code-nav';
+import { clickJumpStep, createJumpGate, oneDefinition } from './utils/definitionJump';
 import {
   applyCollectionMutations,
   hasActiveHistoryOverlay,
@@ -600,7 +601,7 @@ const ReviewApp: React.FC = () => {
     if (!reviewSidebar.isOpen) reviewSidebar.open(reviewSidebar.activeTab);
     focusReviewPanelSoon(reviewSidebar.activeTab);
   }, [reviewSidebar]);
-  const { tab: referencesTab, show: showReferencesTab } = useReferencesTab(closeReviewSidebar);
+  const { tab: referencesTab, show: showReferencesTab, hide: hideReferencesTab } = useReferencesTab(closeReviewSidebar);
   const [isFileTreeOpen, setIsFileTreeOpen] = useState(true);
   const closeFileTree = useCallback(() => setIsFileTreeOpen(false), []);
   const [isCompactNavigatorOpen, setIsCompactNavigatorOpen] = useState(false);
@@ -2131,21 +2132,45 @@ const ReviewApp: React.FC = () => {
     });
   }, []);
 
-  /** ⇧F12, and Cmd+click in a whole-file view: the references panel. */
+  /** ⇧F12, a click's References while its lookup runs, and F12 with several definitions: the references panel. */
   const openReferences = useCallback((request: CodeNavRequest) => {
     codeNavOriginRef.current = { path: request.filePath, line: request.line };
     handleCodeNavRequest(request);
   }, [handleCodeNavRequest]);
 
+  // Each code-nav jump's ticket (definitionJump.ts `createJumpGate`): a newer lookup, or any click or key the
+  // person makes while one waits, makes a late answer jump nowhere.
+  const jumpGate = useRef(createJumpGate());
+  const stopJumpWatch = useRef<(() => void) | null>(null);
+  /** A new ticket; until it settles, the person's next click or key (a modifier alone aside) cancels it. */
+  const takeJumpTicket = useCallback((): number => {
+    stopJumpWatch.current?.();
+    const ticket = jumpGate.current.next();
+    const cancel = (event: Event) => {
+      if (event instanceof KeyboardEvent && ['Meta', 'Control', 'Alt', 'Shift'].includes(event.key)) return;
+      jumpGate.current.cancel();
+      stop();
+    };
+    const stop = () => {
+      document.removeEventListener('pointerdown', cancel, true);
+      document.removeEventListener('keydown', cancel, true);
+      if (stopJumpWatch.current === stop) stopJumpWatch.current = null;
+    };
+    document.addEventListener('pointerdown', cancel, true);
+    document.addEventListener('keydown', cancel, true);
+    stopJumpWatch.current = stop;
+    return ticket;
+  }, []);
+  useEffect(() => () => stopJumpWatch.current?.(), []);
+
   /** F12: one clear definition opens its file at the line; else the references panel. */
-  const goToDefinition = useCallback(async () => {
-    const request = tokenTargets.current();
-    if (!request) return;
+  const definitionOrReferences = useCallback(async (request: CodeNavRequest) => {
+    closeTokenHover();
     if (!gitContext && !agentCwd) {
       needsCheckoutToast();
       return;
     }
-    closeTokenHover();
+    const ticket = takeJumpTicket();
     const from: NavLocation = { path: request.filePath, line: request.line };
     let definitions: CodeNavLocation[] = [];
     try {
@@ -2158,13 +2183,69 @@ const ReviewApp: React.FC = () => {
     } catch {
       definitions = [];
     }
-    const distinct = [...new Map(definitions.map((d) => [`${d.filePath}:${d.line}`, d])).values()];
-    if (distinct.length === 1) {
-      jumpTo({ path: distinct[0].filePath, line: distinct[0].line, symbol: request.symbol }, 'definition', from);
+    // The person moved on (or asked again) while it ran: nothing moves them now.
+    if (!jumpGate.current.live(ticket)) return;
+    stopJumpWatch.current?.();
+    const only = oneDefinition(definitions);
+    if (only) {
+      jumpTo({ path: only.filePath, line: only.line, symbol: request.symbol }, 'definition', from);
       return;
     }
     openReferences(request);
-  }, [agentCwd, closeTokenHover, gitContext, jumpTo, needsCheckoutToast, openReferences, tokenTargets]);
+  }, [agentCwd, closeTokenHover, gitContext, jumpTo, needsCheckoutToast, openReferences, takeJumpTicket]);
+
+  /** F12: one clear definition opens its file at the line; else the references panel. */
+  const goToDefinition = useCallback(async () => {
+    const request = tokenTargets.current();
+    if (!request) return;
+    await definitionOrReferences(request);
+  }, [definitionOrReferences, tokenTargets]);
+
+  /**
+   * Cmd/Ctrl-click on a token (Alt-click too): References open at once, in their loading state, and their own lookup
+   * decides (`clickJumpStep`): exactly one definition elsewhere jumps there and closes the References the click
+   * opened (the sidebar back as it was); several stay listed, with no second lookup. A click on the definition
+   * itself stays on References.
+   */
+  const pendingClickJump = useRef<{ ticket: number; request: CodeNavRequest; undo: () => void } | null>(null);
+  const handleTokenNavClick = useCallback((request: CodeNavRequest) => {
+    if (!gitContext && !agentCwd) {
+      openReferences(request);
+      return;
+    }
+    // What to put back if the click jumps: only what the click opened.
+    const dockHad = !!dockApi?.getPanel(REVIEW_CODE_NAV_PANEL_ID);
+    const tabHad = !!referencesTab;
+    const sidebarWas = reviewSidebar.isOpen ? reviewSidebar.activeTab : null;
+    const inSidebar = usesPaneLayout() && referencesPlacement(window.innerWidth, isCompactTouchLayout) === 'panel';
+    const undo = () => {
+      if (!inSidebar && !dockHad) dockApi?.getPanel(REVIEW_CODE_NAV_PANEL_ID)?.api.close();
+      if (inSidebar && !tabHad) {
+        hideReferencesTab();
+        if (sidebarWas) openReviewSidebarTab(sidebarWas);
+        else closeReviewSidebar();
+      }
+    };
+    openReferences(request);
+    pendingClickJump.current = { ticket: takeJumpTicket(), request, undo };
+  }, [agentCwd, closeReviewSidebar, dockApi, gitContext, hideReferencesTab, isCompactTouchLayout, openReferences, openReviewSidebarTab, referencesTab, reviewSidebar.activeTab, reviewSidebar.isOpen, takeJumpTicket]);
+  useEffect(() => {
+    const pending = pendingClickJump.current;
+    if (!pending) return;
+    const step = clickJumpStep({
+      live: jumpGate.current.live(pending.ticket),
+      isLoading: codeNav.isLoading,
+      activeSymbol: codeNav.activeSymbol,
+      definitions: codeNav.result?.definitions ?? null,
+      request: pending.request,
+    });
+    if (step.kind === 'wait') return;
+    pendingClickJump.current = null;
+    if (jumpGate.current.live(pending.ticket)) stopJumpWatch.current?.();
+    if (step.kind !== 'jump') return;
+    pending.undo();
+    jumpTo({ path: step.to.filePath, line: step.to.line, symbol: pending.request.symbol }, 'definition', { path: pending.request.filePath, line: pending.request.line });
+  }, [codeNav.activeSymbol, codeNav.isLoading, codeNav.result, jumpTo]);
 
   const goToReferences = useCallback(() => {
     const request = tokenTargets.current();
@@ -2195,17 +2276,17 @@ const ReviewApp: React.FC = () => {
         onTokenNavigate: (target) => {
           tokenTargets.report('click', asToken(target), filePath);
           const request = tokenTargets.current();
-          if (request) openReferences(request);
+          if (request) handleTokenNavClick(request);
         },
       };
       fileTokenHandlersCache.current.set(filePath, handlers);
     }
     return handlers;
-  }, [openReferences, tokenTargets]);
-  // The cached handlers close over openReferences; drop them when it changes.
+  }, [handleTokenNavClick, tokenTargets]);
+  // The cached handlers close over handleTokenNavClick; drop them when it changes.
   useEffect(() => {
     fileTokenHandlersCache.current.clear();
-  }, [openReferences]);
+  }, [handleTokenNavClick]);
 
   /** ⌥F5 / ⇧⌥F5: the next run of changed lines; past the last, the next changed file. */
   const codeGroupElement = useCallback((): HTMLElement | null => {
@@ -4688,7 +4769,7 @@ const ReviewApp: React.FC = () => {
     returnFromCallTree,
     clearCallTreeRequest,
     openGuide: handleOpenGuide,
-    onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
+    onCodeNavRequest: canUseLiveWorkspaceActions ? handleTokenNavClick : undefined,
     onTokenHoverEnter: tokenHoverEnabled ? handleTokenHoverEnter : undefined,
     onTokenHoverLeave: tokenHoverEnabled ? tokenHover.onTokenHoverLeave : undefined,
     codeNavResult: codeNav.result,
@@ -4723,7 +4804,7 @@ const ReviewApp: React.FC = () => {
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     hostNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
-    handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
+    handleTokenNavClick, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
     tokenHoverEnabled, handleTokenHoverEnter, tokenHover.onTokenHoverLeave,
   ]);
 
