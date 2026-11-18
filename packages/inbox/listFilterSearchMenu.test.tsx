@@ -450,6 +450,22 @@ describe.skipIf(!hasDom)('nothing matches after something did', () => {
     expect(picks.notSeen).toBe(true);
   });
 
+  test('Clear filters highlighted before nothing matched: End then Enter clears nothing', async () => {
+    render(LONG, { ...NO_LIST_FILTER, projects: ['prj_web'] });
+    await press(funnel());
+    await type('w');
+    await type('we');
+    await key('ArrowDown');
+    expect(highlighted()).toBe('Clear filters');
+    await type('wez');
+    expect($('[data-list-filter-none]')).not.toBeNull();
+    expect(highlighted()).toBeNull();
+    await key('End');
+    await key('Enter');
+    expect(picks.projects).toEqual(['prj_web']);
+    expect(menu()).not.toBeNull();
+  });
+
   test('an arrow onto a kept row is a choice: then Enter unticks it', async () => {
     render(LONG, { ...NO_LIST_FILTER, projects: ['prj_web'] });
     await press(funnel());

@@ -22,16 +22,19 @@ export const filterSearchShown = (sizes: readonly number[]): boolean => sizes.so
 
 /** The marks matching ignores: Latin/Greek/Cyrillic diacritics, Arabic harakat, Hebrew points, variation selectors. */
 const IGNORED_MARKS = /[\u0300-\u036F\u0483-\u0489\u0591-\u05C7\u064B-\u065F\u0670\u1AB0-\u1AFF\u1DC0-\u1DFF\u20D0-\u20FF\uFE00-\uFE0F\uFE20-\uFE2F]/gu;
-const ignored = (char: string) => char.replace(IGNORED_MARKS, '') === '';
 
 /** Text as matching sees it: lower case, the ignored marks gone, ı as i, ς as σ. */
 const fold = (text: string) =>
   text.normalize('NFD').toLowerCase().normalize('NFD').replace(IGNORED_MARKS, '').replace(/ı/g, 'i').replace(/ς/g, 'σ');
 
+/** The Japanese voicing marks (dakuten, handakuten): each makes another letter of the one before it (か, が). */
+const VOICING = /[\u3099\u309A]/;
+
 /**
  * Where `query` sits in `label` (start and end in `label`'s own characters), ignoring case and accents; null: absent.
- * A match starts and ends on whole characters: it never takes a letter's base without the mark that makes it another
- * letter (か in が, or in か followed by its voicing mark).
+ * A match never takes a letter's base without the voicing mark that makes it another letter (か in が, or in か followed
+ * by its mark). Any other mark after the match (an Indic vowel sign, a Thai mark, an accent) is drawn bold with it, so
+ * typing letter by letter keeps finding the name (क finds किताब).
  */
 export function searchHit(label: string, query: string): readonly [number, number] | null {
   const q = fold(query.trim());
@@ -48,15 +51,20 @@ export function searchHit(label: string, query: string): readonly [number, numbe
   }
   for (let start = folded.indexOf(q); start >= 0; start = folded.indexOf(q, start + 1)) {
     const stop = start + q.length;
-    // Both ends on a character's edge in the folded text.
+    // Not from the middle of a character's fold.
     if (start > 0 && from[start - 1] === from[start]) continue;
-    if (stop < folded.length && from[stop] === from[stop - 1]) continue;
+    // Ending inside a character's fold: only a voicing mark left out of it makes it another letter.
+    if (stop < folded.length && from[stop] === from[stop - 1]) {
+      let rest = '';
+      for (let i = stop; i < folded.length && from[i] === from[stop - 1]; i += 1) rest += folded[i];
+      if (VOICING.test(rest)) continue;
+    }
     const last = from[stop - 1]!;
     let end = last + (label.codePointAt(last)! > 0xffff ? 2 : 1);
-    // A mark written as its own character after the match: an ignored one stays inside the bold with its letter; one
-    // that makes another letter means the match took only part of that letter.
-    while (end < label.length && /\p{M}/u.test(label[end]!) && ignored(label[end]!)) end += 1;
-    if (end < label.length && /\p{M}/u.test(label[end]!)) continue;
+    // A mark written as its own character after the match stays inside the bold with its letter; a voicing mark there
+    // means the match took only part of that letter.
+    while (end < label.length && /\p{M}/u.test(label[end]!) && !VOICING.test(label[end]!)) end += 1;
+    if (end < label.length && VOICING.test(label[end]!)) continue;
     return [from[start]!, end];
   }
   return null;
@@ -67,10 +75,41 @@ const ROW_FITS = 26;
 /** How many narrow characters stay before a match when the label's start is dropped. */
 const LEAD = 8;
 
-const graphemes = (text: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(text)];
 /** A character drawn about twice as wide as a Latin letter: CJK, Hangul, full-width forms, emoji. */
 const WIDE = /^[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA000-\uA4CF\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F000}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
 const width = (grapheme: string) => (WIDE.test(grapheme) ? 2 : 1);
+
+/** One grapheme splitter for every call; none where the browser has no `Intl.Segmenter` (Firefox before 125). */
+let segmenter: Intl.Segmenter | null = null;
+function graphemeSplitter(): Intl.Segmenter | null {
+  if (typeof Intl === 'undefined' || typeof Intl.Segmenter !== 'function') return null;
+  segmenter ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  return segmenter;
+}
+
+/** Joins the code point after it into one piece (ZWJ) or belongs to the code point before it (marks, skin tones). */
+const JOINS_NEXT = /^\u200D$/;
+const JOINS_BEFORE = /^(?:\p{M}|[\u{1F3FB}-\u{1F3FF}]|\u200D)$/u;
+
+/**
+ * The label's graphemes, with where each starts. Without `Intl.Segmenter`: code points, a mark, a skin tone or a ZWJ
+ * and what follows it kept with the code point before (a flag may still split; the cut is only drawn, never matched).
+ */
+function graphemes(label: string): { index: number; segment: string }[] {
+  const splitter = graphemeSplitter();
+  if (splitter) return [...splitter.segment(label)].map(({ index, segment }) => ({ index, segment }));
+  const parts: { index: number; segment: string }[] = [];
+  let at = 0;
+  let joinNext = false;
+  for (const point of label) {
+    const last = parts[parts.length - 1];
+    if (last && (joinNext || JOINS_BEFORE.test(point))) last.segment += point;
+    else parts.push({ index: at, segment: point });
+    joinNext = JOINS_NEXT.test(point);
+    at += point.length;
+  }
+  return parts;
+}
 
 /**
  * Where a row's label starts when drawn: 0, or past its start when the match would sit in the part the row cuts off
@@ -79,6 +118,10 @@ const width = (grapheme: string) => (WIDE.test(grapheme) ? 2 : 1);
  */
 export function labelStart(label: string, hit: readonly [number, number] | null): number {
   if (!hit) return 0;
+  // Most names fit: counted by code points (never less than by graphemes), the part up to the match's end fits.
+  let most = 0;
+  for (const point of label.slice(0, hit[1])) most += width(point);
+  if (most <= ROW_FITS) return 0;
   const parts = graphemes(label);
   let upToHit = 0;
   for (const part of parts) if (part.index < hit[1]) upToHit += width(part.segment);

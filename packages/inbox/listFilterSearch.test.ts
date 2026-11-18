@@ -59,18 +59,27 @@ describe('a match', () => {
     expect(searchHit(long, 'quarterly')).toEqual([long.indexOf('quarterly'), long.indexOf('quarterly') + 9]);
   });
 
-  test('a mark that makes another letter is kept: Japanese voicing, Indic vowel signs, Thai marks', () => {
+  test('a voicing mark makes another letter: か never matches が, nor か followed by its mark', () => {
     expect(searchHit('が', 'か')).toBeNull();
     expect(searchHit('パン', 'ハ')).toBeNull();
     expect(searchHit('か\u3099', 'か')).toBeNull();
     expect(searchHit('ぎんこう', 'が')).toBeNull();
     expect(searchHit('ががく', 'が')).toEqual([0, 1]);
-    expect(searchHit('किताब', 'क')).toBeNull();
     expect(searchHit('किताब', 'कि')).toEqual([0, 2]);
-    expect(searchHit('น้ำ', 'น')).toBeNull();
+    expect(searchHit('น้ำ', 'น้ำ')).toEqual([0, 3]);
     // Arabic harakat and an emoji's variation selector still fold away.
     expect(searchHit('مُحَمَّد', 'محمد')).not.toBeNull();
     expect(searchHit('❤️ team', '❤')).toEqual([0, 2]);
+  });
+
+  test('typed letter by letter, Hindi, Thai and Korean keep finding the name; the marks after the match are drawn bold', () => {
+    // Each prefix finds the name, the vowel sign after it inside the bold.
+    expect(searchHit('किताब', 'क')).toEqual([0, 2]);
+    expect(searchHit('किताब', 'कित')).toEqual([0, 4]);
+    expect(searchHit('สวัสดี', 'สวัสด')).toEqual([0, 6]);
+    expect(searchHit('น้ำ', 'น')).toEqual([0, 2]);
+    // A Korean syllable being composed (가 on the way to 각) finds the name.
+    expect(searchHit('각사', '가')).toEqual([0, 1]);
   });
 
   test('dotless ı and final ς match i and σ', () => {
@@ -177,5 +186,32 @@ describe('a long label drawn from past its start', () => {
     expect(at(cjk, '数据')).toBe(0);
     // The same length in Latin letters fits.
     expect(at('abcdefghijklmnopqrs', 'rs')).toBe(0);
+  });
+});
+
+describe('a long label without Intl.Segmenter (Firefox before 125)', () => {
+  test('the cut falls back to code points, keeps a letter with its accent, a skin tone and a ZWJ family whole, and never throws', () => {
+    const intl = Intl as { Segmenter?: unknown };
+    const real = intl.Segmenter;
+    delete intl.Segmenter;
+    try {
+      const at = (label: string, query: string) => labelStart(label, searchHit(label, query));
+      expect(at('billing-api', 'api')).toBe(0);
+      const long = `reports-${'x'.repeat(60)}-quarterly-review`;
+      expect(at(long, 'quarterly')).toBe(long.indexOf('quarterly') - 8);
+      for (const before of ['👍🏽', '👨‍👩‍👧', 'e\u0301']) {
+        for (let pad = 0; pad < 10; pad += 1) {
+          const label = `${'a'.repeat(30 + pad)}${before}${before}${before}quarterly`;
+          const start = at(label, 'quarterly');
+          expect(start).toBeGreaterThan(0);
+          // Never right before what belongs to the code point before it.
+          expect(/^(?:\p{M}|[\u{1F3FB}-\u{1F3FF}]|\u200D)/u.test(label.slice(start))).toBe(false);
+          expect(label.slice(start - 1, start)).not.toBe('\u200D');
+        }
+      }
+    } finally {
+      intl.Segmenter = real;
+    }
+    expect(typeof Intl.Segmenter).toBe('function');
   });
 });

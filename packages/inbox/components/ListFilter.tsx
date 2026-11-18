@@ -348,8 +348,8 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   );
 }
 
-/** The keys that move the highlight from the field. */
-const STEP_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Home', 'End']);
+/** The keys that pick a row from the field while nothing matches (Home and End only move the caret then). */
+const STEP_KEYS = new Set(['ArrowDown', 'ArrowUp']);
 
 /** How long the match count waits for typing to pause before a screen reader hears it. */
 const STATUS_WAIT_MS = 400;
@@ -379,7 +379,7 @@ function FilterMenu({
   onClear: (() => void) | null;
 }) {
   const [query, setQuery] = useState('');
-  /** An arrow (or Home, End) moved the highlight since the query last changed. */
+  /** An arrow moved the highlight since the query last changed. */
   const arrowed = useRef(false);
   const found = searchFilterSections<FilterSection, FilterRow>(sections, searchable ? query : '');
   const typed = query.trim();
@@ -395,8 +395,8 @@ function FilterMenu({
     return () => clearTimeout(wait);
   }, [words]);
 
-  // While nothing matches, the rows still drawn (kept because they are ticked) take new keys, so Base UI sees new rows
-  // and drops a highlight left on one from the query before (it clears a highlight on a change only when
+  // While nothing matches, the rows still drawn (kept because they are ticked, and Clear filters) take new keys, so Base
+  // UI sees new rows and drops a highlight left on one from the query before (it clears a highlight on a change only when
   // `autoHighlight` was already off).
   const keyOf = (row: FilterRow) => (found.searching && found.matches === 0 ? `${row.key}:kept` : row.key);
   const drawRow = ({ row, hit }: FilterSearchRow<FilterRow>) =>
@@ -428,7 +428,7 @@ function FilterMenu({
       {onClear && (
         <>
           {found.sections.length > 0 && <Menu.Separator className="ib-pm-sep" />}
-          <Menu.Item className="ib-pmi" onClick={onClear} data-list-filter-clear="">
+          <Menu.Item key={found.searching && found.matches === 0 ? 'clear:kept' : 'clear'} className="ib-pmi" onClick={onClear} data-list-filter-clear="">
             <Icon name="x" />
             <span className="ib-pmi-l">Clear filters</span>
           </Menu.Item>

@@ -12026,13 +12026,11 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .ib-pm-pos[data-phone] .ib-lflt-find > svg.ib-ic { width: 18px; height: 18px; }
   .pn-inbox .ib-pm-pos[data-phone] .ib-lflt-find input { height: 48px; font-size: var(--ib-fs-16-in, 16px); }
   .ib-pm-pos[data-phone] .ib-lflt-clear { width: 44px; height: 44px; }
-  /* The sheet keeps its height while typing, so the field under the thumb never moves as rows go, and with the
-     keyboard up (phone.ts trackKeyboard: `data-ib-keyboard`, `--ib-vvh`) it sits on the keyboard instead of under it. */
+  /* The sheet keeps its height while typing, so the field under the thumb never moves as rows go. */
   .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { width: auto; height: min(72vh, calc(var(--ib-vvh, 100dvh) - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top))); max-height: min(72vh, calc(var(--ib-vvh, 100dvh) - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top))); }
-  :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] { bottom: calc(100% - var(--ib-vvh, 100%) + var(--ib-sheet-inset)) !important; }
-  /* With the keyboard up (a phone on its side leaves about 140 px) the title goes, so the field and rows fit; the
-     field's own words say what it is. The sheet sits flush on the keyboard, a little tighter, so at least one whole
-     row shows under the field there. */
+  /* With the keyboard up, upright or on its side (phone.ts trackKeyboard: `data-ib-keyboard`, `--ib-vvh`), the sheet
+     sits flush on the keyboard instead of under it, a little tighter, and its title goes (the field's own words say
+     what it is), so the field and rows fit: on its side a phone leaves about 140 px, and one whole row still shows. */
   :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] .ib-pm-title { display: none; }
   :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] { bottom: calc(100% - var(--ib-vvh, 100%)) !important; }
   :root[data-ib-keyboard] .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { padding-block: 4px; height: calc(var(--ib-vvh, 100dvh) - var(--ib-sheet-inset) - env(safe-area-inset-top)); max-height: calc(var(--ib-vvh, 100dvh) - var(--ib-sheet-inset) - env(safe-area-inset-top)); scroll-padding-top: 52px; }
