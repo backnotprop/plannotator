@@ -2,7 +2,7 @@
 # What .github/workflows/mobile-ios.yml runs for the native iPhone app.
 #
 #   bash apps/mobile/ios/ci.sh pr        build and `swift test` (no simulator)
-#   bash apps/mobile/ios/ci.sh nightly   the same, then the simulator UI suite
+#   bash apps/mobile/ios/ci.sh nightly   the same; the simulator UI suite joins it when it exists
 #
 # Until the app's Swift package exists there is nothing to build but the
 # contract's Wire.swift: it says so and exits 0.

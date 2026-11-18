@@ -161,8 +161,9 @@ describe('rules', () => {
       ...['release.yml', 'inbox-pi.yml', 'inbox-claude-code.yml', 'relay.yml', 'mobile-ios.yml'].flatMap((f) => workflow(f).on.pull_request?.paths ?? []),
     ]);
     const dead = [...globs].filter((g) => !tracked.some((f) => new Bun.Glob(g).match(f)));
-    // The picker is in the tree once this lands; until then the guard runs from a branch.
-    expect(dead.filter((g) => g !== 'scripts/ci-affected.ts')).toEqual([]);
+    // The picker is in the tree once this lands; until then the guard runs from a branch. The app contract's
+    // generated Swift arrives with the contract kit (docs/agent-guides/mobile.md); mobile-ios.yml names it already.
+    expect(dead.filter((g) => g !== 'scripts/ci-affected.ts' && g !== 'apps/mobile/contract/generated/swift/**')).toEqual([]);
   });
 
   test('every tracked top-level entry and every tracked file kind is known to the picker', () => {
@@ -320,8 +321,8 @@ describe('plan', () => {
 describe('the native app (apps/mobile)', () => {
   const lanesOf = (p: ReturnType<typeof plan>) => ({ mode: p.mode, tests: p.tests, unit: p.unit, dom: p.dom, gates: p.gates, semgrep: p.semgrep });
 
-  test('a PR that changes only the app\'s Swift, Xcode, Gradle or CI script files plans no lane, no Checks and no gated job', () => {
-    for (const paths of [['apps/mobile/ios/App.swift'], ['apps/mobile/ios/Inbox.xcodeproj/project.pbxproj', 'apps/mobile/ios/ci.sh', 'apps/mobile/android/app/build.gradle.kts']]) {
+  test('a PR that changes only the app\'s Swift, Xcode or Gradle files plans no lane, no Checks and no gated job', () => {
+    for (const paths of [['apps/mobile/ios/App.swift'], ['apps/mobile/ios/Inbox.xcodeproj/project.pbxproj', 'apps/mobile/ios/App/Assets.xcassets/AppIcon.appiconset/Contents.json', 'apps/mobile/android/app/build.gradle.kts', 'apps/mobile/android/app/src/main/res/values/strings.xml']]) {
       // docsOnly false: the picker decides this alone, whatever scripts/ci-docs-only.sh says.
       const p = run(paths.map((f) => ch(f, 'A')));
       expect(p.mode, paths[0]).toBe('docs');
@@ -336,7 +337,16 @@ describe('the native app (apps/mobile)', () => {
 
   test('the app\'s files add nothing to an ordinary change, and its code files keep the ordinary rules', () => {
     expect(lanesOf(run([ch('packages/a/src.ts'), ch('apps/mobile/ios/App.swift')]))).toEqual(lanesOf(run([ch('packages/a/src.ts')])));
-    for (const f of ['apps/mobile/ios/tool.ts', 'apps/mobile/ios/x.test.ts', 'apps/mobile/ios/package.json']) expect(nativeAppFile(f), f).toBe(false);
+    for (const f of ['apps/mobile/ios/tool.ts', 'apps/mobile/ios/x.test.ts', 'apps/mobile/ios/package.json', 'apps/mobile/ios/ci.sh', 'apps/mobile/ios/tsconfig.json', 'apps/mobile/ios/bunfig.toml', 'apps/mobile/ios/tool.py', 'apps/mobile/ios/x.yml', 'apps/mobile/ios/InboxCore/Package.resolved', 'apps/mobile/android/build.sh', 'apps/mobile/android/x.json']) {
+      expect(nativeAppFile(f), f).toBe(false);
+    }
+  });
+
+  test('a file of another kind under the app keeps the ordinary rules: skipping is the risky direction', () => {
+    expect(run([ch('apps/mobile/ios/x.sh', 'A')]).mode, 'a shell script alone').not.toBe('docs');
+    expect(run([ch('apps/mobile/ios/App.swift', 'A')]).mode, 'a Swift file alone').toBe('docs');
+    expect(run([ch('apps/mobile/ios/tsconfig.json')]).mode, 'a tsconfig under ios/').toBe(run([ch('packages/x/tsconfig.json')]).mode);
+    expect(run([ch('apps/mobile/ios/InboxCore/Package.resolved')]).mode, 'a Swift lockfile: data, not skipped and not everything').toBe('subset');
     expect(run([ch('apps/mobile/other/Thing.swift')]).mode, 'Swift outside ios/ and the contract').toBe('all');
   });
 
@@ -357,14 +367,17 @@ describe('the native app (apps/mobile)', () => {
     expect(r.stdout.toString().split('\n').filter(Boolean)).toEqual([]);
   });
 
-  test('mobile-ios.yml stays apart: its own paths, one group, GitHub\'s macOS, and no other workflow builds the app', () => {
-    const wf = workflow('mobile-ios.yml') as Workflow & { concurrency: unknown; on: Record<string, { paths?: string[]; branches?: string[] } | null> };
-    const paths = ['apps/mobile/**', '.github/workflows/mobile-ios.yml'];
+  test('mobile-ios.yml stays apart: its own paths, a group per job, a pinned macOS, and no other workflow builds the app', () => {
+    const wf = workflow('mobile-ios.yml') as Workflow & { concurrency?: unknown; on: Record<string, { paths?: string[]; branches?: string[] } | null> };
+    const paths = ['apps/mobile/ios/**', 'apps/mobile/contract/generated/swift/**', '.github/workflows/mobile-ios.yml'];
     expect(wf.on.pull_request).toEqual({ branches: ['main'], paths });
     expect(wf.on.push).toEqual({ branches: ['main'], paths });
-    expect(wf.concurrency).toEqual({ group: 'mobile-ios', 'cancel-in-progress': true });
-    const jobs = wf.jobs as Record<string, Job & { 'timeout-minutes'?: number }>;
-    expect(Object.values(jobs).map((j) => j['runs-on'])).toEqual(['macos-latest', 'macos-latest']);
+    // No workflow-wide group: a pull request's run (its job skipped or not) never cancels the nightly.
+    expect(wf.concurrency).toBeUndefined();
+    const jobs = wf.jobs as Record<string, Job & { 'timeout-minutes'?: number; concurrency?: unknown }>;
+    expect(jobs.ios!.concurrency, 'a push cancels only its own branch\'s older run').toEqual({ group: 'mobile-ios-${{ github.ref }}', 'cancel-in-progress': true });
+    expect(jobs['ios-nightly']!.concurrency, 'the nightly never cancels and is never cancelled').toEqual({ group: 'mobile-ios-nightly', 'cancel-in-progress': false });
+    expect(Object.values(jobs).map((j) => j['runs-on'])).toEqual(['macos-15', 'macos-15']);
     expect(jobs.ios!['timeout-minutes']).toBe(20);
     expect(jobs['ios-nightly']!['timeout-minutes']).toBe(60);
     expect(jobs.ios!.if).toContain("vars.MOBILE_CI != 'nightly'");
