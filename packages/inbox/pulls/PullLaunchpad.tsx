@@ -108,6 +108,7 @@ export function PullLaunchpad({
   onThread,
   onGuide,
   onShape,
+  onHide,
   foot,
 }: {
   stack: InboxPullStack;
@@ -133,6 +134,8 @@ export function PullLaunchpad({
   onThread: (threadId: string) => void;
   onGuide: (threadId: string, messageId: string) => void;
   onShape: (shape: InboxShapeSummary) => void;
+  /** Hide the PR from the lists (hiddenPulls.ts); nothing changes on the forge. Absent: no Hide. */
+  onHide?: () => void;
   foot: ReactNode;
 }) {
   const forge = forgeName(stack);
@@ -178,6 +181,14 @@ export function PullLaunchpad({
           <Icon name="external" size={15} />
           {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
         </a>
+        {onHide && (
+          <Tip content={`Hide from your lists. It stays open on ${forge}.`}>
+            <button type="button" className="ib-pr-ext" onClick={onHide} data-pulls-hide="">
+              <Icon name="eyeOff" size={15} />
+              {phone ? <span className="ib-sr">Hide</span> : 'Hide'}
+            </button>
+          </Tip>
+        )}
         {!phone && !stacked && (
           <Tip content="Close">
             <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
