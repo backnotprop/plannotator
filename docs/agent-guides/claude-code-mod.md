@@ -845,6 +845,55 @@ OpenCode do not take over shell runs: there an agent-run `plannotator` command
 still runs the CLI (Pi registers the tool itself; see "Pi: the `plannotator`
 tool").
 
+**Behind Claude Code's guard: opened at `tool.run` (`hooks/mod/early-run.ts`).**
+Claude Code 2.1.326 added an "early run" rule to its built-in guard
+(`cc-plugin-sec-default`, seated on Team/Enterprise logins and by managed
+settings). The guard remembers each call the model makes until the call reaches
+`tool.run` (allowed, about to run), or until the person's next prompt when a
+hook answered or the session refused it. While it remembers a call, a
+person-installed mod's `$.process.run` that repeats the call is refused. A
+repeat is an argv that ends in a remembered Bash command, or an argv that hands
+a shell an item equal to one of the call's texts (the tool's `annotate`, its
+target). The guard checks each repeat as a Bash call, past the user tier, so
+Claude Code also prints "its tool.check hook was skipped". The mod answers the
+tool and the take-over at `tool.call`, before the permission check, and the
+launch hands `/bin/sh` the call's words. So from 2.1.326 every guarded open
+failed with `Plannotator could not start: plannotator: $.process.run: this
+repeats a Bash call that is not allowed; serve an allowed call at tool.run`. A
+`Bash(plannotator:*)` rule did not help, because the checked "commands" are the
+bare words. The mod still answers at `tool.call`, so nothing changes where the
+guard does not refuse: no guard, an engine before 2.1.326, or `list`/`close`,
+which start nothing. When the launch fails with the guard's refusal
+(`isEarlyRunRefusal`), `launch()` removes the launch folder, and the `tool.call`
+hook calls `next(e)` instead of answering (`heldUntilAllowed`). The session
+then decides the call by its rules and mode: auto mode's classifier, or a
+prompt for `mcp__plannotator__plannotator` or the Bash command. An allowed call
+reaches the mod's `tool.run` hook, where the guard has forgotten it, and is
+answered there with the same `runTool` launch (`answerModTool`, `answerShellCall`).
+In 2.1.327 a `tool.run` hook's `{ result }` is the call's result and the tool
+does not run (its core is the tool). A `$.tool.register` tool that no hook
+answers fails with "no hook answered this call: add on("tool.run", ...)".
+A refused call opens nothing, and Claude reads the refusal. The `tool.run` hook
+needs nothing from `tool.call` or `tool.check`: it answers every call of the
+mod's own tool that reaches it, and takes over a Bash command by the same rule
+as `tool.call`. It never answers `tool.check`, and never loosens or bypasses
+the guard. It is registered as `on('tool.*', RUN_MATCHER, ...)` and acts only
+when `next.event` is `tool.run`, because an engine before 2.1.326 refuses to
+load a module that names `tool.run`. `RUN_MATCHER` is `Bash` and
+`mcp__<server>__plannotator`. A matcher does not stop the guard's skip notice
+(see "Why not `prompt.context`" in the Inbox section), so the glob can print a
+"tool.<event> hook was skipped" line where the guard sends another `tool.*`
+event past the user tier. `tool.check` was already hooked (skip-rm-prompts),
+`tool.list` is never reported, and `tool.judge` (2.1.327) and `tool.describe`
+now reach the hook too, which passes them on unchanged. Costs on a guarded machine: the first launch of
+each open is refused once, and the open then goes through the session's
+permission decision, which is the guard's requirement. Several opens in one
+message may refuse each other, because one call's words (`annotate`) match a
+call still remembered; Claude can call again. Tests:
+`apps/hook/hooks/mod/early-run.test.ts` (the real hooks with a stand-in guard
+that refuses every start while a call is held, and an engine whose `tool.check`
+never reaches the mod).
+
 **Plan review.** The `tool.call` hook on the main loop's ExitPlanMode resolves
 the plan (the plan file when it is an absolute `.md` regular file within the
 2 MB cap, else the inline `plan`: the #1667 rule), then:
