@@ -2098,6 +2098,32 @@ export interface InboxPullLinkStore {
   sessionLive?(session: string): boolean;
   /** A launched thread whose start failed, or whose agent never connected. */
   launchDead?(threadId: string): boolean;
+  /**
+   * Which threads may own a PR now, read once per call: the rule the person's hand-offs follow (`pullOwnersNow`): not
+   * archived, unless it holds a review. Absent: every thread may.
+   */
+  ownable?(): (threadId: string) => boolean;
+}
+
+/**
+ * The PR a thread started from a PR's page is about (Start a thread): from its first message's details, only their
+ * `- Link: ` line, and only when that line is the whole link and the `- Number: ` and `- Repository: ` lines name the
+ * same PR. Nothing else in the details (a title may hold another PR's link) or in the person's words counts.
+ */
+export function startedThreadPullKey(details: string, byKey: ReadonlyMap<string, InboxPull>): string | null {
+  const lines = details.split("\n");
+  const value = (name: string) => {
+    const found = lines.filter((line) => line.startsWith(`- ${name}: `));
+    return found.length === 1 ? found[0]!.slice(name.length + 4).trim() : null;
+  };
+  const link = value("Link");
+  const ref = link ? parseForgeRefUrl(link) : null;
+  if (!link || !ref || ref.kind !== "pull" || inboxPullUrlsIn(link)[0] !== link) return null;
+  const pull = byKey.get(forgeRefKey(ref));
+  if (!pull) return null;
+  const repository = pull.host === "github.com" ? pull.repo : `${pull.host}/${pull.repo}`;
+  if (value("Number") !== inboxPullLabel(pull) || value("Repository")?.toLowerCase() !== repository.toLowerCase()) return null;
+  return pull.key;
 }
 
 /**
@@ -2179,16 +2205,18 @@ export function linkInboxPulls(
   // The PR links in agents' own messages, per project of the PR's repository.
   const urlThread = new Map<string, { thread: string; project: string; at: string }>();
   // Threads the person started from a PR's page (Start a thread): their first message carries that PR's details with
-  // the thread's step (`splitPullThreadDetails`). The PR's own thread even when the window could not keep it as the PR's
-  // owner (a failed tie, a window reloaded or closed before the tie), so no second thread starts. The first one counts.
+  // the thread's step (`splitPullThreadDetails`), the PR named by their Link line (`startedThreadPullKey`). The PR's own
+  // thread even when the window could not keep it as the PR's owner (a failed tie, a window reloaded or closed before
+  // the tie), so no second thread starts. The first one counts. Never one the person took back (its message is a draft
+  // again), nor one a hand-off could not own either (archived with no review: archiving frees the PR).
   const startedThread = new Map<string, { thread: string; project: string; at: string }>();
+  const ownable = store.ownable?.() ?? (() => true);
   for (const projectId of new Set([...projectsByRepo.values()].flat())) {
     for (const summary of store.threadsOf(projectId)) {
       const root = store.message(summary.thread_id);
-      const details = root && root.author.kind === "person" ? splitPullThreadDetails(root.body)?.details : undefined;
-      for (const url of details ? inboxPullUrlsIn(details) : []) {
-        const key = keyOfUrl(url);
-        if (!key || !wanted.has(key) || !projectsOf(byKey.get(key)!).includes(projectId)) continue;
+      const details = root && root.author.kind === "person" && !root.taken_back_at ? splitPullThreadDetails(root.body)?.details : undefined;
+      const key = details ? startedThreadPullKey(details, byKey) : null;
+      if (key && projectsOf(byKey.get(key)!).includes(projectId) && ownable(summary.thread_id)) {
         const seen = startedThread.get(key);
         if (!seen || root!.created_at < seen.at) startedThread.set(key, { thread: summary.thread_id, project: projectId, at: root!.created_at });
       }

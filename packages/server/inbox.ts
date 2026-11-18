@@ -340,7 +340,7 @@ import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullSafeBranch, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
-import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull } from "@plannotator/core/inbox-types";
+import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { createInboxBranchService } from "./inbox-branch-service";
@@ -1581,15 +1581,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
   // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
   // listed again and a new review can start. Unarchived, it owns the PR again, unless the PR was handed on since.
-  const pullOwnersNow = () => {
+  /** Which threads may own a PR now: not archived, unless it holds a review (archiving frees the PR). */
+  const pullOwnable = () => {
     const reviewed = new Set(reviewIndex.threads().map((thread) => thread.thread_id));
-    return new Map(
-      [...pullOwners.all()].filter(([, owner]) => {
-        if (reviewed.has(owner.thread_id)) return true;
-        const row = store.listRow(owner.thread_id);
-        return !row || !inboxRowArchived(row);
-      }),
-    );
+    return (threadId: string) => {
+      if (reviewed.has(threadId)) return true;
+      const row = store.listRow(threadId);
+      return !row || !inboxRowArchived(row);
+    };
+  };
+  const pullOwnersNow = () => {
+    const ownable = pullOwnable();
+    return new Map([...pullOwners.all()].filter(([, owner]) => ownable(owner.thread_id)));
   };
   const pullStates = createInboxPullStates({ run: options.refRunner, onLand: (record, forget) => pullOwners.land(record, forget) });
   const pullLinkStore: InboxPullLinkStore = {
@@ -1604,6 +1607,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
     sessionLive: (session) => live.isSessionLive(session),
     launchDead: (threadId) => launch.didNotStart(threadId),
+    // A thread started from a PR's page is found by the same rule a hand-off's owner is kept by.
+    ownable: () => pullOwnable(),
   };
   // The folders of this computer's clones of a PR's repository.
   const pullRoots = async (key: string): Promise<string[]> => {
@@ -5031,6 +5036,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The hand-off stands without the coupling.
     }
   };
+  /**
+   * A thread started from a PR's page that the window never tied (a list found it by its first message,
+   * `linkInboxPulls`): kept as the PR's owner now, as the tie would have, with the same coupling (`theirs`, the
+   * thread's PR list, `pull_keys`), so its reviews follow that PR's rules (no verdict on a teammate's PR).
+   */
+  const adoptStartedThreads = (listed: readonly InboxPull[], links: Readonly<Record<string, InboxPullLink>>, owners: ReadonlyMap<string, unknown>) => {
+    const byThread = new Map<string, InboxPull[]>();
+    for (const pull of listed) {
+      const link = links[pull.key];
+      if (!link || link.via !== "owner" || link.ask !== "thread" || owners.has(pull.key)) continue;
+      byThread.set(link.thread_id, [...(byThread.get(link.thread_id) ?? []), pull]);
+    }
+    for (const [threadId, found] of byThread) {
+      const keys = found.map((pull) => pull.key);
+      pullOwners.set(keys, threadId, { ask: "thread", theirs: found.every((pull) => !pull.mine) });
+      couplePulls(keys, threadId);
+    }
+  };
   // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
   const replyLaunch = createInboxReplyLaunch({ store, launch, live, resolveProject });
   const compose = createInboxCompose({
@@ -5985,7 +6008,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]));
+        const owners = new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]);
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, owners);
+        adoptStartedThreads(listed.pulls, links, owners);
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         // Hidden PRs leave the window's lists (a linked machine reading this board gets them all: its window hides by its own).
@@ -6027,6 +6052,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const byWindow = fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM;
         if (!cached && pullHidden.settle(listed.pulls)) pullHiddenChanged();
         if (!cached) notePullThreads(listed.pulls, links);
+        if (!cached) adoptStartedThreads(listed.pulls, links, owners);
         const shownPulls = byWindow ? pullHidden.shown(listed.pulls) : listed.pulls;
         const hiddenKeys = byWindow ? listed.pulls.filter((pull) => pullHidden.has(pull.key)).map((pull) => pull.key) : [];
         const stacks = inboxPullStacks(shownPulls);
