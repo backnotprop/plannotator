@@ -128,7 +128,8 @@ function draw(over: Partial<SheetPageProps> = {}) {
   document.body.appendChild(host);
   root = createRoot(host);
   act(() => root!.render(<div className="pn-inbox"><SidebarProvider><SheetPage {...props} /></SidebarProvider></div>));
-  return { refreshed };
+  const redraw = (changes: Partial<SheetPageProps>) => act(() => root!.render(<div className="pn-inbox"><SidebarProvider><SheetPage {...props} {...changes} /></SidebarProvider></div>));
+  return { refreshed, redraw };
 }
 
 const click = (el: HTMLElement) => act(() => el.click());
@@ -209,6 +210,28 @@ test('the second click merges one after another at the heads seen; a refusal is 
   expect(refreshed).toEqual([1]);
   await settle();
   expect(sent).toHaveLength(3);
+});
+
+test('a refreshed head or destination invalidates an open merge confirmation', () => {
+  if (!hasDom) return;
+  const { redraw } = draw();
+  click($('[data-pr-select="select"]')!);
+  click(tile(key(7)));
+  click($('[data-pr-merge]')!);
+  expect($('[data-pr-merge]')!.textContent).toBe('Confirm merge');
+
+  const updated = (changes: Partial<InboxPull>) => ({ ...MODEL, pulls: MODEL.pulls.map((p) => p.number === 7 ? { ...p, ...changes } : p) });
+  redraw({ model: updated({ head_sha: 'b'.repeat(40) }) });
+  expect($('[data-pr-merge]')!.textContent).toBe('Merge 1');
+  click($('[data-pr-merge]')!);
+  expect(sent).toEqual([]);
+
+  redraw({ model: updated({ head_sha: 'b'.repeat(40), base: 'release' }) });
+  expect($('[data-pr-merge]')!.textContent).toBe('Merge 1');
+  click($('[data-pr-merge]')!);
+  expect(sent).toEqual([]);
+  click($('[data-pr-merge]')!);
+  expect(sent[0]).toMatchObject({ key: key(7), head_sha: 'b'.repeat(40) });
 });
 
 test('a phone: the sheet says Tap again, and nothing merges before the second tap', () => {

@@ -1139,6 +1139,8 @@ const BOUNDED_DIFF_GIT_CONFIG: Record<string, string> = {
   "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
   // Keep gitlinks as parseable pointer hunks even if interactive Git uses log or inline diffs.
   "diff.submodule": "short",
+  // Keep the space on a blank context row: without it the viewer's parser skips the row and every later line number is one off.
+  "diff.suppressBlankEmpty": "false",
 };
 
 /**
@@ -1468,8 +1470,8 @@ async function getUntrackedFileDiffs(
   // diff can't access the literal quoted filename (the file silently drops
   // out of the review), and the returned paths would never match the
   // unquoted deletion paths in removeTrackedDeletions.
+  // A leading or trailing space is part of an unquoted Git path.
   const files = lsResult.stdout
-    .trim()
     .split("\n")
     .filter((file) => file.length > 0)
     .map((file) => unquoteGitPath(file));
@@ -2094,7 +2096,7 @@ async function appendUntrackedFingerprint(
   const untracked = status.stdout
     .split("\n")
     .filter((line) => line.startsWith("?? "))
-    .map((line) => unquoteGitPath(line.slice(3).trim()))
+    .map((line) => unquoteGitPath(line.slice(3)))
     .slice(0, MAX_UNTRACKED_FINGERPRINT_FILES);
   if (untracked.length > 0) {
     const baseDir = await resolveRepoToplevel(runtime, cwd);
@@ -2688,7 +2690,7 @@ export async function getSinceBaseSections(
         // Untracked. Don't clobber an existing tracked entry for the same
         // path: `git rm --cached f` emits BOTH `D  f` (staged delete) and
         // `?? f` (now-untracked file) — the tracked/staged signal wins.
-        const path = unquoteGitPath(rest.trim());
+        const path = unquoteGitPath(rest);
         if (path && !files[path]) files[path] = { group: "untracked", staged: false };
         continue;
       }
@@ -2701,7 +2703,7 @@ export async function getSinceBaseSections(
       // no sidecar entry, defaulting it to Committed. Both-sides prevents that.
       const staged = x !== " " && x !== "?";
       for (const token of splitPorcelainRename(rest)) {
-        const path = unquoteGitPath(token.trim());
+        const path = unquoteGitPath(token);
         if (path) files[path] = { group: "changes", staged };
       }
     }
@@ -2733,7 +2735,7 @@ export async function getSinceBaseSections(
       );
       if (committed.exitCode !== 0) return null;
       for (const line of committed.stdout.split("\n")) {
-        const path = unquoteGitPath(line.trim());
+        const path = unquoteGitPath(line);
         if (!path) continue;
         // Dirty state wins: a file with both committed and working-tree
         // changes lives in "changes" (its diff still shows the full story).
@@ -2823,37 +2825,7 @@ export function isP4DiffType(diffType: string): boolean {
 export function listPatchFiles(
   patch: string,
 ): { path: string; additions: number; deletions: number }[] {
-  if (!patch) return [];
-
-  const chunkStarts = [...patch.matchAll(/^diff --git /gm)];
-  if (chunkStarts.length === 0) return [];
-
-  const files: { path: string; additions: number; deletions: number }[] = [];
-
-  for (let i = 0; i < chunkStarts.length; i++) {
-    const start = chunkStarts[i].index ?? 0;
-    const end = chunkStarts[i + 1]?.index ?? patch.length;
-    const lines = patch.slice(start, end).split("\n");
-
-    // Prefer the --- /+++ path lines (present on every non-mode-only chunk);
-    // fall back to the "diff --git a/x b/y" header for the rare chunk that
-    // lacks them (e.g. a pure mode change).
-    const { oldPath: bodyOldPath, newPath: bodyNewPath } = parseDiffFilePathLines(lines);
-    const headerPaths = parseDiffGitHeader(lines[0] ?? "");
-    const path = bodyNewPath ?? bodyOldPath ?? headerPaths.newPath ?? headerPaths.oldPath;
-    if (!path) continue;
-
-    let additions = 0;
-    let deletions = 0;
-    for (const line of lines) {
-      if (line.startsWith("+") && !line.startsWith("+++")) additions++;
-      else if (line.startsWith("-") && !line.startsWith("---")) deletions++;
-    }
-
-    files.push({ path, additions, deletions });
-  }
-
-  return files;
+  return parseDiffToFiles(patch).map(({ path, additions, deletions }) => ({ path, additions, deletions }));
 }
 
 /** One changed file's chunk in a patch, as the server sees it. */

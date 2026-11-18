@@ -30,6 +30,7 @@ import {
   getGitContext,
   getGitDiffFingerprint,
   getWorkingTreeDiffFromBase,
+  getSinceBaseSections,
   gitAddFile,
   gitResetFile,
   isBinaryPatchFile,
@@ -614,6 +615,23 @@ describe("review-core", () => {
     expect(listPatchFiles(renamed.patch).map((file) => file.path)).toContain(renamedTo);
   }, 20_000);
 
+  test("keeps the space on blank context rows when Git is set to drop it", async () => {
+    const repoDir = initRepo();
+    writeFileSync(join(repoDir, "notes.txt"), "one\n\ntwo\n", "utf-8");
+    git(repoDir, ["add", "notes.txt"]);
+    git(repoDir, ["commit", "-m", "notes"]);
+    git(repoDir, ["config", "diff.suppressBlankEmpty", "true"]);
+    writeFileSync(join(repoDir, "notes.txt"), "one\n\nthree\n", "utf-8");
+
+    const runtime = makeConfigForwardingRuntime(repoDir);
+    for (const diffType of ["unstaged", "staged"] as const) {
+      if (diffType === "staged") git(repoDir, ["add", "notes.txt"]);
+      const { patch } = await runGitDiff(runtime, diffType, "main");
+      const hunk = patch.slice(patch.indexOf("@@ ")).split("\n");
+      expect(hunk.slice(0, 5)).toEqual(["@@ -1,3 +1,3 @@", " one", " ", "-two", "+three"]);
+    }
+  });
+
   test("keeps gitlink pointers as normal subproject diffs and fingerprints them", async () => {
     const superproject = initRepo();
     const submoduleSource = makeTempDir("plannotator-review-core-submodule-");
@@ -894,6 +912,7 @@ describe("review-core", () => {
       expect(options?.config).toEqual({
         "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
         "diff.submodule": "short",
+        "diff.suppressBlankEmpty": "false",
       });
       expect(args.some((arg) => arg.includes("bigFileThreshold"))).toBe(false);
     }
@@ -1449,6 +1468,22 @@ describe("review-core", () => {
     expect(review.patch).toContain("+current content");
     expect(review.patch).toContain("+untracked content");
     expect(await getGitDiffFingerprint(runtime, mode, "main", repo)).not.toBe(before);
+  });
+
+  test("review preserves whitespace at the start of an untracked file's name", async () => {
+    const repo = initRepo();
+    const runtime = makeRuntime(repo);
+    const path = " draft.txt";
+    writeFileSync(join(repo, path), "first draft\n");
+
+    const before = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
+    expect(before).not.toBeNull();
+    const review = await runGitDiff(runtime, "uncommitted", "main", repo);
+    expect(listPatchFiles(review.patch).map((file) => file.path)).toContain(path);
+    expect((await getSinceBaseSections(runtime, "main", repo))?.files[path]).toEqual({ group: "untracked", staged: false });
+
+    writeFileSync(join(repo, path), "other draft\n");
+    expect(await getGitDiffFingerprint(runtime, "uncommitted", "main", repo)).not.toBe(before);
   });
 
   test("uncommitted diff includes untracked files with C-quoted (unicode) names", async () => {
