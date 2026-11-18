@@ -58,6 +58,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/forge-refs.ts',
   'packages/core/guide-notes.ts',
   'packages/core/guide.ts',
+  'packages/core/inbox-answers.ts',
   'packages/core/inbox-antigravity.ts',
   'packages/core/inbox-attachments.ts',
   'packages/core/inbox-branch-reports.ts',
