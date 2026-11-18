@@ -1,0 +1,240 @@
+import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
+import React, { act, useCallback, useImperativeHandle, useRef } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import type { DiffFile } from '../types';
+import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
+
+let lastCodeViewProps: Record<string, unknown> | null = null;
+let items = new Map<string, { id: string; type: string; fileDiff: Record<string, unknown>; version?: number }>();
+
+const realPierreDiffs = { ...(await import('@pierre/diffs')) };
+const realPierreDiffsReact = { ...(await import('@pierre/diffs/react')) };
+const realResolveSyntaxTheme = (await import('@plannotator/ui/utils/syntaxTheme')).resolveSyntaxTheme;
+
+mock.module('../workerPool', () => ({
+  useIsWorkerPoolReadyOrDisabled: () => true,
+  useWorkerPoolThemeSync: () => {},
+}));
+
+mock.module('../hooks/usePierreTheme', () => ({
+  buildLineBgOverrides: () => '',
+  resolveSyntaxTheme: realResolveSyntaxTheme,
+  usePierreTheme: () => ({ type: 'light', css: '' }),
+}));
+
+mock.module('@pierre/diffs', () => ({
+  getSingularPatch: (patch: string) => ({
+    name: patch.match(/\+\+\+ b\/(\S+)/)?.[1] ?? 'file.ts',
+    type: 'change',
+    hunks: [],
+    splitLineCount: 1,
+    unifiedLineCount: 1,
+    isPartial: true,
+    deletionLines: [],
+    additionLines: [],
+  }),
+  processFile: (patch: string) => ({ name: 'whole', type: 'change', hunks: [], splitLineCount: 2, unifiedLineCount: 2, isPartial: false, deletionLines: [], additionLines: [], patch }),
+}));
+
+mock.module('@pierre/diffs/react', () => ({
+  CodeView: React.forwardRef(function MockCodeView(
+    props: { initialItems?: Array<{ id: string; type: string; fileDiff: Record<string, unknown> }>; className?: string; containerRef?: React.Ref<HTMLDivElement> },
+    ref: React.ForwardedRef<unknown>,
+  ) {
+    const seeded = useRef(false);
+    if (!seeded.current) {
+      seeded.current = true;
+      items = new Map((props.initialItems ?? []).map((item) => [item.id, item]));
+    }
+    lastCodeViewProps = props as unknown as Record<string, unknown>;
+    useImperativeHandle(ref, () => ({
+      addItems: () => {},
+      getItem: (id: string) => items.get(id),
+      updateItem: (item: { id: string; type: string; fileDiff: Record<string, unknown> }) => {
+        items.set(item.id, item);
+        return true;
+      },
+      updateItemId: () => true,
+      scrollTo: () => {},
+      setSelectedLines: () => {},
+      getSelectedLines: () => null,
+      clearSelectedLines: () => {},
+      getInstance: () => ({
+        getRenderedItems: () => [],
+        getScrollTop: () => 0,
+        getScrollHeight: () => 0,
+        getHeight: () => 0,
+        getTopForItem: () => 0,
+        scrollTo: () => {},
+      }),
+    }));
+    return <div ref={props.containerRef} className={props.className} />;
+  }),
+  EditProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  useStableCallback: <T extends (...args: never[]) => unknown>(callback: T): T => {
+    const callbackRef = useRef(callback);
+    callbackRef.current = callback;
+    return useCallback(((...args: Parameters<T>) => callbackRef.current(...args)) as T, []);
+  },
+}));
+
+mock.module('./ToolbarHost', () => ({
+  ToolbarHost: React.forwardRef(function MockToolbarHost(_props, ref) {
+    useImperativeHandle(ref, () => ({ handleLineSelectionEnd: () => {}, openLineAnnotation: () => {}, handleTokenClick: () => {}, startEdit: () => {} }));
+    return null;
+  }),
+}));
+
+const { AllFilesCodeView } = await import('./AllFilesCodeView');
+
+const hasDom = typeof document !== 'undefined';
+let root: Root | null = null;
+let host: HTMLElement | null = null;
+const headerRoots: Root[] = [];
+
+function changed(path: string): DiffFile {
+  return {
+    path,
+    patch: `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n-old\n+new\n same`,
+    additions: 1,
+    deletions: 1,
+    status: 'modified',
+  };
+}
+
+const moved: SemDiffResult = {
+  semanticOperations: [{ type: 'moved', lines: { old: [{ start: 1, end: 1 }], new: [{ start: 2, end: 2 }] } } as never],
+  semanticFolds: [],
+  patch: 'semantic patch',
+  summary: { counts: { moved: 1 } } as never,
+};
+
+function fakeClient(answer: SemDiffResult | null, supported = (path: string) => path.endsWith('.ts')) {
+  const asked: string[] = [];
+  const client: SemDiffClient = {
+    supports: supported,
+    diff: async (path) => {
+      asked.push(path);
+      return answer;
+    },
+    attempt: async () => ({ result: answer, failed: false }),
+    dispose: () => {},
+  };
+  return { client, asked };
+}
+
+function hostReader(texts: { oldContent: string; newContent: string } = { oldContent: 'old\nsame\n', newContent: 'new\nsame\n' }) {
+  const reads: string[] = [];
+  const read = async (file: DiffFile) => {
+    reads.push(file.path);
+    return texts;
+  };
+  return { read, reads };
+}
+
+async function mount(files: DiffFile[], props: Partial<React.ComponentProps<typeof AllFilesCodeView>>) {
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () => {
+    root!.render(
+      <AllFilesCodeView
+        files={files}
+        diffStyle="unified"
+        annotations={[]}
+        selectedAnnotationId={null}
+        scrollTargetAnnotation={null}
+        pendingSelection={null}
+        onLineSelection={() => {}}
+        onAddAnnotationForFile={() => {}}
+        onEditAnnotation={() => {}}
+        onSelectAnnotation={() => {}}
+        onDeleteAnnotation={() => {}}
+        readOnly
+        contextExpansionAvailable={false}
+        {...props}
+      />,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  });
+  const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
+  await act(async () => {
+    for (const item of items.values()) {
+      options.onPostRender(document.createElement('div'), {}, 'mount', { item });
+      options.onPostRender(document.createElement('div'), {}, 'update', { item });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 260));
+  });
+}
+
+async function headerOf(path: string): Promise<HTMLElement> {
+  const item = [...items.values()].find((candidate) => candidate.id.includes(path))!;
+  const render = lastCodeViewProps?.renderCustomHeader as (item: unknown) => React.ReactNode;
+  const box = document.createElement('div');
+  document.body.appendChild(box);
+  const headerRoot = createRoot(box);
+  headerRoots.push(headerRoot);
+  await act(async () => headerRoot.render(<>{render(item)}</>));
+  return box;
+}
+
+afterEach(async () => {
+  for (const headerRoot of headerRoots.splice(0)) await act(async () => headerRoot.unmount());
+  if (root) await act(async () => root?.unmount());
+  root = null;
+  host?.remove();
+  host = null;
+  document.body.innerHTML = '';
+  lastCodeViewProps = null;
+  items = new Map();
+});
+
+afterAll(() => {
+  mock.module('@pierre/diffs', () => realPierreDiffs);
+  mock.module('@pierre/diffs/react', () => realPierreDiffsReact);
+});
+
+describe('AllFilesCodeView semantic diffs through a host reader', () => {
+  test.skipIf(!hasDom)('a read-only host with a client reads each file once and its header says what moved', async () => {
+    const { client, asked } = fakeClient(moved);
+    const { read, reads } = hostReader();
+    await mount([changed('a.ts'), changed('b.ts')], { semDiffClient: client, fetchFileContent: read });
+
+    expect(reads.sort()).toEqual(['a.ts', 'b.ts']);
+    expect(asked.sort()).toEqual(['a.ts', 'b.ts']);
+    expect([...items.values()].every((item) => item.fileDiff.isPartial === false)).toBe(true);
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.textContent).toContain('1 moved');
+  });
+
+  test.skipIf(!hasDom)('nothing to say, an unsupported file or texts that do not fit the patch: no note, the plain diff', async () => {
+    const quiet = fakeClient(null);
+    const quietRead = hostReader();
+    await mount([changed('a.ts')], { semDiffClient: quiet.client, fetchFileContent: quietRead.read });
+    expect(quietRead.reads).toEqual(['a.ts']);
+    expect([...items.values()][0]!.fileDiff.isPartial).toBe(true);
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')).toBeNull();
+
+    await act(async () => root?.unmount());
+    root = null;
+    const unsupported = fakeClient(moved);
+    const unsupportedRead = hostReader();
+    await mount([changed('notes.txt')], { semDiffClient: unsupported.client, fetchFileContent: unsupportedRead.read });
+    expect(unsupportedRead.reads).toEqual([]);
+    expect(unsupported.asked).toEqual([]);
+
+    await act(async () => root?.unmount());
+    root = null;
+    const stale = fakeClient(moved);
+    const staleRead = hostReader({ oldContent: 'old\nsame\n', newContent: 'new\nsame\nadded later\n' });
+    await mount([changed('a.ts')], { semDiffClient: stale.client, fetchFileContent: staleRead.read });
+    expect(staleRead.reads).toEqual(['a.ts']);
+    expect(stale.asked).toEqual([]);
+    expect([...items.values()][0]!.fileDiff.isPartial).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
+    const { read, reads } = hostReader();
+    await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });
+    expect(reads).toEqual([]);
+  });
+});

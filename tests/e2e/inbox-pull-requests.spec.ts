@@ -165,6 +165,16 @@ const TOKENS = Array.from({ length: 60 }, (_, i) => `export const SPACE_${i + 1}
 // Past the change the two sides number far apart: new line 75 is old line 45.
 const TOKENS_CHANGED = TOKENS.flatMap((line, i) => (i === 29 ? ['export const SPACE_30 = 32;', ...Array.from({ length: 30 }, (_, n) => `export const EXTRA_${n} = ${n};`)] : [line]));
 
+const SEM_PATH = 'src/build/text.ts';
+const SEM_PLAIN_PATH = 'docs/upgrade.md';
+const semFunction = (name: string, body: string[]) => [`export function ${name}(input: string): string {`, ...body.map((line) => `  ${line}`), '}', ''];
+const TRIM = semFunction('trimEdges', ['const start = input.search(/\\S/);', "if (start < 0) return '';", "const end = input.length - [...input].reverse().join('').search(/\\S/);", 'return input.slice(start, end);']);
+const SLUG = semFunction('slugify', ['const lower = input.toLowerCase();', "const dashed = lower.replace(/[^a-z0-9]+/g, '-');", "return dashed.replace(/^-+|-+$/g, '');"]);
+const titled = (name: string) => semFunction(name, ["const words = input.split(' ');", 'const upper = words.map((word) => word.charAt(0).toUpperCase() + word.slice(1));', "return upper.join(' ');"]);
+const heading = (name: string) => semFunction('heading', [`return ${name}(trimEdges(input));`]);
+const SEM_BASE = lines(...TRIM, ...SLUG, ...titled('titleCase'), ...heading('titleCase'));
+const SEM_HEAD = lines(...SLUG, ...titled('toTitleCase'), ...heading('toTitleCase'), ...TRIM);
+
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'calls'), '');
@@ -461,10 +471,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     src,
     'web-app',
     'https://github.com/northwind/web-app.git',
-    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}'), [TOKENS_PATH]: lines(...TOKENS) },
+    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}'), [TOKENS_PATH]: lines(...TOKENS), [SEM_PATH]: SEM_BASE, [SEM_PLAIN_PATH]: lines('# Upgrading', '', 'Run the build once.') },
     [
       { name: 'tomas/rtl-settings', from: 'main', files: { [TOKENS_PATH]: lines(...TOKENS_CHANGED), 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  // Logical margins, so the sidebar sits on the right in Arabic and Hebrew.', '  return <div className="settings ms-6" dir="auto">{children}</div>;', '}') } },
-      { name: 'codex/vite-8', from: 'main', files: { 'package.json': lines('{', '  "devDependencies": { "vite": "8.0.1" }', '}') } },
+      { name: 'codex/vite-8', from: 'main', files: { 'package.json': lines('{', '  "devDependencies": { "vite": "8.0.1" }', '}'), [SEM_PATH]: SEM_HEAD, [SEM_PLAIN_PATH]: lines('# Upgrading', '', 'Run the build once, then the tests.') } },
       { name: 'locale-fallback', from: 'main', files: { 'src/i18n/fallback.ts': lines("export const FALLBACK = 'en';") } },
     ],
   );
@@ -497,6 +507,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${'880'.padStart(40, '0')}`, lines(...TOKENS_CHANGED));
   forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`, lines(...TOKENS));
   forge.gh('repos/northwind/web-app/pulls/872', vite);
+  for (const [path, base, head] of [[SEM_PATH, SEM_BASE, SEM_HEAD], [SEM_PLAIN_PATH, lines('# Upgrading', '', 'Run the build once.'), lines('# Upgrading', '', 'Run the build once, then the tests.')]] as const) {
+    forge.gh(`repos/northwind/web-app/contents/${path}?ref=${'872'.padStart(40, '0')}`, head);
+    forge.gh(`repos/northwind/web-app/contents/${path}?ref=${MERGE_BASE}`, base);
+  }
   forge.gh('repos/northwind/web-app/pulls/869', locale);
   const csvPatch = ledger.diff('main', 'csv-export');
   const rounding = ledger.diff('main', 'priya/rounding');
@@ -4122,4 +4136,43 @@ test('Reviews with nothing in it: says so, and offers a new review', async () =>
     await page.unroute('**/api/inbox/reviews*');
     await page.unroute('**/api/inbox/pulls?*');
   }
+});
+
+test('the PR page draws moved and renamed code, says so in the file header, and the switch draws the plain diff, kept over a reload', async () => {
+  const { page } = world;
+  const pull = 'github.com/northwind/web-app#872';
+  await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(pull)}&layer=${encodeURIComponent(pull)}&scope=layer`);
+  const review = page.locator('[data-pull-review]');
+  const moved = review.locator(`[data-guide-file-shell="${SEM_PATH}"]`);
+  const plain = review.locator(`[data-guide-file-shell="${SEM_PLAIN_PATH}"]`);
+  const note = moved.locator('[data-semantic-note="semantic"]');
+  await expect(note).toContainText('1 moved', { timeout: 30_000 });
+  await expect(note).toContainText('1 renamed');
+  await expect(moved.locator('[data-semantic-start]').first()).toBeAttached();
+  await expect(plain.locator('[data-column-number]').first()).toBeVisible();
+  await expect(plain.locator('[data-semantic-note]')).toHaveCount(0);
+  await expect(plain.locator('[data-semantic-start]')).toHaveCount(0);
+  const calls = forgeCalls();
+  expect(calls).toContain(`gh diff repos/northwind/web-app/contents/${SEM_PATH}?ref=${MERGE_BASE}`);
+  expect(calls.filter((call) => call.includes(`contents/${SEM_PLAIN_PATH}`))).toEqual([]);
+
+  await page.locator('[data-diff-display-options]').click();
+  const toggle = page.getByRole('switch', { name: 'Show moved & renamed code' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await toggle.click();
+  await expect(moved.locator('[data-semantic-start]')).toHaveCount(0);
+  await expect(moved.locator('[data-semantic-note="off"]')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect.poll(() => (JSON.parse(readFileSync(join(world.dataDir, 'config.json'), 'utf8')) as { diffOptions?: { semantic?: boolean } }).diffOptions?.semantic).toBe(false);
+
+  await page.reload();
+  await expect(moved.locator('[data-column-number]').first()).toBeVisible({ timeout: 30_000 });
+  await expect(moved.locator('[data-semantic-note]')).toHaveCount(0);
+  await expect(moved.locator('[data-semantic-start]')).toHaveCount(0);
+  await page.locator('[data-diff-display-options]').click();
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await toggle.click();
+  await page.keyboard.press('Escape');
+  await expect(moved.locator('[data-semantic-note="semantic"]')).toContainText('1 moved', { timeout: 30_000 });
+  expect(world.errors).toEqual([]);
 });

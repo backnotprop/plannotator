@@ -498,6 +498,7 @@ export interface InboxDiffOptions {
   background: boolean | null;
   background_intensity: 'subtle' | 'normal' | 'strong' | null;
   tab_size: number | null;
+  semantic: boolean | null;
 }
 
 /** Settings → General's cookie switch (SettingsModel.cookie_host). */
@@ -1809,6 +1810,7 @@ export const inboxApi = {
   /** How diffs are drawn, written to config.json `diffOptions` (shared with code review): only the fields given. */
   saveDiffOptions: (change: Partial<InboxDiffOptions>) =>
     post<{ diff_style: InboxDiffStyle | null; diff_options: InboxDiffOptions }>(inboxUrl('/settings'), { diff_options: change }),
+  semDiff: () => get<{ advert: unknown }>(inboxUrl('/sem-diff')),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>(inboxUrl('/settings'), { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.

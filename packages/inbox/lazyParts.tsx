@@ -15,6 +15,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { diffDrawReady, diffLanguages, diffReadyNow } from './threadDrawReady';
+import { loadSemDiffAdvert, semDiffAdvertNow } from './semDiffAdvert';
 
 type Loaded<P> = { default: ComponentType<P> };
 
@@ -90,12 +91,12 @@ export function PanePart({ children, loading = null, onFailed }: { children: Rea
 export function ReaderPart({ diff, children }: { diff: string; children: ReactNode }) {
   const langs = useMemo(() => diffLanguages(diff), [diff]);
   const [waited, setWaited] = useState<readonly string[] | null>(null);
-  const show = waited === langs || (GuideReaderPart.isLoaded() && diffReadyNow(langs));
+  const show = waited === langs || (GuideReaderPart.isLoaded() && diffReadyNow(langs) && semDiffAdvertNow() !== undefined);
   useEffect(() => {
     if (show) return;
     let live = true;
     // A reader that cannot load still draws: its boundary then says so.
-    void Promise.all([diffDrawReady(langs), GuideReaderPart.preload().catch(() => undefined)]).then(() => {
+    void Promise.all([diffDrawReady(langs), GuideReaderPart.preload().catch(() => undefined), loadSemDiffAdvert()]).then(() => {
       if (live) setWaited(langs);
     });
     return () => {

@@ -2221,7 +2221,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [rejectedKey, powerUpActive, powerUpRetry]);
 
   const prefetchWholeFile = useCallback((itemId: string) => {
-    if (fetchFileContentRef.current) return;
+    const hostRead = fetchFileContentRef.current;
+    const semClient = semClientRef.current;
+    if (hostRead && !semClient) return;
     const augmentState = augmentRef.current;
     const generation = fileSetKeyRef.current;
     const existing = augmentState.get(itemId);
@@ -2232,13 +2234,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const file = itemIdToFileRef.current.get(itemId);
     if (file == null) return;
     const controller = new AbortController();
-    if (readOnlyRef.current || !contextExpansionAvailableRef.current || (file.status !== 'modified' && file.status !== 'renamed')) {
+    const bothSides = file.status === 'modified' || file.status === 'renamed';
+    const reads = hostRead ? bothSides && semClient != null && semClient.supports(file.path) : bothSides && !readOnlyRef.current && contextExpansionAvailableRef.current;
+    if (!reads) {
       augmentState.set(itemId, { status: 'done', controller, generation });
       return;
     }
     augmentState.set(itemId, { status: 'pending', controller, generation });
     const isStale = () => controller.signal.aborted || fileSetKeyRef.current !== generation;
-    readWholeFileFromReview(file, controller.signal).then(
+    (hostRead ?? readWholeFileFromReview)(file, controller.signal).then(
       (data) => {
         if (isStale()) return;
         if (data) keptWholeFilesRef.current.keep(itemId, generation, data);
