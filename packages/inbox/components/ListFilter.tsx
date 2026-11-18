@@ -14,8 +14,8 @@
  *   more). Each row shows how many threads it would leave and a tick when picked, then "Clear filters". It stays open while picking. A phone draws it as the bottom
  *   sheet titled "Filter".
  * - Custom range… opens a small panel by the funnel: From, To, Apply.
- * - Long lists (a section of more than 8 rows, listFilterSearch.ts): one field at the top, "Find a project, tag or
- *   agent". Typing narrows every section at once (the match bold, a ticked row kept, a section with nothing left gone,
+ * - Long lists (a section of more than 8 rows, listFilterSearch.ts): one field at the top, "Search filters".
+ *   Typing narrows every section at once (the match bold, a ticked row kept, a section with nothing left gone,
  *   "Nothing matches “…”" when no row matches); the menu keeps its one scroll. Base UI's filterable menu
  *   (`Menu.FilterProvider`, `Menu.Input`, `Menu.List`): the field keeps focus while ↑ ↓ move the highlight
  *   (`aria-activedescendant`, wrapping as the plain menu does), Enter ticks the highlighted row, Space types a space,
@@ -90,7 +90,7 @@ function usePortal(anchor: RefObject<HTMLElement | null>) {
 const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="check" />}</span>;
 
 /** The search's words (the field's placeholder and name; the line and the count a screen reader hears). */
-const FIND_WORDS = 'Find a project, tag or agent';
+const FIND_WORDS = 'Search filters';
 const nothingMatches = (query: string) => `Nothing matches “${query}”`;
 const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : n === 1 ? '1 match' : `${formatCount(n)} matches`);
 
@@ -322,9 +322,65 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   const long = filterSearchShown(sections.map((s) => s.rows.length));
   const [searchable, setSearchable] = useState(long);
   if (!open && searchable !== long) setSearchable(long);
+  const clear = count > 0 ? () => onChange(clearedFrom(source.filter, scoped, tagScoped)) : null;
+
+  return (
+    <>
+      <Tip content={count > 0 ? `Filter · ${count} active` : 'Filter'}>
+        <Menu.Trigger handle={handle} ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-list-filter="">
+          <span className="ib-lflt-g ib-cnt-host">
+            <FilterGlyph size={phone ? 20 : 16} />
+            {count > 0 && <CountBadge count={count} data={{ 'data-list-filter-count': '' }} />}
+          </span>
+        </Menu.Trigger>
+      </Tip>
+      <FilterMenu handle={handle} open={open} onOpenChange={setOpen} phone={phone} portal={portal} searchable={searchable} sections={sections} onClear={clear} />
+      <RangePanel key={rangeOpen ? 'open' : 'shut'} open={rangeOpen} onOpenChange={setRangeOpen} anchor={trigger} portal={portal} phone={phone} start={custom} onApply={(range) => set({ updated: range })} />
+    </>
+  );
+}
+
+/** How long the match count waits for typing to pause before a screen reader hears it. */
+const STATUS_WAIT_MS = 400;
+
+/**
+ * The menu itself. The search's query lives here, so typing redraws only the menu: the rows and their counts are worked
+ * out by `ListFilterButton`, which typing does not redraw.
+ */
+function FilterMenu({
+  handle,
+  open,
+  onOpenChange,
+  phone,
+  portal,
+  searchable,
+  sections,
+  onClear,
+}: {
+  handle: ReturnType<typeof Menu.createHandle>;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  phone: boolean;
+  portal: HTMLElement | null;
+  searchable: boolean;
+  sections: readonly FilterSection[];
+  /** Clear filters; null: nothing is picked, no row. */
+  onClear: (() => void) | null;
+}) {
   const [query, setQuery] = useState('');
   const found = searchFilterSections<FilterSection, FilterRow>(sections, searchable ? query : '');
   const typed = query.trim();
+  // The count a screen reader hears, once typing pauses (not on every key).
+  const words = found.searching ? matchWords(found.matches, typed) : '';
+  const [said, setSaid] = useState('');
+  useEffect(() => {
+    if (words === '') {
+      setSaid('');
+      return;
+    }
+    const wait = setTimeout(() => setSaid(words), STATUS_WAIT_MS);
+    return () => clearTimeout(wait);
+  }, [words]);
 
   const drawRow = ({ row, hit }: FilterSearchRow<FilterRow>) =>
     row.opens ? (
@@ -352,10 +408,10 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
           )}
         </Fragment>
       ))}
-      {count > 0 && (
+      {onClear && (
         <>
           {found.sections.length > 0 && <Menu.Separator className="ib-pm-sep" />}
-          <Menu.Item className="ib-pmi" onClick={() => onChange(clearedFrom(source.filter, scoped, tagScoped))} data-list-filter-clear="">
+          <Menu.Item className="ib-pmi" onClick={onClear} data-list-filter-clear="">
             <Icon name="x" />
             <span className="ib-pmi-l">Clear filters</span>
           </Menu.Item>
@@ -365,7 +421,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   );
 
   const menu = (
-    <Menu.Root handle={handle} open={open} onOpenChange={setOpen} modal={phone}>
+    <Menu.Root handle={handle} open={open} onOpenChange={onOpenChange} modal={phone}>
       <Menu.Portal container={portal ?? undefined}>
         {phone && <Menu.Backdrop className="ib-pm-scrim" />}
         <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
@@ -397,7 +453,7 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
                   </div>
                 </div>
                 <div className="ib-sr" role="status" data-list-filter-search-status="">
-                  {found.searching ? matchWords(found.matches, typed) : ''}
+                  {said}
                 </div>
                 {found.searching && found.matches === 0 && (
                   <div className="ib-lflt-none" data-list-filter-none="">
@@ -415,27 +471,14 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
     </Menu.Root>
   );
 
-  return (
-    <>
-      <Tip content={count > 0 ? `Filter · ${count} active` : 'Filter'}>
-        <Menu.Trigger handle={handle} ref={trigger} className="ib-lflt" aria-label={name} data-set={count > 0 ? '' : undefined} data-list-filter="">
-          <span className="ib-lflt-g ib-cnt-host">
-            <FilterGlyph size={phone ? 20 : 16} />
-            {count > 0 && <CountBadge count={count} data={{ 'data-list-filter-count': '' }} />}
-          </span>
-        </Menu.Trigger>
-      </Tip>
-      {searchable ? (
-        // The highlight goes to the first match as you type (a match always comes first: listFilterSearch.ts); with no
-        // match it goes nowhere, so Enter never unticks a row kept only because it is ticked.
-        <Menu.FilterProvider filter={null} value={query} onValueChange={setQuery} autoHighlight={found.matches > 0}>
-          {menu}
-        </Menu.FilterProvider>
-      ) : (
-        menu
-      )}
-      <RangePanel key={rangeOpen ? 'open' : 'shut'} open={rangeOpen} onOpenChange={setRangeOpen} anchor={trigger} portal={portal} phone={phone} start={custom} onApply={(range) => set({ updated: range })} />
-    </>
+  // The highlight goes to the first match as you type (a match always comes first: listFilterSearch.ts); with no match
+  // it goes nowhere, so Enter never unticks a row kept only because it is ticked.
+  return searchable ? (
+    <Menu.FilterProvider filter={null} value={query} onValueChange={setQuery} autoHighlight={found.matches > 0}>
+      {menu}
+    </Menu.FilterProvider>
+  ) : (
+    menu
   );
 }
 

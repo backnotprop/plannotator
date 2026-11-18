@@ -12010,6 +12010,11 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-lflt-clear > svg.ib-ic { width: 14px; height: 14px; }
 .ib-lflt-none { padding: 8px 8px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: normal; overflow-wrap: anywhere; }
 .ib-lflt-hit { font-weight: 650; }
+/* A highlighted row scrolled into view stops below the sticky field, never under it (the field's 35 px and its 4 px
+   gaps). */
+.ib-pm.ib-lflt-menu[data-list-filter-searchable] { scroll-padding-top: 44px; }
+/* Any touch screen, a tablet wider than a phone too: 16px, so iOS does not zoom into the field. */
+@media (pointer: coarse) { .pn-inbox .ib-lflt-find input { font-size: var(--ib-fs-16-in, 16px); } }
 .ib-lflt-menu .ib-pmi[data-checked] { box-shadow: none; }
 .ib-lflt-host { flex: none; display: inline-grid; place-items: center; width: 16px; height: 16px; }
 .ib-lflt-host > * { transform: scale(0.85); }
@@ -12028,6 +12033,7 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
   .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu { max-height: 72vh; }
   /* The phone's sheet: the field under the "Filter" title, a thumb's height, 16px so iOS does not zoom. */
   .ib-pm-pos[data-phone] .ib-lflt-top { top: -6px; margin: 0 -6px 4px; padding: 0 6px; }
+  .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { scroll-padding-top: 56px; }
   .ib-pm-pos[data-phone] .ib-lflt-find { gap: 12px; padding: 0 2px 0 12px; }
   .ib-pm-pos[data-phone] .ib-lflt-find > svg.ib-ic { width: 18px; height: 18px; }
   .pn-inbox .ib-pm-pos[data-phone] .ib-lflt-find input { height: 48px; font-size: var(--ib-fs-16-in, 16px); }

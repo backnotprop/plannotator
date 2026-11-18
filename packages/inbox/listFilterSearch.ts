@@ -1,8 +1,8 @@
 /**
  * The search at the top of the list's filter menu (components/ListFilter.tsx): the rule that narrows the menu's rows.
  *
- * - The field shows only when a section has more than `FILTER_SEARCH_AT` rows (40 projects, 25 tags). With short lists
- *   the menu is as it always was: no field.
+ * - The field shows only when a section of the menu has more than `FILTER_SEARCH_AT` rows. With short lists the menu
+ *   is as it always was: no field.
  * - A query keeps the rows whose words contain it, ignoring case and accents, and marks where (`hit`, drawn bold).
  * - A ticked row always stays, so it can be unticked, after the matches of its section.
  * - A section with nothing left goes. Sections with a match come first, in their usual order, then the sections that

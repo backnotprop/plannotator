@@ -6,7 +6,8 @@
  * move the highlight while the field keeps focus, or stop at the end where the plain menu wraps; Enter that does not
  * tick the highlighted row; Space that ticks instead of typing; Escape that closes before it empties the field; a ticked
  * row that goes when it does not match; no line when nothing matches; Custom range… not opening its panel from the
- * search; the field taking focus (and a phone's keyboard) on a touch open.
+ * search; the field taking focus (and a phone's keyboard) on a touch open; the count said on every key; focus not back on
+ * the funnel after Escape closes the menu (the funnel is a detached trigger), or `aria-expanded` not following the menu.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -151,6 +152,10 @@ const rowWords = () => [...menu()!.querySelectorAll('.ib-pmi')].map((n) => n.que
 const groups = () => [...menu()!.querySelectorAll('.ib-pm-glabel')].map((n) => n.textContent);
 const highlighted = () => menu()!.querySelector('.ib-pmi[data-highlighted]')?.querySelector('.ib-pmi-l')?.textContent ?? null;
 const status = () => $('[data-list-filter-search-status]')!.textContent;
+/** The count is said once typing pauses (ListFilter.tsx `STATUS_WAIT_MS`); wait that out. */
+async function pause() {
+  await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 450))));
+}
 
 describe.skipIf(!hasDom)('the filter menu with short lists', () => {
   test('no field: the plain menu, its rows as always, focus in the menu', async () => {
@@ -162,6 +167,17 @@ describe.skipIf(!hasDom)('the filter menu with short lists', () => {
     expect(menu()!.getAttribute('role')).toBe('menu');
     expect(groups()).toEqual(['Updated', 'Project']);
     expect(rowWords()).toEqual(['Not seen', 'Today', 'Last 3 days', 'Last 7 days', 'Last 30 days', 'Custom range…', 'api', 'web']);
+  });
+
+  test('Escape closes it and puts focus back on the funnel; aria-expanded follows the menu', async () => {
+    render(['api', 'web']);
+    expect(funnel().getAttribute('aria-expanded')).toBe('false');
+    await press(funnel());
+    expect(funnel().getAttribute('aria-expanded')).toBe('true');
+    await key('Escape');
+    expect(menu()).toBeNull();
+    expect(funnel().getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(funnel());
   });
 
   test("a letter still jumps to the first row it starts (the menu's type-ahead)", async () => {
@@ -176,10 +192,11 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
   test('a click opens it with the field focused at the top, and every row as before', async () => {
     render(LONG);
     await press(funnel());
+    expect(funnel().getAttribute('aria-expanded')).toBe('true');
     expect(field()).not.toBeNull();
     expect(document.activeElement).toBe(field());
-    expect(field()!.getAttribute('placeholder')).toBe('Find a project, tag or agent');
-    expect(field()!.getAttribute('aria-label')).toBe('Find a project, tag or agent');
+    expect(field()!.getAttribute('placeholder')).toBe('Search filters');
+    expect(field()!.getAttribute('aria-label')).toBe('Search filters');
     expect(rowWords()).toEqual(['Not seen', 'Today', 'Last 3 days', 'Last 7 days', 'Last 30 days', 'Custom range…', ...LONG]);
     expect(status()).toBe('');
   });
@@ -191,6 +208,9 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     expect(groups()).toEqual(['Project']);
     expect(rowWords()).toEqual(['billing', 'rebill']);
     expect([...menu()!.querySelectorAll('.ib-lflt-hit')].map((n) => n.textContent)).toEqual(['bil', 'bil']);
+    // Not on every key: the count waits for typing to pause.
+    expect(status()).toBe('');
+    await pause();
     expect(status()).toBe('2 matches');
     expect(highlighted()).toBe('billing');
     const active = field()!.getAttribute('aria-activedescendant');
@@ -223,6 +243,7 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     await type('web');
     expect(rowWords()).toEqual(['web', 'rebill', 'Clear filters']);
     expect(highlighted()).toBe('web');
+    await pause();
     expect(status()).toBe('1 match');
   });
 
@@ -239,6 +260,7 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     await press(funnel());
     await type('zzz');
     expect($('[data-list-filter-none]')!.textContent).toBe('Nothing matches “zzz”');
+    await pause();
     expect(status()).toBe('Nothing matches “zzz”');
     // The ticked project stays so it can be unticked, and Clear filters stays.
     expect(rowWords()).toEqual(['web', 'Clear filters']);
@@ -247,7 +269,7 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     expect(picks.projects).toEqual(['prj_web']);
   });
 
-  test('Escape empties the field first, then closes', async () => {
+  test('Escape empties the field first, then closes and puts focus back on the funnel', async () => {
     render(LONG);
     await press(funnel());
     await type('bil');
@@ -257,6 +279,8 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     expect(rowWords()).toHaveLength(6 + LONG.length);
     await key('Escape');
     expect(menu()).toBeNull();
+    expect(funnel().getAttribute('aria-expanded')).toBe('false');
+    expect(document.activeElement).toBe(funnel());
   });
 
   test('the clear button empties the field', async () => {
