@@ -44,6 +44,8 @@ export const INBOX_REX_SHOW_TIMEOUT_MS = 3_000;
 export const INBOX_REX_SLOW_BACKOFF_MS = 30_000;
 /** How old the last read may be before a list starts another (it still answers from the last one at once). */
 export const INBOX_REX_FRESH_MS = 2_000;
+/** A status read longer ago than this draws no mark on an icon (stale: today's icon until the next read). */
+export const INBOX_REX_MARK_STALE_MS = 15_000;
 /** A read connection is closed once nothing used it this long. */
 const IDLE_CLOSE_MS = 3_000;
 /** The longest a name shown from Rex is, in characters. */
@@ -368,6 +370,8 @@ export function createInboxRex(options: InboxRexOptions) {
           confirmed.delete(session);
         } else {
           if (!was || was.line !== next.line || was.place.block !== next.place.block || statusKey(was.status) !== statusKey(next.status)) moved = true;
+          // A status gone stale (no mark drawn) is fresh again: the marks come back.
+          else if (next.status && at - was.at > INBOX_REX_MARK_STALE_MS) moved = true;
           confirmed.set(session, { ...next, at });
         }
       }
@@ -415,6 +419,17 @@ export function createInboxRex(options: InboxRexOptions) {
       for (const [session, place] of hints) {
         const known = confirmed.get(session);
         if (known?.status && known.place.session === place.session && known.place.block === place.block) out.set(session, known.status);
+      }
+      return out;
+    },
+
+    /** Like `statuses`, but only those read in the last INBOX_REX_MARK_STALE_MS (an icon's mark is never stale). */
+    freshStatuses(hints: ReadonlyMap<string, InboxPlace>): Map<string, InboxRexStatus> {
+      const out = new Map<string, InboxRexStatus>();
+      const cutoff = now() - INBOX_REX_MARK_STALE_MS;
+      for (const [session, place] of hints) {
+        const known = confirmed.get(session);
+        if (known?.status && known.at >= cutoff && known.place.session === place.session && known.place.block === place.block) out.set(session, known.status);
       }
       return out;
     },

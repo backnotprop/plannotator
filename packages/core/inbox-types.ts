@@ -3595,6 +3595,27 @@ export interface InboxAgent {
    * computer's own window only. Additive.
    */
   rex_status?: { state: "blocked" | "done" | "error"; kind?: "permission" | "question" | "auth" };
+  /**
+   * The status mark on its icon (the owner's "jelly" marks): only for a session the Inbox started in Rex while
+   * "Start new agents in" is Rex, as its pane's status record said at a read of the last few seconds (none when stale
+   * or missing: today's icon). This computer's own window only. Additive.
+   */
+  rex_mark?: InboxRexMark;
+}
+
+/** A Rex pane's status as a mark: OSC 7501's state, and for `blocked` its kind. */
+export interface InboxRexMark {
+  state: "idle" | "working" | "done" | "blocked" | "error";
+  kind?: "permission" | "question" | "auth";
+}
+
+/** A mark as another machine or Inbox sent it: null unless it is one this Inbox knows. */
+export function inboxRexMarkChecked(value: unknown): InboxRexMark | null {
+  const mark = value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+  const state = mark?.state;
+  if (state !== "idle" && state !== "working" && state !== "done" && state !== "blocked" && state !== "error") return null;
+  const kind = state === "blocked" && (mark!.kind === "permission" || mark!.kind === "question" || mark!.kind === "auth") ? mark!.kind : null;
+  return { state, ...(kind ? { kind } : {}) };
 }
 
 /** The most agents a list names per machine; `total` says how many there are past that. */
@@ -3605,7 +3626,8 @@ export const INBOX_AGENTS_LISTED_MAX = 40;
  * `first_thread` that is not text is dropped, the rest of the agent kept.
  */
 export function inboxAgentNamesChecked(agent: InboxAgent, options: { show: boolean } = { show: false }): InboxAgent {
-  const { label, title, first_thread, place, rex_status, ...rest } = agent as InboxAgent & Record<string, unknown>;
+  const { label, title, first_thread, place, rex_status, rex_mark, ...rest } = agent as InboxAgent & Record<string, unknown>;
+  const mark = inboxRexMarkChecked(rex_mark);
   const thread = first_thread as unknown as Record<string, unknown> | null | undefined;
   const where = inboxAgentPlaceChecked(place, options);
   const status = rex_status && typeof rex_status === "object" ? (rex_status as Record<string, unknown>) : null;
@@ -3615,6 +3637,7 @@ export function inboxAgentNamesChecked(agent: InboxAgent, options: { show: boole
     ...rest,
     ...(where ? { place: where } : {}),
     ...(statusState ? { rex_status: { state: statusState, ...(statusKind ? { kind: statusKind } : {}) } } : {}),
+    ...(mark ? { rex_mark: mark } : {}),
     ...(typeof label === "string" ? { label } : {}),
     ...(typeof title === "string" ? { title } : {}),
     ...(thread && typeof thread === "object" && typeof thread.id === "string" && typeof thread.name === "string" ? { first_thread: { id: thread.id, name: thread.name } } : {}),

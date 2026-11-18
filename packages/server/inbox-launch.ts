@@ -2214,6 +2214,21 @@ ${result.text}`);
       });
     },
 
+    /**
+     * The sessions started in Rex, while "Start new agents in" is Rex (their icons' status marks); null otherwise.
+     * No run is read (the list's runs ask Rex's word through this Inbox, which asks this).
+     */
+    rexSessions(): ReadonlySet<string> | null {
+      if (!enabled() || config().startIn !== "rex") return null;
+      const out = new Set<string>();
+      for (const root of roots()) {
+        const launch = root.launch!;
+        const session = inboxLaunchedSession(root);
+        if (!launch.deleted_at && session && inboxLaunchInRex(launch)) out.add(session);
+      }
+      return out;
+    },
+
     /** Changes when any launched thread's line would: part of the windows' delivery signature. */
     signature(): string {
       return roots()

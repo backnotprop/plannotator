@@ -6,7 +6,7 @@
  * `working` though the Inbox heard nothing of a turn; a pane that says it is done or failed keeps the Inbox's `idle`
  * and says so in its card. A pane at rest says nothing new.
  */
-import type { InboxAgent } from "@plannotator/core/inbox-types";
+import type { InboxAgent, InboxRexMark } from "@plannotator/core/inbox-types";
 import type { InboxRexStatus } from "./inbox-rex";
 
 export function withRexStatus(agent: InboxAgent, status: InboxRexStatus | null | undefined): InboxAgent {
@@ -15,4 +15,15 @@ export function withRexStatus(agent: InboxAgent, status: InboxRexStatus | null |
   if (status.state === "working") return agent.state === "working" ? agent : { ...agent, state: "working" };
   if ((status.state === "done" || status.state === "error") && agent.state === "idle") return { ...agent, rex_status: { state: status.state } };
   return agent;
+}
+
+/**
+ * The mark an agent's icon carries (the owner's "jelly" marks), for a session the Inbox started in Rex while "Start
+ * new agents in" is Rex: its pane's status record as read in the last few seconds, as it is (state, and for
+ * `blocked` its kind). An agent ended, or with no fresh record, carries none: today's icon.
+ */
+export function withRexMark(agent: InboxAgent, status: InboxRexStatus | null | undefined): InboxAgent {
+  if (!status || agent.state === "ended") return agent;
+  const mark: InboxRexMark = { state: status.state, ...(status.state === "blocked" && status.kind ? { kind: status.kind } : {}) };
+  return { ...agent, rex_mark: mark };
 }

@@ -187,6 +187,8 @@ describe("the Agents list and Rex", () => {
     await w.agent("ses-blocked", ids);
     await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_status !== undefined);
     expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")).toMatchObject({ state: "waiting", waiting: 0, rex_status: { state: "blocked", kind: "question" } });
+    // Not started in Rex by the Inbox: no mark on its icon (today's icon).
+    expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_mark).toBeUndefined();
     w.fake.setStatus(ids.block, [{ state: "working", app: "claude-code" }]);
     await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-blocked")?.state === "working");
     expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_status).toBeUndefined();
@@ -201,6 +203,13 @@ describe("the Agents list and Rex", () => {
     await w.poll(session, { session: made!.session_id, block: made!.windows[0]!.blocks[0]! });
     await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.place !== undefined);
     expect((await w.agentsOf()).find((a) => a.session === session)?.place).toEqual({ kind: "rex", line: "Rex · my-app / Fake Agent" });
+    // Its pane's status is the mark on its icon, as it is.
+    w.fake.setStatus(made!.windows[0]!.blocks[0]!, [{ state: "blocked", kind: "auth", app: "fake-agent" }]);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_mark !== undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)?.rex_mark).toEqual({ state: "blocked", kind: "auth" });
+    // The tailnet's window gets none.
+    const far = w.tailnet();
+    expect((await w.agentsOf(far.headers, far.at)).find((a) => a.session === session)?.rex_mark).toBeUndefined();
   });
 
   test("a session the Inbox launched in the background gets no place, whatever pane it says", async () => {

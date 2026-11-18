@@ -266,7 +266,7 @@ import { createInboxLiveReview } from "./inbox-live-review";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
 import { createInboxRex, inboxRexSocketPath, type InboxRex, type InboxRexStatus } from "./inbox-rex";
-import { withRexStatus } from "./inbox-rex-status";
+import { withRexMark, withRexStatus } from "./inbox-rex-status";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
@@ -4809,9 +4809,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (shown.size === 0) return groups;
     const statuses = rex.statuses(hints);
     const show = rex.offersShow();
+    // The icons' status marks: only sessions started in Rex while Rex is the choice, from a fresh read.
+    const inRex = launch.rexSessions();
+    const fresh = inRex && inRex.size > 0 ? rex.freshStatuses(hints) : null;
     const agents = own.agents.map((agent) => {
       const line = shown.get(agent.session);
-      return line ? withRexStatus({ ...agent, place: { kind: "rex" as const, line, ...(show ? { show: true as const } : {}) } }, statuses.get(agent.session)) : agent;
+      if (!line) return agent;
+      const placed = withRexStatus({ ...agent, place: { kind: "rex" as const, line, ...(show ? { show: true as const } : {}) } }, statuses.get(agent.session));
+      return fresh && inRex!.has(agent.session) ? withRexMark(placed, fresh.get(agent.session)) : placed;
     });
     const out = [...groups];
     out[at] = { ...own, agents };

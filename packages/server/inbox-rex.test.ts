@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
-import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
+import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_MARK_STALE_MS, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 
 /** Every method the Inbox may call: view (ids and labels), status records (`block.method` `program_status` only), a new session or tab with its command, focus. */
@@ -288,6 +288,24 @@ describe("what a pane says it is doing", () => {
     clock += 3_000;
     await placesRead(rex, hints);
     expect(rex.statuses(hints).get("ses_a")).toEqual({ state: "working" });
+    expect(rex.version()).toBeGreaterThan(before);
+  });
+
+  test("an icon's mark only from a fresh read: stale, none; the next read brings it back and the list hears of it", async () => {
+    let clock = 1_000_000;
+    const { fake, rex } = setup({}, { now: () => clock });
+    const ids = fake.addSession("proj", "Claude Code");
+    fake.setStatus(ids.block, [{ state: "blocked", kind: "question", app: "claude-code" }]);
+    const hints = new Map([["ses_m", placeOf(ids)]]);
+    await placesRead(rex, hints);
+    expect(rex.freshStatuses(hints).get("ses_m")).toEqual({ state: "blocked", kind: "question" });
+    clock += INBOX_REX_MARK_STALE_MS + 1;
+    // Stale: no mark (the hover card's word still stands until the next read).
+    expect(rex.freshStatuses(hints).size).toBe(0);
+    expect(rex.statuses(hints).get("ses_m")).toEqual({ state: "blocked", kind: "question" });
+    const before = rex.version();
+    await placesRead(rex, hints);
+    expect(rex.freshStatuses(hints).get("ses_m")).toEqual({ state: "blocked", kind: "question" });
     expect(rex.version()).toBeGreaterThan(before);
   });
 
