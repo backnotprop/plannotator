@@ -1612,6 +1612,13 @@ function Update-OmpExtensionIfPresent {
     if ([int]::TryParse([string]$env:PLANNOTATOR_OMP_PLUGIN_TIMEOUT, [ref]$n) -and $n -gt 0) { $secs = $n }
     $target = $latestTag.TrimStart('v')
     $entry = Get-OmpExtensionEntry
+    # A local build (link:, file:, a path, a git URL, workspace:): an npm range or tag never holds ":", "/" or "\"
+    # and never starts with ".". The person's own, never installed or upgraded over.
+    if ($entry -and ([string]$entry.Spec -ne "listed") -and (([string]$entry.Spec -match '[:/\\]') -or ([string]$entry.Spec).StartsWith('.'))) {
+        $script:ompExtensionState = "pinned"
+        Write-Host "Oh My Pi: Plannotator extension is a local build in OMP ($($entry.Spec)), left as is."
+        return
+    }
     if ($entry -and ([string]$entry.Spec -match '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$')) {
         $script:ompExtensionState = "pinned"
         Write-Host "Oh My Pi: Plannotator extension pinned to $(([string]$entry.Spec).TrimStart('v')) in OMP, left as is. To move it: omp plugin install $ompExtensionPackage@$target"

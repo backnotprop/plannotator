@@ -8,7 +8,7 @@
  * the Inbox runs `codex queue`). Pure.
  */
 import { INBOX_CLAUDE_PLUGIN_INSTALL } from '@plannotator/core/inbox-launch-ready';
-import { INBOX_AGENT_IDS, INBOX_HOST_NAMES, INBOX_MCP_WAKE_MIN_VERSIONS, INBOX_MCP_WAKING_HOSTS, INBOX_WAKING_HOSTS, inboxToolCostText, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
+import { INBOX_AGENT_IDS, INBOX_HOST_NAMES, INBOX_MCP_WAKE_MIN_VERSIONS, INBOX_MCP_WAKING_HOSTS, INBOX_WAKING_HOSTS, OMP_LOCAL_BUILD_REASON, inboxToolCostText, type InboxAgentId, type InboxAgentRow, type InboxAgentsModel } from '@plannotator/core/inbox-types';
 import type { HarnessId } from './harnesses';
 
 /** Plannotator's own connections, in the order the screen offers them. */
@@ -91,8 +91,8 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
   // DeepSeek Harness: Plannotator's plugin, reached through its tool, but not on the first-run screen's host cards.
   if (row.reach.kind === 'tool') {
     if (live || row.reach.on) return { ...base, state: 'ready' };
-    // Oh My Pi with an extension the person pinned before its Inbox tool was on there: theirs to move, not a step.
-    if (row.id === 'oh-my-pi' && row.reach.reason) return { ...base, state: 'tool-off', chosenOff: true, offNote: OMP_PINNED_NOTE };
+    // Oh My Pi with an extension the person pinned before its Inbox tool was on there, or a local build: theirs, not a step.
+    if (row.id === 'oh-my-pi' && row.reach.reason) return { ...base, state: 'tool-off', chosenOff: true, offNote: row.reach.reason === OMP_LOCAL_BUILD_REASON ? OMP_LOCAL_NOTE : OMP_PINNED_NOTE };
     return { ...base, state: 'tool-off', locked: row.reach.locked, chosenOff: row.tool?.chosen_off === true };
   }
   if (row.reach.on) return { ...base, state: 'mcp' };
@@ -104,6 +104,8 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
 
 /** "Left to do" for Oh My Pi when its extension is pinned to a version without the Inbox tool on there. */
 export const OMP_PINNED_NOTE = 'extension pinned to an older version';
+/** "Left to do" for Oh My Pi when its extension is a local build without the Inbox tool on there. */
+export const OMP_LOCAL_NOTE = 'a local build, left as is';
 
 /** Done: reaches the Inbox (through the plugin, or through MCP). */
 export function isDone(row: ConnectRow): boolean {
@@ -246,6 +248,7 @@ export function blockedText(plan: ConnectPlan, opts: { skipped: readonly string[
   for (const row of off) {
     if (row.offNote === 'plugin turned off') parts.push(`Plannotator's plugin is turned off in ${row.label} (claude plugin enable plannotator@plannotator turns it back on).`);
     else if (row.offNote === 'plugin turned off by managed settings') parts.push(`Your organization's managed settings turn Plannotator's plugin off in ${row.label}.`);
+    else if (row.offNote === OMP_LOCAL_NOTE) parts.push(`${row.label} has a local build of Plannotator's extension, left as is; its Inbox tool is off there.`);
     else if (row.offNote === OMP_PINNED_NOTE) parts.push(`${row.label} has Plannotator's extension pinned to a version without the Inbox tool there (omp plugin install @plannotator/pi-extension moves it to the newest).`);
     else if (row.offNote) parts.push(`Plannotator's ${row.label} mod is turned off (PLANNOTATOR_CLAUDE_MOD or claudeCodeMod), so ${row.label} has no Inbox tool.`);
   }

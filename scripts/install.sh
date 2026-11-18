@@ -2309,7 +2309,8 @@ update_pi_extension_if_present() {
 # (docs/plugin-manager-installer-plumbing.md); a listed package whose own
 # package.json can't be read is installed again. An exact version in the
 # manifest (`omp plugin install @plannotator/pi-extension@0.28.60`) is the
-# person's pin, left as is, as the Pi step leaves one in Pi's settings. Each
+# person's pin, left as is, as the Pi step leaves one in Pi's settings; so is
+# a local build (a `link:`, `file:`, path, git or `workspace:` spec). Each
 # call is time-bounded (its process group, so omp's bun or npm stops too), with
 # stdin from /dev/null, run in the home folder (never a project's plugin
 # scope); a failure or a hang never fails the install: it prints the command
@@ -2398,6 +2399,14 @@ update_omp_extension_if_present() {
     _omp_target="${latest_tag#v}"
     _omp_spec=$(omp_extension_spec)
     _omp_before=$(omp_extension_version)
+    # A local build (`link:`, `file:`, a path, a git URL, `workspace:`): an npm range or tag never holds ":", "/"
+    # or "\" and never starts with ".". The person's own, never installed or upgraded over.
+    case "$_omp_spec" in
+        *:*|*/*|*\\*|.*)
+            omp_extension_state="pinned"
+            echo "Oh My Pi: Plannotator extension is a local build in OMP (${_omp_spec}), left as is."
+            return 0 ;;
+    esac
     case "$_omp_spec" in
         [0-9]*.*.*|v[0-9]*.*.*)
             case "$_omp_spec" in

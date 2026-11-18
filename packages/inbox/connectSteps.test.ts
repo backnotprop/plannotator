@@ -274,3 +274,9 @@ test('Oh My Pi with an extension the person pinned before its Inbox tool was on 
   expect(plan.next).toBeNull();
   expect(blockedText(plan, { skipped: [], toolEnv: null }).text).toContain("Oh My Pi has Plannotator's extension pinned to a version without the Inbox tool there (omp plugin install @plannotator/pi-extension moves it to the newest).");
 });
+
+test('Oh My Pi with a local build of the extension: left to the person, said as such, no Connect step', () => {
+  const plan = connectPlan(agentsModel({ 'oh-my-pi': { detected: true, reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: 'A local build is installed in Oh My Pi, left as is.' } } }));
+  expect(plan.next).toBeNull();
+  expect(blockedText(plan, { skipped: [], toolEnv: null }).text).toContain("Oh My Pi has a local build of Plannotator's extension, left as is; its Inbox tool is off there.");
+});

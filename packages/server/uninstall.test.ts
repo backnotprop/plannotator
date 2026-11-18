@@ -2054,6 +2054,17 @@ describe("host and platform integrations", () => {
     const skipped = await runPlannotatorUninstall({ purge: false, dryRun: false }, noOmp.environment);
     expect(skipped.warnings).toContain("Skipped: Oh My Pi extension @plannotator/pi-extension (omp is not on PATH). To remove it, run `omp plugin uninstall @plannotator/pi-extension`.");
     expect(skipped.errors.filter((line) => line.includes("Oh My Pi"))).toEqual([]);
+
+    // A local build (link:, file:, git) is the person's own: left, said, omp never run.
+    for (const spec of ["link:../plannotator/apps/pi-extension", "file:/work/pi-extension", "git+https://github.com/backnotprop/plannotator.git"]) {
+      const local = createFixture();
+      listed(local.homeDir);
+      writeJson(manifest(local.homeDir), { name: "omp-plugins", private: true, dependencies: { "@plannotator/pi-extension": spec } });
+      const kept = await runPlannotatorUninstall({ purge: false, dryRun: false }, { ...local.environment, which: (command) => (command === "omp" ? "/fake/omp" : null) });
+      expect(local.commandCalls.filter((call) => call.command === "/fake/omp")).toEqual([]);
+      expect(kept.warnings).toContain(`Left as is: Oh My Pi extension @plannotator/pi-extension is a local build (${spec}). To remove it, run \`omp plugin uninstall @plannotator/pi-extension\`.`);
+      expect(kept.errors.filter((line) => line.includes("Oh My Pi"))).toEqual([]);
+    }
   });
 
   test("allows Claude to remove its plugin data during purge", async () => {

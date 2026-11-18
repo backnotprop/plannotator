@@ -42,6 +42,7 @@ import {
   INBOX_AGENT_IDS,
   INBOX_AGENT_LABELS,
   INBOX_ANTIGRAVITY_DATA_DIRS,
+  OMP_LOCAL_BUILD_REASON,
   inboxAgentList,
   inboxElsewhereText,
   inboxGrantText,
@@ -719,12 +720,15 @@ export function ompPluginDirs(e: AgentEnvironment): string[] {
  * Plannotator's extension as Oh My Pi installed it, read only. Null: OMP's plugin manifest (`<plugins>/package.json`
  * dependencies) does not list it. `version` "": listed, but the package's own package.json can't be read (an install
  * cut short: treated as not installed, so it is installed again). `pinned`: the manifest holds an exact version
- * (`omp plugin install @plannotator/pi-extension@0.28.60`), left as it is. `current`: its Inbox tool is on in OMP.
+ * (`omp plugin install @plannotator/pi-extension@0.28.60`), left as it is. `local`: the manifest holds a spec that is
+ * not an npm range or tag (`link:`, `file:`, a path, a git URL, `workspace:`): a local build, never installed or
+ * upgraded over, whatever its package says. `current`: its Inbox tool is on in OMP.
  */
 export interface OmpExtension {
   version: string;
   spec: string;
   pinned: boolean;
+  local: boolean;
   current: boolean;
   dir: string;
 }
@@ -743,6 +747,7 @@ export function ompExtension(e: AgentEnvironment): OmpExtension | null {
     }
     const text = typeof spec === "string" ? spec.trim() : "";
     const pinned = /^v?\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(text);
+    const local = ompSpecIsLocal(text);
     const pkg = readAgentFile(join(dir, "node_modules", ...OMP_EXTENSION_PACKAGE.split("/"), "package.json"));
     let version = "";
     let current = false;
@@ -756,9 +761,18 @@ export function ompExtension(e: AgentEnvironment): OmpExtension | null {
         version = "";
       }
     }
-    return { version, spec: text, pinned, current, dir };
+    return { version, spec: text, pinned, local, current, dir };
   }
   return null;
+}
+
+/**
+ * Whether a manifest spec names a local build: anything that is not an npm range, version or dist-tag. Those never
+ * hold ":", "/" or "\\" and never start with "." (`link:../x`, `file:/x`, `./x`, `git+https://…`, `github:o/r`,
+ * `o/r`, `workspace:*`, an `npm:` alias), so one that does is the person's own.
+ */
+export function ompSpecIsLocal(spec: string): boolean {
+  return /[:/\\]/.test(spec) || spec.startsWith(".");
 }
 
 /** The extension's version as OMP installed it: null when not listed, "" when its package can't be read. */
@@ -788,22 +802,26 @@ function ompNotDone(line: string, e: AgentEnvironment): string {
 /**
  * Oh My Pi's way: Plannotator's Pi extension and its tool. The connect step installs the extension with OMP's own
  * command when it is not there (or its package can't be read), or moves one without the OMP default
- * (`omp plugin upgrade`). An exact version the person pinned in OMP is left as it is.
+ * (`omp plugin upgrade`). An exact version the person pinned in OMP, and a local build, are left as they are.
  */
 function ompWay(e: AgentEnvironment): ConnectWay {
   const ext = ompExtension(e);
-  const args = !ext || ext.version === "" ? ["plugin", "install", OMP_EXTENSION_PACKAGE] : !ext.current && !ext.pinned ? ["plugin", "upgrade", OMP_EXTENSION_PACKAGE] : null;
+  const args = ext?.local ? null : !ext || ext.version === "" ? ["plugin", "install", OMP_EXTENSION_PACKAGE] : !ext.current && !ext.pinned ? ["plugin", "upgrade", OMP_EXTENSION_PACKAGE] : null;
   const step: ToolConnectStep | null = args
     ? { bin: "omp", args, done: ompExtensionCurrent, cwd: e.homeDir, timeoutMs: OMP_INSTALL_TIMEOUT_MS, seen: (env) => ompExtensionVersion(env), notDone: ompNotDone }
     : null;
   return { kind: "tool", host: "pi", piHost: "oh-my-pi", ...(step ? { then: step } : {}) };
 }
 
-/** An extension pinned in Oh My Pi too old to have its Inbox tool on there: why, for Settings (null otherwise). */
-function ompPinnedReason(e: AgentEnvironment): string | null {
+/**
+ * An extension Oh My Pi keeps as the person set it: a local build (said whatever its state), or a pin too old to have
+ * its Inbox tool on there. `on`: its tool is on in OMP by default. Null: neither.
+ */
+function ompKept(e: AgentEnvironment): { reason: string; on: boolean } | null {
   const ext = ompExtension(e);
+  if (ext?.local) return { reason: OMP_LOCAL_BUILD_REASON, on: ext.current };
   if (!ext || !ext.pinned || ext.current || ext.version === "") return null;
-  return `Plannotator's extension is pinned to ${ext.version} in Oh My Pi, which has no Inbox tool there by default. omp plugin install ${OMP_EXTENSION_PACKAGE} moves it to the newest`;
+  return { reason: `Plannotator's extension is pinned to ${ext.version} in Oh My Pi, which has no Inbox tool there by default. omp plugin install ${OMP_EXTENSION_PACKAGE} moves it to the newest`, on: false };
 }
 
 /** Whether a tool way's Inbox tool is on: Oh My Pi's own default, else the host's. */
@@ -2424,13 +2442,14 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
     if (way.then && !way.then.setting && configuredInboxTool(loadConfig(), way.host) !== false && toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv) !== false) {
       return { kind: "tool", on: false, state: "not_connected", path: null, locked: false, reason: `Turning this on runs ${[way.then.bin, ...way.then.args].join(" ")}` };
     }
-    // Oh My Pi with an extension the person pinned before the OMP default: off unless turned on by name or by env.
-    const pinned = way.piHost === "oh-my-pi" ? ompPinnedReason(e) : null;
-    if (pinned && configuredInboxTool(loadConfig(), way.host) !== true && parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== true) {
-      return { kind: "tool", on: false, state: "off", path: null, locked, reason: pinned };
+    // Oh My Pi with an extension the person pinned before the OMP default, or a local build without it: off unless
+    // turned on by name or by env. A local build is said either way.
+    const kept = way.piHost === "oh-my-pi" ? ompKept(e) : null;
+    if (kept && !kept.on && configuredInboxTool(loadConfig(), way.host) !== true && parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== true) {
+      return { kind: "tool", on: false, state: "off", path: null, locked, reason: kept.reason };
     }
     const on = !modOff && toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv) && (!way.then || way.then.setting !== undefined || way.then.done(e));
-    return { kind: "tool", on, state: on ? "connected" : "off", path: null, locked, reason: modOff ? CLAUDE_CODE_MOD_OFF_REASON : null };
+    return { kind: "tool", on, state: on ? "connected" : "off", path: null, locked, reason: modOff ? CLAUDE_CODE_MOD_OFF_REASON : (kept?.reason ?? null) };
   }
   if (way.kind === "manual") return { kind: "manual", on: false, state: "manual", path, locked: false, reason: way.why };
   if (way.kind === "none") return { kind: "none", on: false, state: "manual", path, locked: false, reason: null };

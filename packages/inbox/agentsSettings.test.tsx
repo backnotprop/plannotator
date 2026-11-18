@@ -561,3 +561,9 @@ test.skipIf(!hasDom)('Pi and Oh My Pi share one switch: both rows say so when bo
   const alone = mount(model({ agents: [tool('pi', 'Pi')] }));
   expect(alone.textContent).not.toContain(words);
 });
+
+test.skipIf(!hasDom)('a local build of the extension in Oh My Pi is said on its row, on or off', () => {
+  const words = 'A local build is installed in Oh My Pi, left as is.';
+  const el = mount(model({ agents: [tool('oh-my-pi', 'Oh My Pi', { reach: { kind: 'tool', on: true, state: 'connected', path: null, locked: false, reason: words } })] }));
+  expect(rows(group(el, 'oh-my-pi'))[0]!.sub).toBe(words);
+});

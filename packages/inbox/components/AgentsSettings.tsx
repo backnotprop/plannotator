@@ -543,7 +543,7 @@ function AgentGroup({
         // Connected under another QWEN_HOME still reaches the Inbox from there: its value says where, so no off line.
         off={reachSwitchable && !reach.on && reach.state !== 'elsewhere' ? offLine('reach', offWords.reach(row.label)) : null}
         // Oh My Pi without Plannotator's extension: turning it on runs `omp plugin install` (the reason names it).
-        sub={withShared((modOff || reach.state === 'not_connected' || (reach.state === 'off' && row.id === 'oh-my-pi')) && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null, reach.kind === 'tool' ? shared : undefined)}
+        sub={withShared((modOff || reach.state === 'not_connected' || (row.id === 'oh-my-pi' && reach.reason !== null)) && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null, reach.kind === 'tool' ? shared : undefined)}
         warn={modOff && reach.kind === 'tool'}
         r={
           reachSwitchable ? (

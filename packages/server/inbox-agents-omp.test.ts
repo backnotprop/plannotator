@@ -172,6 +172,26 @@ describe("Oh My Pi", () => {
     expect((await inboxAgentReach("oh-my-pi", options())).on).toBe(true);
   });
 
+  test("a local build in OMP (link:, file:, git) is never installed or upgraded over; Settings says so", async () => {
+    fake.install("omp");
+    for (const spec of ["link:../plannotator/apps/pi-extension", "file:/work/plannotator/apps/pi-extension", "git+https://github.com/backnotprop/plannotator.git"]) {
+      // Without the OMP default: off, with the line, nothing run, also from Settings' switch.
+      ompHas("0.28.60", { spec, feature: false });
+      await start();
+      const reach = await inboxAgentReach("oh-my-pi", options());
+      expect({ on: reach.on, state: reach.state, reason: reach.reason }).toEqual({ on: false, state: "off", reason: "A local build is installed in Oh My Pi, left as is." });
+      expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
+      // With it: on, still said.
+      ompHas("0.29.1", { spec });
+      const current = await inboxAgentReach("oh-my-pi", options());
+      expect({ on: current.on, reason: current.reason }).toEqual({ on: true, reason: "A local build is installed in Oh My Pi, left as is." });
+      // Its package unreadable (a link to a folder that moved): still not installed over.
+      rmSync(pkgFile());
+      await start({}, { version: "0.29.3" });
+    }
+    expect(ompCalls()).toEqual([]);
+  });
+
   test("a current extension: nothing is run, and OMP shows its tool on while Pi's own default stays off", async () => {
     fake.install("omp");
     ompHas("0.29.1");

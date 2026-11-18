@@ -82,7 +82,8 @@ omp plugin install @plannotator/pi-extension
 Update with `omp plugin upgrade @plannotator/pi-extension`, then type
 `/restart` in each open OMP session to load the new version. A version you
 pinned (`omp plugin install @plannotator/pi-extension@0.28.60`) is left as
-it is by the installer and the Inbox. Remove with
+it is by the installer and the Inbox, and so is a local build (`link:`,
+`file:`, a path or git). Remove with
 `omp plugin uninstall @plannotator/pi-extension`.
 
 Open reviews with the extension's commands: `/plannotator-review`,

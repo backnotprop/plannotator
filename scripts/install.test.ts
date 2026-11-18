@@ -5785,6 +5785,22 @@ function ompStepTests(runner: OmpRunner) {
     expect(r.out).toContain(`Oh My Pi: Plannotator extension pinned to ${PI_OLDER} in OMP, left as is. To move it: omp plugin install ${OMP_PKG}@${PI_RELEASE}\n`);
   }, timeout);
 
+  test(`${runner}: a local build in OMP (link:, file:, git) is left as is, never installed or upgraded over`, () => {
+    for (const spec of ["link:../plannotator/apps/pi-extension", "file:/work/plannotator/apps/pi-extension", "git+https://github.com/backnotprop/plannotator.git"]) {
+      const s = setupOmpSandbox({ installed: PI_OLDER, spec });
+      const r = runOmpStep(runner, s);
+      expect(r.code).toBe(0);
+      expect(s.calls()).toEqual([]);
+      expect(s.version()).toBe(PI_OLDER);
+      expect(r.out).toContain(`Oh My Pi: Plannotator extension is a local build in OMP (${spec}), left as is.\n`);
+    }
+    // Even when its package can't be read (a link to a folder that moved): not installed over.
+    const moved = setupOmpSandbox({ installed: PI_OLDER, spec: "link:../gone" });
+    rmSync(join(moved.sandbox.home, ".omp", "plugins", "node_modules"), { recursive: true, force: true });
+    expect(runOmpStep(runner, moved).code).toBe(0);
+    expect(moved.calls()).toEqual([]);
+  }, timeout * 2);
+
   test(`${runner}: listed but its package can't be read: installed again`, () => {
     const s = setupOmpSandbox({ installed: PI_OLDER });
     rmSync(join(s.sandbox.home, ".omp", "plugins", "node_modules"), { recursive: true, force: true });

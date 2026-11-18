@@ -827,6 +827,8 @@ async function removeHostPlugins(
     references: () => HostReferences;
     /** Its failure is a warning with the command, never an uninstall error (an extension another agent loads). */
     optional?: boolean;
+    /** Why it is left as it is (a local build the person put there), said as a warning; null: remove it. */
+    leave?: () => string | null;
   }> = [
     {
       label: "Claude Code plugin plannotator@plannotator",
@@ -888,6 +890,11 @@ async function removeHostPlugins(
       command: "omp",
       args: ["plugin", "uninstall", OMP_EXTENSION_PACKAGE],
       optional: true,
+      // A local build (`link:`, `file:`, a path, git) is the person's own: left, and said.
+      leave: () => {
+        const ext = ompExtension(agentEnvironmentOf(environment));
+        return ext?.local ? `Left as is: Oh My Pi extension ${OMP_EXTENSION_PACKAGE} is a local build (${ext.spec}). To remove it, run \`omp plugin uninstall ${OMP_EXTENSION_PACKAGE}\`.` : null;
+      },
       references: () => {
         const ext = ompExtension(agentEnvironmentOf(environment));
         return { references: ext ? [join(ext.dir, "package.json")] : [], otherScopes: [], unreadable: [] };
@@ -916,6 +923,11 @@ async function removeHostPlugins(
 
   const retry = formatUninstallRetryCommand(request);
   for (const action of actions) {
+    const left = action.leave?.() ?? null;
+    if (left) {
+      state.warnings.push(left);
+      continue;
+    }
     const scan = action.references();
     if (scan.unreadable.length > 0) {
       for (const unreadable of scan.unreadable) reportUnreadableConfig(action.owner, unreadable, request, state);

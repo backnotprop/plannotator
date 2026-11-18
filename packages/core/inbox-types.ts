@@ -2691,6 +2691,12 @@ export function inboxElsewhereText(moved: { agent: InboxAgentId; path: string | 
   return `${label} is connected in ${moved.path ?? "another file"}, but ${why}. Plannotator left both as they are; Settings → Agents shows it off here, and turning it on moves it.`;
 }
 
+/**
+ * Settings' line for an Oh My Pi whose Plannotator extension is a local build (a `link:`, `file:`, path, git or
+ * workspace spec in OMP's plugin manifest): the Inbox and the installers never install or upgrade over it.
+ */
+export const OMP_LOCAL_BUILD_REASON = "A local build is installed in Oh My Pi, left as is.";
+
 export function inboxGrantText(grant: { agent: InboxAgentId; setting: string; undo: string }): string {
   return `Plannotator turned on ${INBOX_AGENT_LABELS[grant.agent]}'s ${grant.setting}, so your replies can start a turn in the session that asked. To turn it off: ${grant.undo}`;
 }
