@@ -56,11 +56,24 @@ function marksNow(groups: readonly InboxAgentsGroup[] | null): Map<string, Inbox
   return out;
 }
 
+/** One shared mark per state and kind: an icon re-renders only when its own agent's mark changes, not on every list. */
+const sharedMarks = new Map<string, InboxRexMark>();
+const markKey = (mark: InboxRexMark | null | undefined) => (mark ? `${mark.state}|${mark.kind ?? ''}` : '');
+function sharedMark(key: string): InboxRexMark | null {
+  if (!key) return null;
+  let mark = sharedMarks.get(key);
+  if (!mark) {
+    const [state, kind] = key.split('|') as [InboxRexMark['state'], InboxRexMark['kind'] | ''];
+    mark = kind ? { state, kind } : { state };
+    sharedMarks.set(key, mark);
+  }
+  return mark;
+}
+
 /** The mark an agent's icon carries now (an agent's id or one of its sessions), or null: today's icon. */
 export function useRexMarkOf(agent: string | null | undefined): InboxRexMark | null {
-  const groups = useSyncExternalStore(subscribeInboxAgents, inboxAgentsNow, inboxAgentsNow);
-  if (!agent) return null;
-  return marksNow(groups)?.get(agent) ?? null;
+  const read = () => (agent ? markKey(marksNow(inboxAgentsNow())?.get(agent)) : '');
+  return sharedMark(useSyncExternalStore(subscribeInboxAgents, read, read));
 }
 
 const reducedMotion = () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
