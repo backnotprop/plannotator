@@ -96,7 +96,7 @@ test('a rejected second bulk hide keeps the first batch hidden and reloads the l
   globalThis.fetch = (async () => {
     const body = ++writes === 1 ? { hidden: [] } : { error: 'Second batch refused' };
     return Response.json(body, { status: writes === 1 ? 200 : 400 });
-  }) as typeof fetch;
+  }) as unknown as typeof fetch;
   try {
     await expect(hidePulls(picks)).rejects.toThrow('Second batch refused');
     const model = pullsShown({ ...MODEL, pulls: picks }, hiddenChangesNow())!;
