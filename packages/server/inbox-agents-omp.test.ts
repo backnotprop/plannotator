@@ -197,6 +197,29 @@ describe("Oh My Pi", () => {
     expect(ompCalls()).toEqual([]);
   });
 
+  test("a pin whose package can't be read is still the person's pin: not installed over, said once with why", async () => {
+    fake.install("omp");
+    ompHas("0.28.60", { spec: "0.28.60" });
+    rmSync(pkgFile());
+    const reason = `Plannotator's extension is pinned to 0.28.60 in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install ${PKG} moves it to the newest.`;
+    const report = await start();
+    expect(ompCalls()).toEqual([]);
+    expect(report.added).not.toContain("oh-my-pi");
+    expect(report.manual_why).toEqual([{ agent: "oh-my-pi", why: reason }]);
+    const reach = await inboxAgentReach("oh-my-pi", options());
+    expect({ on: reach.on, state: reach.state, reason: reach.reason }).toEqual({ on: false, state: "off", reason });
+    expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
+    expect(ompCalls()).toEqual([]);
+  });
+
+  test("two starts at once: one install, and only the run that started it says it is installing", async () => {
+    fake.install("omp");
+    const reports = await Promise.all([connectInboxAgents(options({ FAKE_OMP_DELAY_MS: "300" })), connectInboxAgents(options({ FAKE_OMP_DELAY_MS: "300" }))]);
+    await agentInstallsSettled();
+    expect(reports.map((report) => report.installing ?? []).flat()).toEqual(["oh-my-pi"]);
+    expect(ompCalls()).toEqual([`plugin install ${PKG}`]);
+  });
+
   test("a current extension: nothing is run, and OMP shows its tool on while Pi's own default stays off", async () => {
     fake.install("omp");
     ompHas("0.29.1");
@@ -237,6 +260,8 @@ describe("Oh My Pi", () => {
     expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
     expect(ompCalls()).toEqual([`plugin install ${PKG}`]);
     expect((await inboxAgentReach("oh-my-pi", options())).on).toBe(true);
+    // The switch owned the install: it writes the "Installed… /restart" line.
+    expect(readInboxAgents(dataDir).last_report?.installed).toEqual(["oh-my-pi"]);
     // Nothing set: off writes pi:false, on takes it out again.
     expect(await setInboxAgentReach("oh-my-pi", false, options())).toBeNull();
     expect(JSON.parse(configText()).inboxTool).toEqual({ pi: false });

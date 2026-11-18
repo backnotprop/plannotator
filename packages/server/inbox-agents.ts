@@ -806,7 +806,8 @@ function ompNotDone(line: string, e: AgentEnvironment): string {
  */
 function ompWay(e: AgentEnvironment): ConnectWay {
   const ext = ompExtension(e);
-  const args = ext?.local ? null : !ext || ext.version === "" ? ["plugin", "install", OMP_EXTENSION_PACKAGE] : !ext.current && !ext.pinned ? ["plugin", "upgrade", OMP_EXTENSION_PACKAGE] : null;
+  // A pin is the person's whether or not its package can be read, as the installers read it.
+  const args = ext?.local || ext?.pinned ? null : !ext || ext.version === "" ? ["plugin", "install", OMP_EXTENSION_PACKAGE] : !ext.current && !ext.pinned ? ["plugin", "upgrade", OMP_EXTENSION_PACKAGE] : null;
   const step: ToolConnectStep | null = args
     ? { bin: "omp", args, done: ompExtensionCurrent, cwd: e.homeDir, timeoutMs: OMP_INSTALL_TIMEOUT_MS, seen: (env) => ompExtensionVersion(env), notDone: ompNotDone }
     : null;
@@ -815,13 +816,14 @@ function ompWay(e: AgentEnvironment): ConnectWay {
 
 /**
  * An extension Oh My Pi keeps as the person set it: a local build (said whatever its state), or a pin too old to have
- * its Inbox tool on there. `on`: its tool is on in OMP by default. Null: neither.
+ * its Inbox tool on there, or one whose package can't be read (still the person's pin: never installed over).
+ * `on`: its tool is on in OMP by default. Null: neither.
  */
 function ompKept(e: AgentEnvironment): { reason: string; on: boolean } | null {
   const ext = ompExtension(e);
   if (ext?.local) return { reason: OMP_LOCAL_BUILD_REASON, on: ext.current };
-  if (!ext || !ext.pinned || ext.current || ext.version === "") return null;
-  return { reason: `Plannotator's extension is pinned to ${ext.version} in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install ${OMP_EXTENSION_PACKAGE} moves it to the newest.`, on: false };
+  if (!ext || !ext.pinned || ext.current) return null;
+  return { reason: `Plannotator's extension is pinned to ${ext.version || ext.spec.replace(/^v/, "")} in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install ${OMP_EXTENSION_PACKAGE} moves it to the newest.`, on: false };
 }
 
 /** Whether a tool way's Inbox tool is on: Oh My Pi's own default, else the host's. */
@@ -2174,7 +2176,11 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   } catch {
     // The records could not be kept: this run's adds are found again next time ("found").
   }
-  for (const install of installs) startAgentInstall(install.id, install.step, options);
+  // Said as installing only when this run's install started (Settings' switch may own the one running now).
+  for (const install of installs) {
+    if (!startAgentInstall(install.id, install.step, options)) report.installing = (report.installing ?? []).filter((id) => id !== install.id);
+  }
+  if (report.installing?.length === 0) delete report.installing;
   return report;
 }
 
@@ -2647,6 +2653,12 @@ export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options:
       // The background install may have written the file meanwhile: carry on from what it wrote.
       if (running) Object.assign(file, readInboxAgents(options.dataDir), { tool_before_off: file.tool_before_off });
       if (file.install_failed) delete file.install_failed[id];
+      // This switch owned the install: its "Installed… /restart" line is written here (the background one writes its own).
+      if (!running) {
+        const pendingReport = file.last_report && !file.last_report.seen ? file.last_report : null;
+        const said: InboxConnectReport = pendingReport ?? { at, first: false, added: [], already: [], failed: [], foreign: [], manual: [], unfinished: [], claude_code: false };
+        file.last_report = { ...said, installed: [...(said.installed ?? []).filter((agent) => agent !== id), id], seen: false };
+      }
     }
     file.agents[id] = { state: on ? "added" : "off", reach: "tool", path: null, at };
   } else if (on) {
