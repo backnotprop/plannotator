@@ -389,10 +389,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
 
   for (const [gesture, shown] of [
     ['pointermove', 'semantic'],
-    ['pointerdown', 'semantic'],
+    ['pointerdown', 'off'],
     ['click', 'off'],
     ['Enter', 'off'],
-    ['touch that scrolls', 'semantic'],
+    ['touch that scrolls', 'off'],
     ['tap', 'off'],
   ] as const) {
     test.skipIf(!hasDom)(`an arrow met by ${gesture} before the note arrives: the note ends ${shown === 'semantic' ? 'shown by itself' : 'offered, the opened lines left alone'}`, async () => {
@@ -406,22 +406,35 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
         dispose: () => {},
       };
       const { read } = hostReader();
-      await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
-      await pressArrow(
-        gesture === 'Enter'
-          ? [Object.assign(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }))]
-          : gesture === 'touch that scrolls'
-            ? [touchAt('touchstart', 0), touchAt('touchend', 60)]
-            : gesture === 'tap'
-              ? [touchAt('touchstart', 0), touchAt('touchend', 2)]
-              : gesture,
-      );
-      const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
-      await act(async () => {
-        await options.loadDiffFiles({ name: 'a.ts' });
-        await new Promise((resolve) => setTimeout(resolve, 600));
-      });
-      expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe(shown);
+      const realRect = Element.prototype.getBoundingClientRect;
+      const realSizes = (['scrollHeight', 'clientHeight'] as const).map((name) => [name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)] as const);
+      Element.prototype.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, right: 800, width: 800, top: 0, bottom: 700, height: 700, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 3000 });
+      Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
+      try {
+        await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
+        await pressArrow(
+          gesture === 'Enter'
+            ? [Object.assign(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }))]
+            : gesture === 'touch that scrolls'
+              ? [touchAt('touchstart', 0), touchAt('touchend', 60)]
+              : gesture === 'tap'
+                ? [touchAt('touchstart', 0), touchAt('touchend', 2)]
+                : gesture,
+        );
+        const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
+        await act(async () => {
+          await options.loadDiffFiles({ name: 'a.ts' });
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        });
+        expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe(shown);
+      } finally {
+        Element.prototype.getBoundingClientRect = realRect;
+        for (const [name, real] of realSizes) {
+          if (real) Object.defineProperty(HTMLElement.prototype, name, real);
+          else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+        }
+      }
     });
   }
 
@@ -557,5 +570,238 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     const { read, reads } = hostReader();
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });
     expect(reads).toEqual([]);
+  });
+});
+
+describe('AllFilesCodeView semantic notes that land after the person started reading', () => {
+  const box = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
+  const tops = new Map<Element, number>();
+  let pageHeight = 10_000;
+  let hidden = false;
+  const sizes = ['scrollHeight', 'clientHeight'] as const;
+  let restore: (() => void) | null = null;
+  afterEach(() => {
+    restore?.();
+    restore = null;
+    tops.clear();
+    pageHeight = 10_000;
+    hidden = false;
+  });
+
+  async function reading(files: string[], at: Record<string, number>, extra: Partial<React.ComponentProps<typeof AllFilesCodeView>> = {}, secondOpinions: SemDiffResult[] = []) {
+    if (!restore) {
+      const realRect = Element.prototype.getBoundingClientRect;
+      const realSizes = sizes.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
+      restore = () => {
+        Element.prototype.getBoundingClientRect = realRect;
+        sizes.forEach((name, index) => {
+          if (realSizes[index]) Object.defineProperty(HTMLElement.prototype, name, realSizes[index]);
+          else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+        });
+      };
+    }
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
+    };
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => pageHeight });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
+    const gates: (() => void)[] = [];
+    let asked = 0;
+    const client: SemDiffClient = {
+      supports: (path) => path.endsWith('.ts'),
+      diff: (_path, _old, _new, _signal, options) =>
+        new Promise((resolve) => gates.push(() => resolve(options ? { ...(secondOpinions.shift() ?? moved), secondOpinion: { state: 'ok', links: [{ operationIndex: 0, candidateId: `c${++asked}` }] } as never } : moved))),
+      attempt: async () => ({ result: moved, failed: false }),
+      dispose: () => {},
+    };
+    const { read } = hostReader();
+    await mount(files.map(changed), { semDiffClient: client, fetchFileContent: read, ...extra });
+    const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
+    const nodes = new Map<string, HTMLElement>();
+    await act(async () => {
+      for (const item of items.values()) {
+        const node = document.createElement('div');
+        document.body.appendChild(node);
+        const path = files.find((file) => item.id.includes(file))!;
+        nodes.set(path, node);
+        tops.set(node, at[path]!);
+        options.onPostRender(node, {}, 'mount', { item });
+      }
+    });
+    const land = async () => {
+      await act(async () => {
+        for (const open of gates.splice(0)) open();
+        await new Promise((resolve) => setTimeout(resolve, 260));
+      });
+    };
+    const swapped = (path: string) => ([...items.values()].find((item) => item.id.includes(path))!.fileDiff.semanticOperations as unknown[] | undefined)?.length === 1;
+    const move = (path: string, top: number) => void tops.set(nodes.get(path)!, top);
+    const redraw = async () => {
+      await act(async () => {
+        for (const item of items.values()) options.onPostRender(nodes.get(files.find((file) => item.id.includes(file))!)!, {}, 'update', { item });
+      });
+    };
+    const drawnKey = (path: string) => String([...items.values()].find((item) => item.id.includes(path))!.fileDiff.cacheKey ?? '');
+    const rerender = async (props: Partial<React.ComponentProps<typeof AllFilesCodeView>>) => {
+      await act(async () => {
+        root!.render(
+          <AllFilesCodeView files={files.map(changed)} diffStyle="unified" annotations={[]} selectedAnnotationId={null} scrollTargetAnnotation={null} pendingSelection={null} onLineSelection={() => {}} onAddAnnotationForFile={() => {}} onEditAnnotation={() => {}} onSelectAnnotation={() => {}} onDeleteAnnotation={() => {}} readOnly contextExpansionAvailable={false} semDiffClient={client} fetchFileContent={read} {...extra} {...props} />,
+        );
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      });
+    };
+    return { land, swapped, move, redraw, drawnKey, rerender };
+  }
+
+  test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
+    const quiet = await reading(['a.ts', 'b.ts'], { 'a.ts': 100, 'b.ts': 3000 });
+    await quiet.land();
+    expect([quiet.swapped('a.ts'), quiet.swapped('b.ts')]).toEqual([true, true]);
+    await act(async () => root?.unmount());
+    root = null;
+
+    const engaged = await reading(['a.ts', 'b.ts'], { 'a.ts': 100, 'b.ts': 3000 });
+    document.dispatchEvent(new Event('wheel'));
+    await engaged.land();
+    expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
+    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
+    expect([offered?.textContent?.includes('1 moved'), offered?.getAttribute('aria-pressed')]).toEqual([true, 'false']);
+    await act(async () => offered!.click());
+    expect(engaged.swapped('a.ts')).toBe(true);
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test.skipIf(!hasDom)('a view hidden after the person started reading it keeps its notes as offers, so nothing has moved when it is shown again', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    document.dispatchEvent(new Event('wheel'));
+    hidden = true;
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('a hidden view nobody has read yet draws its notes as they land', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    hidden = true;
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('during a fling a file a little below the bottom edge counts as on screen', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 800 });
+    document.dispatchEvent(new Event('wheel'));
+    let top = 0;
+    const fling = setInterval(() => {
+      top += 40;
+      for (const element of document.querySelectorAll('div')) {
+        Object.defineProperty(element, 'scrollTop', { configurable: true, value: top });
+        element.dispatchEvent(new Event('scroll'));
+      }
+    }, 8);
+    try {
+      await page.land();
+    } finally {
+      clearInterval(fling);
+    }
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('at rest, a file a little below the bottom edge takes its note by itself', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 800 });
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
+    const page = await reading(['a.ts', 'b.ts', 'c.ts'], { 'a.ts': -3000, 'b.ts': 3000, 'c.ts': 3000 });
+    document.dispatchEvent(new Event('pointerdown'));
+    page.move('b.ts', 200);
+    await page.land();
+    expect([page.swapped('a.ts'), page.swapped('b.ts'), page.swapped('c.ts')]).toEqual([false, false, true]);
+    await act(async () => root?.unmount());
+    root = null;
+
+    pageHeight = 1_200;
+    const end = await reading(['a.ts'], { 'a.ts': 3000 });
+    document.dispatchEvent(new Event('keydown'));
+    await end.land();
+    expect(end.swapped('a.ts')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('turning the semantic switch on by hand shows the note in every file, on screen or not', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    document.dispatchEvent(new Event('touchstart'));
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+    await act(async () => configStore.set('diffSemantic', false));
+    await act(async () => configStore.set('diffSemantic', true));
+    expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('a restored position that leaves the page where it is does not count as the person moving', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { initialScrollPosition: 400 });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  const powerUp = { active: true, rejected: [], provider: 'jev', retry: 0 } as never;
+
+  test.skipIf(!hasDom)('a second opinion landing after the switch was turned on by hand is offered, not drawn under the reader', async () => {
+    configStore.set('diffSemantic', false);
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp });
+    document.dispatchEvent(new Event('pointerdown'));
+    await act(async () => configStore.set('diffSemantic', true));
+    await page.redraw();
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+    await page.land();
+    expect(page.drawnKey('a.ts')).not.toContain(':c1');
+  });
+
+  test.skipIf(!hasDom)('a file drawn semantic whose second opinion is offered keeps saying so, and the next toggle on draws the newer answer', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp });
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    expect(page.drawnKey('a.ts')).not.toContain(':c1');
+    const shown = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
+    expect(shown?.dataset.semanticNote).toBe('semantic');
+    await act(async () => shown!.click());
+    const off = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note]');
+    expect(off?.dataset.semanticNote).toBe('off');
+    await act(async () => off!.click());
+    expect(page.drawnKey('a.ts')).toContain(':c1');
+  });
+
+  test.skipIf(!hasDom)('a newer answer drawn by itself brings its own counts to the header, not those of one that was waiting', async () => {
+    const summary = (counts: Record<string, number>) => ({ ...moved, summary: { counts } as never });
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp }, [summary({ moved: 1, renamed: 1 }), summary({ moved: 2 })]);
+    await page.land();
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    expect(page.drawnKey('a.ts')).not.toContain(':c1');
+    page.move('a.ts', 3000);
+    await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
+    await page.land();
+    expect(page.drawnKey('a.ts')).toContain(':c2');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.textContent).toBe('2 moved');
+  });
+
+  test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {
+    configStore.set('diffSemantic', false);
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    document.dispatchEvent(new Event('pointerdown'));
+    await act(async () => configStore.set('diffSemantic', true));
+    await page.redraw();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    document.dispatchEvent(new Event('keydown'));
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
   });
 });

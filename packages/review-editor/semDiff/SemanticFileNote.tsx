@@ -30,13 +30,14 @@ export function semanticNoteLabel(summary: ReviewSummary): string {
 export const SemanticFileNote: React.FC<{ state: SemanticFileState; onToggle: () => void }> = ({ state, onToggle }) => {
   if (state.status === 'working') {
     return (
-      <span data-semantic-note="working" className="text-[11px] text-muted-foreground/60 px-1 select-none" title="Looking for moved and renamed code">
+      <span data-semantic-note="working" className="flex-none text-[11px] text-muted-foreground/60 px-1 select-none @max-[479px]/file-header:hidden" title="Looking for moved and renamed code">
         reading…
       </span>
     );
   }
   const all = semanticNoteParts(state.summary).join(', ');
   const on = state.status === 'semantic';
+  const title = on ? `${all}. Click to show the plain diff.` : `Plain diff. Click to show ${all}.`;
   return (
     <button
       type="button"
@@ -45,8 +46,10 @@ export const SemanticFileNote: React.FC<{ state: SemanticFileState; onToggle: ()
         e.stopPropagation();
         onToggle();
       }}
-      className={`text-[11px] px-1.5 py-0.5 rounded transition-colors hover:bg-muted ${on ? 'text-muted-foreground' : 'text-muted-foreground/50 line-through'}`}
-      title={on ? `${all}. Click to show the plain diff.` : `Plain diff. Click to show ${all}.`}
+      className={`flex-none whitespace-nowrap text-[11px] px-1.5 py-0.5 rounded transition-colors hover:bg-muted ${on ? 'text-muted-foreground' : 'text-muted-foreground/50 line-through'}`}
+      title={title}
+      aria-label={title}
+      aria-pressed={on}
     >
       {semanticNoteLabel(state.summary)}
     </button>
