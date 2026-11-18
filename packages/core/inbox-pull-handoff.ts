@@ -84,7 +84,7 @@ export function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
 }
 
 /** What a hand-off asks the agent for first: a guided review (the default), or the person's own curation. */
-export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string } | { kind: 'show_me'; words?: string };
+export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string } | { kind: 'show_me'; words?: string } | { kind: 'both' };
 /** A launchpad's Start a thread (pulls/startThread.ts): the PR handed over with nothing asked for first, no guided review. */
 export type PullHandoffThread = { kind: 'thread' };
 
@@ -131,6 +131,7 @@ export function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 
 export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): string {
   const layers = handoffLayers(stack);
   // The person's words, whole (through 0.28.61 they were cut at 1,000 characters without a word).
+  if (ask.kind === 'both') return `${pullHandoffAskLine(stack, { kind: 'guide' })}\n2. Then ${pullHandoffAskLine(stack, { kind: 'show_me' }).replace(/^1\. Send/, 'send')}`;
   const custom = ask.kind === 'guide' ? '' : (ask.words ?? '').trim();
   if (ask.kind === 'show_me') {
     const of = layers.length > 1 ? `the whole stack's diff, from ${safeBranch(stack.open_base) ?? "the stack's base branch"} to ${safeBranch(layers[layers.length - 1]!.head) ?? `the top ${pullNounOf(stack)}'s branch`}` : `its diff against ${safeBranch(layers[0]!.base) ?? 'its base branch'}`;
@@ -183,7 +184,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk | 
   const whatToDo =
     ask.kind === 'thread'
       ? `What to do\n${PULL_THREAD_STEP} ${PULL_HANDOFF_TALK} ${feedback}`
-      : `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
+      : `What to do\n${pullHandoffAskLine(stack, ask)}\n${ask.kind === 'both' ? 3 : 2}. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
   if (!many) {
     const pull = layers[0]!;
     const url = pullUrl(pull);
