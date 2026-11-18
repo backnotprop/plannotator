@@ -80,8 +80,28 @@ describe("relay 1.1 under wrangler dev", () => {
   test("hello says the relay's version, beside 1.0's fields", async () => {
     const hello = await helloOf(relay.url, mailbox, inbox);
     expect(hello.version).toBe(RELAY_VERSION);
-    expect(hello.devices.find((d: Json) => d.device_id === PHONE)).toEqual({ device_id: PHONE, cursor: 0, carriage: true, apns: false, fcm: false });
+    expect(hello.devices.find((d: Json) => d.device_id === PHONE)).toEqual({ device_id: PHONE, cursor: 0, carriage: true, apns: false, fcm: false, topic: false });
   });
+
+  test("the Inbox hears when a phone starts and stops naming its app's topic, and hello lists it; a token with no topic says nothing", async () => {
+    const hub = await open("/socket", inbox);
+    await until(() => hub.frames.some((f) => f.type === "hello"), (said) => said, "hello");
+    expect((await at("PUT", `/devices/${THIRD}/apns`, third, { token: TOKEN, environment: "sandbox" })).status).toBe(204);
+    expect((await at("PUT", `/devices/${THIRD}/apns`, third, { token: TOKEN, environment: "sandbox", topic: "ai.plannotator.app" })).status).toBe(204);
+    expect((await at("PUT", `/devices/${THIRD}/apns`, third, { token: TOKEN, environment: "sandbox", topic: "ai.plannotator.app.beta" })).status).toBe(204);
+    expect((await at("PUT", `/devices/${THIRD}/apns`, third, { token: null })).status).toBe(204);
+    await until(() => hub.frames.filter((f) => f.type === "topic").length, (n) => n >= 2, "two topic frames");
+    // One frame per change: a token with no topic, and a topic changed for another, say nothing.
+    expect(hub.frames.filter((f) => f.type === "topic")).toEqual([
+      { type: "topic", device_id: THIRD, topic: true },
+      { type: "topic", device_id: THIRD, topic: false },
+    ]);
+    hub.ws.close();
+    // hello lists it (a new Inbox socket replaces the one above).
+    expect((await at("PUT", `/devices/${THIRD}/apns`, third, { token: TOKEN, environment: "sandbox", topic: "ai.plannotator.app" })).status).toBe(204);
+    expect((await helloOf(relay.url, mailbox, inbox)).devices.find((d: Json) => d.device_id === THIRD).topic).toBe(true);
+    expect((await at("PUT", `/devices/${THIRD}/apns`, third, { token: null })).status).toBe(204);
+  }, 30_000);
 
   test("the device socket takes only that device's bearer, and an upgrade", async () => {
     expect((await at("GET", `/devices/${PHONE}/socket`, other)).status).toBe(401);
@@ -204,7 +224,8 @@ describe("relay 1.1 under wrangler dev", () => {
     expect((await at("POST", "/push", inbox, { device_id: PHONE, kind: "live", live })).status).toBe(202);
     expect(apple.pushes.length).toBe(before + 1);
     const push = lastPush();
-    expect(push.headers).toMatchObject({ ":path": `/3/device/${LIVE_TOKEN}`, "apns-push-type": "liveactivity", "apns-topic": "ai.plannotator.app.beta.push-type.liveactivity" });
+    // Priority 5: Apple budgets priority-10 Live Activity updates and throttles past the budget.
+    expect(push.headers).toMatchObject({ ":path": `/3/device/${LIVE_TOKEN}`, "apns-push-type": "liveactivity", "apns-priority": "5", "apns-topic": "ai.plannotator.app.beta.push-type.liveactivity" });
     expect(push.headers["apns-collapse-id"]).toBeUndefined();
     expect(JSON.parse(push.body)).toEqual({ aps: live });
 
@@ -222,9 +243,22 @@ describe("relay 1.1 under wrangler dev", () => {
     expect((await at("POST", "/push", phone, { device_id: PHONE, kind: "live", live })).status).toBe(401);
   });
 
-  // Last: it restarts the relay. A command held by 1.0 carries no mark of having been handed over, and 1.0 may have
-  // handed it already, so after the upgrade it counts as handed: Cancel never removes what an Inbox may have applied.
-  test("a command held before 1.1 cannot be taken back after the upgrade", async () => {
+  test("Apple's 410 deletes only the token it refused: one the phone registered while the push was on its way stays", async () => {
+    const refused = "4101" + "a".repeat(60);
+    const fresh = "d".repeat(64);
+    expect((await at("PUT", `/devices/${PHONE}/apns`, phone, { token: refused, environment: "sandbox" })).status).toBe(204);
+    const push = at("POST", "/push", inbox, { device_id: PHONE, collapse_id: "g".repeat(64), ciphertext: "AAAAgone" });
+    await until(() => apple.pushes.some((p) => p.headers[":path"] === `/3/device/${refused}`), (seen) => seen, "the push at Apple");
+    expect((await at("PUT", `/devices/${PHONE}/apns`, phone, { token: fresh, environment: "sandbox" })).status).toBe(204);
+    expect(await (await push).json()).toEqual({ sent: false, reason: "apns_gone" });
+    const row = (dumpMailbox(relay, mailbox).devices as Json[]).find((d) => d.id === PHONE)!;
+    expect(row.apns_token).toBe(fresh);
+  }, 30_000);
+
+  // Last: it restarts the relay. A command written by code that knows no `handed` (1.0 before the upgrade, or 1.0 again
+  // during a rollback) may have been handed over already, so it counts as handed: Cancel never removes what an Inbox
+  // may have applied. 1.1 writes `handed = 0` itself.
+  test("a command written by 1.0, before the upgrade or during a rollback, cannot be taken back after 1.1 runs again", async () => {
     await until(async () => ((await (await at("GET", `/devices/${PHONE}/items`, phone)).json()) as Json).inbox_online, (online) => online === false, "the Inbox's socket gone");
     expect((await at("POST", `/devices/${PHONE}/commands`, phone, { id: "key-from-1-0", ciphertext: "AAAAold" })).status).toBe(202);
     await relay.stop();
@@ -236,16 +270,36 @@ describe("relay 1.1 under wrangler dev", () => {
         db.close();
       }
     })!;
-    const db = new Database(file);
-    try {
-      db.exec("ALTER TABLE commands DROP COLUMN handed");
-    } finally {
-      db.close();
-    }
-    relay = await startRelay("relay-1-1", { ...apple.vars, APNS_TOPICS: "ai.plannotator.app, ai.plannotator.app.beta" }, { keep: true });
+    // Before the upgrade: the table as 1.0 made it, with no `handed`.
+    const asOneZero = (sql: string) => {
+      const db = new Database(file);
+      try {
+        db.exec(sql);
+      } finally {
+        db.close();
+      }
+    };
+    asOneZero("ALTER TABLE commands DROP COLUMN handed");
+    const restart = async () => {
+      relay = await startRelay("relay-1-1", { ...apple.vars, APNS_TOPICS: "ai.plannotator.app, ai.plannotator.app.beta" }, { keep: true });
+    };
+    await restart();
     const refused = await at("DELETE", `/devices/${PHONE}/commands/key-from-1-0`, phone);
     expect(refused.status).toBe(409);
     expect(await refused.json()).toMatchObject({ code: "already_handed" });
     expect(commands(PHONE)).toEqual(["key-from-1-0"]);
+
+    // 1.1 again: a command it writes itself can be taken back.
+    expect((await at("POST", `/devices/${PHONE}/commands`, phone, { id: "key-from-1-1", ciphertext: "AAAAnew" })).status).toBe(202);
+    expect((await at("DELETE", `/devices/${PHONE}/commands/key-from-1-1`, phone)).status).toBe(204);
+
+    // A rollback to 1.0: its INSERT names no `handed` (the column stays). Then 1.1 is deployed again.
+    await relay.stop();
+    asOneZero(`INSERT INTO commands (seq, device_id, id, part, data, held_at) VALUES ((SELECT COALESCE(MAX(seq), 0) + 1 FROM commands), '${PHONE}', 'key-during-rollback', 0, 'AAAArolled', ${Date.now()})`);
+    await restart();
+    const rolled = await at("DELETE", `/devices/${PHONE}/commands/key-during-rollback`, phone);
+    expect(rolled.status).toBe(409);
+    expect(await rolled.json()).toMatchObject({ code: "already_handed" });
+    expect(commands(PHONE).sort()).toEqual(["key-during-rollback", "key-from-1-0"]);
   }, 120_000);
 });

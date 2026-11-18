@@ -11,7 +11,7 @@
  * Sealed under the all-zero pairing of inbox-relay-vectors.json. Public by design.
  */
 import { deriveRelayKeys, encryptWithKey } from "./crypto";
-import { inboxPushCollapseId, inboxPushFallbacks, inboxPushPlaintext, type InboxPushInput, type InboxPushPlaintext } from "./inbox-push";
+import { inboxPushCollapseId, inboxPushFallbacks, inboxPushPlaintext, inboxPushSealText, type InboxPushInput, type InboxPushPlaintext } from "./inbox-push";
 import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_TERMINAL } from "./inbox-permission";
 
 export const INBOX_PUSH_VECTOR_PAIRING = { pairing_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA", device_id: "dev_00000000000000000000000000" };
@@ -64,14 +64,20 @@ export const INBOX_PUSH_VECTOR_INPUTS: { name: string; input: InboxPushInput }[]
   { name: "replaced", input: { ...base, message_id: REPLY, replaces: true, badge: 0 } },
 ];
 
-/** The plaintexts: one per input, then each rung of the first vector's size ladder. */
-export function inboxPushVectorPlaintexts(): { name: string; plaintext: InboxPushPlaintext }[] {
+/**
+ * The plaintexts as sealed (with their `pad`, inboxPushSealText): one per input, then each rung of the first
+ * vector's size ladder. `sealed_bytes` is the sealed text's length in UTF-8 bytes: a fixed step, never the words'.
+ */
+export function inboxPushVectorPlaintexts(): { name: string; sealed_bytes: number; plaintext: InboxPushPlaintext }[] {
   const pushes = INBOX_PUSH_VECTOR_INPUTS.map(({ name, input }) => ({ name, plaintext: inboxPushPlaintext(input)! }));
   const ladder = inboxPushFallbacks(pushes[0]!.plaintext).map((plaintext, index, all) => ({
     name: index === all.length - 1 ? "ladder: ids only (the last rung)" : `ladder rung ${index + 1}: ${["action labels dropped", "question.context dropped", "question and actions dropped"][index]}`,
     plaintext,
   }));
-  return [...pushes, ...ladder];
+  return [...pushes, ...ladder].map(({ name, plaintext }) => {
+    const text = inboxPushSealText(plaintext)!;
+    return { name, sealed_bytes: new TextEncoder().encode(text).length, plaintext: JSON.parse(text) as InboxPushPlaintext };
+  });
 }
 
 /** The whole file, sealed: envelopes under the device key, collapse ids under the collapse key. */
@@ -79,7 +85,7 @@ export async function inboxPushVectors() {
   const { key, collapseKey } = await deriveRelayKeys(INBOX_PUSH_VECTOR_PAIRING.pairing_secret, INBOX_PUSH_VECTOR_PAIRING.device_id);
   return {
     about:
-      "Push version 2 vectors for the Inbox relay (adr/implementation/inbox-mobile.md, section 4, \"Push\" and \"Relay 1.1 and push 2\"), produced by scripts/inbox-push-vectors.ts (packages/core/inbox-push-vectors.ts) from the Inbox's own push rules (packages/core/inbox-push.ts) and sealed under the all-zero pairing of inbox-relay-vectors.json: `envelope` under `key`, `collapse_id` the thread id under `collapse_key`. packages/core/inbox-push.test.ts checks the file against the code; the phone's notification tests read it. Sample data is invented. Public by design: nothing here protects anything.",
+      "Push version 2 vectors for the Inbox relay (adr/implementation/inbox-mobile.md, section 4, \"Push\" and \"Relay 1.1 and push 2\"), produced by scripts/inbox-push-vectors.ts (packages/core/inbox-push-vectors.ts) from the Inbox's own push rules (packages/core/inbox-push.ts) and sealed under the all-zero pairing of inbox-relay-vectors.json: `envelope` under `key` (the plaintext with its `pad`, `sealed_bytes` long), `collapse_id` the thread id under `collapse_key`. packages/core/inbox-push.test.ts checks the file against the code; the phone's notification tests read it. Sample data is invented. Public by design: nothing here protects anything.",
     ...INBOX_PUSH_VECTOR_PAIRING,
     key,
     collapse_key: collapseKey,
@@ -87,7 +93,7 @@ export async function inboxPushVectors() {
       inboxPushVectorPlaintexts().map(async (push) => ({
         ...push,
         collapse_id: await inboxPushCollapseId(collapseKey, push.plaintext.thread_id),
-        envelope: await encryptWithKey(JSON.stringify(push.plaintext), key),
+        envelope: await encryptWithKey(inboxPushSealText(push.plaintext)!, key),
       })),
     ),
   };

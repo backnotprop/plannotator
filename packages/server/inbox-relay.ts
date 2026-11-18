@@ -52,7 +52,7 @@ import type { InboxLine } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAgentRelayApplied } from "./inbox-agent-relay-applied";
 import { AGENT_PLATFORM } from "./inbox-devices";
-import { inboxPushCollapseId } from "@plannotator/core/inbox-push";
+import { INBOX_PUSH_KINDS_FOR_NEW_APPS, inboxPushCollapseId, type InboxPushKind } from "@plannotator/core/inbox-push";
 import { inboxPushSummary, sizedPushEnvelope } from "./inbox-relay-push";
 
 export { apnsBody } from "./inbox-relay-push";
@@ -81,8 +81,9 @@ export const RELAY_BODY_LIMIT = Math.floor((WEBSOCKET_MESSAGE_LIMIT * 3) / 4);
  * 16n/9: a message image at the 10 MB cap (MAX_REVIEW_IMAGE_PREVIEW_BYTES)
  * is a frame of about 17.8 MiB, inside WEBSOCKET_MESSAGE_LIMIT.
  */
-export async function sealRelayResult(deviceId: string, id: string, status: number, contentType: string, bytes: Buffer, key: string): Promise<string> {
-  const result = { v: 1, type: "result", id, status, content_type: contentType, body_b64: bytes.toString("base64") };
+export async function sealRelayResult(deviceId: string, id: string, status: number, contentType: string, bytes: Buffer, key: string, now: number = Date.now()): Promise<string> {
+  // `now`: the computer's clock when it answered, so a phone keeps its offset from it for `not_after` (section 4).
+  const result = { v: 1, type: "result", id, status, content_type: contentType, body_b64: bytes.toString("base64"), now: new Date(now).toISOString() };
   return JSON.stringify({ type: "item", device_id: deviceId, cursor: null, ciphertext: await encryptWithKey(JSON.stringify(result), key) });
 }
 
@@ -200,7 +201,15 @@ interface HelloFrame {
   type: "hello";
   /** Relay 1.1 and later; absent from 1.0. */
   version?: unknown;
-  devices: { device_id: string; cursor: number; carriage: boolean; apns: boolean }[];
+  /** `topic` (relay 1.1): the phone registered its app's topic through the 1.1 route. */
+  devices: { device_id: string; cursor: number; carriage: boolean; apns: boolean; topic?: boolean }[];
+}
+
+/** Relay 1.1: a phone started or stopped naming its app's topic. */
+interface TopicFrame {
+  type: "topic";
+  device_id: string;
+  topic: boolean;
 }
 
 interface CarriageFrame {
@@ -228,16 +237,23 @@ interface CommandPlaintext {
   not_after?: unknown;
 }
 
+/** How far past `not_after` a write is still applied: its time in transit and a clock a little off. */
+export const NOT_AFTER_GRACE_MS = 5_000;
+
 /**
- * Why a sealed command is refused before the door sees it, or null to apply
- * it: a `not_after` that has passed (`410 command_expired`), or one that is no
- * time at all (`400 bad_request`). Either way the command is reported applied.
+ * Why a write is refused before the window sees it, or null to apply it: a
+ * `not_after` more than `NOT_AFTER_GRACE_MS` past on this computer's clock
+ * (`410 command_expired`), or one that is no time at all (`400 bad_request`).
+ * Both carry `now`, the computer's time, so the phone can correct its clock's
+ * offset. Used for a sealed relay command (reported applied either way) and
+ * for a write sent straight to the door with `X-Plannotator-Not-After`.
  */
-export function commandTimeRefusal(notAfter: unknown, now: number): { status: number; body: { error: string; code: string } } | null {
+export function commandTimeRefusal(notAfter: unknown, now: number): { status: number; body: { error: string; code: string; now: string } } | null {
   if (notAfter === undefined || notAfter === null) return null;
   const at = typeof notAfter === "string" ? Date.parse(notAfter) : Number.NaN;
-  if (!Number.isFinite(at)) return { status: 400, body: { error: "not_after: an ISO time.", code: "bad_request" } };
-  if (now > at) return { status: 410, body: { error: "This command reached the computer too late and was not applied.", code: "command_expired" } };
+  const said = new Date(now).toISOString();
+  if (!Number.isFinite(at)) return { status: 400, body: { error: "not_after: an ISO time.", code: "bad_request", now: said } };
+  if (now > at + NOT_AFTER_GRACE_MS) return { status: 410, body: { error: "This command reached the computer too late and was not applied.", code: "command_expired", now: said } };
   return null;
 }
 
@@ -305,6 +321,8 @@ export function createInboxRelay(context: InboxRelayContext) {
   let reachable: boolean | null = null;
   /** The relay's version, from the last `hello`; null before the first. */
   let relayVersion: string | null = null;
+  /** Relay 1.1: the phones whose app registered its topic (from `hello` and `topic` frames); none before the first `hello`. */
+  const topics = new Set<string>();
   let unsubscribe: (() => void) | null = null;
   /** Per phone with carriage on, on this socket: the store seq its items have reached. Cleared on each new socket. */
   const sent = new Map<string, number>();
@@ -382,6 +400,8 @@ export function createInboxRelay(context: InboxRelayContext) {
     relayVersion = version;
     log(`hello ${frame.devices.length}`);
     sent.clear();
+    topics.clear();
+    for (const entry of frame.devices) if (entry.topic === true) topics.add(entry.device_id);
     const listed = new Set<string>();
     for (const entry of frame.devices) {
       listed.add(entry.device_id);
@@ -486,7 +506,7 @@ export function createInboxRelay(context: InboxRelayContext) {
 
   /** The result item for a command, sealed under the phone's key; past the WebSocket message limit, a 413 in its place. */
   const resultFrame = async (deviceId: string, id: string, answer: Response, key: string): Promise<string> => {
-    const seal = (status: number, contentType: string, bytes: Buffer) => sealRelayResult(deviceId, id, status, contentType, bytes, key);
+    const seal = (status: number, contentType: string, bytes: Buffer) => sealRelayResult(deviceId, id, status, contentType, bytes, key, (context.now ?? Date.now)());
     // base64 grows a body by 4/3 before the JSON and the seal: anything over
     // 3/4 of the frame limit can never fit, so it is refused without being
     // read, and a body without a length is read only up to that bound.
@@ -576,7 +596,7 @@ export function createInboxRelay(context: InboxRelayContext) {
   };
 
   const onFrame = async (text: string): Promise<void> => {
-    let frame: HelloFrame | CarriageFrame | CommandFrame;
+    let frame: HelloFrame | CarriageFrame | CommandFrame | TopicFrame;
     try {
       frame = JSON.parse(text);
     } catch {
@@ -597,6 +617,9 @@ export function createInboxRelay(context: InboxRelayContext) {
       }
     } else if (frame?.type === "command" && typeof frame.device_id === "string" && typeof frame.id === "string" && typeof frame.ciphertext === "string") {
       await onCommand(frame);
+    } else if (frame?.type === "topic" && typeof frame.device_id === "string" && typeof frame.topic === "boolean") {
+      if (frame.topic) topics.add(frame.device_id);
+      else topics.delete(frame.device_id);
     }
   };
 
@@ -695,10 +718,15 @@ export function createInboxRelay(context: InboxRelayContext) {
   const pushFor = async (messageId: string): Promise<void> => {
     const message = store.message(messageId);
     if (!mailbox || !message || !phonesOn) return;
-    const summary = inboxPushSummary(store, messageId, context.rows ?? (() => store.listRows()));
+    // The phones that take pushes, first: with none, nothing more is read.
+    const phones = devices.list().filter((device) => device.carriage && device.platform !== AGENT_PLATFORM && devices.secret(device.id) !== null);
+    if (phones.length === 0) return;
+    // A kind push 2 added goes only to a phone whose app registered its topic through relay 1.1 (a phone in use before keeps its pushes as they were).
+    const takes = (deviceId: string, kind: InboxPushKind | undefined) => !kind || !INBOX_PUSH_KINDS_FOR_NEW_APPS.has(kind) || topics.has(deviceId);
+    const summary = inboxPushSummary(store, messageId, context.rows ?? (() => store.listRows()), (kind) => phones.some((device) => takes(device.id, kind)));
     if (!summary) return;
-    for (const device of devices.list()) {
-      if (!device.carriage || device.platform === AGENT_PLATFORM) continue;
+    for (const device of phones) {
+      if (!takes(device.id, summary.kind)) continue;
       const secret = devices.secret(device.id);
       if (!secret) continue;
       try {
@@ -736,6 +764,46 @@ export function createInboxRelay(context: InboxRelayContext) {
     } catch (error) {
       log(`live ${deviceId} failed: ${error instanceof Error ? error.name : "error"}`);
       return "failed";
+    }
+  };
+
+  // ── A snoozed thread coming back pushes as the window notifies for it (notify.ts `returnedItems`): once per
+  // return, when it has a question open. A return that came while this Inbox was not running does not push.
+  /** Returns already handled, `<thread>:<until>`. */
+  const returned = new Set<string>();
+  let snoozeTimer: ReturnType<typeof setTimeout> | null = null;
+  let unsubscribeSnoozes: (() => void) | null = null;
+  /** A timer never waits longer than this: a clock moved or a machine asleep is caught at the next look. */
+  const SNOOZE_LOOK_MAX_MS = 60 * 60 * 1000;
+
+  const pushReturn = (threadId: string) => {
+    const messages = store.thread(threadId)?.messages ?? [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const message = messages[i]!;
+      if (message.author.kind !== "agent" || !store.questionsOf(message.id).some((q) => q.state === "open")) continue;
+      void pushFor(message.id);
+      return;
+    }
+  };
+
+  const lookAtSnoozes = (push: boolean) => {
+    if (snoozeTimer) clearTimeout(snoozeTimer);
+    snoozeTimer = null;
+    if (stopped) return;
+    const now = (context.now ?? Date.now)();
+    let next = Number.POSITIVE_INFINITY;
+    for (const snooze of store.snoozes()) {
+      const at = Date.parse(snooze.until);
+      const key = `${snooze.thread_id}:${snooze.until}`;
+      if (at > now) next = Math.min(next, at);
+      else if (!returned.has(key)) {
+        returned.add(key);
+        if (push) pushReturn(snooze.thread_id);
+      }
+    }
+    if (Number.isFinite(next)) {
+      snoozeTimer = setTimeout(() => lookAtSnoozes(true), Math.min(next - now, SNOOZE_LOOK_MAX_MS));
+      (snoozeTimer as { unref?: () => void }).unref?.();
     }
   };
 
@@ -777,11 +845,15 @@ export function createInboxRelay(context: InboxRelayContext) {
         const id = line.record.id;
         queueMicrotask(() => void pushFor(id));
       });
+      lookAtSnoozes(false);
+      unsubscribeSnoozes = store.onSnoozesChange(() => lookAtSnoozes(true));
       connect();
     },
     stop(): void {
       stopped = true;
       unsubscribe?.();
+      unsubscribeSnoozes?.();
+      if (snoozeTimer) clearTimeout(snoozeTimer);
       disconnect();
     },
   };

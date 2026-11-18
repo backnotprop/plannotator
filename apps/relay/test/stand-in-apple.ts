@@ -46,6 +46,11 @@ export async function standInApple(): Promise<{ port: number; pushes: ApplePush[
       if (!jwtValid) {
         stream.respond({ ":status": 403 });
         stream.end(JSON.stringify({ reason: "InvalidProviderToken" }));
+      } else if (flat[":path"]!.startsWith("/3/device/4101")) {
+        // A refusal that takes a moment: long enough for the phone to register a new token meanwhile.
+        await new Promise((later) => setTimeout(later, 1_500));
+        stream.respond({ ":status": 410 });
+        stream.end(JSON.stringify({ reason: "Unregistered", timestamp: Date.now() }));
       } else if (flat[":path"]!.startsWith("/3/device/4100")) {
         stream.respond({ ":status": 410 });
         stream.end(JSON.stringify({ reason: "Unregistered", timestamp: Date.now() }));

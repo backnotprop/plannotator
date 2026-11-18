@@ -6,8 +6,13 @@
  * Push version 2: the kinds the window notifies for (a new thread, a
  * permission prompt, a failed turn), the badge, `time_sensitive`, the
  * actions, no push for a snoozed thread, and the size ladder.
- * A local fake relay records each `POST …/push`; the envelope is opened with
- * the phone's own key, as the phone does. No network beyond loopback.
+ * The two kinds push 2 added (a new thread, a failed turn) go only to a phone
+ * whose app registered its topic through relay 1.1; a phone in use before
+ * gets exactly the pushes it had. A snoozed thread coming back with a
+ * question open pushes, as the window rings for it.
+ * A local fake relay records each `POST …/push` and says `hello` on the
+ * socket; the envelope is opened with the phone's own key, as the phone does.
+ * No network beyond loopback.
  */
 import { afterEach, expect, test } from "bun:test";
 import { createHmac, randomBytes } from "node:crypto";
@@ -29,15 +34,24 @@ const AGENT = { kind: "agent" as const, host: "claude-code", session: "ses_a", n
 const QUESTION = (prompt: string, replaces?: string) =>
   [":::question", ...(replaces ? [`Replaces: ${replaces}`] : []), prompt, "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 
-async function world() {
+const PHONE = "dev_01M4H6G73M9H3Z32T859E72DPY";
+
+/**
+ * `topic`: the phone's app registered its topic through relay 1.1 (the new app), as the relay's `hello` says;
+ * false is a phone in use before (the app in the field today, which names none).
+ */
+async function world(options: { topic?: boolean } = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "plannotator-inbox-relay-push-"));
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
   const pushes: { collapse_id: string; ciphertext: string }[] = [];
+  const sockets = new Set<{ send: (text: string) => void }>();
+  let rowsRead = 0;
   const relay = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    async fetch(req) {
+    async fetch(req, server) {
       const path = new URL(req.url).pathname;
+      if (path.endsWith("/socket")) return server.upgrade(req) ? undefined : new Response(null, { status: 400 });
       if (req.method === "POST" && path === "/v1/mailboxes") return Response.json({ mailbox_id: "mbx_test" }, { status: 201 });
       if (req.method === "POST" && path.endsWith("/push")) {
         pushes.push((await req.json()) as { collapse_id: string; ciphertext: string });
@@ -46,12 +60,22 @@ async function world() {
       if (req.method === "PUT") return Response.json({});
       return new Response("not here", { status: 404 });
     },
+    websocket: {
+      open(ws) {
+        sockets.add(ws);
+        ws.send(JSON.stringify({ type: "hello", version: "1.1", devices: [{ device_id: PHONE, cursor: 0, carriage: true, apns: true, fcm: false, topic: options.topic === true }] }));
+      },
+      close(ws) {
+        sockets.delete(ws);
+      },
+      message() {},
+    },
   });
   cleanup.push(() => relay.stop(true));
   const store = InboxStore.open(dataDir);
   const devices = InboxDevices.open(dataDir);
   const secret = randomBytes(32).toString("base64url");
-  const device = devices.add({ id: "dev_01M4H6G73M9H3Z32T859E72DPY", name: "Phone", platform: "ios", token: "tok_x", secret, at: new Date().toISOString() });
+  const device = devices.add({ id: PHONE, name: "Phone", platform: "ios", token: "tok_x", secret, at: new Date().toISOString() });
   const client = createInboxRelay({
     dataDir,
     store,
@@ -60,10 +84,16 @@ async function world() {
     apply: async () => new Response(null, { status: 404 }),
     url: `http://127.0.0.1:${relay.port}`,
     log: () => {},
+    rows: () => {
+      rowsRead++;
+      return store.listRows();
+    },
   });
   expect(await client.paired(device)).not.toBeNull();
   client.start();
   cleanup.push(() => client.stop());
+  for (let i = 0; i < 300 && client.relayVersion() !== "1.1"; i++) await Bun.sleep(10);
+  expect(client.relayVersion()).toBe("1.1");
   const keys = await deriveRelayKeys(secret, device.id);
   const project = store.ensureProject({ name: "billing-svc", root: "/work/billing-svc" });
   /** The next push, opened with the phone's key. */
@@ -76,7 +106,16 @@ async function world() {
   const collapseOf = (threadId: string) => createHmac("sha256", Buffer.from(keys.collapseKey, "base64url")).update(threadId).digest("hex");
   /** Every push sent so far, opened. */
   const opened = async () => Promise.all(pushes.map(async (push) => JSON.parse(await decryptWithKey(push.ciphertext, keys.key)) as Record<string, any>));
-  return { store, project, pushes, nextPush, collapseOf, opened, keys };
+  /** The relay tells the Inbox the phone started (or stopped) naming its topic, as relay 1.1 does when the app registers. */
+  const topicFrame = (topic: boolean) => {
+    for (const ws of sockets) ws.send(JSON.stringify({ type: "topic", device_id: PHONE, topic }));
+  };
+  /** Waits a little and says how many pushes were sent: for checking that none was. */
+  const settled = async () => {
+    await Bun.sleep(150);
+    return pushes.length;
+  };
+  return { store, devices, project, pushes, nextPush, collapseOf, opened, keys, topicFrame, settled, rowsRead: () => rowsRead };
 }
 
 const PERM_AUTHOR = { kind: "agent" as const, host: "claude-code", session: "perm:ses_a", name: null };
@@ -94,8 +133,8 @@ const PERMISSION = [
   ":::",
 ].join("\n");
 
-test("push 2: a new thread that asks nothing, a failed turn and a permission prompt each push with their kind; plain news does not", async () => {
-  const w = await world();
+test("push 2: to a phone whose app registered its topic, a new thread that asks nothing, a failed turn and a permission prompt each push with their kind; plain news does not", async () => {
+  const w = await world({ topic: true });
   const root = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Migrated the ledger", body: "Done, nothing to decide." }).message;
   const fresh = await w.nextPush(0);
   expect(fresh.summary).toMatchObject({ kind: "new_thread", thread_id: root.id, question: null, time_sensitive: false });
@@ -182,10 +221,14 @@ const fits = (envelope: string) => Buffer.byteLength(apnsBody(envelope)) <= 4096
 
 test("push 2's ladder keeps Apple's 4096 bytes: action labels go first, then the context, then the question, then all but the ids, kind and badge", async () => {
   const key = Buffer.alloc(32, 7).toString("base64url");
+  const lengths = new Set<number>();
   const open = async (summary: InboxPushPlaintext) => {
     const envelope = await sizedPushEnvelope(summary, key);
     expect(fits(envelope)).toBe(true);
-    return JSON.parse(await decryptWithKey(envelope, key)) as InboxPushPlaintext;
+    lengths.add(envelope.length);
+    const { pad, ...read } = JSON.parse(await decryptWithKey(envelope, key)) as InboxPushPlaintext;
+    expect(pad).toMatch(/^ *$/);
+    return read as InboxPushPlaintext;
   };
   expect(await open(LADDER_BASE)).toEqual(LADDER_BASE);
 
@@ -209,6 +252,74 @@ test("push 2's ladder keeps Apple's 4096 bytes: action labels go first, then the
 
   const idsOnly = await open({ ...huge, subject: "S".repeat(4000) });
   expect(idsOnly).toEqual({ v: 1, type: "push", thread_id: LADDER_BASE.thread_id, message_id: LADDER_BASE.message_id, kind: "question", badge: 3, time_sensitive: true });
+  // Padded: the envelope's length is one of a few fixed sizes, whatever the words or the rung.
+  const shorter = await sizedPushEnvelope({ ...LADDER_BASE, subject: "Run?" }, key);
+  expect(shorter.length).toBe((await sizedPushEnvelope(LADDER_BASE, key)).length);
+  expect(lengths.size).toBeLessThanOrEqual(3);
+});
+
+test("a phone in use before relay 1.1 (no topic) gets exactly the pushes it had: no new thread, no failed turn; questions and permission prompts as before; a topic frame turns the new kinds on", async () => {
+  const w = await world();
+  const root = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Migrated the ledger", body: "Done, nothing to decide." }).message;
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "The turn failed: rate limited.", reply_to: root.id, turn_error: true });
+  expect(await w.settled()).toBe(0);
+
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Retry a 409?"), reply_to: root.id });
+  expect((await w.nextPush(0)).summary.kind).toBe("question");
+  w.store.sendMessage({ project_id: w.project.id, author: PERM_AUTHOR, permission: true, body: PERMISSION, reply_to: root.id });
+  expect((await w.nextPush(1)).summary.kind).toBe("permission");
+  const withdrawn = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Second", body: QUESTION("Bump the SDK?") }).message;
+  await w.nextPush(2);
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "No longer needed.", reply_to: withdrawn.id, supersedes: [withdrawn.id] });
+  expect((await w.nextPush(3)).summary.kind).toBe("replaced");
+
+  // The new app registers its topic: from then on the new kinds go to it; it stops naming one: they stop again.
+  w.topicFrame(true);
+  await Bun.sleep(50);
+  const later = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Rotated the keys", body: "Done." }).message;
+  const fresh = await w.nextPush(4);
+  expect(fresh.summary).toMatchObject({ kind: "new_thread", thread_id: later.id });
+  w.topicFrame(false);
+  await Bun.sleep(50);
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "The turn failed.", reply_to: later.id, turn_error: true });
+  expect(await w.settled()).toBe(5);
+});
+
+test("the list is read only for a message that pushes to a phone that takes it: never for plain news, nor with every phone's relay switch off", async () => {
+  const w = await world();
+  const root = w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Retry a 409?") }).message;
+  await w.nextPush(0);
+  const read = w.rowsRead();
+  expect(read).toBeGreaterThan(0);
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "A plain note.", reply_to: root.id });
+  // A new thread to a phone with no topic pushes nothing, so nothing is read for it either.
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Done", body: "Nothing to decide." });
+  expect(await w.settled()).toBe(1);
+  expect(w.rowsRead()).toBe(read);
+  w.devices.setCarriage(PHONE, false, new Date().toISOString());
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Bump the SDK?") });
+  expect(await w.settled()).toBe(1);
+  expect(w.rowsRead()).toBe(read);
+});
+
+test("a snoozed thread that comes back with a question open pushes it once, as the window rings for it; one with none open does not", async () => {
+  const w = await world();
+  const asks = w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Retry a 409?") }).message;
+  await w.nextPush(0);
+  // A thread that asks nothing (and, to this phone with no topic, pushed nothing).
+  const quiet = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Notes", body: "Nothing to decide." }).message;
+  const until = new Date(Date.now() + 400).toISOString();
+  w.store.setSnooze(asks.thread_id, until);
+  w.store.setSnooze(quiet.thread_id, until);
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("And a 429?"), reply_to: asks.id });
+  expect(await w.settled()).toBe(1);
+  const back = await w.nextPush(1);
+  expect(back.summary).toMatchObject({ kind: "question", thread_id: asks.thread_id });
+  expect(back.summary.question.prompt).toBe("And a 429?");
+  expect(back.collapse_id).toBe(w.collapseOf(asks.thread_id));
+  // Once per return, and nothing for the thread with no question open.
+  await Bun.sleep(300);
+  expect(w.pushes.length).toBe(2);
 });
 
 test("a withdrawal that asks nothing pushes on the thread's collapse id with no question; plain news still does not", async () => {

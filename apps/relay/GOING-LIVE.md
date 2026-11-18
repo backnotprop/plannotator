@@ -53,7 +53,7 @@ ok    relay 1.1: PUT devices/:dev/liveactivity is served
 Then one sealed push to your own paired test phone, on the computer whose Inbox it is paired with, after the app has registered its push token (the app's notifications allowed):
 
 ```sh
-bun apps/relay/live-push-check.ts dev_XXXXXXXXXXXXXXXXXXXXXXXXXX
+bun live-push-check.ts dev_XXXXXXXXXXXXXXXXXXXXXXXXXX
 ```
 
 The device id is in Settings, Remote devices, or in `inbox/devices.jsonl`. The script reads this computer's mailbox and that phone's pairing secret, seals a test summary exactly as the Inbox seals a push, and prints only the relay's answer:
@@ -82,6 +82,6 @@ What the person sees after a rollback to 1.0:
 - The Inbox reads no version in `hello` and stops sending `live` pushes; question pushes and the phone's reads and answers go on unchanged.
 - Phones lose their socket and poll `items`, as before. Cancel answers `404 not_found`, so a held write waits like any held write.
 - A phone that registered a bundle id other than `ai.plannotator.app` gets no pushes, since 1.0 pushes every token under that id.
-- The columns 1.1 added stay and 1.0 ignores them. One edge if you later deploy 1.1 again: a command held while 1.0 ran carries no mark of having been handed to the Inbox, so it could be taken back even if 1.0 had already handed it over. The idempotency log still keeps the write to one.
+- The columns 1.1 added stay and 1.0 ignores them. A command 1.0 holds meanwhile is written without the `handed` mark, and the column defaults to handed, so when you deploy 1.1 again it cannot be taken back: Cancel answers `409` and its result says what happened. No write can be reported taken back after it ran.
 
 To stop all iPhone pushes without a rollback: `bunx wrangler secret delete APNS_KEY`. Every push then answers `no_apns_key`.

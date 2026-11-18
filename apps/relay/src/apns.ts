@@ -94,7 +94,8 @@ export async function sendPush(input: {
     headers: [
       ["authorization", `bearer ${await providerToken(input.apns, Date.now())}`],
       ["apns-push-type", input.pushType],
-      ["apns-priority", "10"],
+      // A Live Activity update at 5: Apple budgets priority-10 updates per hour and throttles past it.
+      ["apns-priority", input.pushType === "liveactivity" ? "5" : "10"],
       ["apns-topic", input.topic],
       ...(input.collapseId ? [["apns-collapse-id", input.collapseId] as [string, string]] : []),
       ["content-type", "application/json"],

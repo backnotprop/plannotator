@@ -190,12 +190,12 @@ export class Mailbox extends DurableObject<Env> {
         this.sql.exec(`UPDATE ${table} SET held_at = ? WHERE held_at IS NULL`, Date.now());
       }
     }
-    // Relay 1.1: a command handed to an Inbox socket at least once can no longer be taken back. One held
-    // before 1.1 may have been handed already (1.0 kept no mark), so it counts as handed.
+    // Relay 1.1: a command handed to an Inbox socket at least once can no longer be taken back. The column
+    // defaults to handed, so a row any code that knows no `handed` writes (1.0, before this, or during a rollback
+    // to it) counts as handed: 1.0 may have handed it already. 1.1 inserts `handed = 0` itself (`command()`).
     const commandColumns = this.sql.exec<{ name: string }>("PRAGMA table_info(commands)").toArray().map((c) => c.name);
     if (!commandColumns.includes("handed")) {
-      this.sql.exec("ALTER TABLE commands ADD COLUMN handed INTEGER NOT NULL DEFAULT 0");
-      this.sql.exec("UPDATE commands SET handed = 1");
+      this.sql.exec("ALTER TABLE commands ADD COLUMN handed INTEGER NOT NULL DEFAULT 1");
     }
     this.schemaReady = true;
   }
@@ -284,7 +284,7 @@ export class Mailbox extends DurableObject<Env> {
       type: "hello",
       // Relay 1.1 says its version; an Inbox that reads none is talking to 1.0.
       version: RELAY_VERSION,
-      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null, fcm: d.fcm_token !== null, ...(d.agent === 1 ? { agent: true } : {}) })),
+      devices: devices.map((d) => ({ device_id: d.id, cursor: d.cursor, carriage: d.carriage === 1, apns: d.apns_token !== null, fcm: d.fcm_token !== null, topic: d.apns_topic !== null, ...(d.agent === 1 ? { agent: true } : {}) })),
     };
   }
 
@@ -425,6 +425,7 @@ export class Mailbox extends DurableObject<Env> {
     const input = await body(req);
     if (input?.token === null) {
       this.sql.exec("UPDATE devices SET apns_token = NULL, apns_environment = NULL, apns_topic = NULL WHERE id = ?", device.id);
+      this.topicChanged(device, null);
       return new Response(null, { status: 204 });
     }
     const token = input?.token;
@@ -435,7 +436,17 @@ export class Mailbox extends DurableObject<Env> {
     if (topic !== null && !isBundleId(topic)) return refuse(400, "bad_request", "topic: the app's bundle id.");
     if (topic !== null && !allowedTopics(this.env.APNS_TOPICS).has(topic)) return refuse(400, "topic_not_allowed", "This relay does not push to that app.");
     this.sql.exec("UPDATE devices SET apns_token = ?, apns_environment = ?, apns_topic = ?, fcm_token = NULL WHERE id = ?", token.toLowerCase(), environment, topic, device.id);
+    this.topicChanged(device, topic);
     return new Response(null, { status: 204 });
+  }
+
+  /**
+   * Relay 1.1: tells the Inbox's socket when a phone starts or stops naming its app's topic, as `hello` lists it
+   * (`topic`). Only an app that registers through the 1.1 route names one, and the Inbox sends the kinds of push
+   * that came with it (a new thread, a failed turn) only to such a phone. An Inbox from before ignores the frame.
+   */
+  private topicChanged(device: DeviceRow, topic: string | null): void {
+    if ((device.apns_topic !== null) !== (topic !== null)) this.toInbox({ type: "topic", device_id: device.id, topic: topic !== null });
   }
 
   /** `PUT .../liveactivity` (1.1): the token of the phone's Live Activity, `{ token, environment? }` (the APNs token's environment when absent); `token: null` removes it. */
@@ -501,6 +512,7 @@ export class Mailbox extends DurableObject<Env> {
     const token = input?.token;
     if (typeof token !== "string" || !FCM_TOKEN.test(token)) return refuse(400, "bad_request", "token: the FCM registration token, or null.");
     this.sql.exec("UPDATE devices SET fcm_token = ?, apns_token = NULL, apns_environment = NULL, apns_topic = NULL, live_token = NULL, live_environment = NULL WHERE id = ?", token, device.id);
+    this.topicChanged(device, null);
     return new Response(null, { status: 204 });
   }
 
@@ -559,7 +571,7 @@ export class Mailbox extends DurableObject<Env> {
     }
     const seq = (this.sql.exec<{ seq: number }>("SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM commands").one().seq);
     const at = Date.now();
-    parts(envelope).forEach((data, part) => this.sql.exec("INSERT INTO commands (seq, device_id, id, part, data, held_at) VALUES (?, ?, ?, ?, ?, ?)", seq, device.id, id, part, data, at));
+    parts(envelope).forEach((data, part) => this.sql.exec("INSERT INTO commands (seq, device_id, id, part, data, held_at, handed) VALUES (?, ?, ?, ?, ?, ?, 0)", seq, device.id, id, part, data, at));
     await this.armExpiry();
     console.log(`relay: command ${device.id} queued`);
     if (this.toInbox({ type: "command", device_id: device.id, id, ciphertext: envelope })) this.sql.exec("UPDATE commands SET handed = 1 WHERE device_id = ? AND id = ?", device.id, id);
@@ -610,7 +622,8 @@ export class Mailbox extends DurableObject<Env> {
     console.log(`relay: push ${device.id} ${result.status}`);
     if (result.status === 200) return json({ sent: true }, 202);
     if (result.status === 410) {
-      this.sql.exec("UPDATE devices SET apns_token = NULL, apns_environment = NULL WHERE id = ?", device.id);
+      // Only the token Apple refused: one registered while this push was on its way stays.
+      this.sql.exec("UPDATE devices SET apns_token = NULL, apns_environment = NULL WHERE id = ? AND apns_token = ?", device.id, device.apns_token);
       return json({ sent: false, reason: "apns_gone" });
     }
     return json({ error: `APNs answered ${result.status}${result.reason ? ` ${result.reason}` : ""}.`, code: "apns_failed", apns_status: result.status, apns_reason: result.reason }, 502);

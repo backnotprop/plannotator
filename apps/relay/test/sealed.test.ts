@@ -7,7 +7,8 @@
  * every relay-side record (the mailbox's SQLite files, as stored), every log
  * line (the relay's under `wrangler dev`, and the Inbox's relay log) and
  * every push Apple was sent (headers and bodies, the `live` one too) is
- * searched for it, and for the thread's id. Neither is found. As a control,
+ * searched for it, for every message's id, the question's key and the agent's
+ * session id. None is found. As a control,
  * the phone's key opens the same pushes and items and finds the phrase.
  *
  * The relay runs under `wrangler dev` with Apple played locally
@@ -50,7 +51,7 @@ afterAll(async () => {
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
 });
 
-test("no sentinel and no thread id in any relay record, log line or push Apple was sent; the phone's key finds the sentinel", async () => {
+test("no sentinel, message id, question key or session id in any relay record, log line or push Apple was sent; the phone's key finds the sentinel", async () => {
   const store = InboxStore.open(dataDir);
   const devices = InboxDevices.open(dataDir);
   const secret = randomBytes(32).toString("base64url");
@@ -76,6 +77,8 @@ test("no sentinel and no thread id in any relay record, log line or push Apple w
     fetch(`${relay.url}/v1/mailboxes/${mailbox}${path}`, { method, headers: { Authorization: `Bearer ${keys.relaySecret}`, "Content-Type": "application/json" }, body: body === undefined ? undefined : JSON.stringify(body) });
   expect((await at("PUT", `/devices/${PHONE}/apns`, { token: "a".repeat(64), environment: "sandbox", topic: "ai.plannotator.app" })).status).toBe(204);
   expect((await at("PUT", `/devices/${PHONE}/liveactivity`, { token: "e".repeat(64) })).status).toBe(204);
+  // The topic frame reaches the Inbox (the new app: it is sent the new thread and the failed turn too).
+  await Bun.sleep(300);
   const notices: Json[] = [];
   const socket = new WebSocket(`${relay.url.replace(/^http/, "ws")}/v1/mailboxes/${mailbox}/devices/${PHONE}/socket`, { headers: { Authorization: `Bearer ${keys.relaySecret}` } } as unknown as string[]);
   socket.onmessage = (event) => notices.push(JSON.parse(String(event.data)));
@@ -88,9 +91,9 @@ test("no sentinel and no thread id in any relay record, log line or push Apple w
     subject: `Ship ${SENTINEL} today?`,
     body: [":::question", `Ship ${SENTINEL} today?`, "", `Stopped: ${SENTINEL} waits on this`, "", `- [ ] Yes, ship ${SENTINEL}`, "- [ ] No", ":::"].join("\n"),
   }).message;
-  store.sendMessage({ project_id: project.id, author: AGENT, body: `The turn failed on ${SENTINEL}.`, reply_to: asked.id, turn_error: true });
-  store.sendMessage({ project_id: project.id, author: { ...AGENT, session: "perm:ses_sealed" }, permission: true, reply_to: asked.id, body: [":::question", `Claude Code wants to run \`rm ${SENTINEL}\``, "", "- [ ] Allow once", "- [ ] Deny", ":::"].join("\n") });
-  store.sendMessage({ project_id: project.id, author: AGENT, subject: `Migrated ${SENTINEL}`, body: `Done with ${SENTINEL}.` });
+  const failed = store.sendMessage({ project_id: project.id, author: AGENT, body: `The turn failed on ${SENTINEL}.`, reply_to: asked.id, turn_error: true }).message;
+  const prompt = store.sendMessage({ project_id: project.id, author: { ...AGENT, session: "perm:ses_sealed" }, permission: true, reply_to: asked.id, body: [":::question", `Claude Code wants to run \`rm ${SENTINEL}\``, "", "- [ ] Allow once", "- [ ] Deny", ":::"].join("\n") }).message;
+  const fresh = store.sendMessage({ project_id: project.id, author: AGENT, subject: `Migrated ${SENTINEL}`, body: `Done with ${SENTINEL}.` }).message;
   await until(() => apple.pushes.length, (n) => n >= 4, "four pushes at Apple");
 
   // The phone sends a reply up, its words the sentinel, with a not_after; the Inbox's answer echoes them back down.
@@ -114,16 +117,21 @@ test("no sentinel and no thread id in any relay record, log line or push Apple w
   expect(summaries.every((s) => JSON.stringify(s).includes(SENTINEL))).toBe(true);
   expect(notices.every((notice) => Object.keys(notice).join() === "n" && Number.isInteger(notice.n))).toBe(true);
 
-  // Every relay-side record, log line and push payload: no words and no thread id. The Inbox's own relay log, on
-  // the computer, names message and device ids by design (ids and codes only), so only the words are looked for there.
+  // Every relay-side record, log line and push payload: no words, no message id, no question key, no session id.
+  // The Inbox's own relay log, on the computer, names message and device ids by design (ids and codes only), so only
+  // the words and the session are looked for there.
   const words = [SENTINEL, SENTINEL.toLowerCase(), "Vellum"];
+  const key = store.questionsOf(asked.id)[0]!.key;
+  // The thread's id is its first message's.
+  const ids = [...new Set([asked.thread_id, asked.id, failed.id, prompt.id, fresh.id, key, "ses_sealed"])];
+  expect(ids.length).toBe(6);
   const places: [string, Buffer, string[]][] = [
-    ["the mailbox's SQLite files", storageBytes(relay), [...words, asked.thread_id]],
-    ["the mailbox's rows", Buffer.from(JSON.stringify(dumpMailbox(relay, mailbox))), [...words, asked.thread_id]],
-    ["the relay's log", Buffer.from(relay.log()), [...words, asked.thread_id]],
-    ["what Apple was sent", Buffer.from(JSON.stringify(apple.pushes)), [...words, asked.thread_id]],
-    ["the items the relay answers", Buffer.from(await (await at("GET", `/devices/${PHONE}/items?after=0`)).text()), [...words, asked.thread_id]],
-    ["the Inbox's relay log", Buffer.from(inboxLog.join("\n")), words],
+    ["the mailbox's SQLite files", storageBytes(relay), [...words, ...ids]],
+    ["the mailbox's rows", Buffer.from(JSON.stringify(dumpMailbox(relay, mailbox))), [...words, ...ids]],
+    ["the relay's log", Buffer.from(relay.log()), [...words, ...ids]],
+    ["what Apple was sent", Buffer.from(JSON.stringify(apple.pushes)), [...words, ...ids]],
+    ["the items the relay answers", Buffer.from(await (await at("GET", `/devices/${PHONE}/items?after=0`)).text()), [...words, ...ids]],
+    ["the Inbox's relay log", Buffer.from(inboxLog.join("\n")), [...words, "ses_sealed"]],
   ];
   for (const [place, bytes, texts] of places) {
     expect(bytes.length).toBeGreaterThan(0);

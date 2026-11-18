@@ -132,7 +132,11 @@ test("a command past its not_after is refused 410 command_expired and never reac
   const w = await world(undefined);
   const late = await w.command("key-late", { not_after: new Date(Date.now() - 60_000).toISOString() });
   expect(late).toMatchObject({ status: 410 });
-  expect(JSON.parse(Buffer.from(late!.body_b64, "base64").toString())).toMatchObject({ code: "command_expired" });
+  // The computer's time rides in the refusal and on every result, so the phone can keep its clock's offset.
+  const refused = JSON.parse(Buffer.from(late!.body_b64, "base64").toString());
+  expect(refused).toMatchObject({ code: "command_expired" });
+  expect(Math.abs(Date.parse(refused.now) - Date.now())).toBeLessThan(5_000);
+  expect(Math.abs(Date.parse(late!.now) - Date.now())).toBeLessThan(5_000);
   expect(w.applied).toEqual([]);
 
   const onTime = await w.command("key-on-time", { not_after: new Date(Date.now() + 60_000).toISOString() });
@@ -142,10 +146,11 @@ test("a command past its not_after is refused 410 command_expired and never reac
   expect(w.applied.length).toBe(2);
 });
 
-test("not_after that is not a time refuses the command rather than guess", () => {
+test("not_after that is not a time refuses the command rather than guess; a few seconds past it are allowed for transit", () => {
   expect(commandTimeRefusal(undefined, Date.now())).toBeNull();
   expect(commandTimeRefusal("soon", Date.now())).toMatchObject({ status: 400 });
   expect(commandTimeRefusal(1_700_000_000, Date.now())).toMatchObject({ status: 400 });
-  expect(commandTimeRefusal("2026-11-18T10:00:00.000Z", Date.parse("2026-11-18T10:00:00.001Z"))).toMatchObject({ status: 410 });
+  expect(commandTimeRefusal("2026-11-18T10:00:00.000Z", Date.parse("2026-11-18T10:00:05.001Z"))).toMatchObject({ status: 410, body: { now: "2026-11-18T10:00:05.001Z" } });
+  expect(commandTimeRefusal("2026-11-18T10:00:00.000Z", Date.parse("2026-11-18T10:00:05.000Z"))).toBeNull();
   expect(commandTimeRefusal("2026-11-18T10:00:00.000Z", Date.parse("2026-11-18T10:00:00.000Z"))).toBeNull();
 });

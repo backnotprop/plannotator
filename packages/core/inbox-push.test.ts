@@ -7,7 +7,21 @@ import { describe, expect, test } from "bun:test";
 import { createHmac } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { decryptWithKey, deriveRelayKeys } from "./crypto";
-import { apnsBody, inboxPushCollapseId, inboxPushFallbacks, inboxPushFits, inboxPushKind, inboxPushPlaintext, type InboxPushInput, type InboxPushInputQuestion } from "./inbox-push";
+import {
+  apnsBody,
+  INBOX_PUSH_KINDS_FOR_NEW_APPS,
+  INBOX_PUSH_PAD_STEP,
+  INBOX_PUSH_TEXT_MAX,
+  inboxPushCollapseId,
+  inboxPushFallbacks,
+  inboxPushFits,
+  inboxPushKind,
+  inboxPushPlaintext,
+  inboxPushSealText,
+  type InboxPushInput,
+  type InboxPushInputQuestion,
+} from "./inbox-push";
+import { encryptWithKey } from "./crypto";
 import { inboxPushVectorPlaintexts, INBOX_PUSH_VECTOR_PAIRING } from "./inbox-push-vectors";
 import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_TERMINAL } from "./inbox-permission";
 
@@ -99,6 +113,40 @@ describe("the size ladder as data", () => {
   });
 });
 
+describe("padding", () => {
+  const bytes = (text: string) => new TextEncoder().encode(text).length;
+
+  test("the sealed text is a whole step of 512 bytes, or the largest that fits; the words' length does not show; it reads back as the summary plus spaces", async () => {
+    const key = Buffer.alloc(32, 3).toString("base64url");
+    const short = inboxPushPlaintext(input({ questions: [single()], subject: "A" }))!;
+    const longer = inboxPushPlaintext(input({ questions: [single()], subject: "A much longer subject, still in the same step" }))!;
+    const [a, b] = [inboxPushSealText(short)!, inboxPushSealText(longer)!];
+    expect(bytes(a)).toBe(INBOX_PUSH_PAD_STEP);
+    expect(bytes(b)).toBe(bytes(a));
+    expect((await encryptWithKey(a, key)).length).toBe((await encryptWithKey(b, key)).length);
+    const { pad, ...read } = JSON.parse(a);
+    expect(pad).toMatch(/^ +$/);
+    expect(read).toEqual(short);
+
+    // Past the last whole step, the text is exactly the largest that fits, and its envelope fits; one byte more cannot.
+    const big = inboxPushPlaintext(input({ new_thread: true, subject: "S".repeat(INBOX_PUSH_TEXT_MAX - 400) }))!;
+    const bigText = inboxPushSealText(big)!;
+    expect(bytes(bigText)).toBe(INBOX_PUSH_TEXT_MAX);
+    expect(inboxPushFits(await encryptWithKey(bigText, key))).toBe(true);
+    expect(inboxPushFits(await encryptWithKey(`${bigText} `, key))).toBe(false);
+    expect(inboxPushSealText({ ...big, subject: "S".repeat(INBOX_PUSH_TEXT_MAX) })).toBeNull();
+  });
+
+  test("a pad already on the summary is replaced, never grown", () => {
+    const plain = inboxPushPlaintext(input({ new_thread: true }))!;
+    expect(inboxPushSealText({ ...plain, pad: " ".repeat(3000) })).toBe(inboxPushSealText(plain));
+  });
+});
+
+test("the kinds only an app that registered through relay 1.1 is sent: a new thread, a failed turn, a run ended; never a question, a permission prompt, a review or a withdrawal", () => {
+  expect([...INBOX_PUSH_KINDS_FOR_NEW_APPS].sort()).toEqual(["new_thread", "run_ended", "turn_error"]);
+});
+
 test("the collapse id is HMAC-SHA256 of the thread id under the collapse key, in hex", async () => {
   const collapseKey = Buffer.alloc(32, 5).toString("base64url");
   for (const thread of ["msg_01K70000000000000000000010", "msg_x"]) {
@@ -113,13 +161,15 @@ test("the vectors file is what the push rules give for its inputs; each envelope
     device_id: string;
     key: string;
     collapse_key: string;
-    pushes: { name: string; plaintext: unknown; collapse_id: string; envelope: string }[];
+    pushes: { name: string; sealed_bytes: number; plaintext: unknown; collapse_id: string; envelope: string }[];
   };
   const keys = await deriveRelayKeys(INBOX_PUSH_VECTOR_PAIRING.pairing_secret, INBOX_PUSH_VECTOR_PAIRING.device_id);
   expect([file.pairing_secret, file.device_id, file.key, file.collapse_key]).toEqual([INBOX_PUSH_VECTOR_PAIRING.pairing_secret, INBOX_PUSH_VECTOR_PAIRING.device_id, keys.key, keys.collapseKey]);
-  expect(file.pushes.map(({ name, plaintext }) => ({ name, plaintext }))).toEqual(inboxPushVectorPlaintexts());
+  expect(file.pushes.map(({ name, sealed_bytes, plaintext }) => ({ name, sealed_bytes, plaintext }))).toEqual(inboxPushVectorPlaintexts());
   for (const push of file.pushes) {
-    expect(JSON.parse(await decryptWithKey(push.envelope, keys.key))).toEqual(push.plaintext);
+    const text = await decryptWithKey(push.envelope, keys.key);
+    expect(JSON.parse(text)).toEqual(push.plaintext);
+    expect(new TextEncoder().encode(text).length).toBe(push.sealed_bytes);
     expect(inboxPushFits(push.envelope)).toBe(true);
     expect(push.collapse_id).toBe(await inboxPushCollapseId(keys.collapseKey, (push.plaintext as { thread_id: string }).thread_id));
   }

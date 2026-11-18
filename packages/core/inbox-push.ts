@@ -62,7 +62,19 @@ export interface InboxPushPlaintext {
   time_sensitive?: boolean;
   /** Beside `question` only: recommended first, each naming its choice by index. */
   actions?: InboxPushAction[];
+  /**
+   * Spaces that bring the sealed text to a fixed size (`inboxPushSealText`), so the envelope's length, which the
+   * relay and Apple see, does not follow the length of the words or the rung of the ladder. Ignored by every reader.
+   */
+  pad?: string;
 }
+
+/**
+ * The kinds a push 2 Inbox added that a phone in the field before relay 1.1 never got: sent only to a phone
+ * that registered its app's topic through relay 1.1 (the native app, which shows them and will have its own
+ * notification settings), so a phone already in use keeps exactly the pushes it had.
+ */
+export const INBOX_PUSH_KINDS_FOR_NEW_APPS: ReadonlySet<InboxPushKind> = new Set<InboxPushKind>(["new_thread", "turn_error", "run_ended"]);
 
 /** One of the message's questions, as much as a push reads (an `InboxQuestion` from the store fits). */
 export interface InboxPushInputQuestion {
@@ -186,6 +198,27 @@ export function inboxPushFallbacks(plain: InboxPushPlaintext): InboxPushPlaintex
   }
   steps.push({ v, type, thread_id, message_id, ...(kind ? { kind } : {}), ...(badge !== undefined ? { badge } : {}), ...(time_sensitive !== undefined ? { time_sensitive } : {}) });
   return steps;
+}
+
+/** The size steps a sealed push text is padded to, in UTF-8 bytes; the last step is the largest text that fits. */
+export const INBOX_PUSH_PAD_STEP = 512;
+
+/** The largest sealed text, in UTF-8 bytes, whose envelope (12-byte IV + text + 16-byte tag, base64url without `=`) fits Apple's ceiling in the APNs body. */
+export const INBOX_PUSH_TEXT_MAX = Math.floor(((APNS_BODY_LIMIT - apnsBody("").length) * 3) / 4) - 28;
+
+const utf8Length = (text: string) => new TextEncoder().encode(text).length;
+
+/**
+ * The text to seal for this summary: its JSON with `pad` added so the text is a whole number of
+ * `INBOX_PUSH_PAD_STEP` bytes (or exactly `INBOX_PUSH_TEXT_MAX` above the last whole step), or null when the
+ * summary cannot fit at all (the caller tries the next rung of `inboxPushFallbacks`).
+ */
+export function inboxPushSealText(plain: InboxPushPlaintext): string | null {
+  const { pad: _old, ...rest } = plain;
+  const bare = utf8Length(JSON.stringify({ ...rest, pad: "" }));
+  if (bare > INBOX_PUSH_TEXT_MAX) return null;
+  const target = Math.min(Math.ceil(bare / INBOX_PUSH_PAD_STEP) * INBOX_PUSH_PAD_STEP, INBOX_PUSH_TEXT_MAX);
+  return JSON.stringify({ ...rest, pad: " ".repeat(target - bare) });
 }
 
 /** True when the APNs body around this envelope fits Apple's ceiling. */
