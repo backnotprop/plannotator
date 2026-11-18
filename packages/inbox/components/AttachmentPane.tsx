@@ -2884,14 +2884,13 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             <DeferredMarkdownContentsRail
               key={`rail:${docKey}`}
               blocks={documentBlocks}
+              minHeadings={INBOX_CONTENTS_MIN_HEADINGS}
               scrollViewport={scrollViewport}
               contentSelector="[data-doc-text-root]"
               // A linked document over the file hides the file's Contents with it.
               hidden={!contentsShown || linkedTop !== null}
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
-              panelAction={<ContentsHide onHide={hideContents} />}
-              minHeadings={INBOX_CONTENTS_MIN_HEADINGS}
-            />
+              panelAction={<ContentsHide onHide={hideContents} />} />
           )}
         </div>
         <div
