@@ -87,14 +87,14 @@ const markScroller = (page: Page) =>
 const firstRows = (page: Page) =>
   expect.poll(() => page.evaluate(() => [...document.querySelectorAll('diffs-container')].some((host) => host.shadowRoot?.querySelector('[data-line]'))), { timeout: 30_000 }).toBe(true);
 
-const PHONE = (browser: Browser) => ({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: browser.browserType().name() === 'chromium', colorScheme: 'light' as const });
+const PHONE = (browser: Browser, width = 390) => ({ viewport: { width, height: 844 }, hasTouch: true, isMobile: browser.browserType().name() === 'chromium', colorScheme: 'light' as const });
 
-async function reviewWindow(browser: Browser, held: string[], phone = false): Promise<View> {
+async function reviewWindow(browser: Browser, held: string[], phone: boolean | number = false): Promise<View> {
   const session = await reviewOf(`sem-landing-${Math.random().toString(36).slice(2, 8)}`, base, head);
   const reads = new Set<string>();
   const requested = new Set<string>();
   let release = (_name: string) => {};
-  const { context, page } = await openReviewWindow(browser, session.url, async (page) => void (release = delay(page, '**/api/file-content?*', reads, requested, held)), phone ? PHONE(browser) : undefined);
+  const { context, page } = await openReviewWindow(browser, session.url, async (page) => void (release = delay(page, '**/api/file-content?*', reads, requested, held)), phone ? PHONE(browser, phone === true ? undefined : phone) : undefined);
   await firstRows(page);
   await markScroller(page);
   return {
@@ -172,7 +172,7 @@ function inboxWorld(browser: () => Browser): () => Inbox {
 
 let projects = 0;
 
-async function inboxReview(browser: Browser, world: Inbox, held: string[], phone = false, files = FILES): Promise<View> {
+async function inboxReview(browser: Browser, world: Inbox, held: string[], phone: boolean | number = false, files = FILES): Promise<View> {
   const [base, head] = sides(files);
   const project = scratchProject(join(world.root, 'src'), `shop${++projects}`);
   git(project, 'checkout', '-q', '-b', 'main');
@@ -194,7 +194,7 @@ async function inboxReview(browser: Browser, world: Inbox, held: string[], phone
     review: true,
   } as never);
   const context: BrowserContext = await browser.newContext(
-    phone ? { ...PHONE(browser), reducedMotion: 'reduce' } : { viewport: { width: 1280, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' },
+    phone ? { ...PHONE(browser, phone === true ? undefined : phone), reducedMotion: 'reduce' } : { viewport: { width: 1280, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' },
   );
   const page = await context.newPage();
   const reads = new Set<string>();
@@ -346,8 +346,8 @@ export function landingCases(type: BrowserType) {
   const inbox = inboxWorld(() => browser);
   const open = (host: Host, held: string[] = []) => (host === 'review' ? reviewWindow(browser, held) : inboxReview(browser, inbox(), held));
 
-  const onPhone = async (host: Host, held: string[], file: string) => {
-    const view = host === 'review' ? await reviewWindow(browser, held, true) : await inboxReview(browser, inbox(), held, true);
+  const onPhone = async (host: Host, held: string[], file: string, width?: number) => {
+    const view = host === 'review' ? await reviewWindow(browser, held, width ?? true) : await inboxReview(browser, inbox(), held, width ?? true);
     if (host === 'review') {
       await view.page.locator(`[data-changes-tree] [data-type="item"][data-item-path$="${file}.ts"]`).first().tap({ timeout: 10_000 });
       await view.page.getByText('All changes', { exact: true }).first().tap({ timeout: 10_000 });
@@ -388,6 +388,29 @@ export function landingCases(type: BrowserType) {
       expect(box.width, 'the note shows its words').toBeGreaterThan(30);
       await view.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
       await expect(note).toHaveAttribute('data-semantic-note', 'semantic');
+    } finally {
+      await view.close();
+    }
+  });
+
+  test(`${host} on a 320 px phone: the file name keeps its room beside the note, and a tap just above or below the note reaches it`, async () => {
+    const view = await onPhone(host, [], 'a-money', 320);
+    try {
+      const shell = view.shell('a-money');
+      await expect.poll(() => noteOf(view, 'a-money'), { timeout: 45_000 }).toMatch(/^(off|semantic)$/);
+      await view.page.locator(shell).scrollIntoViewIfNeeded();
+      await atRest(view);
+      const note = view.page.locator(`${shell} [data-semantic-note]`).first();
+      const name = view.page.locator(`${shell} [data-file-header] span[title]`).first();
+      if (process.env.SEM_LANDING_SHOT) await view.page.locator(`${shell} [data-file-header]`).first().screenshot({ path: `${process.env.SEM_LANDING_SHOT}-320-${host}-${type.name()}.png` });
+      expect((await name.boundingBox())!.width, 'the file name keeps room to read').toBeGreaterThanOrEqual(64);
+      for (const offset of [-7, 5]) {
+        const box = (await note.boundingBox())!;
+        const was = await noteOf(view, 'a-money');
+        await view.page.waitForTimeout(600);
+        await view.page.touchscreen.tap(box.x + box.width / 2, offset < 0 ? box.y + offset : box.y + box.height + offset);
+        await expect.poll(() => noteOf(view, 'a-money'), { timeout: 5_000, message: `a tap ${offset} px off the note reaches it` }).not.toBe(was);
+      }
     } finally {
       await view.close();
     }

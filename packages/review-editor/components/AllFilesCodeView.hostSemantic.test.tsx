@@ -667,9 +667,11 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
     const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
     expect([offered?.textContent?.includes('1 moved'), offered?.getAttribute('aria-pressed')]).toEqual([true, 'false']);
+    const name = offered?.getAttribute('aria-label');
     await act(async () => offered!.click());
     expect(engaged.swapped('a.ts')).toBe(true);
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
+    const shown = (await headerOf('a.ts')).querySelector('[data-semantic-note]');
+    expect([shown?.getAttribute('aria-pressed'), shown?.getAttribute('aria-label')]).toEqual(['true', name]);
   });
 
   test.skipIf(!hasDom)('a view hidden after the person started reading it keeps its notes as offers, so nothing has moved when it is shown again', async () => {
@@ -849,7 +851,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await page.rerender({ powerUp: { active: true, rejected: ['c1'], provider: 'jev', retry: 0 } as never });
     await page.land();
     expect(page.drawnKey('a.ts')).toContain(':c2');
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.textContent).toBe('2 moved');
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-label')).toBe('2 moved');
   });
 
   test.skipIf(!hasDom)('turning Power Up off after the switch was turned on by hand offers the answer without it, and leaves the drawn file alone', async () => {
