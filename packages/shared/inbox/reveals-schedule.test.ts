@@ -78,10 +78,10 @@ test("the grill-me tip is registered beside the line, waiting for every other ca
 
 test("the same-day group, in the owner's order (2026-11-10): the tab icon, themes, Grouping, Rows, the sound, voice, none with a tenure; then the later group, each with one", () => {
   const ids = INBOX_REVEALS.filter((entry) => !entry.aside && entry.id !== "code_review").map((entry) => entry.id);
-  expect(ids).toEqual(["tab_icon", "theme_chooser", LIST_VIEW, "list_intro", "sound", "voice", "snooze", "personal_agents", "priority", "board", "steps", BRO, AGENT_RULES]);
+  expect(ids).toEqual(["tab_icon", "theme_chooser", LIST_VIEW, "list_intro", "sound", "voice", "snooze", "personal_agents", "priority", "board", "routines", "steps", BRO, AGENT_RULES]);
   const tenure = (id: RevealId) => INBOX_REVEALS.find((entry) => entry.id === id)!.tenureMs;
   expect(ids.slice(0, 6).map(tenure)).toEqual([0, 0, 0, 0, 0, 0]);
-  expect(ids.slice(6).map(tenure)).toEqual([2 * DAY, 2 * DAY, 3 * DAY, 3 * DAY, 5 * DAY, 2 * DAY, 2 * DAY]);
+  expect(ids.slice(6).map(tenure)).toEqual([2 * DAY, 2 * DAY, 3 * DAY, 3 * DAY, 2 * DAY, 5 * DAY, 2 * DAY, 2 * DAY]);
   expect(INBOX_REVEALS.find((entry) => entry.id === "tab_icon")).toEqual({ id: "tab_icon", kind: "update", tenureMs: 0, minThreads: 0, enabled: true });
 });
 
@@ -115,6 +115,8 @@ interface User {
   noPersonalAgent?: boolean;
   /** Never added a thread to Priority (packages/server/inbox-priority-intro.ts): the Priority dialog is open. Absent: they did. */
   neverPriority?: boolean;
+  /** The day the person's third good day of sends ends (shared/inbox/routines-intro.ts): from then Routines' intro is open. Absent: never. */
+  goodDays?: number;
 }
 
 interface Shown {
@@ -150,7 +152,7 @@ function simulate(user: User, days = 30): Shown[] {
         open: Object.fromEntries(
           TABLE.map((entry) => [
             entry.id,
-            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.kind === "offer" || user.update),
+            !done.has(entry.id) && (entry.id === "theme_chooser" ? user.defaultTheme === true : entry.id === CODE_REVIEW_OFFER.id ? user.codeReviewOff === true : entry.id === GRILL_ME ? user.grillMeGap !== undefined && day >= user.grillMeGap : entry.id === AGENT_RULES ? user.noRules === true : entry.id === "personal_agents" ? user.noPersonalAgent === true : entry.id === "priority" ? user.neverPriority === true : entry.id === "routines" ? user.goodDays !== undefined && day >= user.goodDays : entry.kind === "offer" || user.update),
           ]),
         ),
         waitingSince: saved.waitingSince,
@@ -688,5 +690,40 @@ describe("the line's rules", () => {
 
   test("a dev build keeps no line: the agent note is always free", () => {
     expect(revealLineFree("setup", base({ release: false, dayShownAt: new Date(NOW.getTime() - MINUTE).toISOString() }), NOW)).toBe(true);
+  });
+});
+
+describe("Routines: three good days, then only the line's gap", () => {
+  test("registered after the Board and before the Checklist: an offer, two days' tenure, no thread minimum, no day of its own", () => {
+    const place = INBOX_REVEALS.findIndex((entry) => entry.id === "routines");
+    expect(INBOX_REVEALS[place - 1]!.id).toBe("board");
+    expect(INBOX_REVEALS[place + 1]!.id).toBe("steps");
+    expect(INBOX_REVEALS[place]).toEqual({ id: "routines", kind: "offer", tenureMs: 2 * DAY, minThreads: 0, enabled: true });
+  });
+
+  // The owner, 2026-11-17, on the day of its own it first had: "Feel like this shouldn't be huge blocker, just separate
+  // them 20min or so". So it shares a day with other dialogs, the gap apart (these loads are two hours apart).
+  test("a heavy user whose third good day ends on day 3: Routines the load after the Board that same day, every other card once and in its order", () => {
+    const shown = simulate({ ...HEAVY, goodDays: 3 });
+    expect(when(shown).filter(([, day]) => day === 3)).toEqual([["board", 3, 9], ["routines", 3, 11]]);
+    expect(when(shown).filter(([id]) => id !== "routines").map(([id]) => id)).toEqual(when(simulate(HEAVY)).map(([id]) => id));
+    expectSpaced(shown);
+  });
+
+  test("open from day 2: it goes that day, between Snooze and Bro mode, a load after each", () => {
+    const shown = simulate({ ...HEAVY, goodDays: 2 });
+    expect(when(shown).filter(([, day]) => day === 2)).toEqual([["snooze", 2, 9], ["routines", 2, 11], ["bro", 2, 13]]);
+    expectSpaced(shown);
+  });
+
+  test("someone already here when it ships (three good days in their history) updates on day 0: the update day's dialogs take every load, Routines the first load of day 1, Bro mode the next, once", () => {
+    const shown = simulate({ ...UPGRADER, goodDays: 0 });
+    expect(when(shown).filter(([, day]) => day === 1).slice(0, 2)).toEqual([["routines", 1, 9], ["bro", 1, 11]]);
+    expect(shown.filter((s) => s.id === "routines")).toHaveLength(1);
+    expectSpaced(shown);
+  });
+
+  test("never for someone without three good days", () => {
+    expect(simulate(HEAVY).some((s) => s.id === "routines")).toBe(false);
   });
 });

@@ -14,6 +14,7 @@ import { useAgentListFilter } from '../agentsList';
 import { filterAgentRows } from '../agents/model';
 import { filterTagRows } from '../threadTags';
 import { withLiveTagPicks } from '../listFilterTags';
+import { routineHold, useRoutineThreads } from '../listFilterRoutines';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
@@ -103,12 +104,22 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const listFilterDay = localDay(Date.now());
   // Until the list is read its tags are not known: the Tag picks hold (no moment of unfiltered rows).
   const listTags = latest ? tags.listTags : undefined;
-  const listFilterApplied = useMemo(() => withLiveTagPicks(appliedFilter(listFilterPicks, listFilterScoped, filterTag !== null), listTags), [listFilterPicks, listFilterScoped, filterTag, listTags]);
+  // Routines (listFilterRoutines.ts): off, the Routine picks step aside; not read yet, a saved Routine pick holds the
+  // list (no row drawn, never a moment of unfiltered rows); read, they apply.
+  const routines = useRoutineThreads();
+  const listFilterApplied = useMemo(
+    () => withLiveTagPicks(appliedFilter(listFilterPicks, listFilterScoped, filterTag !== null, routines.state !== 'off'), listTags),
+    [listFilterPicks, listFilterScoped, filterTag, listTags, routines.state],
+  );
+  const routineTest = routines.state === 'ready' ? routines.test : undefined;
+  /** A saved Routine pick while the routines are not read: the list waits, drawing no row and no empty words. */
+  const listHeld = routineHold(routines, listFilterApplied);
   /** The list as the person reads it: `filterList`, then the filter. "N new" and the rows read this. */
   const filterShown = useCallback(
-    (sections: readonly InboxListSection[]) => filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, tagsOfRow),
+    (sections: readonly InboxListSection[]) =>
+      listHeld ? filterList(sections).map((section) => ({ ...section, threads: [] })) : filterListSections(filterList(sections), listFilterApplied, Date.now(), heldRead, tagsOfRow, routineTest),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the day: a new one reads the spans again.
-    [filterList, listFilterApplied, listFilterDay, heldRead, tagsOfRow],
+    [filterList, listFilterApplied, listFilterDay, heldRead, tagsOfRow, routineTest, listHeld],
   );
   /** The rows before the filter: its menu's counts and choices. */
   const listFilterRows = useMemo(() => {
@@ -122,6 +133,7 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   }, [listShown, shown, filterShown]);
   /** The filter left no row where the list holds some (the Snoozed band aside): "No threads match". */
   const listFilterEmpty =
+    !listHeld &&
     pickCount(listFilterApplied) > 0 &&
     listSections !== null &&
     listSections.every((section) => section.id === 'snoozed' || section.threads.length === 0) &&
@@ -140,5 +152,5 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
           news: heldNewsOf(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen()),
         }
       : null;
-  return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };
+  return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };
 }
