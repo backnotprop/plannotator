@@ -33,9 +33,10 @@
 
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_MESSAGE_COMMENT_QUOTE_MAX, isInboxId, isInboxRecipientSessionId, type InboxDraftFile, type InboxReplyDraft, type InboxReplyQuote } from "@plannotator/core/inbox-types";
+import { INBOX_MESSAGE_COMMENT_QUOTE_MAX, isInboxId, isInboxRecipientSessionId, type InboxDraftFile, type InboxReplyDraft, type InboxReplyMention, type InboxReplyQuote } from "@plannotator/core/inbox-types";
 import { checkInboxDraftFiles, checkInboxDraftIds, checkInboxDraftPlaces, INBOX_DRAFT_BODY_MAX } from "./drafts";
 import type { ReplyDraftFileOps } from "@plannotator/core/inbox-reply-draft";
+import { standingReplyMentions } from "@plannotator/core/inbox-thread-mention";
 import { InboxError } from "./schema";
 
 export const INBOX_REPLY_DRAFTS_DIR = "reply-drafts";
@@ -61,6 +62,8 @@ function parse(text: string): InboxReplyDraft | null {
     const recipients = recipientList(value.recipients);
     // The message the reply quotes (approval "inbox-reply-quote"): kept only when well formed.
     const quote = replyQuote(value.quote);
+    // The threads mentioned in the words (approval "inbox-drag-threads"): only those that still stand where they say.
+    const mentions = standingReplyMentions(value.body, value.mentions);
     return {
       v: 1,
       thread_id: value.thread_id,
@@ -70,6 +73,7 @@ function parse(text: string): InboxReplyDraft | null {
       ...(files.length > 0 ? { files } : {}),
       ...(recipients && recipients.length > 0 ? { recipients } : {}),
       ...(quote ? { quote } : {}),
+      ...(mentions.length > 0 ? { mentions } : {}),
     };
   } catch {
     return null;
@@ -148,6 +152,8 @@ export function checkInboxReplyDraftInput(
   recipients: string[] | null;
   /** The message the reply quotes: undefined, not sent (the draft keeps its own); null, none any more. */
   quote: InboxReplyQuote | null | undefined;
+  /** The threads mentioned in the words, each standing where it says (others dropped); undefined: not sent. */
+  mentions: InboxReplyMention[] | undefined;
 } {
   const body = input.body === undefined ? "" : input.body;
   if (typeof body !== "string" || body.length > INBOX_DRAFT_BODY_MAX) {
@@ -182,7 +188,12 @@ export function checkInboxReplyDraftInput(
   if (quote === null && input.quote !== null && input.quote !== undefined) {
     throw new InboxError("validation_error", `quote: { of, words? }, of a message id, words at most ${INBOX_MESSAGE_COMMENT_QUOTE_MAX} characters.`, { field: "quote" });
   }
-  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops, recipients, quote };
+  if (input.mentions !== undefined && !Array.isArray(input.mentions)) {
+    throw new InboxError("validation_error", "mentions: a list of { thread_id, title, label, at }.", { field: "mentions" });
+  }
+  // A mention that does not stand in the words is dropped, never refused: the words always save.
+  const mentions = input.mentions === undefined ? undefined : standingReplyMentions(body, input.mentions);
+  return { body, base, baseBody, files, baseFiles: listedBase as string[] | null, allFiles: input.all_files === true, ops, recipients, quote, mentions };
 }
 
 /** What a reply draft save may carry (`POST /api/inbox/threads/:id/draft`). */
@@ -201,6 +212,8 @@ export interface InboxReplyDraftInput {
   recipients?: unknown;
   /** The message the reply quotes, `{ of, words? }` (approval "inbox-reply-quote"); null: none; absent, the draft keeps its own. */
   quote?: unknown;
+  /** The threads mentioned in the words, `{ thread_id, title, label, at, … }` each; absent, the draft keeps those of its own still standing. */
+  mentions?: unknown;
 }
 
 /** Write one draft whole (owner-only folder and file). */

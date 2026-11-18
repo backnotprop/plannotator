@@ -604,9 +604,9 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }, { file: 's.ts' }] }] });
     const files = [addedFile('m.sql', 5), addedFile('s.ts', 10)];
     await renderView(guide, { bare: true, state: makeState({ files }) });
-    // Before a measure: 5 and 10 rows of 20px, the 33px header, the list's padding and the border, as the browser lays it out.
-    expect(boxHeight('m.sql')).toBe('151px');
-    expect(boxHeight('s.ts')).toBe('251px');
+    // Before a measure: 5 and 10 rows of 20px, the 32px header, the list's padding and the border, as the browser lays it out.
+    expect(boxHeight('m.sql')).toBe('150px');
+    expect(boxHeight('s.ts')).toBe('250px');
 
     const report = (path: string) => latestCodeViewProps.filter((p) => (p.files as DiffFile[])[0]?.path === path).at(-1)!.onContentHeightChange as (h: number) => void;
     // Inline comments, wrapped lines and opened gaps grow the content: the box follows, with no limit, and nothing scrolls inside it.
@@ -624,8 +624,8 @@ describe('GuideView bare (the Inbox PR page)', () => {
   test.skipIf(!hasDom)('a flush host: the box is exactly what the renderer reports, with no border or padding', async () => {
     const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'm.sql' }] }] });
     await renderView(guide, { bare: true, state: { ...makeState({ files: [addedFile('m.sql', 5)] }), flushFiles: true } });
-    // Before a measure: 5 rows of 20px and the 33px header, without the bordered box's 18px.
-    expect(boxHeight('m.sql')).toBe('133px');
+    // Before a measure: 5 rows of 20px and the 32px header, without the bordered box's 18px.
+    expect(boxHeight('m.sql')).toBe('132px');
     const report = latestCodeViewProps.at(-1)!.onContentHeightChange as (h: number) => void;
     await act(async () => report(300));
     expect(boxHeight('m.sql')).toBe('300px');
@@ -636,7 +636,7 @@ describe('GuideView bare (the Inbox PR page)', () => {
   test.skipIf(!hasDom)('a host opts in without bare: the box fits, the heading stays', async () => {
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'm.sql' }] }] });
     await renderView(guide, { fitFileHeights: true, state: makeState({ files: [addedFile('m.sql', 5)] }) });
-    expect(boxHeight('m.sql')).toBe('151px');
+    expect(boxHeight('m.sql')).toBe('150px');
     expect(host!.querySelector('h1')).not.toBeNull();
     expect(latestCodeViewProps.at(-1)!.onContentHeightChange).toBeFunction();
   });
@@ -649,9 +649,9 @@ describe('GuideView bare (the Inbox PR page)', () => {
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split' } });
     const without = Number.parseFloat(boxHeight('a.ts'));
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split', opensWholeFiles: true } });
-    expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 32);
+    expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 20);
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [{ ...file, status: 'renamed', oldPath: 'b.ts' }] }), diffStyle: 'split', opensWholeFiles: true } });
-    expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 32);
+    expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 20);
     // Nothing more to open in a file with one side.
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [{ ...file, status: 'added' }] }), diffStyle: 'split', opensWholeFiles: true } });
     expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without);
@@ -664,12 +664,12 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
     // Rows: ctx, ctx2, then 3 (max of 2 removed, 3 added) and 1 → 6 in Split; ctx, ctx2, 5 and 1 → 8 in Unified.
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split' } });
-    expect(boxHeight('a.ts')).toBe(`${51 + 6 * 20}px`);
+    expect(boxHeight('a.ts')).toBe(`${50 + 6 * 20}px`);
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified' } });
-    expect(boxHeight('a.ts')).toBe(`${51 + 8 * 20}px`);
+    expect(boxHeight('a.ts')).toBe(`${50 + 8 * 20}px`);
   });
 
-  // Guards a modified file growing on its first mount: the separators above and between hunks are 32 px each, with no gaps around them.
+  // Guards a modified file growing on its first mount: the separators above and between hunks are 20 px each, with no gaps around them.
   test.skipIf(!hasDom)('the first estimate counts the separator above a first hunk and those between hunks', async () => {
     const hunk = (at: number) => `@@ -${at},2 +${at},2 @@\n ctx\n-a\n+b\n`;
     const patchOf = (...ats: number[]) => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n${ats.map(hunk).join('')}`;
@@ -680,10 +680,10 @@ describe('GuideView bare (the Inbox PR page)', () => {
       return boxHeight('a.ts');
     };
     // Each hunk draws three rows in Unified.
-    expect(await box(patchOf(1))).toBe(`${51 + 3 * 20}px`);
-    expect(await box(patchOf(10))).toBe(`${51 + 3 * 20 + 32}px`);
-    expect(await box(patchOf(1, 30))).toBe(`${51 + 6 * 20 + 32}px`);
-    expect(await box(patchOf(10, 30, 50))).toBe(`${51 + 9 * 20 + 3 * 32}px`);
+    expect(await box(patchOf(1))).toBe(`${50 + 3 * 20}px`);
+    expect(await box(patchOf(10))).toBe(`${50 + 3 * 20 + 20}px`);
+    expect(await box(patchOf(1, 30))).toBe(`${50 + 6 * 20 + 20}px`);
+    expect(await box(patchOf(10, 30, 50))).toBe(`${50 + 9 * 20 + 3 * 20}px`);
   });
 
   // Guards the same growth on a file with no final newline: the viewer draws that note as a row of its own.
@@ -699,12 +699,12 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const oldSide = `-a\n${NOTE}+a\n`;
     const bothSides = `-a\n${NOTE}+b\n${NOTE}`;
     const afterContext = `-a\n+b\n c\n${NOTE}`;
-    expect(await box(oldSide, 'unified')).toBe('111px');
-    expect(await box(oldSide, 'split')).toBe('91px');
-    expect(await box(bothSides, 'unified')).toBe('131px');
-    expect(await box(bothSides, 'split')).toBe('91px');
-    expect(await box(afterContext, 'unified')).toBe('131px');
-    expect(await box(afterContext, 'split')).toBe('111px');
+    expect(await box(oldSide, 'unified')).toBe('110px');
+    expect(await box(oldSide, 'split')).toBe('90px');
+    expect(await box(bothSides, 'unified')).toBe('130px');
+    expect(await box(bothSides, 'split')).toBe('90px');
+    expect(await box(afterContext, 'unified')).toBe('130px');
+    expect(await box(afterContext, 'split')).toBe('110px');
   });
 
   // A commented file back in the outer window: 20 files so the window runs, frames by hand once it is back.

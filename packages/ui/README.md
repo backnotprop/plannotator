@@ -65,8 +65,13 @@ The sidebar/panel resize handle exposes seams for hosts that want different edge
   ```ts
   const resize = useResizablePanel({ storageKey, side: "left", onSnapClose: collapse, onClick: collapse });
   ```
+- **Resize from the keyboard.** `resizeTo(px)` from `useResizablePanel` sets the width the way a finished drag does: clamped to `minWidth`/`maxWidth`, applied, and saved under `storageKey`. A value that is not a finite number is ignored.
 
 Building your own tooltip and removing the built-in double-click reset are host-side concerns (override `onDoubleClick` where you render the handle).
+
+### Page frame (`components/frame`, `frame.css`)
+
+The rail, edges, versions panel, reading line and phone sheets around a document, with host words, storage and colours passed in. See [`components/frame/README.md`](components/frame/README.md).
 
 ### Lazy renderers and the eager entries (`utils/math`, `utils/generateIdentity`, `utils/mermaid`; 0.32.0)
 
@@ -672,6 +677,8 @@ See HANDOFF.md § "Decision toggle on any question, and an opener for the host's
 **Local links decided by the host (ui 0.53.0).** `Viewer` `resolveLocalLink`: the host decides what a link to a local path does (open it itself, or draw it as inert text), markdown and raw HTML alike. See HANDOFF.md § "Viewer `resolveLocalLink` (ui 0.53.0)".
 
 **File paths in words, decided by the host (unreleased; the Inbox's "every file a message names opens").** All opt-in, in `components/LocalLinkContext.tsx`; with no provider every path renders exactly as before.
+- `LocalLinkMatchContext`: which link targets `LocalLinkContext`'s resolver is asked about (default `isLocalLinkTarget`, local paths only), in `InlineMarkdown`, raw HTML (`HtmlBlock`) and `PlanCleanDiffView`'s inline text. A host that must keep every non-web link from doing anything (`mailto:`, an editor's scheme) gives a wider test and answers those `unavailable`; an email autolink (`<a@b.com>`) is asked about as `mailto:…` too. `PlanCleanDiffView`'s inline text also reads `ImageResolverContext` and `LocalLinkContext` now (it read neither); with no provider it renders as before.
+- `DiagramSvgAcceptContext` (`components/diagramSvgAccept`): a host's check of every drawn diagram svg (Mermaid and Graphviz) before it reaches the page. `renderDiagram(kind, id, source, theme, { accept })` calls it on the parsed root while it is still in DOMPurify's inert document (before `adoptNode`). A refusal is a `DiagramRenderError` with `refused: true`, and `DiagramBlock` shows the fence's source as code. Absent: every render is exactly as before. The Inbox's Plans page passes one.
 - `CodeSpanMatchContext`: which code spans `CodeSpanContext`'s wrap is asked about (default `isCodeFilePath`); a host that opens documents, pictures and films gives its own test.
 - `BarePathContext` (`{ find, wrap }`): file paths written as plain words. InlineMarkdown asks `find` for each plain run (after cross-repo refs), stops a chunk where a found path starts so a `_` or `@` in it does not cut it, and draws each through `wrap`. Never inside code, links or markup.
 - An `'open'` resolution's `wrap?: (link) => ReactNode`: draws the link inside the host's own hover (its code, say), without the tooltip; the click still calls `open`.

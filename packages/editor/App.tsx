@@ -335,7 +335,7 @@ import {
   computeEditStats,
   isEmptyFeedbackSentinel,
   normalizeEditedMarkdown,
-} from './directEdits';
+} from '@plannotator/shared/direct-edits';
 import {
   buildAnnotateApprovalBody,
   buildCompleteAnnotateFeedback,

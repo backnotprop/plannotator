@@ -1,5 +1,5 @@
 /**
- * A board over its thread or over the grid, with Show me from the board: the same request and the same box as a
+ * A board in its thread's pane or over the grid, with Show me from the board: the same request and the same box as a
  * review's board, with no review behind it. It needs a thread and a live owner, as Ask does (`can_ask`): with neither,
  * the box has Ask and Change it, which wait for the agent, and the board is as it always was.
  *

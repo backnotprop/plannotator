@@ -1,14 +1,17 @@
 /**
  * The board can close the main sidebar (the owner: "I still need to be
  * able to close the main sidebar in this view. It takes up a lot of
- * horizontal space."). The board, opened from the Shape row or over its
- * thread, covers the page's head, so it has the sidebar toggle every full
- * page has at the left of its title, and it closes and
- * opens the sidebar through the shell's own state (the window stores that
- * choice, as on every page); ⌘/Ctrl+B does the same with the board open. What
- * regresses: the board (on the Shape page or over a thread) losing its
- * toggle, the toggle not reaching the
- * sidebar, or a phone (where the sidebar is a sheet) gaining one.
+ * horizontal space."). The board opened from the Shape row covers the page's
+ * head, so it has the sidebar toggle every full page has at the left of its
+ * title, and it closes and opens the sidebar through the shell's own state
+ * (the window stores that choice, as on every page); ⌘/Ctrl+B does the same
+ * with the board open. A board in its thread (the owner, 2026-11-16: it fits
+ * within the thread view) keeps one only where the thread covers the list (a
+ * stacked window, `sidebarToggle`); beside the list, the list's own toggle is
+ * on screen (packages/inbox/shape/boardInThread.test.tsx). What regresses: the
+ * board (on the Shape page or in a thread that covers the list) losing its
+ * toggle, the toggle not reaching the sidebar, or a phone (where the sidebar
+ * is a sheet) gaining one.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -69,7 +72,7 @@ function windowIs(phone: boolean) {
  * The shell with the board laid over the page, as App.tsx draws it: the sidebar's open state is the window's
  * (`stored` records each change, as App's onOpenChange stores it).
  */
-async function mount(options: { thread?: InboxThread; phone?: boolean } = {}): Promise<{ el: HTMLElement; stored: boolean[] }> {
+async function mount(options: { thread?: InboxThread; phone?: boolean; inThread?: boolean } = {}): Promise<{ el: HTMLElement; stored: boolean[] }> {
   windowIs(options.phone ?? false);
   // happy-dom lays nothing out, so every width reads 0, a phone's: the board is desktop-wide.
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
@@ -99,7 +102,7 @@ async function mount(options: { thread?: InboxThread; phone?: boolean } = {}): P
           <nav data-test-nav="">Inbox</nav>
         </Sidebar>
         <main className="ib-main" data-shape-open="">
-          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={options.thread ?? null} />
+          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={options.thread ?? null} inThread={options.inThread} />
         </main>
       </SidebarProvider>
     );
@@ -117,12 +120,12 @@ async function mount(options: { thread?: InboxThread; phone?: boolean } = {}): P
 const sidebarState = (el: ParentNode) => el.querySelector('[data-slot="sidebar"][data-state]')?.getAttribute('data-state') ?? null;
 const boardToggle = (el: ParentNode) => el.querySelector<HTMLButtonElement>('.shp-head [data-sidebar="trigger"]');
 
-/** A thread the board hangs off (only the board's Thread tab reads its messages). */
+/** A thread the board hangs off. */
 const THREAD = { thread_id: 'thr_1', messages: [], project: { root: '/work/relay', repo: null } } as unknown as InboxThread;
 
-for (const [where, thread] of [['the Shape page', undefined], ['a board over its thread', THREAD]] as const) {
+for (const [where, thread] of [['the Shape page', undefined], ['a board in a thread that covers the list', THREAD]] as const) {
   test.skipIf(!hasDom)(`${where}: the toggle sits left of the title, and closes and opens the sidebar`, async () => {
-    const { el, stored } = await mount({ thread });
+    const { el, stored } = await mount({ thread, inThread: !!thread });
     const toggle = boardToggle(el);
     expect(toggle).not.toBeNull();
     expect(toggle!.getAttribute('aria-label')).toBe('Toggle Sidebar');

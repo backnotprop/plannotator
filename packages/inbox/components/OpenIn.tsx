@@ -17,7 +17,7 @@ import { InboxApiError, inboxApi } from '../api';
 import type { OpenInFileCode, OpenInFileScope } from '../openInWire';
 import { Icon } from '../icons';
 import { newTabUrl, onAnotherMachine, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
-import { attachmentDownloadUrl, readableVersion } from '../attachments';
+import { readableVersion } from '../attachments';
 import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone, useTouchScreen } from '../phone';
@@ -946,7 +946,8 @@ function FullScreenMoreApps(props: FullScreenMoreProps) {
 function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNode }) {
   const { attachment, version } = props;
   // A source that writes nothing (the tour): no Open in, no Download; the menu says so.
-  const { writes } = useInboxFileSource();
+  const source = useInboxFileSource();
+  const { writes } = source;
   // Through the tailnet or on a phone (or a server without the app list): a new tab, for HTML and images.
   const tab = writes && props.openIn === null && props.surface !== undefined ? newTabUrl(attachment, version) : null;
   const named = [props.openIn || tab ? 'open in' : null, writes ? 'download' : null, props.versionAction ? 'versions' : null].filter(Boolean).join(', ') || 'not in the tour';
@@ -968,7 +969,7 @@ function FullScreenMoreMenu(props: FullScreenMoreProps & { openIn: React.ReactNo
         )}
         {writes && (props.openIn || tab) && <DropdownMenuSeparator />}
         {writes ? (
-          <DropdownMenuItem className="text-xs" render={<a href={attachmentDownloadUrl(attachment, version)} download={attachment.name} />} data-attachment-download="">
+          <DropdownMenuItem className="text-xs" render={<a href={source.downloadUrl(attachment, version)} download={attachment.name} />} data-attachment-download="">
             <Icon name="download" size={15} className="ib-appi ib-glyph" />
             <span className="flex-1">{version === 'sent' ? 'Download the sent version' : 'Download'}</span>
           </DropdownMenuItem>

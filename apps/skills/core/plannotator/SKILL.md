@@ -34,6 +34,7 @@ Use the CLI only when you have no such tool, or for what the tool does not do: `
 | Export or share a Guided Review | `plannotator guide export` / `plannotator guide share` |
 | Reopen or list live sessions | `plannotator sessions` |
 | Ask the person something they can answer later, without blocking | The `plannotator_inbox` tool when you have it, else the Inbox's MCP server (`plannotator inbox mcp`) |
+| Have work run on its own on a schedule, reporting in the Inbox (a routine) | `plannotator routine --help` |
 
 ## Session model
 

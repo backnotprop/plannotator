@@ -6,8 +6,9 @@
  *
  *   POST /api/inbox/threads/:id/tags   `{ tag: "ini_…", on: boolean }`: Add tag, untick, Remove from; `{ tags }`, the thread's tags
  *                                      `{ name, on }` in place of `tag`: the live tag of that name, made when none is
- *   POST /api/inbox/tag-colours        `{ tag: "ini_…", colour, at }`: a tag's row colour (a preset, `#rrggbb`, or null
- *                                      for None); `{ show, at }`: "Show tag colors". `at` is when the person chose, the
+ *   POST /api/inbox/tag-colours        `{ tag: "ini_…", colour, at, kept_colour? }`: a tag's row colour (a preset,
+ *                                      `#rrggbb`, or null: Highlight rows off, `kept_colour` the colour it keeps for when
+ *                                      it is on again); `{ show, at }`: "Show tag colors". `at` is when the person chose, the
  *                                      same on every machine the window sends it to (inbox-tag-colours.ts).
  *
  * The person's marks live in `inbox/tags.json`, outside the event log (shared/inbox/thread-tags.ts): agents,
@@ -39,7 +40,7 @@ export function createInboxThreadTags(options: {
       if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
       if (body.show !== undefined) return json({ tag_colours: store.setTagColoursShown(body.show, body.at) });
       if (body.colour === undefined) throw new InboxError("validation_error", "colour: a preset, a #rrggbb, or null.", { field: "colour" });
-      return json({ look: store.setTagColour(body.tag, body.colour, body.at), tag_colours: store.tagColours() });
+      return json({ look: store.setTagColour(body.tag, body.colour, body.at, body.kept_colour), tag_colours: store.tagColours() });
     }
     const match = INBOX_THREAD_TAGS_PATH.exec(url.pathname);
     if (!match) return null;

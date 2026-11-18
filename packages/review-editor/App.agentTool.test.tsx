@@ -190,21 +190,17 @@ afterAll(() => {
 });
 
 describe.if(hasDom)("agent tool switch in code review", () => {
-  test("Pi with the tool off: the offer turns it on and the Settings row follows", async () => {
+  test("Pi with the tool off: no first-run offer; the Settings row turns it on", async () => {
     seedEarlierChainSeen();
     await mount("pi", PI_OFF);
-    expect(document.querySelector(DIALOG)?.getAttribute("data-agent-tool-host")).toBe("pi");
-
-    await act(async () => buttonIn(DIALOG, "Yes, turn it on").click());
-    await settle();
-    expect(configPosts).toEqual([{ agentTool: true }]);
-    expect(memory.get(AGENT_TOOL_KEY)).toBe("1");
-
-    await act(async () => buttonIn(DIALOG, "Done").click());
     expect(document.querySelector(DIALOG)).toBeNull();
 
     await openSettings();
-    expect(document.querySelector(`${SETTING_ROW} button[role="switch"]`)?.getAttribute("aria-checked")).toBe("true");
+    const toggle = document.querySelector<HTMLButtonElement>(`${SETTING_ROW} button[role="switch"]`);
+    expect(toggle?.getAttribute("aria-checked")).toBe("false");
+    await act(async () => toggle!.click());
+    await settle();
+    expect(configPosts).toEqual([{ agentTool: true }]);
   });
 
   test("no offer and no row where the server reports no tool host", async () => {

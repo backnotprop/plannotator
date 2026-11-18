@@ -17,7 +17,7 @@ import { StartedBy } from './StartedBy';
 import { earlierRunsLabel, RunDivider, runFolds, ScheduledFoot } from '../scheduled/thread';
 import { useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type OutboxView, type TagMode, type ThreadModel } from '../api';
-import { awayLine, outboxLine } from '../machines';
+import { outboxLine } from '../machines';
 import { ThreadSessions } from './ThreadSessions';
 import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
@@ -25,6 +25,7 @@ import { annotationOf, attachmentFeedback, attachmentImageUrl, isFileComment, OW
 import { withPictures } from '../commentPictureFiles';
 import { CommentPictures } from '../commentPictures';
 import { fileQuestionRecords, type FileQuestions } from '../fileQuestions';
+import { ThreadMeta } from '../parts/ThreadMeta';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
@@ -54,7 +55,7 @@ import { HoldingChips, SnippetText } from '../parts/FoldLine';
 import { atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard } from './ReviewCard';
-import { reviewOpenPlan } from '../pulls/reviewsModel';
+import { ReviewViewNote, reviewOpenPlan } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { ThreadMore, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
@@ -187,6 +188,7 @@ import { StepsButton } from '../steps/StepsButton';
 import { stepsButtonSig, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps } from '../steps/useThreadSteps';
 import { keepEqualByKey } from '../thread/keepEqual';
+import { useKeptScroll } from '../thread/keptScroll';
 import { sentActionsOf } from '../thread/sentActions';
 import { leftoverWords } from '../thread/leftover';
 import { replyWordsCount, withFreeName, withoutReplyWords } from '../shape/addToReply';
@@ -194,20 +196,21 @@ import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTarget
 import { FOLD_STEP, isSuperseded, NO_ANNOTATIONS, NO_QUESTIONS, NO_IDS, NO_OUTBOX, NO_SENT_ANSWERS, NO_UPLOADS, askingSessionOf, commentTags, emptyAnswerFor, isOtherAgent, newBelow, otherSendSessions, reducedMotion, replyKeyOf, reviewOutcomesOf, spanWords, stillHidden, type FoldState } from '../thread/helpers';
 import { NO_SKILLS_HINT_MS, REPLY_FILES_SUMMARY_FROM, SHOW_NEW_MESSAGE_BUTTON, SIDE_COMMAND_DESCRIPTION, SIDE_COMMAND_NAME, THREAD_GONE_TEXT, focusReplyFromBox } from '../thread/replyBox';
 import { AckPill } from '../parts/AckPill';
-import { HeadMark } from '../parts/HeadMark';
+import { ThreadBarTitle } from '../thread/ThreadBarTitle';
 import { SkipChip } from '../parts/SkipChip';
 import { namedTagOptions, useThreadSessions } from '../thread/useThreadSessions';
 import { measureOpenPlaces } from '../thread/openPlaces';
 import { takeMergedFiles as takeMergedFilesInto, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
 import { ReplyTextField } from '../parts/ReplyTextField';
+import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
 
 export { AckPill, MessageBody };
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
-export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread: threadRead, threadSteps = null, codeReview = false, pullReview, machine = null, onMachineUpdate, onNewMessageWith, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onSentRead, readPending = false, onPickSaves, onChanged, onTakenBack, draftChanged = 0, filesChanged = 0, draftSignal = null, filesSignal = null, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, parked = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, priority, onSnooze, onUnsnooze, snoozeBlocked, replyRequest, onReplyOpened, shapeButton = null, board = null, onSide, onSideWords, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, namedFile = null, onOpenNamedFile, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, links: linksRoute = false, onLinks, decide = null, threadAlone = false, paired = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null, agentContext = null, agentFilter = null, onAgentFilter }: ThreadPaneProps) {
   /**
    * The questions this pane's own saves brought back (by `<message id>/<key>`), and how many saves landed. The thread
    * drawn is the one read, its questions never older than these: a read that left before the last keys were saved
@@ -519,7 +522,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [errorDetails, setErrorDetails] = useState<{ for: string; text: string } | null>(null);
   /** The error line names a machine that needs an update (a Delete it refused): its Update follows the words. */
   const [errorUpdate, setErrorUpdate] = useState<{ for: string; machine: string } | null>(null);
-  const voice = useThreadVoice(thread.thread_id, (outcome, takenIn) => onLateVoice(outcome, takenIn));
+  const voice = useThreadVoice(thread.thread_id, (outcome, takenIn) => onLateVoice(outcome, takenIn), parked);
   const lateMiss = useLateVoiceMiss(thread.thread_id);
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
@@ -585,6 +588,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const nameChip = threadChipName(thread.thread_name, thread.subject ?? '(no subject)');
   // The bar's name: in Reviews, the review's title once it landed, the name its row and heading show (`ReviewView.name`).
   const barName = reviewView?.name ?? nameChip;
+  const heading = reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)';
   // The agent sessions this thread involves (approval "inbox-tag-agents"): overlapping marks in the head.
   const participants = useMemo(() => threadParticipants(thread), [thread]);
   const lookRef = useRef<{ threadId: string; seq: number | null } | null>(null);
@@ -1596,10 +1600,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
 
   // The "↓ N new" pill while new messages the person has not seen are below
   // the view (its count: those messages, never everything new this visit).
-  // The subject shows in the header once the body's heading has scrolled away (a named thread's name always does).
   // `pill` here is only whether the pill shows; its count changes on most scroll steps past new messages, so it
   // lives in `pillCount`, which only the pill reads: a scroll redraws the pill, never every message of the thread.
-  const [chrome, setChrome] = useState({ subject: false, pill: false });
+  const [chrome, setChrome] = useState({ pill: false });
   const [pillCount] = useState(createCountStore);
   /** The new messages the person has had on screen this visit (newBelow): the pill never counts them again. */
   const passed = useRef<{ threadId: string; ids: Set<string> }>({ threadId: thread.thread_id, ids: new Set() });
@@ -1612,16 +1615,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const updateChrome = useCallback(() => {
     const body = bodyRef.current;
     if (!body) return;
-    const box = body.getBoundingClientRect();
-    const subject = body.querySelector<HTMLElement>('.ib-subject');
     const shown = showingRef.current && (typeof document === 'undefined' || document.visibilityState !== 'hidden');
     const count = newBelow(body, passedIds(), shown).length;
-    const next = {
-      subject: subject !== null && subject.getBoundingClientRect().bottom < box.top + 4,
-      pill: count > 0,
-    };
     pillCount.set(count);
-    setChrome((current) => (current.subject === next.subject && current.pill === next.pill ? current : next));
+    setChrome((current) => (current.pill === count > 0 ? current : { pill: count > 0 }));
   }, [passedIds, pillCount]);
 
   // ── Seen on sight (design record "inbox-new-in-open-thread", variant A) ──
@@ -1656,11 +1653,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     [onSeen, thread.thread_id],
   );
   // On a phone the pill sits in the foot and covers none of the thread.
-  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn, pill: chrome.pill && !phone, onSeen: sawOne });
+  useSeenOnSight({ bodyRef, candidates, covered: covered || fileCovers || artifactsOn || !!board, pill: chrome.pill && !phone, onSeen: sawOne });
   // The thread on screen, for notifications: a question in it raises nothing while it is visible.
   const screenRef = useRef(onScreenChange);
   screenRef.current = onScreenChange;
-  const paneCovered = covered || fileCovers || artifactsOn;
+  // The board in the messages' place covers them as the Artifacts view does: none of the thread's keys act under it.
+  const paneCovered = covered || fileCovers || artifactsOn || !!board;
   showingRef.current = !paneCovered;
   // The status and Cancel go under the cover with the box (the pane stays mounted): a recording goes, nothing posted; a take being transcribed lands.
   useEffect(() => {
@@ -1672,10 +1670,10 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   useEffect(() => () => screenRef.current?.(null), []);
 
   // The Artifacts view: opening it moves focus to its heading, leaving it returns focus to the Artifacts
-  // button (the messages keep the scroll they had). Only on a change in this pane, never on the first draw
-  // (a reload or a link lands where the window puts focus).
+  // button (the messages keep the scroll they had, as under the board: keptScroll.ts). Only on a change in this
+  // pane, never on the first draw (a reload or a link lands where the window puts focus).
+  useKeptScroll(bodyRef, artifactsOn || !!board);
   const artifactsWas = useRef(artifactsOn);
-  const threadScroll = useRef(0);
   useLayoutEffect(() => {
     if (artifactsWas.current === artifactsOn) return;
     artifactsWas.current = artifactsOn;
@@ -1683,20 +1681,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       (linksOn ? linksHeadingRef : artifactsHeadingRef).current?.focus({ preventScroll: true });
       return;
     }
-    if (bodyRef.current) bodyRef.current.scrollTop = threadScroll.current;
     const button = artifactsButtonRef.current;
     if (button) button.focus();
-    else bodyRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
-  }, [artifactsOn]);
-  // The thread's scroll, kept while the grid is shown over it.
-  useEffect(() => {
-    const body = bodyRef.current;
-    if (!body || artifactsOn) return;
-    const keep = () => {
-      threadScroll.current = body.scrollTop;
-    };
-    body.addEventListener('scroll', keep, { passive: true });
-    return () => body.removeEventListener('scroll', keep);
+    else sectionRef.current?.querySelector<HTMLElement>('.ib-subject')?.focus({ preventScroll: true });
   }, [artifactsOn]);
   // ── Your place in the thread, around a file (threadPlace.ts) ──
   // Beside a file the thread is a narrow column, under a full-screen file it is covered, and on a phone or a
@@ -2036,7 +2023,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const [openItemsRequest, setOpenItemsRequest] = useState(0);
   // H (approval "inbox-keyboard-keys-2026-11-07", item 3): opens the header ⋯ menu at Snooze's times; it never snoozes by itself.
   const [snoozeRequest, setSnoozeRequest] = useState(0);
-  const readKeysOn = !one && !artifactsOn;
+  const readKeysOn = !one && !artifactsOn && !board;
   const readKeyAllowed = (event: KeyboardEvent) => {
     if (!readKeysOn || !bareKeyAllowed(event)) return false;
     const origin = keyOrigin(event);
@@ -2106,7 +2093,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       reply: {
         when: (event) => {
           // Only where the Reply button is (or the box is already open): never where the foot shows something else.
-          if (!bareKeyAllowed(event) || !(box.open || sectionRef.current?.querySelector('[data-reply-button]'))) return false;
+          if (!bareKeyAllowed(event) || board || !(box.open || sectionRef.current?.querySelector('[data-reply-button]'))) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row' || origin === 'file';
         },
@@ -2114,7 +2101,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       },
       openNewest: {
         when: (event) => {
-          if (!bareKeyAllowed(event) || artifactsOn) return false;
+          if (!bareKeyAllowed(event) || artifactsOn || board) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row';
         },
@@ -2208,7 +2195,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       fullScreen: {
         when: (event) => {
           // A phone or a stacked window shows files full screen only: there is nothing to switch.
-          if (!bareKeyAllowed(event) || artifactsOn || phone || fileStacked) return false;
+          if (!bareKeyAllowed(event) || artifactsOn || board || phone || fileStacked) return false;
           const origin = keyOrigin(event);
           return origin === 'thread' || origin === 'row' || origin === 'file';
         },
@@ -2700,7 +2687,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setError(null);
     },
     // The same conditions that hide the box (the guard shows only while a replaced question waits).
-    !resolved && !artifactsOn && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose',
+    !resolved && !artifactsOn && !board && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose',
   );
   /** Acting on the panel: these replacements were seen, so Send goes as asked from now on. */
   const acknowledgeStale = () => {
@@ -3325,7 +3312,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         const files = withPictures(last ? uploads : [], own);
         requests.push({ messageId: target.message.id, input: {
           idempotency_key: sendKeys.current.get(part.key) ?? newUuid(),
-          words: last ? words : '',
+          words: last ? replyWordsWithMentions(thread.thread_id, words) : '',
           questions: target.questions,
           ...(target.skip.length > 0 ? { skip: target.skip } : {}),
           ...(target.actions.length > 0 ? { actions: target.actions } : {}),
@@ -3338,12 +3325,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           // The message the words answer (approval "inbox-reply-quote") rides the reply that carries them.
           ...(last && sendQuote && words.trim() !== '' ? { quote: sendQuote } : {}),
           ...(tags.length > 0 ? { tags } : {}),
-          // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding
-          // exactly these words when the `updated_at` they were saved as is not known here).
+          // The reply that carries the box's words: their draft goes with the Send (that draft, or one holding exactly these words when the `updated_at` they were saved as is not known here).
           ...(last && sendClears ? { clear_draft: draftSavedAs ?? '' } : {}),
-          // Only a message an ended session of this Send asked goes to the session picked;
-          // an answer to a live session's message still goes to that session.
-          // The words aimed with the pill at a session that never wrote here go to it alone.
+          // Only a message an ended session of this Send asked goes to the session picked; an answer to a live session's message still goes to that session. The words aimed with the pill at a session that never wrote here go to it alone.
           ...(part.wordsTo
             ? { to: part.wordsTo }
             : to && target.message.author.kind === 'agent' && !!target.message.author.session && sendEnded.has(target.message.author.session) && ('session' in to || target.message.author.session === asking?.session)
@@ -4340,6 +4324,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     </div>
   );
 
+  // A thread mentioned from outside the box (approval "inbox-drag-threads"): a closed box opens and takes it.
+  useMentionBoxOpener(thread.thread_id, box.open, sending, openBox);
   // The warning toast's Reply: the reply box opens, once.
   useEffect(() => {
     if (replyRequest !== thread.thread_id) return;
@@ -4360,9 +4346,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyWords, sending]);
 
-  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes
-  // out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send,
-  // Discard or another thread ends it.
+  // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send, Discard or another thread ends it.
   const changeReplyLive = useRef(changeReply);
   changeReplyLive.current = changeReply;
   // `/side` in the reply box's "/" list, only where the thread can ask: the words go to the side chat, and the reply
@@ -4603,7 +4587,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, linkList.count, linksOn, one, !!shapeButton, !!board, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -4772,28 +4756,14 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </>
         )}
-        {/* The bar: the subject first, then icons with tooltips (approval "inbox-thread-artifacts"): Artifacts,
-            Expand / Fold all, ⋯ More (its read actions and Snooze lead it; Archive is in it), then the close. */}
+        {/* The bar: the subject first, then icons with tooltips (approval "inbox-thread-artifacts"): Shape's Pebble (left of
+            Artifacts, the owner 2026-11-16), Artifacts, Expand / Fold all, ⋯ More (read actions, Snooze, Archive), the close. */}
         {phone && artifactsOn ? null : (
           <>
-            {one && !artifactsOn && !barName ? (
-              <span className="ib-sp" />
-            ) : (
-              // The bar's title, as on main: the thread's name (the list's rule, `threadChipName`; in Reviews, `barName`), always; with no name,
-              // the subject once the body's heading has scrolled away, so its words never show twice; always over the
-              // Artifacts grid. The heading stays the body's h2 (what a screen reader reads). Its tooltip is the whole
-              // subject: always under a name (the owner, 2026-11-02), else only when the subject is cut. The box takes the
-              // bar's free room, so the tooltip hangs on the words inside it (`.ib-phsubj-t`, as wide as they are, cut
-              // with "…" at the box's edge): it opens under the title, not centred on the empty room after a short one.
-              <span className="ib-phsubj" dir="auto" data-header-subject="" data-header-name={barName ? '' : undefined} data-on={barName || chrome.subject || artifactsOn ? '' : undefined} aria-hidden="true">
-                <Tip content={thread.subject ?? '(no subject)'} cut={!barName}>
-                  <span className="ib-phsubj-t" data-header-title="">
-                    <HeadMark thread={thread} where="bar" />
-                    {barName ?? thread.subject ?? '(no subject)'}
-                  </span>
-                </Tip>
-              </span>
-            )}
+            {/* The thread's title, always in the bar and nowhere in the body (the owner, 2026-11-15): its name (the list's
+                rule, `threadChipName`; in Reviews, `barName`) with its heading after it, muted, else its heading; cut, a
+                tap opens it whole (thread/ThreadBarTitle.tsx). The pane's h2, the focus target when focus has nowhere else to go. */}
+            <ThreadBarTitle key={thread.thread_id} thread={thread} name={barName} heading={heading} />
             {/* The thread's PRs (approval "inbox-pr-binding"): left of Artifacts, at its icon's size; none, no button
                 (the ⋯ menu's Add a pull request shows it with its card open on the Add field). */}
             {!artifactsOn && pullsOffered && (
@@ -4810,6 +4780,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 review={pullReview}
               />
             )}
+            {shapeButton}
             {artifactsButton && (
               <Tip content={withShortcut(artifactsOn ? 'Back to the thread' : linksOnly ? 'Links' : 'Artifacts: every file, image and guided review in this thread', { scope: inboxThreadShortcuts, action: 'artifacts' })}>
                 <button
@@ -4829,7 +4800,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </button>
               </Tip>
             )}
-            {!one && !artifactsOn && (
+            {!one && !artifactsOn && !board && (
               <Tip content={allOpen ? 'Fold the earlier messages' : 'Expand all messages'}>
                 <button
                   type="button"
@@ -4842,7 +4813,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
                 </button>
               </Tip>
             )}
-            {shapeButton}
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
@@ -4869,7 +4839,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               }
             />
 
-            {phone || stacked || backBesideFile || threadAlone ? null : (
+            {phone || backBesideFile || ((stacked || threadAlone) && !paired) ? null : (
               <>
                 <span className="ib-vsep" aria-hidden="true" />
                 <Tip content="Close">
@@ -4882,11 +4852,12 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           </>
         )}
       </div>
-      {/* The Artifacts view swaps the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
+      {/* The Artifacts view and the board swap the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
+      {board}
       <div
         className={`ib-pbody${one ? '' : ' ib-folding'}`}
         ref={bodyRef}
-        hidden={artifactsOn}
+        hidden={artifactsOn || !!board}
         // A named session wrote here (issue #2450): every head's name column is wider, so the rows still line up.
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
@@ -4907,8 +4878,6 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             )}
           </div>
         )}
-        <HeadMark thread={thread} where="body" />
-        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
         <ThreadTagLine threadId={thread.thread_id} phone={phone} />
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
@@ -4918,15 +4887,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             </button>
           </p>
         )}
-        {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
-        {nameChip && <span className="ib-sr" data-thread-name-sr="">Thread name: {nameChip}</span>}
-        {machine && (
-          // Another machine's thread: which machine, or since when it is away (its rows are greyed in the list).
-          <div className="ib-tmeta" data-thread-machine={machine.id} data-away={awayLine(machine) ? '' : undefined}>
-            <span>{awayLine(machine) ?? `On ${machine.name}`}</span>
-          </div>
-        )}
-        {cardChip ? <div className="ib-tmeta" data-thread-card-row="">{cardChip}</div> : null}
+        <ThreadMeta machine={machine} cardChip={cardChip} messages={thread.messages} />
         {notice}
         {launched && <StartedBy launched={launched} root={thread.messages[0]} project={thread.project.name} />}
         {confirmDelete && launched && (
@@ -5503,7 +5464,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           );
           return before;
         })}
-        {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">{reviewView.curating}</p>}
+        {reviewView && <ReviewViewNote view={reviewView} />}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         <SendingReply sends={sendsDrawn} held={outbox} machine={machine} />
@@ -5540,7 +5501,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           />
         </div>
       )}
-      <div className="ib-pfoot" hidden={artifactsOn} data-under={textUnder ? '' : undefined}>
+      <div className="ib-pfoot" hidden={artifactsOn || !!board} data-under={textUnder ? '' : undefined}>
         {/* One status region, always mounted, so a screen reader announces the note when it appears. */}
         <div role="status" id={noteId} data-asker-note="">
           {/* With the pill there, the open box's pill says who gets the reply (and that it ended): no note above it. */}
@@ -5655,6 +5616,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               <div className="ib-rscroll" data-reply-scroll="" ref={replyScrollRef}>
                 <ReplyTextField
                   replyText={replyText}
+                  mentionThread={thread.thread_id}
                   sendingWords={wordsAway === thread.thread_id}
                   textareaRef={textRef}
                   voice={voice}

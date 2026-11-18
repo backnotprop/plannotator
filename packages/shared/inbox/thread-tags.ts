@@ -2,7 +2,7 @@
  * Plannotator Inbox: the tags the person put on a thread or took off it
  * (approval "inbox-thread-tags", step 1).
  *
- *   inbox/tags.json   { v: 1, marks: [{ thread_id, tag, on, seq, at }], looks?: { [ini_id]: { colour, by, at } },
+ *   inbox/tags.json   { v: 1, marks: [{ thread_id, tag, on, seq, at }], looks?: { [ini_id]: { colour, by, at, kept_colour? } },
  *                     show?: { on, at }, recent?: [{ colour, at }] }, 0600, written whole (temp, then rename)
  *
  * A tag is an initiative record (`ini_` id, initiatives in the event log); this
@@ -18,7 +18,7 @@
 
 import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { INBOX_TAG_RECENT_MAX, isInboxId, isInboxTagLook, type InboxTagLook } from "@plannotator/core/inbox-types";
+import { INBOX_TAG_RECENT_MAX, inboxTagLook, isInboxId, isInboxTagLook, type InboxTagLook } from "@plannotator/core/inbox-types";
 import { InboxError } from "./schema";
 
 export const INBOX_TAGS_FILE = "tags.json";
@@ -110,7 +110,7 @@ export function readInboxTagColours(inboxDirPath: string): InboxTagColoursFile {
   const looks = new Map<string, InboxTagLook>();
   if (file.looks && typeof file.looks === "object" && !Array.isArray(file.looks)) {
     for (const [id, look] of Object.entries(file.looks as Record<string, unknown>)) {
-      if (isInboxId("ini", id) && isInboxTagLook(look)) looks.set(id, { colour: look.colour, by: look.by, at: look.at });
+      if (isInboxId("ini", id) && isInboxTagLook(look)) looks.set(id, inboxTagLook(look.colour, look.by, look.at, look.kept_colour));
     }
   }
   const show = file.show as { on?: unknown; at?: unknown } | null | undefined;
@@ -136,7 +136,7 @@ export function writeInboxTagColours(inboxDirPath: string, colours: InboxTagColo
   if (state === "bad") renameSync(file, `${file}.unreadable-${new Date().toISOString().replace(/[:.]/g, "-")}`);
   const { looks: _looks, show: _show, recent: _recent, ...kept } = rest;
   const next: Record<string, unknown> = { ...kept };
-  if (colours.looks.size > 0) next.looks = Object.fromEntries([...colours.looks].map(([id, look]) => [id, { colour: look.colour, by: look.by, at: look.at }]));
+  if (colours.looks.size > 0) next.looks = Object.fromEntries([...colours.looks].map(([id, look]) => [id, inboxTagLook(look.colour, look.by, look.at, look.kept_colour)]));
   if (colours.show) next.show = { on: colours.show.on, at: colours.show.at };
   if (colours.recent.length > 0) next.recent = colours.recent.map((r) => ({ colour: r.colour, at: r.at }));
   const wire = marks.map((m) => ({ thread_id: m.thread_id, tag: m.tag, on: m.on, seq: m.seq, at: m.at }));

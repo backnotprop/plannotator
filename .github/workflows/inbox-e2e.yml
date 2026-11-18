@@ -28,8 +28,8 @@ name: Inbox window e2e
 #  - On a PR, only with the `ci:e2e` label (or `ci:e2e-all`), for a risky PR,
 #    and then only when the Inbox, the ui and the guide viewer it composes, the
 #    plan editor, the plan and annotate servers, the binary entry or the build
-#    could have changed. Every PR runs the smoke slice instead
-#    (browser-smoke.yml). `ci:full` does not start this workflow.
+#    could have changed. A PR that touches these paths runs the smoke slice
+#    instead (browser-smoke.yml, which reads this path list).
 # The Pi servers are not listed: these specs drive only the compiled Bun
 # binary, and test.yml runs the Pi mirrors of the same scenarios.
 #

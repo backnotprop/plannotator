@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { Block } from '@plannotator/ui/types';
+import type { ContentsButtonMode } from './components/ContentsPanel';
 import { hasContentsRailHeadings } from '@plannotator/ui/utils/annotationHelpers';
 import { storage } from '@plannotator/ui/utils/storage';
 
@@ -31,4 +32,35 @@ export function useContentsShown(): [boolean, (shown: boolean) => void] {
     storage.setItem(CONTENTS_COOKIE, next ? 'shown' : 'hidden');
   }, []);
   return [shown, setShown];
+}
+
+/** How long a rail may take to load and measure before the Contents button stands in for it. */
+export const CONTENTS_RAIL_WAIT_MS = 2500;
+
+/**
+ * Whether the rail has had its time for this key (a document, and whether the rail is shown): while it may still be
+ * on its way no stand-in shows (no button flashes before the rail); past that, a rail that never drew leaves the
+ * Contents button and sheet. The wait starts again for each key.
+ */
+export function useContentsRailWaited(enabled: boolean, key: string): boolean {
+  const [waited, setWaited] = useState<string | null>(null);
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = setTimeout(() => setWaited(key), CONTENTS_RAIL_WAIT_MS);
+    return () => clearTimeout(timer);
+  }, [enabled, key]);
+  return waited === key;
+}
+
+/**
+ * The Contents button over a document (ContentsPanel.tsx): on a phone, the sheet; hidden, Show wherever the rail
+ * would fit (by the layout, `sideFits`, or by the rail's own measure), else the sheet; shown, nothing while the rail
+ * is there or on its way, and the sheet where it does not fit or never drew. Null: no button.
+ */
+export function contentsButtonMode(state: { hasContents: boolean; phone: boolean; shown: boolean; sideFits: boolean; railFits: boolean | null; waited: boolean }): ContentsButtonMode | null {
+  const { hasContents, phone, shown, sideFits, railFits, waited } = state;
+  if (!hasContents) return null;
+  if (phone) return 'sheet';
+  if (!shown) return sideFits || railFits === true ? 'show' : railFits === false || waited ? 'sheet' : null;
+  return railFits === true ? null : (railFits === false && !sideFits) || waited ? 'sheet' : null;
 }

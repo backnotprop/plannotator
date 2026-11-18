@@ -141,7 +141,7 @@ export function createInboxScheduled(deps: {
     return null;
   };
 
-  const rowOf = (record: InboxScheduledThread): InboxScheduledRow => {
+  const rowOf = ({ create_key: _key, ...record }: InboxScheduledThread): InboxScheduledRow => {
     const last = lastDividerOf(record);
     const lastRun = last ? summaryOf(last) : null;
     const running = lastRun?.outcome === "running";
@@ -460,14 +460,24 @@ export function createInboxScheduled(deps: {
           const rank = (row: InboxScheduledRow) => (row.state === "done" ? 2 : row.enabled || row.state === "running" ? 0 : 1);
           return rank(a) - rank(b) || (a.next_run ?? "~").localeCompare(b.next_run ?? "~") || a.created_at.localeCompare(b.created_at);
         }),
+    /** The window's routine made with this create key, if it is still there. */
+    withCreateKey: (key: string): InboxScheduledThread | null => store.scheduledThreads().find((record) => record.create_key === key) ?? null,
     get: (id: string) => {
       const record = found(id);
       return { scheduled: rowOf(record), runs: dividersOf(record).slice(-20).reverse().map(summaryOf) };
     },
 
-    async create(input: InboxScheduledInput, by: InboxScheduledBy): Promise<{ record: InboxScheduledThread; told: string | null }> {
+    /**
+     * `createKey`: the window's key, kept on the record (inbox-scheduled-once.ts). `asked`: an agent's create the
+     * person asked for with `/create-routine` (a grant it took, inbox-routine-grants.ts): made approved and on, as
+     * the person's own would be. Every field is checked the same either way. `checked`: called once every field passed,
+     * just before the routine is saved: a throw after it may have left the routine written.
+     */
+    async create(input: InboxScheduledInput, by: InboxScheduledBy, createKey?: string, asked = false, checked?: () => void): Promise<{ record: InboxScheduledThread; told: string | null }> {
       const fields = await fieldsOf(input, true);
-      const on = by.kind === "person" && input.enabled === true;
+      const schedule = scheduleOf(input.schedule);
+      checked?.();
+      const on = (by.kind === "person" && input.enabled === true) || (by.kind === "agent" && asked);
       const at = iso();
       const record = store.putScheduledThread({
         id: inboxId("sch"),
@@ -475,7 +485,7 @@ export function createInboxScheduled(deps: {
         enabled: on,
         approved_at: on ? at : null,
         prompt: fields.prompt!,
-        schedule: scheduleOf(input.schedule),
+        schedule,
         if_missed: fields.if_missed ?? "run_once",
         runs_on: "this_computer",
         folder: fields.folder!,
@@ -484,12 +494,13 @@ export function createInboxScheduled(deps: {
         ...(fields.effort ? { effort: fields.effort } : {}),
         attachments: fields.attachments ?? [],
         thread_id: null,
+        ...(createKey ? { create_key: createKey } : {}),
         ...(by.kind === "agent" ? { made_by: { host: by.host, session: by.session, thread_id: by.thread_id ?? "" } } : {}),
         handled_through: on ? at : null,
         created_at: at,
         updated_at: at,
       });
-      const told = await tell(by, record, `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
+      const told = await tell(by, record, on ? `Made the routine ${linkOf(record)}. It is on, as you asked with /create-routine.` : `Made the routine ${linkOf(record)}. It is off until you turn it on.`, { op: "create" });
       return { record: found(record.id), told };
     },
 

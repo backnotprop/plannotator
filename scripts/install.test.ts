@@ -374,7 +374,6 @@ describe("install.sh", () => {
       'mv -f "$staged_file" "$INSTALL_DIR/plannotator"',
     );
     const minimalExit = script.indexOf('if [ "$minimal" -eq 1 ]; then');
-    const semInstall = script.indexOf("install_sem_sidecar\n");
     const agentTerminal = script.indexOf("install_agent_terminal_runtime\n");
     const callFlow = script.indexOf("install_call_flow_runtime\n");
     const codexBlock = script.indexOf(
@@ -387,7 +386,6 @@ describe("install.sh", () => {
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
     // Everything the reporter called "trash" runs strictly after the exit gate.
-    expect(semInstall).toBeGreaterThan(minimalExit);
     expect(agentTerminal).toBeGreaterThan(minimalExit);
     expect(callFlow).toBeGreaterThan(minimalExit);
     expect(codexBlock).toBeGreaterThan(minimalExit);
@@ -721,14 +719,12 @@ describe("install.ps1", () => {
       'Move-Item -Force $tmpFile "$installDir\\plannotator.exe"',
     );
     const minimalExit = script.indexOf("if ($minimal) {");
-    const semInstall = script.indexOf("Install-SemSidecar\n");
     const callFlow = script.indexOf("Install-CallFlowRuntime\n");
     const pathAdvice = script.indexOf("function Show-PathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(pathAdvice).toBeGreaterThan(binaryInstalled);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
-    expect(semInstall).toBeGreaterThan(minimalExit);
     expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
@@ -1012,13 +1008,11 @@ describe("install.cmd", () => {
       'move /y "!TEMP_FILE!" "!INSTALL_PATH!"',
     );
     const minimalExit = script.indexOf('if "!MINIMAL!"=="1" (');
-    const semInstall = script.indexOf("call :InstallSemSidecar");
     const callFlow = script.indexOf("call :InstallCallFlowRuntime");
     const printPathAdvice = script.indexOf(":PrintPathAdvice");
 
     expect(binaryInstalled).toBeGreaterThan(0);
     expect(minimalExit).toBeGreaterThan(binaryInstalled);
-    expect(semInstall).toBeGreaterThan(minimalExit);
     expect(callFlow).toBeGreaterThan(minimalExit);
     // The gate exits rather than falling through, and reuses :PrintPathAdvice.
     const gateBody = script.slice(minimalExit, minimalExit + 400);
@@ -1702,41 +1696,6 @@ describe("install shared behavior", () => {
     expect(cmdScript).toContain('set "MIN_ATTESTED_VERSION=v0.17.2"');
     expect(cmdScript).toContain("powershell -NoProfile -Command");
     expect(cmdScript).toContain("predates");
-  });
-
-  test("all installers install sem sidecar as a non-fatal optional dependency", () => {
-    const cmdScript = readScript("install.cmd");
-
-    expect(sh).toContain('SEM_REPO="Ataraxy-Labs/sem"');
-    expect(sh).toContain('SEM_VERSION="v0.8.0"');
-    expect(sh).toContain("install_sem_sidecar");
-    expect(sh).toContain("Skipping semantic diff sidecar install");
-    expect(sh).toContain('${_config_dir}/vendor/sem/${SEM_VERSION}');
-    expect(sh).toContain('if ! mkdir -p "$sem_dir"; then');
-    expect(sh).toContain('if ! cp "$extracted_sem" "$sem_bin"; then');
-    expect(sh).toContain('if ! chmod +x "$sem_bin"; then');
-
-    expect(ps).toContain('$semRepo = "Ataraxy-Labs/sem"');
-    expect(ps).toContain('$semVersion = "v0.8.0"');
-    expect(ps).toContain("function Install-SemSidecar");
-    expect(ps).toContain('if ($platform -eq "win32-x64")');
-    expect(ps).toContain("Skipping semantic diff sidecar install");
-
-    expect(cmdScript).toContain('set "SEM_REPO=Ataraxy-Labs/sem"');
-    expect(cmdScript).toContain('set "SEM_VERSION=v0.8.0"');
-    expect(cmdScript).toContain("call :InstallSemSidecar");
-    expect(cmdScript).toContain('if /i "!PLATFORM!"=="win32-x64" set "SEM_ASSET=sem-windows-x86_64.zip"');
-    expect(cmdScript).toContain("Skipping semantic diff sidecar install");
-    expect(cmdScript).toContain("Get-ChildItem -Path $env:SEM_EXTRACT -Filter sem.exe -Recurse -File");
-    expect(cmdScript).toContain('copy /y "!EXTRACTED_SEM!" "!SEM_PATH!"');
-
-    // The sidecar download is time-bounded so a slow/hung fetch can't wedge an
-    // install where plannotator itself already landed (all three installers).
-    expect(sh).toContain("--connect-timeout 10 --max-time 120");
-    expect(ps).toContain("-TimeoutSec 120");
-    expect(cmdScript).toContain("--connect-timeout 10 --max-time 120");
-    // And the opt-out is documented in the help text.
-    expect(sh).toContain("PLANNOTATOR_SKIP_SEM_INSTALL=1");
   });
 
   test("all installers install agent terminal runtime as a non-fatal optional dependency", () => {
@@ -2437,7 +2396,6 @@ function runInstallSh(
         STUB_CHECKSUM: sandbox.binaryChecksum ?? FAKE_BINARY_SHA256,
         STUB_BINARY_SOURCE: sandbox.binarySource ?? "",
         STUB_ATT_JSON: ATTESTATION_FIXTURE,
-        PLANNOTATOR_SKIP_SEM_INSTALL: "1",
         PLANNOTATOR_SKIP_AGENT_TERMINAL_INSTALL: "1",
         // Tests never show a real notification: the alert tests turn it back
         // on with a fake notifier first on PATH.
@@ -2773,23 +2731,6 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
     });
   },
 );
-
-describe("install scripts pin the sem sidecar's checksums (no checksums.txt fetch)", () => {
-  const sh = readFileSync(join(scriptsDir, "install.sh"), "utf8");
-  const ps1 = readFileSync(join(scriptsDir, "install.ps1"), "utf8");
-  const cmd = readFileSync(join(scriptsDir, "install.cmd"), "utf8");
-  // Bumping SEM_VERSION without new pins would make every sem install skip
-  // ("checksum mismatch"); this fails first, naming the version to re-pin.
-  test("each installer pins sem v0.8.0 and no longer reads checksums.txt", () => {
-    for (const [name, text] of [["install.sh", sh], ["install.ps1", ps1], ["install.cmd", cmd]] as const) {
-      expect(`${name}:${/v0\.8\.0/.test(text)}`).toBe(`${name}:true`);
-      expect(`${name}:${text.includes("checksums.txt\"") || /\/checksums\.txt/.test(text)}`).toBe(`${name}:false`);
-    }
-    expect(sh).toContain("a98235ac9f8fae93364ddb7c681036fbe33af756db40e067331ef2091ecc8e6a");
-    expect(ps1).toContain("2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06");
-    expect(cmd).toContain("2a4b57f8368f0c88ded52f9ecbe0a85771008e37aa09215fc9ce750adab03d06");
-  });
-});
 
 describe("is_release_tag (install.sh): only a plain vX.Y.Z tag", () => {
   const script = readScript("install.sh");
