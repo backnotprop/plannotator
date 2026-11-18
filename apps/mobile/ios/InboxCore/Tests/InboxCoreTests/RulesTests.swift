@@ -135,6 +135,83 @@ final class SendPlanTests: XCTestCase {
     XCTAssertFalse(SendPlan.hasSomethingToSend(thread: thread([message("m1", a)]), words: "  "))
     XCTAssertTrue(SendPlan.hasSomethingToSend(thread: thread([message("m1", a)]), words: "ok"))
   }
+
+  func testTheWordsGoPastAPermissionPromptAndARoutinesChangeLine() {
+    var prompt = message("m2", InboxAuthor(kind: .agent, host: "claude-code", session: "perm:A"), picked: ["allow"])
+    prompt.body = "Allow Bash?"
+    var change = message("m3", b)
+    change.scheduledChange = InboxScheduledChange(scheduledId: "r", name: "nightly", op: .unknown("edit"))
+    let targets = SendPlan.targets(in: thread([message("m1", a), prompt, change]))
+    // The prompt's own answer rides a reply to the prompt; the words go to the agent itself, last.
+    XCTAssertEqual(targets.map(\.message.rawValue), ["m2", "m1"])
+    XCTAssertEqual(targets[0].questions.map(\.key), ["allow"])
+  }
+
+  func testAThreadHandedToAnotherSessionIsAnsweredOnTheComputer() {
+    var handed = message("m2", InboxAuthor(kind: .person))
+    handed.handoff = InboxHandoff(at: "2026-11-18T10:00:00.000Z")
+    XCTAssertTrue(SendPlan.needsComputer(thread([message("m1", a), handed])))
+    XCTAssertFalse(SendPlan.needsComputer(thread([message("m1", a)])))
+  }
+}
+
+final class CardAnswerTests: XCTestCase {
+  private func question(_ kind: InboxQuestionKind, answer: QuestionAnswer? = nil) -> InboxQuestion {
+    let choices = ["A", "B", "C"].map { InboxQuestionChoice(label: $0, recommended: false, settled: false) }
+    return InboxQuestion(key: "q", position: 0, kind: kind, prompt: "Which?", choices: choices, holdsUp: [], orphaned: false, state: .openValue, answer: answer, revision: 0, sentRevision: 0, messageId: MessageID("m"))
+  }
+  private func saved(_ edit: CardAnswers.Edit, file: StaticString = #filePath, line: UInt = #line) -> QuestionAnswer? {
+    guard case .save(let answer) = edit else { XCTFail("expected a save", file: file, line: line); return nil }
+    return answer
+  }
+
+  // proves: answer-05
+  func testOnAPickAnyQuestionTicksAndOtherWordsStayTogether() {
+    let typed = saved(CardAnswers.other(question(.multi), words: "A wizard"))
+    XCTAssertEqual(typed?.other, "A wizard")
+    let ticked = saved(CardAnswers.tap(question(.multi, answer: typed), label: "C"))
+    XCTAssertEqual(ticked?.other, "A wizard", "ticking does not erase the Other words")
+    let both = saved(CardAnswers.tap(question(.multi, answer: ticked), label: "A"))
+    XCTAssertEqual(both?.selected, ["A", "C"], "in the agent's order, not the tap order")
+    let retyped = saved(CardAnswers.other(question(.multi, answer: both), words: "A wizard, two steps"))
+    XCTAssertEqual(retyped?.selected, ["A", "C"], "typing Other does not erase the ticks")
+    let unticked = saved(CardAnswers.tap(question(.multi, answer: retyped), label: "A"))
+    XCTAssertEqual(unticked?.selected, ["C"])
+  }
+
+  // proves: answer-04
+  func testOnAPickOneQuestionATapMovesThePickAndATapOnThePickedRowDoesNothing() {
+    let first = saved(CardAnswers.tap(question(.single), label: "A"))
+    XCTAssertEqual(first?.selected, ["A"])
+    XCTAssertEqual(CardAnswers.tap(question(.single, answer: first), label: "A"), .nothing)
+    XCTAssertEqual(saved(CardAnswers.tap(question(.single, answer: first), label: "B"))?.selected, ["B"])
+    // Other words give up the pick, and a pick gives up the Other words.
+    let other = saved(CardAnswers.other(question(.single, answer: first), words: "Neither"))
+    XCTAssertEqual(other?.selected, [])
+    XCTAssertNil(saved(CardAnswers.tap(question(.single, answer: other), label: "B"))?.other)
+  }
+
+  // proves: answer-11
+  func testSkipKeepsTheNoteAndUnskipRemovesOnlyTheSkip() {
+    let noted = saved(CardAnswers.note(question(.single), words: "ask Dana first"))
+    XCTAssertEqual(noted?.note, "ask Dana first", "a note stands on its own")
+    let skipped = saved(CardAnswers.toggleSkip(question(.single, answer: noted)))
+    XCTAssertEqual(skipped?.skipped, true)
+    XCTAssertEqual(skipped?.note, "ask Dana first")
+    let back = saved(CardAnswers.toggleSkip(question(.single, answer: skipped)))
+    XCTAssertNil(back?.skipped)
+    XCTAssertEqual(back?.note, "ask Dana first")
+    // With no note, Unskip leaves nothing worth keeping: the answer is taken back.
+    let bare = saved(CardAnswers.toggleSkip(question(.single)))
+    XCTAssertEqual(CardAnswers.toggleSkip(question(.single, answer: bare)), .save(nil))
+  }
+
+  func testTypingTheSameWordsAgainWritesNothing() {
+    let text = saved(CardAnswers.text(question(.text), words: "Pay now"))
+    XCTAssertEqual(CardAnswers.text(question(.text, answer: text), words: "Pay now"), .nothing)
+    XCTAssertEqual(CardAnswers.text(question(.text, answer: text), words: ""), .save(nil))
+    XCTAssertEqual(CardAnswers.other(question(.single), words: ""), .nothing)
+  }
 }
 
 final class StreamAndTimeTests: XCTestCase {

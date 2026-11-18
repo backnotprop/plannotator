@@ -24,7 +24,9 @@ public enum DoorFailure: Error, Sendable {
     switch self {
     case .refused(let status, _): return status < 500
     case .appNeedsUpdate, .notOffered: return true
-    case .unreachable, .unreadable: return false
+    // A 4xx that is not the Inbox's JSON (a proxy's page): still a refusal, never retried for ever.
+    case .unreadable(let status): return (400..<500).contains(status)
+    case .unreachable: return false
     }
   }
 

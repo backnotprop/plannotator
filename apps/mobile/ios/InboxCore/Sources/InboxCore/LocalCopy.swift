@@ -74,4 +74,6 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var path: String
   public var body: Data
   public var madeAt: Date
+  /// A reply's words, kept so a refusal can hand them back to the person.
+  public var words: String?
 }

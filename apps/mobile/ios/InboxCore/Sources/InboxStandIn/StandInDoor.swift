@@ -20,6 +20,8 @@ public actor StandInDoor {
     /// Route names left out of `health.door.routes`, as an older Inbox would.
     public var withoutRoutes: Set<String> = []
     public var version = "0.29.3"
+    /// A status something between the phone and the computer answers every reply with, as a web page: not the Inbox's JSON.
+    public var proxyRefusesReplies: Int?
     public init() {}
   }
 
@@ -174,7 +176,9 @@ public actor StandInDoor {
     switch (parts.first, parts.count, parts.last) {
     case ("threads", 3, "seen"): answer = seen(ThreadID(parts[1]))
     case ("messages", 3, "picks"): answer = picks(MessageID(parts[1]), body)
-    case ("messages", 3, "reply"): answer = reply(MessageID(parts[1]), body)
+    case ("messages", 3, "reply"):
+      if let status = options.proxyRefusesReplies { return DoorAnswerBytes(status: status, headers: ["content-type": "text/html"], body: Data("<html><body>Request refused</body></html>".utf8)) }
+      answer = reply(MessageID(parts[1]), body)
     default:
       // Not on the list: answered, and never kept under the key.
       return refuse(404, "device_route_not_found", "Not a route of the door.")

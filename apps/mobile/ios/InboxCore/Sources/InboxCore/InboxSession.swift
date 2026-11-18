@@ -35,8 +35,23 @@ public final class InboxSession {
   public private(set) var threads: [ThreadID: ThreadModel] = [:]
   /// Threads the computer says are not there.
   public private(set) var missingThreads: Set<ThreadID> = []
-  /// The Inbox's own words for the last refusal in a thread, shown where the write was made.
-  public private(set) var notices: [ThreadID: String] = [:]
+  /// Why something the person did was not taken.
+  public enum Notice: Hashable, Sendable {
+    /// The Inbox's own words for its refusal.
+    case refused(String)
+    /// An answer that was not the Inbox's: something between the phone and the computer refused it.
+    case unreadable(status: Int)
+    /// This Inbox does not offer it.
+    case notOffered
+    case appNeedsUpdate
+  }
+
+  /// Why a Send in a thread was refused, shown at the composer until the person sends again.
+  public private(set) var notices: [ThreadID: Notice] = [:]
+  /// Why a pick was refused, by question, until the person acts on that question again.
+  public private(set) var refusals: [String: Notice] = [:]
+  /// The words of a refused Send, to go back into the composer.
+  public private(set) var returned: [ThreadID: String] = [:]
   /// Writes with no definite answer yet, oldest first.
   public private(set) var held: [HeldWrite] = []
   /// Threads with a Send on its way now.
@@ -49,8 +64,12 @@ public final class InboxSession {
   private var stream: Task<Void, Never>?
   private var reload: Task<Void, Never>?
   private var connecting: Task<Bool, Never>?
+  private var retry: Task<Void, Never>?
+  private var pumping: Set<String> = []
+  private let retryEvery: Duration
 
-  public init(computer: PairedComputer, app: AppIdentity, copy: LocalCopy = LocalCopy(folder: nil), connector: @escaping DoorConnector) {
+  public init(computer: PairedComputer, app: AppIdentity, copy: LocalCopy = LocalCopy(folder: nil), retryEvery: Duration = .seconds(15), connector: @escaping DoorConnector) {
+    self.retryEvery = retryEvery
     self.computer = computer
     self.app = app
     self.copy = copy
@@ -72,6 +91,11 @@ public final class InboxSession {
   /// Read again: on launch, on return to the front, on pull to refresh.
   public func refresh() async {
     guard await connect() else { return }
+    await resume()
+  }
+
+  /// The computer answers: send what waited, then read what it has now.
+  private func resume() async {
     await flush()
     await readList()
     for id in threads.keys { await readThread(id) }
@@ -79,6 +103,12 @@ public final class InboxSession {
   }
 
   public func stop() {
+    stopListening()
+    retry?.cancel()
+    retry = nil
+  }
+
+  private func stopListening() {
     stream?.cancel()
     stream = nil
     reload?.cancel()
@@ -96,7 +126,6 @@ public final class InboxSession {
   }
 
   private func findPath() async -> Bool {
-    if reach != .here { reach = .connecting }
     let token = computer.token
     let app = self.app
     let candidates = connector(computer).map { DoorClient(transport: $0, token: token, app: app) }
@@ -145,11 +174,13 @@ public final class InboxSession {
     case .refused(let failure):
       note(failure)
       reach = standing == .ok ? .away : .here
+      stopListening()
       return false
     case .silent:
       client = nil
       reach = .away
-      stop()
+      stopListening()
+      if !held.isEmpty { retryLater() }
       return false
     }
   }
@@ -158,11 +189,18 @@ public final class InboxSession {
   private func note(_ failure: DoorFailure) {
     switch failure {
     case .appNeedsUpdate: standing = .appNeedsUpdate
-    case .refused(_, let error) where ["device_revoked", "device_token_invalid", "device_token_missing"].contains(error.code): standing = .removed
+    case .refused where [.deviceRevoked, .deviceTokenInvalid, .deviceTokenMissing].contains(failure.code):
+      // The computer removed this phone: nothing of that computer stays here.
+      standing = .removed
+      stopListening()
+      copy.erase()
+      list = nil
+      threads = [:]
+      held = []
     case .unreachable:
       reach = .away
       client = nil
-      stop()
+      stopListening()
     default: break
     }
   }
@@ -231,6 +269,19 @@ public final class InboxSession {
 
   // MARK: Writing
 
+  private func ref(_ message: String?, _ key: String) -> String { "\(message ?? "")/\(key)" }
+
+  /// Why the computer did not take a pick on this question, until the person acts on the question again.
+  public func refusal(message: MessageID, key: String) -> Notice? { refusals[ref(message.rawValue, key)] }
+
+  /// Whether this question's pick is still on the phone only.
+  public func isHeldPick(message: MessageID, key: String) -> Bool {
+    held.contains { write in
+      guard write.kind == .pick, write.message == message.rawValue, let body = try? JSONDecoder().decode(DoorPicksBody.self, from: write.body) else { return false }
+      return body.questions.contains { $0.key == key }
+    }
+  }
+
   private func hold(_ write: HeldWrite) {
     held.append(write)
     copy.saveOutbox(held)
@@ -241,26 +292,49 @@ public final class InboxSession {
     copy.saveOutbox(held)
   }
 
+  /// A write the computer will never take: say why where it was made, and never lose the person's words.
+  private func giveBack(_ write: HeldWrite, _ notice: Notice) {
+    let thread = ThreadID(write.thread)
+    switch write.kind {
+    case .pick:
+      let questions = (try? JSONDecoder().decode(DoorPicksBody.self, from: write.body))?.questions ?? []
+      for question in questions { refusals[ref(write.message, question.key)] = notice }
+    case .reply:
+      notices[thread] = notice
+      if let words = write.words, !words.isEmpty {
+        returned[thread] = [returned[thread], words].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+      }
+    case .seen:
+      break
+    }
+  }
+
   /// Send one held write. True when it has a definite answer (applied or refused) and left the outbox.
   private func deliver(_ write: HeldWrite) async -> Bool {
     guard let client, let method = DoorMethod(rawValue: write.method) else { return false }
     // A route this Inbox does not list is never called, so no 404 is kept under the key.
     guard skew?.offers(write.route) ?? false else {
       settle(write.id)
+      giveBack(write, .notOffered)
       return true
     }
-    let thread = ThreadID(write.thread)
     do {
       let answer = try await client.resend(method: method, path: write.path, body: write.body)
-      settle(write.id)
-      notices[thread] = nil
       apply(write, answer)
+      settle(write.id)
       return true
     } catch let failure as DoorFailure {
       note(failure)
       guard failure.isDefinite else { return false }
       settle(write.id)
-      if case .refused(_, let error) = failure, write.kind != .seen { notices[thread] = error.error }
+      switch failure {
+      case .refused(_, let error): giveBack(write, .refused(error.error))
+      case .unreadable(let status): giveBack(write, .unreadable(status: status))
+      case .appNeedsUpdate: giveBack(write, .appNeedsUpdate)
+      default: giveBack(write, .notOffered)
+      }
+      // Show what the computer has now, beside the refusal.
+      if write.kind != .seen { await readThread(ThreadID(write.thread)) }
       return true
     } catch {
       return false
@@ -271,9 +345,16 @@ public final class InboxSession {
     let thread = ThreadID(write.thread)
     switch write.kind {
     case .pick:
-      guard let picked = try? JSONDecoder().decode(DoorPicksAnswer.self, from: answer.body), var model = threads[thread],
-        let index = model.thread.messages.firstIndex(where: { $0.id == picked.messageId })
-      else { return }
+      guard let picked = try? JSONDecoder().decode(DoorPicksAnswer.self, from: answer.body) else { return }
+      // A saved pick raises its question's revision. Writes the person made after it, while it waited, still name
+      // the revision this pick read: they follow it to the revision the computer answered, so the person's own
+      // earlier pick never makes their later pick or Send stale.
+      let sent = (try? JSONDecoder().decode(DoorPicksBody.self, from: write.body))?.questions ?? []
+      for pick in sent {
+        guard let now = picked.questions.first(where: { $0.key == pick.key })?.revision, now != pick.revision else { continue }
+        follow(after: write, message: picked.messageId, key: pick.key, from: pick.revision, to: now)
+      }
+      guard var model = threads[thread], let index = model.thread.messages.firstIndex(where: { $0.id == picked.messageId }) else { return }
       // The answer holds the message's questions and action items together: keep each where it was.
       let byKey = Dictionary(picked.questions.map { ($0.key, $0) }, uniquingKeysWith: { $1 })
       model.thread.messages[index].questions = model.thread.messages[index].questions?.map { byKey[$0.key] ?? $0 }
@@ -286,66 +367,129 @@ public final class InboxSession {
     }
   }
 
-  /// Send what waited, in the order made. A write that still has no answer stops the ones behind it for its thread.
+  /// Move the later held writes of this thread that name one question at `from` to the revision the computer gave.
+  private func follow(after write: HeldWrite, message: MessageID, key: String, from: Int64, to: Int64) {
+    guard let start = held.firstIndex(where: { $0.id == write.id }) else { return }
+    for index in held.indices where index > start && held[index].thread == write.thread {
+      switch held[index].kind {
+      case .pick:
+        guard held[index].message == message.rawValue, var body = try? JSONDecoder().decode(DoorPicksBody.self, from: held[index].body) else { continue }
+        for q in body.questions.indices where body.questions[q].key == key && body.questions[q].revision == from { body.questions[q].revision = to }
+        held[index].body = encode(body)
+      case .reply:
+        guard var body = try? JSONDecoder().decode(DoorReplyBody.self, from: held[index].body), var questions = body.questions else { continue }
+        for q in questions.indices where questions[q].key == key && questions[q].revision == from && (questions[q].messageId?.rawValue ?? held[index].message) == message.rawValue {
+          questions[q].revision = to
+        }
+        body.questions = questions
+        held[index].body = encode(body)
+      case .seen:
+        break
+      }
+    }
+    copy.saveOutbox(held)
+  }
+
+  /// Send a thread's held writes in the order made, each after the one before it has its answer. One pump per
+  /// thread: a write made while another is on its way joins the same run.
+  private func pump(_ thread: String) async {
+    guard !pumping.contains(thread) else { return }
+    pumping.insert(thread)
+    defer { pumping.remove(thread) }
+    if client == nil { _ = await connect() }
+    while client != nil, standing == .ok, let next = held.first(where: { $0.thread == thread }) {
+      if !(await deliver(next)) { break }
+    }
+    if held.contains(where: { $0.thread == thread }) { retryLater() }
+  }
+
+  /// Send what waited: every thread's queue, in the order made.
   private func flush() async {
-    var stopped: Set<String> = []
-    for write in held where !stopped.contains(write.thread) {
-      if !(await deliver(write)) { stopped.insert(write.thread) }
+    var seen: Set<String> = []
+    for thread in held.map(\.thread) where seen.insert(thread).inserted { await pump(thread) }
+  }
+
+  /// While something waits and the computer does not answer, ask again now and then.
+  private func retryLater() {
+    guard retry == nil else { return }
+    retry = Task { [weak self] in
+      while let self, !Task.isCancelled {
+        try? await Task.sleep(for: self.retryEvery)
+        if Task.isCancelled { return }
+        if self.held.isEmpty || self.standing != .ok { break }
+        if await self.connect() { await self.resume() }
+        if self.held.isEmpty { break }
+      }
+      self?.retry = nil
     }
   }
 
   private func encode<Body: Encodable>(_ body: Body) -> Data { (try? JSONEncoder().encode(body)) ?? Data("{}".utf8) }
 
-  private func write(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String) async -> Bool {
-    let write = HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date())
-    // Behind an earlier write of this thread that still waits: keep the order.
-    let behind = held.contains { $0.thread == thread.rawValue }
-    hold(write)
-    if behind || client == nil { return false }
-    return await deliver(write)
+  private func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil) {
+    hold(HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date(), words: words))
   }
 
   private func markSeen(_ id: ThreadID) async {
-    guard let model = threads[id], offers(DoorRoutes.postThreadSeen) else { return }
+    // Only while the computer answers: a look is told when it is made, never piled up while away.
+    guard client != nil, reach == .here, let model = threads[id], offers(DoorRoutes.postThreadSeen) else { return }
     guard let newest = model.thread.messages.compactMap(\.seq).max() else { return }
+    held.removeAll { $0.kind == .seen && $0.thread == id.rawValue }
     let key = UUID().uuidString
-    _ = await write(kind: .seen, thread: id, message: nil, request: Door.postThreadSeen(thread: id), body: encode(DoorSeenBody(idempotencyKey: key, throughSeq: newest)), key: key)
+    enqueue(kind: .seen, thread: id, message: nil, request: Door.postThreadSeen(thread: id), body: encode(DoorSeenBody(idempotencyKey: key, throughSeq: newest)), key: key)
+    await pump(id.rawValue)
+  }
+
+  /// Put one answer in the outbox now (nil takes it back), before anything else can run: a Send made right after
+  /// already sees it. Returns false when this Inbox does not offer picks.
+  @discardableResult
+  public func hold(pick answer: QuestionAnswer?, thread: ThreadID, message: MessageID, question: InboxQuestion) -> Bool {
+    guard canAnswer() else { return false }
+    // The person acted on this question again: its last refusal has been read.
+    refusals[ref(message.rawValue, question.key)] = nil
+    let key = UUID().uuidString
+    // `unsent_only`: refused when a reply already sent the question, so a pick can never race the phone's own Send.
+    let body = QuestionAnswers.pickBody(key: question.key, revision: question.revision, answer: answer, unsentOnly: true, idempotencyKey: key)
+    enqueue(kind: .pick, thread: thread, message: message, request: Door.postMessagePicks(message: message), body: encode(body), key: key)
+    return true
   }
 
   /// Save one answer to the computer at once (nil takes it back). It is not sent to the agent until Send.
   public func pick(thread: ThreadID, message: MessageID, question: InboxQuestion, answer: QuestionAnswer?) async {
-    let key = UUID().uuidString
-    // `unsent_only`: refused when a reply already sent the question, so a pick can never race the phone's own Send.
-    let body = QuestionAnswers.pickBody(key: question.key, revision: question.revision, answer: answer, unsentOnly: true, idempotencyKey: key)
-    let done = await write(kind: .pick, thread: thread, message: message, request: Door.postMessagePicks(message: message), body: encode(body), key: key)
-    // A refused pick (a newer revision elsewhere, a replaced question): show what the computer has now.
-    if done, notices[thread] != nil { await readThread(thread) }
+    guard hold(pick: answer, thread: thread, message: message, question: question) else { return }
+    await pump(thread.rawValue)
   }
+
+  /// Send what is in the outbox for a thread: what a screen calls after `hold(pick:)`.
+  public func deliverHeld(thread: ThreadID) async { await pump(thread.rawValue) }
 
   /// Send: every saved pick in the thread, one reply per agent session, the words riding the last.
   /// False when there was nothing to send or nowhere to send it.
   @discardableResult
   public func send(thread id: ThreadID, words: String) async -> Bool {
-    guard let model = thread(id), !sending.contains(id) else { return false }
+    guard let model = thread(id), !sending.contains(id), !SendPlan.needsComputer(model.thread), offers(DoorRoutes.postMessageReply) || skew == nil else { return false }
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
     let targets = SendPlan.targets(in: model.thread)
-    guard !targets.isEmpty, !text.isEmpty || targets.contains(where: { !$0.questions.isEmpty }) else { return false }
+    guard !targets.isEmpty, !text.isEmpty || targets.contains(where: { !$0.questions.isEmpty || !$0.actions.isEmpty }) else { return false }
     sending.insert(id)
     defer { sending.remove(id) }
+    notices[id] = nil
+    returned[id] = nil
     for (index, target) in targets.enumerated() {
       let last = index == targets.count - 1
-      if !last, target.questions.isEmpty { continue }
+      if !last, target.questions.isEmpty, target.actions.isEmpty { continue }
       let key = UUID().uuidString
-      let body = DoorReplyBody(idempotencyKey: key, words: last ? text : "", questions: target.questions, withThread: last ? true : nil)
-      _ = await write(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key)
+      let body = DoorReplyBody(idempotencyKey: key, words: last ? text : "", questions: target.questions, actions: target.actions.isEmpty ? nil : target.actions, withThread: last ? true : nil)
+      enqueue(kind: .reply, thread: id, message: target.message, request: Door.postMessageReply(message: target.message), body: encode(body), key: key, words: last ? text : nil)
     }
+    await pump(id.rawValue)
     if client != nil { await readList() }
     return true
   }
 
   /// Whether Send has anything to carry for this thread.
   public func canSend(thread id: ThreadID, words: String) -> Bool {
-    guard let model = thread(id), offers(DoorRoutes.postMessageReply) || skew == nil else { return false }
+    guard let model = thread(id), offers(DoorRoutes.postMessageReply) || skew == nil, !SendPlan.needsComputer(model.thread) else { return false }
     return SendPlan.hasSomethingToSend(thread: model.thread, words: words) && !SendPlan.targets(in: model.thread).isEmpty
   }
 
@@ -355,6 +499,12 @@ public final class InboxSession {
   public func hasHeldReply(_ id: ThreadID) -> Bool { held.contains { $0.kind == .reply && $0.thread == id.rawValue } }
 
   public func clearNotice(_ id: ThreadID) { notices[id] = nil }
+
+  /// The words of a Send the computer refused, handed back once for the composer.
+  public func takeReturnedWords(_ id: ThreadID) -> String? {
+    defer { returned[id] = nil }
+    return returned[id]
+  }
 
   /// Remove this phone from the computer, then forget the computer here.
   public func removeThisPhone() async {

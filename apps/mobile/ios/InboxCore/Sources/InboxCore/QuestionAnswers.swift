@@ -94,9 +94,17 @@ public enum QuestionAnswers {
       idempotencyKey: idempotencyKey)
   }
 
-  /// JavaScript's `String.prototype.trim`: white space and line terminators, both ends.
+  /// JavaScript's `String.prototype.trim`: its white space and line terminators, both ends (not U+0085).
+  static let jsSpace: Set<Unicode.Scalar> = {
+    var set: Set<Unicode.Scalar> = ["\u{9}", "\u{A}", "\u{B}", "\u{C}", "\u{D}", " ", "\u{A0}", "\u{1680}", "\u{2028}", "\u{2029}", "\u{202F}", "\u{205F}", "\u{3000}", "\u{FEFF}"]
+    for value in 0x2000...0x200A { set.insert(Unicode.Scalar(value)!) }
+    return set
+  }()
+
   static func jsTrim(_ text: String) -> String {
-    let space = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))
-    return text.trimmingCharacters(in: space)
+    var scalars = Substring.UnicodeScalarView(text.unicodeScalars)
+    while let first = scalars.first, jsSpace.contains(first) { scalars.removeFirst() }
+    while let last = scalars.last, jsSpace.contains(last) { scalars.removeLast() }
+    return String(scalars)
   }
 }
