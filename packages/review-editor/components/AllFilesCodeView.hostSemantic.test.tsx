@@ -389,10 +389,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
 
   for (const [gesture, shown] of [
     ['pointermove', 'semantic'],
-    ['pointerdown', 'off'],
+    ['pointerdown', 'semantic'],
     ['click', 'off'],
     ['Enter', 'off'],
-    ['touch that scrolls', 'off'],
+    ['touch that scrolls', 'semantic'],
     ['tap', 'off'],
   ] as const) {
     test.skipIf(!hasDom)(`an arrow met by ${gesture} before the note arrives: the note ends ${shown === 'semantic' ? 'shown by itself' : 'offered, the opened lines left alone'}`, async () => {
@@ -564,6 +564,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
   const box = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
   const tops = new Map<Element, number>();
   let pageHeight = 10_000;
+  let hidden = false;
   const sizes = ['scrollHeight', 'clientHeight'] as const;
   let restore: (() => void) | null = null;
   afterEach(() => {
@@ -571,6 +572,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     restore = null;
     tops.clear();
     pageHeight = 10_000;
+    hidden = false;
   });
 
   async function reading(files: string[], at: Record<string, number>, extra: Partial<React.ComponentProps<typeof AllFilesCodeView>> = {}) {
@@ -586,7 +588,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
       };
     }
     Element.prototype.getBoundingClientRect = function (this: Element) {
-      return box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
+      return hidden ? box(0, 0) : box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
     };
     Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => pageHeight });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
@@ -645,6 +647,14 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await act(async () => offered!.click());
     expect(engaged.swapped('a.ts')).toBe(true);
     expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
+  });
+
+  test.skipIf(!hasDom)('a view that is hidden (zero size) draws its notes: nothing in it can be seen to move', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    document.dispatchEvent(new Event('wheel'));
+    hidden = true;
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
   });
 
   test.skipIf(!hasDom)('a file only just below the bottom edge counts as on screen: a fling can bring it in before the draw', async () => {
