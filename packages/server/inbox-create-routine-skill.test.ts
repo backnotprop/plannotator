@@ -18,7 +18,7 @@ const none = () => [];
 test("the / list offers /create-routine only while Routines are on, as a built-in the window pastes", async () => {
   expect((await rows(inboxSkillCatalog(true, none, true, false))).map((s) => s.name)).not.toContain(CREATE_ROUTINE_SKILL.name);
   const on = await rows(inboxSkillCatalog(false, none, false, true));
-  expect(on).toEqual([{ name: "create-routine", root: INBOX_BUILTIN_SKILL_ROOT, description: CREATE_ROUTINE_SKILL.description, humanOnly: true }]);
+  expect(on.filter((s) => s.name !== "show-me")).toEqual([{ name: "create-routine", root: INBOX_BUILTIN_SKILL_ROOT, description: CREATE_ROUTINE_SKILL.description, humanOnly: true }]);
   // Beside the other built-ins, after them: the review skills, then /shape, then /create-routine.
   const all = (await rows(inboxSkillCatalog(true, none, true, true))).map((s) => s.name);
   expect(all.slice(-2)).toEqual(["shape", "create-routine"]);

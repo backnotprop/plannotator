@@ -1497,7 +1497,7 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
       mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, "SKILL.md"), "---\nname: readback\ndescription: State the request back.\ndisable-model-invocation: true\n---\n\n# Readback\n");
       const list = (await (await door("skills")).json()) as Json;
-      expect(list.skills.map((s: Json) => [s.name, s.humanOnly])).toEqual([["readback", true]]);
+      expect(list.skills.filter((s: Json) => s.root !== "plannotator").map((s: Json) => [s.name, s.humanOnly])).toEqual([["readback", true]]);
       const content = (await (await door("skills/content?name=readback")).json()) as Json;
       expect(content.skill).toMatchObject({ name: "readback", humanOnly: true, truncated: false });
       expect(content.skill.content).toContain("# Readback");

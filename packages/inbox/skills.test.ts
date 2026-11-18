@@ -11,6 +11,7 @@ import { GRILL_ME_NOTE_TEXT } from '@plannotator/core/grill-me';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import type { SkillCatalogEntry, SkillExportContent } from '@plannotator/ui/utils/skillReferences';
 import { CREATE_ROUTINE_SKILL } from '@plannotator/core/create-routine-skill';
+import { SHOW_ME_SKILL } from '@plannotator/core/show-me-skill';
 import { INBOX_BUILTIN_SKILL_ROOT } from '@plannotator/core/inbox-review';
 import { builtinSkillContent, composeInboxSkillsBlock, inboxSkillReferences, inboxSkillsBlock, INBOX_SKILL_INSTRUCTIONS_BUDGET, withSkillsBlock } from './skills';
 import { replyWords } from './folding';
@@ -318,5 +319,25 @@ describe('/create-routine, the built-in the Inbox lists while Routines are on', 
   test('the text is the window\'s own, not a folder read', () => {
     expect(builtinSkillContent(entry)).toEqual({ content: CREATE_ROUTINE_SKILL.body, truncated: false, dir: '', path: '' });
     expect(builtinSkillContent({ ...entry, root: 'claude' })).toBeUndefined();
+  });
+});
+
+describe('/show-me, the built-in every thread lists', () => {
+  const entry: SkillCatalogEntry = { name: SHOW_ME_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: SHOW_ME_SKILL.description };
+  const showMeSources = { catalog: async () => [entry, ...CATALOG], content: async () => READBACK };
+
+  test('picked with a focus, its whole text rides the message once, and the window still folds it', async () => {
+    const words = '/show-me the retry timeline, before and after';
+    const block = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE, showMeSources);
+    expect(block.split('--- BEGIN SKILL INSTRUCTIONS: show-me ---')).toHaveLength(2);
+    expect(block).toEndWith(`${SHOW_ME_SKILL.body.trim()}\n\n--- END SKILL INSTRUCTIONS: show-me ---`);
+    expect(block).not.toContain(READBACK.content);
+    const split = splitInboxSkillsBlock(withSkillsBlock(words, block))!;
+    expect(split.before).toBe(words);
+    expect(split.skills.map((s) => s.name)).toEqual(['show-me']);
+  });
+
+  test('the text is the window\'s own, not a folder read', () => {
+    expect(builtinSkillContent(entry)).toEqual({ content: SHOW_ME_SKILL.body, truncated: false, dir: '', path: '' });
   });
 });

@@ -87,6 +87,7 @@
     "./shape-animate": "./shape-animate.ts",
     "./shape-skill": "./shape-skill.ts",
     "./create-routine-skill": "./create-routine-skill.ts",
+    "./show-me-skill": "./show-me-skill.ts",
     "./shape-kit.mjs": "./shape-kit.mjs",
     "./inbox-reply-draft": "./inbox-reply-draft.ts",
     "./inbox-review": "./inbox-review.ts",
