@@ -807,8 +807,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     // A change still running may publish after this: its record stays for the next start until it is down.
     if (record()) {
       if (pending > 0) keepRecord(`Stopped while publishing; the tailnet address is taken down at the next start, or run "tailscale serve --https=${port} off".`);
-      // The ports it mapped stay known until the switch goes off, so a mapping Tailscale brings back later is its own.
-      else if (record()?.made) save({ url: null, error: null });
+      // Taken down, or found gone while Tailscale runs: nothing is left to know ("later" kept the record above).
       else save(undefined);
     }
     return { failedPort: null };
