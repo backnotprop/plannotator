@@ -5,6 +5,7 @@ const SEARCH_INPUT = '[data-file-tree-search-input]';
 interface SearchableTree {
   getFileTreeContainer(): HTMLElement | undefined | null;
   isSearchOpen(): boolean;
+  getSearchValue(): string;
 }
 
 export function useTreeSearchKeys(model: SearchableTree) {
@@ -31,11 +32,21 @@ export function useTreeSearchKeys(model: SearchableTree) {
       menuPress.current = true;
       setTimeout(() => { menuPress.current = false; }, 0);
     };
+    const onClick = (event: MouseEvent) => {
+      const host = model.getFileTreeContainer();
+      const path = event.composedPath?.() ?? [];
+      if (!host || !path.includes(host) || model.getSearchValue() !== '') return;
+      const input = host.shadowRoot?.activeElement;
+      const row = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.dataset.type === 'item');
+      if (row && input?.matches(SEARCH_INPUT)) row.focus({ preventScroll: true });
+    };
     window.addEventListener('keydown', onKey, true);
     window.addEventListener('pointerdown', onPress, true);
+    window.addEventListener('click', onClick);
     return () => {
       window.removeEventListener('keydown', onKey, true);
       window.removeEventListener('pointerdown', onPress, true);
+      window.removeEventListener('click', onClick);
     };
   }, [model]);
 
