@@ -8,6 +8,7 @@
 import { useImperativeHandle, useMemo, useRef } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DiffFile } from '@plannotator/core/diff-files';
+import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
 import { RepoTreeView, type RepoTreeHandle } from '@plannotator/review-editor/components/RepoTreeView';
 import { RepoListingPlaceholder } from '@plannotator/review-editor/components/FileTree';
 import { RepoFileView } from '@plannotator/review-editor/components/RepoFileView';
@@ -27,6 +28,7 @@ export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath
     for (const comment of comments as CodeAnnotation[]) map.set(comment.filePath, (map.get(comment.filePath) ?? 0) + 1);
     return map;
   }, [comments]);
+  const touch = useCompactTouchLayout();
   const inner = useRef<RepoTreeHandle>(null);
   useImperativeHandle(handleRef, () => ({ focus: () => inner.current?.focus() }), []);
   return (
@@ -34,6 +36,8 @@ export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath
       {head}
       {repo.state.status === 'ready' ? (
         <RepoTreeView
+          key={touch ? 'touch' : 'pointer'}
+          touch={touch}
           repo={repo.state}
           loadDir={repo.loadDir}
           files={list}

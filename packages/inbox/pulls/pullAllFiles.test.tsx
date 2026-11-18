@@ -206,10 +206,10 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBeNull();
 });
 
-test.skipIf(!hasDom)("a phone's Files sheet opened in All files: focus goes into the tree", async () => {
+test.skipIf(!hasDom)("a phone's Files sheet opened in All files: focus goes into the tree, rows at touch height", async () => {
   const savedMatchMedia = window.matchMedia;
   window.matchMedia = ((query: string) => ({
-    matches: query.includes('max-width: 767px'),
+    matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
     media: query,
     onchange: null,
     addEventListener: () => {},
@@ -225,6 +225,7 @@ test.skipIf(!hasDom)("a phone's Files sheet opened in All files: focus goes into
     await act(async () => el('[data-pull-review-files-button]').click());
     await settle();
     expect(el('[data-repo-file-tree]').shadowRoot?.activeElement?.getAttribute('data-item-path') ?? null).not.toBeNull();
+    expect(el('[data-repo-file-tree]').style.getPropertyValue('--trees-item-height')).toBe('44px');
   } finally {
     window.matchMedia = savedMatchMedia;
   }
