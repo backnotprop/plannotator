@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 
-import { diffHunkLines, parseDiffToFiles, stripPatchColor } from "./diff-files";
+import { countPatchChanges, diffHunkLines, parseDiffToFiles, stripPatchColor } from "./diff-files";
 
 // #1661: `color.diff = always` (git) or `ui.color = "always"` (jj) wraps every
 // patch line in ANSI escapes, which used to parse to 0 files with no error.
@@ -35,6 +35,28 @@ describe("colorized patches", () => {
     ].join("\n");
     expect(stripPatchColor(plain)).toBe(plain);
     expect(parseDiffToFiles(plain)[0].patch).toBe(plain);
+  });
+});
+
+describe("countPatchChanges", () => {
+  it("counts a merge conflict's combined diff by its first column", () => {
+    // Real `git diff` (git 2.50) of an unmerged file: `diff --cc`, a `@@@` hunk, two marker columns.
+    const combined = [
+      "diff --cc f.md",
+      "index 83deb0c,1405721..0000000",
+      "--- a/f.md",
+      "+++ b/f.md",
+      "@@@ -1,3 -1,3 +1,7 @@@",
+      "  one",
+      "++<<<<<<< HEAD",
+      " +main",
+      "++=======",
+      "+ side",
+      "++>>>>>>> side",
+      "  two",
+      "",
+    ].join("\n");
+    expect(countPatchChanges(combined)).toEqual({ additions: 4, deletions: 0 });
   });
 });
 
