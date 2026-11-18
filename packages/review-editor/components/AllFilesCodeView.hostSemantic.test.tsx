@@ -564,20 +564,27 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
   const box = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
   const tops = new Map<Element, number>();
   let pageHeight = 10_000;
-  const realRect = Element.prototype.getBoundingClientRect;
   const sizes = ['scrollHeight', 'clientHeight'] as const;
-  const realSizes = sizes.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
+  let restore: (() => void) | null = null;
   afterEach(() => {
-    Element.prototype.getBoundingClientRect = realRect;
-    sizes.forEach((name, index) => {
-      if (realSizes[index]) Object.defineProperty(HTMLElement.prototype, name, realSizes[index]);
-      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
-    });
+    restore?.();
+    restore = null;
     tops.clear();
     pageHeight = 10_000;
   });
 
   async function reading(files: string[], at: Record<string, number>) {
+    if (!restore) {
+      const realRect = Element.prototype.getBoundingClientRect;
+      const realSizes = sizes.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
+      restore = () => {
+        Element.prototype.getBoundingClientRect = realRect;
+        sizes.forEach((name, index) => {
+          if (realSizes[index]) Object.defineProperty(HTMLElement.prototype, name, realSizes[index]);
+          else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+        });
+      };
+    }
     Element.prototype.getBoundingClientRect = function (this: Element) {
       return box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
     };
