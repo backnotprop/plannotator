@@ -123,6 +123,11 @@ export interface InboxPullLink {
    * (a PR page's Start a thread; the thread is the PR's page from then on). Absent for an older choice.
    */
   ask?: "guide" | "custom" | "thread";
+  /**
+   * `owner` only: the thread was started from the PR's page (Start a thread), so it is the PR's page; kept when that
+   * thread later asks for a guided review (`ask` then `guide`). Absent otherwise.
+   */
+  page?: true;
 }
 
 /** One host the Inbox asked, and as whom. */

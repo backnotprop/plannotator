@@ -8,7 +8,9 @@
  *  - To offering another project's agents, a second recipient's start rows, or starting on anything but New review's
  *    choice (a live agent of the PR's project, else a new session there);
  *  - the PR's row or page opening the launchpad once its thread was started from it, or saying "Curating…" or "New
- *    review · Guided review" for a thread that asked for no review.
+ *    review · Guided review" for a thread that asked for no review; the row leaving the group its PR was in (it is not
+ *    curating), or not moving to With your agents once that thread asks for a guided review;
+ *  - the guided review request's words drifting from the hand-off's own step.
  */
 import { expect, test } from 'bun:test';
 import { inboxPullStacks, inboxReviewRows, type InboxPull, type InboxPullLink } from '@plannotator/core/inbox-types';
@@ -17,6 +19,7 @@ import { reviewRowLaunchpad, reviewRowLine, reviewViewOf } from './reviewsModel'
 import { canStartPullThread, isPullThread, pullThreadMessage, splitPullThreadDetails } from './startThread';
 import { PULL_DETAILS_START } from './threadDetails';
 import { pullThreadDefault, pullThreadOptions } from './threadTo';
+import { pullThreadGuideWords } from './usePullThreadGuide';
 
 const REPO = 'northwind/web-app';
 const pr = (fields: Partial<InboxPull> = {}): InboxPull => ({
@@ -116,14 +119,18 @@ test("To: the PR's project's live agents, then a new session of each agent there
   expect(pullThreadOptions(null, ['prj'])).toEqual([]);
 });
 
-test("once started from its page, the PR's row opens its thread, says no Curating, and the thread draws the PR's line with no New review label", () => {
+test("once started from its page: the PR's row opens its thread and stays in its group (On you · review requested), the thread draws the PR's line with no New review label", () => {
   const pull = pr();
   const stacks = inboxPullStacks([pull]);
   const rowsWith = (l: InboxPullLink) => inboxReviewRows({ threads: [], stacks, links: { [pull.key]: l }, pulls: [pull] });
+  const [free] = inboxReviewRows({ threads: [], stacks, links: {}, pulls: [pull] });
   const [threadRow] = rowsWith(link({ ask: 'thread' }));
   expect(isPullThread(threadRow!.link)).toBe(true);
   expect(reviewRowLaunchpad(threadRow!)).toBe(null);
-  expect(reviewRowLine(threadRow!).status).toBe('checks passed');
+  // Not curating: the PR stays where its own state put it before the thread (a review asked of the person).
+  expect([threadRow!.move, threadRow!.reason]).toEqual([free!.move, free!.reason]);
+  expect([threadRow!.move, threadRow!.reason]).toEqual(['on_you', 'requested']);
+  expect(reviewRowLine(threadRow!).status).not.toBe('Curating…');
   const diffs: string[] = [];
   const view = reviewViewOf(threadRow!, { messages: [{ id: 'm1' }], subject: null }, { projectName: 'web-app', onWholeThread: () => {}, onOpenStack: () => {}, onOpenDiff: (stack, layer) => diffs.push(`${stack} ${layer}`) });
   expect(view.curating).toBe(null);
@@ -136,4 +143,23 @@ test("once started from its page, the PR's row opens its thread, says no Curatin
   expect(reviewRowLaunchpad(guided!)).toBe(stacks[0]!.id);
   expect(reviewRowLine(guided!).status).toBe('Curating…');
   expect(reviewViewOf(guided!, { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {}, onOpenDiff: () => {} }).pullLine).toBe(null);
+});
+
+test("a guided review asked in the PR's thread: the row moves to With your agents (curating), and the thread is still the PR's page", () => {
+  const pull = pr();
+  const stacks = inboxPullStacks([pull]);
+  const [row] = inboxReviewRows({ threads: [], stacks, links: { [pull.key]: link({ ask: 'guide', page: true }) }, pulls: [pull] });
+  expect([row!.move, row!.reason]).toEqual(['agents', 'curating']);
+  expect(reviewRowLine(row!).status).toBe('Curating…');
+  expect(isPullThread(row!.link)).toBe(true);
+  expect(reviewRowLaunchpad(row!)).toBe(null);
+  const view = reviewViewOf(row!, { messages: [{ id: 'm1' }], subject: null }, { projectName: 'web-app', onWholeThread: () => {}, onOpenStack: () => {}, onOpenDiff: () => {} });
+  expect(view.curating).toBe('Curating the review…');
+  expect(view.asked).toBe(null);
+  expect(!!view.pullLine).toBe(true);
+});
+
+test("the guided review request's words: the hand-off's own step, /review-curate on the PR's diff against its base", () => {
+  expect(pullThreadGuideWords(stackOf(pr()))).toBe('Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message). Include what I might ask tomas.');
+  expect(pullThreadGuideWords(stackOf(pr({ mine: true, author: 'dana' })))).toBe('Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).');
 });

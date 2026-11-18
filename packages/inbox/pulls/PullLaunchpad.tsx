@@ -44,6 +44,8 @@ export interface LaunchpadStart {
 /** The Review thread door's words with no thread yet, and its Start a thread (`pulls/startThread.ts`). */
 export const THREAD_NONE_YET = 'None yet. Start one, or start a guided review.';
 export const START_THREAD = 'Start a thread';
+/** A thread started here that isn't tied to the PR yet (`threadStarts.ts`): the door offers it. */
+export const THREAD_UNTIED_DOOR = 'A thread started here, but it isn’t tied to this pull request yet.';
 
 function Door({ kind, icon, title, sub, soon, wide, thread, children }: { kind: string; icon: ReactNode; title: string; sub: ReactNode; soon?: boolean; wide?: boolean; thread?: string; children?: ReactNode }) {
   return (
@@ -154,6 +156,7 @@ export function PullLaunchpad({
   heading,
   start,
   startThread = null,
+  untiedThread = null,
   shapes,
   system = false,
   risk = null,
@@ -182,6 +185,8 @@ export function PullLaunchpad({
    * review asked for. Null: none (a thread about the PR already, a closed or merged PR, or no project an agent can take it in).
    */
   startThread?: (() => void) | null;
+  /** A thread Start a thread started that isn't tied to the PR yet: the door says so and offers it. */
+  untiedThread?: string | null;
   /** Shape boards by thread; null while Shape is off (no Shape board door then). */
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
   /** System shows (`systemShown`, the Reviews page's `system`): only then the System door. */
@@ -348,6 +353,8 @@ export function PullLaunchpad({
                       !ended && <>{'\u00a0· '}No answer yet</>
                     )}
                   </>
+                ) : untiedThread ? (
+                  <>{THREAD_UNTIED_DOOR}</>
                 ) : startThread ? (
                   <>{THREAD_NONE_YET}</>
                 ) : (
@@ -357,6 +364,11 @@ export function PullLaunchpad({
             >
               {startThread && !link && !named && (
                 <div className="ib-lp-go">
+                  {untiedThread && (
+                    <button type="button" className="ib-btn" onClick={() => onThread(untiedThread)} data-launch-go="untied-thread">
+                      Open the thread
+                    </button>
+                  )}
                   <button type="button" className="ib-btn" onClick={startThread} data-launch-go="start-thread">
                     {START_THREAD}
                   </button>

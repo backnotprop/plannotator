@@ -22,7 +22,6 @@ import { AgentMark, AgentPill } from './AgentPill';
 import { BottomSheet } from './BottomSheet';
 import { SheetLine, SheetRow } from './SheetRow';
 
-const TITLE = 'Who gets this reply';
 
 const AtSign = () => (
   <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
@@ -41,7 +40,7 @@ export function PhoneReplyRecipient({
   section,
   labels,
   folderOf,
-  title = TITLE,
+  noun = 'reply',
 }: {
   /** Every agent the sheet offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -60,8 +59,8 @@ export function PhoneReplyRecipient({
   labels: SessionLabels;
   /** The folder a session works in, as the thread knows it. */
   folderOf: (session: string) => string;
-  /** The sheet's title (a PR's new thread: "Who gets this message"). */
-  title?: string;
+  /** What is sent: a reply, or a PR's new thread's first message (`PullThreadStart`), as the sheet and names say it. */
+  noun?: 'reply' | 'message';
 }) {
   const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
   const names = recipientNames(rows, labels, folderOf);
@@ -74,7 +73,7 @@ export function PhoneReplyRecipient({
     open,
     keepFocus: true,
     onClick: () => onOpen(!open),
-    ariaLabel: `Reply goes to ${spoken || 'nobody yet'}${ended ? ', ended' : ''}. Change`,
+    ariaLabel: `${noun === 'reply' ? 'Reply' : 'Message'} goes to ${spoken || 'nobody yet'}${ended ? ', ended' : ''}. Change`,
     attrs: { 'data-recipient': '', 'data-recipient-chosen': chosenIds.join(' ') },
   };
   return (
@@ -86,8 +85,8 @@ export function PhoneReplyRecipient({
       ) : (
         <AgentMark {...control} host={first.host} agent={first.session} count={chosen.length} />
       )}
-      <BottomSheet open={open} onClose={() => onOpen(false)} title={title} host={section} attrs={{ 'data-recipient-list': '' }}>
-        <div className="ib-sheet-list" role="listbox" aria-label={title} aria-multiselectable>
+      <BottomSheet open={open} onClose={() => onOpen(false)} title={`Who gets this ${noun}`} host={section} attrs={{ 'data-recipient-list': '' }}>
+        <div className="ib-sheet-list" role="listbox" aria-label={`Who gets this ${noun}`} aria-multiselectable={onToggle ? true : undefined}>
           {rows.map((row) => {
             const on = chosenIds.includes(row.session);
             if (row.start) {

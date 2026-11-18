@@ -216,8 +216,11 @@ export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string
 /** A launchpad's Start a thread (pulls/startThread.ts): the PR handed over with nothing asked for first, no guided review. */
 export type PullHandoffThread = { kind: 'thread' };
 
-/** A thread started from a PR's page (Start a thread): its link keeps the `thread` ask, and its row and page open the thread. */
-export const isPullThread = (link: Pick<InboxPullLink, 'via' | 'ask'> | null | undefined): boolean => link?.via === 'owner' && link.ask === 'thread';
+/**
+ * A thread started from a PR's page (Start a thread): its link has the `thread` ask, or the `page` mark once that thread
+ * asked for a guided review; its row and page open the thread.
+ */
+export const isPullThread = (link: Pick<InboxPullLink, 'via' | 'ask' | 'page'> | null | undefined): boolean => link?.via === 'owner' && (link.ask === 'thread' || link.page === true);
 
 /** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
 const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';

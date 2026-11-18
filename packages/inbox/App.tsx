@@ -232,7 +232,8 @@ import { useBoardInProject, useSheetPulls } from './prs/useSheetPulls';
 import { type SheetLayout } from './prs/tableModel';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
-import { reviewRowProject, reviewsOnYou, reviewViewOf } from './pulls/reviewsModel';
+import { reviewsOnYou } from './pulls/reviewsModel';
+import { appReviewView } from './app/reviewView';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { BroIntro } from './components/BroIntro';
@@ -5101,16 +5102,7 @@ function Inbox() {
     />
   );
 
-  // A thread opened from Reviews starts at its review (`reviewViewOf`); it is the same thread, and links back to the Inbox's view of it.
-  const reviewRow = route.reviews && route.thread && pullsShown ? (pulls.reviews?.rows.find((row) => row.reviewed && row.thread_id === route.thread) ?? null) : null;
-  const reviewView =
-    reviewRow && thread && thread.thread_id === route.thread
-      ? reviewViewOf(reviewRow, thread, {
-          projectName: projectNames.get(reviewRowProject(reviewRow) ?? '') ?? null,
-          onWholeThread: () => go({ page: 'inbox', project: null, thread: reviewRow.thread_id }),
-          onOpenStack: (stackId) => go({ page: 'reviews', project: route.reviews?.project ?? null, view: route.reviews?.view, thread: null, stack: stackId }), onOpenDiff: (stackId, layer) => go({ page: 'reviews', project: route.reviews?.project ?? null, view: route.reviews?.view, thread: null, stack: stackId, layer, scope: 'layer' }),
-        })
-      : null;
+  const reviewView = appReviewView({ route, pulls, pullsShown, thread, projectNames, go });
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
   const reviewsList = (project: string | null, view: PullFilter, threadId: string | null) => {
     // A PR opened from a project's drawing closes back to it (its own page only).
@@ -5147,7 +5139,11 @@ function Inbox() {
             }
           : null
       }
-      onOpenThread={(id, replace) => writeRoute({ page: 'inbox', reviews: { project, view }, project: null, thread: id }, { replace: !!replace })}
+      onOpenThread={(id, replace, reply) => {
+        // A thread the person just started from the PR's page opens with its reply box open (the mock).
+        if (reply) setReplyFor(id);
+        writeRoute({ page: 'inbox', reviews: { project, view }, project: null, thread: id }, { replace: !!replace });
+      }}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
       onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
       onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })}

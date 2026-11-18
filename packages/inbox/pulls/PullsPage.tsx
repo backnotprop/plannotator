@@ -65,7 +65,8 @@ import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
 import { canStartPullThread, isPullThread } from './startThread';
-import { PullThreadStart } from './PullThreadStart';
+import { PULL_THREAD_TAKEN, PULL_THREAD_TAKEN_DETAIL, PullThreadStart } from './PullThreadStart';
+import { untiedPullThread } from './threadStarts';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
@@ -125,8 +126,11 @@ export interface PullsPageProps {
   onScope: (next: { filter: PullFilter; project: string | null }) => void;
   /** Phase 1's review mode on one layer (`scope` layer), or on the stack up to it (`stack`). */
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
-  /** `replace`: in place of the PR's page in history (a PR whose page is its thread, `isPullThread`). */
-  onOpenThread: (threadId: string, replace?: boolean) => void;
+  /**
+   * `replace`: in place of the PR's page in history (a PR whose page is its thread, `isPullThread`). `reply`: its reply
+   * box open (a thread the person just started from the PR's page).
+   */
+  onOpenThread: (threadId: string, replace?: boolean, reply?: boolean) => void;
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
@@ -568,12 +572,21 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           stacked={!phone && !!props.stacked}
           onClose={props.onClose}
           onHide={hide}
-          onLeave={() => setDrafting(false)}
+          onLeave={() => {
+            setDrafting(false);
+            // Back on the PR's page, on the button that left it.
+            requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-pulls-stack="${CSS.escape(stack.id)}"] [data-launch-go="start-thread"]`)?.focus());
+          }}
           onGuide={canStart ? newReview : null}
           onDiff={() => props.onReview(stack.id, start.key, 'layer')}
           onStarted={(threadId) => {
             props.state.reload();
+            props.onOpenThread(threadId, true, true);
+          }}
+          onTaken={(threadId) => {
+            props.state.reload();
             props.onOpenThread(threadId, true);
+            props.onToast?.({ icon: 'check', lead: PULL_THREAD_TAKEN, detail: PULL_THREAD_TAKEN_DETAIL }, 6000);
           }}
         />
       );
@@ -590,6 +603,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         heading={heading}
         start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: newReview } : null}
         startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
+        untiedThread={link ? null : untiedPullThread(start.key)}
         shapes={props.shapes ?? null}
         system={!!props.system}
         risk={riskLines}
@@ -679,7 +693,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
 const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: boolean; mentioned?: boolean; now: number }>(function ThreadLine({ link, ended, mentioned, now }, ref) {
   const name = linkAgentName(link) ?? 'Agent';
   // The ask (the person started it), until the agent's guided review arrives in the thread.
-  const asked = link.via === 'owner' && link.ask && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
+  // A thread started from the PR's page (`thread`) asked for nothing: the launchpad's own rule (`onItsWay`).
+  const asked = link.via === 'owner' && (link.ask === 'guide' || link.ask === 'custom') && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
   return (
     <div ref={ref} tabIndex={-1} className="ib-pr-thread" data-pulls-thread-line={ended ? 'ended' : asked ? 'asked' : 'live'} data-pulls-thread={link.thread_id}>
       <div className="ib-pr-thread-h">

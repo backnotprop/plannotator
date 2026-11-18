@@ -7,6 +7,7 @@ import {
   inboxPullIsOpen,
   type InboxMessageWire,
   type InboxPull,
+  type InboxPullLink,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
@@ -112,8 +113,6 @@ function statusOf(row: InboxReviewRow): { status: Words; tone: ReviewRowLine['to
     case 'branch_ready':
       return { status: ['Ready for review'], tone: null };
     case 'curating':
-      // A thread started from the PR's page asked for no review: nothing is being curated.
-      if (isPullThread(row.link)) return { status: checks ? [lower(checks)] : [], tone: null };
       return { status: ['Curating…'], tone: null };
     case 'feedback_sent': {
       const verdict = row.review?.verdict;
@@ -239,9 +238,10 @@ export interface ReviewView {
   pullUrl: string | null;
   /**
    * A thread started from the PR's page (Start a thread): the PR's line over the messages (`PullContextLine`) in place of
-   * the context line, with The diff (`onDiff`) and the thread's guided review once the agent sent one. Null otherwise.
+   * the context line, with Guided review (asked for in this thread, `usePullThreadGuide`, or opened once it is in), The
+   * diff (`onDiff`) and the PR on its forge. `link`: the PR's, this thread's. Null otherwise.
    */
-  pullLine?: { pull: InboxPull; onDiff: () => void } | null;
+  pullLine?: { pull: InboxPull; stack: InboxPullStack; link: InboxPullLink; onDiff: () => void; onAsked: () => void } | null;
   /**
    * A reported branch with no review yet (Branch reviews): what the agent reported, and the message a review request
    * replies to, so the review stays in this thread. Null for every other thread, and once a review is in.
@@ -308,7 +308,7 @@ export function reviewOpenPlan(input: {
 export function reviewViewOf(
   row: InboxReviewRow,
   thread: { messages: readonly { id: string }[]; subject: string | null; thread_name?: string | null },
-  options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void; onOpenDiff?: (stackId: string, layerKey: string) => void },
+  options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void; onOpenDiff?: (stackId: string, layerKey: string) => void; onAsked?: () => void },
 ): ReviewView {
   const line = reviewRowLine(row);
   const started = row.link?.via === 'owner' || !!row.started;
@@ -328,13 +328,16 @@ export function reviewViewOf(
     name: row.review && !stack ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
-    curating: row.reason !== 'curating' || pullThread ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
+    curating: row.reason !== 'curating' ? null : reviewIsWalkthrough(row) ? 'Writing the walkthrough…' : 'Curating the review…',
     asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,
     pullUrl: reviewRowLanding(row)?.url ?? null,
-    pullLine: pullThread && stack && startLayer(stack) && options.onOpenDiff ? { pull: startLayer(stack)!, onDiff: () => options.onOpenDiff!(stack.id, startLayer(stack)!.key) } : null,
+    pullLine:
+      pullThread && stack && startLayer(stack) && row.link?.thread_id === row.thread_id && options.onOpenDiff
+        ? { pull: startLayer(stack)!, stack, link: row.link, onDiff: () => options.onOpenDiff!(stack.id, startLayer(stack)!.key), onAsked: options.onAsked ?? (() => {}) }
+        : null,
   };
 }
 

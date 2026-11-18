@@ -144,7 +144,7 @@ export function ReplyRecipient({
   onTagAnother,
   labels = NO_LABELS,
   folderOf = NO_FOLDER,
-  title = 'Who gets this reply',
+  noun = 'reply',
 }: {
   /** Every agent the list offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -161,8 +161,8 @@ export function ReplyRecipient({
   labels?: SessionLabels;
   /** The folder a session works in, as the thread knows it. */
   folderOf?: (session: string) => string;
-  /** The list's name for screen readers (a PR's new thread: "Who gets this message"). */
-  title?: string;
+  /** What is sent: a reply, or a PR's new thread's first message (`PullThreadStart`), as the names read it. */
+  noun?: 'reply' | 'message';
 }) {
   const listId = useRef(`ib-rpick-${Math.random().toString(36).slice(2)}`).current;
   const pillRef = useRef<HTMLButtonElement | null>(null);
@@ -218,7 +218,7 @@ export function ReplyRecipient({
       className="ib-rto"
       data-recipient=""
       data-ended={ended ? '' : undefined}
-      aria-label={`To ${names}${ended ? ', ended' : ''}. Change who gets this reply`}
+      aria-label={`To ${names}${ended ? ', ended' : ''}. Change who gets this ${noun}`}
       aria-expanded={open}
       aria-controls={open ? listId : undefined}
       // The press must not take focus from the reply field.
@@ -230,7 +230,7 @@ export function ReplyRecipient({
   );
 
   const list = open ? (
-    <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label={title} onMouseDown={(event) => event.preventDefault()} style={spot}>
+    <div ref={markRecipientList} className="ib-tg-menu ib-rpick" id={listId} data-recipient-list="" role="group" aria-label={`Who gets this ${noun}`} onMouseDown={(event) => event.preventDefault()} style={spot}>
       {rows.map((row) => {
         const on = chosenIds.includes(row.session);
         const { title, agent } = named.get(row.session)!;

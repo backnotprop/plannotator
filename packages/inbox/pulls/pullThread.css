@@ -11,6 +11,8 @@
 .ib-pctx-size { white-space: nowrap; }
 .ib-pctx-go { margin-left: auto; display: inline-flex; gap: 14px; }
 .ib-rvctx.ib-pctx .ib-pctx-go .ib-rvctx-link { margin-left: 0; padding: 0; border: 0; background: none; font: inherit; cursor: pointer; white-space: nowrap; }
+.ib-pctx-asked { white-space: nowrap; }
+.ib-pctx-err { flex-basis: 100%; color: var(--destructive); }
 
 /* The empty thread: its messages' column, with one calm line in the middle of what is left. */
 .ib-pth-body { display: flex; flex-direction: column; }

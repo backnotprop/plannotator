@@ -955,6 +955,34 @@ describe("on", () => {
     expect((await thread(theirs)).pull_theirs).toBeUndefined();
   });
 
+  test("a PR page's Start a thread: the `thread` ask is kept and served with the page mark; a guided review asked in that thread keeps the mark; another thread drops it; any other ask is refused", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    const other = await w.send("Ready.", "other");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    const linkOf = async () => ((await (await w.pulls()).json()) as InboxPullsAnswer).links[key];
+    for (const bad of ["Thread", "page", "anything", 7]) expect((await w.own([key], talk, { ask: bad })).status).toBe(422);
+    expect((await w.own([key], talk, { ask: "thread" })).status).toBe(200);
+    expect(await linkOf()).toMatchObject({ via: "owner", thread_id: talk, ask: "thread", page: true });
+    expect((await w.own([key], talk, { ask: "guide" })).status).toBe(200);
+    expect(await linkOf()).toMatchObject({ via: "owner", thread_id: talk, ask: "guide", page: true });
+    expect((await w.own([key], other, { ask: "guide" })).status).toBe(200);
+    const moved = await linkOf();
+    expect(moved).toMatchObject({ thread_id: other, ask: "guide" });
+    expect(moved?.page).toBeUndefined();
+  });
+
+  test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect(await (await w.check(["github.com/northwind/billing-svc#412"], projectId)).json()).toMatchObject({ ok: true, owner: null });
+    expect((await w.own(["github.com/northwind/billing-svc#412"], talk, { ask: "thread" })).status).toBe(200);
+    expect(await (await w.check(["github.com/northwind/billing-svc#412"], projectId)).json()).toMatchObject({ ok: true, owner: talk });
+  });
+
   test("checked before the send: validate_only writes nothing, refuses another project, and needs no thread", async () => {
     const w = await world({ codeReview: true });
     await w.send("Ready.", "handed");

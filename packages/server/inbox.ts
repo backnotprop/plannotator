@@ -6193,7 +6193,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
           }
         }
-        if (validateOnly) return json({ serverSession, ok: true });
+        // Already given to a thread (another window's Start a thread, a hand-off): which, so that window opens it, not a second.
+        if (validateOnly) return json({ serverSession, ok: true, owner: (keys as string[]).map((key) => pullOwnersNow().get(key)?.thread_id).find((id) => !!id && !!pullLinkStore.threadProject(id)) ?? null });
         if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
         pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
         couplePulls(keys as string[], threadId);

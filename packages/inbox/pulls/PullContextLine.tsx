@@ -10,7 +10,27 @@ import { formatCount } from '@plannotator/core/inbox-format';
 import { Icon } from '../icons';
 import { checksWords } from './model';
 
-export function PullContextLine({ pr, onGuide, onDiff }: { pr: Pick<InboxPull, 'title' | 'head' | 'additions' | 'deletions' | 'checks'>; onGuide: (() => void) | null; onDiff: () => void }) {
+/** Said while a guided review asked for in the thread is on its way (the launchpad's own words). */
+export const PULL_GUIDE_ON_THE_WAY = 'Guided review on the way';
+
+export function PullContextLine({
+  pr,
+  onGuide,
+  onDiff,
+  guideOnTheWay = false,
+  forge = null,
+  error = null,
+}: {
+  pr: Pick<InboxPull, 'title' | 'head' | 'additions' | 'deletions' | 'checks'>;
+  onGuide: (() => void) | null;
+  onDiff: () => void;
+  /** A guided review asked for and not in yet: said in place of the Guided review link. */
+  guideOnTheWay?: boolean;
+  /** The PR on its forge (the thread's line; the empty thread has the bar's Open on GitHub). */
+  forge?: { name: string; url: string } | null;
+  /** A Guided review request that did not go. */
+  error?: string | null;
+}) {
   const checks = checksWords(pr);
   const dot = (
     <span className="ib-pctx-dot" aria-hidden="true">
@@ -38,15 +58,31 @@ export function PullContextLine({ pr, onGuide, onDiff }: { pr: Pick<InboxPull, '
         </>
       )}
       <span className="ib-pctx-go">
-        {onGuide && (
-          <button type="button" className="ib-rvctx-link" onClick={onGuide} data-pull-context-go="guide">
-            Guided review
-          </button>
+        {guideOnTheWay ? (
+          <span className="ib-pctx-asked" data-pull-context-guide="asked">
+            {PULL_GUIDE_ON_THE_WAY}
+          </span>
+        ) : (
+          onGuide && (
+            <button type="button" className="ib-rvctx-link" onClick={onGuide} data-pull-context-go="guide">
+              Guided review
+            </button>
+          )
         )}
         <button type="button" className="ib-rvctx-link" onClick={onDiff} data-pull-context-go="diff">
           The diff
         </button>
+        {forge && (
+          <a className="ib-rvctx-link" href={forge.url} target="_blank" rel="noreferrer noopener" data-pull-context-go="forge">
+            Open on {forge.name}
+          </a>
+        )}
       </span>
+      {error && (
+        <span className="ib-pctx-err" role="alert" data-pull-context-error="">
+          {error}
+        </span>
+      )}
     </div>
   );
 }

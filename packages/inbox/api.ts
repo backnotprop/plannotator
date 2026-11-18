@@ -2004,7 +2004,7 @@ export const inboxApi = {
   pullClose: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close', undefined, machine), { key }),
   /** Close's Undo: taken only on the machine that closed it, in the last few minutes, so it goes to the same `machine`. */
   pullReopen: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen', undefined, machine), { key }),
-  pullOwnerCheck: (keys: readonly string[], projectId: string, machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], project_id: projectId, validate_only: true }),
+  pullOwnerCheck: (keys: readonly string[], projectId: string, machine: string | null = null) => post<{ ok: true; owner?: string | null }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], project_id: projectId, validate_only: true }),
   /** `machine`: a linked machine's look, through the cursor of its cards as read. */
   seeBoard: (throughSeq: number, machine?: string | null) => post<{ seen_seq: number }>(inboxUrl('/cards/seen', undefined, machine), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */

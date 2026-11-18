@@ -11,7 +11,15 @@
  *  - the window not opening the started thread in place of the page, or a PR whose thread started there opening its
  *    launchpad again rather than the thread;
  *  - a phone's To not being the box's own agent control and sheet;
- *  - the thread's first message showing the PR's details instead of folding them under "Sent with: this PR's details".
+ *  - the thread's first message showing the PR's details instead of folding them under "Sent with: this PR's details";
+ *  - a thread that started but was not tied being started AGAIN (words edited, To changed, the page left and opened
+ *    again): from then on a Send only ties it, and the PR's page offers it;
+ *  - a PR another window gave to a thread first getting a second thread: Send opens that one and says so;
+ *  - Send not pale while the box is empty; the words not cleared once sent; a skills block when the words name none;
+ *  - the keys: an IME's Enter or Escape acting, Escape leaving while the `/` list is open, focus not back on Start a
+ *    thread after leaving;
+ *  - no agent able to take the thread said only after typing;
+ *  - an ended agent's refusal talking about a draft.
  *
  * Element checks are booleans: a failing match on a happy-dom node prints the whole window.
  *
@@ -27,7 +35,8 @@ import { pullsStateOf } from './reviewsTestState';
 const hasDom = typeof document !== 'undefined';
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
-const { forgetUnsentPullThreads } = (hasDom ? await import('./PullThreadStart') : {}) as typeof import('./PullThreadStart');
+const { forgetPullThreadStarts } = (hasDom ? await import('./threadStarts') : {}) as typeof import('./threadStarts');
+const { resetSkillCatalogCache } = (hasDom ? await import('@plannotator/ui/utils/skillCatalog') : {}) as typeof import('@plannotator/ui/utils/skillCatalog');
 const { MessageBody } = (hasDom ? await import('../parts/MessageBody/MessageBody') : {}) as typeof import('../parts/MessageBody/MessageBody');
 const { pullThreadMessage } = (hasDom ? await import('./startThread') : {}) as typeof import('./startThread');
 const { inboxPullStacks } = (hasDom ? await import('@plannotator/core/inbox-types') : {}) as typeof import('@plannotator/core/inbox-types');
@@ -83,6 +92,13 @@ let reloads = 0;
 let startFails = 0;
 /** Holds the start's answer until released (a double press while one is on its way). */
 let hold: Promise<void> | null = null;
+/** How many of the next ties (`pulls/owner` with a thread) fail. */
+let tieFails = 0;
+/** The thread the check says the PR is already given to (another window's). */
+let ownerNow: string | null = null;
+/** The live sessions the Inbox lists in the PR's project, and whether an agent can start there. */
+let liveHere = ['ses_web'];
+let canLaunch = true;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -91,7 +107,12 @@ beforeEach(() => {
   reloads = 0;
   startFails = 0;
   hold = null;
-  forgetUnsentPullThreads();
+  tieFails = 0;
+  ownerNow = null;
+  liveHere = ['ses_web'];
+  canLaunch = true;
+  forgetPullThreadStarts();
+  resetSkillCatalogCache();
   savedFetch = globalThis.fetch;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
@@ -105,6 +126,14 @@ beforeEach(() => {
         }
         return Response.json({ thread_id: 'thr_new', message: {}, replayed: false });
       }
+      if (url.pathname.endsWith('/pulls/owner')) {
+        const body = JSON.parse(String(init.body ?? '{}')) as Record<string, unknown>;
+        if (body.validate_only) return Response.json({ ok: true, owner: ownerNow });
+        if (tieFails > 0) {
+          tieFails -= 1;
+          return Response.json({ error: 'The Inbox could not save it.', code: 'error' }, { status: 500 });
+        }
+      }
       return Response.json({ ok: true });
     }
     if (url.pathname.endsWith('/api/inbox/sessions')) {
@@ -112,12 +141,13 @@ beforeEach(() => {
         serverSession: 's',
         home: '/home/dana',
         projects: [
-          { project: { id: 'prj_web', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web')] },
+          { project: { id: 'prj_web', name: 'web-app', root: '/home/dana/web-app' }, sessions: liveHere.map(liveSession) },
           { project: { id: 'prj_other', name: 'billing', root: '/home/dana/billing' }, sessions: [liveSession('ses_billing')] },
         ],
-        launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [{ id: 'prj_web', name: 'web-app', root: '/home/dana/web-app', exists: true }, { id: 'prj_other', name: 'billing', root: '/home/dana/billing', exists: true }] },
+        launch: { agents: canLaunch ? [{ agent: 'claude-code', name: 'Claude Code' }] : [], projects: [{ id: 'prj_web', name: 'web-app', root: '/home/dana/web-app', exists: true }, { id: 'prj_other', name: 'billing', root: '/home/dana/billing', exists: true }] },
       });
     }
+    if (url.pathname.endsWith('/api/skills')) return Response.json({ skills: [{ name: 'review-curate', root: 'plannotator', humanOnly: true }] });
     if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
     return Response.json({});
   }) as typeof fetch;
@@ -138,6 +168,10 @@ async function settle(rounds = 8) {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
   }
+  // A frame's work (focus back on Start a thread) runs too: nothing is left pending past the test.
+  await act(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+  });
 }
 
 function mount(model: InboxPullsAnswer, extra: Partial<PullsPageProps> = {}) {
@@ -153,7 +187,7 @@ function mount(model: InboxPullsAnswer, extra: Partial<PullsPageProps> = {}) {
     onOpenStack: (id) => went.push(`stack ${id}`),
     onScope: () => {},
     onReview: (stack, key, scope) => went.push(`diff ${stack} ${key} ${scope}`),
-    onOpenThread: (thread, replace) => went.push(`thread ${thread}${replace ? ' in place' : ''}`),
+    onOpenThread: (thread, replace, reply) => went.push(`thread ${thread}${replace ? ' in place' : ''}${reply ? ', reply open' : ''}`),
     onNew: () => {},
     onNewReview: (pick) => went.push(`new review ${pick.id}`),
     ...extra,
@@ -251,8 +285,13 @@ test.skipIf(!hasDom)("Send: the PR checked with To's project, the thread started
   expect(String(sent.body).includes('/review-curate')).toBe(false);
   expect(sent.thread_name).toBe('Review #880: Fix RTL in the date picker');
   expect(posts[2]!.body).toMatchObject({ keys: [single.key], thread_id: 'thr_new', ask: 'thread' });
-  expect(went).toEqual(['thread thr_new in place']);
+  // The thread opens in place of the page with its reply box open (the mock), and the words sent are gone.
+  expect(went).toEqual(['thread thr_new in place, reply open']);
   expect(reloads).toBe(1);
+  act(() => root!.unmount());
+  host!.remove();
+  await start();
+  expect(field().value).toBe('');
 });
 
 test.skipIf(!hasDom)('a new session chosen in To starts in the PR\'s project', async () => {
@@ -286,7 +325,7 @@ test.skipIf(!hasDom)('a double press while the Send is on its way, and a press a
   await settle();
   expect(sends()).toHaveLength(2);
   expect(sends()[1]!.body.idempotency_key).toBe(sends()[0]!.body.idempotency_key);
-  expect(went).toEqual(['thread thr_new in place']);
+  expect(went).toEqual(['thread thr_new in place, reply open']);
 });
 
 test.skipIf(!hasDom)('a PR whose thread was started from its page opens that thread, in place of its page; one handed over another way keeps its page', async () => {
@@ -301,6 +340,22 @@ test.skipIf(!hasDom)('a PR whose thread was started from its page opens that thr
   await settle();
   expect(went).toEqual([]);
   expect(!!$('[data-launchpad]')).toBe(true);
+  // A guided review asked in the PR's thread keeps it the PR's page (the server's `page` mark).
+  act(() => root!.unmount());
+  host!.remove();
+  mount(answer({ [single.key]: { ...link, ask: 'guide', page: true } }));
+  await settle();
+  expect(went).toEqual(['thread thr_pr in place']);
+});
+
+test.skipIf(!hasDom)("a stack's page whose thread started from a layer's page asked for nothing: its thread line never says a guided review is on its way", async () => {
+  const link: InboxPullLink = { via: 'owner', ask: 'thread', page: true, thread_id: 'thr_pr', thread_subject: 'Review #880', project_id: 'prj_web', agent: { host: 'claude-code', session: 'ses_web', name: null }, last: null, guide: null };
+  const upper: InboxPull = { ...single, key: `github.com/${REPO}#881`, number: 881, url: `https://github.com/${REPO}/pull/881`, base: 'fix/rtl', head: 'fix/rtl-2' };
+  mount({ ...answer({ [single.key]: link }), pulls: [single, upper] }, { stackId: inboxPullStacks([single, upper])[0]!.id });
+  await settle();
+  expect(went).toEqual([]);
+  expect($('[data-pulls-thread-line]')!.getAttribute('data-pulls-thread-line')).toBe('live');
+  expect(document.body.textContent!.includes('on the way')).toBe(false);
 });
 
 test.skipIf(!hasDom)("a phone: the same empty thread, To as the box's agent control with its sheet", async () => {
@@ -336,4 +391,145 @@ test.skipIf(!hasDom)("the thread's first message shows the person's words, and t
   expect(toggle.getAttribute('aria-expanded')).toBe('false');
   await act(async () => toggle.click());
   expect(host.querySelector('[data-pull-details-text]')!.textContent).toBe(pullHandoffMessage(inboxPullStacks([single])[0]!, { kind: 'thread' }));
+});
+
+const ties = () => posts.filter((p) => p.path.endsWith('/pulls/owner') && !p.body.validate_only);
+
+test.skipIf(!hasDom)("a thread that started but isn't tied is never started again: edited words, another To, or the page left and opened again only tie it", async () => {
+  await start();
+  await type(ASK);
+  tieFails = 3;
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()).toHaveLength(1);
+  expect($('[data-pull-thread-error]')!.textContent!.startsWith('The thread started, but it isn’t tied to this pull request yet. Press Send again to tie it.')).toBe(true);
+  // Edited words: a tie, no start.
+  await type(`${ASK} And the tests?`);
+  await click('[data-pull-thread-start] [data-reply-send]');
+  // Another To: a tie, no start.
+  await click('[data-pull-thread-start] [data-recipient]');
+  await click('[data-recipient-list] [data-recipient-row="new:claude-code:prj_web"] .ib-rpick-name');
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()).toHaveLength(1);
+  expect(ties().map((p) => p.body.thread_id)).toEqual(['thr_new', 'thr_new', 'thr_new']);
+  // Left and opened again: the PR's page offers the thread, and the empty thread says so at once.
+  await escape();
+  expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('A thread started here, but it isn’t tied to this pull request yet.');
+  await click('[data-launch-go="untied-thread"]');
+  expect(went).toEqual(['thread thr_new']);
+  act(() => root!.unmount());
+  host!.remove();
+  await start();
+  expect(!!$('[data-pull-thread-error]')).toBe(true);
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()).toHaveLength(1);
+  expect(ties()).toHaveLength(4);
+  expect(went).toEqual(['thread thr_new', 'thread thr_new in place, reply open']);
+});
+
+test.skipIf(!hasDom)('a PR another window gave to a thread first: Send starts nothing and opens that thread, saying so', async () => {
+  const toasts: string[] = [];
+  await start({ onToast: (toast) => toasts.push(`${toast.lead}: ${toast.detail}`) });
+  await type(ASK);
+  ownerNow = 'thr_other';
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()).toHaveLength(0);
+  expect(ties()).toHaveLength(0);
+  expect(went).toEqual(['thread thr_other in place']);
+  expect(toasts).toEqual(['Already has a thread: This pull request was given to a thread before yours went. Nothing new started; that thread is open.']);
+});
+
+test.skipIf(!hasDom)('Send is pale while the box is empty; words of spaces only say to write first', async () => {
+  await start();
+  const button = () => $<HTMLButtonElement>('[data-pull-thread-start] [data-reply-send]')!;
+  expect(button().disabled).toBe(true);
+  await type('   ');
+  expect(button().disabled).toBe(false);
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect($('[data-pull-thread-error]')!.textContent).toBe('Write a message first.');
+  expect(posts).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the skills block goes only when the words name a skill', async () => {
+  await start();
+  await type('Use /review-curate on the date grid only.');
+  await click('[data-pull-thread-start] [data-reply-send]');
+  const named = String(sends()[0]!.body.body);
+  const plain = pullThreadMessage(inboxPullStacks([single])[0]!, 'Use /review-curate on the date grid only.');
+  expect(named.startsWith(plain) && named.length > plain.length + 100).toBe(true);
+  act(() => root!.unmount());
+  host!.remove();
+  forgetPullThreadStarts();
+  posts = [];
+  await start();
+  await type(ASK);
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()[0]!.body.body).toBe(pullThreadMessage(inboxPullStacks([single])[0]!, ASK));
+});
+
+test.skipIf(!hasDom)("the keys: an IME's Enter and Escape are its own; Escape closes the / list first, then leaves, focus back on Start a thread", async () => {
+  await start();
+  await type(ASK);
+  await act(async () => {
+    field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, ctrlKey: true, isComposing: true, bubbles: true, cancelable: true }));
+    field().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', keyCode: 229, bubbles: true, cancelable: true }));
+  });
+  await settle();
+  expect(!!$('[data-pull-thread-start]') && posts.length === 0).toBe(true);
+  // A bare `/` opens the skill list: the first Escape closes it alone, the next leaves.
+  await act(async () => {
+    const el = field();
+    el.focus();
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(el, 'Look at this. /');
+    el.selectionStart = el.selectionEnd = el.value.length;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new KeyboardEvent('keyup', { key: '/', bubbles: true }));
+  });
+  await settle();
+  expect(!!document.querySelector('[data-skill-menu]')).toBe(true);
+  await escape();
+  expect(!!$('[data-pull-thread-start]') && !document.querySelector('[data-skill-menu]')).toBe(true);
+  await escape();
+  expect(!!$('[data-launchpad]')).toBe(true);
+  expect(document.activeElement === $('[data-launch-go="start-thread"]')).toBe(true);
+});
+
+test.skipIf(!hasDom)('no agent can take the thread: said before any typing, and Send stays off', async () => {
+  liveHere = [];
+  canLaunch = false;
+  await start();
+  expect($('[data-pull-thread-empty]')!.textContent).toBe('No agent is running in this project, and none can start here. Start one, then come back.');
+  await type(ASK);
+  expect($<HTMLButtonElement>('[data-pull-thread-start] [data-reply-send]')!.disabled).toBe(true);
+});
+
+test.skipIf(!hasDom)('an agent that ended before the Send: nothing sent, no word of a draft', async () => {
+  await start();
+  await type(ASK);
+  startFails = 0;
+  const saved = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/api/inbox/messages')) return Response.json({ error: 'That session is not live any more: nothing was sent. Pick a live session, or save it as a draft.', code: 'session_not_live' }, { status: 409 });
+    return saved(input, init);
+  }) as typeof fetch;
+  await click('[data-pull-thread-start] [data-reply-send]');
+  globalThis.fetch = saved;
+  expect($('[data-pull-thread-error]')!.textContent).toBe('That agent isn’t running any more, so nothing was sent. Pick another in To.');
+});
+
+test.skipIf(!hasDom)("a press again after a failed start, once the PR list reloaded with new details, sends the same body under the same key (never refused as a reused key)", async () => {
+  await start();
+  await type(ASK);
+  startFails = 1;
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(!!$('[data-pull-thread-error]')).toBe(true);
+  act(() => root!.unmount());
+  host!.remove();
+  mount({ ...answer(), pulls: [{ ...single, title: 'Fix RTL in the date picker and the calendar', additions: 160 }] });
+  await settle();
+  await click('[data-launch-go="start-thread"]');
+  await click('[data-pull-thread-start] [data-reply-send]');
+  expect(sends()).toHaveLength(2);
+  expect(sends()[1]!.body.idempotency_key).toBe(sends()[0]!.body.idempotency_key);
+  expect(sends()[1]!.body.body).toBe(sends()[0]!.body.body);
+  expect(sends()[1]!.body.thread_name).toBe(sends()[0]!.body.thread_name);
 });

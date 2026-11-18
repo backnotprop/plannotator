@@ -2163,7 +2163,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread" }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread"; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2214,7 +2214,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const url = urlThread.get(pull.key);
