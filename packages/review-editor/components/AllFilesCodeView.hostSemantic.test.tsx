@@ -573,7 +573,7 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     pageHeight = 10_000;
   });
 
-  async function reading(files: string[], at: Record<string, number>) {
+  async function reading(files: string[], at: Record<string, number>, extra: Partial<React.ComponentProps<typeof AllFilesCodeView>> = {}) {
     if (!restore) {
       const realRect = Element.prototype.getBoundingClientRect;
       const realSizes = sizes.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
@@ -593,12 +593,13 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     const gates: (() => void)[] = [];
     const client: SemDiffClient = {
       supports: (path) => path.endsWith('.ts'),
-      diff: () => new Promise((resolve) => gates.push(() => resolve(moved))),
+      diff: (_path, _old, _new, _signal, options) =>
+        new Promise((resolve) => gates.push(() => resolve(options ? { ...moved, secondOpinion: { state: 'ok', links: [{ operationIndex: 0, candidateId: 'c1' }] } as never } : moved))),
       attempt: async () => ({ result: moved, failed: false }),
       dispose: () => {},
     };
     const { read } = hostReader();
-    await mount(files.map(changed), { semDiffClient: client, fetchFileContent: read });
+    await mount(files.map(changed), { semDiffClient: client, fetchFileContent: read, ...extra });
     const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
     const nodes = new Map<string, HTMLElement>();
     await act(async () => {
@@ -624,7 +625,8 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
         for (const item of items.values()) options.onPostRender(nodes.get(files.find((file) => item.id.includes(file))!)!, {}, 'update', { item });
       });
     };
-    return { land, swapped, move, redraw };
+    const drawnKey = (path: string) => String([...items.values()].find((item) => item.id.includes(path))!.fileDiff.cacheKey ?? '');
+    return { land, swapped, move, redraw, drawnKey };
   }
 
   test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
@@ -668,6 +670,20 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await act(async () => configStore.set('diffSemantic', false));
     await act(async () => configStore.set('diffSemantic', true));
     expect(page.swapped('a.ts')).toBe(true);
+  });
+
+  const powerUp = { active: true, rejected: [], provider: 'jev', retry: 0 } as never;
+
+  test.skipIf(!hasDom)('a second opinion landing after the switch was turned on by hand is offered, not drawn under the reader', async () => {
+    configStore.set('diffSemantic', false);
+    const page = await reading(['a.ts'], { 'a.ts': 100 }, { powerUp });
+    document.dispatchEvent(new Event('pointerdown'));
+    await act(async () => configStore.set('diffSemantic', true));
+    await page.redraw();
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(true);
+    await page.land();
+    expect(page.drawnKey('a.ts')).not.toContain(':c1');
   });
 
   test.skipIf(!hasDom)('notes that land after the switch was turned on by hand show, on screen or not', async () => {

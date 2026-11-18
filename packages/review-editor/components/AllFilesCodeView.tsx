@@ -2165,11 +2165,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     onPowerUpStatus({ asking, answered, links, unavailable });
   });
 
-  const swapsUnseen = useStableCallback((itemId: string) => {
+  const swapsUnseen = useStableCallback((itemId: string, secondOpinion: boolean) => {
     const scroller = scrollRef.current;
     const page = scroller && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : scroller);
     const engaged = engagedRef.current || readingRef.current?.engaged() === true || (page?.scrollTop ?? 0) > 0;
-    if (!engaged || semanticAskedForRef.current.has(`${fileSetKeyRef.current}::${itemId}`)) return true;
+    const asked = !secondOpinion && semanticAskedForRef.current.delete(`${fileSetKeyRef.current}::${itemId}`);
+    if (!engaged || asked) return true;
     if (!page) return false;
     const pageBox = page === document.documentElement ? { top: 0, bottom: window.innerHeight } : page.getBoundingClientRect();
     const viewTop = Math.max(0, pageBox.top);
@@ -2194,6 +2195,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     onDropped: () => void,
     swap = true,
     signal?: AbortSignal,
+    secondOpinion = false,
   ) => {
     queueAugmentApply(itemId, () => {
       if (stale()) {
@@ -2230,7 +2232,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
       semDiffsRef.current.set(itemId, { plain, semantic });
       semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId)) showSemantic(itemId, semanticEnabledRef.current);
+      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`) && swapsUnseen(itemId, secondOpinion)) showSemantic(itemId, semanticEnabledRef.current);
       else refreshItem(itemId);
     });
   });
@@ -2261,7 +2263,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       powerUpFilesRef.current.set(itemId, { state: 'ok', links: report.links });
       reportPowerUp();
       if (report.links.length === 0 && !hadLinks && !semDiffsRef.current.has(itemId)) return;
-      applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {});
+      applySemanticResult(itemId, file, oldText, newText, generation, stale, result, () => {}, true, undefined, true);
     });
   });
 
