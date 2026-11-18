@@ -367,6 +367,9 @@ test.skipIf(!hasDom)("a phone: the same empty thread, To as the box's agent cont
   expect([...document.querySelectorAll('[data-recipient-list] [data-recipient-row]')].map((row) => row.getAttribute('data-recipient-row'))).toEqual(['ses_web', 'new:claude-code:prj_web']);
   // The sheet names a new thread's first message, not a reply.
   expect(document.body.textContent!.includes('Who gets this message') && !document.body.textContent!.includes('Who gets this reply')).toBe(true);
+  // One recipient only: the sheet's list is no multi-select, and the control's name says message.
+  expect(document.querySelector('[data-recipient-list] [role="listbox"]')!.hasAttribute('aria-multiselectable')).toBe(false);
+  expect(control.getAttribute('aria-label')!.startsWith('Message goes to ')).toBe(true);
   expect(posts).toEqual([]);
 });
 
