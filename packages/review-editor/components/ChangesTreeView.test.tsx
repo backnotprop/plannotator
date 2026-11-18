@@ -235,6 +235,31 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     }
   });
 
+  test('after a search is cleared, a click on a row moves focus to it and arrows walk the tree', async () => {
+    const el = await mount(<Tree files={[file('src/alpha.ts'), file('src/beta.ts'), file('src/gamma.ts')]} activeFileIndex={0} />);
+    const host = el.querySelector('[data-changes-tree]')!;
+    await typeInSearch(host, 'beta');
+    await act(async () => key(searchInput(host), 'Enter'));
+    await settle();
+    await act(async () => {
+      searchInput(host).value = '';
+      searchInput(host).dispatchEvent(new InputEvent('input', { bubbles: true, composed: true }));
+    });
+    await settle();
+    const target = rowEls(el).find((r) => r.dataset.itemPath?.endsWith('alpha.ts'))!;
+    await act(async () => {
+      const down = new MouseEvent('mousedown', { bubbles: true, composed: true, cancelable: true });
+      target.dispatchEvent(down);
+      if (!down.defaultPrevented) target.focus();
+      target.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true, cancelable: true }));
+    });
+    await settle();
+    expect(shadow(el).activeElement?.getAttribute('data-item-path')).toBe(target.dataset.itemPath!);
+    await act(async () => key(shadow(el).activeElement!, 'ArrowDown'));
+    await settle();
+    expect(shadow(el).activeElement?.getAttribute('data-item-path')).toEndWith('beta.ts');
+  });
+
   test('group by git status: a file staged from its header moves to Staged', async () => {
     const tree = (staged: string[]) => (
       <Tree files={working} activeFileIndex={0} sinceBaseSections={sections} stagedFiles={new Set(staged)} groupBy="status" onSelectGroupBy={() => {}} statusGroupingAvailable />

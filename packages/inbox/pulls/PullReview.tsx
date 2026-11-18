@@ -634,11 +634,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
   }, [sheet]);
   // Opening the Files sheet, focus goes to the file open, else the first.
   const changesTree = useRef<PullChangesTreeHandle>(null);
+  const allFilesTree = useRef<PullChangesTreeHandle>(null);
   useEffect(() => {
-    if (!filesSheet) return;
-    const repoRow = railRef.current?.querySelector<HTMLElement>('[data-repo-file-tree] button');
-    if (repoRow) repoRow.focus({ preventScroll: true });
-    else changesTree.current?.focus();
+    if (filesSheet) (allFilesTree.current ?? changesTree.current)?.focus();
   }, [filesSheet]);
   const closeComments = () => {
     // At once: on a phone the button can take focus only once the page shows again.
@@ -920,6 +918,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             head={filesHead}
             onSelect={pickFile}
             onOpen={openRepoFile}
+            handleRef={allFilesTree}
           />
         </PanePart>
       ) : (
