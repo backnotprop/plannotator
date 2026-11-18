@@ -19810,12 +19810,33 @@
       "title": "The Inbox's health and the door's version",
       "surface": [
         "door:GET health",
-        "window:/api/inbox/health"
+        "window:/api/inbox/health",
+        "field:InboxDoorHealth.contract",
+        "field:InboxDoorHealth.grants",
+        "field:InboxDoorHealth.min_app_contract",
+        "field:InboxDoorHealth.not_by_relay",
+        "field:InboxDoorHealth.routes"
       ],
       "flows": [],
       "mobile": "v1",
       "why": "The phone reads health to learn the Inbox's version and its door (brief F1).",
       "source": "seed: no SCOPE row names it",
+      "ios": {
+        "state": "not-started"
+      },
+      "decoded": true
+    },
+    {
+      "id": "door-get-update",
+      "title": "A linked computer reads another's update state (`GET update` on the door)",
+      "surface": [
+        "door:GET update"
+      ],
+      "flows": [],
+      "mobile": "never",
+      "why": "N-self: a route between linked computers (grant machine); a phone's token never reaches it.",
+      "reason": "N-self",
+      "source": "seed: the door's table (F1)",
       "ios": {
         "state": "not-started"
       }
