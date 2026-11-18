@@ -658,6 +658,8 @@ packages/inbox/reviewJump.test.tsx
 packages/inbox/reviewAllFilesTree.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
+packages/inbox/pulls/pullThreadStart.test.tsx
+packages/inbox/pulls/pullThreadGuide.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/prs/checksTurn.test.tsx
@@ -745,6 +747,7 @@ packages/inbox/composeLaunchTip.test.tsx
 packages/inbox/sidebarTip.test.tsx
 packages/inbox/attachmentDownload.test.tsx
 packages/inbox/listFilterButton.test.tsx
+packages/inbox/listFilterSearchMenu.test.tsx
 packages/inbox/prototypeWindow.test.tsx
 packages/ui/utils/pageMarks.test.tsx
 packages/inbox/pageMarks.test.tsx
@@ -770,6 +773,8 @@ packages/inbox/agents/setAgentIcons.test.tsx
 packages/inbox/agents/animateAnyIcon.test.tsx
 packages/inbox/agents/agentRename.test.tsx
 packages/inbox/agents/agentMenuLaunch.test.tsx
+packages/inbox/agents/agentRexPlace.test.tsx
+packages/inbox/agents/rexMark.test.tsx
 packages/inbox/agents/linkedAgentFaces.test.tsx
 packages/review-editor/dock/panels/ReviewCallFlowPanel.states.test.tsx
 packages/review-editor/components/callTree/CallTree.test.tsx
@@ -844,3 +849,5 @@ packages/ui/components/frame/card/card.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
 packages/inbox/pulls/branchReviews.test.tsx
 packages/review-editor/App.treePanes.test.tsx
+packages/review-editor/components/FileHeader.counts.test.tsx
+packages/inbox/guide/useSemDiffClient.test.tsx

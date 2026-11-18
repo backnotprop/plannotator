@@ -30,6 +30,7 @@ import {
   getGitContext,
   getGitDiffFingerprint,
   getWorkingTreeDiffFromBase,
+  getSinceBaseSections,
   gitAddFile,
   gitResetFile,
   isBinaryPatchFile,
@@ -42,6 +43,7 @@ import {
   parseJjCommitDiffType,
   parseWorktreeDiffType,
   GIT_COLOR_FREE_ARGS,
+  GIT_OUTPUT_ARGS,
   prepareGitCommand,
   runGitDiff,
   splitPorcelainRename,
@@ -87,8 +89,14 @@ function makeTempDir(prefix: string): string {
   return dir;
 }
 
+/**
+ * Git in these tests reads only the repository's config and the test's own,
+ * never the developer's (a global signing program would fail or prompt).
+ */
+const TEST_GIT_ENV: NodeJS.ProcessEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+
 function git(cwd: string, args: string[]): string {
-  const result = spawnSync("git", args, { cwd, encoding: "utf-8" });
+  const result = spawnSync("git", args, { cwd, encoding: "utf-8", env: TEST_GIT_ENV });
   if (result.status !== 0) {
     throw new Error(result.stderr || `git ${args.join(" ")} failed`);
   }
@@ -103,6 +111,7 @@ function makeRuntime(baseCwd: string): ReviewGitRuntime {
         encoding: "utf-8",
         maxBuffer: MAX_REVIEW_FILE_CONTENT_BYTES * 4,
         input: options?.stdin,
+        env: TEST_GIT_ENV,
       });
 
       return {
@@ -165,13 +174,13 @@ function makeConfigForwardingRuntime(
     async runGit(args: string[], options?: GitCommandOptions) {
       const intercepted = intercept?.(args);
       if (intercepted) return intercepted;
-      const command = prepareGitCommand(args, options, process.env);
+      const command = prepareGitCommand(args, options, TEST_GIT_ENV);
       const result = spawnSync("git", command.args, {
         cwd: options?.cwd ?? baseCwd,
         encoding: "utf-8",
         maxBuffer: MAX_REVIEW_FILE_CONTENT_BYTES * 4,
         input: options?.stdin,
-        env: command.env as NodeJS.ProcessEnv | undefined,
+        env: (command.env as NodeJS.ProcessEnv | undefined) ?? TEST_GIT_ENV,
       });
       return {
         stdout: result.stdout ?? "",
@@ -221,8 +230,7 @@ describe("review-core", () => {
     });
     expect(command.args).toEqual([
       ...GIT_COLOR_FREE_ARGS,
-      "-c",
-      "core.quotePath=false",
+      ...GIT_OUTPUT_ARGS,
       "-c",
       "credential.interactive=false",
       "ls-remote",
@@ -267,7 +275,7 @@ describe("review-core", () => {
     );
 
     expect(command).toEqual({
-      args: [...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", "fetch", "origin", "main"],
+      args: [...GIT_COLOR_FREE_ARGS, ...GIT_OUTPUT_ARGS, "fetch", "origin", "main"],
       isolateProcessGroup: false,
     });
   });
@@ -281,7 +289,7 @@ describe("review-core", () => {
 
     // argv must stay byte-identical to the configless invocation: callers and
     // test mocks match on the exact argument vector.
-    expect(command.args).toEqual([...GIT_COLOR_FREE_ARGS, "-c", "core.quotePath=false", "diff", "--no-ext-diff", "--cached"]);
+    expect(command.args).toEqual([...GIT_COLOR_FREE_ARGS, ...GIT_OUTPUT_ARGS, "diff", "--no-ext-diff", "--cached"]);
     expect(command.env).toEqual({
       PATH: "/usr/bin",
       GIT_CONFIG_COUNT: "1",
@@ -415,8 +423,8 @@ describe("review-core", () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
     writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 10, 1));
-    spawnSync("git", ["add", "photo.png"], { cwd: repoDir });
-    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "photo"], { cwd: repoDir });
+    spawnSync("git", ["add", "photo.png"], { cwd: repoDir, env: TEST_GIT_ENV });
+    spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "photo"], { cwd: repoDir, env: TEST_GIT_ENV });
     writeFileSync(join(repoDir, "photo.png"), Buffer.alloc(MAX_REVIEW_FILE_CONTENT_BYTES + 20, 2));
 
     const result = await runGitDiff(runtime, "uncommitted", "main");
@@ -613,6 +621,63 @@ describe("review-core", () => {
     expect(renamed.patch).not.toContain("Binary files");
     expect(listPatchFiles(renamed.patch).map((file) => file.path)).toContain(renamedTo);
   }, 20_000);
+
+  test("a review started in a subdirectory covers the whole repository when diff.relative is on", async () => {
+    const repoDir = initRepo();
+    mkdirSync(join(repoDir, "sub"));
+    writeFileSync(join(repoDir, "sub", "inner.txt"), "inner before\n", "utf-8");
+    git(repoDir, ["add", "sub/inner.txt"]);
+    git(repoDir, ["commit", "-m", "inner"]);
+    git(repoDir, ["config", "diff.relative", "true"]);
+    writeFileSync(join(repoDir, "tracked.txt"), "after\n", "utf-8");
+    writeFileSync(join(repoDir, "sub", "inner.txt"), "inner after\n", "utf-8");
+
+    const runtime = makeConfigForwardingRuntime(join(repoDir, "sub"));
+    const { patch } = await runGitDiff(runtime, "unstaged", "main");
+    // Paths from the repository root, the way hunk expansion and stage and unstage use them.
+    expect(listPatchFiles(patch).map((file) => file.path).sort()).toEqual(["sub/inner.txt", "tracked.txt"]);
+  });
+
+  const hasSshKeygen = spawnSync("ssh-keygen", ["-?"]).error === undefined;
+  test.skipIf(!hasSshKeygen)("a signed commit's review names its commit when log.showSignature is on", async () => {
+    const repoDir = initRepo();
+    const keyDir = makeTempDir("plannotator-review-core-key-");
+    const key = join(keyDir, "key");
+    const made = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "review-core", "-f", key]);
+    if (made.status !== 0) throw new Error(String(made.stderr));
+    // Signed and checked by ssh-keygen with this throwaway key only (every git call here leaves out the developer's config).
+    git(repoDir, ["config", "gpg.format", "ssh"]);
+    git(repoDir, ["config", "gpg.ssh.program", "ssh-keygen"]);
+    git(repoDir, ["config", "user.signingkey", key]);
+    writeFileSync(join(repoDir, "tracked.txt"), "signed\n", "utf-8");
+    git(repoDir, ["-c", "gpg.ssh.program=ssh-keygen", "commit", "-q", "-S", "-am", "signed change"]);
+    const sha = git(repoDir, ["rev-parse", "HEAD"]);
+    const shortSha = git(repoDir, ["rev-parse", "--short", "HEAD"]);
+    // With it on, log and show print a signature check ("No signature", "Good ... signature") before the fields.
+    git(repoDir, ["config", "log.showSignature", "true"]);
+
+    const runtime = makeConfigForwardingRuntime(repoDir);
+    const result = await runGitDiff(runtime, `commit:${sha}`, "main");
+    expect(result.label).toBe(`Commit ${shortSha} — signed change`);
+    expect(listPatchFiles(result.patch).map((file) => file.path)).toEqual(["tracked.txt"]);
+  });
+
+  test("keeps the space on blank context rows when Git is set to drop it", async () => {
+    const repoDir = initRepo();
+    writeFileSync(join(repoDir, "notes.txt"), "one\n\ntwo\n", "utf-8");
+    git(repoDir, ["add", "notes.txt"]);
+    git(repoDir, ["commit", "-m", "notes"]);
+    git(repoDir, ["config", "diff.suppressBlankEmpty", "true"]);
+    writeFileSync(join(repoDir, "notes.txt"), "one\n\nthree\n", "utf-8");
+
+    const runtime = makeConfigForwardingRuntime(repoDir);
+    for (const diffType of ["unstaged", "staged"] as const) {
+      if (diffType === "staged") git(repoDir, ["add", "notes.txt"]);
+      const { patch } = await runGitDiff(runtime, diffType, "main");
+      const hunk = patch.slice(patch.indexOf("@@ ")).split("\n");
+      expect(hunk.slice(0, 5)).toEqual(["@@ -1,3 +1,3 @@", " one", " ", "-two", "+three"]);
+    }
+  });
 
   test("keeps gitlink pointers as normal subproject diffs and fingerprints them", async () => {
     const superproject = initRepo();
@@ -894,6 +959,7 @@ describe("review-core", () => {
       expect(options?.config).toEqual({
         "core.bigFileThreshold": String(MAX_REVIEW_FILE_CONTENT_BYTES),
         "diff.submodule": "short",
+        "diff.suppressBlankEmpty": "false",
       });
       expect(args.some((arg) => arg.includes("bigFileThreshold"))).toBe(false);
     }
@@ -1449,6 +1515,22 @@ describe("review-core", () => {
     expect(review.patch).toContain("+current content");
     expect(review.patch).toContain("+untracked content");
     expect(await getGitDiffFingerprint(runtime, mode, "main", repo)).not.toBe(before);
+  });
+
+  test("review preserves whitespace at the start of an untracked file's name", async () => {
+    const repo = initRepo();
+    const runtime = makeRuntime(repo);
+    const path = " draft.txt";
+    writeFileSync(join(repo, path), "first draft\n");
+
+    const before = await getGitDiffFingerprint(runtime, "uncommitted", "main", repo);
+    expect(before).not.toBeNull();
+    const review = await runGitDiff(runtime, "uncommitted", "main", repo);
+    expect(listPatchFiles(review.patch).map((file) => file.path)).toContain(path);
+    expect((await getSinceBaseSections(runtime, "main", repo))?.files[path]).toEqual({ group: "untracked", staged: false });
+
+    writeFileSync(join(repo, path), "other draft\n");
+    expect(await getGitDiffFingerprint(runtime, "uncommitted", "main", repo)).not.toBe(before);
   });
 
   test("uncommitted diff includes untracked files with C-quoted (unicode) names", async () => {

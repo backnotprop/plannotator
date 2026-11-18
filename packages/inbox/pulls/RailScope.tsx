@@ -44,6 +44,17 @@ export function RailScopeSwitch({ scope, changed, onSelect }: { scope: TreeScope
   );
 }
 
+export function focusScopeWhenLost(rail: HTMLElement | null, scope: TreeScope, frames = 12): void {
+  const attempt = (left: number) => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    const button = rail?.querySelector<HTMLElement>(`[data-tree-scope="${scope}"]`);
+    if (button) button.focus({ preventScroll: true });
+    else if (left > 0) requestAnimationFrame(() => attempt(left - 1));
+  };
+  requestAnimationFrame(() => attempt(frames));
+}
+
 /**
  * The review app's reads (`/api/repo-files?…`, `/api/repo-file?…`, as its `useRepoFiles` and `useRepoFileText` ask)
  * sent to the Inbox's routes for one PR, the rest of the query as it was. Anything else is refused, never fetched.

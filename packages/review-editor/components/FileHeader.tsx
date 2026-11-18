@@ -11,6 +11,7 @@ import type { DiffFileStatus } from '../types';
 import { FileKindIcon } from '@plannotator/guide-viewer/FileKindIcon';
 import { fileStatusLetter } from '@plannotator/ui/utils/fileStatusLetter';
 import { formatCount } from '@plannotator/ui/utils/countFormat';
+import { countPatchChanges } from '@plannotator/core/diff-files';
 
 interface FileHeaderProps {
   /** Read-only host: no open-in affordance (it probes the review server). */
@@ -108,17 +109,6 @@ const FileStatusLetter: React.FC<{ status: DiffFileStatus; oldPath?: string }> =
   );
 };
 
-/** Count +/- lines in a unified patch (ignores the +++/--- file headers). */
-function countChanges(patch: string): { additions: number; deletions: number } {
-  let additions = 0;
-  let deletions = 0;
-  for (const line of patch.split('\n')) {
-    if (line[0] === '+' && !line.startsWith('+++')) additions++;
-    else if (line[0] === '-' && !line.startsWith('---')) deletions++;
-  }
-  return { additions, deletions };
-}
-
 /** Sticky file header with file path, Viewed toggle, Git Add, and Copy Diff button */
 const TIGHT_LABEL = '@max-[479px]/file-header:hidden';
 const TIGHT_PAD = 'gap-1 px-2 py-1 @max-[479px]/file-header:px-1.5';
@@ -169,7 +159,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
   const headerWidthNow = () => headerRef.current?.clientWidth ?? Infinity;
   const tinyNow = () => !readOnly && headerWidthNow() < ACTIONS_FOLD_WIDTH;
   const actionFold = readOnly ? '' : ACTIONS_FOLD;
-  const { additions, deletions } = React.useMemo(() => countChanges(patch), [patch]);
+  const { additions, deletions } = React.useMemo(() => countPatchChanges(patch), [patch]);
 
   return (
     <div
@@ -247,7 +237,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
       {!isCompactTouchLayout && <div className={`flex flex-shrink-0 items-center pl-2 gap-1`}>
         <CallFlowFileBadge filePath={filePath} oldPath={oldPath} />
         <SemanticFileBadge filePath={filePath} />
-        {semanticNote && <span className={`contents ${TIGHT_LABEL}`}>{semanticNote}</span>}
+        {semanticNote}
         {openIn}
         {!readOnly && <OpenInAppButton
           quiet
@@ -371,6 +361,7 @@ const FileHeaderView: React.FC<FileHeaderProps> = ({
           </button>
         )}
       </div>}
+      {isCompactTouchLayout && semanticNote}
       {isCompactTouchLayout && readOnly && renderMarkdownView?.({ iconOnly: false, touch: true })}
       {isCompactTouchLayout && !readOnly && (
         <CompactFileActions

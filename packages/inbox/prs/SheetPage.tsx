@@ -211,8 +211,6 @@ export function SheetPage(props: SheetPageProps) {
   // Bulk Merge: the confirm and the report hold the picks they were for; another pick drops them.
   const [bulk, setBulk] = useState<BulkPhase>({ at: 'idle' });
   const chosenKey = [...chosen].sort().join('\n');
-  const live: BulkPhase = (bulk.at === 'confirm' || bulk.at === 'report' || bulk.at === 'reviewed') && bulk.keys !== chosenKey ? { at: 'idle' } : bulk;
-  const busy = live.at === 'running';
   const pickSheet = useToastAbove();
 
   const show = useCallback((next: Pop) => {
@@ -424,6 +422,16 @@ export function SheetPage(props: SheetPageProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [model, chosenKey, order.join('\n')]);
   const plan = useMemo(() => mergePlan(pickedPulls, (key) => stackOf.get(key) ?? null), [pickedPulls, stackOf]);
+  // A refresh can replace a selected PR's head or change where the merge will run.
+  const mergeTargets = JSON.stringify(plan.merge.map(({ key, head_sha, base, machine }) => [key, head_sha, base, machine]));
+  const picksChanged = (bulk.at === 'confirm' || bulk.at === 'report' || bulk.at === 'reviewed') && bulk.keys !== chosenKey;
+  const targetsChanged = bulk.at === 'confirm' && bulk.targets !== mergeTargets;
+  const live: BulkPhase = picksChanged || targetsChanged ? { at: 'idle' } : bulk;
+  const busy = live.at === 'running';
+  useEffect(() => {
+    if (bulk.at === 'confirm' && live.at === 'idle') setBulk({ at: 'idle' });
+  }, [bulk.at, live.at]);
+
   const labelOf = (repo: string) => sheet?.sections.find((section) => section.key === repo)?.label ?? repo;
   const reviews = reviewPlan(pickedPulls, model?.links ?? {}, threadsHere, model?.projects ?? {}, labelOf);
   // One run at a time: Close's Undo, pressed from the toast while another runs, waits for it.
@@ -525,7 +533,7 @@ export function SheetPage(props: SheetPageProps) {
     });
   const pressMerge = () => {
     if (live.at === 'confirm') runMerge(plan.merge, plan.skip);
-    else if (live.at !== 'running' && plan.merge.length > 0) setBulk({ at: 'confirm', keys: chosenKey });
+    else if (live.at !== 'running' && plan.merge.length > 0) setBulk({ at: 'confirm', keys: chosenKey, targets: mergeTargets });
   };
   // A click anywhere but Confirm merge drops the confirm.
   useEffect(() => {
@@ -1074,7 +1082,7 @@ const MERGE_WORDS = ['Merge', 'Confirm merge', 'Merging…', 'Merged'] as const;
 /** The bar's actions: idle, Merge's confirm (for the picks it was asked for), one PR after another, then the report. */
 type BulkPhase =
   | { at: 'idle' }
-  | { at: 'confirm'; keys: string }
+  | { at: 'confirm'; keys: string; targets: string }
   | { at: 'running'; verb: BulkVerb | 'review'; done: number; total: number }
   | { at: 'report'; verb: BulkVerb; keys: string; outcomes: RunOutcome[]; skipped: MergePlan['skip'] }
   | { at: 'reviewed'; keys: string; report: ReviewReport };

@@ -417,6 +417,13 @@ describe("plannotator inbox mcp inside an agent Ask AI started (PLANNOTATOR_ASK_
     expect(fromPerson.PLANNOTATOR_INBOX_TOOL).toBe("0");
     expect(fromPerson.PLANNOTATOR_AGENT_TOOL).toBe("1");
   });
+
+  test("an Inbox started from a Rex pane does not keep that pane: its background agents would report it as theirs", () => {
+    const pane = { REX_SESSION: "session:11111111-2222-4333-8444-555555555555", REX_BLOCK: "block:11111111-2222-4333-8444-666666666666", REX_SERVER: "/tmp/rex.sock", TERM_PROGRAM: "rex" };
+    const detached = detachedInboxEnv({ PATH: "/bin", ...pane }, "/data");
+    expect(Object.keys(detached).filter((name) => name.startsWith("REX_") || name === "TERM_PROGRAM")).toEqual([]);
+    expect(detached.PATH).toBe("/bin");
+  });
 });
 
 describe("plannotator inbox mcp inside an agent session", () => {

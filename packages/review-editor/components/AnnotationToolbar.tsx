@@ -13,7 +13,7 @@ import type { ConventionalLabel, ConventionalDecoration } from '@plannotator/ui/
 import type { AIChatEntry } from '../hooks/useAIChat';
 import { useDraggable } from '@plannotator/ui/hooks/useDraggable';
 import { useConfigValue } from '@plannotator/ui/config';
-import { isCommentSubmitKey } from '@plannotator/ui/utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '@plannotator/ui/utils/commentSubmitKey';
 import {
   hasPrimaryCoarsePointer,
   useVisibleViewportBounds,
@@ -312,6 +312,10 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             rows={3}
             autoFocus={!coarsePointer}
             onKeyDown={(e) => {
+              if (e.key === 'Escape' && isImeCompositionKey(e)) {
+                e.stopPropagation();
+                return;
+              }
               if (mention.onKeyDown(e)) return;
               if (e.key === 'Escape') {
                 e.stopPropagation();

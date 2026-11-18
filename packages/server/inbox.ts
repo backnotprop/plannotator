@@ -108,6 +108,7 @@ import {
   type InboxMessage,
   type InboxProject,
   type InboxProjectRepo,
+  type InboxRestartAgents,
   type InboxTag,
   inboxStepsProgress,
 } from "@plannotator/core/inbox-types";
@@ -188,6 +189,7 @@ import {
   INBOX_TAGS_POLL_FIELD,
   inboxStopNoticeId,
   inboxReminderRulesText,
+  type InboxPlace,
   type InboxReplyCommand,
 } from "@plannotator/shared/inbox/connection";
 import {
@@ -265,6 +267,8 @@ import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxLiveReview } from "./inbox-live-review";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
+import { createInboxRex, inboxRexSocketPath, type InboxRex, type InboxRexStatus } from "./inbox-rex";
+import { withRexMark, withRexStatus } from "./inbox-rex-status";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
@@ -340,7 +344,7 @@ import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullSafeBranch, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
-import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull } from "@plannotator/core/inbox-types";
+import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { createInboxBranchService } from "./inbox-branch-service";
@@ -352,6 +356,7 @@ import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWa
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
+import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
@@ -493,6 +498,8 @@ function isPageOrigin(value: string): boolean {
 export interface InboxServerOptions {
   /** Default: `getPlannotatorDataDir()`. */
   dataDir?: string;
+  /** This computer's Rex (inbox-rex.ts). Default: the app's server socket on macOS (under a sandboxed test, its own home's). */
+  rex?: InboxRex;
   liveReviewCommand?: string[];
   /** The running binary's version; `dev` for a source run. */
   version?: string;
@@ -895,6 +902,8 @@ const ERROR_STATUS: Record<string, number> = {
   scratch_unavailable: 422,
   agent_unavailable: 409,
   launch_not_found: 404,
+  // Stop of a session that runs in Rex: Rex owns it.
+  launch_in_rex: 409,
   launch_off: 404,
   open_unavailable: 409,
   // Trust folder: the agent's own config could not be changed; nothing was, and the message stays kept.
@@ -1283,7 +1292,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let port = 0;
   let baseUrl = "";
   let portChanged = false;
-  const statusListeners = new Set<() => void>();
+  const statusListeners = new Set<(restartAgents: InboxRestartAgents) => void>();
   /**
    * A reply draft was saved or deleted (inbox-reply-drafts.ts), or a compose draft saved, deleted or sent
    * (inbox-compose.ts, no thread: null): the windows' streams say `event: drafts`.
@@ -1355,7 +1364,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     installerPath: () => (launchReady ? launch.loginPath() : []),
     ...options.updates,
     onChange: () => {
-      for (const listener of statusListeners) listener();
+      if (statusListeners.size === 0) return;
+      const restartAgents = live.restartAgents();
+      for (const listener of statusListeners) listener(restartAgents);
     },
     onRestartWanted: () => requestRestart(),
   });
@@ -1581,15 +1592,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
   // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
   // listed again and a new review can start. Unarchived, it owns the PR again, unless the PR was handed on since.
-  const pullOwnersNow = () => {
+  /**
+   * Which threads may own a PR now: not one whose first message the person took back (it is a draft again, and no
+   * thread: a root is taken back only while it is the thread's only message), and not archived unless it holds a
+   * review (archiving frees the PR).
+   */
+  const pullOwnable = () => {
     const reviewed = new Set(reviewIndex.threads().map((thread) => thread.thread_id));
-    return new Map(
-      [...pullOwners.all()].filter(([, owner]) => {
-        if (reviewed.has(owner.thread_id)) return true;
-        const row = store.listRow(owner.thread_id);
-        return !row || !inboxRowArchived(row);
-      }),
-    );
+    return (threadId: string) => {
+      if (store.message(threadId)?.taken_back_at) return false;
+      if (reviewed.has(threadId)) return true;
+      const row = store.listRow(threadId);
+      return !row || !inboxRowArchived(row);
+    };
+  };
+  const pullOwnersNow = () => {
+    const ownable = pullOwnable();
+    return new Map([...pullOwners.all()].filter(([, owner]) => ownable(owner.thread_id)));
   };
   const pullStates = createInboxPullStates({ run: options.refRunner, onLand: (record, forget) => pullOwners.land(record, forget) });
   const pullLinkStore: InboxPullLinkStore = {
@@ -1604,6 +1623,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
     sessionLive: (session) => live.isSessionLive(session),
     launchDead: (threadId) => launch.didNotStart(threadId),
+    // A thread started from a PR's page is found by the same rule a hand-off's owner is kept by.
+    ownable: () => pullOwnable(),
   };
   // The folders of this computer's clones of a PR's repository.
   const pullRoots = async (key: string): Promise<string[]> => {
@@ -1930,6 +1951,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return rest;
   };
 
+  // Both fields describe the same sessions. The old Claude-only field reads
+  // from this response's snapshot so it never rechecks the plugin folders.
+  const restartStatus = (agents = live.restartAgents()) => ({
+    restart_claude_code: agents.runtimes["claude-code"] ?? 0,
+    restart_agents: agents,
+  });
+
   /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
@@ -2048,10 +2076,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       update: updates.current(),
       /** This Inbox started on a newer version than the last one: the sidebar's "What's new in X" link. */
       updated: updates.updated(),
-      /** Claude Code sessions a restart would bring up to date (inbox-restart.ts): the sidebar's "Reload Claude Code N". Additive. */
-      restart_claude_code: live.restartCount(),
-      /** Every runtime's sessions a reload brings up to date (Claude Code, Pi, Oh My Pi, OpenCode 2): "Reload agents N". Additive. */
-      restart_agents: live.restartAgents(),
+      ...restartStatus(),
       /** Checking for updates has failed for hours: the sidebar's quiet "Can't check for updates". Additive. */
       update_check_failing: updates.checkFailing(),
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
@@ -3936,6 +3961,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** Routines (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
     ...scheduledCap.wire(),
     /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. */
+    // Rex is not asked here (every window load reads this): Settings → Agents reads its own, which asks (`rex_here`).
     launch: launch.settingsState(),
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
@@ -4081,9 +4107,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const unsubscribe = store.subscribe(sendLine);
         // `updated` (additive): the "What's new in X" link appears or goes once its notes are fetched or cannot be.
         // `restart_claude_code` (additive): the sidebar's "Reload Claude Code N" follows the sessions as they restart.
-        const onStatus = () =>
+        const onStatus = (restartAgents: InboxRestartAgents) =>
           send(
-            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), restart_claude_code: live.restartCount(), restart_agents: live.restartAgents(), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
+            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), ...restartStatus(restartAgents), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
           );
         statusListeners.add(onStatus);
         // An Inbox window (not the phone's door): counted while its stream is open, with what it reported.
@@ -4868,10 +4894,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The sidebar's "Reload Claude Code N" is pushed as it changes (a session restarts, goes away, or an update lands).
   let lastRestartCount = "";
   const restartWatch = setInterval(() => syncSection("timer:restart", () => {
-    const count = JSON.stringify(live.restartAgents());
+    const restartAgents = live.restartAgents();
+    const count = JSON.stringify(restartAgents);
     if (count === lastRestartCount) return;
     lastRestartCount = count;
-    for (const listener of statusListeners) listener();
+    for (const listener of statusListeners) listener(restartAgents);
   }), INBOX_RESTART_WATCH_MS);
   (restartWatch as { unref?: () => void }).unref?.();
 
@@ -4907,17 +4934,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // From the start, as the presence: a session's first poll moves the Agents however soon a window opened. The launches'
   // part is learned at the first look (they are made below), so an Inbox with launches says `agents` once then.
   let lastAgentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#`;
+  // What the list shows from Rex (inbox-rex.ts, made below): a place line or the app moving says `agents` too.
+  let rexVersion: () => number = () => 0;
+  let rexWatch: () => void = () => {};
   const deliveryWatch = setInterval(() => syncSection("timer:delivery", () => {
     // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
     launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
+    // While a window watches: Rex's read of the panes agents live in stays fresh (what each says it is doing), at most
+    // every few seconds; its news moves `rexVersion` below.
+    rexWatch();
     const launched = launch.signature();
     const signature = live.deliverySignature() + launched;
     const presence = live.presenceSignature();
     const sessions = presence !== lastPresenceSignature;
     const moved = sessions || signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
-    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}`;
+    const agentsSignature = `${live.agentsSignature(inboxStartOfDay(live.clock()))}#${launched}#${rexVersion()}`;
     const agents = agentsSignature !== lastAgentsSignature;
     lastAgentsSignature = agentsSignature;
     if (!moved && !labels && !agents) return;
@@ -4936,7 +4969,96 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The plain env launch finds agents on: this Inbox's own, or a sandboxed test's fakes.
   const launchOwnEnv = (): Readonly<Record<string, string | undefined>> =>
     process.env.PLANNOTATOR_TEST_SANDBOX ? { HOME: join(dataDir, "agents-home"), PATH: process.env.PLANNOTATOR_TEST_LAUNCH_PATH ?? "" } : process.env;
+  // Rex (superlogical.com/rex): where agents live and what their panes say, starting agents in Rex, Show in Rex. Only an existing server is ever reached.
+  // Under test (bun test, or a sandboxed binary) no Rex is reached but one a test names: `options.rex`, or a sandbox's
+  // PLANNOTATOR_TEST_REX_SOCKET (its fake). The person's own Rex never is.
+  const rexSocket = process.env.NODE_ENV === "test" ? null : process.env.PLANNOTATOR_TEST_SANDBOX ? (process.env.PLANNOTATOR_TEST_REX_SOCKET || null) : inboxRexSocketPath(process.platform, homedir());
+  const rex = options.rex ?? createInboxRex({ socketPath: rexSocket, version, sessionsFile: join(store.dir, "rex-sessions.json") });
+  rexVersion = rex.version;
+  rexWatch = () => rex.watch(rexHints([...live.placedSessions(), ...(launch.rexPanes()?.keys() ?? [])]));
+  /**
+   * Where the given live sessions say they live (their polls' place hints). While "Start new agents in" is Rex: every
+   * one in a Rex pane, one the person started there by hand included. Otherwise only the sessions the Inbox started in
+   * Rex (`launch.rexSessions()`) and the conversations that go on from them, until they end. None (the default
+   * setting and no such agent, or no agent in a Rex pane): no hints, so no Rex read at all. An agent the Inbox
+   * started in the background is in no Rex pane, whatever its connection says (it may have inherited one).
+   */
+  const rexHints = (sessions: Iterable<string>): Map<string, InboxPlace> => {
+    const hints = new Map<string, InboxPlace>();
+    const every = launch.startsInRex();
+    const inRex = launch.rexPanes();
+    if (!every && (!inRex || inRex.size === 0)) return hints;
+    const background = launch.backgroundSessions();
+    const unconnected = rexUnconnectedNow();
+    for (const session of sessions) {
+      if (background.has(session)) continue;
+      if (!every && !inRex!.has(session) && !live.continuesOf(session).some((old) => inRex!.has(old))) continue;
+      const place = rexPlaceOf(session, inRex, unconnected);
+      if (place) hints.set(session, place);
+    }
+    return hints;
+  };
+  /** The engine's not-yet-connected Rex sessions (`rexUnconnected`), less any whose connection was heard since its start. */
+  const rexUnconnectedNow = (): Set<string> => {
+    const out = new Set<string>();
+    for (const [session, startedAt] of launch.rexUnconnected()) {
+      const heard = live.lastHeardOf(session);
+      if (heard === null || heard < startedAt) out.add(session);
+    }
+    return out;
+  };
+  /**
+   * Where a session runs in Rex: the place its connection reports (Claude Code's), else, for one the Inbox started in
+   * Rex, the pane Rex made for it (Pi and OpenCode report none): while it is live, or before it connected (a prompt
+   * in its tab, such as the agent's own trust question, shows then too; Rex confirms the pane is still there).
+   */
+  const rexPlaceOf = (session: string, inRex: ReadonlyMap<string, InboxPlace | null> | null, unconnected: ReadonlySet<string>): InboxPlace | null =>
+    live.placeOf(session) ?? (live.isSessionLive(session) || unconnected.has(session) ? (inRex?.get(session) ?? null) : null);
+  /**
+   * This Inbox's agents with where they live (inbox-rex.ts), for every window (a phone, the tailnet and a linked
+   * machine too): each place Rex last confirmed, as one line, and what that pane says the agent is doing
+   * (`withRexStatus`, the marks). `show` (Show in Rex) only for a window on this computer (`here`): elsewhere it would
+   * move a screen no one there looks at. Answered at once from the last read; a stale one starts the next in the
+   * background (never waited on).
+   */
+  const withRexPlaces = (groups: InboxAgentsGroup[], here: boolean): InboxAgentsGroup[] => {
+    const at = groups.findIndex((group) => !group.machine || group.machine === machines.selfId);
+    const own = at >= 0 ? groups[at]! : null;
+    if (!own) return groups;
+    const hints = rexHints(own.agents.filter((agent) => agent.live).map((agent) => agent.session));
+    if (hints.size === 0) return groups;
+    const shown = rex.places(hints);
+    if (shown.size === 0) return groups;
+    const statuses = rex.statuses(hints);
+    const show = here && rex.offersShow();
+    // The icons' status marks, from a fresh read.
+    const fresh = rex.freshStatuses(hints);
+    const agents = own.agents.map((agent) => {
+      const line = shown.get(agent.session);
+      if (!line) return agent;
+      const placed = withRexStatus({ ...agent, place: { kind: "rex" as const, line, ...(show ? { show: true as const } : {}) } }, statuses.get(agent.session));
+      return withRexMark(placed, fresh.get(agent.session));
+    });
+    const out = [...groups];
+    out[at] = { ...own, agents };
+    return out;
+  };
+  /**
+   * Rex's word on a launched session that runs in Rex (its run line's `waiting_terminal`). The engine asks only for
+   * sessions it started in Rex, so its own pane hint is used as is: going through `rexHints` would ask the engine's
+   * agent list, whose runs ask this again.
+   */
+  const rexStatusOf = (session: string): InboxRexStatus | null => {
+    // Only a session the Inbox started in Rex (`rexPanes` reads no runs: no loop).
+    const inRex = launch.rexPanes();
+    if (!inRex?.has(session)) return null;
+    const place = rexPlaceOf(session, inRex, rexUnconnectedNow());
+    return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
+  };
   const launch = createInboxLaunch({
+    rex,
+    rexStatus: (session) => rexStatusOf(session),
+    placeOf: (session) => live.placeOf(session),
     store,
     live,
     dataDir,
@@ -4998,7 +5120,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     launch,
     on: scheduledCap.on,
-    launchOn: () => launch.settingsState().enabled,
+    launchOn: () => launch.enabled(),
     resolveProject,
     recordAttachments: (paths, project, base) => recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
@@ -5012,7 +5134,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       supported: scheduledCap.wire().scheduled_threads !== undefined,
       saved: () => options.scheduled ?? loadConfig().inboxScheduledThreads,
       routineMade: () => store.scheduledEverMade(),
-      launchOn: () => launch.settingsState().enabled,
+      launchOn: () => launch.enabled(),
       waits,
       goodDays: routinesGoodDays,
     });
@@ -5034,6 +5156,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (refs.length > 0) store.changeThreadPulls({ thread_id: threadId, add: refs, by: { kind: "person" } });
     } catch {
       // The hand-off stands without the coupling.
+    }
+  };
+  /**
+   * A thread started from a PR's page that the window never tied (a list found it by its first message,
+   * `linkInboxPulls`): kept as the PR's owner now, as the tie would have, with the same coupling (`theirs`, the
+   * thread's PR list, `pull_keys`), so its reviews follow that PR's rules (no verdict on a teammate's PR).
+   */
+  const adoptStartedThreads = (listed: readonly InboxPull[], links: Readonly<Record<string, InboxPullLink>>, owners: ReadonlyMap<string, unknown>) => {
+    const byThread = new Map<string, InboxPull[]>();
+    for (const pull of listed) {
+      const link = links[pull.key];
+      if (!link || link.via !== "owner" || link.ask !== "thread" || owners.has(pull.key)) continue;
+      byThread.set(link.thread_id, [...(byThread.get(link.thread_id) ?? []), pull]);
+    }
+    for (const [threadId, found] of byThread) {
+      const keys = found.map((pull) => pull.key);
+      pullOwners.set(keys, threadId, { ask: "thread", theirs: found.every((pull) => !pull.mine) });
+      couplePulls(keys, threadId);
     }
   };
   // A reply sent to a new session in place of the one that ended (packages/server/inbox-reply-launch.ts).
@@ -5059,6 +5199,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
     launch,
     machine: () => machines.selfId,
+    places: (sessions) => rex.places(rexHints(sessions)),
     onDraftsChange: () => {
       for (const listener of draftListeners) listener(null);
     },
@@ -5715,7 +5856,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await cfRoutes?.handle(req, path);
         if (answer) return answer;
       }
-      if (path === "/api/inbox/health" && req.method === "GET") return json(health());
+      if (path === "/api/inbox/health" && req.method === "GET") {
+        // Through the device door only (section 14): the contract, and the routes this caller's token reaches.
+        const caller = fromDeviceDoor.get(req);
+        return json(caller && phones ? { ...health(), door: doorHealth(phones.doorReach(caller.platform)) } : health());
+      }
       if (path === "/api/inbox/threads" && req.method === "GET") {
         const projectFilter = projectFilterOf(url);
         const archivedMode = archivedModeOf(url);
@@ -5731,7 +5876,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const fromMachine = door?.platform === MACHINE_PLATFORM;
         const faces = fromMachine ? agentFacesFile.wire() : null;
         const phone = door !== undefined && !fromMachine;
-        const agents = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
+        const listed = faces ? rows.agents.map((group) => ({ ...group, faces: faces.faces, faces_rev: faces.rev, face_tiles: true as const })) : rows.agents;
+        // Where this computer's agents live and what their panes say, as Rex says now, in every window; Show in Rex only in one on this computer.
+        const agents = withRexPlaces(listed, via === "local" && door === undefined);
         // And the "Show archived" switch, which every linked machine keeps the same (inbox-show-archived.ts).
         const model = { ...(phone ? phoneList(rows) : rows), agents, session_labels: labels, session_titles: titles, ...(fromMachine ? { show_archived: showArchived.state() } : {}) };
         // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
@@ -5739,6 +5886,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const since = url.searchParams.get("since");
         if (since === null) return json(model);
         return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
+      }
+      // Show in Rex (inbox-rex.ts): Rex's app on this computer goes to the pane a live session said it lives in, on the
+      // person's click, for any session the list places in Rex (`rexHints`). Only this computer's windows offer it (it
+      // moves this screen); another site's page never asks.
+      if (path === "/api/inbox/rex/show") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const session = typeof body.session === "string" ? body.session : "";
+        const place = session ? rexHints([session]).get(session) : undefined;
+        if (!place) return json({ error: "That session isn't in Rex.", code: "not_in_rex" }, 404);
+        return json(await rex.show(place));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
@@ -5973,7 +6133,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               return json({ serverSession, oldContent: null, newContent: null });
             }
             const check = ids ?? (pinned && changed ? { patch: changed.patch } : null);
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath, from)) });
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, check ? await pullRoots(key) : [], check, changed?.oldPath, from, req.signal)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
@@ -5992,7 +6152,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         pullRisk.assess(everywhere ? listed.pulls.filter((pull) => projectsByRepo.has(`${pull.host}/${pull.repo}`.toLowerCase())) : listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]));
+        const owners = new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]);
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, owners);
+        adoptStartedThreads(listed.pulls, links, owners);
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         // Hidden PRs leave the window's lists (a linked machine reading this board gets them all: its window hides by its own).
@@ -6034,6 +6196,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const byWindow = fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM;
         if (!cached && pullHidden.settle(listed.pulls)) pullHiddenChanged();
         if (!cached) notePullThreads(listed.pulls, links);
+        if (!cached) adoptStartedThreads(listed.pulls, links, owners);
         const shownPulls = byWindow ? pullHidden.shown(listed.pulls) : listed.pulls;
         const hiddenKeys = byWindow ? listed.pulls.filter((pull) => pullHidden.has(pull.key)).map((pull) => pull.key) : [];
         const stacks = inboxPullStacks(shownPulls);
@@ -6200,9 +6363,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
           }
         }
-        if (validateOnly) return json({ serverSession, ok: true });
-        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom") throw new InboxError("validation_error", "ask: guide or custom.", { field: "ask" });
-        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | undefined) ?? null, theirs });
+        // Already given to a thread (another window's Start a thread, a hand-off): which, so that window opens it, not a second.
+        // Its own thread as the list links it: a hand-off's, or a thread started from the PR's page and not tied yet.
+        if (validateOnly) {
+          const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
+          return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
+        }
+        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
+        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
         couplePulls(keys as string[], threadId);
         return json({ serverSession, ok: true });
       }
@@ -6734,7 +6902,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
-        const launchOn = () => launch.settingsState().enabled;
+        const launchOn = () => launch.enabled();
         const answer = await scheduledRoute(req, path, { scheduled, on: scheduledCap.on, launchOn, serverSession, json, readBody });
         if (answer) return answer;
       }
@@ -6912,7 +7080,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The device door is never the owner here: it may not trust a folder, so it is offered none.
       // A linked machine is the owner's other computer: it may trust a folder for a press in its window (remote launch).
       const machineDoor = door?.platform === MACHINE_PLATFORM;
-      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null);
+      const composed = await compose.route(req, url, !door || machineDoor, door ? { machine: machineDoor, window: door.window, from: machineDoor ? machines.machineOfDevice(door.device_id) : null } : null, via === "local" && !door);
       if (composed) return composed;
       const reviewed = await liveReview.route(req, url, !door);
       if (reviewed) return reviewed;
@@ -8011,6 +8179,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     unsubscribeWaits();
     scheduled.stop();
     launch.stop();
+    rex.close();
     unsubscribeLaunchTip();
     unsubscribeAgentWork();
     combine.close();

@@ -9,7 +9,7 @@ import { SparklesIcon } from './SparklesIcon';
 import { Icon } from './inbox-thread/icons';
 import { commentCardAimX, getCommentCardEnabled, getCommentCardLayout } from '../utils/commentCardPolicy';
 import { hasUnsavedCommentContent } from '../utils/commentContent';
-import { isCommentSubmitKey } from '../utils/commentSubmitKey';
+import { isCommentSubmitKey, isImeCompositionKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { useSkillReferenceAutocomplete } from '../hooks/useSkillReferenceAutocomplete';
 import { HumanOnlySkillNotice, SkillReferenceMenu } from './SkillReferenceMenu';
@@ -873,6 +873,12 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
   const enterSavesComment = useConfigValue('enterSavesComment');
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Escape during composition belongs to the IME. Leave its default alone
+    // and keep it from reaching the comment dialog or the app's close shortcut.
+    if (e.key === 'Escape' && isImeCompositionKey(e)) {
+      e.stopPropagation();
+      return;
+    }
     if (skillAc.onKeyDown(e)) return;
     if (mentionAc.onKeyDown(e)) return;
     if (e.key === 'Escape') {
