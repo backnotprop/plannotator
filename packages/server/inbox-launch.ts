@@ -237,7 +237,10 @@ export function createInboxLaunch(options: {
   onChange: () => void;
   /** The argv that runs this Plannotator (the permission hook's command): the Inbox's own `selfCommand`. */
   selfCommand: readonly string[];
-  /** More agents beside Claude Code, made with the engine's context (a test's fake host). Each is held by its own `agent`. */
+  /**
+   * More agents beside Claude Code, made with the engine's context (a test's fake host, a launch bridge's hosts). Each
+   * is held by its own `agent`, so one here takes the place of the Inbox's own host for that agent.
+   */
   hosts?: (context: LaunchHostContext) => LaunchHost[];
   /** This Inbox was started over SSH (`SSH_CONNECTION` at start): macOS keeps Claude Code's login locked there, so the launch block names that cause. */
   startedOverSsh?: boolean;
@@ -654,7 +657,7 @@ export function createInboxLaunch(options: {
     }
     const project = store.project(root.project_id)?.name ?? launch.folder;
     const last = state.lastAvailable;
-    return inboxRunOf({
+    const line = inboxRunOf({
       launch,
       project,
       now: now(),
@@ -682,6 +685,8 @@ export function createInboxLaunch(options: {
           }
         : {}),
     });
+    // A host in another app shows the session there: the line's Open names that app, not Terminal.
+    return line && host.open && host.openIn ? { ...line, open_in: host.openIn } : line;
   };
 
   /**
@@ -832,7 +837,8 @@ export function createInboxLaunch(options: {
       // A reply's launch takes its thread's name.
       const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
       const name = head.thread_name ?? head.subject ?? "Inbox";
-      const result = await host.start(launch, { name, login });
+      // `source` ties the session to the message that asked for it; `reconcile` is Try again of a failed start.
+      const result = await host.start(launch, { name, login, source: { messageId: root.id, threadId: root.thread_id }, reconcile: again });
       // Deleted while it started: the session it made goes too, and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
         if (result.ok) {
@@ -844,7 +850,8 @@ export function createInboxLaunch(options: {
         rmSync(launchDir(launch.id), { recursive: true, force: true });
         return;
       }
-      if (result.ok) store.settleLaunch(root.id, { to: { host: launch.agent, session: result.session }, session_ref: result.ref });
+      // A host in another app: the session connects as that app's host (`routeHost`), not as the agent.
+      if (result.ok) store.settleLaunch(root.id, { to: { host: host.routeHost ?? launch.agent, session: result.session }, session_ref: result.ref });
       else store.settleLaunch(root.id, { error: { code: result.code, text: result.text, at: new Date(now()).toISOString() } });
       log(`Inbox launch ${launch.id}: ${result.ok ? `started ${result.ref}` : `did not start (${result.code})`}`);
     } catch (error) {
@@ -1164,6 +1171,12 @@ ${result.text}`);
       stopping.delete(launch.id);
     }
     startLog(launch.id, `stop ${launch.session_ref}: exit ${result.exitCode}\n${result.text}`);
+    // A host in another app may refuse the stop: the session still runs there, so nothing is held for the next
+    // reply, and the person reads why.
+    if (host.routeHost && result.exitCode !== 0) {
+      memo.heldReply = null;
+      throw new InboxError("stop_unavailable", result.text.slice(0, 300));
+    }
     memo.stoppedAt = now();
     memo.startedAt = Math.min(memo.startedAt, now() - INBOX_RUN_START_GRACE_MS);
     // Nothing waits on a stopped session's prompt: its questions are withdrawn at once.
@@ -1419,6 +1432,12 @@ ${result.text}`);
         return json({ run: await stopLaunch(root, host) });
       case "open": {
         if (via === "tailnet") return localOnly();
+        // A host in another app shows the session there: no Terminal is started.
+        if (host.open) {
+          const opened = await host.open(launch);
+          if (opened.exitCode !== 0) throw new InboxError("open_unavailable", opened.text.slice(0, 300));
+          return json({ ok: true });
+        }
         const e = await environment();
         // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
         // first: `terminal` may hand a session over, and a refused Open must change nothing.
@@ -1883,7 +1902,8 @@ ${result.text}`);
           // Only a default: the next clone offers the projects' folder instead.
         }
       }
-      return { project, to: { host: host.agent, session: `launch:${id}` }, launch, trust };
+      // A host in another app: the placeholder is addressed as its sessions will be (`routeHost`).
+      return { project, to: { host: host.routeHost ?? host.agent, session: `launch:${id}` }, launch, trust };
     },
 
     /**
@@ -2031,7 +2051,8 @@ ${result.text}`);
       if (!Object.hasOwn(hosts, agent)) return "queue";
       const host = hosts[agent]!;
       if (!host.deliver) return "queue";
-      const ofSession = roots().filter((m) => m.launch!.agent === agent && m.to?.host === agent && m.to.session === session && m.launch!.session_ref);
+      // A host in another app addresses its sessions as its `routeHost`.
+      const ofSession = roots().filter((m) => m.launch!.agent === agent && m.to?.host === (host.routeHost ?? agent) && m.to.session === session && m.launch!.session_ref);
       const root = ofSession.find((m) => !m.launch!.deleted_at) ?? ofSession[0];
       if (!root) return "queue";
       const launch = root.launch!;
@@ -2086,7 +2107,8 @@ ${result.text}`);
 
     /** Whether a launch of this Inbox (not deleted) owns `session` of `agent`, so its host can take an item. */
     launched(agent: string, session: string): boolean {
-      return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === agent && m.to.session === session);
+      const host = Object.hasOwn(hosts, agent) ? hosts[agent]! : null;
+      return roots().some((m) => m.launch!.agent === agent && !m.launch!.deleted_at && m.to?.host === (host?.routeHost ?? agent) && m.to.session === session);
     },
 
     /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
@@ -2163,7 +2185,8 @@ ${result.text}`);
         const launch = root.launch!;
         const session = inboxLaunchedSession(root);
         if (launch.deleted_at || !session || !hostOf(launch)) return [];
-        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run }];
+        // The row's host is the one its session connects as: a launch bridge's own (`routeHost`), else the agent.
+        return [{ launch_id: launch.id, session, thread_id: root.thread_id, host: hostOf(launch)?.routeHost ?? launch.agent, project_id: root.project_id, started_at: launch.started_at, started: !!launch.session_ref, run: runOfRoot(root)?.state ?? null, scratch: launch.scratch ? basename(launch.folder) : null, scheduled: !!root.scheduled_run }];
       });
     },
 

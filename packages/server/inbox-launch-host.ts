@@ -9,6 +9,7 @@
  *   inbox-launch-pi.ts                 Pi (`pi --mode rpc`, one process per session, owned by the Inbox)
  *   inbox-launch-codex.ts              Codex (`codex app-server`, one process per thread, owned by the Inbox)
  *   inbox-launch-codex-permission.ts   Codex's approval requests on the permission card
+ *   inbox-launch-bridge.ts             An app on this computer that hosts the agents (PLANNOTATOR_LAUNCH_BRIDGE)
  *
  * The engine holds `{ "claude-code": claude, pi, codex }`. Adding an agent is one host
  * file and its entry there. No host reads another host's state, and nothing
@@ -249,6 +250,13 @@ export interface LaunchHost {
   readonly name: string;
   /** What of Plannotator's connects a session, in the line's words: "plugin" (the default), Pi's "extension". */
   readonly connector?: string;
+  /**
+   * Only a host in another app (a launch bridge): the host its sessions connect as, so the root's `to.host` and the
+   * Agents section's row. Without it, `agent`. The record's `agent` stays the agent either way.
+   */
+  readonly routeHost?: string;
+  /** Only a host with `open`: the app's name, for the run line's "Open in <app>". */
+  readonly openIn?: string;
   /** The login-shell names it keeps from each read (the rest of the env is never held). */
   readonly shellNames: readonly string[];
   /** Login-shell names it learns only whether they are set: kept as "1", never their values (a sign-in token). */
@@ -271,8 +279,13 @@ export interface LaunchHost {
   /**
    * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
    * session (`settleLaunch`) and its own channel delivers it. It writes its own start.log entries.
+   * `source`: the launched message and its thread, for a host that ties the session to the message that asked for
+   * it. `reconcile`: Try again of a start that failed, so such a host finds a session it may have made already.
    */
-  start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
+  start(
+    launch: InboxLaunchRecord,
+    input: { name: string; login: LaunchEnv; source?: { messageId: string; threadId: string }; reconcile?: boolean },
+  ): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */
@@ -290,6 +303,11 @@ export interface LaunchHost {
   terminal(launch: InboxLaunchRecord, untrusted: boolean): string;
   /** That command never reached Terminal (osascript failed): undo what `terminal` did for it. */
   terminalFailed?(launch: InboxLaunchRecord, command: string): void;
+  /**
+   * Only a host in another app: Open shows the session there (`openIn` names it). The engine then never calls
+   * `terminal` and starts no Terminal. A non-zero exit is a refused Open, in its own words.
+   */
+  open?(launch: InboxLaunchRecord): Promise<LaunchHostResult>;
   /**
    * A host that owns its session's process: true when no process of its own runs this session now (it ended,
    * or this Inbox never ran one). A reply then starts it again even if it never connected. No member: a
