@@ -17,7 +17,7 @@ import { tailnetTransport, checkTailnetAddress } from "./inbox-transport-tailnet
 export type InboxTransportSpec = { kind: "tailnet"; url: string };
 
 export interface InboxDoorRequest {
-  method: "GET" | "POST";
+  method: "GET" | "HEAD" | "POST";
   /** Sent as they are: the link adds `Authorization`, the caller what it forwards. */
   headers: Record<string, string>;
   body?: BodyInit | null;
