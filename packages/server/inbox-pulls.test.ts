@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { INBOX_REPO_TTL_MS, inboxId, PULL_DETAILS_START, PULL_THREAD_STEP, type InboxPullHidden, type InboxPullRiskAnswer, type InboxPullRiskModels, type InboxPullsAnswer, type InboxReviewsAnswer } from "@plannotator/core/inbox-types";
+import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
@@ -988,6 +989,9 @@ describe("on", () => {
     await w.send("Ready.", "talk");
     await w.pulls();
     const key = "github.com/northwind/billing-svc#412";
+    // The session polls, so the person's new thread can go to it (a live session).
+    const polled = await fetch(`${w.base}${INBOX_BRIDGE_POLL_PATH}`, { method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` }, body: JSON.stringify({ session: "ses_talk", host: "claude-code", waitMs: 0, project_path: w.project, started_at: Date.now(), busy: false }) });
+    expect(polled.status).toBe(200);
     const body = `Tell me about it.\n\n${PULL_DETAILS_START}pull request.\n\nPull request\n- Link: https://github.com/northwind/billing-svc/pull/412\n\nWhat to do\n${PULL_THREAD_STEP} Talk.`;
     const started = await fetch(`${w.base}/api/inbox/messages`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: { session: "ses_talk" }, body, idempotency_key: "started-412" }) });
     expect(started.status).toBe(200);
