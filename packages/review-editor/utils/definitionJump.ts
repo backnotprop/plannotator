@@ -12,3 +12,45 @@ export function oneDefinition(definitions: readonly CodeNavLocation[], from?: { 
   const only = distinct[0]!;
   return from && only.filePath === from.filePath && only.line === from.line ? null : only;
 }
+
+/**
+ * Which code-nav jump may still land. Each lookup takes a number (`next`); a
+ * newer lookup, or any click or key the person makes while it waits
+ * (`cancel`), makes an older number stale, so a late answer never moves them.
+ */
+export function createJumpGate() {
+  let seq = 0;
+  return {
+    next: (): number => ++seq,
+    cancel: (): void => {
+      seq++;
+    },
+    live: (ticket: number): boolean => ticket === seq,
+  };
+}
+
+/** What a Cmd/Ctrl-click waiting on References' own lookup does once that lookup has an answer. */
+export type ClickJumpStep =
+  | { kind: 'wait' }
+  | { kind: 'drop' }
+  | { kind: 'stay' }
+  | { kind: 'jump'; to: CodeNavLocation };
+
+/**
+ * A click opens References at once (its loading state) and waits on that
+ * lookup, never a second one: still loading, wait; a stale ticket or another
+ * symbol's answer, drop it; exactly one definition elsewhere, jump (and the
+ * References opened for the click close); otherwise References stay, loaded.
+ */
+export function clickJumpStep(input: {
+  live: boolean;
+  isLoading: boolean;
+  activeSymbol: string | null;
+  definitions: readonly CodeNavLocation[] | null;
+  request: { symbol: string; filePath: string; line: number };
+}): ClickJumpStep {
+  if (!input.live || input.activeSymbol !== input.request.symbol) return { kind: 'drop' };
+  if (input.isLoading) return { kind: 'wait' };
+  const only = oneDefinition(input.definitions ?? [], input.request);
+  return only ? { kind: 'jump', to: only } : { kind: 'stay' };
+}
