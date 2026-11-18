@@ -360,6 +360,28 @@ describe('mergeExternalsIntoMessageEntries', () => {
     expect(merged[0]!.annotations.map((a) => a.id)).toEqual(['x1']);
   });
 
+  test('a new external note does not erase another note restored from a draft', () => {
+    const restored = external('restored', 'Verify the deployment rollback');
+    const fresh = external('fresh', 'Record the monitoring threshold');
+
+    const merged = mergeExternalsIntoMessageEntries(
+      [entry('latest', A_TEXT, [restored])], 'latest', [fresh],
+    );
+
+    const feedback = exportMessages(merged);
+    expect(feedback).toContain('Verify the deployment rollback');
+    expect(feedback).toContain('Record the monitoring threshold');
+    expect(collectSubmittedAnnotations({ annotations: [], linkedDocuments: new Map() }, merged).map((a) => a.id))
+      .toEqual(['restored', 'fresh']);
+  });
+
+  test('a live edit replaces its restored copy with the same id', () => {
+    const restored = external('unchanged-id', 'Original wording');
+    const updated = external('unchanged-id', 'Corrected wording');
+    const merged = mergeExternalsIntoMessageEntries([entry('latest', A_TEXT, [restored])], 'latest', [updated]);
+    expect(merged[0]!.annotations.map((a) => a.text)).toEqual(['Corrected wording']);
+  });
+
   test('with no current match the latest message carries them; no externals changes nothing', () => {
     const entries = [entry('latest', A_TEXT, []), entry('older', B_TEXT, [])];
     expect(mergeExternalsIntoMessageEntries(entries, null, [external('x1', 'N')])[0]!.annotations.map((a) => a.id)).toEqual(['x1']);
