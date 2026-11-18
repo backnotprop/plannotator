@@ -4817,8 +4817,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     out[at] = { ...own, agents };
     return out;
   };
-  /** Rex's word on a launched session that runs in Rex (its run line's `waiting_terminal`). */
-  const rexStatusOf = (session: string): InboxRexStatus | null => rex.statuses(rexHints([session])).get(session) ?? null;
+  /**
+   * Rex's word on a launched session that runs in Rex (its run line's `waiting_terminal`). The engine asks only for
+   * sessions it started in Rex, so its own pane hint is used as is: going through `rexHints` would ask the engine's
+   * agent list, whose runs ask this again.
+   */
+  const rexStatusOf = (session: string): InboxRexStatus | null => {
+    const place = live.placeOf(session);
+    return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
+  };
   const launch = createInboxLaunch({
     rex,
     rexStatus: (session) => rexStatusOf(session),
