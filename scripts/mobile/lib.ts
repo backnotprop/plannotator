@@ -18,6 +18,10 @@ export const OUT = {
   door: 'apps/mobile/contract/door.json',
   schema: 'apps/mobile/contract/schema/wire.schema.json',
   swift: 'apps/mobile/contract/generated/swift/Wire.swift',
+  tokens: 'apps/mobile/contract/tokens/tokens.json',
+  catalog: 'apps/mobile/contract/generated/swift/Tokens.xcassets/Contents.json',
+  words: 'apps/mobile/contract/words/words.json',
+  wordsSwift: 'apps/mobile/contract/generated/swift/Words.swift',
 } as const;
 
 /** The contract's number (a whole number; it rises when an app built from an older contract would misread the door). */

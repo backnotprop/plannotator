@@ -6,7 +6,7 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 
 ## The standing rules
 
-- Swift never has a hand-written wire type, route string, error code, color or product word. These come from `apps/mobile/contract/generated/`.
+- Swift never has a hand-written wire type, route string, error code, color or product word. These come from `apps/mobile/contract/generated/`: `Wire.swift`, `Words.swift` and `Tokens.xcassets`.
 - Never read the window's React code to copy a rule. If a rule is not in the contract, add it to the contract first (a type, a door entry, a vector or a flow check). Then build the app from it.
 - Every change to the wire is additive. An old app reads a newer Inbox: generated structs keep unknown fields, generated enums have `unknown(String)`, optional fields stay optional.
 - Do not edit a file marked GENERATED. Change its source and run its generator.
@@ -19,6 +19,8 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 | `door.json` | `scripts/mobile/door.ts` | The door's own route list (`doorRouteNames`, `doorRouteOf`, `doorWriteRoutes` in `packages/server/inbox-devices.ts`) and the write kinds (`DOOR_WRITES` in `packages/server/inbox-outbox.ts`). One entry per route, alternations written out. |
 | `schema/wire.schema.json` | `scripts/mobile/schema.ts` | The product's TypeScript types named in `ROOTS`, and every type they reach. It uses the TypeScript 5.8 compiler that `packages/core` installs. |
 | `generated/swift/Wire.swift` | `scripts/mobile/swift.ts` | The schema, `door.json`, and the error codes of the door (`refuse(…)`) and the window (`ERROR_STATUS` in `packages/server/inbox.ts`). |
+| `tokens/tokens.json`, `generated/swift/Tokens.xcassets/` | `scripts/mobile/tokens.ts` | The default theme, `packages/ui/themes/plannotator.css`, dark and light: every color as its CSS, Display P3 and sRGB hex, the radius in points and the font names. The catalog has one color set per color, light with a dark appearance. The other themes come later. |
+| `words/words.json`, `generated/swift/Words.swift` | `scripts/mobile/words.ts` | The words the product exports as constants or pure functions: section names, agent names, Looks good, Action item, delivery lines and the failed-turn words. A word with a part (a name, a number) is made by calling the product's function with a marker, so `{name}` sits where the window prints the name. |
 
 `scripts/mobile/door-shapes.ts` declares the few door shapes that the product has no TypeScript type for: the pair exchange, the error body, the stream frames, and the bodies of `seen`, `picks` and `reply`. If the product gets a type for one of these, use the product's type in `ROOTS` and remove the shape from `door-shapes.ts`.
 
@@ -27,23 +29,27 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 ```sh
 bun scripts/mobile/door.ts      # door.json
 bun scripts/mobile/schema.ts    # schema/wire.schema.json
-bun scripts/mobile/swift.ts     # generated/swift/Wire.swift (reads the two above: run it last)
+bun scripts/mobile/swift.ts     # generated/swift/Wire.swift (reads the two above: run it after them)
+bun scripts/mobile/tokens.ts    # tokens/tokens.json and the color catalog
+bun scripts/mobile/words.ts     # words/words.json and Words.swift
 ```
+
+A word the window shows that is not in `words.json` is written inside a component or a server message. Make it a constant in the product first (that is a product change, in its own pull request), then add its row in `buildWords()`.
 
 Add `--check` to compare with the committed files without writing. The command fails and names the stale files.
 
 ## When a test fails on your pull request
 
-`tests/mobile-vectors.test.ts` runs every generator with its check. It runs in an ordinary unit lane: `scripts/ci-affected.ts` selects it when a file the generators import or name changes, for example the door, the outbox's write kinds, the wire types, `packages/inbox/api.ts` or the window's error table. It takes about a second.
+`tests/mobile-vectors.test.ts` runs every generator with its check. It runs in an ordinary unit lane: `scripts/ci-affected.ts` selects it when a file the generators import or name changes, for example the door, the outbox's write kinds, the wire types, `packages/inbox/api.ts`, the window's error table, `plannotator.css` or a module a word comes from. It takes about a second. A theme file other than `plannotator.css` does not select it.
 
 If it fails with "is up to date (else: bun scripts/mobile/<name>.ts)":
 
-1. Run the three generators in the order above.
+1. Run the generators in the order above.
 2. Read the diff of `apps/mobile/contract/`. A new route, field or code is something the phone must decide about.
 3. Commit the regenerated files in the same pull request.
 
 ## CI
 
 - The contract files are data. The test picker reads them like any other data file. Only `.github/workflows/mobile-ios.yml` builds Swift, and only when `apps/mobile/**` changes. It is never a required check.
-- `apps/mobile/ios/ci.sh` typechecks `Wire.swift` on that job.
+- `apps/mobile/ios/ci.sh` typechecks `Wire.swift` and `Words.swift` on that job.
 - A generator never lists a folder of the checkout. Every path it reads or writes is a literal in `scripts/mobile/lib.ts` or in the generator, so the picker can see it. If a generator lists a folder, every pull request runs the contract test.

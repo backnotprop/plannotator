@@ -2,3 +2,5 @@
 apps/mobile/contract/door.json linguist-generated=true
 apps/mobile/contract/schema/** linguist-generated=true
 apps/mobile/contract/generated/** linguist-generated=true
+apps/mobile/contract/tokens/** linguist-generated=true
+apps/mobile/contract/words/** linguist-generated=true
