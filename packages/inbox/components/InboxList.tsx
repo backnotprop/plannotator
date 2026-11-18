@@ -25,7 +25,8 @@ import { canMarkUnread, offersRowMarkRead } from '../markRead';
 import { useNarrowerThan } from '../narrower';
 import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types';
 import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
-import { HeldNoticeLine } from './HeldNoticeLine';
+import { HeldNoticeLine, HeldNoticeSaid } from './HeldNoticeLine';
+import { listNewState } from '../listNewState';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
 import { ThreadRowMenu, useRowDragA11y } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
@@ -46,7 +47,6 @@ import { useStarredAbove } from '../starredPills';
 import { StarredPills } from './StarredPills';
 import type { PinnedAction } from './PinnedRow';
 import { useListGroups } from '../listGroups';
-import type { HeldNews } from '../held';
 import type { ListEdge, UnseenRow } from '../showLight';
 import { ListNewPill } from './ListNewPill';
 import { useInboxTextSize } from '../textSize';
@@ -98,10 +98,10 @@ export interface InboxListProps {
    * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
    * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip. `lands`: the
    * groups its rows land in (held.ts `showLandsIn`); Show opens each one closed, as a click on its header does, so
-   * the rows it brings in are on screen (List has no groups to open). `news`: the threads it counts (held.ts
-   * `heldNews`), for the pill at the list's edge while this line is out of view (ListNewPill.tsx).
+   * the rows it brings in are on screen (List has no groups to open). The line sticks to the list's top while
+   * it shows (listNewState.ts): held news has no other sign, and no pill.
    */
-  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[]; news?: readonly HeldNews[] } | null;
+  notice: { count: number; project?: string | null; lands?: readonly InboxListGroupId[] } | null;
   /** The list is drawn but out of sight (a thread covers it: a phone, a stacked window, full screen): its pill waits. */
   covered?: boolean;
   /**
@@ -113,8 +113,8 @@ export interface InboxListProps {
   stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
   ask?: ReactNode;
-  /** Show. It never scrolls the list, except `fromPill`: the pill's press also goes to the rows it brings in past that edge. */
-  onShowNew: (fromPill?: ListEdge) => void;
+  /** Show. It never scrolls the list. */
+  onShowNew: () => void;
   /** The rows Show brought in that are not in view yet (showLight.ts): the pill counts them, and its press is `onGoNew`. */
   unseenNew?: readonly UnseenRow[];
   onGoNew?: (edge: ListEdge) => void;
@@ -1161,7 +1161,6 @@ function newSince(rows: readonly InboxListRow[], since: number): boolean {
   return rows.some((row) => row.unread && Date.parse(row.last_agent_at ?? row.last_at) > since);
 }
 
-const NO_NEWS: readonly HeldNews[] = [];
 const NO_UNSEEN: readonly UnseenRow[] = [];
 
 export function InboxList(props: InboxListProps) {
@@ -1348,13 +1347,15 @@ export function InboxList(props: InboxListProps) {
     return () => fonts.removeEventListener('loadingdone', refit);
   }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
-  /** Show, from the "N new" line or from the pill that stands for it while it is out of view. */
-  const showNew = (fromPill?: ListEdge) => {
+  // The list's two signs of news (listNewState.ts): the bar while threads are held, the pill only after Show.
+  const newState = listNewState({ held: props.notice?.count ?? 0, unseen: props.unseenNew ?? NO_UNSEEN, watching: props.covered !== true });
+  /** Show, from the "N new" line. */
+  const showNew = () => {
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
     // rows: closed, they would come in out of sight and Show would seem to do nothing.
     const lands = props.notice?.lands;
     if (lands && !asList) groups.open(lands);
-    props.onShowNew(fromPill);
+    props.onShowNew();
   };
   // The row whose right-click menu is open: a muted background, as the project row's.
   const [menuRow, setMenuRow] = useState<string | null>(null);
@@ -1588,17 +1589,8 @@ export function InboxList(props: InboxListProps) {
           </span>
         </div>
       )}
-      {/* Before the rows, where the "N new" line it stands for is: Tab reaches it from the header, ahead of the list. */}
-      <ListNewPill
-        news={props.notice?.news ?? NO_NEWS}
-        body={bodyRef}
-        order={props.sections.map((section) => section.id)}
-        layout={`${asList}|${visible.map((section) => section.id).join(',')}`}
-        covered={props.covered === true}
-        onShow={showNew}
-        unseen={props.unseenNew ?? NO_UNSEEN}
-        onGo={(edge) => props.onGoNew?.(edge)}
-      />
+      {/* Before the rows: Tab reaches it from the header, ahead of the list. Only after Show (listNewState.ts). */}
+      <ListNewPill covered={props.covered === true} unseen={props.unseenNew ?? NO_UNSEEN} onGo={(edge) => props.onGoNew?.(edge)} />
         <ThreadRowMenu
           ref={bodyRef}
           className="ib-lbody"
@@ -1629,7 +1621,7 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {props.notice && (
+          {newState.bar && props.notice && (
             <HeldNoticeLine
               count={props.notice.count}
               project={props.notice.project ?? null}
@@ -1680,6 +1672,8 @@ export function InboxList(props: InboxListProps) {
           </LazyRowTips.Provider>
         </ThreadRowMenu>
       {pick.sheet}
+      {/* The bar's words for a screen reader, once per count (HeldNoticeLine.tsx): never on a scroll. */}
+      <HeldNoticeSaid count={newState.bar ? props.notice!.count : 0} project={props.notice?.project ?? null} />
       {props.reconnecting && (
         <p className="ib-relink" data-inbox-reconnecting="">
           Reconnecting…

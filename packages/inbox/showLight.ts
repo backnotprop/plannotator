@@ -61,7 +61,7 @@ function startRun(ids: ReadonlySet<string>, after: number, body: HTMLElement | n
   /** `go` is scrolling the list: the count is held back until the scroll ends, so the pill does not flash on the way. */
   let going = false;
   let started = false;
-  /** `go` asked before the rows had slid into place (the pill's press that is also Show): it goes once they are measured. */
+  /** `go` asked before the rows had slid into place: it goes once they are measured. */
   let goFirst: ListEdge | null = null;
   const publish = () => {
     if (!going) setUnseen([...waiting].map(([id, row]) => ({ id, edge: row.edge })));

@@ -146,21 +146,6 @@ export function heldNotice(
 }
 
 /**
- * One thread behind "N new", for the list's own pill (listNewPill.ts). `key`
- * is the thread and when its agent last wrote, so a second message there is a
- * new key; `lands` is the group Show puts the row in.
- */
-export interface HeldNews {
-  key: string;
-  lands: InboxListGroupId;
-}
-
-/** The threads "N new" counts (`newsRows`, the same arguments as `heldNotice`), each with where Show lands it. */
-export function heldNews(shown: readonly InboxListSection[], latest: readonly InboxListSection[], openedHere?: ReadonlySet<string>, open?: OpenThread | null): HeldNews[] {
-  return newsRows(shown, latest, openedHere, open).map((row) => ({ key: `${row.thread_id} ${row.snooze_back ?? lastAgentAt(row)}`, lands: groupOf(row) }));
-}
-
-/**
  * The rows Show brings in (design record "inbox-polish", item 6): each row of
  * `latest` the list on screen lacks, or that carries agent activity the row on
  * screen does not show (so it moved or changed). A row that stays as it was,

@@ -9,7 +9,7 @@ import type { InboxListRow, InboxListSection, InboxThread } from '@plannotator/c
 import { patchedRow, withCombining, withPinPatches } from '../rowActions';
 import { filterMachineRows, machineCounts, machineProjectNames } from '../machines';
 import { appliedFilter, filterListSections, localDay, pickCount, useListFilter } from '../listFilter';
-import { filterSections, heldNews as heldNewsOf, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
+import { filterSections, heldNotice, listGroups, lookedRow, markHeldRowLooked, showLandsIn, waitingCount, type OpenThread } from '../held';
 import { useAgentListFilter } from '../agentsList';
 import { filterAgentRows } from '../agents/model';
 import { filterTagRows } from '../threadTags';
@@ -130,14 +130,12 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : filterAgent ? filterAgent.name : filterTag ? filterTag.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
   // Show opens the groups the rows it brings in land in (held.ts showLandsIn), so they are on screen.
-  // `news`: the same threads, for the pill at the list's edge while the line is out of view (ListNewPill.tsx).
   const notice =
     heldNews?.text && shown
       ? {
           count: heldNews.count,
           project: heldNews.project ?? null,
           lands: showLandsIn(filterShown(shown), filterShown(latestGroups)),
-          news: heldNewsOf(filterShown(shown), filterShown(latestGroups), openedHere.current, heldOpen()),
         }
       : null;
   return { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, tagsOfRow, filterTag, threadTagsHost, sidebarTags, listColours };

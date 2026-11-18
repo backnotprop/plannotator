@@ -1411,6 +1411,15 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-notice-text { display: flex; align-items: baseline; gap: 0.3em; min-width: 0; overflow: hidden; }
 .ib-notice-n { flex-shrink: 0; }
 .ib-notice-proj { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The held list's bar sticks to the top of the list's scroll box while threads wait behind it (HeldNoticeLine.tsx,
+   listNewState.ts; the owner, 2026-11-17: always in reach, never scrolled out of sight). At rest it is where it was,
+   above the rows; its box is the rows' own ground, so rows pass under it unseen, and the 12 px under the line is
+   the box's. Above the phone's sticky group headers, which stick under it. `--ib-held-h` is the box's height: the
+   phone's headers and the list's top pill sit below it. Nothing moves: no transition, so reduced motion is the same. */
+.ib-listcol { --ib-held-h: 50px; }
+.ib-notice-stick { position: sticky; top: 0; z-index: 3; padding-bottom: 12px; background: var(--card); }
+.ib-notice-stick > .ib-notice { margin-bottom: 0; }
+.pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 12px); }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
 .ib-notice.ib-stale { padding: 0; gap: 0; overflow: hidden; }
@@ -3700,6 +3709,13 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
+  /* The bar's box on a phone: the line's 10 / 12 px margins are its padding, the line one 44 px row; the group
+     headers stick under it. */
+  .ib-listcol { --ib-held-h: 64px; }
+  .ib-notice-stick { padding: 10px 12px; }
+  .ib-notice-stick > .ib-notice { height: 44px; margin: 0; width: 100%; }
+  .ib-lbody:has(.ib-notice-stick) .ib-band { top: var(--ib-held-h); }
+  .pn-inbox .ib-listcol:has(.ib-notice-stick) > .ib-lnew:not([data-edge="bottom"]) > .ib-npill { margin-top: calc(var(--ib-held-h) + 56px); }
   /* The stale page notice's ×: a finger's width. */
   .pn-inbox .ib-stale .ib-stale-x { width: 44px; }
   .ib-askline { margin: 10px 12px; }
