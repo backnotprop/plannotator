@@ -39,6 +39,7 @@ import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFil
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { keepPlace, letGoOfPlace, noteOpened, registerFileHosts } from '../utils/keepPlace';
 import { scrollWithPage, type PageScroll } from '../utils/scrollWithPage';
 import { newLineOf } from '../utils/newLineOf';
 import { fileKind } from '@plannotator/core/file-kind';
@@ -987,18 +988,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     pageScrollRef.current?.undo();
     pageScrollRef.current = el && scrollsWithPageRef.current ? scrollWithPage(el) : null;
   }, []);
+  const placeScroller = () => (scrollsWithPageRef.current ? pageScrollRef.current?.page : scrollRef.current) ?? null;
   // Every named jump goes through the handle; with the page as the scroller it says so first.
   const attachViewer = useCallback((viewer: CodeViewHandle<DiffAnnotationMetadata> | null) => {
-    viewerRef.current =
-      viewer && scrollsWithPageRef.current
-        ? {
-            ...viewer,
-            scrollTo: (target) => {
-              pageScrollRef.current?.expectJump();
-              return viewer.scrollTo(target);
-            },
-          }
-        : viewer;
+    viewerRef.current = viewer
+      ? {
+          ...viewer,
+          scrollTo: (target) => {
+            const scroller = placeScroller();
+            if (scroller) letGoOfPlace(scroller);
+            pageScrollRef.current?.expectJump();
+            return viewer.scrollTo(target);
+          },
+        }
+      : viewer;
   }, []);
   // Measured height of the leading content (commit description card) — becomes
   // CodeView's layout.paddingTop so the virtualized items start below it and
@@ -2059,6 +2062,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (kept.length === folds.length) return fileDiff;
     return { ...fileDiff, semanticFolds: kept.length > 0 ? kept : undefined, cacheKey: `${fileDiff.cacheKey ?? itemId}:open${folds.map((fold) => (kept.includes(fold) ? '' : fold.old.start)).join('.')}` };
   });
+  const holdPlaceForSwap = useStableCallback(() => {
+    const scroller = placeScroller();
+    if (!scroller) return;
+    const view = scrollsWithPageRef.current ? null : (viewerRef.current?.getInstance() as unknown as { getScrollAnchor?: unknown } | undefined);
+    if (view && !Object.hasOwn(view, 'getScrollAnchor')) view.getScrollAnchor = () => undefined;
+    keepPlace(scroller, { onStop: () => void (view && delete view.getScrollAnchor) });
+  });
   const showSemantic = useStableCallback((itemId: string, on: boolean) => {
     const pair = semDiffsRef.current.get(itemId);
     const handle = viewerRef.current;
@@ -2157,7 +2167,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
       semDiffsRef.current.set(itemId, { plain, semantic });
       semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`)) showSemantic(itemId, semanticEnabledRef.current);
+      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`)) {
+        if (semanticEnabledRef.current) holdPlaceForSwap();
+        showSemantic(itemId, semanticEnabledRef.current);
+      }
       else refreshItem(itemId);
     });
   });
@@ -2448,6 +2461,32 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     revealOnArrivalRef.current.set(itemId, performance.now() + REVEAL_ON_ARRIVAL_MS);
     if (!waiting) requestAnimationFrame(() => revealWhenDrawn(itemId));
   });
+
+  useEffect(() => {
+    const scroller = scrollEl && placeScroller();
+    if (!scrollEl || !scroller) return;
+    const noteOpening = (event: MouseEvent | PointerEvent) => {
+      const path = event.composedPath();
+      if (!path.some((node) => node instanceof Element && (node.hasAttribute('data-expand-button') || node.hasAttribute('data-unmodified-lines')))) return;
+      const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
+      if (host) noteOpened(host, event.clientY);
+    };
+    scrollEl.addEventListener('pointerdown', noteOpening, { capture: true, passive: true });
+    scrollEl.addEventListener('click', noteOpening, { capture: true });
+    const unregister = registerFileHosts(scroller, {
+      *hosts() {
+        for (const [itemId, host] of itemNodeRef.current) {
+          const path = itemIdToFileRef.current.get(itemId)?.path;
+          if (path) yield { path, host };
+        }
+      },
+    });
+    return () => {
+      scrollEl.removeEventListener('pointerdown', noteOpening, { capture: true });
+      scrollEl.removeEventListener('click', noteOpening, { capture: true });
+      unregister();
+    };
+  }, [scrollEl]);
 
   useEffect(() => {
     if (!scrollEl || !opensWholeFiles) return;

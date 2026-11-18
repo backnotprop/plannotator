@@ -5,6 +5,8 @@
  * browser scrolls everything natively, and sticky headers stick to the page. No rows are positioned here.
  */
 
+import { isKeepingPlace } from './keepPlace';
+
 const FORWARDED_INTENT = ['wheel', 'touchstart', 'pointerdown', 'keydown'] as const;
 
 function scrollerOf(element: HTMLElement): HTMLElement {
@@ -16,6 +18,7 @@ function scrollerOf(element: HTMLElement): HTMLElement {
 }
 
 export interface PageScroll {
+  page: HTMLElement;
   /** The next moves are a jump asked for by name (a line, a comment): take them as they come. */
   expectJump(): void;
   undo(): void;
@@ -41,6 +44,7 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
     const at = viewTop - rect.top;
     let from = at;
     if (performance.now() >= jumpUntil) {
+      if (isKeepingPlace(page)) return;
       // CodeView keeping its anchor. Wholly above the viewport, what holds the reader's place is the host keeping it for
       // a box that changes height there (GuideFileCard); past the last whole window CodeView sees `last`, not `at`, so
       // what it asks for is a move from there.
@@ -88,6 +92,7 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
   for (const child of Array.from(page.children)) moved?.observe(child);
 
   return {
+    page,
     expectJump: () => {
       jumpUntil = performance.now() + JUMP_MS;
     },

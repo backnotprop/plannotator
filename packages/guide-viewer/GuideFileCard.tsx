@@ -248,6 +248,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       height = box.offsetHeight;
       if (height === before) return;
       const page = pageOf(box);
+      if (page.hasAttribute('data-keeping-place')) return;
       if (box.getBoundingClientRect().top + before > pageTopOf(page)) return;
       if (height < before && page.scrollHeight - page.clientHeight - page.scrollTop < 1) return;
       page.scrollTop += height - before;
