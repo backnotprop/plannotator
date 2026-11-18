@@ -63,7 +63,7 @@ import { FIRST_NOTE, LAST_NOTE, stepAnnouncement, stepIndexOf, stepKeyIntent, ty
 import { Icon } from '../icons';
 import { FileName } from './FileName';
 import { useNarrowerThan } from '../narrower';
-import { contentsButtonMode, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
+import { contentsButtonMode, INBOX_CONTENTS_MIN_HEADINGS, showsContents, useContentsRailWaited, useContentsShown } from '../contents';
 import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotator/ui/utils/annotationHelpers';
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
@@ -1462,7 +1462,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     ? (text: string, context: SelectionActionContext) =>
         props.onSide!(text, fileSideSource(attachment, props.version, { selected: text, blockId: context.blockId, blocks: isHtml ? [] : blocks, annotations }))
     : undefined;
-  // A Markdown file with 4 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
+  // A Markdown file with 2 or more headings has Contents (contents.ts). On a desktop, Side by side and Full screen
   // alike: ui's contents rail in the page's right gutter. Where the rail yields (its own rule: a gutter under 68 px,
   // a pane under 480 px), when it is hidden, and on a phone: a Contents button over the file (ContentsPanel.tsx).
   const [contentsShown, setContentsShown] = useContentsShown();
@@ -2890,6 +2890,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               hidden={!contentsShown || linkedTop !== null}
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
               panelAction={<ContentsHide onHide={hideContents} />}
+              minHeadings={INBOX_CONTENTS_MIN_HEADINGS}
             />
           )}
         </div>
