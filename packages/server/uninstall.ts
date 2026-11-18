@@ -2605,7 +2605,7 @@ async function defaultRunCommand(
       stdout: "pipe",
       stderr: "ignore",
       env: { ...process.env, ...env },
-      ...(cwd ? { cwd } : {}),
+      cwd,
       windowsHide: true,
     });
   } catch {
