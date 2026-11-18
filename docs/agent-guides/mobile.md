@@ -34,7 +34,7 @@ Add `--check` to compare with the committed files without writing. The command f
 
 ## When a test fails on your pull request
 
-`tests/mobile-vectors.test.ts` runs every generator with its check. It runs in an ordinary unit lane: `scripts/ci-affected.ts` selects it when a file the generators import or name changes, for example the door, the outbox's write kinds, the wire types, `packages/inbox/api.ts` or the window's error table. It takes about a second.
+`tests/mobile-vectors.test.ts` runs every generator with its check. It runs in an ordinary unit lane: `scripts/ci-affected.ts` selects it when a file the generators import or name changes, for example the door, the outbox's write kinds, the wire types (`packages/core/inbox-types.ts`, `packages/core/inbox-wire-models.ts`) or the window's error table. A change to the window's or the shared UI's own code does not select it. It takes about a second.
 
 If it fails with "is up to date (else: bun scripts/mobile/<name>.ts)":
 
