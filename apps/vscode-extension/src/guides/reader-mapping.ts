@@ -69,7 +69,8 @@ export function locateToken(lineAt: (line: number) => string | undefined, line: 
 
 /**
  * The `git diff` runs that give the guide's files' diff now, to compare with
- * the guide's (`changedPatchFiles`; their outputs are joined). Rename
+ * the guide's (`changedPatchFiles`; their outputs are joined), with the Git
+ * settings the guide's own patch was made with. Rename
  * detection is the user's (`diff.renames`), as it was when the guide's own
  * patch was made, so a pure `git mv` comes out the same way both times; a
  * renamed file's old path is in the pathspec too (in the same run), or git
@@ -88,7 +89,8 @@ export function changedSinceDiffArgs(baseRev: string, files: Iterable<{ path: st
     batch.push(...paths);
   }
   if (batch.length) batches.push(batch);
-  return batches.map((paths) => ["--no-pager", "-c", "core.quotePath=false", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", baseRev, "--", ...paths]);
+  // The settings review diffs pin (BOUNDED_DIFF_GIT_CONFIG in review-core), so a user's own setting cannot make an unchanged file differ.
+  return batches.map((paths) => ["--no-pager", "-c", "core.quotePath=false", "-c", "diff.suppressBlankEmpty=false", "-c", "diff.submodule=short", "diff", "--no-color", "--no-ext-diff", "--src-prefix=a/", "--dst-prefix=b/", baseRev, "--", ...paths]);
 }
 
 /** A file's diff text without the lines that name blobs (`index …`), which differ for the same change. */
