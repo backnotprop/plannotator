@@ -369,7 +369,7 @@ describe('the native app (apps/mobile)', () => {
 
   test('mobile-ios.yml stays apart: its own paths, a group per job, a pinned macOS, and no other workflow builds the app', () => {
     const wf = workflow('mobile-ios.yml') as Workflow & { concurrency?: unknown; on: Record<string, { paths?: string[]; branches?: string[] } | null> };
-    const paths = ['apps/mobile/ios/**', 'apps/mobile/contract/generated/swift/**', 'apps/mobile/contract/parity/ledger.json', 'scripts/mobile/parity-debts.ts', '.github/workflows/mobile-ios.yml'];
+    const paths = ['apps/mobile/ios/**', 'apps/mobile/contract/generated/swift/**', '.github/workflows/mobile-ios.yml'];
     expect(wf.on.pull_request).toEqual({ branches: ['main'], paths });
     expect(wf.on.push).toEqual({ branches: ['main'], paths });
     // No workflow-wide group: a pull request's run (its job skipped or not) never cancels the nightly.
@@ -377,28 +377,50 @@ describe('the native app (apps/mobile)', () => {
     const jobs = wf.jobs as Record<string, Job & { 'timeout-minutes'?: number; concurrency?: unknown }>;
     expect(jobs.ios!.concurrency, 'a push cancels only its own branch\'s older run').toEqual({ group: 'mobile-ios-${{ github.ref }}', 'cancel-in-progress': true });
     expect(jobs['ios-nightly']!.concurrency, 'the nightly never cancels and is never cancelled').toEqual({ group: 'mobile-ios-nightly', 'cancel-in-progress': false });
-    expect(Object.values(jobs).map((j) => j['runs-on'])).toEqual(['macos-15', 'macos-15', 'ubuntu-24.04']);
+    expect(Object.values(jobs).map((j) => j['runs-on'])).toEqual(['macos-15', 'macos-15']);
     expect(jobs.ios!['timeout-minutes']).toBe(20);
     expect(jobs['ios-nightly']!['timeout-minutes']).toBe(60);
     expect(jobs.ios!.if).toContain("vars.MOBILE_CI != 'nightly'");
     for (const file of files.filter((f) => f !== 'mobile-ios.yml')) {
       const text = readFileSync(join(WF_DIR, file), 'utf8');
-      expect(text, file).not.toContain('apps/mobile');
+      // mobile-ledger.yml names the ledger (a push path) and builds nothing.
+      if (file !== 'mobile-ledger.yml') expect(text, file).not.toContain('apps/mobile');
       expect(text, file).not.toMatch(/xcodebuild|swift (build|test)/);
     }
   });
 
-  test("the parity ledger's clock runs only in mobile-ios.yml's ledger job, never in a `bun test`", () => {
+  test("the parity ledger's clock runs only in mobile-ledger.yml, never in a `bun test` or on an Inbox pull request", () => {
     // A mobile debt must never turn the Inbox's checks, main's full run or a release red: the clock is a script
     // (bun test runs only *.test.ts), one job runs it, and no test file reads the ledger's dates.
     const runners = files.flatMap((file) =>
       Object.entries(workflow(file).jobs).flatMap(([id, job]) => ((job.steps ?? []).some((s) => s.run?.includes('parity-debts')) ? [`${file} ${id}`] : [])),
     );
-    expect(runners).toEqual(['mobile-ios.yml ledger']);
-    expect(workflow('mobile-ios.yml').jobs.ledger!.steps!.map((s) => s.run).filter(Boolean)).toEqual(['bun scripts/mobile/parity-debts.ts']);
+    expect(runners).toEqual(['mobile-ledger.yml ledger']);
+    const ledger = workflow('mobile-ledger.yml') as Workflow & { on: Record<string, { paths?: string[]; branches?: string[] } | null> };
+    expect(ledger.jobs.ledger!.steps!.map((s) => s.run).filter(Boolean)).toEqual(['bun scripts/mobile/parity-debts.ts']);
+    expect(ledger.jobs.ledger!['runs-on']).toBe('ubuntu-24.04');
+    expect(ledger.on.pull_request).toEqual({ branches: ['main'], paths: ['scripts/mobile/parity-debts.ts', '.github/workflows/mobile-ledger.yml'] });
+    expect(ledger.on.push?.paths).toContain('apps/mobile/contract/parity/ledger.json');
     const testFiles = tracked.filter((f) => /\.(test|spec)\.[cm]?[jt]sx?$|_(test|spec)\.[cm]?[jt]sx?$/.test(f));
     expect(testFiles.filter((f) => f.includes('debts'))).toEqual(['tests/mobile-parity-debts.test.ts']);
     expect(readFileSync(join(repoRoot, 'tests/mobile-parity-debts.test.ts'), 'utf8')).not.toContain('ledger.json');
+  });
+
+  test('a pull request that records a ledger row beside Inbox changes starts no macOS job and no ledger job', () => {
+    // An Inbox pull request that adds a field or route must record it in the ledger (tests/mobile-parity.test.ts).
+    const changed = ['apps/mobile/contract/parity/ledger.json', 'apps/mobile/contract/parity/surface.json', 'packages/server/inbox.ts', 'packages/core/inbox-types.ts', 'packages/inbox/api.ts'];
+    const started = files.flatMap((file) => {
+      const wf = workflow(file);
+      const pr = wf.on.pull_request;
+      if (pr === undefined) return [];
+      const paths = pr?.paths;
+      const reached = !paths || changed.some((f) => paths.some((g) => new Bun.Glob(g).match(f)));
+      if (!reached) return [];
+      return Object.entries(wf.jobs).flatMap(([id, job]) =>
+        String(job['runs-on'] ?? '').includes('macos') || (job.steps ?? []).some((s) => s.run?.includes('parity-debts')) ? [`${file} ${id}`] : [],
+      );
+    });
+    expect(started).toEqual([]);
   });
 });
 
