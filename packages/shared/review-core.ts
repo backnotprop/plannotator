@@ -1468,8 +1468,8 @@ async function getUntrackedFileDiffs(
   // diff can't access the literal quoted filename (the file silently drops
   // out of the review), and the returned paths would never match the
   // unquoted deletion paths in removeTrackedDeletions.
+  // A leading or trailing space is part of an unquoted Git path.
   const files = lsResult.stdout
-    .trim()
     .split("\n")
     .filter((file) => file.length > 0)
     .map((file) => unquoteGitPath(file));
@@ -2094,7 +2094,7 @@ async function appendUntrackedFingerprint(
   const untracked = status.stdout
     .split("\n")
     .filter((line) => line.startsWith("?? "))
-    .map((line) => unquoteGitPath(line.slice(3).trim()))
+    .map((line) => unquoteGitPath(line.slice(3)))
     .slice(0, MAX_UNTRACKED_FINGERPRINT_FILES);
   if (untracked.length > 0) {
     const baseDir = await resolveRepoToplevel(runtime, cwd);
@@ -2688,7 +2688,7 @@ export async function getSinceBaseSections(
         // Untracked. Don't clobber an existing tracked entry for the same
         // path: `git rm --cached f` emits BOTH `D  f` (staged delete) and
         // `?? f` (now-untracked file) — the tracked/staged signal wins.
-        const path = unquoteGitPath(rest.trim());
+        const path = unquoteGitPath(rest);
         if (path && !files[path]) files[path] = { group: "untracked", staged: false };
         continue;
       }
@@ -2701,7 +2701,7 @@ export async function getSinceBaseSections(
       // no sidecar entry, defaulting it to Committed. Both-sides prevents that.
       const staged = x !== " " && x !== "?";
       for (const token of splitPorcelainRename(rest)) {
-        const path = unquoteGitPath(token.trim());
+        const path = unquoteGitPath(token);
         if (path) files[path] = { group: "changes", staged };
       }
     }
@@ -2733,7 +2733,7 @@ export async function getSinceBaseSections(
       );
       if (committed.exitCode !== 0) return null;
       for (const line of committed.stdout.split("\n")) {
-        const path = unquoteGitPath(line.trim());
+        const path = unquoteGitPath(line);
         if (!path) continue;
         // Dirty state wins: a file with both committed and working-tree
         // changes lives in "changes" (its diff still shows the full story).
