@@ -1,8 +1,8 @@
 /**
  * Rex in the window: an agent's place (Rex · session / tab) as a Where row on its hover card and in its row's spoken
  * name, Show in Rex on its menu, and the run line's Open in Rex. What this catches: Show in Rex offered when the list
- * did not say (the app said no, another computer's window), on a phone, or for a linked machine's agent; its press
- * reaching the wrong agent; a failed Show said nowhere; the place missing from the card's facts; the button saying
+ * did not say (the app has not confirmed a jump, another computer's window), on a phone, or for a linked machine's
+ * agent; its press reaching the wrong agent; a failed Show not shown under its row; the place missing from the card's facts; the button saying
  * one place and the server asked for the other; an open in Rex not saying where it went. A person without Rex sees
  * no change.
  *
@@ -145,7 +145,7 @@ test.skipIf(!hasDom)('Show in Rex: on the menu only when the list says it works 
   mount([group([agent('ses_show', { place: { kind: 'rex', line: LINE, show: true } }), agent('ses_line', { place: { kind: 'rex', line: LINE } }), agent('ses_plain')])]);
   await settle();
   expect(await itemsOf('ses_show')).toContain('Show in Rex');
-  // A place without `show` (the app said no lately, or another computer's window): no item, so no menu of its own.
+  // A place without `show` (no jump confirmed by the app yet, or another computer's window): no item.
   const lineOnly = await itemsOf('ses_line');
   expect(lineOnly === null || !lineOnly.includes('Show in Rex')).toBe(true);
   const plain = await itemsOf('ses_plain');
@@ -155,10 +155,10 @@ test.skipIf(!hasDom)('Show in Rex: on the menu only when the list says it works 
   expect(shown).toEqual(['ses_show']);
 });
 
-test.skipIf(!hasDom)("the Inbox's own Show in Rex: asks this Inbox; a refusal is said and takes the item away at once", async () => {
+test.skipIf(!hasDom)("the Inbox's own Show in Rex: asks this Inbox; a refusal is a visible line under the row, said too, and takes the item away", async () => {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     if ((init?.method ?? 'GET') === 'POST') posts.push(String(input));
-    return Response.json(String(input).endsWith('/rex/show') ? { shown: false } : { faces: {}, rev: 0 });
+    return Response.json(String(input).endsWith('/rex/show') ? { shown: false, refused: true } : { faces: {}, rev: 0 });
   }) as unknown as typeof fetch;
   mount([group([agent('ses_show', { place: { kind: 'rex', line: LINE, show: true } })])], { own: true });
   await settle();
@@ -166,7 +166,11 @@ test.skipIf(!hasDom)("the Inbox's own Show in Rex: asks this Inbox; a refusal is
   await press(document.querySelector('[data-agent-action="rex"]')!);
   await settle();
   expect(posts).toEqual(['/api/inbox/rex/show']);
-  expect(said).toEqual(["Rex didn't show it."]);
+  expect(said).toEqual(["Rex didn't show it. Turn on Remote Control in Rex's settings."]);
+  const note = document.querySelector('[data-agent-rex-note]');
+  expect(note?.textContent).toBe("Rex didn't show it. Turn on Remote Control in Rex's settings.");
+  // Under that agent's row, nowhere else.
+  expect(row('ses_show')!.nextElementSibling).toBe(note);
   const after = await itemsOf('ses_show');
   expect(after === null || !after.includes('Show in Rex')).toBe(true);
   // The place line stays.
@@ -184,6 +188,7 @@ test.skipIf(!hasDom)("shown: the item stays, and nothing is said", async () => {
   await press(document.querySelector('[data-agent-action="rex"]')!);
   await settle();
   expect(said).toEqual([]);
+  expect(document.querySelector('[data-agent-rex-note]')).toBeNull();
   expect(await itemsOf('ses_show')).toContain('Show in Rex');
 });
 

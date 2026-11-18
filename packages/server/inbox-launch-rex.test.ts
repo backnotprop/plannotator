@@ -2,8 +2,8 @@
  * Open in Rex (inbox-rex.ts) from the launch route: the window's button says where it opens, and the server does
  * that or fails, never the other. The failures these guard: Rex asked from a window on another computer (the
  * tailnet, a linked machine's window); a Rex failure leaving a handed-over session with nothing running (the host's
- * `terminalFailed`); a Rex tab and a Terminal window both opening the command; a double click opening two tabs; the
- * command run without the person's login PATH.
+ * `terminalFailed`), or undone while the tab may be running it; a Rex tab and a Terminal window both opening the
+ * command; a double click opening two tabs; the command run without the person's login PATH.
  *
  * A real launch engine over a temp data dir with the engine's fake host (tests/helpers/fake-launch-host.ts) and a
  * stand-in for inbox-rex.ts (its own tests cover the calls Rex gets). The sandbox PATH has no osascript.
@@ -105,12 +105,18 @@ describe("Open in Rex", () => {
     expect(opens).toEqual([]);
   });
 
-  test("Rex failed: the host hears so (nothing left without a process), and Terminal does not open instead", async () => {
-    const { fake, opens, failed, open } = await setup(async () => ({ opened: false, sent: true }));
+  test("Rex failed before any tab was asked for: the host hears so (nothing left without a process), and Terminal does not open instead", async () => {
+    const { fake, opens, failed, open } = await setup(async () => ({ opened: false, sent: false }));
     await expect(open(true)).rejects.toMatchObject({ code: "open_unavailable", message: "Rex didn't open it. Copy the command instead." });
     expect(opens).toHaveLength(1);
     expect(failed).toEqual([`fake attach f1`]);
     expect(fake.calls.filter((c) => c.startsWith("terminal "))).toHaveLength(1);
+  });
+
+  test("Rex failed after the tab was asked for: the hand-over stands (the tab may be running it), never two sessions", async () => {
+    const { failed, open } = await setup(async () => ({ opened: false, sent: true }));
+    await expect(open(true)).rejects.toMatchObject({ code: "open_unavailable" });
+    expect(failed).toEqual([]);
   });
 
   test("two presses while the first is opening: one tab", async () => {

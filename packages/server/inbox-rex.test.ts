@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
-import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, INBOX_REX_REFUSED_MS, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
+import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 
 /** Every method the Inbox may call: view (ids and labels), a new session or tab with its command, focus. */
@@ -144,12 +144,12 @@ describe("where an agent lives", () => {
 });
 
 describe("the app attached here", () => {
-  test("a Mac app over this computer's socket as this user", async () => {
+  test("a Mac app over this computer's socket as this user (Show in Rex still waits for a confirmed jump)", async () => {
     const { rex } = setup();
     rex.appAttached();
     await rex.settled();
     expect(rex.appAttached()).toBe(true);
-    expect(rex.offersShow()).toBe(true);
+    expect(rex.offersShow()).toBe(false);
   });
 
   test("an app attached over the tailnet (another computer's) is never one", async () => {
@@ -192,26 +192,35 @@ describe("Show in Rex", () => {
     expect(fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
   });
 
-  test("the app refuses (Remote Control off): not shown, and not offered again for a while", async () => {
-    let clock = 5_000_000;
-    const { fake, rex } = setup({ remote: false }, { now: () => clock });
+  test("offered only after the app confirmed a jump in this run, hidden again by a refusal until the next one", async () => {
+    const { fake, rex } = setup({ remote: true });
     const ids = fake.addSession("p", "t");
     rex.appAttached();
     await rex.settled();
+    // Attached, never asked: hidden (Remote Control may be off).
+    expect(rex.offersShow()).toBe(false);
+    // Open in Rex's own jump confirms it.
+    expect((await rex.open({ project: "p", projectKey: "p", tab: "t", command: "c" })).opened).toBe(true);
     expect(rex.offersShow()).toBe(true);
-    expect(await rex.show(placeOf(ids))).toEqual({ shown: false });
+    // Remote Control turned off: the click is refused, and Show in Rex is hidden again.
+    fake.setRemote(false);
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: false, refused: true });
     expect(fake.methods()).not.toContain("session.focus_block");
     expect(rex.offersShow()).toBe(false);
-    clock += INBOX_REX_REFUSED_MS + 1;
-    await placesRead(rex, new Map());
+    // An Open whose jump is refused leaves it hidden; one confirmed again offers it.
+    expect((await rex.open({ project: "p", projectKey: "p", tab: "t2", command: "c" })).opened).toBe(true);
+    expect(rex.offersShow()).toBe(false);
+    fake.setRemote(true);
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
     expect(rex.offersShow()).toBe(true);
   });
 
   test("an answer of a shape it does not know counts as no", async () => {
     const { fake, rex } = setup({ remote: true });
     const ids = fake.addSession("p", "t");
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
     fake.setPerformAnswer({ payload: { ok: true } });
-    expect(await rex.show(placeOf(ids))).toEqual({ shown: false });
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: false, refused: true });
     expect(rex.offersShow()).toBe(false);
   });
 
@@ -220,7 +229,7 @@ describe("Show in Rex", () => {
     const ids = fake.addSession("p", "t");
     fake.setDelay(Infinity, "client.perform");
     const started = performance.now();
-    expect(await rex.show(placeOf(ids))).toEqual({ shown: false });
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: false, refused: true });
     expect(performance.now() - started).toBeLessThan(1_000);
     expect(fake.methods()).not.toContain("session.focus_block");
   });
@@ -265,29 +274,35 @@ describe("Open in Rex", () => {
     for (const call of fake.calls.filter((c) => c.method === "client.perform")) expect((call.payload.args as { session_id: string }).session_id).not.toBe(theirs.session);
   });
 
-  test("the session it made, by the id it kept (renamed or not): a new tab there; gone: a new session", async () => {
+  test("the session it made, by the id and label it kept: a new tab there; renamed by the person or gone: a new session", async () => {
     const dir = mkdtempSync(join(tmpdir(), "rex-kept-"));
     const file = join(dir, "rex-sessions.json");
     const { fake, rex } = setup({ remote: true }, { sessionsFile: file });
     const first = await rex.open({ project: "my-app", projectKey: "proj-1", tab: "Claude Code", command: "a" });
     if (!first.opened) throw new Error("not opened");
-    expect(JSON.parse(readFileSync(file, "utf8")).sessions).toEqual({ "proj-1": first.session });
-    fake.rename(first.session, "renamed by the person");
+    expect(JSON.parse(readFileSync(file, "utf8")).sessions).toEqual({ "proj-1": { id: first.session, label: "my-app" } });
 
-    // Another Inbox run (the file is what it remembers).
+    // Another Inbox run (the file is what it remembers): the same session gets the next tab.
     const again = createInboxRex({ socketPath: fake.socketPath, sessionsFile: file });
     rexes.push(again);
     const second = await again.open({ project: "my-app", projectKey: "proj-1", tab: "Codex", command: "b" });
-    expect(second).toMatchObject({ opened: true, session: first.session, line: "Rex · renamed by the person / Codex" });
+    expect(second).toMatchObject({ opened: true, session: first.session, line: "Rex · my-app / Codex" });
     expect(fake.calls.find((c) => c.method === "session.new_window")!.payload).toEqual({ session_id: first.session, window_label: "Codex", layout: terminal("b"), focus: true });
     expect(fake.sessions).toHaveLength(1);
 
-    // The person closed it: a new one, and that one is kept.
-    fake.sessions.splice(0, 1);
+    // The person renamed it: theirs now. It gets no tab (and no switch); a new one is made and kept.
+    fake.rename(first.session, "my work");
     const third = await again.open({ project: "my-app", projectKey: "proj-1", tab: "Pi", command: "c" });
     if (!third.opened) throw new Error("not opened");
     expect(third.session).not.toBe(first.session);
-    expect(JSON.parse(readFileSync(file, "utf8")).sessions).toEqual({ "proj-1": third.session });
+    expect(fake.sessions.find((s) => s.session_id === first.session)!.windows.map((w) => w.label)).toEqual(["Claude Code", "Codex"]);
+    expect(JSON.parse(readFileSync(file, "utf8")).sessions).toEqual({ "proj-1": { id: third.session, label: "my-app" } });
+
+    // The person closed that one: a new one again.
+    fake.sessions.splice(fake.sessions.findIndex((s) => s.session_id === third.session), 1);
+    const fourth = await again.open({ project: "my-app", projectKey: "proj-1", tab: "Pi", command: "d" });
+    if (!fourth.opened) throw new Error("not opened");
+    expect([first.session, third.session]).not.toContain(fourth.session);
   });
 
   test("Remote Control off: the tab is still made, and that is an open", async () => {

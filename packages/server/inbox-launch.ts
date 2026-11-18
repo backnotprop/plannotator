@@ -1309,8 +1309,8 @@ ${result.text}`);
   /**
    * Open in Terminal, or Open in Rex when the window's button said Rex (`rex`: never from another machine). Rex: a new
    * tab in the Rex session the Inbox made for the project (inbox-rex.ts); it never falls back to Terminal, so the
-   * command never runs twice. Either failing hands the host's `terminalFailed` the command, so nothing is left without
-   * a process (Pi, Codex and OpenCode hand their session over in `terminal`).
+   * command never runs twice. A failure before anything opened hands the host's `terminalFailed` the command, so
+   * nothing is left without a process (Pi, Codex and OpenCode hand their session over in `terminal`).
    */
   const openTerminal = async (root: InboxMessage, host: LaunchHost, launch: InboxLaunchRecord, rex: boolean): Promise<{ body: Record<string, unknown>; status: number; error?: InboxError }> => {
     const e = await environment();
@@ -1333,7 +1333,9 @@ ${result.text}`);
         pathPrepend: [...loginPath, ...options.installDirs],
       });
       if (opened.opened) return { body: { ok: true, command, opened: "rex", line: opened.line }, status: 200 };
-      host.terminalFailed?.(launch, command);
+      // Never asked for: the hand-over is undone. Asked for (`sent`), the tab may be running the command: the
+      // hand-over's own wait settles it, never two sessions writing.
+      if (!opened.sent) host.terminalFailed?.(launch, command);
       return { body: {}, status: 409, error: new InboxError("open_unavailable", INBOX_REX_OPEN_FAILED) };
     }
     // `on run argv`: the command is an argument, never part of the script's text.

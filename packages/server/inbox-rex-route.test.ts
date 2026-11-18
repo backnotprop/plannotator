@@ -2,7 +2,8 @@
  * Rex in a running Inbox (CI runs this: it starts one), with a fake Rex (tests/helpers/fake-rex.ts) as this
  * computer's. What it guards: an agent's place reaches the Agents list only as Rex confirms it, as one line, and only
  * for this computer's own window (the tailnet gets none, and makes no Rex read); a session the Inbox launched never
- * gets one; Show in Rex asks the app only at the click, and a refusal takes the item away; the Show route answers
+ * gets one; Show in Rex is offered only after the app confirmed a jump, asks the app only at the click, and a
+ * refusal takes the item away; the Show route answers
  * only this computer's own window (never the tailnet, never another site); a session that never said it lives in
  * Rex is never shown there.
  */
@@ -169,7 +170,8 @@ describe("the Agents list and Rex", () => {
     await w.agent("ses-wrong", { session: ids.session, block: "block:01a1eb35-0de6-701f-808a-16e06621d0ae" });
     await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place !== undefined);
     const agents = await w.agentsOf();
-    expect(agents.find((a) => a.session === "ses-in-rex")?.place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code", show: true });
+    // No Show in Rex yet: Rex's app has not confirmed a jump in this run (its Remote Control may be off).
+    expect(agents.find((a) => a.session === "ses-in-rex")?.place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code" });
     expect(agents.find((a) => a.session === "ses-elsewhere")?.place).toBeUndefined();
     expect(agents.find((a) => a.session === "ses-wrong")?.place).toBeUndefined();
     // Read for the list, the app was asked nothing.
@@ -208,12 +210,14 @@ describe("POST /api/inbox/rex/show", () => {
     expect(w.fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
   });
 
-  test("the app refuses (Remote Control off): not shown, and the list stops offering it", async () => {
-    const w = await world({ remote: false });
+  test("offered once the app confirmed a jump; refused (Remote Control off): not shown, and no longer offered", async () => {
+    const w = await world({ remote: true });
     const ids = w.fake.addSession("my-app", "Claude Code");
     await w.agent("ses-in-rex", ids);
+    expect(await (await w.show("ses-in-rex")).json()).toEqual({ shown: true });
     await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place?.show === true);
-    expect(await (await w.show("ses-in-rex")).json()).toEqual({ shown: false });
+    w.fake.setRemote(false);
+    expect(await (await w.show("ses-in-rex")).json()).toEqual({ shown: false, refused: true });
     const place = (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place;
     expect(place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code" });
   });

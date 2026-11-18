@@ -12,7 +12,7 @@ import { Tip } from '../components/Tip';
 import { AgentMark, type AgentMarkPicks } from './AgentMark';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
 import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry } from './model';
-import { showInRex } from '../data/actions/rexShow';
+import { showInRex, useRexShowNote } from '../data/actions/rexShow';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -80,7 +80,7 @@ export interface AgentsSectionProps {
   onDelete?: (agent: InboxAgent, machine: string | null) => void;
   /**
    * Show in Rex: Rex's app goes to the pane this computer's agent lives in. Offered on an agent whose place says so
-   * (`place.show`: Rex's app is attached on this computer and has not said no lately). Absent: `showInRex` (the Inbox's own).
+   * (`place.show`: Rex's app on this computer confirmed a jump in this run and has not failed one since). Absent: `showInRex` (the Inbox's own).
    */
   onShowInRex?: (agent: InboxAgent) => void;
   /** Says a line in the window's live region (the rename field's refusals). */
@@ -343,6 +343,16 @@ const AgentRow = memo(
     a.picks === b.picks,
 );
 
+/** A failed Show in Rex: one quiet line under the agent's row, for a short while (rexShow.ts). */
+function RexShowNote({ session }: { session: string }) {
+  const text = useRexShowNote(session);
+  return text ? (
+    <div className="ib-side-empty ib-agents-empty" data-agent-rex-note="">
+      {text}
+    </div>
+  ) : null;
+}
+
 export function AgentsSection(props: AgentsSectionProps) {
   const groupsRead = useInboxAgents();
   const groups = useMemo(() => agentsGroups(groupsRead, props.machines, props.rows), [groupsRead, props.machines, props.rows]);
@@ -450,7 +460,7 @@ export function AgentsSection(props: AgentsSectionProps) {
                   {notice && <MachineSidebarWord notice={notice} name={machine.name} onPress={props.pick(() => props.onMachineUpdate?.(machine.id))} />}
                 </div>
               )}
-              {rows.map((entry) => (
+              {rows.map((entry) => [
                 <AgentRow
                   key={entry.agent.id}
                   entry={entry}
@@ -466,8 +476,9 @@ export function AgentsSection(props: AgentsSectionProps) {
                   onShowInRex={!linked ? onShowInRex : undefined}
                   picks={picks}
                   announce={props.announce}
-                />
-              ))}
+                />,
+                !linked && <RexShowNote key={`${entry.agent.id}:rex`} session={entry.agent.session} />,
+              ])}
             </div>
           );
         })}
