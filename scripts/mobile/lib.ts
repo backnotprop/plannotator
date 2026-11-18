@@ -34,6 +34,11 @@ export function contractVersion(): number {
   return Number(text);
 }
 
+/** Whether a repository file exists, by its path from the root (always a path named as a literal by the caller). */
+export function repoFileExists(path: string): boolean {
+  return existsSync(join(ROOT, path));
+}
+
 /** A repository file's text, by its path from the root (always a path named as a literal by the caller). */
 export function readRepoText(path: string): string {
   return readFileSync(join(ROOT, path), 'utf8');
