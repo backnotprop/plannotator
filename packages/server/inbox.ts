@@ -2029,8 +2029,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
     const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
     // The sidebar's Agents (inbox-agents-list.ts): this machine's from its own rows, every linked machine's from its list.
-    // Its rows before the Hide's filter: a thread left out for its hidden PRs keeps its agent (only the row leaves),
-    // but not its wait: the agent's waiting count, "Waiting on you" and its rank come from the threads still listed.
+    // Its rows before the Hide's filter (the archived set), but a thread left out for its hidden PRs is no wait: a
+    // running agent stays listed in its own state, and its waiting count, "Waiting on you" and rank come from the
+    // threads still listed.
     const ownAgents = agentsOf(allOwn, now, own.length === allOwn.length ? undefined : new Set(own.map((row) => row.thread_id)));
     return {
       serverSession,
@@ -2106,7 +2107,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
       const owner = store.threadOwner(row.thread_id);
-      if (owner) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at, ...(listed && !listed.has(row.thread_id) ? { hidden: true as const } : {}) });
+      // A thread left out for its hidden PRs is no wait: no count, no "Waiting on you", no rank, and it lists no agent
+      // that is not running (an ended one shows ended, with nothing waiting).
+      if (owner && (!listed || listed.has(row.thread_id))) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
     }
     return inboxAgentsGroup({
       sessions: live.agentSessions(inboxStartOfDay(live.clock())),
