@@ -1,0 +1,74 @@
+/**
+ * What every generator of the native app's contract shares (apps/mobile/contract,
+ * docs/agent-guides/mobile.md): the paths it writes, deterministic JSON, and
+ * the write-or-check step.
+ *
+ * Every output path is a literal here, so scripts/ci-affected.ts sees which
+ * files the contract tests read and selects them when one changes. Never list
+ * a folder of the checkout from a generator: that makes every test that
+ * imports it run on every pull request.
+ */
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+
+export const ROOT = resolve(import.meta.dir, '../..');
+
+/** Every file a generator writes, relative to the repository. */
+export const OUT = {
+  door: 'apps/mobile/contract/door.json',
+  schema: 'apps/mobile/contract/schema/wire.schema.json',
+  swift: 'apps/mobile/contract/generated/swift/Wire.swift',
+} as const;
+
+/** The contract's number (a whole number; it rises when an app built from an older contract would misread the door). */
+export const VERSION_FILE = 'apps/mobile/contract/VERSION';
+
+export function contractVersion(): number {
+  const text = readFileSync(join(ROOT, VERSION_FILE), 'utf8').trim();
+  if (!/^[1-9]\d*$/.test(text)) throw new Error(`${VERSION_FILE}: a whole number, not ${JSON.stringify(text)}`);
+  return Number(text);
+}
+
+/** A repository file's text, by its path from the root (always a path named as a literal by the caller). */
+export function readRepoText(path: string): string {
+  return readFileSync(join(ROOT, path), 'utf8');
+}
+
+export type Output = { path: string; text: string };
+
+/** JSON with two-space indents and a final newline: the same value always gives the same bytes. */
+export function jsonText(value: unknown): string {
+  return `${JSON.stringify(value, null, 2)}\n`;
+}
+
+/**
+ * Write the outputs, or with `check` compare them with the committed files
+ * and return the stale ones (a missing file is stale). `root`: the checkout
+ * (a test passes a temp folder).
+ */
+export function emit(outputs: Output[], check: boolean, root = ROOT): string[] {
+  const stale: string[] = [];
+  for (const output of outputs) {
+    const file = join(root, output.path);
+    const now = existsSync(file) ? readFileSync(file, 'utf8') : null;
+    if (now === output.text) continue;
+    if (check) stale.push(output.path);
+    else {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, output.text);
+    }
+  }
+  return stale;
+}
+
+/** A generator's command line: `bun scripts/mobile/<name>.ts [--check]`. */
+export function cli(name: string, generate: () => Output[]): void {
+  const check = process.argv.includes('--check');
+  const outputs = generate();
+  const stale = emit(outputs, check);
+  if (check && stale.length) {
+    console.error(`${name}: stale, run \`bun scripts/mobile/${name}.ts\` and commit:\n${stale.map((p) => `  ${p}`).join('\n')}`);
+    process.exit(1);
+  }
+  console.log(`${name}: ${check ? 'up to date' : 'wrote'} ${outputs.map((o) => o.path).join(', ')}`);
+}
