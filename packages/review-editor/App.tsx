@@ -142,6 +142,7 @@ import { changeRuns, stepChange, type ChangeStep } from './utils/explorerChangeN
 import { GoToFile } from './components/GoToFile';
 import type { FileTokenHandlers } from './components/RepoFileView';
 import type { CodeNavLocation, CodeNavResponse } from '@plannotator/shared/code-nav';
+import { oneDefinition } from './utils/definitionJump';
 import {
   applyCollectionMutations,
   hasActiveHistoryOverlay,
@@ -2137,15 +2138,17 @@ const ReviewApp: React.FC = () => {
     handleCodeNavRequest(request);
   }, [handleCodeNavRequest]);
 
-  /** F12: one clear definition opens its file at the line; else the references panel. */
-  const goToDefinition = useCallback(async () => {
-    const request = tokenTargets.current();
-    if (!request) return;
+  /**
+   * One clear definition opens its file at the line; else the references
+   * panel. F12, and (`click`) a Cmd/Ctrl-click on a token, which opens
+   * References when the token is that definition itself.
+   */
+  const definitionOrReferences = useCallback(async (request: CodeNavRequest, click = false) => {
+    closeTokenHover();
     if (!gitContext && !agentCwd) {
       needsCheckoutToast();
       return;
     }
-    closeTokenHover();
     const from: NavLocation = { path: request.filePath, line: request.line };
     let definitions: CodeNavLocation[] = [];
     try {
@@ -2158,13 +2161,25 @@ const ReviewApp: React.FC = () => {
     } catch {
       definitions = [];
     }
-    const distinct = [...new Map(definitions.map((d) => [`${d.filePath}:${d.line}`, d])).values()];
-    if (distinct.length === 1) {
-      jumpTo({ path: distinct[0].filePath, line: distinct[0].line, symbol: request.symbol }, 'definition', from);
+    const only = oneDefinition(definitions, click ? request : undefined);
+    if (only) {
+      jumpTo({ path: only.filePath, line: only.line, symbol: request.symbol }, 'definition', from);
       return;
     }
     openReferences(request);
-  }, [agentCwd, closeTokenHover, gitContext, jumpTo, needsCheckoutToast, openReferences, tokenTargets]);
+  }, [agentCwd, closeTokenHover, gitContext, jumpTo, needsCheckoutToast, openReferences]);
+
+  /** F12: one clear definition opens its file at the line; else the references panel. */
+  const goToDefinition = useCallback(async () => {
+    const request = tokenTargets.current();
+    if (!request) return;
+    await definitionOrReferences(request);
+  }, [definitionOrReferences, tokenTargets]);
+
+  /** Cmd/Ctrl-click on a token (Alt-click too): as F12, so one clear definition elsewhere opens at once. */
+  const handleTokenNavClick = useCallback((request: CodeNavRequest) => {
+    void definitionOrReferences(request, true);
+  }, [definitionOrReferences]);
 
   const goToReferences = useCallback(() => {
     const request = tokenTargets.current();
@@ -2195,17 +2210,17 @@ const ReviewApp: React.FC = () => {
         onTokenNavigate: (target) => {
           tokenTargets.report('click', asToken(target), filePath);
           const request = tokenTargets.current();
-          if (request) openReferences(request);
+          if (request) handleTokenNavClick(request);
         },
       };
       fileTokenHandlersCache.current.set(filePath, handlers);
     }
     return handlers;
-  }, [openReferences, tokenTargets]);
-  // The cached handlers close over openReferences; drop them when it changes.
+  }, [handleTokenNavClick, tokenTargets]);
+  // The cached handlers close over handleTokenNavClick; drop them when it changes.
   useEffect(() => {
     fileTokenHandlersCache.current.clear();
-  }, [openReferences]);
+  }, [handleTokenNavClick]);
 
   /** ⌥F5 / ⇧⌥F5: the next run of changed lines; past the last, the next changed file. */
   const codeGroupElement = useCallback((): HTMLElement | null => {
@@ -4688,7 +4703,7 @@ const ReviewApp: React.FC = () => {
     returnFromCallTree,
     clearCallTreeRequest,
     openGuide: handleOpenGuide,
-    onCodeNavRequest: canUseLiveWorkspaceActions ? handleCodeNavRequest : undefined,
+    onCodeNavRequest: canUseLiveWorkspaceActions ? handleTokenNavClick : undefined,
     onTokenHoverEnter: tokenHoverEnabled ? handleTokenHoverEnter : undefined,
     onTokenHoverLeave: tokenHoverEnabled ? tokenHover.onTokenHoverLeave : undefined,
     codeNavResult: codeNav.result,
@@ -4723,7 +4738,7 @@ const ReviewApp: React.FC = () => {
     callFlowAvailable, callFlowAdvert, callFlowAnalysis, retryCallFlowAnalysis, isCallFlowNodeInPatch, isCallFlowActive, openCallFlowPanel, callFlowInstall,
     hostNotes, callTreeRequest, openCallTreeNode, returnFromCallTree, clearCallTreeRequest,
     editSuggestionsEnabled, handleAddSuggestionsForFile, handleAddEditorCommentForFile,
-    handleCodeNavRequest, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
+    handleTokenNavClick, codeNav.result, codeNav.isLoading, codeNav.activeSymbol,
     tokenHoverEnabled, handleTokenHoverEnter, tokenHover.onTokenHoverLeave,
   ]);
 
