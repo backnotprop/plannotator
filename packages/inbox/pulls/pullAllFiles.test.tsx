@@ -7,6 +7,7 @@
  *  - the review app's reads (`/api/repo-files`, `/api/repo-file`) not reaching the Inbox's routes for this PR, or
  *    anything else (its live stream) being fetched through them;
  *  - the choice not remembered as the review app remembers it;
+ *  - a phone's Files sheet opened in All files leaving focus outside the tree;
  *  - Changes out of the reader's order, a file the tree cannot place missing, a row not revealing its file, a viewed
  *    file not dimmed.
  * The review app's real trees (guide/PullRepoParts.tsx, guide/PullChangesTree.tsx) draw the rail; the diff reader and
@@ -203,6 +204,30 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   expect(!!document.querySelector('[data-review-files]')).toBe(true);
   expect(!!document.querySelector('[data-pull-repo-file]')).toBe(false);
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBeNull();
+});
+
+test.skipIf(!hasDom)("a phone's Files sheet opened in All files: focus goes into the tree", async () => {
+  const savedMatchMedia = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width: 767px'),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    storage.setItem(TREE_SCOPE_COOKIE, 'all');
+    mount(pr);
+    await settle();
+    await act(async () => el('[data-pull-review-files-button]').click());
+    await settle();
+    expect(el('[data-repo-file-tree]').shadowRoot?.activeElement?.getAttribute('data-item-path') ?? null).not.toBeNull();
+  } finally {
+    window.matchMedia = savedMatchMedia;
+  }
 });
 
 test.skipIf(!hasDom)('no head commit known: no switch, the file count as before', async () => {

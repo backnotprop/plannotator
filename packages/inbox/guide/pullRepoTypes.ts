@@ -25,6 +25,7 @@ export interface PullAllFilesProps {
   onSelect: (path: string) => void;
   /** A file the PR does not change: shown whole in place of the diff. */
   onOpen: (path: string) => void;
+  handleRef?: Ref<PullChangesTreeHandle>;
 }
 
 export interface PullRepoFileProps {
