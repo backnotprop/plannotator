@@ -379,13 +379,17 @@ test('after a stalled file replaces a warm worker, the files queued behind it ge
   for (const timer of timers) clearTimeout(timer);
 });
 
-test('a language whose cold start timed out once gets only the warm limit after that', async () => {
+test('a language whose cold start timed out twice gets only the warm limit after that, and once is not enough', async () => {
   const hang = () => ({ onmessage: null, onerror: null, postMessage() {}, terminate() {} }) as unknown as Worker;
-  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker: hang, timeoutMs: 30, coldTimeoutMs: 600 });
+  const client = createSemDiffClient({ advert, origin: 'http://x', createWorker: hang, timeoutMs: 30, coldTimeoutMs: 400 });
+  const started = Date.now();
   const first = client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n');
   const second = client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n');
   const order: string[] = [];
-  await Promise.all([first.then(() => order.push('first')), second.then(() => order.push('second'))]);
+  await first.then(() => order.push('first'));
+  const firstAt = Date.now() - started;
+  await second.then(() => order.push('second'));
+  expect(Date.now() - started - firstAt).toBeGreaterThan(200);
   const third = client.attempt('c.ts', 'const c = 1;\n', 'const c = 2;\n');
   const stop = new Promise<string>((resolve) => {
     const timer = setTimeout(() => resolve('cold again'), 300);

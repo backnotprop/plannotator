@@ -57,7 +57,7 @@ export function hasSomethingToSay(operations: SemanticDiffOperation[]): boolean 
 export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClient {
   const { advert, origin, createWorker, timeoutMs = SEM_DIFF_TIMEOUT_MS, coldTimeoutMs = SEM_DIFF_COLD_TIMEOUT_MS } = options;
   const warm = new Set<string>();
-  const coldTimedOut = new Set<string>();
+  const coldTimedOut = new Map<string, number>();
   let worker: Promise<Worker> | null = null;
   let nextId = 1;
   interface Pending {
@@ -74,7 +74,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     if (head.done) return;
     const id = head.value;
     const { request } = pending.get(id)!;
-    const limit = request.opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : warm.has(languageForPath(request.path) ?? '') || coldTimedOut.has(languageForPath(request.path) ?? '') ? timeoutMs : Math.max(timeoutMs, coldTimeoutMs);
+    const limit = request.opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : warm.has(languageForPath(request.path) ?? '') || (coldTimedOut.get(languageForPath(request.path) ?? '') ?? 0) >= 2 ? timeoutMs : Math.max(timeoutMs, coldTimeoutMs);
     watchdog = setTimeout(() => headTimedOut(id), limit);
   };
   const settle = (id: number, reply: SemDiffReply | null) => {
@@ -108,7 +108,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const timedOut = pending.get(id);
     if (!timedOut) return;
     const language = languageForPath(timedOut.request.path) ?? '';
-    if (!warm.has(language)) coldTimedOut.add(language);
+    if (!warm.has(language)) coldTimedOut.set(language, (coldTimedOut.get(language) ?? 0) + 1);
     settle(id, null);
     dropWorker();
     for (const other of pending.keys()) post(other);
