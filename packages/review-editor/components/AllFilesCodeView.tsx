@@ -1277,6 +1277,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const semStateRef = useRef(new Map<string, SemanticFileState>());
   const semTextsRef = useRef(new Map<string, { file: DiffFile; oldText: string; newText: string; generation: string; signal: AbortSignal }>());
   const arrowLoadedRef = useRef(new Set<string>());
+  const retiredControllersRef = useRef<{ controller: AbortController; generation: string }[]>([]);
   const viewRunsRef = useRef(new AbortController());
   useEffect(() => {
     const runs = new AbortController();
@@ -1604,6 +1605,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // dedup guard ignores them and isStale() blocks their writes — so this
     // sweep is pure cleanup.
     keptWholeFilesRef.current.keepOnly(fileSetKey);
+    for (const key of arrowLoadedRef.current) if (!key.startsWith(`${fileSetKey}::`)) arrowLoadedRef.current.delete(key);
+    retiredControllersRef.current = retiredControllersRef.current.filter((entry) => {
+      if (entry.generation === fileSetKey) return true;
+      entry.controller.abort();
+      return false;
+    });
     for (const [itemId, entry] of augmentRef.current) {
       if (entry.generation === fileSetKey) continue;
       entry.controller.abort();
@@ -2050,6 +2057,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const folds = (fileDiff as { semanticFolds?: readonly { old: { start: number; end: number } }[] }).semanticFolds;
     if (!folds?.length) return fileDiff;
     const held = (annotations ?? []).filter((a) => a.side === 'deletions').map((a) => [a.lineNumber, a.lineNumber]);
+    const path = itemIdToFileRef.current.get(itemId)?.path;
+    for (const a of annotationsRef.current) if (a.filePath === path && a.side === 'old' && (a.scope ?? 'line') === 'line') held.push([a.lineStart, a.lineEnd]);
     const pick = selectedLinesRef.current;
     if (pick?.id === itemId) {
       const { start, end, side, endSide } = pick.range;
@@ -2094,7 +2103,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   useEffect(() => {
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
-  }, [semanticEnabled, showSemantic]);
+    for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
+  }, [semanticEnabled, showSemantic, refreshItem]);
 
   const reportPowerUp = useStableCallback(() => {
     if (!onPowerUpStatus) return;
@@ -2122,10 +2132,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     result: SemDiffResult,
     onDropped: () => void,
     swap = true,
+    signal?: AbortSignal,
   ) => {
     queueAugmentApply(itemId, () => {
       if (stale()) {
-        if (fileSetKeyRef.current === generation && semStateRef.current.get(itemId)?.status === 'working') onDropped();
+        if (fileSetKeyRef.current === generation && semTextsRef.current.get(itemId)?.signal === signal && semStateRef.current.get(itemId)?.status === 'working') onDropped();
         return;
       }
       const liveHandle = viewerRef.current;
@@ -2218,7 +2229,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         return;
       }
       if (!result) settleEmpty();
-      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty, swap);
+      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty, swap, signal);
       runPowerUp(itemId);
     });
   });
@@ -2318,7 +2329,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const controller = new AbortController();
     const prior = augmentRef.current.get(itemId);
     if (prior?.status === 'pending') prior.controller.abort();
-    arrowLoadedRef.current.add(`${generation}::${itemId}`);
+    else if (prior) retiredControllersRef.current.push({ controller: prior.controller, generation: prior.generation });
     augmentRef.current.set(itemId, { status: 'pending', controller, generation });
     // The arrows say a read is on its way (SCROLLS_WITH_PAGE_CSS): the click's rows arrive with it.
     const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId)?.element;
@@ -2329,7 +2340,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (data?.oldContent == null || data.newContent == null) return none();
         // The file may have moved on since this diff was captured: whole text that no longer fits would break the layout.
         if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) return none();
-        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, viewRunsRef.current.signal, false);
+        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, viewRunsRef.current.signal);
         return {
           oldFile: { name: file.oldPath || file.path, contents: data.oldContent },
           newFile: { name: file.path, contents: data.newContent },
@@ -2365,11 +2376,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
   // need be), then scroll, once the rows are there. Answers whether it took the jump on.
+  const markExpanded = useStableCallback((itemId: string) => {
+    arrowLoadedRef.current.add(`${fileSetKeyRef.current}::${itemId}`);
+  });
   const revealClosedLines = useStableCallback((itemId: string, ann: CodeAnnotation | null, range: SelectedLineRange, onDone: () => void): (() => void) | null => {
     const file = itemIdToFileRef.current.get(itemId);
     const side = range.side === 'deletions' ? 'old' : 'new';
     if (!file || !wholeFileReaderRef.current || (ann && isFileScopedAnnotation(ann))) return null;
     if (isLineRangeInPatch(file.patch, Math.min(range.start, range.end), Math.max(range.start, range.end), side)) return null;
+    markExpanded(itemId);
     let frame = 0;
     let asked = false;
     const failures = wholeFileFailedRef.current;
@@ -2452,13 +2467,26 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   useEffect(() => {
     if (!scrollEl || !opensWholeFiles) return;
+    let tapStart: { itemId: string; x: number; y: number } | null = null;
     const readAheadOfExpand = (event: Event) => {
       if (event.type === 'pointermove' && event instanceof PointerEvent && event.movementX === 0 && event.movementY === 0) return;
       const path = event.composedPath();
-      if (!path.some((node) => node instanceof Element && node.hasAttribute('data-expand-button'))) return;
+      if (!path.some((node) => node instanceof Element && (node.hasAttribute('data-expand-button') || node.hasAttribute('data-unmodified-lines')))) return;
       const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
       const itemId = host ? nodeToItemIdRef.current.get(host) : undefined;
       if (itemId == null) return;
+      if (event.type === 'click') {
+        markExpanded(itemId);
+        return;
+      }
+      const touch = (event as TouchEvent).changedTouches?.[0];
+      if (event.type === 'touchstart') tapStart = touch ? { itemId, x: touch.clientX, y: touch.clientY } : null;
+      else if (event.type === 'touchend') {
+        if (tapStart?.itemId === itemId && touch && Math.hypot(touch.clientX - tapStart.x, touch.clientY - tapStart.y) < 10) markExpanded(itemId);
+        tapStart = null;
+        return;
+      } else if (event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ')) markExpanded(itemId);
+      if (fetchFileContentRef.current && !semanticEnabledRef.current) return;
       const rendered = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId);
       if (rendered?.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) return;
       rendered.instance.expandHunk(0, 'up', 0);
@@ -2467,13 +2495,24 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     scrollEl.addEventListener('pointermove', readAheadOfExpand, { passive: true });
     scrollEl.addEventListener('touchstart', readAheadOfExpand, { passive: true, capture: true });
     scrollEl.addEventListener('focusin', readAheadOfExpand);
+    scrollEl.addEventListener('keydown', readAheadOfExpand, { capture: true });
+    scrollEl.addEventListener('touchend', readAheadOfExpand, { passive: true, capture: true });
+    scrollEl.addEventListener('click', readAheadOfExpand, { capture: true });
     return () => {
       stopKeepingClicks();
       scrollEl.removeEventListener('pointermove', readAheadOfExpand);
       scrollEl.removeEventListener('touchstart', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('focusin', readAheadOfExpand);
+      scrollEl.removeEventListener('keydown', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('touchend', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('click', readAheadOfExpand, { capture: true });
     };
   }, [scrollEl, opensWholeFiles]);
+
+  useEffect(() => {
+    if (!semanticEnabled) return;
+    for (const itemId of itemNodeRef.current.keys()) if (!semDiffsRef.current.has(itemId)) prefetchWholeFile(itemId);
+  }, [semanticEnabled, prefetchWholeFile]);
 
   const handlePostRender = useStableCallback(
     (
@@ -2597,6 +2636,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const augmentState = augmentRef.current;
     return () => {
       for (const { controller } of augmentState.values()) controller.abort();
+      for (const { controller } of retiredControllersRef.current.splice(0)) controller.abort();
       augmentState.clear();
     };
   }, []);
@@ -3917,7 +3957,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
         semanticNote={(() => {
           const semState = semStateRef.current.get(item.id);
-          if (!semState) return undefined;
+          if (!semState || !semanticEnabledRef.current) return undefined;
           return <SemanticFileNote state={semState} onToggle={() => showSemantic(item.id, semState.status !== 'semantic')} />;
         })()}
         />
