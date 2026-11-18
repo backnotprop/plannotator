@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { flushInboxDebugLogs } from "./inbox-debug-log";
 
 const SENTINEL = "TEST_ONLY_NOT_A_KEY_123";
 const roots: string[] = [];
@@ -104,6 +105,7 @@ test("the window saves a secret and runs the block; the agent gets the result an
   stderr.mockRestore();
   expect(logged.join("")).not.toContain(SENTINEL);
   // Only the sandbox's own vault file holds it: no store file, index, run record or log (the debug log is on) does.
+  await flushInboxDebugLogs();
   expect(filesUnder(dataDir, "/nothing/").some((file) => file.endsWith("debug.log"))).toBe(true);
   for (const file of filesUnder(dataDir, join(dataDir, "inbox", "secrets") + "/")) expect([file, readFileSync(file, "utf8").includes(SENTINEL)]).toEqual([file, false]);
 });
@@ -114,7 +116,8 @@ test("an Inbox that quits while a command runs stops it and tells the agent; the
   const project = join(root, "site");
   mkdirSync(project);
   const dataDir = join(root, "data");
-  const body = [":::run", "Wait a while", "", "```sh", "echo started; sleep 30", "```", ":::"].join("\n");
+  // A builtin that waits (the sandbox's PATH holds only agent stubs): stdin is a pipe held open, so `read` never returns.
+  const body = [":::run", "Wait a while", "", "```sh", "echo started; read -r line", "```", ":::"].join("\n");
   const first = await startInboxServer({ dataDir, binaryPath: null });
   servers.push(first);
   const client = new Client({ name: "inbox-run-test", version: "1.0.0" });
@@ -124,7 +127,7 @@ test("an Inbox that quits while a command runs stops it and tells the agent; the
   const origin = `http://127.0.0.1:${first.port}`;
   const route = `${origin}/api/inbox/messages/${sent.message_id}/run`;
   const key = Object.keys(((await (await fetch(route)).json()) as Json).blocks)[0]!;
-  const press = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ key, op: "start", command: "echo started; sleep 30", serverSession: first.serverSession }) });
+  const press = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ key, op: "start", command: "echo started; read -r line", serverSession: first.serverSession }) });
   expect(press.status).toBe(200);
   for (let i = 0; i < 200; i++) {
     const runs = ((await (await fetch(route)).json()) as Json).runs;
