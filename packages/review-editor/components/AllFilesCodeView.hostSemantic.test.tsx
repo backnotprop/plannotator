@@ -69,7 +69,7 @@ mock.module('@pierre/diffs/react', () => ({
         scrollTo: () => {},
       }),
     }));
-    return <div ref={props.containerRef} className={props.className} />;
+    return <div ref={props.containerRef} className={props.className} data-mock-scroll="" />;
   }),
   EditProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   useStableCallback: <T extends (...args: never[]) => unknown>(callback: T): T => {
@@ -179,6 +179,19 @@ async function headerOf(path: string): Promise<HTMLElement> {
   return box;
 }
 
+async function pressArrow(gesture = 'pointerdown') {
+  const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
+  const container = document.createElement('diffs-container');
+  const arrow = document.createElement('div');
+  arrow.setAttribute('data-expand-button', '');
+  container.appendChild(arrow);
+  document.querySelector('[data-mock-scroll]')!.appendChild(container);
+  await act(async () => {
+    options.onPostRender(container, {}, 'update', { item: [...items.values()][0] });
+    arrow.dispatchEvent(new Event(gesture, { bubbles: true, composed: true }));
+  });
+}
+
 afterEach(async () => {
   configStore.set('diffSemantic', true);
   for (const headerRoot of headerRoots.splice(0)) await act(async () => headerRoot.unmount());
@@ -253,6 +266,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       return Promise.resolve(texts);
     };
     await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read });
+    await pressArrow();
     const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
     await act(async () => {
       await options.loadDiffFiles({ name: 'a.ts' });
@@ -304,6 +318,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     const read = (_file: DiffFile, signal?: AbortSignal, how?: { background?: boolean }) =>
       how?.background ? new Promise<typeof texts>((_resolve, reject) => signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))) : Promise.resolve(texts);
     await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read });
+    await pressArrow();
     const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
     await act(async () => {
       await options.loadDiffFiles({ name: 'a.ts' });
@@ -354,6 +369,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       };
       const { read } = hostReader();
       await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, settleMs);
+      await pressArrow();
       const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
       await act(async () => {
         await options.loadDiffFiles({ name: 'a.ts' });
@@ -363,6 +379,29 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       expect([offered?.dataset.semanticNote, offered?.textContent?.includes('1 moved')]).toEqual(['off', true]);
       await act(async () => offered!.click());
       expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
+    });
+  }
+
+  for (const [gesture, shown] of [['pointermove', 'semantic'], ['pointerdown', 'off']] as const) {
+    test.skipIf(!hasDom)(`an arrow ${gesture === 'pointermove' ? 'only passed over' : 'pressed'} before the note arrives: the note ends ${shown === 'semantic' ? 'shown by itself' : 'offered, the opened lines left alone'}`, async () => {
+      const client: SemDiffClient = {
+        supports: (path) => path.endsWith('.ts'),
+        diff: async () => {
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          return moved;
+        },
+        attempt: async () => ({ result: moved, failed: false }),
+        dispose: () => {},
+      };
+      const { read } = hostReader();
+      await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
+      await pressArrow(gesture);
+      const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
+      await act(async () => {
+        await options.loadDiffFiles({ name: 'a.ts' });
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      });
+      expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe(shown);
     });
   }
 
