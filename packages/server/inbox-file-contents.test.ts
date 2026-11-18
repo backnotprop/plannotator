@@ -159,6 +159,19 @@ describe("a PR's file", () => {
     expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
   });
 
+  test("a request that closes while another waits on the same file: the one still open gets the text", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    const first = new AbortController();
+    const closed = pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS, undefined, undefined, first.signal).catch(() => "refused");
+    const open = pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS, undefined, undefined, new AbortController().signal);
+    first.abort();
+    expect(await open).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    await closed;
+  });
+
   test("the whole stack: the list's head, and where it left the stack's base", async () => {
     const f = scripted();
     f.files.set(fileAt("src/a.ts", HEAD), "new\n");

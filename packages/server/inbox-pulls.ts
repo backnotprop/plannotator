@@ -705,6 +705,8 @@ export class InboxPullsError extends Error {
   }
 }
 
+const READ_CLOSED = new InboxPullsError("pull_diff_failed", "The request was closed.");
+
 export interface InboxPulls {
   /**
    * The PRs of these repositories, with the hosts asked, what each CLI asked was found to be (`clis`), and the
@@ -1171,7 +1173,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   // A diff's base commit, by its head (a pushed head has its own), and each file's text by commit: a commit's file
   // never changes, so a settled answer stays until the bound. A failed read is forgotten, for the next look to retry.
   const mergeBases = new Map<string, Promise<string | null>>();
-  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number }>();
+  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number; callers: (AbortSignal | undefined)[] }>();
   let fileTextBytes = 0;
   let readsRunning = 0;
   const readsWaiting: (() => void)[] = [];
@@ -1973,7 +1975,6 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const project = encodeURIComponent(pull.repo);
       /** A forge read: the command's output, null when the forge says there is none, and a throw for anything passing. */
       const ask = async (endpoint: string, extra: string[] = []): Promise<string | null> => {
-        if (signal?.aborted) throw new InboxPullsError("pull_diff_failed", "The request was closed.");
         if (now() < Math.max(holdUntil.get(pull.host) ?? 0, fileHoldUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", "rate limited");
         const result = await diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...extra], INBOX_PULL_FILE_MAX_BYTES);
         if (result.tooLarge) return null;
@@ -2018,6 +2019,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
         return read;
       };
+      const stillWanted = (read: Promise<string | null>, sha: string, filePath: string): Promise<string | null> =>
+        read.catch((cause: unknown) => (cause === READ_CLOSED && !signal?.aborted ? textAt(sha, filePath) : Promise.reject(cause)));
       const textAt = (sha: string, filePath: string): Promise<string | null> => {
         const textKey = `${pull.host}/${pull.repo}\u0000${sha}\u0000${filePath}`;
         const hit = fileTexts.get(textKey);
@@ -2025,9 +2028,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           // Used again: the last to go.
           fileTexts.delete(textKey);
           fileTexts.set(textKey, hit);
-          return hit.read;
+          hit.callers.push(signal);
+          return stillWanted(hit.read, sha, filePath);
         }
+        const callers: (AbortSignal | undefined)[] = [signal];
         const read = inTurn(async () => {
+          if (callers.every((caller) => caller?.aborted)) throw READ_CLOSED;
           for (const root of roots) {
             const local = await gitRead(root, sha, filePath, INBOX_PULL_FILE_MAX_BYTES).catch(() => null);
             if (local === "none") return null;
@@ -2040,7 +2046,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           const text = await ask(endpoint, pull.platform === "github" ? ["-H", "Accept: application/vnd.github.v3.raw"] : []);
           return text === null || text.slice(0, 8000).includes("\u0000") ? null : text;
         });
-        const entry = { read, bytes: 0 };
+        const entry = { read, bytes: 0, callers };
         fileTexts.set(textKey, entry);
         read.then(
           (text) => {
@@ -2064,7 +2070,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             if (fileTexts.get(textKey) === entry) fileTexts.delete(textKey);
           },
         );
-        return read;
+        return stillWanted(read, sha, filePath);
       };
       try {
         const newContent = await textAt(head, path);
