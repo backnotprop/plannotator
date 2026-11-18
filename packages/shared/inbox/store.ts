@@ -111,7 +111,7 @@ import {
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
 import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
-import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
+import { inboxListSections, inboxRowDraftOnly, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
@@ -2508,7 +2508,7 @@ export class InboxStore {
     // (New), not Sent; `sent` stays on the row for its delivery tick.
     const section = inboxSectionOf(isInboxActionReport(lastReal) && unseen > 0 ? { ...facts, sent: null } : facts);
     // In New only for the person's own unsent words or comments: not bold.
-    const draftOnly = section === "new" && unseen === 0 && !facts.answered_not_sent && inboxHasUnsent(unsent);
+    const draftOnly = inboxRowDraftOnly(section, unseen, facts.answered_not_sent, unsent);
     return { ...facts, ...(sessionEnded && section !== "quiet" ? { session_ended: true } : {}), section, unread: inboxRowUnread(section, unseen, draftOnly) };
   }
 
