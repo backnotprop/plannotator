@@ -155,6 +155,14 @@ describe("inboxPullStacks", () => {
     expect(inboxPullStacks([feature, intoMain, above]).find((s) => s.layers.some((l) => l.number === 32))!.layers.map((l) => l.number)).toEqual([31, 32]);
   });
 
+  test("a stale main branch does not win over the forge's configured default", () => {
+    const main = pr({ number: 120, head: "rounding", base: "main", default_branch: "next" });
+    const next = pr({ number: 121, head: "rounding", base: "next", default_branch: "next" });
+    const child = pr({ number: 122, head: "rounding-tests", base: "rounding", default_branch: "next" });
+    const stack = inboxPullStacks([main, next, child]).find((s) => s.layers.includes(child))!;
+    expect(inboxPullParent(stack, child.key)?.key).toBe(next.key);
+  });
+
   test("two layers on one branch stay in one stack, by depth then number", () => {
     const low = pr({ number: 10, head: "base-work", base: "main" });
     const b = pr({ number: 12, head: "b", base: "base-work" });

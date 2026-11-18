@@ -427,7 +427,7 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   // The PR a branch's layers sit on, when two open PRs come from one branch (a backport: a second PR from the same
   // branch, into a release branch): the one into the repository's trunk (its default branch when the forge said,
   // else main or master), then into another long-lived branch, then the lowest number, whatever the order.
-  const rank = (pull: InboxPull) => (pull.base === pull.default_branch || TRUNK.test(pull.base) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
+  const rank = (pull: InboxPull) => ((pull.default_branch ? pull.base === pull.default_branch : TRUNK.test(pull.base)) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
   for (const pull of open) {
     if (!ownHead(pull)) continue;
     const at = `${repoKey(pull)}\u0000${pull.head}`;
