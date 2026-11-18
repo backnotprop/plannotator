@@ -2459,6 +2459,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
   useEffect(() => {
     if (!scrollEl || !opensWholeFiles) return;
+    let tapStart: { itemId: string; x: number; y: number } | null = null;
     const readAheadOfExpand = (event: Event) => {
       if (event.type === 'pointermove' && event instanceof PointerEvent && event.movementX === 0 && event.movementY === 0) return;
       const path = event.composedPath();
@@ -2466,7 +2467,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
       const itemId = host ? nodeToItemIdRef.current.get(host) : undefined;
       if (itemId == null) return;
-      if (event.type === 'pointerdown' || event.type === 'touchstart' || (event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' '))) markExpanded(itemId);
+      const touch = (event as TouchEvent).changedTouches?.[0];
+      if (event.type === 'touchstart') tapStart = touch ? { itemId, x: touch.clientX, y: touch.clientY } : null;
+      else if (event.type === 'touchend') {
+        if (tapStart?.itemId === itemId && touch && Math.hypot(touch.clientX - tapStart.x, touch.clientY - tapStart.y) < 10) markExpanded(itemId);
+        tapStart = null;
+        return;
+      } else if ((event.type === 'pointerdown' && !(event instanceof PointerEvent && event.pointerType === 'touch')) || (event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' '))) markExpanded(itemId);
       const rendered = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId);
       if (rendered?.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) return;
       rendered.instance.expandHunk(0, 'up', 0);
@@ -2476,12 +2483,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     scrollEl.addEventListener('touchstart', readAheadOfExpand, { passive: true, capture: true });
     scrollEl.addEventListener('focusin', readAheadOfExpand);
     scrollEl.addEventListener('keydown', readAheadOfExpand, { capture: true });
+    scrollEl.addEventListener('touchend', readAheadOfExpand, { passive: true, capture: true });
     return () => {
       scrollEl.removeEventListener('pointermove', readAheadOfExpand);
       scrollEl.removeEventListener('pointerdown', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('touchstart', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('focusin', readAheadOfExpand);
       scrollEl.removeEventListener('keydown', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('touchend', readAheadOfExpand, { capture: true });
     };
   }, [scrollEl, opensWholeFiles]);
 

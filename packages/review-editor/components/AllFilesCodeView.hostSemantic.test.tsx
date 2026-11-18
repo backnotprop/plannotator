@@ -179,7 +179,9 @@ async function headerOf(path: string): Promise<HTMLElement> {
   return box;
 }
 
-async function pressArrow(gesture = 'pointerdown') {
+const touchAt = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, composed: true }), { changedTouches: [{ clientX: x, clientY: 0 }] });
+
+async function pressArrow(gesture: string | Event[] = 'pointerdown') {
   const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
   const container = document.createElement('diffs-container');
   const arrow = document.createElement('div');
@@ -188,7 +190,7 @@ async function pressArrow(gesture = 'pointerdown') {
   document.querySelector('[data-mock-scroll]')!.appendChild(container);
   await act(async () => {
     options.onPostRender(container, {}, 'update', { item: [...items.values()][0] });
-    arrow.dispatchEvent(new Event(gesture, { bubbles: true, composed: true }));
+    for (const event of typeof gesture === 'string' ? [new Event(gesture, { bubbles: true, composed: true })] : gesture) arrow.dispatchEvent(event);
   });
 }
 
@@ -382,8 +384,14 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     });
   }
 
-  for (const [gesture, shown] of [['pointermove', 'semantic'], ['pointerdown', 'off']] as const) {
-    test.skipIf(!hasDom)(`an arrow ${gesture === 'pointermove' ? 'only passed over' : 'pressed'} before the note arrives: the note ends ${shown === 'semantic' ? 'shown by itself' : 'offered, the opened lines left alone'}`, async () => {
+  for (const [gesture, shown] of [
+    ['pointermove', 'semantic'],
+    ['pointerdown', 'off'],
+    ['Enter', 'off'],
+    ['touch that scrolls', 'semantic'],
+    ['tap', 'off'],
+  ] as const) {
+    test.skipIf(!hasDom)(`an arrow met by ${gesture} before the note arrives: the note ends ${shown === 'semantic' ? 'shown by itself' : 'offered, the opened lines left alone'}`, async () => {
       const client: SemDiffClient = {
         supports: (path) => path.endsWith('.ts'),
         diff: async () => {
@@ -395,7 +403,15 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       };
       const { read } = hostReader();
       await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
-      await pressArrow(gesture);
+      await pressArrow(
+        gesture === 'Enter'
+          ? [Object.assign(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }))]
+          : gesture === 'touch that scrolls'
+            ? [touchAt('touchstart', 0), touchAt('touchend', 60)]
+            : gesture === 'tap'
+              ? [touchAt('touchstart', 0), touchAt('touchend', 2)]
+              : gesture,
+      );
       const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
       await act(async () => {
         await options.loadDiffFiles({ name: 'a.ts' });
