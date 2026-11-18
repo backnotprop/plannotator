@@ -12030,6 +12030,14 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
      keyboard up (phone.ts trackKeyboard: `data-ib-keyboard`, `--ib-vvh`) it sits on the keyboard instead of under it. */
   .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { width: auto; height: min(72vh, calc(var(--ib-vvh, 100dvh) - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top))); max-height: min(72vh, calc(var(--ib-vvh, 100dvh) - 2 * var(--ib-sheet-inset) - env(safe-area-inset-top))); }
   :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] { bottom: calc(100% - var(--ib-vvh, 100%) + var(--ib-sheet-inset)) !important; }
+  /* With the keyboard up (a phone on its side leaves about 140 px) the title goes, so the field and rows fit; the
+     field's own words say what it is. The sheet sits flush on the keyboard, a little tighter, so at least one whole
+     row shows under the field there. */
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] .ib-pm-title { display: none; }
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone][data-list-filter-searchable] { bottom: calc(100% - var(--ib-vvh, 100%)) !important; }
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone] .ib-pm.ib-lflt-menu[data-list-filter-searchable] { padding-block: 4px; height: calc(var(--ib-vvh, 100dvh) - var(--ib-sheet-inset) - env(safe-area-inset-top)); max-height: calc(var(--ib-vvh, 100dvh) - var(--ib-sheet-inset) - env(safe-area-inset-top)); scroll-padding-top: 52px; }
+  :root[data-ib-keyboard] .ib-pm-pos[data-phone] .ib-lflt-top { top: -4px; }
+  :root[data-ib-keyboard] .pn-inbox .ib-pm-pos[data-phone] .ib-lflt-find input { height: 44px; }
   .ib-pm-pos[data-phone] .ib-lflt-none { padding: 12px; font-size: var(--ib-fs-15, 15px); }
   .ib-tidy-pos[data-phone] .ib-tidy.ib-lflt-range { width: auto; padding: 16px; }
   .pn-inbox .ib-lflt-range-days input { height: 44px; font-size: var(--ib-fs-16-in, 16px); }

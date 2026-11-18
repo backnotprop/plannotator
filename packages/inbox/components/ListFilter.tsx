@@ -18,11 +18,12 @@
  *   Typing narrows every section at once (the match bold, a ticked row kept, a section with nothing left gone,
  *   "Nothing matches “…”" when no row matches); the menu keeps its one scroll. Base UI's filterable menu
  *   (`Menu.FilterProvider`, `Menu.Input`, `Menu.List`): the field keeps focus while ↑ ↓ move the highlight
- *   (`aria-activedescendant`, wrapping as the plain menu does), Enter ticks the highlighted row, Space types a space,
- *   Escape empties the field first and then closes, Tab closes, Home and End stay the field's caret keys. A touch or pen
- *   open leaves the field unfocused, so a phone's keyboard stays down; the phone's sheet then sits on the keyboard
- *   (inbox.css). The menu keeps one width while typing. With short lists none of this: the plain menu, its type-ahead
- *   included.
+ *   (`aria-activedescendant`, wrapping as the plain menu does), Enter ticks or unticks the highlighted row, Space types
+ *   a space, Escape empties the field first and then closes. With the field empty Home and End go to the first and
+ *   last row; with text in it they move the caret. Tab moves focus out of the menu, which closes it. With nothing
+ *   matching no row is highlighted, and Enter does nothing until an arrow picks a row. A touch or pen open leaves the
+ *   field unfocused, so a phone's keyboard stays down; the phone's sheet then sits on the keyboard (inbox.css). The
+ *   menu keeps one width while typing. With short lists none of this: the plain menu, its type-ahead included.
  * - Nothing matches: `ListFilterEmpty` in the list's body, "No threads match" and Clear filters.
  *
  * No shortcut of its own.
@@ -40,7 +41,7 @@ import { CountBadge } from './CountBadge';
 import { useThreadTags } from '../threadTags';
 import { toggledTagPick, withLiveTagPicks } from '../listFilterTags';
 import { useRoutineThreads } from '../listFilterRoutines';
-import { filterSearchShown, searchFilterSections, type FilterSearchRow } from '../listFilterSearch';
+import { filterSearchShown, labelStart, searchFilterSections, type FilterSearchRow } from '../listFilterSearch';
 import {
   NO_LIST_FILTER,
   PULL_OPTIONS,
@@ -93,27 +94,11 @@ const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="ch
 
 /** The search's words (the field's placeholder and name; the line and the count a screen reader hears). */
 const FIND_WORDS = 'Search filters';
-/** The × in the field: its name, for a screen reader's touch or virtual cursor (Escape does the same from the keyboard). */
+/** The × in the field: its name, for a screen reader's touch or virtual cursor (Escape does the same from the keyboard).
+ * Base UI hides its clear button from screen readers; `aria-hidden={false}` puts it back. */
 const CLEAR_WORDS = 'Clear search';
 const nothingMatches = (query: string) => `Nothing matches “${query}”`;
 const matchWords = (n: number, query: string) => (n === 0 ? nothingMatches(query) : n === 1 ? '1 match' : `${formatCount(n)} matches`);
-
-/** About as many characters as a row shows before its end is cut with "…" (300 px menu, a phone's sheet). */
-const ROW_FITS = 26;
-/** How much of the label stays before a match when its start is dropped. */
-const LEAD = 8;
-
-/**
- * Where a row's label starts when drawn: 0, or past its start when the match would sit in the part the row cuts off
- * (an 80-character project name matched near its end), so the bold always shows. Never inside a character or before
- * an accent mark.
- */
-export function labelStart(label: string, hit: readonly [number, number] | null): number {
-  if (!hit || label.length <= ROW_FITS || hit[1] <= ROW_FITS) return 0;
-  let at = Math.max(0, hit[0] - LEAD);
-  while (at > 0 && (/[\uDC00-\uDFFF]/.test(label[at]!) || /\p{M}/u.test(label[at]!))) at -= 1;
-  return at;
-}
 
 /** A row's label with the search's match drawn bold, from `labelStart` ("…" for what it drops). */
 function lit(label: string, hit: readonly [number, number] | null) {
@@ -149,7 +134,7 @@ interface FilterSection {
 
 function CheckRow({ label, hit, on, count, onToggle, mark, data }: { label: string; hit: readonly [number, number] | null; on: boolean; count: number; onToggle: () => void; mark: React.ReactNode; data: Record<string, string> }) {
   return (
-    <Menu.CheckboxItem className="ib-pmi" label={label} aria-label={labelStart(label, hit) > 0 ? label : undefined} checked={on} onCheckedChange={onToggle} closeOnClick={false} {...data}>
+    <Menu.CheckboxItem className="ib-pmi" label={label} aria-label={labelStart(label, hit) > 0 ? `${label} ${formatCount(count)}` : undefined} checked={on} onCheckedChange={onToggle} closeOnClick={false} {...data}>
       {mark}
       <span className="ib-pmi-l" dir="auto">
         {lit(label, hit)}
@@ -363,6 +348,9 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   );
 }
 
+/** The keys that move the highlight from the field. */
+const STEP_KEYS = new Set(['ArrowDown', 'ArrowUp', 'Home', 'End']);
+
 /** How long the match count waits for typing to pause before a screen reader hears it. */
 const STATUS_WAIT_MS = 400;
 
@@ -391,6 +379,8 @@ function FilterMenu({
   onClear: (() => void) | null;
 }) {
   const [query, setQuery] = useState('');
+  /** An arrow (or Home, End) moved the highlight since the query last changed. */
+  const arrowed = useRef(false);
   const found = searchFilterSections<FilterSection, FilterRow>(sections, searchable ? query : '');
   const typed = query.trim();
   // The count a screen reader hears, once typing pauses (not on every key).
@@ -405,16 +395,20 @@ function FilterMenu({
     return () => clearTimeout(wait);
   }, [words]);
 
+  // While nothing matches, the rows still drawn (kept because they are ticked) take new keys, so Base UI sees new rows
+  // and drops a highlight left on one from the query before (it clears a highlight on a change only when
+  // `autoHighlight` was already off).
+  const keyOf = (row: FilterRow) => (found.searching && found.matches === 0 ? `${row.key}:kept` : row.key);
   const drawRow = ({ row, hit }: FilterSearchRow<FilterRow>) =>
     row.opens ? (
-      <Menu.Item key={row.key} className="ib-pmi" label={row.opens} onClick={row.onToggle} data-checked={row.on ? '' : undefined} {...row.data}>
+      <Menu.Item key={keyOf(row)} className="ib-pmi" label={row.opens} onClick={row.onToggle} data-checked={row.on ? '' : undefined} {...row.data}>
         {row.mark}
         <span className="ib-pmi-l">{lit(row.label, hit)}</span>
         {row.count !== null && <span className="ib-pmi-n">{formatCount(row.count)}</span>}
         {tick(row.on)}
       </Menu.Item>
     ) : (
-      <CheckRow key={row.key} label={row.label} hit={hit} on={row.on} count={row.count ?? 0} onToggle={row.onToggle} mark={row.mark} data={row.data} />
+      <CheckRow key={keyOf(row)} label={row.label} hit={hit} on={row.on} count={row.count ?? 0} onToggle={row.onToggle} mark={row.mark} data={row.data} />
     );
   const items = (
     <>
@@ -461,16 +455,28 @@ function FilterMenu({
                       aria-label={FIND_WORDS}
                       placeholder={FIND_WORDS}
                       onKeyDown={(event: React.KeyboardEvent<HTMLInputElement> & { preventBaseUIHandler?: () => void }) => {
+                        // During IME composition Enter and Escape are the IME's (commit, cancel): no tick, no close.
+                        if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
+                          if (event.key === 'Enter' || event.key === 'Escape') {
+                            event.preventBaseUIHandler?.();
+                            event.stopPropagation();
+                          }
+                          return;
+                        }
+                        if (STEP_KEYS.has(event.key)) arrowed.current = true;
+                        // With nothing matching, Enter acts only on a row an arrow picked since the last key typed.
+                        const enterBlocked = event.key === 'Enter' && found.searching && found.matches === 0 && !arrowed.current;
                         // Escape empties the field first; with the field empty it closes the menu as always.
-                        if (event.key !== 'Escape' || query === '' || event.nativeEvent.isComposing) return;
+                        if (!enterBlocked && (event.key !== 'Escape' || query === '')) return;
                         event.preventDefault();
-                        event.stopPropagation();
                         event.preventBaseUIHandler?.();
+                        if (enterBlocked) return;
+                        event.stopPropagation();
                         setQuery('');
                       }}
                       data-list-filter-search=""
                     />
-                    <Menu.Clear className="ib-lflt-clear" aria-label={CLEAR_WORDS} data-list-filter-search-clear="">
+                    <Menu.Clear className="ib-lflt-clear" aria-label={CLEAR_WORDS} aria-hidden={false} data-list-filter-search-clear="">
                       <Icon name="x" />
                     </Menu.Clear>
                   </div>
@@ -495,10 +501,19 @@ function FilterMenu({
     </Menu.Root>
   );
 
-  // The highlight goes to the first match as you type (a match always comes first: listFilterSearch.ts); with no match
-  // it goes nowhere, so Enter never unticks a row kept only because it is ticked.
+  // The highlight goes to the first match as you type (with a match, the first row is one: listFilterSearch.ts); Enter
+  // ticks or unticks it like any row. With no match it goes nowhere (`keyOf`, the Enter guard), so Enter never unticks
+  // a row kept only because it is ticked.
   return searchable ? (
-    <Menu.FilterProvider filter={null} value={query} onValueChange={setQuery} autoHighlight={found.matches > 0}>
+    <Menu.FilterProvider
+      filter={null}
+      value={query}
+      onValueChange={(next) => {
+        arrowed.current = false;
+        setQuery(next);
+      }}
+      autoHighlight={found.matches > 0}
+    >
       {menu}
     </Menu.FilterProvider>
   ) : (

@@ -4,10 +4,12 @@
  * What this catches: a field on a short menu (or none on a long one); a match that misses on case or accents, or bolds
  * the wrong letters; a ticked row that goes when it does not match (it could no longer be unticked); a section with
  * nothing left that stays; a ticked-only row or section that comes before a match (Enter, which ticks the first row,
- * would untick it); a kept row counted as a match (a screen reader would hear a wrong count).
+ * would untick it); a kept row counted as a match (a screen reader would hear a wrong count); a fold that takes away a
+ * mark making another letter (か matching が) or misses ı and ς; a long label shortened inside a grapheme, or not
+ * shortened when its match is out of view (CJK counted narrow).
  */
 import { describe, expect, test } from 'bun:test';
-import { FILTER_SEARCH_AT, filterSearchShown, searchFilterSections, searchHit } from './listFilterSearch';
+import { filterSearchShown, labelStart, searchFilterSections, searchHit } from './listFilterSearch';
 
 type Row = { label: string; on: boolean };
 type Section = { id: string; rows: Row[] };
@@ -24,7 +26,6 @@ const view = (query: string) =>
 
 describe('when the field shows', () => {
   test('only once a section holds more than eight rows', () => {
-    expect(FILTER_SEARCH_AT).toBe(8);
     expect(filterSearchShown([1, 5, 8, 8])).toBe(false);
     expect(filterSearchShown([1, 5, 9])).toBe(true);
     expect(filterSearchShown([])).toBe(false);
@@ -56,6 +57,27 @@ describe('a match', () => {
     expect(searchHit('Überwachung', 'uber')).toEqual([0, 4]);
     const long = `reports-${'x'.repeat(64)}-quarterly-review`;
     expect(searchHit(long, 'quarterly')).toEqual([long.indexOf('quarterly'), long.indexOf('quarterly') + 9]);
+  });
+
+  test('a mark that makes another letter is kept: Japanese voicing, Indic vowel signs, Thai marks', () => {
+    expect(searchHit('が', 'か')).toBeNull();
+    expect(searchHit('パン', 'ハ')).toBeNull();
+    expect(searchHit('か\u3099', 'か')).toBeNull();
+    expect(searchHit('ぎんこう', 'が')).toBeNull();
+    expect(searchHit('ががく', 'が')).toEqual([0, 1]);
+    expect(searchHit('किताब', 'क')).toBeNull();
+    expect(searchHit('किताब', 'कि')).toEqual([0, 2]);
+    expect(searchHit('น้ำ', 'น')).toBeNull();
+    // Arabic harakat and an emoji's variation selector still fold away.
+    expect(searchHit('مُحَمَّد', 'محمد')).not.toBeNull();
+    expect(searchHit('❤️ team', '❤')).toEqual([0, 2]);
+  });
+
+  test('dotless ı and final ς match i and σ', () => {
+    expect(searchHit('Istanbul', 'ıstanbul')).toEqual([0, 8]);
+    expect(searchHit('ılık', 'ilik')).toEqual([0, 4]);
+    expect(searchHit('ΟΔΟΣ ops', 'οδος')).toEqual([0, 4]);
+    expect(searchHit('οδός', 'ΟΔΟΣ')).toEqual([0, 4]);
   });
 
   test('a blank query or an absent one is no match', () => {
@@ -119,5 +141,41 @@ describe('narrowing', () => {
       ['tags', ['design']],
       ['projects', ['web', 'rebill']],
     ]);
+  });
+});
+
+describe('a long label drawn from past its start', () => {
+  const at = (label: string, query: string) => labelStart(label, searchHit(label, query));
+
+  test('a label that fits, or a match within the part shown, starts at 0', () => {
+    expect(at('billing-api', 'api')).toBe(0);
+    expect(at(`reports-${'x'.repeat(60)}`, 'reports')).toBe(0);
+    expect(labelStart(`reports-${'x'.repeat(60)}`, null)).toBe(0);
+  });
+
+  test('a match past the cut keeps eight characters before it', () => {
+    const label = `reports-${'x'.repeat(60)}-quarterly-review`;
+    const start = at(label, 'quarterly');
+    expect(start).toBe(label.indexOf('quarterly') - 8);
+  });
+
+  test('never inside a flag, a skin tone, a family emoji or a letter and its accent', () => {
+    const edges = (label: string) => new Set([...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(label)].map((p) => p.index));
+    for (const before of ['🇫🇷', '👍🏽', '👨‍👩‍👧', 'e\u0301', '각']) {
+      for (let pad = 0; pad < 10; pad += 1) {
+        const label = `${'a'.repeat(30 + pad)}${before}${before}${before}quarterly`;
+        const start = at(label, 'quarterly');
+        expect(start).toBeGreaterThan(0);
+        expect(edges(label).has(start)).toBe(true);
+      }
+    }
+  });
+
+  test('wide characters count twice: a CJK match out of view is brought in, one in view is not', () => {
+    const cjk = '数据管道和报表导出服务的季度财务审查';
+    expect(at(cjk, '审查')).toBeGreaterThan(0);
+    expect(at(cjk, '数据')).toBe(0);
+    // The same length in Latin letters fits.
+    expect(at('abcdefghijklmnopqrs', 'rs')).toBe(0);
   });
 });

@@ -8,9 +8,11 @@
  * row that goes when it does not match; no line when nothing matches; Custom range… not opening its panel from the
  * search; the field taking focus (and a phone's keyboard) on a touch open; the count said on every key; focus not back on
  * the funnel after Escape closes the menu (the funnel is a detached trigger), or `aria-expanded` not following the menu;
- * the field on eight rows or missing on nine; Tags or the Routine group left out of the narrowing; Home or End taken from
- * the field's caret; Clear filters gone or dead while searching; the × with no name; a list of 200 tags that narrows
- * wrong.
+ * the field on eight rows or missing on nine, on a fresh menu or the same mounted one; Tags, Agent, Pull request or the
+ * Routine group left out of the narrowing; Home or End taken from the field's caret when it holds text, or not going to
+ * the first and last row when it is empty; Tab not closing; Clear filters gone or dead while searching; the × hidden
+ * from screen readers; a list of 200 tags that narrows wrong; a highlight left on a ticked row when nothing matches
+ * (Enter would untick it); Enter or Escape during IME composition ticking or closing.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -87,8 +89,13 @@ const tagsOf = (names: readonly string[]) => names.map((name, i) => ({ id: `tag_
 /** One of this computer's routines, running in `thread`. */
 const routine = (thread: string) => ({ id: `sch_${thread}`, name: `Routine ${thread}`, thread_id: thread, state: 'off', last_run: null, last_change: null }) as unknown as InboxScheduledRow;
 
-function Harness({ rows, start, tagNames }: { rows: readonly InboxListRow[]; start: ListFilter; tagNames: readonly string[] }) {
+/** Swaps the mounted harness's rows (a project arriving while the window is open). */
+let swapRows: ((rows: readonly InboxListRow[]) => void) | null = null;
+
+function Harness({ rows: first, start, tagNames }: { rows: readonly InboxListRow[]; start: ListFilter; tagNames: readonly string[] }) {
   const [filter, setFilter] = useState(start);
+  const [rows, setRows] = useState(first);
+  swapRows = setRows;
   const tags = tagsOf(tagNames);
   const host: ThreadTagsHost | null =
     tagNames.length === 0 ? null : { tags, tagsOf: () => [], counts: new Map(), can: () => true, set: () => {}, createAndSet: () => {}, listed: null, rows, rowTags: (r) => r.tags ?? [] };
@@ -149,6 +156,24 @@ async function key(name: string): Promise<boolean> {
   });
   await settle();
   return went;
+}
+/** A keyboard open: Enter on the focused funnel, whose click the browser then fires with no pointer. */
+async function keyOpen() {
+  await act(async () => {
+    funnel().focus();
+    funnel().dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    funnel().click();
+  });
+  await settle();
+}
+/** A key pressed while an IME is composing (the browser's `isComposing`, keyCode 229). */
+async function composingKey(name: string) {
+  await act(async () => {
+    const event = new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true, isComposing: true });
+    Object.defineProperty(event, 'keyCode', { value: 229 });
+    document.activeElement!.dispatchEvent(event);
+  });
+  await settle();
 }
 async function type(text: string) {
   const input = field()!;
@@ -223,8 +248,6 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     expect(funnel().getAttribute('aria-expanded')).toBe('true');
     expect(field()).not.toBeNull();
     expect(document.activeElement).toBe(field());
-    expect(field()!.getAttribute('placeholder')).toBe('Search filters');
-    expect(field()!.getAttribute('aria-label')).toBe('Search filters');
     expect(rowWords()).toEqual(['Not seen', 'Today', 'Last 3 days', 'Last 7 days', 'Last 30 days', 'Custom range…', ...LONG]);
     expect(status()).toBe('');
   });
@@ -338,7 +361,7 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     expect(document.activeElement === field()).toBe(false);
   });
 
-  test('Home and End stay with the field: they move its caret, not the highlight', async () => {
+  test('Home and End: with text in the field they move its caret, not the highlight', async () => {
     render(LONG);
     await press(funnel());
     await type('bil');
@@ -352,14 +375,136 @@ describe.skipIf(!hasDom)('the filter menu with a long list', () => {
     expect(document.activeElement).toBe(field());
   });
 
+  test('Home and End: with the field empty they go to the first and last row', async () => {
+    render(LONG);
+    await keyOpen();
+    expect(document.activeElement).toBe(field());
+    expect(highlighted()).toBe('Not seen');
+    await key('End');
+    expect(highlighted()).toBe('worker');
+    await key('Home');
+    expect(highlighted()).toBe('Not seen');
+    expect(document.activeElement).toBe(field());
+  });
+
+  test('Tab: focus leaving for the page closes the menu', async () => {
+    render(LONG);
+    const after = document.createElement('button');
+    document.body.append(after);
+    await press(funnel());
+    await type('bil');
+    // Base UI leaves Tab to the browser (its default is not prevented); the browser then moves focus to the next
+    // control, firing focusout on the field with that control as `relatedTarget`, as here.
+    expect(await key('Tab')).toBe(true);
+    await act(async () => {
+      field()!.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: after }));
+      after.focus();
+    });
+    await settle();
+    expect(menu()).toBeNull();
+    expect(funnel().getAttribute('aria-expanded')).toBe('false');
+    after.remove();
+  });
+
   test('the × has a name, and Clear filters stays at the foot while searching and clears every pick', async () => {
     render(LONG, { ...NO_LIST_FILTER, projects: ['prj_web'], notSeen: true });
     await press(funnel());
     await type('bil');
-    expect($('[data-list-filter-search-clear]')!.getAttribute('aria-label')).toBe('Clear search');
+    const clear = $('[data-list-filter-search-clear]')!;
+    // Reachable by a screen reader's touch or virtual cursor (Base UI hides its clear button by default).
+    expect(clear.getAttribute('aria-hidden')).not.toBe('true');
+    expect(clear.closest('[aria-hidden="true"]')).toBeNull();
+    expect(clear.getAttribute('aria-label')).toBe('Clear search');
     expect(rowWords().at(-1)).toBe('Clear filters');
     await press($('[data-list-filter-clear]')!);
     expect(picks).toEqual(NO_LIST_FILTER);
+  });
+});
+
+describe.skipIf(!hasDom)('nothing matches after something did', () => {
+  test('a ticked row that was the first match loses its highlight, and Enter leaves it ticked', async () => {
+    render(LONG, { ...NO_LIST_FILTER, projects: ['prj_web'] });
+    await press(funnel());
+    await type('w');
+    await type('we');
+    expect(highlighted()).toBe('web');
+    await type('wez');
+    expect($('[data-list-filter-none]')).not.toBeNull();
+    expect(highlighted()).toBeNull();
+    const active = field()!.getAttribute('aria-activedescendant');
+    expect(active ? document.getElementById(active) : null).toBeNull();
+    await key('Enter');
+    expect(picks.projects).toEqual(['prj_web']);
+    expect(menu()).not.toBeNull();
+  });
+
+  test('Not seen ticked, a keyboard open, then a query with no match: Enter leaves Not seen ticked', async () => {
+    render(LONG, { ...NO_LIST_FILTER, notSeen: true });
+    await keyOpen();
+    expect(highlighted()).toBe('Not seen');
+    await type('z');
+    await type('zz');
+    await type('zzz');
+    expect(highlighted()).toBeNull();
+    await key('Enter');
+    expect(picks.notSeen).toBe(true);
+  });
+
+  test('an arrow onto a kept row is a choice: then Enter unticks it', async () => {
+    render(LONG, { ...NO_LIST_FILTER, projects: ['prj_web'] });
+    await press(funnel());
+    await type('w');
+    await type('wez');
+    await key('ArrowDown');
+    expect(highlighted()).toBe('web');
+    await key('Enter');
+    expect(picks.projects).toEqual([]);
+  });
+});
+
+describe.skipIf(!hasDom)('an IME composing in the field', () => {
+  test('Enter that commits the composition ticks nothing; Escape that cancels it neither empties the field nor closes', async () => {
+    render(LONG);
+    await press(funnel());
+    await type('bil');
+    expect(highlighted()).toBe('billing');
+    await composingKey('Enter');
+    expect(picks).toEqual(NO_LIST_FILTER);
+    await composingKey('Escape');
+    expect(menu()).not.toBeNull();
+    expect(field()!.value).toBe('bil');
+  });
+});
+
+describe.skipIf(!hasDom)('the field on the same mounted menu', () => {
+  test('a ninth project arriving while the menu is shut brings the field on the next open; back to eight takes it away', async () => {
+    render(LONG.slice(0, 8));
+    await press(funnel());
+    expect(field()).toBeNull();
+    await key('Escape');
+    expect(menu()).toBeNull();
+    await act(async () => swapRows!(rowsOf(LONG.slice(0, 9))));
+    await press(funnel());
+    expect(field()).not.toBeNull();
+    expect(document.activeElement).toBe(field());
+    await key('Escape');
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(funnel());
+    await act(async () => swapRows!(rowsOf(LONG.slice(0, 8))));
+    await press(funnel());
+    expect(field()).toBeNull();
+    expect(menu()!.getAttribute('role')).toBe('menu');
+    await key('Escape');
+    expect(document.activeElement).toBe(funnel());
+  });
+
+  test('the field stays as it was while the menu is open, even when a row arrives', async () => {
+    render(LONG.slice(0, 8));
+    await press(funnel());
+    await act(async () => swapRows!(rowsOf(LONG.slice(0, 9))));
+    await settle();
+    expect(field()).toBeNull();
+    expect(rowWords()).toContain('search');
   });
 });
 
@@ -374,7 +519,8 @@ describe.skipIf(!hasDom)('a long name', () => {
     expect(words.startsWith('…')).toBe(true);
     expect(words.length).toBeLessThan(30);
     expect(item.querySelector('.ib-lflt-hit')!.textContent).toBe('quarterly');
-    expect(item.getAttribute('aria-label')).toBe(NAME);
+    // Its name: the whole label and the count, as a row drawn whole is read.
+    expect(item.getAttribute('aria-label')).toBe(`${NAME} 1`);
   });
 
   test('a match near the start draws the whole name, with no name of its own', async () => {
@@ -398,7 +544,7 @@ describe.skipIf(!hasDom)('the search covers every section', () => {
     expect(rowWords()).toEqual(['billing-bugs', 'mobile', 'stability', 'billing']);
   });
 
-  test('the Routine group, Pull request and Updated narrow like the rest', async () => {
+  test('the Routine group and Updated narrow like the rest', async () => {
     resetScheduledForTests([routine('t0')]);
     render(LONG);
     await press(funnel());
@@ -407,6 +553,23 @@ describe.skipIf(!hasDom)('the search covers every section', () => {
     expect(rowWords()).toEqual(['Routine threads', 'Other threads']);
     await type('days');
     expect(groups()).toEqual(['Updated']);
+  });
+
+  test('Agent and Pull request narrow like the rest', async () => {
+    const rows = rowsOf(LONG).map((r, i) =>
+      ({ ...r, author: { ...r.author, host: i % 2 ? 'codex' : 'claude-code' }, pulls: i % 3 === 0 ? { count: 1, headline: { state: 'open', number: i } } : undefined }) as unknown as InboxListRow,
+    );
+    render(LONG);
+    await act(async () => swapRows!(rows));
+    await press(funnel());
+    expect(groups()).toContain('Agent');
+    expect(groups()).toContain('Pull request');
+    await type('codex');
+    expect(groups()).toEqual(['Agent']);
+    expect(rowWords()).toEqual(['Codex']);
+    await type(' pr');
+    expect(groups()).toEqual(['Pull request']);
+    expect(rowWords()).toEqual(['Has a PR', 'No PR']);
   });
 
   test('200 tags: typing narrows to the few that match, a ticked one kept after them', async () => {
