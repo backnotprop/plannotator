@@ -69,7 +69,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
           void save();
         }}
       >
-        <h2 id={titleId}>No slop zone rules</h2>
+        <h2 id={titleId}>Set risk rules</h2>
         <label className="ib-sub ib-riskd-l" htmlFor={rulesId}>
           What makes a pull request high risk for you? Every open one is ranked against this: not touched is low, maybe is medium, definitely is high.
         </label>
