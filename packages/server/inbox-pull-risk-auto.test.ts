@@ -2,7 +2,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { InboxPull, InboxPullRiskAuto } from "@plannotator/core/inbox-types";
+import type { InboxPull, InboxPullRiskAuto, InboxPullRiskLevel } from "@plannotator/core/inbox-types";
 import { createPullRiskAuto, type PullRiskAutoJob } from "./inbox-pull-risk-auto";
 import { pullRiskAutoBody } from "./inbox-pull-risk-auto-start";
 
@@ -39,15 +39,20 @@ const pr = (number: number, fields: Partial<InboxPull> = {}): InboxPull => ({
   ...fields,
 });
 
-function world(settings: InboxPullRiskAuto | null = { level: "high", make: "show_me" }, dataDir = mkdtempSync(join(tmpdir(), "pull-risk-auto-"))) {
+function world(initial: InboxPullRiskAuto | null = { level: "high", make: "show_me" }, dataDir = mkdtempSync(join(tmpdir(), "pull-risk-auto-"))) {
   dirs.push(dataDir);
+  let settings = initial;
   const started: PullRiskAutoJob[] = [];
   const threads = new Set<string>();
+  const listed = new Map<string, InboxPull>();
+  const levels = new Map<string, InboxPullRiskLevel>();
   let fail: string | null = null;
   let hold: Promise<void> | null = null;
   const auto = createPullRiskAuto({
     dataDir,
     settings: () => settings,
+    pullOf: (key) => listed.get(key) ?? null,
+    levelOf: (pull) => levels.get(pull.key) ?? null,
     hasThread: async (pull) => threads.has(pull.key),
     start: async (job) => {
       started.push(job);
@@ -57,9 +62,18 @@ function world(settings: InboxPullRiskAuto | null = { level: "high", make: "show
       return { thread_id: `thr_${job.pull.number}` };
     },
   });
+  const judged = (pull: InboxPull, level: InboxPullRiskLevel) => {
+    listed.set(pull.key, pull);
+    levels.set(pull.key, level);
+    auto.judged(pull, level);
+  };
   return {
     dataDir,
     auto,
+    judged,
+    listed,
+    levels,
+    set: (next: InboxPullRiskAuto | null) => (settings = next),
     started,
     threads,
     failWith: (reason: string | null) => (fail = reason),
@@ -76,10 +90,10 @@ function world(settings: InboxPullRiskAuto | null = { level: "high", make: "show
 
 test("a PR ranked at the level is made for once, with the chosen ask; a new head or a second judgment starts nothing", async () => {
   const w = world({ level: "high", make: "both", agent: "codex" });
-  w.auto.judged(pr(880), "high");
+  w.judged(pr(880), "high");
   await w.auto.idle();
   w.threads.clear();
-  w.auto.judged(pr(880, { head_sha: "b".repeat(40) }), "high");
+  w.judged(pr(880, { head_sha: "b".repeat(40) }), "high");
   await w.auto.idle();
   expect(w.started.map((job) => [job.key, job.made, job.agent])).toEqual([[pr(880).key, "both", "codex"]]);
   expect(w.auto.runs()[pr(880).key]).toMatchObject({ state: "started", made: "both", level: "high", thread_id: "thr_880" });
@@ -87,19 +101,19 @@ test("a PR ranked at the level is made for once, with the chosen ask; a new head
 
 test("nothing is made below the level, with a review thread already, or while it is off", async () => {
   const high = world({ level: "high", make: "guide" });
-  high.auto.judged(pr(1), "medium");
+  high.judged(pr(1), "medium");
   high.threads.add(pr(2).key);
-  high.auto.judged(pr(2), "high");
+  high.judged(pr(2), "high");
   await high.auto.idle();
   expect(high.started).toEqual([]);
   expect(high.auto.runs()).toEqual({});
   const off = world(null);
-  off.auto.judged(pr(3), "high");
+  off.judged(pr(3), "high");
   await off.auto.idle();
   expect(off.started).toEqual([]);
   const medium = world({ level: "medium", make: "guide" });
-  medium.auto.judged(pr(4), "medium");
-  medium.auto.judged(pr(5), "low");
+  medium.judged(pr(4), "medium");
+  medium.judged(pr(5), "low");
   await medium.auto.idle();
   expect(medium.started.map((job) => job.pull.number)).toEqual([4]);
 });
@@ -107,9 +121,9 @@ test("nothing is made below the level, with a review thread already, or while it
 test("one start at a time across the Inbox: the rest wait their turn, in order", async () => {
   const w = world();
   const release = w.holdStarts();
-  w.auto.judged(pr(1), "high");
-  w.auto.judged(pr(2), "high");
-  w.auto.judged(pr(3), "high");
+  w.judged(pr(1), "high");
+  w.judged(pr(2), "high");
+  w.judged(pr(3), "high");
   await Bun.sleep(5);
   expect(w.started.map((job) => job.pull.number)).toEqual([1]);
   expect(Object.values(w.auto.runs()).map((run) => run.state)).toEqual(["queued", "queued", "queued"]);
@@ -121,20 +135,20 @@ test("one start at a time across the Inbox: the rest wait their turn, in order",
 test("a failed start is kept with its reason and never tried again by itself", async () => {
   const w = world();
   w.failWith("Codex can't be started here.");
-  w.auto.judged(pr(7), "high");
+  w.judged(pr(7), "high");
   await w.auto.idle();
-  w.auto.judged(pr(7), "high");
+  w.judged(pr(7), "high");
   w.auto.resume();
   await w.auto.idle();
   expect(w.started).toHaveLength(1);
   expect(w.auto.runs()[pr(7).key]).toEqual({ at: expect.any(String), level: "high", made: "show_me", state: "failed", thread_id: null, reason: "Codex can't be started here." });
 });
 
-test("a restart mid-queue starts each waiting PR once, and none that had started", async () => {
+test("a restart mid-queue starts each waiting PR once its list is read, and none that had started", async () => {
   const first = world();
   const release = first.holdStarts();
-  first.auto.judged(pr(1), "high");
-  first.auto.judged(pr(2), "high");
+  first.judged(pr(1), "high");
+  first.judged(pr(2), "high");
   await Bun.sleep(5);
   first.auto.stop();
   release();
@@ -142,8 +156,19 @@ test("a restart mid-queue starts each waiting PR once, and none that had started
   const again = world({ level: "high", make: "show_me" }, first.dataDir);
   again.auto.resume();
   await again.auto.idle();
+  expect(again.started).toEqual([]);
+  for (const n of [1, 2]) {
+    again.listed.set(pr(n).key, pr(n));
+    again.levels.set(pr(n).key, "high");
+  }
+  again.auto.resume();
+  await again.auto.idle();
   expect(again.started.map((job) => job.pull.number)).toEqual([1, 2]);
   const third = world({ level: "high", make: "show_me" }, first.dataDir);
+  for (const n of [1, 2]) {
+    third.listed.set(pr(n).key, pr(n));
+    third.levels.set(pr(n).key, "high");
+  }
   third.auto.resume();
   await third.auto.idle();
   expect(third.started).toEqual([]);
@@ -194,4 +219,35 @@ test("a start run again after a restart replays the same thread: no second agent
   expect(begun).toEqual(["thr_1"]);
   expect(abandoned).toEqual(["l1"]);
   expect(owned).toEqual([[[pr(880).key], "thr_1", "both"], [[pr(880).key], "thr_1", "both"]]);
+});
+
+test("a waiting PR is checked again when its turn comes: the setting now, still open, still at the level, still no review thread", async () => {
+  const w = world({ level: "medium", make: "guide", agent: "codex" });
+  const release = w.holdStarts();
+  for (const n of [1, 2, 3, 4, 5]) w.judged(pr(n), "high");
+  await Bun.sleep(5);
+  w.set({ level: "high", make: "show_me", agent: "claude-code" });
+  w.listed.set(pr(2).key, pr(2, { state: "closed" }));
+  w.levels.set(pr(3).key, "medium");
+  w.threads.add(pr(4).key);
+  release();
+  await w.auto.idle();
+  expect(w.started.map((job) => [job.pull.number, job.made, job.agent])).toEqual([[1, "guide", "codex"], [5, "show_me", "claude-code"]]);
+  expect(Object.keys(w.auto.runs())).toEqual([pr(1).key, pr(5).key]);
+});
+
+test("turned off while PRs wait: they are dropped quietly and never start", async () => {
+  const w = world();
+  const release = w.holdStarts();
+  w.judged(pr(1), "high");
+  w.judged(pr(2), "high");
+  await Bun.sleep(5);
+  w.set(null);
+  release();
+  await w.auto.idle();
+  w.set({ level: "high", make: "show_me" });
+  w.auto.resume();
+  await w.auto.idle();
+  expect(w.started.map((job) => job.pull.number)).toEqual([1]);
+  expect(Object.keys(w.auto.runs())).toEqual([pr(1).key]);
 });

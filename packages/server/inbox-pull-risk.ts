@@ -275,6 +275,7 @@ export interface PullRisk {
   branchPending(key: string, head: string | null, base: string | null): boolean;
   /** A branch may be judged now: the person's `branches` switch, rules, an agent that is here, Code review and Branch reviews on. */
   branchRankable(): boolean;
+  levelOf(pull: InboxPull): InboxPullRiskJudgment["level"] | null;
   /** Save the dialog. Throws InboxError on a bad input or a config that can't be written. */
   save(input: unknown): void;
   models(provider: string): Promise<InboxPullRiskModels>;
@@ -536,6 +537,11 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       }
       const { branches, ...shown } = current;
       return { ...shown, ...(options.branchesOn?.() ? { branches } : {}), agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure, auto_runs: options.autoRuns?.() ?? {} };
+    },
+    levelOf(pull) {
+      const { rules } = settings();
+      const one = rules && pull.head_sha ? load().get(pull.key) : undefined;
+      return one && one.head === pull.head_sha && one.base === pull.base && one.rules === hashOf(rules) ? one.level : null;
     },
     assess(pulls) {
       listed = pulls;
