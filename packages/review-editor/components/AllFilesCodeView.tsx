@@ -854,6 +854,7 @@ const noopAIMarkerClick = () => {};
 
 const SCROLL_SPEED_FRESH_MS = 100;
 const FRAME_MS = 16;
+const SETTLE_FRAMES = 10;
 const SWAP_LEAD_MS = 100;
 
 function stickyHeaderHeight(node: HTMLElement | undefined): number {
@@ -2181,32 +2182,40 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const toggleInPlace = useStableCallback((itemId: string, on: boolean) => {
     const root = scrollRef.current;
     const page = root && (scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : root);
-    if (root && page && !heldLengthRef.current) {
-      const top = page.scrollTop;
+    if (root && page && !heldLengthRef.current && page.scrollHeight - page.scrollTop - page.clientHeight <= page.clientHeight) {
       const height = page.scrollHeight;
-      let px = 0;
-      const fit = () => {
-        const want = Math.max(0, height - (page.scrollHeight - px));
-        if (want === px) return;
-        const grew = want > px;
-        px = want;
+      const node = itemNodeRef.current.get(itemId);
+      let px = Math.ceil(node?.isConnected ? node.getBoundingClientRect().height : page.clientHeight);
+      root.style.paddingBottom = `${px}px`;
+      let settled = false;
+      let calm = 0;
+      let last = -1;
+      let frame = 0;
+      const settle = () => {
+        const natural = page.scrollHeight - px;
+        calm = natural === last ? calm + 1 : 0;
+        last = natural;
+        if (calm < SETTLE_FRAMES) {
+          frame = requestAnimationFrame(settle);
+          return;
+        }
+        px = Math.min(px, Math.max(0, height - natural));
         root.style.paddingBottom = px > 0 ? `${px}px` : '';
-        if (grew && page.scrollTop < top) page.scrollTop = top;
+        settled = true;
       };
-      const observer = new ResizeObserver(fit);
-      for (const element of new Set([root, ...root.children, ...page.children])) observer.observe(element);
+      frame = requestAnimationFrame(settle);
       const moves = page === document.documentElement ? window : page;
       const check = () => {
-        if (px > 0 && page.scrollTop + page.clientHeight <= page.scrollHeight - px) heldLengthRef.current?.();
+        if (settled && px > 0 && page.scrollTop + page.clientHeight <= page.scrollHeight - px) heldLengthRef.current?.();
       };
       const gesture = () => {
-        if (px === 0) heldLengthRef.current?.();
+        if (settled && px === 0) heldLengthRef.current?.();
       };
       const gestures = ['wheel', 'touchstart', 'keydown'] as const;
       moves.addEventListener('scroll', check, { passive: true });
       for (const type of gestures) document.addEventListener(type, gesture, { capture: true, passive: true });
       heldLengthRef.current = () => {
-        observer.disconnect();
+        cancelAnimationFrame(frame);
         moves.removeEventListener('scroll', check);
         for (const type of gestures) document.removeEventListener(type, gesture, { capture: true });
         root.style.paddingBottom = '';

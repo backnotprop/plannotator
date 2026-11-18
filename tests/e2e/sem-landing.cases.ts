@@ -419,6 +419,16 @@ export function landingCases(type: BrowserType) {
   test(`${host} on a phone: at the very end of the page, a tap on the last file's offered note leaves its header where it is`, async () => {
     const view = await onPhone(host, ['tail'], 'a-money');
     try {
+      if (process.env.SEM_LANDING_BUSY)
+        await view.page.evaluate((ms) => {
+          const busy = () => {
+            const until = performance.now() + ms;
+            while (performance.now() < until);
+            requestAnimationFrame(busy);
+          };
+          requestAnimationFrame(busy);
+        }, Number(process.env.SEM_LANDING_BUSY));
+      if (process.env.SEM_LANDING_CPU && type.name() === 'chromium') await (await view.page.context().newCDPSession(view.page)).send('Emulation.setCPUThrottlingRate', { rate: Number(process.env.SEM_LANDING_CPU) });
       const shell = view.shell('f-tail');
       const header = view.page.locator(`${shell} [data-file-header]`).first();
       const atEnd = () =>
@@ -458,6 +468,10 @@ export function landingCases(type: BrowserType) {
       }, `${shell} [data-semantic-note]`);
       await view.page.touchscreen.tap(box.x + box.width / 2, box.y + box.height / 2);
       await expect(note).toHaveAttribute('data-semantic-note', 'semantic');
+      await view.page.waitForTimeout(1_000);
+      const again = (await note.boundingBox())!;
+      await view.page.touchscreen.tap(again.x + again.width / 2, again.y + again.height / 2);
+      await expect(note).toHaveAttribute('data-semantic-note', 'off');
       await view.page.waitForTimeout(1_000);
       const tops = await view.page.evaluate(() => {
         const w = window as unknown as { __noteTops: number[]; __noteOn: boolean };
