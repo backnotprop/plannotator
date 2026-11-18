@@ -70,6 +70,11 @@ export interface InboxAgentWait {
   project: { id: string; name: string };
   /** The thread's latest agent activity (ISO). */
   at: string;
+  /**
+   * Left out of the Inbox list for its hidden PRs: its agent stays listed (idle when nothing else holds it), but the
+   * thread is no wait: no waiting count, no "Waiting on you", no say in its rank.
+   */
+  hidden?: true;
 }
 
 export interface InboxAgentsEvidence {
@@ -213,13 +218,17 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
         session,
         host: wait.host,
         project: wait.project,
-        state: "ended",
+        state: wait.hidden ? "idle" : "ended",
         waiting: 0,
         live: false,
         started_at: null,
         last_seen_at: heard === null ? null : iso(heard),
       };
       bySession.set(session, agent);
+    }
+    if (wait.hidden) {
+      if (!agent.project) agent.project = wait.project;
+      continue;
     }
     agent.waiting += 1;
     agent.state = "waiting";
