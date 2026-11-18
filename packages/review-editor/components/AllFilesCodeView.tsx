@@ -249,7 +249,7 @@ export interface AllFilesCodeViewProps {
    * file. Null, a side left null, or text that no longer fits the patch takes
    * the arrows away and leaves the file as the patch shows it. Absent: as before.
    */
-  fetchFileContent?: (file: DiffFile, signal: AbortSignal) => Promise<{ oldContent: string | null; newContent: string | null } | null>;
+  fetchFileContent?: (file: DiffFile, signal: AbortSignal, how?: { background?: boolean }) => Promise<{ oldContent: string | null; newContent: string | null } | null>;
   /**
    * Before/After image preview for a hunkless image chunk (#1598), rendered in
    * place of the binary notice. A render prop rather than a flag so the
@@ -2038,6 +2038,20 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, []);
 
   const [semanticNotes, setSemanticNotes] = useState<ReadonlyMap<string, SemanticMinimapNote[]>>(new Map());
+  const openHeldFolds = useStableCallback((itemId: string, fileDiff: FileDiffMetadata, annotations: readonly { side: string; lineNumber: number }[] | undefined): FileDiffMetadata => {
+    const folds = (fileDiff as { semanticFolds?: readonly { old: { start: number; end: number } }[] }).semanticFolds;
+    if (!folds?.length) return fileDiff;
+    const held = (annotations ?? []).filter((a) => a.side === 'deletions').map((a) => [a.lineNumber, a.lineNumber]);
+    const pick = selectedLinesRef.current;
+    if (pick?.id === itemId) {
+      const { start, end, side, endSide } = pick.range;
+      if (side === 'deletions') held.push([start, (endSide ?? side) === 'deletions' ? end : start]);
+      else if (endSide === 'deletions') held.push([end, end]);
+    }
+    const kept = folds.filter((fold) => !held.some(([from, to]) => Math.min(from!, to!) <= fold.old.end && Math.max(from!, to!) >= fold.old.start));
+    if (kept.length === folds.length) return fileDiff;
+    return { ...fileDiff, semanticFolds: kept.length > 0 ? kept : undefined, cacheKey: `${fileDiff.cacheKey ?? itemId}:open${folds.map((fold) => (kept.includes(fold) ? '' : fold.old.start)).join('.')}` };
+  });
   const showSemantic = useStableCallback((itemId: string, on: boolean) => {
     const pair = semDiffsRef.current.get(itemId);
     const handle = viewerRef.current;
@@ -2046,7 +2060,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (itemId === editSession.editingItemIdRef.current) return;
     const state = semStateRef.current.get(itemId);
     if (state && state.status !== 'working') semStateRef.current.set(itemId, { status: on ? 'semantic' : 'off', summary: state.summary });
-    const next = on ? pair.semantic : pair.plain;
+    const next = on ? openHeldFolds(itemId, pair.semantic, item.annotations) : pair.plain;
     const notePath = itemIdToFilePath.get(itemId);
     setSemanticNotes((current) => {
       if (!on && !current.has(itemId)) return current;
@@ -2099,6 +2113,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     stale: () => boolean,
     result: SemDiffResult,
     onDropped: () => void,
+    swap = true,
   ) => {
     queueAugmentApply(itemId, () => {
       if (stale()) return;
@@ -2132,7 +2147,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
       semDiffsRef.current.set(itemId, { plain, semantic });
       semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      showSemantic(itemId, semanticEnabledRef.current);
+      if (swap) showSemantic(itemId, semanticEnabledRef.current);
+      else refreshItem(itemId);
     });
   });
 
@@ -2173,6 +2189,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     newText: string | null,
     generation: string,
     signal: AbortSignal,
+    swap = true,
   ) => {
     const client = semClientRef.current;
     if (!client || oldText == null || newText == null || !client.supports(file.path)) return;
@@ -2187,7 +2204,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     void client.diff(file.path, oldText, newText, signal).then((result) => {
       if (stale()) return;
       if (!result) settleEmpty();
-      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty);
+      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty, swap);
       runPowerUp(itemId);
     });
   });
@@ -2227,7 +2244,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   }, [rejectedKey, powerUpActive, powerUpRetry]);
 
   const prefetchWholeFile = useCallback((itemId: string) => {
-    if (fetchFileContentRef.current) return;
+    const hostRead = fetchFileContentRef.current;
+    const semClient = semClientRef.current;
+    if (hostRead && (!semClient || !semanticEnabledRef.current)) return;
     const augmentState = augmentRef.current;
     const generation = fileSetKeyRef.current;
     const existing = augmentState.get(itemId);
@@ -2238,13 +2257,15 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const file = itemIdToFileRef.current.get(itemId);
     if (file == null) return;
     const controller = new AbortController();
-    if (readOnlyRef.current || !contextExpansionAvailableRef.current || (file.status !== 'modified' && file.status !== 'renamed')) {
+    const bothSides = file.status === 'modified' || file.status === 'renamed';
+    const reads = hostRead ? bothSides && semClient != null && semClient.supports(file.path) : bothSides && !readOnlyRef.current && contextExpansionAvailableRef.current;
+    if (!reads) {
       augmentState.set(itemId, { status: 'done', controller, generation });
       return;
     }
     augmentState.set(itemId, { status: 'pending', controller, generation });
     const isStale = () => controller.signal.aborted || fileSetKeyRef.current !== generation;
-    readWholeFileFromReview(file, controller.signal).then(
+    (hostRead ? hostRead(file, controller.signal, { background: true }) : readWholeFileFromReview(file, controller.signal)).then(
       (data) => {
         if (isStale()) return;
         if (data) keptWholeFilesRef.current.keep(itemId, generation, data);
@@ -2292,6 +2313,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (data?.oldContent == null || data.newContent == null) return none();
         // The file may have moved on since this diff was captured: whole text that no longer fits would break the layout.
         if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) return none();
+        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal, false);
         return {
           oldFile: { name: file.oldPath || file.path, contents: data.oldContent },
           newFile: { name: file.path, contents: data.newContent },
@@ -2466,6 +2488,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
       itemNodeRef.current.set(context.id, node);
+      if (heldSelectionIdRef.current === context.id && context.fileDiff.isPartial !== true) setWholeAfterHold((n) => n + 1);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
       prefetchWholeFile(context.id);
@@ -2704,10 +2727,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         contextNotesRef.current,
         hostLineNotesRef.current,
       );
+      item.fileDiff = openHeldFolds(itemId, item.fileDiff, item.annotations);
       item.version = (item.version ?? 0) + 1;
       handle.updateItem(item);
     },
-    [prUrl, prDiffScope],
+    [prUrl, prDiffScope, openHeldFolds],
   );
 
   // Keep review annotations incremental: a single add/edit/delete republishes
@@ -3008,6 +3032,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // live CodeView selection without re-running on every drag delta.
   const selectedLinesRef = useRef(selectedLines);
   selectedLinesRef.current = selectedLines;
+  const heldSelectionIdRef = useRef<string | null>(null);
+  const [wholeAfterHold, setWholeAfterHold] = useState(0);
+  const drawnSelectedLines = useMemo(() => {
+    heldSelectionIdRef.current = null;
+    if (selectedLines == null) return null;
+    const file = itemIdToFile.get(selectedLines.id);
+    if (!file) return selectedLines;
+    const { start, end, side, endSide } = selectedLines.range;
+    const drawn = (line: number, lineSide: typeof side) => isLineRangeInPatch(file.patch, line, line, lineSide === 'deletions' ? 'old' : 'new');
+    if (drawn(start, side) && drawn(end, endSide ?? side)) return selectedLines;
+    const item = viewerRef.current?.getItem(selectedLines.id);
+    if (item?.type === 'diff' && item.fileDiff.isPartial !== true) return selectedLines;
+    heldSelectionIdRef.current = selectedLines.id;
+    return null;
+  }, [selectedLines, itemIdToFile, wholeAfterHold]);
 
   // Reconcile the App-level `pendingSelection` (the range the toolbar / AI is
   // operating on) with CodeView's highlighted lines. CodeView selection is
@@ -4161,7 +4200,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       className={`relative ${minimapOn && minimapShown ? 'mr-6' : ''} ${scrollsWithPage ? 'overflow-x-clip [contain:layout_style]' : `h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [will-change:scroll-position]`} [overflow-anchor:none] focus-visible:outline-none! [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
       initialItems={identity.items}
       options={options}
-      selectedLines={selectedLines}
+      selectedLines={drawnSelectedLines}
       onSelectedLinesChange={handleSelectedLinesChange}
       onScroll={handleScroll}
       renderCustomHeader={renderCustomHeader}

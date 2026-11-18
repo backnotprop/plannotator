@@ -50,6 +50,7 @@
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */
 @import "../../packages/review-editor/comments.css";
 @import "../../packages/review-editor/pierreTree.css";
+@import "../../packages/review-editor/semantic-colors.css";
 @import "../../packages/inbox/inbox.css";
 /* A question's prototypes: the options' tray, its Try prototype tab, and the full window (components/PrototypeWindow.tsx). */
 @import "../../packages/inbox/prototype-window.css";
