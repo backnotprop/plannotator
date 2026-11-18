@@ -381,6 +381,7 @@ packages/review-editor/edit/selectionActionPopover.test.ts
 packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
 packages/review-editor/components/AllFilesCodeView.flushTrailing.test.tsx
 packages/review-editor/components/AllFilesCodeView.hostLineNotes.test.tsx
+packages/review-editor/components/AllFilesCodeView.hostSemantic.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
