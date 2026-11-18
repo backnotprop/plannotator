@@ -17,6 +17,7 @@ import {
   agentInstallsSettled,
   connectInboxAgents,
   createAgentEnvironmentFor,
+  forgetOmpToolBeforeOff,
   formatConnectReport,
   inboxAgentReach,
   readInboxAgents,
@@ -162,11 +163,15 @@ describe("Oh My Pi", () => {
   test("a version the person pinned in OMP is left as is; Settings says why its tool is off and does not offer to turn it on", async () => {
     fake.install("omp");
     ompHas("0.28.60", { spec: "0.28.60", feature: false });
-    await start();
+    const report = await start();
     expect(ompCalls()).toEqual([]);
+    // Not "Connected": said once, with why.
+    expect(report.added).not.toContain("oh-my-pi");
+    expect(report.manual_why).toEqual([{ agent: "oh-my-pi", why: `Plannotator's extension is pinned to 0.28.60 in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install ${PKG} moves it to the newest.` }]);
+    expect((await start()).manual_why ?? []).toEqual([]);
     const reach = await inboxAgentReach("oh-my-pi", options());
     expect({ on: reach.on, state: reach.state }).toEqual({ on: false, state: "off" });
-    expect(reach.reason).toBe(`Plannotator's extension is pinned to 0.28.60 in Oh My Pi, which has no Inbox tool there by default. omp plugin install ${PKG} moves it to the newest`);
+    expect(reach.reason).toBe(`Plannotator's extension is pinned to 0.28.60 in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install ${PKG} moves it to the newest.`);
     // Turned on by name, the old extension has its tool: on.
     writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true } }));
     expect((await inboxAgentReach("oh-my-pi", options())).on).toBe(true);
@@ -177,7 +182,7 @@ describe("Oh My Pi", () => {
     for (const spec of ["link:../plannotator/apps/pi-extension", "file:/work/plannotator/apps/pi-extension", "git+https://github.com/backnotprop/plannotator.git"]) {
       // Without the OMP default: off, with the line, nothing run, also from Settings' switch.
       ompHas("0.28.60", { spec, feature: false });
-      await start();
+      expect((await start()).added).not.toContain("oh-my-pi");
       const reach = await inboxAgentReach("oh-my-pi", options());
       expect({ on: reach.on, state: reach.state, reason: reach.reason }).toEqual({ on: false, state: "off", reason: "A local build is installed in Oh My Pi, left as is." });
       expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
@@ -228,7 +233,7 @@ describe("Oh My Pi", () => {
 
   test("Settings' switch installs the extension; off and on again puts back a Pi turned on by name", async () => {
     fake.install("omp");
-    expect((await inboxAgentReach("oh-my-pi", options())).reason).toBe(`Turning this on runs omp plugin install ${PKG}`);
+    expect((await inboxAgentReach("oh-my-pi", options())).reason).toBe(`Turning this on runs omp plugin install ${PKG}.`);
     expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
     expect(ompCalls()).toEqual([`plugin install ${PKG}`]);
     expect((await inboxAgentReach("oh-my-pi", options())).on).toBe(true);
@@ -244,6 +249,53 @@ describe("Oh My Pi", () => {
     expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
     expect(JSON.parse(configText()).inboxTool).toEqual({ pi: true });
     expect(ompCalls()).toHaveLength(1);
+  });
+
+  test("Pi's own switch written after OMP's off: OMP on again never turns Pi back on", async () => {
+    fake.install("omp");
+    ompHas("0.29.1");
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true } }));
+    expect(await setInboxAgentReach("oh-my-pi", false, options())).toBeNull();
+    // Pi's own switch in Settings → Agents writes the key: the memory goes.
+    fake.install("pi");
+    mkdirSync(join(fake.home, ".pi", "agent"), { recursive: true });
+    writeFileSync(join(fake.home, ".pi", "agent", "settings.json"), JSON.stringify({ packages: ["npm:@plannotator/pi-extension"] }));
+    expect(await setInboxAgentReach("pi", false, options())).toBeNull();
+    expect(readInboxAgents(dataDir).tool_before_off?.["oh-my-pi"]).toBeUndefined();
+    expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
+    expect(JSON.parse(configText()).inboxTool?.pi).not.toBe(true);
+    // The same through the inbox_tool settings route's helper.
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: true } }));
+    expect(await setInboxAgentReach("oh-my-pi", false, options())).toBeNull();
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTool: { pi: false } }));
+    forgetOmpToolBeforeOff(dataDir);
+    expect(await setInboxAgentReach("oh-my-pi", true, options())).toBeNull();
+    expect(JSON.parse(configText()).inboxTool?.pi).not.toBe(true);
+  });
+
+  test("an install that ends while a second run works keeps its record and its /restart line", async () => {
+    fake.install("omp");
+    await connectInboxAgents(options({ FAKE_OMP_DELAY_MS: "300" }));
+    fake.install("amp");
+    // The second run reads before the install ends and writes after it (amp hangs until its limit).
+    const second = await connectInboxAgents({ ...options({ FAKE_AGENT_HANG: "amp" }), agentTimeoutMs: 1500 });
+    await agentInstallsSettled();
+    expect(second.installed).toEqual(["oh-my-pi"]);
+    const file = readInboxAgents(dataDir);
+    expect(file.agents["oh-my-pi"]?.state).toBe("added");
+    expect(file.last_report?.installed).toEqual(["oh-my-pi"]);
+    expect(ompCalls()).toEqual([`plugin install ${PKG}`]);
+  });
+
+  test("an install Settings' switch started is the one install: a start meanwhile waits for it", async () => {
+    fake.install("omp");
+    const switched = setInboxAgentReach("oh-my-pi", true, options({ FAKE_OMP_DELAY_MS: "600" }));
+    await Bun.sleep(100);
+    const report = await connectInboxAgents(options({ FAKE_OMP_DELAY_MS: "600" }));
+    expect(report.installing ?? []).toEqual([]);
+    expect(await switched).toBeNull();
+    await agentInstallsSettled();
+    expect(ompCalls()).toEqual([`plugin install ${PKG}`]);
   });
 
   test("omp on PATH is not Pi: Pi is neither found nor connected by it", async () => {

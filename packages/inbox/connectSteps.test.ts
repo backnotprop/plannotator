@@ -253,7 +253,7 @@ test('a Connect step for an MCP agent says it is not woken (Codex 0.149+ is: the
 });
 
 test("Oh My Pi without Plannotator's extension is a one-click Connect that installs it; with it, a ready extension", () => {
-  const notInstalled = { detected: true, reach: { kind: 'tool' as const, on: false, state: 'not_connected' as const, path: null, locked: false, reason: 'Turning this on runs omp plugin install @plannotator/pi-extension' } };
+  const notInstalled = { detected: true, reach: { kind: 'tool' as const, on: false, state: 'not_connected' as const, path: null, locked: false, reason: 'Turning this on runs omp plugin install @plannotator/pi-extension.' } };
   const plan = connectPlan(agentsModel({ 'oh-my-pi': notInstalled }));
   expect(plan.next?.id).toBe('oh-my-pi');
   expect(plan.next?.state).toBe('connect');
@@ -269,7 +269,7 @@ test("Oh My Pi without Plannotator's extension is a one-click Connect that insta
 });
 
 test('Oh My Pi with an extension the person pinned before its Inbox tool was on there: left to them, said why, no Connect step', () => {
-  const reason = "Plannotator's extension is pinned to 0.28.60 in Oh My Pi, which has no Inbox tool there by default. omp plugin install @plannotator/pi-extension moves it to the newest";
+  const reason = "Plannotator's extension is pinned to 0.28.60 in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install @plannotator/pi-extension moves it to the newest.";
   const plan = connectPlan(agentsModel({ 'oh-my-pi': { detected: true, reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason } } }));
   expect(plan.next).toBeNull();
   expect(blockedText(plan, { skipped: [], toolEnv: null }).text).toContain("Oh My Pi has Plannotator's extension pinned to a version without the Inbox tool there (omp plugin install @plannotator/pi-extension moves it to the newest).");

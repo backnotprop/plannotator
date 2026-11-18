@@ -1504,10 +1504,11 @@ function Update-PiExtensionIfPresent {
 # again, and an exact version in the manifest (the person's pin) is left as is.
 # Time-bounded (the process tree), stdin closed, run in the home folder; a
 # failure never fails the install and prints the command. A pinned run installs
-# that version fresh and leaves an existing install as it is.
+# nothing in OMP (OMP would record that exact version as a pin): it prints the
+# command, and leaves an existing install as it is.
 # Same logic in install.sh and install.cmd's :UpdateOmpExtension.
 $ompExtensionPackage = "@plannotator/pi-extension"
-# none | installed | updated | current | behind | pinned | failed
+# none | installed | updated | current | behind | pinned | skipped | failed
 $script:ompExtensionState = "none"
 # The command the closing section prints when the step could not finish.
 $script:ompExtensionManual = "omp plugin install $ompExtensionPackage"
@@ -1621,7 +1622,7 @@ function Update-OmpExtensionIfPresent {
     }
     if ($entry -and ([string]$entry.Spec -match '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$')) {
         $script:ompExtensionState = "pinned"
-        Write-Host "Oh My Pi: Plannotator extension pinned to $(([string]$entry.Spec).TrimStart('v')) in OMP, left as is. To move it: omp plugin install $ompExtensionPackage@$target"
+        Write-Host "Oh My Pi: Plannotator extension pinned to $(([string]$entry.Spec).TrimStart('v')) in OMP, left as is. To move it: omp plugin install $ompExtensionPackage"
         return
     }
     $pinned = ($Version -ne "latest") -and ($env:PLANNOTATOR_UPDATE_VERSION -ne $latestTag)
@@ -1630,6 +1631,13 @@ function Update-OmpExtensionIfPresent {
     if ($update -and $pinned) {
         $script:ompExtensionState = "pinned"
         Write-Host "Oh My Pi: the Plannotator extension was not updated: pinned to $latestTag; updating would install the newest extension."
+        return
+    }
+    # A pinned run never installs a fresh one: OMP would record that exact version, a pin every later update leaves.
+    if ($pinned) {
+        $script:ompExtensionState = "skipped"
+        $script:ompExtensionManual = "omp plugin install $ompExtensionPackage@$target"
+        Write-Host "Oh My Pi: the Plannotator extension was not installed: pinned to $latestTag. To install that version: $($script:ompExtensionManual)"
         return
     }
     if ($update) {
@@ -1641,7 +1649,6 @@ function Update-OmpExtensionIfPresent {
         $script:ompExtensionManual = "omp plugin install $ompExtensionPackage"
         $doing = "install"
         $spec = $ompExtensionPackage
-        if ($pinned) { $spec = "$ompExtensionPackage@$target" }
         Write-Host "Installing the Plannotator extension in Oh My Pi..."
         $why = Invoke-OmpWithTimeLimit -OmpPath $omp.Source -Arguments @("plugin", "install", $spec) -Seconds $secs
     }

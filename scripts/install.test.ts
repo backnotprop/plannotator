@@ -5782,7 +5782,15 @@ function ompStepTests(runner: OmpRunner) {
     expect(r.code).toBe(0);
     expect(s.calls()).toEqual([]);
     expect(s.version()).toBe(PI_OLDER);
-    expect(r.out).toContain(`Oh My Pi: Plannotator extension pinned to ${PI_OLDER} in OMP, left as is. To move it: omp plugin install ${OMP_PKG}@${PI_RELEASE}\n`);
+    expect(r.out).toContain(`Oh My Pi: Plannotator extension pinned to ${PI_OLDER} in OMP, left as is. To move it: omp plugin install ${OMP_PKG}\n`);
+  }, timeout);
+
+  test(`${runner}: a range that looks like a version ("0.29.x") is not a pin: upgraded`, () => {
+    const s = setupOmpSandbox({ installed: PI_OLDER, spec: "0.29.x" });
+    const r = runOmpStep(runner, s);
+    expect(r.code).toBe(0);
+    expect(s.calls()).toEqual([`plugin upgrade ${OMP_PKG}`]);
+    expect(r.out).not.toContain("pinned to");
   }, timeout);
 
   test(`${runner}: a local build in OMP (link:, file:, git) is left as is, never installed or upgraded over`, () => {
@@ -5839,12 +5847,13 @@ function ompStepTests(runner: OmpRunner) {
     expect(alive).toBe(false);
   }, timeout);
 
-  test(`${runner}: a pinned run installs that version fresh and leaves an install as it is`, () => {
+  test(`${runner}: a pinned run installs nothing in OMP (that would become a pin), prints the command, and leaves an install as it is`, () => {
     const fresh = setupOmpSandbox({ installed: null, latest: "100.0.0" });
     const r = runOmpStep(runner, fresh, { pinned: true });
     expect(r.code).toBe(0);
-    expect(fresh.calls()).toEqual([`plugin install ${OMP_PKG}@${PI_RELEASE}`]);
-    expect(fresh.version()).toBe(PI_RELEASE);
+    expect(fresh.calls()).toEqual([]);
+    expect(fresh.version()).toBeNull();
+    expect(r.out).toContain(`Oh My Pi: the Plannotator extension was not installed: pinned to v${PI_RELEASE}. To install that version: omp plugin install ${OMP_PKG}@${PI_RELEASE}\n`);
     const kept = setupOmpSandbox({ installed: PI_OLDER, latest: "100.0.0" });
     const k = runOmpStep(runner, kept, { pinned: true });
     expect(k.code).toBe(0);

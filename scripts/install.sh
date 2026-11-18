@@ -2314,13 +2314,13 @@ update_pi_extension_if_present() {
 # call is time-bounded (its process group, so omp's bun or npm stops too), with
 # stdin from /dev/null, run in the home folder (never a project's plugin
 # scope); a failure or a hang never fails the install: it prints the command
-# to run. A pinned run (--version naming an older tag) installs that version
-# fresh and leaves an existing install as it is, as the Claude Code plugin
-# step does. Skipped by --minimal (it exits before this), like the Pi step,
+# to run. A pinned run (--version naming an older tag) installs nothing in
+# OMP (OMP would record that exact version as a pin) and prints the command,
+# and leaves an existing install as it is. Skipped by --minimal (it exits before this), like the Pi step,
 # which has no opt-out of its own either. install.ps1 and install.cmd's
 # :UpdateOmpExtension carry the same step.
 OMP_EXTENSION_PACKAGE="@plannotator/pi-extension"
-# none (no omp) | installed | updated | current | behind | pinned | failed
+# none (no omp) | installed | updated | current | behind | pinned | skipped | failed
 omp_extension_state="none"
 # The command the closing section prints when the step could not finish.
 omp_extension_manual="omp plugin install ${OMP_EXTENSION_PACKAGE}"
@@ -2407,16 +2407,13 @@ update_omp_extension_if_present() {
             echo "Oh My Pi: Plannotator extension is a local build in OMP (${_omp_spec}), left as is."
             return 0 ;;
     esac
-    case "$_omp_spec" in
-        [0-9]*.*.*|v[0-9]*.*.*)
-            case "$_omp_spec" in
-                *[!0-9A-Za-z.+-]*) ;;
-                *)
-                    omp_extension_state="pinned"
-                    echo "Oh My Pi: Plannotator extension pinned to ${_omp_spec#v} in OMP, left as is. To move it: omp plugin install ${OMP_EXTENSION_PACKAGE}@${_omp_target}"
-                    return 0 ;;
-            esac ;;
-    esac
+    # An exact version (the rule install.ps1, install.cmd and the Inbox use; "0.29.x" is a range): the person's pin.
+    # The way off it installs with no version, which OMP records as a range.
+    if printf '%s' "$_omp_spec" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+        omp_extension_state="pinned"
+        echo "Oh My Pi: Plannotator extension pinned to ${_omp_spec#v} in OMP, left as is. To move it: omp plugin install ${OMP_EXTENSION_PACKAGE}"
+        return 0
+    fi
     _omp_pinned=0
     if [ "$VERSION_EXPLICIT" -eq 1 ] && [ "${PLANNOTATOR_UPDATE_VERSION:-}" != "$latest_tag" ]; then
         _omp_pinned=1
@@ -2427,6 +2424,13 @@ update_omp_extension_if_present() {
     if [ "$_omp_update" -eq 1 ] && [ "$_omp_pinned" -eq 1 ]; then
         omp_extension_state="pinned"
         echo "Oh My Pi: the Plannotator extension was not updated: pinned to ${latest_tag}; updating would install the newest extension."
+        return 0
+    fi
+    # A pinned run never installs a fresh one: OMP would record that exact version, a pin every later update leaves.
+    if [ "$_omp_pinned" -eq 1 ]; then
+        omp_extension_state="skipped"
+        omp_extension_manual="omp plugin install ${OMP_EXTENSION_PACKAGE}@${_omp_target}"
+        echo "Oh My Pi: the Plannotator extension was not installed: pinned to ${latest_tag}. To install that version: ${omp_extension_manual}"
         return 0
     fi
     if [ "$_omp_update" -eq 1 ]; then
@@ -2449,7 +2453,6 @@ update_omp_extension_if_present() {
         (cd "$HOME" && run_with_time_limit_group "$_omp_secs" "$_omp_tmp/timed-out" omp plugin upgrade "$OMP_EXTENSION_PACKAGE") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
     else
         _omp_spec_arg="$OMP_EXTENSION_PACKAGE"
-        if [ "$_omp_pinned" -eq 1 ]; then _omp_spec_arg="${OMP_EXTENSION_PACKAGE}@${_omp_target}"; fi
         echo "Installing the Plannotator extension in Oh My Pi..."
         (cd "$HOME" && run_with_time_limit_group "$_omp_secs" "$_omp_tmp/timed-out" omp plugin install "$_omp_spec_arg") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
     fi

@@ -14,7 +14,7 @@ import { mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { releasePiSessionClaim, writePiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
-import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxPiParentReader, inboxPiParentSession, processStartedAtMs, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxQwenShimContext, inboxPiParentReader, inboxPiParentSession, processStartedAtMs, runInboxMcpShim } from "./inbox-mcp-shim";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -37,7 +37,7 @@ async function shimSends(
   dataDir: string,
   parentPid: number,
   calls: Args[],
-  options: { env?: Record<string, string>; between?: (index: number) => void; client?: string; parentStartedMs?: number | null } = {},
+  options: { env?: Record<string, string>; between?: (index: number) => void; client?: string; parentStartedMs?: number | null; qwenHome?: string } = {},
 ): Promise<Args[]> {
   const reached: Args[] = [];
   const fake = Bun.serve({
@@ -77,6 +77,7 @@ async function shimSends(
     ensureRunning: async () => ({ v: 1, pid: process.pid, port: fake.port, url: "", version: "test", token: "t", serverSession: "s", startedAt: "" }) as never,
     hostSession: inboxHostSessionFromEnv(options.env ?? {}),
     claude: inboxClaudeMcpSessionFromEnv(options.env ?? {}),
+    ...(options.qwenHome ? { qwen: inboxQwenShimContext({ ...options.env, QWEN_HOME: options.qwenHome }, options.qwenHome, "/work/app", parentPid) } : {}),
     piParent: () => inboxPiParentSession(dataDir, parentPid, options.parentStartedMs ?? null),
     input,
     write: () => {},
@@ -191,6 +192,17 @@ describe("plannotator inbox mcp under a Pi or Oh My Pi session with the extensio
     expect(read()).toEqual(piAuthor("omp-session-a"));
     expect(read()).toEqual(piAuthor("omp-session-a"));
     expect(reads).toBe(1);
+  });
+
+  test("an OMP started from a Qwen Code shell: the Qwen variable it inherited does not hide its own session", async () => {
+    const dataDir = dataDirFor();
+    claim(dataDir, "omp-session-a");
+    // No Qwen registry record for this parent (it is OMP, not Qwen), and the client is OMP's.
+    const sent = await shimSends(dataDir, process.pid, [{ body: "a", reply_to: "msg_01" }], {
+      env: { QWEN_CODE_SESSION_ID: "6f1c2d3e-4b5a-4c6d-8e7f-9a0b1c2d3e4f" },
+      qwenHome: dataDirFor(),
+    });
+    expect(author(sent[0]!)).toEqual(piAuthor("omp-session-a"));
   });
 
   test("the agent's own session or another host it names still wins", async () => {

@@ -545,7 +545,7 @@ test.skipIf(!hasDom)("Codex's group reads its account once: the plan and the lim
 
 test.skipIf(!hasDom)('Pi and Oh My Pi share one switch: both rows say so when both are shown, neither when Pi is alone; a pinned OMP says why it is off', () => {
   const words = 'Oh My Pi and Pi share this switch.';
-  const pinned = "Plannotator's extension is pinned to 0.28.60 in Oh My Pi, which has no Inbox tool there by default. omp plugin install @plannotator/pi-extension moves it to the newest";
+  const pinned = "Plannotator's extension is pinned to 0.28.60 in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install @plannotator/pi-extension moves it to the newest.";
   const both = mount(
     model({
       agents: [

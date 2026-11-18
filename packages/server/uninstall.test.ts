@@ -2029,8 +2029,9 @@ describe("host and platform integrations", () => {
       {
         ...removed.environment,
         which: (command) => (command === "omp" ? "/fake/omp" : null),
-        runCommand: async (command, args) => {
+        runCommand: async (command, args, _env, cwd) => {
           removed.commandCalls.push({ command, args });
+          if (command === "/fake/omp") expect(cwd).toBe(removed.homeDir);
           if (command === "/fake/omp") writeJson(manifest(removed.homeDir), { name: "omp-plugins", private: true, dependencies: {} });
           return { exitCode: 0, timedOut: false, stdout: "" };
         },

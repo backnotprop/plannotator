@@ -477,7 +477,7 @@ See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
 omp plugin install @plannotator/pi-extension
 ```
 
-To update it by hand, run `omp plugin upgrade @plannotator/pi-extension`. A version you pinned in OMP (`omp plugin install @plannotator/pi-extension@0.28.60`) or a local build (`link:`, `file:`, a path or git), is left as it is; the installer says so. A run with `--version` pinned to an older release installs that version in a fresh OMP and leaves an installed one as it is.
+To update it by hand, run `omp plugin upgrade @plannotator/pi-extension`. A version you pinned in OMP (`omp plugin install @plannotator/pi-extension@0.28.60`), or a local build (`link:`, `file:`, a path or git), is left as it is; the installer says so. A run with `--version` pinned to an older release leaves OMP as it is: with no extension there, it prints the command that installs that version (OMP then keeps that exact version until you run `omp plugin install @plannotator/pi-extension`).
 
 Open reviews with the extension's commands: `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode` for plan mode. Reviews opened this way can use **Ask this session**: Ask AI sends your question to the OMP session, and the answer streams back from it. Ask AI labels it "Ask this session · Pi".
 

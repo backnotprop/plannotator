@@ -392,6 +392,7 @@ import {
   createAgentEnvironment,
   createAgentEnvironmentFor,
   displayPath,
+  forgetOmpToolBeforeOff,
   inboxAgentReach,
   inboxConnectDisabled,
   inboxPluginStatus,
@@ -4014,6 +4015,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (validateOnly) return inboxToolState();
     // Every other entry is kept, a host this version does not know included.
     saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, changes) });
+    if (changes.pi !== undefined) forgetOmpToolBeforeOff(dataDir);
     const saved = loadConfig();
     for (const [host, value] of Object.entries(changes)) {
       if (configuredInboxTool(saved, host as InboxToolHost) !== value) {

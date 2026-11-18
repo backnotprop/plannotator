@@ -821,7 +821,7 @@ function ompKept(e: AgentEnvironment): { reason: string; on: boolean } | null {
   const ext = ompExtension(e);
   if (ext?.local) return { reason: OMP_LOCAL_BUILD_REASON, on: ext.current };
   if (!ext || !ext.pinned || ext.current || ext.version === "") return null;
-  return { reason: `Plannotator's extension is pinned to ${ext.version} in Oh My Pi, which has no Inbox tool there by default. omp plugin install ${OMP_EXTENSION_PACKAGE} moves it to the newest`, on: false };
+  return { reason: `Plannotator's extension is pinned to ${ext.version} in Oh My Pi, a version with its Inbox tool off there by default. omp plugin install ${OMP_EXTENSION_PACKAGE} moves it to the newest.`, on: false };
 }
 
 /** Whether a tool way's Inbox tool is on: Oh My Pi's own default, else the host's. */
@@ -1820,6 +1820,10 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
     }
     const configured = parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined ? true : configuredInboxTool(loadConfig(), way.host);
     if (configured === false) return { kind: "off", record: { state: "off", reach: "tool", path: null, at } };
+    // Oh My Pi with an extension the person keeps (a pin or a local build) whose tool is off there: not connected,
+    // said once with why; nothing is installed over it.
+    const kept = way.piHost === "oh-my-pi" && configured !== true ? ompKept(e) : null;
+    if (kept && !kept.on) return { kind: "manual", why: kept.reason };
     // Oh My Pi's tool is on with nothing configured: nothing to write (the `pi` key would turn Pi's on too).
     if (configured !== true && !way.piHost) {
       saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [way.host]: true }) });
@@ -1883,6 +1887,14 @@ const agentInstalls = new Map<string, Promise<string | null>>();
 /** Every background install still running (tests, and an Inbox that waits before it stops). */
 export async function agentInstallsSettled(): Promise<void> {
   await Promise.all([...agentInstalls.values()]);
+}
+
+/** Run an install as this agent's one running install (Settings' switch and Connect): nothing written here. */
+function trackAgentInstall(dataDir: string, id: InboxAgentId, run: () => Promise<string | null>): Promise<string | null> {
+  const key = `${dataDir}\0${id}`;
+  const job = run().finally(() => agentInstalls.delete(key));
+  agentInstalls.set(key, job);
+  return job;
 }
 
 /** The install running for this agent and data folder, if any. */
@@ -1959,6 +1971,8 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
   report.claude_code = claudeCodePluginEnabled(e) && claudeCodeInboxToolOn(e);
 
   const pending = AGENT_SPECS.filter((spec) => spec.id !== "claude-code" && spec.detect(e));
+  // Installs already running (a start's, or Settings'): what they write when they end is kept by this run's write.
+  const racing = pending.filter((spec) => agentInstallRunning(options.dataDir, spec.id)).map((spec) => spec.id);
   // An agent with a record is never added again by itself; an MCP entry it
   // had is checked (read only) so Settings can say it was removed outside.
   for (const spec of pending) {
@@ -2071,7 +2085,11 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
         const version = options.version ?? "dev";
         const seen = outcome.step.seen?.(e) ?? null;
         if (failed && failed.version === version && failed.seen === seen) break;
-        if (agentInstallRunning(options.dataDir, spec.id)) break;
+        // Running now, or one that ended while this run waited for the others (it wrote its own outcome).
+        if (agentInstallRunning(options.dataDir, spec.id) || outcome.step.done(e)) {
+          if (!racing.includes(spec.id)) racing.push(spec.id);
+          break;
+        }
         installs.push({ id: spec.id, step: outcome.step });
         (report.installing ??= []).push(spec.id);
         break;
@@ -2120,6 +2138,26 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
     if (options.signal?.aborted) return report;
     if (retry?.kind === "failed" && !retry.repeated) (report.trust_failed ??= []).push({ agent: "qwen", reason: retry.reason });
   }
+  // An install that ended while this run worked wrote its outcome (the record, its "Installed…" line or its failure):
+  // read again and kept, never written over.
+  if (racing.length > 0) {
+    const fresh = readInboxAgents(options.dataDir);
+    const theirs = fresh.last_report && !fresh.last_report.seen ? fresh.last_report : null;
+    for (const id of racing) {
+      if (fresh.agents[id]) file.agents[id] = fresh.agents[id];
+      const failedNow = fresh.install_failed?.[id];
+      if (failedNow) (file.install_failed ??= {})[id] = failedNow;
+      else if (file.install_failed) delete file.install_failed[id];
+      if (fresh.failures?.[id]) (file.failures ??= {})[id] = fresh.failures[id];
+      if (theirs?.installed?.includes(id)) {
+        report.installed = [...(report.installed ?? []).filter((agent) => agent !== id), id];
+        if (!report.added.includes(id)) report.added.push(id);
+        report.already = report.already.filter((agent) => agent !== id);
+      }
+      const failure = theirs?.failed.find((failed) => failed.agent === id);
+      if (failure && !report.failed.some((failed) => failed.agent === id)) report.failed.push(failure);
+    }
+  }
   if (report.added.length > 0 && !file.first_connected_at) file.first_connected_at = at;
   const news =
     report.added.length > 0 ||
@@ -2128,6 +2166,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
     (report.elsewhere?.length ?? 0) > 0 ||
     (report.trusted?.length ?? 0) > 0 ||
     (report.granted?.length ?? 0) > 0 ||
+    (report.installed?.length ?? 0) > 0 ||
     (report.trust_failed?.length ?? 0) > 0;
   file.last_report = news ? { ...report, seen: false } : file.last_report;
   try {
@@ -2440,7 +2479,7 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
     // Oh My Pi without Plannotator's extension (or with one too old to have the tool on): not connected yet; turning
     // it on installs it. One the person turned off by name stays off.
     if (way.then && !way.then.setting && configuredInboxTool(loadConfig(), way.host) !== false && toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv) !== false) {
-      return { kind: "tool", on: false, state: "not_connected", path: null, locked: false, reason: `Turning this on runs ${[way.then.bin, ...way.then.args].join(" ")}` };
+      return { kind: "tool", on: false, state: "not_connected", path: null, locked: false, reason: `Turning this on runs ${[way.then.bin, ...way.then.args].join(" ")}.` };
     }
     // Oh My Pi with an extension the person pinned before the OMP default, or a local build without it: off unless
     // turned on by name or by env. A local build is said either way.
@@ -2539,6 +2578,21 @@ export function setMoveRollbackHookForTests(hook: (() => void) | null): void {
   beforeMoveRollback = hook;
 }
 
+/**
+ * Pi's own switch wrote `inboxTool.pi` (Settings' inbox_tool route): forget what Oh My Pi's off remembered, so turning
+ * OMP on again never puts back a value the person has changed since.
+ */
+export function forgetOmpToolBeforeOff(dataDir: string): void {
+  const file = readInboxAgents(dataDir);
+  if (file.tool_before_off?.["oh-my-pi"] === undefined) return;
+  delete file.tool_before_off["oh-my-pi"];
+  try {
+    writeInboxAgents(dataDir, file);
+  } catch {
+    // Not kept: OMP's on then restores the remembered value, as before.
+  }
+}
+
 export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options: ConnectOptions): Promise<string | null> {
   /** Said once the switch is done: the switch held, and something beside it did not (Qwen Code's trusted sender). */
   let notice: string | null = null;
@@ -2577,12 +2631,18 @@ export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options:
         problem = restore === true ? setInboxTool(way.host, true, e) : clearInboxTool(way.host, e);
         if (!problem && file.tool_before_off) delete file.tool_before_off[id];
       } else problem = null;
-    } else problem = setInboxTool(way.host, on, e);
+    } else {
+      problem = setInboxTool(way.host, on, e);
+      // Pi's own switch wrote the key Oh My Pi shares: what OMP's off remembered is no longer the person's latest choice.
+      if (!problem && way.host === "pi" && file.tool_before_off) delete file.tool_before_off["oh-my-pi"];
+    }
     if (problem) return problem;
     if (on && way.then && !way.then.setting && !way.then.done(e)) {
-      // One already running (started with the Inbox): wait for it rather than start a second.
+      // One already running (started with the Inbox): wait for it rather than start a second. One started here is
+      // tracked the same way, so a start meanwhile waits for it too.
       const running = agentInstallRunning(options.dataDir, id);
-      const unfinished = running ? await running : await finishToolConnect(e, way.then, options.agentTimeoutMs ?? way.then.timeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS);
+      const step = way.then;
+      const unfinished = running ? await running : await trackAgentInstall(options.dataDir, id, () => finishToolConnect(e, step, options.agentTimeoutMs ?? step.timeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS));
       if (unfinished && !way.then.done(e)) return unfinished;
       // The background install may have written the file meanwhile: carry on from what it wrote.
       if (running) Object.assign(file, readInboxAgents(options.dataDir), { tool_before_off: file.tool_before_off });

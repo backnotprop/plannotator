@@ -295,6 +295,7 @@ export interface UninstallEnvironment {
     command: string,
     args: readonly string[],
     env?: Readonly<Record<string, string>>,
+    cwd?: string,
   ) => Promise<UninstallCommandResult>;
   readonly scheduleWindowsSelfDelete: (
     target: string,
@@ -829,6 +830,8 @@ async function removeHostPlugins(
     optional?: boolean;
     /** Why it is left as it is (a local build the person put there), said as a warning; null: remove it. */
     leave?: () => string | null;
+    /** Run from this folder (Oh My Pi's from home, as the installers do, never a project's plugin scope). */
+    cwd?: string;
   }> = [
     {
       label: "Claude Code plugin plannotator@plannotator",
@@ -890,6 +893,7 @@ async function removeHostPlugins(
       command: "omp",
       args: ["plugin", "uninstall", OMP_EXTENSION_PACKAGE],
       optional: true,
+      cwd: environment.homeDir,
       // A local build (`link:`, `file:`, a path, git) is the person's own: left, and said.
       leave: () => {
         const ext = ompExtension(agentEnvironmentOf(environment));
@@ -961,7 +965,7 @@ async function removeHostPlugins(
       state.planned.push(action.label);
       continue;
     }
-    const result = await environment.runCommand(executable, action.args);
+    const result = await environment.runCommand(executable, action.args, undefined, action.cwd);
     if (result.exitCode === 0) {
       // Only what that command removes counts: another scope's install was named above.
       const remaining = action.references();
@@ -2592,6 +2596,7 @@ async function defaultRunCommand(
   command: string,
   args: readonly string[],
   env?: Readonly<Record<string, string>>,
+  cwd?: string,
 ): Promise<UninstallCommandResult> {
   let proc: Bun.Subprocess<"ignore", "pipe", "ignore">;
   try {
@@ -2600,6 +2605,7 @@ async function defaultRunCommand(
       stdout: "pipe",
       stderr: "ignore",
       env: { ...process.env, ...env },
+      ...(cwd ? { cwd } : {}),
       windowsHide: true,
     });
   } catch {

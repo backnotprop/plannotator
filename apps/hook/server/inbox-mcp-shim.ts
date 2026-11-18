@@ -366,10 +366,12 @@ export function processStartedAtMs(pid: number, platform: NodeJS.Platform = proc
  * thread (`confirmed`, the old rule's answer). Only when none did, the Pi or
  * OMP session the parent process claims, over a variable the shim merely
  * inherited (an OMP started from a Claude Code shell carries that session's
- * tag); then the inherited identity, as before.
+ * tag; one started from a Qwen Code shell carries Qwen's, which the Qwen read
+ * then drops as not its client's); then the inherited identity, as before.
  */
 export function inboxShimCallSession(hostSession: InboxHostSession | null, confirmed: InboxHostSession | null, piParent: (() => InboxHostSession | null) | undefined): InboxHostSession | null {
-  const clientSaid = confirmed !== hostSession || hostSession?.host === INBOX_T3_HOST;
+  // A client confirms an identity only by naming one: an inherited variable it dropped (null) is not its word.
+  const clientSaid = (confirmed !== null && confirmed !== hostSession) || hostSession?.host === INBOX_T3_HOST;
   if (clientSaid) return confirmed;
   return piParent?.() ?? confirmed;
 }
