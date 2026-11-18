@@ -428,6 +428,25 @@ describe("Claude Code as a launch host", () => {
     expect(w.calls().find((call) => call.startsWith("respawn"))).toContain("FROM_LOGIN=yes");
   });
 
+  test("Start in Rex: interactive claude in the folder as a session id picked now, with the launch's settings file and flags; nothing runs, and no message on the line", async () => {
+    const w = world();
+    const made = await w.host.rexCommand!({ ...w.launch, session_ref: null, own_mode: true }, { name: "Tidy the changelog", login: w.login, resume: false });
+    if (!made.ok) throw new Error(made.text);
+    expect(made.session).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(made.ref).toBe(made.session);
+    const settings = join(w.dataDir, "inbox", "launch", "lch_1", "settings.json");
+    expect(made.command).toBe(`cd '${w.root}' && exec claude '--session-id' '${made.session}' '--settings' '${settings}'`);
+    expect(made.command).not.toContain("changelog");
+    // The same settings file as a background start (its permission hook brings prompts to the Inbox too).
+    expect(JSON.parse(readFileSync(settings, "utf8")).env.PATH).toBe(w.login.PATH);
+    // Nothing was run: Rex runs it.
+    expect(existsSync(join(w.root, "calls.log")) ? w.calls().filter((call) => call.startsWith("--")) : []).toEqual([]);
+    // A reply to it once it ended: the same session again.
+    const again = await w.host.rexCommand!({ ...w.launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: w.login, resume: true });
+    expect(again.ok && again.command).toContain(`'--resume' '${made.session}'`);
+    expect(again.ok && again.command).toContain("'--permission-mode' 'auto'");
+  });
+
   test("a login env that can't reach `claude` (a shell read that failed) still starts it, from Claude's install folders", async () => {
     const w = world({ installFolderOnly: true, login: { FROM_LOGIN: "yes" } });
     expect(await w.host.start(w.launch, { name: "Inbox", login: w.login })).toMatchObject({ ok: true });

@@ -72,6 +72,8 @@
 /* The sidebar's Agents section and the animated agent marks (packages/inbox/agents/). */
 @import "../../packages/inbox/agents/agents.css";
 @import "../../packages/inbox/agents/iconDialog.css";
+/* The Rex status marks on agents' icons (packages/inbox/agents/rexMark.tsx). */
+@import "../../packages/inbox/agents/rexMark.css";
 /* Thread tags: the sidebar's Tags, Add tag, a tag's list header (packages/inbox/threadTags.css). */
 @import "../../packages/inbox/threadTags.css";
 @import "../../packages/inbox/cloudflare.css";

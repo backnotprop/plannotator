@@ -40,12 +40,14 @@ import { isAbsolute, join, resolve } from "node:path";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  INBOX_PLACE_POLL_FIELD,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_STEER_POLLS_POLL_FIELD,
   inboxClaimName,
   INBOX_TAGS_POLL_FIELD,
   INBOX_TOOL_NAME,
   inboxHealthPeeks,
+  inboxPlaceFromEnv,
   inboxSessionThreadsParams,
   inboxSessionThreadsText,
   inboxToolCall,
@@ -217,6 +219,8 @@ export interface InboxAgentConnectionOptions {
   tools: readonly InboxToolInfo[];
   /** The command that starts the Inbox. Default: PLANNOTATOR_BIN, else `plannotator` on PATH, else ~/.local/bin/plannotator. */
   command?: string;
+  /** The environment the host started with, where its place is read (`inboxPlaceFromEnv`). Default: process.env. */
+  env?: Readonly<Record<string, string | undefined>>;
 }
 
 /** The `plannotator_inbox` tool and the bridge doors, for one host process. */
@@ -729,12 +733,15 @@ export class InboxWake {
     } catch {
       plugin = null;
     }
+    const place = inboxPlaceFromEnv(this.connection.options.env ?? process.env);
     const response = await this.connection.bridge(
       INBOX_BRIDGE_POLL_PATH,
       this.sessionId,
       {
         waitMs,
         ...(typeof projectPath === "string" && projectPath ? { project_path: projectPath } : {}),
+        // Where the host lives (a Rex pane's ids): a hint the Inbox checks against Rex before it shows anything.
+        ...(place ? { [INBOX_PLACE_POLL_FIELD]: place } : {}),
         // The host's title for the session (additive): the To picker's name for it; empty clears it.
         ...(this.target.label ? { label: this.lastLabel } : {}),
         started_at: this.startedAt,
