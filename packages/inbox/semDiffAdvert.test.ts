@@ -17,9 +17,11 @@ test('an advert that never answers lets readers draw without semantic diffs, doe
   }) as typeof fetch;
   expect(await loadSemDiffAdvert(40)).toBeNull();
   expect(semDiffAdvertNow()).toBeNull();
-  const started = Date.now();
-  expect(await loadSemDiffAdvert(40)).toBeNull();
-  expect([asked, Date.now() - started < 20]).toEqual([1, true]);
+  const order: string[] = [];
+  const again = loadSemDiffAdvert(40).then((value) => order.push(`answer ${String(value)}`));
+  const limit = new Promise<void>((resolve) => setTimeout(resolve, 40)).then(() => order.push('the limit'));
+  await Promise.all([again, limit]);
+  expect([asked, order]).toEqual([1, ['answer null', 'the limit']]);
   await new Promise((resolve) => setTimeout(resolve, 100));
   expect(semDiffAdvertNow()).toBeUndefined();
   globalThis.fetch = (async () => new Response(JSON.stringify({ advert: { runtime: 'x' } }), { headers: { 'content-type': 'application/json' } })) as unknown as typeof fetch;

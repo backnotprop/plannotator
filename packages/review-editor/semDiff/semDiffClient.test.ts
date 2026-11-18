@@ -332,12 +332,13 @@ describe('a moved method is named by itself, not its class, in every language', 
 });
 
 test('a slow first answer while the engine and its grammar arrive is not a failure; a warm engine that stalls still is', async () => {
+  const timers: ReturnType<typeof setTimeout>[] = [];
   const replyAfter = (ms: number) => () =>
     ({
       onmessage: null as ((e: MessageEvent<SemDiffReply>) => void) | null,
       onerror: null,
       postMessage(request: SemDiffRequest) {
-        setTimeout(() => this.onmessage?.({ data: { id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' } } as MessageEvent<SemDiffReply>), ms);
+        timers.push(setTimeout(() => this.onmessage?.({ data: { id: request.id, ok: true, semanticOperations: [], semanticFolds: [], patch: '' } } as MessageEvent<SemDiffReply>), ms));
       },
       terminate() {},
     }) as unknown as Worker;
@@ -345,6 +346,7 @@ test('a slow first answer while the engine and its grammar arrive is not a failu
   expect(await client.attempt('a.ts', 'const a = 1;\n', 'const a = 2;\n')).toEqual({ result: null, failed: false });
   expect((await client.attempt('b.ts', 'const b = 1;\n', 'const b = 2;\n')).failed).toBe(true);
   client.dispose();
+  for (const timer of timers) clearTimeout(timer);
 });
 
 test('after a stalled file replaces a warm worker, the files queued behind it get the cold limit on the new one', async () => {
