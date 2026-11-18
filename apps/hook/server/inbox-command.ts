@@ -76,6 +76,7 @@ import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { isRemoteSession } from "@plannotator/server/remote";
 import { assertTestHome } from "@plannotator/server/test-home-guard";
 import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDisabled } from "@plannotator/server/inbox-agents";
+import { withoutRexPane } from "@plannotator/server/inbox-launch-env";
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
@@ -146,7 +147,8 @@ function spawnDetachedInbox(dataDir: string, tailscale: boolean): number | undef
  * real sessions. Without the marker, both switches pass through as before.
  */
 export function detachedInboxEnv(env: Readonly<Record<string, string | undefined>>, dataDir: string): Record<string, string | undefined> {
-  const out: Record<string, string | undefined> = { ...env, PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
+  // Not the Rex pane it was started from (`withoutRexPane`): the Inbox outlives it, and its agents are not in it.
+  const out: Record<string, string | undefined> = { ...withoutRexPane(env), PLANNOTATOR_DATA_DIR: dataDir, [LOCK_HELD_ENV]: "1", [DETACHED_ENV]: "1" };
   if (isAskAiChild(env)) {
     delete out.PLANNOTATOR_ASK_AI_CHILD;
     delete out.PLANNOTATOR_INBOX_TOOL;
