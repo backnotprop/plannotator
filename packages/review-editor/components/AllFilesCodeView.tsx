@@ -3006,7 +3006,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (selectedLines == null) return null;
     const file = itemIdToFile.get(selectedLines.id);
     const { start, end, side } = selectedLines.range;
-    if (!file || isLineRangeInPatch(file.patch, Math.min(start, end), Math.max(start, end), side === 'deletions' ? 'old' : 'new')) return selectedLines;
+    const drawn = (line: number) => isLineRangeInPatch(file!.patch, line, line, side === 'deletions' ? 'old' : 'new');
+    if (!file || (drawn(start) && drawn(end))) return selectedLines;
     const item = viewerRef.current?.getItem(selectedLines.id);
     return item?.type === 'diff' && item.fileDiff.isPartial === true ? null : selectedLines;
   }, [selectedLines, itemIdToFile]);

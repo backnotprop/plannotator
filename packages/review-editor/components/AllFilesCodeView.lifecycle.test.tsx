@@ -127,7 +127,7 @@ let host: HTMLElement | null = null;
 
 const file: DiffFile = {
   path: 'target.ts',
-  patch: 'diff --git a/target.ts b/target.ts\n--- a/target.ts\n+++ b/target.ts\n@@ -1 +1 @@\n-old\n+new',
+  patch: `diff --git a/target.ts b/target.ts\n--- a/target.ts\n+++ b/target.ts\n@@ -1,10 +1,10 @@\n-old\n+new\n${Array.from({ length: 9 }, (_, i) => ` line ${i + 2}`).join('\n')}`,
   additions: 1,
   deletions: 1,
   status: 'modified',
