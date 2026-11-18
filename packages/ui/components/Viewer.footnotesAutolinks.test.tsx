@@ -200,6 +200,25 @@ describe.if(hasDom)('comments made on the page before footnotes, links and refer
     expect(exportAnnotations(parseMarkdownToBlocks(THREE), [ann])).toMatch(/\(line 5\)/);
   });
 
+  test('an unanchored comment whose words come back paints and takes its block (and line label) back', async () => {
+    const reports: AnnotationRestoreReport[] = [];
+    const { ref, host } = await mount(() => {}, THREE, (r) => reports.push(r));
+    // As the plan editor stored it after a restore found its words nowhere: no block, words and positions kept.
+    const byPositions: Annotation = { ...oldAnchor('back', oldParagraphIndex(host, 'Closing'), 'Closing words.', 'Closing words.'), blockId: '' };
+    const bySearch: Annotation = { ...lost('backSearch', '', 'Closing'), id: 'backSearch' };
+    // A share link's comment comes with no block and no positions: it stays without one, as on main.
+    const shared: Annotation = { ...bySearch, id: 'shared', originalText: 'words.', startMeta: undefined, endMeta: undefined, startOffset: 0, endOffset: 0 };
+    await act(async () => ref.current!.applySharedAnnotations([byPositions, bySearch, shared]));
+    await settle();
+    expect(painted('back')).toBe('Closing words.');
+    expect(painted('backSearch')).toBe('Closing');
+    expect(painted('shared')).toBe('words.');
+    const last = reports.filter((r) => r.attempted.includes('back')).at(-1)!;
+    expect(last.unanchored).toEqual([]);
+    expect(last.moved?.map((m) => [m.id, m.blockId, m.startOffset])).toEqual([['back', 'block-6', 0], ['backSearch', 'block-6', 0]]);
+    expect(exportAnnotations(parseMarkdownToBlocks(THREE), [{ ...byPositions, blockId: 'block-6' }])).toMatch(/\(line 13\)/);
+  });
+
   test('a comment whose block is gone and whose words are written once still follows them', async () => {
     const reports: AnnotationRestoreReport[] = [];
     const { ref } = await mount(() => {}, MARKDOWN, (r) => reports.push(r));

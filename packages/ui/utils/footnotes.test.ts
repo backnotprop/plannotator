@@ -37,12 +37,15 @@ describe('footnote definitions in the parser', () => {
       ['A regex: `[^0-9]`.', undefined],
       ['[^0-9]: anything but digits', undefined],
       ['Cited[^x].', undefined],
-      // An uncited line right under a note was in that note's paragraph, and stays in its block.
-      ['[^x]: Real note.\n[^y]: Nobody cites me.', 'x'],
+      // An uncited line right under a note ends it and stays a paragraph where it is written.
+      ['[^x]: Real note.', 'x'],
+      ['[^y]: Nobody cites me.', undefined],
       ['[^z]: Nor me.', undefined],
     ]);
-    // An uncited line on its own is drawn where it is written, not in the notes list.
-    expect(indexFootnotes(blocks)!.bodyBlocks.map((b) => b.content)).toContain('[^z]: Nor me.');
+    // Uncited lines are drawn where they are written, not in the notes list.
+    const body = indexFootnotes(blocks)!.bodyBlocks.map((b) => b.content);
+    expect(body).toContain('[^y]: Nobody cites me.');
+    expect(body).toContain('[^z]: Nor me.');
   });
 
   test('a definition inside a code fence or written in a list continuation is not one', () => {

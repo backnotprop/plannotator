@@ -816,11 +816,16 @@ const parseBlocks = (markdown: string, options: ParseMarkdownOptions | undefined
       continue;
     }
     // Any other line the loop would add to a paragraph is the note's lazy
-    // text, an uncited `[^x]:` line included: it was in the same paragraph
-    // before notes were drawn, so it stays in the block with that id.
+    // text, except a `[^x]:` line nobody cites: that ends the note and stays
+    // an ordinary paragraph where it is written (its text never moves to the
+    // notes list). It was part of the note's paragraph before, so it has no
+    // id of its own there: `keepBlockIds` derives one (`block-k-fn2`).
     if (note) {
-      note.lines.push(line);
-      continue;
+      if (!FOOTNOTE_DEF_RE.test(line)) {
+        note.lines.push(line);
+        continue;
+      }
+      closeNote();
     }
 
     // Accumulate paragraph text

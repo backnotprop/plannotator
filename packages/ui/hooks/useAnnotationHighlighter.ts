@@ -1565,7 +1565,11 @@ export function useAnnotationHighlighter({
     // document, or a quote that also appears in the stored block — so the
     // stored id (and the export built from it) stays exactly as it was.
     const noteAnchor = (ann: Annotation, firstDom: Node | null | undefined, positionsStale: boolean) => {
-      if (!ann.blockId) return;
+      // No block: an annotation that came with none (a share link's, which
+      // has no positions either) keeps none. One a restore left unanchored
+      // keeps its saved positions (below); when its words come back and it
+      // paints, it takes the block it painted in again, and its line label.
+      if (!ann.blockId && !(ann.startMeta && ann.endMeta)) return;
       const blockEl = blockElementOf(firstDom);
       const blockId = blockEl?.dataset.blockId;
       if (!blockEl || !blockId || blockId === ann.blockId) return;

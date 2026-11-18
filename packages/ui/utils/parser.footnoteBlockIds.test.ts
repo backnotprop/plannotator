@@ -17,7 +17,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findQuestionBlocks } from '@plannotator/core/question-block';
 import { parseMarkdownToBlocks } from './parser';
-import { FOOTNOTE_DEF_RE } from './footnotes';
+import { FOOTNOTE_DEF_RE, indexFootnotes } from './footnotes';
 
 interface BaseBlock { id: string; type: string; content: string; startLine: number }
 const fixture = JSON.parse(readFileSync(join(import.meta.dir, '../../../tests/test-fixtures/footnote-block-ids.json'), 'utf8')) as {
@@ -42,7 +42,15 @@ describe('every block that is not a note keeps the id the parser gave it before 
           continue;
         }
         const same = base.get(block.id);
-        expect(same, `${block.id} "${block.content}"`).toBeDefined();
+        if (!same) {
+          // A `[^x]:` line nobody cites, written under a note: it was part of
+          // that note's paragraph, so it has no id of its own there and takes
+          // one derived from the block before it (no number from the count).
+          expect(block.type).toBe('paragraph');
+          expect(block.id).toMatch(/^block-\d+-fn\d+$/);
+          expect(FOOTNOTE_DEF_RE.test(block.content), `${block.id} "${block.content}"`).toBe(true);
+          continue;
+        }
         expect([same!.type, same!.startLine]).toEqual([block.type, block.startLine]);
         if (same!.content !== block.content) {
           // Only a paragraph a definition interrupted: the old block held the
@@ -72,14 +80,35 @@ describe('every block that is not a note keeps the id the parser gave it before 
   });
 });
 
-test('two blocks starting on one line (display math closing mid-line) and an uncited line under a note keep main\'s ids', () => {
-    for (const name of ['display math closing mid-line, then text', 'an uncited definition line right after a note']) {
+test('two blocks starting on one line (display math closing mid-line) keep main\'s ids', () => {
+  const doc = fixture.docs.find((d) => d.name === 'display math closing mid-line, then text')!;
+  expect(parseMarkdownToBlocks(doc.markdown).map((b) => b.id)).toEqual(doc.base.map((b) => b.id));
+});
+
+describe('a [^x]: line nobody cites, under a cited note, stays where it is written', () => {
+  for (const [name, inPlace, note] of [
+    ['an uncited definition line under a cited one, under a line', ['Sources:', '[^2]: RFC 9111', 'Task', 'Cites [^1].'], '[^1]: RFC 9110'],
+    ['an uncited definition line right after a note', ['Cite[^1].', '[^2]: Nobody cites this.', 'Task'], '[^1]: Cited note.'],
+  ] as const) {
+    test(name, () => {
       const doc = fixture.docs.find((d) => d.name === name)!;
-      expect(parseMarkdownToBlocks(doc.markdown).map((b) => b.id), name).toEqual(doc.base.map((b) => b.id));
-    }
-    // The uncited line stays in the block that held it: the note's.
-    const doc = fixture.docs.find((d) => d.name === 'an uncited definition line right after a note')!;
-    expect(parseMarkdownToBlocks(doc.markdown).find((b) => b.footnoteLabel === '1')!.content).toBe('[^1]: Cited note.\n[^2]: Nobody cites this.');
+      const blocks = parseMarkdownToBlocks(doc.markdown);
+      // Only the cited note goes to the notes list; the uncited line is not
+      // folded into it (it would move to the end of the document, marker and all).
+      expect(blocks.filter((b) => b.footnoteLabel !== undefined).map((b) => b.content)).toEqual([note]);
+      const body = indexFootnotes(blocks)!.bodyBlocks;
+      expect(body.map((b) => b.content)).toEqual([...inPlace]);
+      // In the order it is written.
+      const lines = body.map((b) => b.startLine);
+      expect(lines).toEqual([...lines].sort((a, b) => a - b));
+      // It takes a derived id; every other block keeps main's.
+      const uncited = body.find((b) => b.content.startsWith('[^2]:'))!;
+      expect(uncited.id).toMatch(/^block-\d+-fn\d+$/);
+      const others = blocks.filter((b) => b !== uncited && b.footnoteLabel === undefined);
+      for (const b of others) expect(doc.base.find((o) => o.id === b.id)?.startLine, b.content).toBe(b.startLine);
+      expect(new Set(blocks.map((b) => b.id)).size).toBe(blocks.length);
+    });
+  }
 });
 
 describe('what counts as a citation', () => {

@@ -452,6 +452,30 @@
       ]
     },
     {
+      "name": "an uncited definition line under a cited one, under a line",
+      "markdown": "Sources:\n[^1]: RFC 9110\n[^2]: RFC 9111\n\n- [x] Task\n\nCites [^1].",
+      "base": [
+        {
+          "id": "block-0",
+          "type": "paragraph",
+          "content": "Sources:\n[^1]: RFC 9110\n[^2]: RFC 9111",
+          "startLine": 1
+        },
+        {
+          "id": "block-1",
+          "type": "list-item",
+          "content": "Task",
+          "startLine": 5
+        },
+        {
+          "id": "block-2",
+          "type": "paragraph",
+          "content": "Cites [^1].",
+          "startLine": 7
+        }
+      ]
+    },
+    {
       "name": "unclosed $$ inside a note",
       "markdown": "Cite[^m].\n\n[^m]: costs\n$$100k for infra\n\n- [ ] Task",
       "base": [
