@@ -25,6 +25,7 @@ import {
 	unstageFile,
 } from "./server.ts";
 import { BROWSER_SESSION_STOPPED } from "./browser-session-error.ts";
+import { hasCurrentPiSession, isCtxAlive } from "./current-pi-session.ts";
 import type { SessionBridge } from "./generated/ai/session-bridge.ts";
 import type { HostControl } from "./generated/host-control.ts";
 import type { AnnotateBundleFile } from "./generated/annotate-bundle.ts";
@@ -831,6 +832,11 @@ async function createCodeReviewBrowserSession(
 
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
+		// The decision goes to the session that opened the review, or to the
+		// one Pi switched to since (index.ts): with neither, Send is refused
+		// and the draft kept. The server lives in Pi's process, so it never
+		// outlives Pi itself.
+		agentPresence: () => (isCtxAlive(ctx) || hasCurrentPiSession() ? "here" : "gone"),
 		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,

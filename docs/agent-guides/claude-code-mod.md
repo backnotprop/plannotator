@@ -376,10 +376,18 @@ is logged. The launch
 directory is created owner-only (`umask 077`, `chmod 700`) before `stdin` is
 written; once a decision is delivered its files are removed (`cleanupArgv`),
 except `feedback.md`, which Claude reads afterwards. A launch whose server
-crashed keeps its directory (its `stderr` explains why). Servers outlive Claude Code on purpose:
-the wrapper ignores SIGHUP and starts the CLI under `nohup` (a closing terminal
-otherwise took the server with it), so closing the terminal does not lose a
-review; verified live, `claude --continue` reattached and delivered it.
+crashed keeps its directory (its `stderr` explains why). Servers outlive the
+terminal on purpose: the wrapper ignores SIGHUP and starts the CLI under
+`nohup` (a closing terminal otherwise took the server with it), so closing the
+terminal does not lose a review; verified live, `claude --continue` reattached
+and delivered it. They do not outlive the session for long: a code review
+whose launch no Claude Code process has held (`watcher.json`, released at
+`session.end`, stale after 20 s) for 2 minutes of the server's own awake time
+ends by itself, keeping its draft and writing no result (exit 3, so the mod
+reports "stopped (exit 3) without a decision. Your draft is saved." when the
+session is resumed, and reopening the review brings the comments back). A
+decision written before that is delivered on resume as before. See "When the
+agent that asked for a review is gone" in `code-review.md`.
 
 *Two processes on one session.* `claude --continue` while the first process
 still runs gives two Claude Code processes the same session id, and both

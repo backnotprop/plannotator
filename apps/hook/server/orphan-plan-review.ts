@@ -37,7 +37,8 @@ export function classicPlanReviewOrphaned(check: ParentWatchMode & { currentPpid
   return watchesParent(check) && check.currentPpid !== check.startPpid;
 }
 
-function stdoutIsPipe(): boolean {
+/** Whether stdout is a pipe or socket (the decision then reaches only the process reading it). */
+export function stdoutIsPipe(): boolean {
   try {
     const stat = fstatSync(1);
     return stat.isFIFO() || stat.isSocket();

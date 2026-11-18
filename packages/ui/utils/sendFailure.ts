@@ -16,6 +16,11 @@ export const ALREADY_DECIDED_CODE = 'already_decided';
 /** The `code` of plan review's 409 for a decision on an older revision. */
 export const PLAN_REVISED_CODE = 'plan_revised';
 
+/** The `code` a code review server (Bun and Pi) puts on its 410 when the
+ *  agent that asked for the review is gone: nothing was sent and the draft
+ *  is kept (also `packages/shared/review-agent-gone.ts`). */
+export const AGENT_GONE_CODE = 'agent_gone';
+
 export type SendFailure =
   /** fetch rejected: the server is gone (stopped, crashed) or unreachable. */
   | { kind: 'unreachable' }
@@ -24,6 +29,9 @@ export type SendFailure =
   /** The review was decided already (another window sent it, or the session
    *  that opened it ended). Sending again cannot work. */
   | { kind: 'decided' }
+  /** The agent that asked for this review is gone: nothing was sent, the
+   *  comments are kept. Sending again cannot reach it. */
+  | { kind: 'agent-gone' }
   /** Anything else thrown before the response settled. */
   | { kind: 'unknown' };
 
@@ -58,7 +66,19 @@ export async function assertSendOk(res: Response): Promise<void> {
   if (res.status === 409 && (await refusalCode(res)) === ALREADY_DECIDED_CODE) {
     throw new DecisionSendError({ kind: 'decided' });
   }
+  if (res.status === 410 && (await refusalCode(res)) === AGENT_GONE_CODE) {
+    throw new DecisionSendError({ kind: 'agent-gone' });
+  }
   throw new DecisionSendError({ kind: 'rejected', status: res.status });
+}
+
+/**
+ * The failure to show for a send made after the page heard that the agent is
+ * gone and the server is quitting: whatever the request ran into (most often
+ * the stopped server), the reason is that the agent is gone.
+ */
+export function sendErrorAfterAgentGone(error: unknown, agentGone: boolean): unknown {
+  return agentGone ? new DecisionSendError({ kind: 'agent-gone' }, { cause: error }) : error;
 }
 
 export function sendFailureOf(error: unknown): SendFailure {
@@ -67,7 +87,7 @@ export function sendFailureOf(error: unknown): SendFailure {
 
 /** Whether sending the same decision again could work. */
 export function canRetrySend(failure: SendFailure): boolean {
-  return failure.kind !== 'decided';
+  return failure.kind !== 'decided' && failure.kind !== 'agent-gone';
 }
 
 /** The one sentence under the toast's title: why nothing reached the agent. */
@@ -79,6 +99,8 @@ export function describeSendFailure(failure: SendFailure): string {
       return `Plannotator answered with an error (${failure.status}).`;
     case 'decided':
       return 'This review was already decided, in another window or because its session ended.';
+    case 'agent-gone':
+      return 'The agent that asked for this review is gone. Your comments are kept.';
     default:
       return 'Something went wrong before it was sent.';
   }

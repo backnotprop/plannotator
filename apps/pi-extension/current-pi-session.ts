@@ -165,6 +165,11 @@ export function notifyCurrentPiSession(
 	}
 }
 
+/** Whether a Pi session is registered now (one that a browser tab's feedback can be delivered to). */
+export function hasCurrentPiSession(): boolean {
+	return !!getStore().current;
+}
+
 export function isCurrentPiSessionDifferentFrom(origin: PiSessionIdentity): boolean {
 	return isDifferentSession(origin, getStore().current?.identity);
 }
