@@ -194,6 +194,14 @@ export function OpenedCard({
           return cause instanceof Error ? cause.message : 'Not linked.';
         }
       }}
+      onUnlink={async (url) => {
+        try {
+          onChanged((await inboxApi.editCard(card.id, { op: 'unlink', url })).card);
+          return null;
+        } catch (cause) {
+          return cause instanceof Error ? cause.message : 'Not removed.';
+        }
+      }}
       onOpenThread={onOpenThread}
       onCreateThread={(opener) => onCreateThread(askTarget?.session ?? null, opener)}
     />
