@@ -211,6 +211,24 @@ describe("createMachinePulls", () => {
     expect(await pulls.stateThere(link, "github.com/northwind/api#7")).toBeNull();
   });
 
+  test("a read started before unlink cannot replace the board of the newly linked machine", async () => {
+    let release = () => {};
+    const old = peer(B, { hold: new Promise<void>((done) => (release = done)) });
+    const relinked = peer(B, { board: { pulls: [pull("northwind/api", 8)] } });
+    let linked = [old.link];
+    const pulls = createMachinePulls({ peers: () => linked });
+    pulls.start(false);
+    const stale = pulls.settled();
+    pulls.forget(B);
+    linked = [relinked.link];
+    const snapshot = pulls.start(false);
+
+    release();
+    await stale;
+    await pulls.settled();
+    expect(snapshot()[0]!.board!.pulls.map((pr) => pr.number)).toEqual([8]);
+  });
+
   test("unlinked: nothing of its board stays", async () => {
     const b = peer(B);
     let linked = [b.link];

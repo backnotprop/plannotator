@@ -108,6 +108,7 @@ import {
   type InboxMessage,
   type InboxProject,
   type InboxProjectRepo,
+  type InboxRestartAgents,
   type InboxTag,
   inboxStepsProgress,
 } from "@plannotator/core/inbox-types";
@@ -1283,7 +1284,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let port = 0;
   let baseUrl = "";
   let portChanged = false;
-  const statusListeners = new Set<() => void>();
+  const statusListeners = new Set<(restartAgents: InboxRestartAgents) => void>();
   /**
    * A reply draft was saved or deleted (inbox-reply-drafts.ts), or a compose draft saved, deleted or sent
    * (inbox-compose.ts, no thread: null): the windows' streams say `event: drafts`.
@@ -1355,7 +1356,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     installerPath: () => (launchReady ? launch.loginPath() : []),
     ...options.updates,
     onChange: () => {
-      for (const listener of statusListeners) listener();
+      if (statusListeners.size === 0) return;
+      const restartAgents = live.restartAgents();
+      for (const listener of statusListeners) listener(restartAgents);
     },
     onRestartWanted: () => requestRestart(),
   });
@@ -1925,6 +1928,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return rest;
   };
 
+  // Both fields describe the same sessions. The old Claude-only field reads
+  // from this response's snapshot so it never rechecks the plugin folders.
+  const restartStatus = (agents = live.restartAgents()) => ({
+    restart_claude_code: agents.runtimes["claude-code"] ?? 0,
+    restart_agents: agents,
+  });
+
   /**
    * The list model: one row per thread, placed in the approved sections, with
    * the project as a label and an optional filter (`?project=prj_...`), which
@@ -2043,10 +2053,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       update: updates.current(),
       /** This Inbox started on a newer version than the last one: the sidebar's "What's new in X" link. */
       updated: updates.updated(),
-      /** Claude Code sessions a restart would bring up to date (inbox-restart.ts): the sidebar's "Reload Claude Code N". Additive. */
-      restart_claude_code: live.restartCount(),
-      /** Every runtime's sessions a reload brings up to date (Claude Code, Pi, Oh My Pi, OpenCode 2): "Reload agents N". Additive. */
-      restart_agents: live.restartAgents(),
+      ...restartStatus(),
       /** Checking for updates has failed for hours: the sidebar's quiet "Can't check for updates". Additive. */
       update_check_failing: updates.checkFailing(),
       notice: portChanged ? "The Inbox moved to a new port: allow notifications again on this page." : null,
@@ -4076,9 +4083,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const unsubscribe = store.subscribe(sendLine);
         // `updated` (additive): the "What's new in X" link appears or goes once its notes are fetched or cannot be.
         // `restart_claude_code` (additive): the sidebar's "Reload Claude Code N" follows the sessions as they restart.
-        const onStatus = () =>
+        const onStatus = (restartAgents: InboxRestartAgents) =>
           send(
-            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), restart_claude_code: live.restartCount(), restart_agents: live.restartAgents(), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
+            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), ...restartStatus(restartAgents), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
           );
         statusListeners.add(onStatus);
         // An Inbox window (not the phone's door): counted while its stream is open, with what it reported.
@@ -4863,10 +4870,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The sidebar's "Reload Claude Code N" is pushed as it changes (a session restarts, goes away, or an update lands).
   let lastRestartCount = "";
   const restartWatch = setInterval(() => syncSection("timer:restart", () => {
-    const count = JSON.stringify(live.restartAgents());
+    const restartAgents = live.restartAgents();
+    const count = JSON.stringify(restartAgents);
     if (count === lastRestartCount) return;
     lastRestartCount = count;
-    for (const listener of statusListeners) listener();
+    for (const listener of statusListeners) listener(restartAgents);
   }), INBOX_RESTART_WATCH_MS);
   (restartWatch as { unref?: () => void }).unref?.();
 

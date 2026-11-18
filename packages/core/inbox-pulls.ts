@@ -397,6 +397,7 @@ export interface InboxPullStack {
 const LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
 /** A repository's usual trunk names, when the forge did not say its default branch. */
 const TRUNK = /^(main|master)$/;
+const MERGED_STACK_LOOKBACK = 5;
 
 /** A long-lived branch (`main`, `develop`, `release/…`): what a stack's bottom layer lands on. */
 export function inboxPullLongLived(branch: string): boolean {
@@ -427,7 +428,7 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   // The PR a branch's layers sit on, when two open PRs come from one branch (a backport: a second PR from the same
   // branch, into a release branch): the one into the repository's trunk (its default branch when the forge said,
   // else main or master), then into another long-lived branch, then the lowest number, whatever the order.
-  const rank = (pull: InboxPull) => (pull.base === pull.default_branch || TRUNK.test(pull.base) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
+  const rank = (pull: InboxPull) => ((pull.default_branch ? pull.base === pull.default_branch : TRUNK.test(pull.base)) ? 0 : LONG_LIVED.test(pull.base) ? 1 : 2);
   for (const pull of open) {
     if (!ownHead(pull)) continue;
     const at = `${repoKey(pull)}\u0000${pull.head}`;
@@ -438,9 +439,10 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   const parentOf = (pull: InboxPull): { parent: InboxPull; via: InboxPull[] } | null => {
     const via: InboxPull[] = [];
     let base = pull.base;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i <= MERGED_STACK_LOOKBACK; i++) {
       const parent = headOf.get(`${repoKey(pull)}\u0000${base}`);
       if (parent) return parent.key !== pull.key ? { parent, via } : null;
+      if (i === MERGED_STACK_LOOKBACK) return null;
       const between = merged.find((m) => ownHead(m) && repoKey(m) === repoKey(pull) && m.head === base && !LONG_LIVED.test(m.head) && !via.includes(m));
       if (!between) return null;
       via.unshift(between);
@@ -484,7 +486,7 @@ export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
     }
     const under: InboxPull[] = [];
     let base = root.base;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < MERGED_STACK_LOOKBACK; i++) {
       const below = merged.find(
         (pull) =>
           ownHead(pull) &&
