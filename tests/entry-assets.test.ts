@@ -386,6 +386,14 @@ describe('review entry assets', () => {
   // (`inlineDynamicImports`, vite-plugin-singlefile) builds and passes
   // everything else while quietly restoring the ~25 MB first load over a
   // tailnet or tunnel, so this reads the ARTIFACT.
+  const forkBundles = { 'apps/hook/dist/inbox.html': true, 'apps/hook/dist/surface.html': false, 'apps/hook/dist/shape.html': false };
+  for (const [path, fork] of Object.entries(forkBundles)) {
+    test.skipIf(!existsSync(resolve(root, path)))(`${path} draws diffs with ${fork ? 'the vendored fork' : 'the stock'} @pierre/diffs`, () => {
+      const onFork = readFileSync(resolve(root, path), 'utf8').includes('data-connector-level');
+      expect({ path, onFork }).toEqual({ path, onFork: fork });
+    });
+  }
+
   const packedBundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/review.html'];
   for (const path of packedBundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} loads only its entry chunk and stylesheet up front`, async () => {

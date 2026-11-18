@@ -2460,6 +2460,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // CodeView recycles elements across items.
       nodeToItemIdRef.current.set(node, context.id);
       itemNodeRef.current.set(context.id, node);
+      if (heldSelectionIdRef.current === context.id && context.fileDiff.isPartial !== true) setWholeAfterHold((n) => n + 1);
       if (flushesFiles) syncTrailingRow(node, context);
       if (powerUpStreamRef.current) keepPowerUpInStep(node);
       prefetchWholeFile(context.id);
@@ -3002,15 +3003,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // live CodeView selection without re-running on every drag delta.
   const selectedLinesRef = useRef(selectedLines);
   selectedLinesRef.current = selectedLines;
+  const heldSelectionIdRef = useRef<string | null>(null);
+  const [wholeAfterHold, setWholeAfterHold] = useState(0);
   const drawnSelectedLines = useMemo(() => {
+    heldSelectionIdRef.current = null;
     if (selectedLines == null) return null;
     const file = itemIdToFile.get(selectedLines.id);
-    const { start, end, side } = selectedLines.range;
-    const drawn = (line: number) => isLineRangeInPatch(file!.patch, line, line, side === 'deletions' ? 'old' : 'new');
-    if (!file || (drawn(start) && drawn(end))) return selectedLines;
+    if (!file) return selectedLines;
+    const { start, end, side, endSide } = selectedLines.range;
+    const drawn = (line: number, lineSide: typeof side) => isLineRangeInPatch(file.patch, line, line, lineSide === 'deletions' ? 'old' : 'new');
+    if (drawn(start, side) && drawn(end, endSide ?? side)) return selectedLines;
     const item = viewerRef.current?.getItem(selectedLines.id);
-    return item?.type === 'diff' && item.fileDiff.isPartial === true ? null : selectedLines;
-  }, [selectedLines, itemIdToFile]);
+    if (item?.type === 'diff' && item.fileDiff.isPartial !== true) return selectedLines;
+    heldSelectionIdRef.current = selectedLines.id;
+    return null;
+  }, [selectedLines, itemIdToFile, wholeAfterHold]);
 
   // Reconcile the App-level `pendingSelection` (the range the toolbar / AI is
   // operating on) with CodeView's highlighted lines. CodeView selection is

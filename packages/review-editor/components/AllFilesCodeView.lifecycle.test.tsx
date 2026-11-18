@@ -8,6 +8,7 @@ let codeViewMounts = 0;
 let codeViewUnmounts = 0;
 let scrollTargets: Array<Record<string, unknown>> = [];
 let lastCodeViewProps: Record<string, unknown> | null = null;
+let viewerItems = new Map<string, { id: string; type: 'diff'; fileDiff: { isPartial: boolean } }>();
 let toolbarSelections: Array<SelectedLineRange | null> = [];
 let viewport: { scrollTop: number; tops: Record<string, number> } = { scrollTop: 0, tops: {} };
 
@@ -64,6 +65,7 @@ mock.module('@pierre/diffs/react', () => ({
     ref: React.ForwardedRef<unknown>,
   ) {
     const itemsRef = useRef(new Map((props.initialItems ?? []).map((item) => [item.id, item])));
+    viewerItems = itemsRef.current as unknown as typeof viewerItems;
     lastCodeViewProps = props as unknown as Record<string, unknown>;
     useEffect(() => {
       codeViewMounts += 1;
@@ -285,6 +287,27 @@ describe('AllFilesCodeView semantic client switch', () => {
 
     expect(codeViewMounts).toBe(2);
     expect(scrollTargets).toContainEqual({ type: 'item', id: second, align: 'start', offset: -240 });
+  });
+});
+
+describe('AllFilesCodeView selection on a line the partial diff does not draw', () => {
+  test.skipIf(!hasDom)('holds the picked comment back while the file is partial and hands it over once the file is whole', async () => {
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    const comment = { id: 'far', type: 'comment', filePath: 'target.ts', lineStart: 20, lineEnd: 20, side: 'new', text: 'Why?', createdAt: 0 } as unknown as React.ComponentProps<typeof AllFilesCodeView>['annotations'][number];
+    await render({ annotations: [comment] });
+    await render({ annotations: [comment], selectedAnnotationId: 'far' });
+    expect(lastCodeViewProps?.selectedLines).toBeNull();
+
+    const item = [...viewerItems.values()][0]!;
+    item.fileDiff.isPartial = false;
+    const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: { item: unknown }) => void };
+    await act(async () => {
+      options.onPostRender(document.createElement('div'), {}, 'update', { item });
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    expect(lastCodeViewProps?.selectedLines).toEqual({ id: item.id, range: { start: 20, end: 20, side: 'additions' } });
   });
 });
 
