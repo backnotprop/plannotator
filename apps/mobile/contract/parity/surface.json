@@ -703,6 +703,7 @@
       "DoorPicksAnswer.message_id",
       "DoorPicksAnswer.questions",
       "DoorPicksAnswer.reply",
+      "DoorPicksBody.confirm_full",
       "DoorPicksBody.idempotency_key",
       "DoorPicksBody.questions",
       "DoorPicksBody.unsent_only",

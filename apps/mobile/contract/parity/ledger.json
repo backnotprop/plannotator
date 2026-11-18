@@ -12138,7 +12138,9 @@
     {
       "id": "agents-185",
       "title": "\"Or allow this and switch the session to Auto mode · Full permissions\" (Full asks to confirm the first time)",
-      "surface": [],
+      "surface": [
+        "field:DoorPicksBody.confirm_full"
+      ],
       "flows": [],
       "mobile": "v1",
       "why": "Confirm alert for Full",

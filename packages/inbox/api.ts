@@ -66,6 +66,7 @@ import type {
 } from '@plannotator/core/inbox-types';
 import { inboxCommentPicture } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
+import { inboxPickBody } from '@plannotator/core/inbox-answers';
 import { inboxSectionsAsOf } from '@plannotator/core/inbox-snooze';
 import { NO_FILE_OPS, type ReplyDraftFileOps } from '@plannotator/core/inbox-reply-draft';
 import { FEEDBACK_UNAVAILABLE } from '@plannotator/core/product-feedback';
@@ -1430,11 +1431,7 @@ export const inboxApi = {
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
   pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean; keepalive?: boolean } = {}) =>
-    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
-      questions: [{ key, revision, answer }],
-      ...(options.unsentOnly ? { unsent_only: true } : {}),
-      ...(options.confirmFull ? { confirm_full: true } : {}),
-    }, { keepalive: options.keepalive }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
+    post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), inboxPickBody(key, revision, answer, options), { keepalive: options.keepalive }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),
    * or taking it back (`null`). `staged` (the thread's checklist; approval
