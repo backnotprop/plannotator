@@ -7,7 +7,9 @@
  *
  * Suites: list (rows to sections, order, bold and the badge), words (each word
  * with sample parts), time (the window's time words in a fixed zone), crypto
- * (the relay's collapse id, beside the existing relay vectors). The stream
+ * (the relay's collapse id, beside the existing relay vectors), questions (the
+ * answer each act makes and the body that saves it), skew (health answers and
+ * app headers read by the door's version rules). The stream
  * suite reads with the window's own parser, so it has its own generator,
  * scripts/mobile/vectors-stream.ts.
  */
@@ -15,15 +17,19 @@ import { createHmac } from 'node:crypto';
 import { deriveRelayKeys } from '../../packages/core/crypto';
 import { autoAfterText, reaskRowLine, sentRowLine } from '../../packages/core/inbox-delivery-line';
 import { formatCount, plural, questionCount, waitCount } from '../../packages/core/inbox-format';
-import { inboxHasUnsent, type InboxListRow } from '../../packages/core/inbox-types';
+import type { InboxListRow, InboxQuestion } from '../../packages/core/inbox-types';
+import { choiceAnswer, inboxPickBody, otherAnswer, skipAnswer, textAnswer } from '../../packages/core/inbox-answers';
+import { formatInboxAppHeader, inboxDoorOffers, parseInboxAppHeader, readInboxDoorHealth, type InboxDoorClient } from '../../packages/core/inbox-door-version';
 import { tabBadgeLabel, inboxTabCount } from '../../packages/inbox/tabCount';
-import { inboxListSections, inboxRowUnread, inboxSectionOf, type InboxSectionFacts } from '../../packages/shared/inbox/list';
+import { inboxListSections, inboxRowDraftOnly, inboxRowUnread, inboxSectionOf, type InboxSectionFacts } from '../../packages/shared/inbox/list';
 import { ROOT, cli, jsonText, readRepoText, type Output } from './lib';
 import { buildWords } from './words';
 
 export const FIXTURES = {
   list: 'apps/mobile/contract/fixtures/list.json',
   time: 'apps/mobile/contract/fixtures/time.json',
+  questions: 'apps/mobile/contract/fixtures/questions.json',
+  skew: 'apps/mobile/contract/fixtures/skew.json',
   relay: 'packages/core/fixtures/inbox-relay-vectors.json',
 } as const;
 
@@ -32,6 +38,8 @@ export const VECTORS = {
   words: 'apps/mobile/contract/vectors/words.json',
   time: 'apps/mobile/contract/vectors/time.json',
   crypto: 'apps/mobile/contract/vectors/crypto.json',
+  questions: 'apps/mobile/contract/vectors/questions.json',
+  skew: 'apps/mobile/contract/vectors/skew.json',
 } as const;
 
 const TIME_SCRIPT = 'scripts/mobile/vectors-time.ts';
@@ -46,8 +54,7 @@ export function listVectors(): unknown {
   const fixture = JSON.parse(readRepoText(FIXTURES.list)) as { rows: FixtureRow[] };
   const rows = fixture.rows.map((row) => {
     const section = inboxSectionOf(row);
-    // The store's own rule, inline there (packages/shared/inbox/store.ts, the list row's `unread`).
-    const draftOnly = section === 'new' && row.unseen === 0 && !row.answered_not_sent && inboxHasUnsent(row.unsent);
+    const draftOnly = inboxRowDraftOnly(section, row.unseen, row.answered_not_sent, row.unsent);
     return { row, section, unread: inboxRowUnread(section, row.unseen, draftOnly) };
   });
   const listRows = rows.map(({ row, section }) => ({ ...row, section }) as unknown as InboxListRow);
@@ -145,12 +152,72 @@ export async function cryptoVectors(): Promise<unknown> {
   };
 }
 
+type Act = { question: string; note?: string; unsentOnly?: boolean; confirmFull?: boolean } & (
+  | { act: 'choice'; selected: string[] }
+  | { act: 'other'; other: string }
+  | { act: 'text'; text: string }
+  | { act: 'skip' }
+  | { act: 'clear' }
+);
+
+/** Each act on a question: the answer the window's builders make, and the pick body that saves it (null: taken back). */
+export function questionVectors(): unknown {
+  const fixture = JSON.parse(readRepoText(FIXTURES.questions)) as { questions: InboxQuestion[]; acts: Act[] };
+  const byKey = new Map(fixture.questions.map((q) => [q.key, q]));
+  return {
+    about: about('Each act: the answer the window builds (packages/core/inbox-answers.ts) and the body POST messages/:id/picks takes, at the question\'s revision. The door adds idempotency_key.', FIXTURES.questions),
+    cases: fixture.acts.map((act) => {
+      const q = byKey.get(act.question);
+      if (!q) throw new Error(`vectors.ts: no question ${act.question}`);
+      const note = act.note ?? '';
+      const answer =
+        act.act === 'choice' ? choiceAnswer(q, act.selected, note)
+        : act.act === 'other' ? otherAnswer(q, act.other, note)
+        : act.act === 'text' ? textAnswer(q, act.text, note)
+        : act.act === 'skip' ? skipAnswer(q, note)
+        : null;
+      return { act, message_id: q.message_id, answer, body: inboxPickBody(q.key, q.revision, answer, { unsentOnly: act.unsentOnly, confirmFull: act.confirmFull }) };
+    }),
+  };
+}
+
+type SkewCase = { note: string; client: string; health: unknown };
+
+/** Health answers read by the door's own rules (what the app offers), and app headers as the door parses them. */
+export function skewVectors(): unknown {
+  const fixture = JSON.parse(readRepoText(FIXTURES.skew)) as {
+    clients: Record<string, InboxDoorClient>; routes: string[]; health: SkewCase[];
+    big_contract: { note: string; client: string; health_text: string }; headers: string[];
+  };
+  const read = ({ note, client, health }: SkewCase, text?: string) => {
+    const c = fixture.clients[client];
+    if (!c) throw new Error(`vectors.ts: no client ${client}`);
+    const skew = readInboxDoorHealth(health, c);
+    return {
+      note, client, ...(text === undefined ? { health } : { health_text: text }), skew,
+      offers: fixture.routes.map((route) => ({ route, direct: inboxDoorOffers(skew, route, 'direct'), relay: inboxDoorOffers(skew, route, 'relay') })),
+    };
+  };
+  const big = fixture.big_contract;
+  return {
+    about: about('Each health answer as the app reads it (readInboxDoorHealth) and which routes it then offers, directly and through the relay (inboxDoorOffers); then each X-Plannotator-App header as the door parses it (null: read as no header).', FIXTURES.skew),
+    clients: fixture.clients,
+    health: [...fixture.health.map((h) => read(h)), read({ note: big.note, client: big.client, health: JSON.parse(big.health_text) }, big.health_text)],
+    headers: fixture.headers.map((header) => {
+      const app = parseInboxAppHeader(header);
+      return { header, app, formatted: app ? formatInboxAppHeader(app) : null };
+    }),
+  };
+}
+
 export async function generateVectors(): Promise<Output[]> {
   return [
     { path: VECTORS.list, text: jsonText(listVectors()) },
     { path: VECTORS.words, text: jsonText(wordVectors()) },
     { path: VECTORS.time, text: jsonText(timeVectors()) },
     { path: VECTORS.crypto, text: jsonText(await cryptoVectors()) },
+    { path: VECTORS.questions, text: jsonText(questionVectors()) },
+    { path: VECTORS.skew, text: jsonText(skewVectors()) },
   ];
 }
 

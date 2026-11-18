@@ -57,13 +57,13 @@ A fixture (`fixtures/<suite>.json`) is invented input. A vector (`vectors/<suite
 | `words` | none | Each word template filled with sample parts; the counting words | The word functions in `packages/core` |
 | `time` | `fixtures/time.json`: moments, a "now" and a time zone | `shortTime`, `whenTime`, `dayWords`, `dateTime`, `clockTime`, `fullTime`, and `normalise`: the rule and examples for iOS's U+202F before AM and PM | `packages/core/inbox-format.ts`, run in its own process with `TZ` set (`scripts/mobile/vectors-time.ts`), because the formatters read the zone when they load |
 | `crypto` | `packages/core/fixtures/inbox-relay-vectors.json` (the existing relay vectors) | The push collapse id per thread. The keys stay in the relay file; the app derives the collapse key itself | `deriveRelayKeys` and the Inbox's HMAC step |
+| `questions` | `fixtures/questions.json`: questions and what the person does on each | The answer each act makes, and the pick body that saves it (`answer: null` takes a pick back) | `choiceAnswer`, `otherAnswer`, `textAnswer`, `skipAnswer`, `inboxPickBody` (`packages/core/inbox-answers.ts`) |
+| `skew` | `fixtures/skew.json`: health answers, two app clients, app headers | What the app makes of each health answer (`ok`, `inbox_needs_update`, `app_needs_update`) and which routes it then offers, directly and through the relay; how the door parses each `X-Plannotator-App` header | `readInboxDoorHealth`, `inboxDoorOffers`, `parseInboxAppHeader` (`packages/core/inbox-door-version.ts`) |
 | `stream` | `fixtures/stream.json`: bytes as the Inbox writes them, and cut points | The frames the window's reader takes | `parseEventStreamText` (`packages/inbox/sharedEvents.ts`), with its own generator, `scripts/mobile/vectors-stream.ts`, and its own test, `tests/mobile-stream-vectors.test.ts` |
 
-Four of the suites that slice S1 needs have no generator yet:
+Two of the suites that slice S1 needs have no generator yet:
 
-- `questions`: the answer builders and the pick body are now in `packages/core/inbox-answers.ts` (#3686). The suite follows when that lands.
-- `push`: it waits for the push plaintext builder that brief F6a exports to `packages/core`.
-- `skew`: it waits for the door's contract version (brief F1).
+- `push`: brief F6a's own push vectors (`packages/core/fixtures/inbox-relay-push-v2-vectors.json`) will be referenced from here, not made twice, once F6a is on main. The collapse id then comes from its `inboxPushCollapseId`.
 - `decode`: real list and thread answers. Brief F4 defines the device view these come from.
 
 To add a fixture:
@@ -151,7 +151,7 @@ Then run `bun scripts/mobile/all.ts`. A row that names an entry the window no lo
 - the default theme, `packages/ui/themes/plannotator.css` (another theme file does not select it);
 - a module a word comes from (`scripts/mobile/words.ts` imports them);
 - what the parity surface reads: the server's route files, `packages/ui/types.ts` (blocks), `packages/inbox/settingsRoute.ts` (Settings sections) and the capability files;
-- what the vectors run: `packages/shared/inbox/list.ts`, `packages/inbox/tabCount.ts`, `packages/core/inbox-format.ts`, `packages/core/crypto.ts`, the word modules;
+- what the vectors run: `packages/shared/inbox/list.ts`, `packages/inbox/tabCount.ts`, `packages/core/inbox-format.ts`, `packages/core/crypto.ts`, `packages/core/inbox-answers.ts`, `packages/core/inbox-door-version.ts`, the word modules;
 - the contract files themselves.
 
 A change to the window's components or `packages/inbox/api.ts`, or to the rest of the shared UI, does not select it. `scripts/ci-affected-map.test.ts` checks this.
@@ -181,7 +181,8 @@ If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 - The flows are checked against the window and cite it. In the list: left swipe is Archive only, the undo banner stays 7 s, the badge counts threads with unseen agent messages, and a picked card reads "Picked <time> · in your draft".
 - About 33 v1 features use door routes that a phone token cannot reach today (`grant: machine`: the Board, pulls, launch, open-in and more), and `window-door-gap` lists v1 features with no door route at all. S1 should use only `grant: phone` routes.
 - Time words: the vectors print U+0020 before AM and PM, and iOS's en_US format prints U+202F. Normalise both sides as `vectors/time.json` `normalise.rule` says, and test in the fixture's zone (UTC).
-- The suites `questions`, `push`, `skew` and `decode` do not exist yet (see Fixtures and vectors).
+- The suites `push` and `decode` do not exist yet (see Fixtures and vectors).
+- Skew: a `contract` or `min_app_contract` that is not a whole number from 0 to 2^53 − 1 makes the whole `door` unreadable, so the app treats it as an Inbox from before the handshake. `vectors/skew.json` holds the cases, including a number above 2^53 that `Int64` could hold.
 - Only the words in `words.json` (about 30) are generated. Any other window word needs a product constant first, in its own pull request.
 - `tokens.json` names the fonts Inter and Geist Mono. Bundling them in the app needs their OFL notices.
 - `DoorPicksBody` is the window's own pick body (`inboxPickBody` in `packages/core/inbox-answers.ts`) plus `idempotency_key`, so it has `unsent_only` and `confirm_full`. A pick's `answer: null` takes it back, and `Wire.swift` writes the null. The other bodies in `door-shapes.ts` (pair, seen, reply, the error and the frames) are still written by hand until the product has types for them.
