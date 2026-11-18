@@ -38,6 +38,7 @@ import { retryTies, startReview } from './startReviews';
 import { untiedStarts } from './reviewStarts';
 import type { InboxToastModel } from '../components/Toast';
 import { useToastAbove } from '../toastAbove';
+import { focusWhenGone, hideWithUndo } from '../pulls/hiddenPulls';
 import { SheetTable, type TableSection } from './SheetTable';
 import { nextSort, pullWords, sortUnits, type SheetLayout, type TableSort } from './tableModel';
 import {
@@ -690,6 +691,20 @@ export function SheetPage(props: SheetPageProps) {
         hide(false);
         props.onOpenThread!(threadOf(pop.pull.key)!);
       } : undefined}
+      onHide={() => {
+        // The tile leaves with the popover: focus goes to the PR now in its place.
+        const root = pop.anchor.closest('.pn-inbox');
+        focusWhenGone(
+          () =>
+            [...(root?.querySelectorAll<HTMLElement>('[data-pr-tile], [data-pr-row]') ?? [])].flatMap((el) => {
+              const target = el.matches('[data-pr-tile]') ? el : el.querySelector<HTMLElement>('[data-pr-open]');
+              return target ? [{ id: el.getAttribute('data-pr-tile') ?? el.getAttribute('data-pr-row') ?? '', el: target }] : [];
+            }),
+          pop.pull.key,
+        );
+        hide(false);
+        void hideWithUndo([pop.pull], props.onToast);
+      }}
       onHold={(hold) => {
         held.current = hold;
       }}
@@ -734,6 +749,25 @@ export function SheetPage(props: SheetPageProps) {
   const reviewControl = live.at !== 'running' && pickedPulls.length > 0 && (
     <button type="button" className="ib-prs-btn" onClick={runReviews} data-pr-review="">
       {startButtonWords(reviews.groups.length)}
+    </button>
+  );
+  // Hide (hiddenPulls.ts): every pick leaves the board and Reviews at once; nothing changes on the forge. The toast's Undo shows them again.
+  const hideControl = live.at !== 'running' && pickedPulls.length > 0 && (
+    <button
+      type="button"
+      className="ib-prs-btn"
+      onClick={() => {
+        const list = pickedPulls;
+        void hideWithUndo(list, props.onToast).then((hid) => {
+          if (!hid) return;
+          setPicked((was) => new Set([...was].filter((key) => !list.some((pull) => pull.key === key))));
+          anchor.current = null;
+          setBulk({ at: 'idle' });
+        });
+      }}
+      data-pr-hide=""
+    >
+      Hide {pickedPulls.length}
     </button>
   );
   const threadLink = (threadId: string, words: string, key: string) =>
@@ -877,6 +911,7 @@ export function SheetPage(props: SheetPageProps) {
               {mergeControl}
               {closeControl}
               {reviewControl}
+              {hideControl}
               {mergeNote}
               {!busy && (
                 <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
@@ -971,6 +1006,7 @@ export function SheetPage(props: SheetPageProps) {
             {mergeControl}
             {closeControl}
             {reviewControl}
+            {hideControl}
             {!busy && (
               <button type="button" className="ib-prs-btn ib-prs-end" onClick={leaveSelect} data-pr-clear="">
                 Clear
@@ -1024,6 +1060,8 @@ function TilePopover(props: {
   onOpenStack: () => void;
   /** The PR's review thread, when it has one. */
   onOpenThread?: () => void;
+  /** Hide it from the lists (hiddenPulls.ts); nothing changes on the forge. */
+  onHide: () => void;
   /** A merge under way or done: keep the popover open (true), or let it go again (false). */
   onHold: (hold: boolean) => void;
   /** The merge went and "Merged" was shown for `MERGED_SHOWN_MS`: close, and the PR leaves Open. */
@@ -1231,6 +1269,13 @@ function TilePopover(props: {
                 </button>
               )}
             </span>
+          )}
+          {/* Last, so Merge's second click stays where the first one was. An open PR only, and never mid-merge. */}
+          {open && merge.at !== 'merging' && merge.at !== 'done' && (
+            <button type="button" className="ib-prpop-btn" onClick={props.onHide} tabIndex={tabIndex} title={`Hide from your lists. It stays open on ${forgeName(pull)}.`} data-pr-pop-hide="">
+              <Icon name="eyeOff" size={13} />
+              Hide
+            </button>
           )}
         </div>
         {!phone && notes}
