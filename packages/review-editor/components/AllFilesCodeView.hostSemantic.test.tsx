@@ -389,10 +389,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
 
   for (const [gesture, shown] of [
     ['pointermove', 'semantic'],
-    ['pointerdown', 'semantic'],
+    ['pointerdown', 'off'],
     ['click', 'off'],
     ['Enter', 'off'],
-    ['touch that scrolls', 'semantic'],
+    ['touch that scrolls', 'off'],
     ['tap', 'off'],
   ] as const) {
     test.skipIf(!hasDom)(`an arrow met by ${gesture} before the note arrives: the note ends ${shown === 'semantic' ? 'shown by itself' : 'offered, the opened lines left alone'}`, async () => {
@@ -406,22 +406,35 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
         dispose: () => {},
       };
       const { read } = hostReader();
-      await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
-      await pressArrow(
-        gesture === 'Enter'
-          ? [Object.assign(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }))]
-          : gesture === 'touch that scrolls'
-            ? [touchAt('touchstart', 0), touchAt('touchend', 60)]
-            : gesture === 'tap'
-              ? [touchAt('touchstart', 0), touchAt('touchend', 2)]
-              : gesture,
-      );
-      const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
-      await act(async () => {
-        await options.loadDiffFiles({ name: 'a.ts' });
-        await new Promise((resolve) => setTimeout(resolve, 600));
-      });
-      expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe(shown);
+      const realRect = Element.prototype.getBoundingClientRect;
+      const realSizes = (['scrollHeight', 'clientHeight'] as const).map((name) => [name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name)] as const);
+      Element.prototype.getBoundingClientRect = () => ({ x: 0, y: 0, left: 0, right: 800, width: 800, top: 0, bottom: 700, height: 700, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => 3000 });
+      Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
+      try {
+        await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
+        await pressArrow(
+          gesture === 'Enter'
+            ? [Object.assign(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }))]
+            : gesture === 'touch that scrolls'
+              ? [touchAt('touchstart', 0), touchAt('touchend', 60)]
+              : gesture === 'tap'
+                ? [touchAt('touchstart', 0), touchAt('touchend', 2)]
+                : gesture,
+        );
+        const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
+        await act(async () => {
+          await options.loadDiffFiles({ name: 'a.ts' });
+          await new Promise((resolve) => setTimeout(resolve, 600));
+        });
+        expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe(shown);
+      } finally {
+        Element.prototype.getBoundingClientRect = realRect;
+        for (const [name, real] of realSizes) {
+          if (real) Object.defineProperty(HTMLElement.prototype, name, real);
+          else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+        }
+      }
     });
   }
 
