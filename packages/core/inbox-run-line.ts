@@ -36,11 +36,19 @@ import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
 export const INBOX_TURN_FAILED_WORDS = "couldn't answer";
 
 /** A start in Rex whose session never connected: the failed line's cause (the agent's own tab says why). */
-export const INBOX_RUN_REX_NOT_CONNECTED = "Started in Rex, but not connected to the Inbox. Look at its tab in Rex.";
+export const INBOX_RUN_REX_NOT_CONNECTED = "It opened in Rex but never connected to the Inbox. Look at its tab there.";
+/** Try again on a Rex session the Inbox may not have heard from yet since it started (its connection retries every minute at most). */
+export const INBOX_REX_MAY_RUN = "It may still be running in Rex. Try again in a minute.";
+/** Try again, or a reply's restart, on a Rex session whose process still runs (its tab has it): nothing starts beside it. */
+export const INBOX_REX_STILL_RUNS = "It's still running in its tab in Rex. Look there.";
 /** Stop of a session that runs in Rex (its line offers none; an older window's press): Rex owns it. */
 export const INBOX_RUN_IN_REX_STOP = "This agent runs in Rex. Stop it in its tab there.";
 /** A reply to a session that ran in Rex, while Rex is not on this computer: the failed line's cause. */
 export const INBOX_REX_NOT_HERE_AGAIN = "Rex isn't open on this computer, so it did not start again.";
+/** A reply to a session that ran in Rex, when Rex said no to its new tab (an error answer): the failed line's cause. */
+export const INBOX_REX_REFUSED_AGAIN = "Rex didn't open its tab, so it did not start again.";
+/** Open in Terminal for a session that runs in Rex (its line offers none; an older window's press). */
+export const INBOX_RUN_IN_REX_OPEN = "This agent runs in Rex. Open its tab there.";
 
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
@@ -187,7 +195,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
-  if (!e.seenLive && !hostStopped) return line("failed", { cause: e.rex?.line !== undefined && !e.rex.unavailable ? INBOX_RUN_REX_NOT_CONNECTED : `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
+  if (!e.seenLive && !hostStopped) return line("failed", { cause: e.rex?.line !== undefined && !e.rex.unavailable && !e.rex.refused ? INBOX_RUN_REX_NOT_CONNECTED : `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
   const byPerson = e.stoppedByPersonAt !== null;
   // Not the person's Stop: the host's own words, when it has some.
   return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });

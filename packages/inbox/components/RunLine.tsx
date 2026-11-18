@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { InboxRun } from '@plannotator/core/inbox-types';
+import { inboxRunInRex, type InboxRun } from '@plannotator/core/inbox-types';
 import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
@@ -145,7 +145,7 @@ export function RunLine({
   const kept = 'Your message is kept.';
   let bar: number | null = null;
   // Started in Rex (Settings → Agents' "Start new agents in"): Rex owns it, so no Stop here; its tab is the way in.
-  const inRex = !!run.rex && !run.rex.unavailable;
+  const inRex = inboxRunInRex(run);
   const rexLine = inRex ? run.rex!.line : null;
   switch (run.state) {
     case 'starting':
@@ -398,7 +398,7 @@ export function RunLine({
               Trust folder
             </button>
           )}
-          {canOpen && openTerminal}
+          {canOpen && !inRex && openTerminal}
           <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('retry')} data-run-retry="">
             Try again
           </button>
@@ -424,6 +424,11 @@ export function RunLine({
           {run.rex?.unavailable && (run.state === 'starting' || run.state === 'working') && (
             <span className="ib-run-sub" data-run-rex-away="">
               Rex isn't open on this computer, so it started in the background.
+            </span>
+          )}
+          {run.rex?.refused && (run.state === 'starting' || run.state === 'working') && (
+            <span className="ib-run-sub" data-run-rex-refused="">
+              Rex didn't open a tab for it, so it started in the background.
             </span>
           )}
           {bar !== null && (

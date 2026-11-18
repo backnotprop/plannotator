@@ -16,12 +16,12 @@
  *    Inbox made for the project, recognised by the id it recorded when it made it (`sessionsFile`), never by its name: the Inbox never
  *    makes a tab in, or changes the active tab of, a session it did not make. The command runs through the person's
  *    login shell (Rex's own `login` option), with the Inbox's login PATH added (Rex's `path_prepend`; a real login profile puts its own first).
- *  - Show in Rex. Rex's app goes to an agent's pane (`session.select`, then `session.focus_block`), on the person's
- *    click only. It is offered only while Rex's app is known to perform actions for other programs (its Remote
- *    Control setting), and the only way to know is the app's own answer to an action: nothing asks it in the
- *    background or when a menu opens. So it is hidden at first, offered once the app confirmed a jump in this run
- *    (the select a start in Rex makes, or a Show), and hidden again after any refusal, error, timeout or answer of an
- *    unknown shape, until the next confirmed one.
+ *    A start never moves Rex's app: the tab is made without being selected (`focus: false`, no `session.select`).
+ *  - Show in Rex. Rex's app goes to an agent's pane (`session.select`, then `session.focus_block` in a session the
+ *    Inbox made: never in one it did not), on the person's click only. It is offered while Rex's app is attached here,
+ *    and hidden for a while (INBOX_REX_SHOW_REFUSED_MS) after that app refused, failed or timed out on one (its Remote
+ *    Control setting is off): the only way to know is the app's own answer to an action, and nothing asks it in the
+ *    background or when a menu opens.
  *
  * What it never does: start a Rex server (no `rex` binary: only an existing socket, owned by this user, is connected
  * to), type into a pane, read a pane's contents, list or show sessions that did not connect to the Inbox themselves,
@@ -32,7 +32,7 @@ import { lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { dirname, join } from "node:path";
 import { graphemesOf } from "@plannotator/core/inbox-format";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
-import { connectRex, RexUnavailable, type RexConnection } from "./inbox-rex-socket";
+import { connectRex, RexCallError, RexUnavailable, type RexConnection } from "./inbox-rex-socket";
 
 /** The longest a background read (where agents live) may take, connecting included; past it nothing is shown. */
 export const INBOX_REX_READ_TIMEOUT_MS = 400;
@@ -40,6 +40,8 @@ export const INBOX_REX_READ_TIMEOUT_MS = 400;
 export const INBOX_REX_OPEN_TIMEOUT_MS = 10_000;
 /** The longest Show in Rex waits for the app. */
 export const INBOX_REX_SHOW_TIMEOUT_MS = 3_000;
+/** After Rex's app refused a Show (or failed or timed out on one), how long Show in Rex stays hidden for that app. */
+export const INBOX_REX_SHOW_REFUSED_MS = 5 * 60_000;
 /** After a Rex that did not answer in time, how long nothing asks it again. */
 export const INBOX_REX_SLOW_BACKOFF_MS = 30_000;
 /** How old the last read may be before a list starts another (it still answers from the last one at once). */
@@ -135,6 +137,8 @@ function sessionsKept(file: string | null) {
   };
   return {
     of: (project: string): KeptSession | null => memory[project] ?? null,
+    /** A Rex session the Inbox made (by its id). */
+    made: (id: string): boolean => Object.values(memory).some((kept) => kept.id === id),
     set(project: string, session: KeptSession) {
       memory = { ...memory, [project]: session };
       save();
@@ -165,8 +169,12 @@ export interface InboxRexOptions {
   onChange?: () => void;
 }
 
-/** What a start in Rex did. `sent`: the tab was asked for (whatever came of it): the agent must not start elsewhere as well. */
-export type InboxRexOpened = { opened: true; session: string; window: string; line: string } | { opened: false; sent: boolean };
+/**
+ * What a start in Rex did. `sent`: the tab was asked for and no answer came (a timeout, a dropped connection), so it
+ * may exist: the agent must not start elsewhere as well. `refused`: Rex answered the ask with an error, so it made
+ * nothing (an option this Rex does not take, Remote Control off): the agent starts in the background.
+ */
+export type InboxRexOpened = { opened: true; session: string; window: string; line: string } | { opened: false; sent: boolean; refused?: true };
 
 export type InboxRex = ReturnType<typeof createInboxRex>;
 
@@ -184,14 +192,16 @@ export function createInboxRex(options: InboxRexOptions) {
   /** What the last reads confirmed: each hinted session's place and line, and the app attached here. */
   const confirmed = new Map<string, { place: InboxPlace; line: string; status: InboxRexStatus | null; at: number }>();
   let app: { id: string | null; at: number } = { id: null, at: 0 };
-  /** The app that last confirmed a jump (`performed_by` itself), until it refuses or fails one: Show in Rex is offered. */
-  let jumps: string | null = null;
+  /** The app that last refused (or failed or timed out on) a Show, and when: Show in Rex is hidden for it a while. */
+  let refusedShow: { app: string; at: number } | null = null;
   const jumped = (appId: string, ok: boolean) => {
-    const next = ok ? appId : null;
-    if (next === jumps) return;
-    jumps = next;
+    const next = ok ? null : { app: appId, at: now() };
+    if (!next && !refusedShow) return;
+    refusedShow = next;
     changed();
   };
+  /** One start at a time per project: two Sends never make two sessions for it (the second waits for the first's). */
+  const opening = new Map<string, Promise<unknown>>();
   let lastRead = 0;
   let lastKey = "";
   let lastHints: ReadonlyMap<string, InboxPlace> = new Map();
@@ -394,6 +404,69 @@ export function createInboxRex(options: InboxRexOptions) {
       });
   };
 
+  /** `open`'s work, one project at a time. */
+  const openNow = async (request: { project: string; projectKey: string; tab: string; command: string; pathPrepend?: readonly string[] }): Promise<InboxRexOpened> => {
+    const project = cleanName(request.project).slice(0, 128) || "Plannotator";
+    const tab = cleanName(request.tab).slice(0, 128);
+    let sent = false;
+    const result = await act(openTimeout, async (rex): Promise<InboxRexOpened> => {
+      const appId = await within(openTimeout, appOf(rex));
+      if (!appId) return { opened: false, sent: false };
+      const layout = {
+        block: {
+          flavor: TERMINAL_FLAVOR,
+          // The person's own shell as a login shell reads their profile; the Inbox's PATH is added (the profile's comes first).
+          options: { command: ["/bin/sh", "-c", request.command], login: true, ...(request.pathPrepend?.length ? { path_prepend: [...request.pathPrepend] } : {}) },
+        },
+      };
+      // The session the Inbox made for this project, by the id it kept (never one found by its name), while Rex
+      // still names it as the Inbox did: renamed, it is the person's now, and the Inbox makes another.
+      const keptOne = kept.of(request.projectKey);
+      let own: string | null = null;
+      let ownLabel = project;
+      if (keptOne) {
+        const result = resultsOf(await within(openTimeout, rex.call("target.resolve", { kinds: ["session"], queries: [keptOne.id] })))[0];
+        if (result?.status === "resolved" && result.target?.session_id === keptOne.id && result.target?.label === keptOne.label) {
+          own = keptOne.id;
+          ownLabel = cleanName(keptOne.label) || project;
+        } else kept.forget(request.projectKey);
+      }
+      let session: string;
+      let window: string;
+      // Rex's own "no" to the ask (an error answer, not a timeout or a dropped connection): it made nothing.
+      const refusedBy = (error: unknown): InboxRexOpened => {
+        if (error instanceof RexCallError) return { opened: false, sent: false, refused: true };
+        throw error;
+      };
+      if (own) {
+        await within(openTimeout, rex.call("session.attach", { session_id: own }));
+        sent = true;
+        let made: Record<string, unknown>;
+        try {
+          made = await within(openTimeout, rex.call("session.new_window", { session_id: own, ...(tab ? { window_label: tab } : {}), layout, focus: false }));
+        } catch (error) {
+          return refusedBy(error);
+        }
+        session = own;
+        window = text(made.window_id);
+      } else {
+        sent = true;
+        let made: Record<string, unknown>;
+        try {
+          made = await within(openTimeout, rex.call("session.create", { label: project, initial_windows: [{ ...(tab ? { window_label: tab } : {}), layout }] }));
+        } catch (error) {
+          return refusedBy(error);
+        }
+        session = text(made.session_id);
+        window = text((made.initial_windows as { window_id?: unknown }[] | undefined)?.[0]?.window_id);
+        if (SESSION_ID.test(session)) kept.set(request.projectKey, { id: session, label: project });
+      }
+      if (!session || !window) return { opened: false, sent: true };
+      return { opened: true, session, window, line: inboxRexLine(ownLabel, tab) };
+    });
+    return result ?? { opened: false, sent };
+  };
+
   // The last read's answer stands until the next read replaces it (a list read after a quiet spell starts that read:
   // a time limit here would drop the line for that one read).
   const appHere = () => app.id;
@@ -404,6 +477,8 @@ export function createInboxRex(options: InboxRexOptions) {
      * never waiting on Rex. A stale or different ask starts the next read in the background.
      */
     places(hints: ReadonlyMap<string, InboxPlace>): Map<string, string> {
+      // Nothing to ask about: Rex is not contacted at all.
+      if (hints.size === 0) return new Map();
       refresh(hints);
       const out = new Map<string, string>();
       for (const [session, place] of hints) {
@@ -445,10 +520,10 @@ export function createInboxRex(options: InboxRexOptions) {
       return appHere() !== null;
     },
 
-    /** Show in Rex may be offered: the app attached here confirmed a jump in this run and has not failed one since. */
+    /** Show in Rex may be offered: Rex's app is attached here, and it has not refused a Show in the last while. */
     offersShow(): boolean {
       const id = appHere();
-      return id !== null && jumps === id;
+      return id !== null && !(refusedShow && refusedShow.app === id && now() - refusedShow.at < INBOX_REX_SHOW_REFUSED_MS);
     },
 
     /** What the list's Rex part depends on (the delivery watch says `agents` when it moves). */
@@ -462,59 +537,19 @@ export function createInboxRex(options: InboxRexOptions) {
     /**
      * Open `command` in a new tab named `tab` of the Rex session the Inbox made for `projectKey` (made now, labelled
      * `project`, when it has none, that one is gone, or the person renamed it). Runs through the person's login shell,
-     * with `pathPrepend` first on its PATH. The app is asked to go to the tab, best effort, after it exists: whatever
-     * it answers, an open tab is an open (and its answer says whether Show in Rex may be offered). `sent: true` on a
-     * failure means the tab may exist: the caller opens nothing else.
+     * with `pathPrepend` first on its PATH. Rex's app is never moved to it (no select, `focus: false`). `sent: true`
+     * on a failure means the tab may exist: the caller opens nothing else; `refused`: Rex said no and made nothing.
      */
     async open(request: { project: string; projectKey: string; tab: string; command: string; pathPrepend?: readonly string[] }): Promise<InboxRexOpened> {
-      const project = cleanName(request.project).slice(0, 128) || "Plannotator";
-      const tab = cleanName(request.tab).slice(0, 128);
-      let sent = false;
-      const result = await act(openTimeout, async (rex): Promise<InboxRexOpened> => {
-        const appId = await within(openTimeout, appOf(rex));
-        if (!appId) return { opened: false, sent: false };
-        const layout = {
-          block: {
-            flavor: TERMINAL_FLAVOR,
-            // The person's own shell as a login shell reads their profile; the Inbox's PATH is added (the profile's comes first).
-            options: { command: ["/bin/sh", "-c", request.command], login: true, ...(request.pathPrepend?.length ? { path_prepend: [...request.pathPrepend] } : {}) },
-          },
-        };
-        // The session the Inbox made for this project, by the id it kept (never one found by its name), while Rex
-        // still names it as the Inbox did: renamed, it is the person's now, and the Inbox makes another.
-        const keptOne = kept.of(request.projectKey);
-        let own: string | null = null;
-        let ownLabel = project;
-        if (keptOne) {
-          const result = resultsOf(await within(openTimeout, rex.call("target.resolve", { kinds: ["session"], queries: [keptOne.id] })))[0];
-          if (result?.status === "resolved" && result.target?.session_id === keptOne.id && result.target?.label === keptOne.label) {
-            own = keptOne.id;
-            ownLabel = cleanName(keptOne.label) || project;
-          } else kept.forget(request.projectKey);
-        }
-        let session: string;
-        let window: string;
-        if (own) {
-          await within(openTimeout, rex.call("session.attach", { session_id: own }));
-          sent = true;
-          const made = await within(openTimeout, rex.call("session.new_window", { session_id: own, ...(tab ? { window_label: tab } : {}), layout, focus: true }));
-          session = own;
-          window = text(made.window_id);
-        } else {
-          sent = true;
-          const made = await within(openTimeout, rex.call("session.create", { label: project, initial_windows: [{ ...(tab ? { window_label: tab } : {}), layout }] }));
-          session = text(made.session_id);
-          window = text((made.initial_windows as { window_id?: unknown }[] | undefined)?.[0]?.window_id);
-          if (SESSION_ID.test(session)) kept.set(request.projectKey, { id: session, label: project });
-        }
-        if (!session || !window) return { opened: false, sent: true };
-        // Best effort, on its own short clock: the tab is open whatever the app says. Its answer is what says the app
-        // performs actions now (Show in Rex offered) or not (hidden).
-        const select = await within(1_500, rex.call("client.perform", { client_id: appId, action: "session.select", args: { session_id: session, window_id: window }, origin: "api", timeout_ms: 1_000 })).catch(() => null);
-        jumped(appId, select?.performed_by === appId);
-        return { opened: true, session, window, line: inboxRexLine(ownLabel, tab) };
+      // One at a time per project: a second Send waits, then finds the session the first made.
+      const before = opening.get(request.projectKey) ?? Promise.resolve();
+      const mine = before.then(() => openNow(request));
+      const settled = mine.catch(() => undefined);
+      opening.set(request.projectKey, settled);
+      void settled.then(() => {
+        if (opening.get(request.projectKey) === settled) opening.delete(request.projectKey);
       });
-      return result ?? { opened: false, sent };
+      return mine;
     },
 
     /**
@@ -534,8 +569,9 @@ export function createInboxRex(options: InboxRexOptions) {
           answer = null;
         }
         if (!answer || answer.performed_by !== appId) return { shown: false, app: appId };
-        // The pane itself, in a tab of several: best effort, the app already went there.
-        try {
+        // The pane itself, in a tab of several: best effort, the app already went there. Only in a session the Inbox
+        // made: never attach to, or move the focus in, one it did not.
+        if (kept.made(place.session)) try {
           await within(1_500, rex.call("session.attach", { session_id: place.session }));
           await within(1_500, rex.call("session.focus_block", { session_id: place.session, block_id: place.block }));
         } catch {

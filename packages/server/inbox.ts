@@ -3938,6 +3938,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     /** Routines (config.json `inboxScheduledThreads`): off unless the person turned them on; absent on Windows. */
     ...scheduledCap.wire(),
     /** Launch (config.json `inboxLaunch`, on unless `enabled` is false; off by default on Windows): Settings → Agents' "Start agents from New message" switch, and while on its full-permissions switch and scratch root. */
+    // Rex is not asked here (every window load reads this): Settings → Agents reads its own, which asks (`rex_here`).
     launch: launch.settingsState(),
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
@@ -4952,19 +4953,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   rexVersion = rex.version;
   rexWatch = () => rex.watch(rexHints(live.placedSessions()));
   /**
-   * Where the given live sessions say they live (their polls' place hints), but for the ones the Inbox launched in
-   * the background and the conversations that go on from them: those carry whatever pane the Inbox itself was started
-   * from. One the Inbox started in Rex lives in its own tab, and says so.
+   * Where the given live sessions say they live (their polls' place hints), only for the sessions the Inbox itself
+   * started in Rex while "Start new agents in" is Rex (`launch.rexSessions()`), and the conversations that go on from
+   * them: Rex is never read about, and nothing from it is shown for, any other session (one the person runs in Rex by
+   * hand included). None (the default setting, or no such agent): no hints, so no Rex read at all.
    */
   const rexHints = (sessions: Iterable<string>): Map<string, InboxPlace> => {
     const hints = new Map<string, InboxPlace>();
-    let launched: Set<string> | null = null;
+    const inRex = launch.rexSessions();
+    if (!inRex || inRex.size === 0) return hints;
     for (const session of sessions) {
+      if (!inRex.has(session) && !live.continuesOf(session).some((old) => inRex.has(old))) continue;
       const place = live.placeOf(session);
-      if (!place) continue;
-      launched ??= new Set(launch.agents().flatMap((agent) => (agent.rex ? [] : [agent.session])));
-      if (launched.has(session) || live.continuesOf(session).some((old) => launched!.has(old))) continue;
-      hints.set(session, place);
+      if (place) hints.set(session, place);
     }
     return hints;
   };
@@ -4985,14 +4986,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (shown.size === 0) return groups;
     const statuses = rex.statuses(hints);
     const show = rex.offersShow();
-    // The icons' status marks: only sessions started in Rex while Rex is the choice, from a fresh read.
-    const inRex = launch.rexSessions();
-    const fresh = inRex && inRex.size > 0 ? rex.freshStatuses(hints) : null;
+    // The icons' status marks, from a fresh read (the hints are only sessions started in Rex while Rex is the choice).
+    const fresh = rex.freshStatuses(hints);
     const agents = own.agents.map((agent) => {
       const line = shown.get(agent.session);
       if (!line) return agent;
       const placed = withRexStatus({ ...agent, place: { kind: "rex" as const, line, ...(show ? { show: true as const } : {}) } }, statuses.get(agent.session));
-      return fresh && inRex!.has(agent.session) ? withRexMark(placed, fresh.get(agent.session)) : placed;
+      return withRexMark(placed, fresh.get(agent.session));
     });
     const out = [...groups];
     out[at] = { ...own, agents };
@@ -5004,6 +5004,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * agent list, whose runs ask this again.
    */
   const rexStatusOf = (session: string): InboxRexStatus | null => {
+    // Only while "Start new agents in" is Rex, as every Rex word (`rexSessions` reads no runs: no loop).
+    if (!launch.rexSessions()?.has(session)) return null;
     const place = live.placeOf(session);
     return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
   };
@@ -5071,7 +5073,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store,
     launch,
     on: scheduledCap.on,
-    launchOn: () => launch.settingsState().enabled,
+    launchOn: () => launch.enabled(),
     resolveProject,
     recordAttachments: (paths, project, base) => recordInboxAttachments(store.dir, paths, { base, at: new Date().toISOString() }),
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
@@ -5085,7 +5087,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       supported: scheduledCap.wire().scheduled_threads !== undefined,
       saved: () => options.scheduled ?? loadConfig().inboxScheduledThreads,
       routineMade: () => store.scheduledEverMade(),
-      launchOn: () => launch.settingsState().enabled,
+      launchOn: () => launch.enabled(),
       waits,
       goodDays: routinesGoodDays,
     });
@@ -5814,7 +5816,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (since === null) return json(model);
         return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}|${phone ? 1 : 0}`, model, since || null));
       }
-      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click.
+      // Show in Rex (inbox-rex.ts): Rex's app goes to the pane a live session said it lives in, on the person's click,
+      // only for a session the Inbox itself started in Rex (`rexHints`): never one the person runs there by hand.
       // A request from this computer only, as a page of this Inbox sends it (never the tailnet, a phone or a linked
       // machine: their Rex is not this one). A local program that copies those headers could ask too; all it can do is
       // move Rex's app to a pane.
@@ -6824,7 +6827,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
-        const launchOn = () => launch.settingsState().enabled;
+        const launchOn = () => launch.enabled();
         const answer = await scheduledRoute(req, path, { scheduled, on: scheduledCap.on, launchOn, serverSession, json, readBody });
         if (answer) return answer;
       }
@@ -7597,7 +7600,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const door = fromDeviceDoor.get(req);
             const fromMachine = door?.platform === MACHINE_PLATFORM;
             // Another machine starts an agent here only for what the person pressed in a window there: never an agent's call.
-            const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null) : null;
+            // Start in Rex only for a reply pressed in this computer's own window (a page of this Inbox, same origin).
+            const pressedHere = via === "local" && !door && req.headers.get("sec-fetch-site") === "same-origin";
+            const launching = startsSession ? await replyLaunch.prepare(messageId, body, fromMachine ? { from: machines.machineOfDevice(door.device_id), window: door.window } : null, pressedHere) : null;
             const asked = body.to === undefined || startsSession ? undefined : store.message(messageId);
             const to = launching ? launching.to : body.to === undefined || !asked ? undefined : live.replyTarget(asked.thread_id, body.to);
             // The sessions the person tagged with `@` (approval "inbox-tag-agents"): each one live

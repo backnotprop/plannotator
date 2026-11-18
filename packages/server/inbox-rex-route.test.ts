@@ -1,12 +1,12 @@
 /**
  * Rex in a running Inbox (CI runs this: it starts one), with a fake Rex (tests/helpers/fake-rex.ts) as this
- * computer's. What it guards: an agent's place reaches the Agents list only as Rex confirms it, as one line, and only
- * for this computer's own window (the tailnet gets none, and makes no Rex read); a session the Inbox launched in the
- * background never gets one, one it started in Rex gets its own tab's; what the pane says (blocked on a prompt) is the
- * agent's state on the list, with its kind; Show in Rex is offered only after the app confirmed a jump, asks the app only at the click, and a
- * refusal takes the item away; the Show route answers
- * only this computer's own window (never the tailnet, never another site); a session that never said it lives in
- * Rex is never shown there.
+ * computer's. What it guards: Rex is read about, and anything from it shown for, only sessions the Inbox itself started
+ * in Rex while "Start new agents in" is Rex; with the default setting, Rex is never contacted, however many sessions run
+ * in Rex panes by hand. A place reaches the Agents list only as Rex confirms it, as one line, and only for this
+ * computer's own window (the tailnet gets none, and makes no Rex read); what the pane says (blocked on a prompt) is the
+ * agent's state on the list, with its kind, and its icon's mark; Show in Rex asks the app only at the click, only for
+ * such a session, and a refusal takes the item away; the Show route answers only this computer's own window (never
+ * the tailnet, never another site).
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -125,7 +125,8 @@ async function world(options: { remote: boolean; startIn?: "rex" }) {
     const asked = store.sendMessage({ project_id: folder.id, author: { kind: "agent", host: "claude-code", session: "ses-asker", name: "Claude Code" }, body: "Which one?", wakes: true, idempotency_key: "asked" }).message;
     const sent = await fetch(`${base}/api/inbox/messages/${asked.id}/reply`, {
       method: "POST",
-      headers: { Origin: base, "Content-Type": "application/json" },
+      // Pressed in this computer's own window (a page of this Inbox): the only Send that may start in Rex.
+      headers: { Origin: base, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" },
       body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k1", words: "This one.", questions: [], to: { launch: { agent: FAKE, project_id: folder.id } } }),
     });
     expect({ status: sent.status, body: sent.status === 200 ? null : await sent.text() }).toEqual({ status: 200, body: null });
@@ -150,7 +151,15 @@ async function world(options: { remote: boolean; startIn?: "rex" }) {
     expect(listener).not.toBeNull();
     return { at: `http://127.0.0.1:${listener}`, headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, Origin: `https://${MAGIC}:${server.port}`, "Sec-Fetch-Site": "same-origin" } };
   };
-  return { fake, agent, poll, launched, agentsOf, show, tailnet };
+  /** A session the Inbox started in Rex, polling from its own tab: its id and the tab's ids. */
+  const inRex = async () => {
+    const session = await launched();
+    const made = fake.sessions.find((s) => s.label === "my-app")!;
+    const ids = { session: made.session_id, window: made.windows[0]!.window_id, block: made.windows[0]!.blocks[0]! };
+    await poll(session, ids);
+    return { session, ids };
+  };
+  return { fake, agent, poll, launched, inRex, agentsOf, show, tailnet, base, server };
 }
 
 /** Wait for the list to say it (Rex is read in the background; the list answers from the last read). */
@@ -164,45 +173,37 @@ async function until(check: () => Promise<boolean>) {
 }
 
 describe("the Agents list and Rex", () => {
-  test("a place Rex confirms is one line; a session that said none, or a wrong one, has none", async () => {
-    const w = await world({ remote: false });
+  test("the default setting: Rex is never contacted, however many sessions say they live in a Rex pane", async () => {
+    const w = await world({ remote: true });
     const ids = w.fake.addSession("my-app", "Claude Code");
-    await w.agent("ses-in-rex", ids);
-    await w.agent("ses-elsewhere");
-    await w.agent("ses-wrong", { session: ids.session, block: "block:01a1eb35-0de6-701f-808a-16e06621d0ae" });
-    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place !== undefined);
-    const agents = await w.agentsOf();
-    // No Show in Rex yet: Rex's app has not confirmed a jump in this run (its Remote Control may be off).
-    expect(agents.find((a) => a.session === "ses-in-rex")?.place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code" });
-    expect(agents.find((a) => a.session === "ses-elsewhere")?.place).toBeUndefined();
-    expect(agents.find((a) => a.session === "ses-wrong")?.place).toBeUndefined();
-    // Read for the list, the app was asked nothing.
-    expect(w.fake.methods()).not.toContain("client.perform");
-  });
-
-  test("a pane blocked on a prompt: the agent waits on you, with the kind; working again: working", async () => {
-    const w = await world({ remote: false });
-    const ids = w.fake.addSession("my-app", "Claude Code");
-    w.fake.setStatus(ids.block, [{ state: "blocked", kind: "question", app: "claude-code", msg: "V2hpY2ggb25lPw==" }]);
-    await w.agent("ses-blocked", ids);
-    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_status !== undefined);
-    expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")).toMatchObject({ state: "waiting", waiting: 0, rex_status: { state: "blocked", kind: "question" } });
-    // Not started in Rex by the Inbox: no mark on its icon (today's icon).
-    expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_mark).toBeUndefined();
-    w.fake.setStatus(ids.block, [{ state: "working", app: "claude-code" }]);
-    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-blocked")?.state === "working");
-    expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_status).toBeUndefined();
+    await w.agent("ses-by-hand", ids);
+    const background = await w.launched();
+    await w.poll(background, ids);
+    for (let i = 0; i < 3; i++) {
+      const agents = await w.agentsOf();
+      expect(agents.find((a) => a.session === "ses-by-hand")).toMatchObject({ state: expect.any(String) });
+      expect(agents.find((a) => a.session === "ses-by-hand")?.place).toBeUndefined();
+      expect(agents.find((a) => a.session === background)?.place).toBeUndefined();
+      await Bun.sleep(1_100);
+    }
+    // Routines are on with Launch: their clock asks whether Launch is on, never Rex.
+    const far = w.tailnet();
+    const settings = (await (await fetch(`${far.at}/api/inbox/launch/settings`, { headers: far.headers })).json()) as { launch: Record<string, unknown> };
+    expect(settings.launch.rex_here).toBe(false);
+    expect(w.fake.calls).toEqual([]);
+    expect(w.fake.connections().opened).toBe(0);
   });
 
   test("started in Rex: the Inbox's own Rex session for the project gets a tab running the agent, and its place is that tab", async () => {
     const w = await world({ remote: false, startIn: "rex" });
-    const session = await w.launched();
+    const { session } = await w.inRex();
     const made = w.fake.sessions.find((s) => s.label === "my-app");
     expect(made?.windows.map((win) => win.label)).toEqual(["Fake Agent"]);
     expect(w.fake.calls.find((c) => c.method === "session.create")?.payload).toMatchObject({ initial_windows: [{ layout: { block: { options: { login: true, command: ["/bin/sh", "-c", expect.stringContaining(`--session ${session}`)] } } } }] });
-    await w.poll(session, { session: made!.session_id, block: made!.windows[0]!.blocks[0]! });
+    // A start never moves Rex's app.
+    expect(w.fake.methods()).not.toContain("client.perform");
     await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.place !== undefined);
-    expect((await w.agentsOf()).find((a) => a.session === session)?.place).toEqual({ kind: "rex", line: "Rex · my-app / Fake Agent" });
+    expect((await w.agentsOf()).find((a) => a.session === session)?.place).toMatchObject({ kind: "rex", line: "Rex · my-app / Fake Agent" });
     // Its pane's status is the mark on its icon, as it is.
     w.fake.setStatus(made!.windows[0]!.blocks[0]!, [{ state: "blocked", kind: "auth", app: "fake-agent" }]);
     await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_mark !== undefined);
@@ -212,14 +213,30 @@ describe("the Agents list and Rex", () => {
     expect((await w.agentsOf(far.headers, far.at)).find((a) => a.session === session)?.rex_mark).toBeUndefined();
   });
 
-  test("a session the Inbox launched in the background gets no place, whatever pane it says", async () => {
-    const w = await world({ remote: true });
-    const ids = w.fake.addSession("my-app", "Claude Code");
-    const session = await w.launched();
-    await w.poll(session, ids);
-    await w.agent("ses-in-rex", ids);
-    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place !== undefined);
-    expect((await w.agentsOf()).find((a) => a.session === session)?.place).toBeUndefined();
+  test("a pane blocked on a prompt: the agent waits on you, with the kind; working again: working", async () => {
+    const w = await world({ remote: false, startIn: "rex" });
+    const { session, ids } = await w.inRex();
+    w.fake.setStatus(ids.block, [{ state: "blocked", kind: "question", app: "claude-code", msg: "V2hpY2ggb25lPw==" }]);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_status !== undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)).toMatchObject({ state: "waiting", rex_status: { state: "blocked", kind: "question" }, rex_mark: { state: "blocked", kind: "question" } });
+    w.fake.setStatus(ids.block, [{ state: "working", app: "claude-code" }]);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_status === undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)?.rex_mark).toEqual({ state: "working" });
+  });
+
+  test("Rex chosen: a session the person runs in Rex by hand gets no place, no status and no mark", async () => {
+    const w = await world({ remote: false, startIn: "rex" });
+    const { session } = await w.inRex();
+    const theirs = w.fake.addSession("their work", "shell");
+    w.fake.setStatus(theirs.block, [{ state: "blocked", kind: "permission", app: "claude-code" }]);
+    await w.agent("ses-by-hand", theirs);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.place !== undefined);
+    const byHand = (await w.agentsOf()).find((a) => a.session === "ses-by-hand");
+    expect(byHand?.place).toBeUndefined();
+    expect(byHand?.rex_status).toBeUndefined();
+    expect(byHand?.rex_mark).toBeUndefined();
+    // Never read about: no status asked of its block.
+    expect(w.fake.calls.filter((c) => c.method === "block.method" && c.payload.block_id === theirs.block)).toEqual([]);
   });
 
   test("over the tailnet: no place, and Rex is not read", async () => {
@@ -234,39 +251,37 @@ describe("the Agents list and Rex", () => {
 });
 
 describe("POST /api/inbox/rex/show", () => {
-  test("this computer's window: Rex's app goes to the pane", async () => {
-    const w = await world({ remote: true });
-    const ids = w.fake.addSession("my-app", "Claude Code");
-    await w.agent("ses-in-rex", ids);
-    const response = await w.show("ses-in-rex");
+  test("this computer's window: Rex's app goes to the pane of an agent the Inbox started in Rex", async () => {
+    const w = await world({ remote: true, startIn: "rex" });
+    const { session, ids } = await w.inRex();
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.place?.show === true);
+    const response = await w.show(session);
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ shown: true });
     expect(w.fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
   });
 
-  test("offered once the app confirmed a jump; refused (Remote Control off): not shown, and no longer offered", async () => {
-    const w = await world({ remote: true });
-    const ids = w.fake.addSession("my-app", "Claude Code");
-    await w.agent("ses-in-rex", ids);
-    expect(await (await w.show("ses-in-rex")).json()).toEqual({ shown: true });
-    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place?.show === true);
+  test("refused (Remote Control off): not shown, and no longer offered", async () => {
+    const w = await world({ remote: true, startIn: "rex" });
+    const { session } = await w.inRex();
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.place?.show === true);
     w.fake.setRemote(false);
-    expect(await (await w.show("ses-in-rex")).json()).toEqual({ shown: false, refused: true });
-    const place = (await w.agentsOf()).find((a) => a.session === "ses-in-rex")?.place;
-    expect(place).toEqual({ kind: "rex", line: "Rex · my-app / Claude Code" });
+    expect(await (await w.show(session)).json()).toEqual({ shown: false, refused: true });
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.place?.show === undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)?.place).toEqual({ kind: "rex", line: "Rex · my-app / Fake Agent" });
   });
 
-  test("another site, the tailnet, or a session not in Rex: refused, and Rex is asked nothing", async () => {
-    const w = await world({ remote: true });
-    const ids = w.fake.addSession("my-app", "Claude Code");
-    await w.agent("ses-in-rex", ids);
-    await w.agent("ses-elsewhere");
+  test("another site, the tailnet, or a session the Inbox did not start in Rex: refused, and Rex is asked nothing", async () => {
+    const w = await world({ remote: true, startIn: "rex" });
+    const { session } = await w.inRex();
+    const theirs = w.fake.addSession("their work", "shell");
+    await w.agent("ses-by-hand", theirs);
     const before = w.fake.calls.length;
-    expect((await w.show("ses-in-rex", { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
-    expect((await w.show("ses-in-rex", {})).status).toBe(403);
+    expect((await w.show(session, { "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await w.show(session, {})).status).toBe(403);
     const remote = w.tailnet();
-    expect((await w.show("ses-in-rex", remote.headers, remote.at)).status).toBe(403);
-    expect((await w.show("ses-elsewhere")).status).toBe(404);
-    expect(w.fake.calls.slice(before).filter((c) => c.method === "client.perform" || c.method === "session.focus_block")).toEqual([]);
+    expect((await w.show(session, remote.headers, remote.at)).status).toBe(403);
+    expect((await w.show("ses-by-hand")).status).toBe(404);
+    expect(w.fake.calls.slice(before).filter((c) => c.method === "client.perform" || c.method === "session.focus_block" || c.method === "session.attach")).toEqual([]);
   });
 });

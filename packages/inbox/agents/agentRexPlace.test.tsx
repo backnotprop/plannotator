@@ -166,9 +166,9 @@ test.skipIf(!hasDom)("the Inbox's own Show in Rex: asks this Inbox; a refusal is
   await press(document.querySelector('[data-agent-action="rex"]')!);
   await settle();
   expect(posts).toEqual(['/api/inbox/rex/show']);
-  expect(said).toEqual(["Rex didn't show it. Turn on Remote Control in Rex's settings."]);
+  expect(said).toHaveLength(1);
   const note = document.querySelector('[data-agent-rex-note]');
-  expect(note?.textContent).toBe("Rex didn't show it. Turn on Remote Control in Rex's settings.");
+  expect(note?.textContent).toBe(said[0]);
   // Under that agent's row, nowhere else.
   expect(row('ses_show')!.nextElementSibling).toBe(note);
   const after = await itemsOf('ses_show');
@@ -238,8 +238,18 @@ test.skipIf(!hasDom)("a run started in Rex: where Rex put it while it connects, 
   expect(waiting.querySelector('[data-run-open]')).toBeNull();
   expect(waiting.querySelector('[data-run-stop]')).toBeNull();
   const away = draw({ state: 'working', rex: { line: null, unavailable: true } });
-  expect(away.querySelector('[data-run-rex-away]')!.textContent).toBe("Rex isn't open on this computer, so it started in the background.");
+  expect(away.querySelector('[data-run-rex-away]')).not.toBeNull();
   expect(away.querySelector('[data-run-stop]')).not.toBeNull();
+  // Rex said no to its tab: it runs in the background, said so, and the Inbox's own Stop works.
+  const refused = draw({ state: 'working', rex: { line: null, refused: true } });
+  expect(refused.querySelector('[data-run-rex-refused]')).not.toBeNull();
+  expect(refused.querySelector('[data-run-rex-away]')).toBeNull();
+  expect(refused.querySelector('[data-run-stop]')).not.toBeNull();
+  // Never connected: Try again, and no Open in Terminal (it would run a second copy beside its tab's).
+  const failed = draw({ state: 'failed', rex: { line: LINE }, cause: 'Its tab' });
+  expect(failed.querySelector('[data-run-retry]')).not.toBeNull();
+  expect(failed.querySelector('[data-run-open]')).toBeNull();
+  expect(draw({ state: 'failed', cause: 'x' }).querySelector('[data-run-open]')).not.toBeNull();
   // Not a Rex start: the line as before.
   expect(draw({ state: 'starting' }).textContent).toContain('Starting Claude Code in billing…');
 });

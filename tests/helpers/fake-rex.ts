@@ -67,6 +67,8 @@ export interface FakeRex {
   setDelay(ms: number, method?: string): void;
   /** The app answers its next actions with this instead (an answer of a shape the Inbox does not know). */
   setPerformAnswer(answer: Record<string, unknown> | null): void;
+  /** Answer every `method` request with this error (Rex's own "no": an option it does not take, Remote Control off); null: as usual. */
+  setRefusal(method: string, error: { code: string; message: string; status: number } | null): void;
   /** Rename a session or a window (labels are read at show time). */
   rename(id: string, label: string): void;
   /** A block's program status records, as programs reported them (replaces them all; [] clears). */
@@ -91,6 +93,7 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
   let remote = options.remote ?? false;
   let delay = 0;
   const delays = new Map<string, number>();
+  const refusals = new Map<string, { code: string; message: string; status: number }>();
   let performAnswer: Record<string, unknown> | null = null;
   const appTransport = options.appTransport ?? "unix";
   const appUid = options.appUid ?? process.getuid?.() ?? 501;
@@ -244,7 +247,8 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
         calls.push({ method: message.method, payload });
         const reply = () => {
           try {
-            ws.send(JSON.stringify({ type: "response", id: message.id, ...answer(ws, message.method as string, payload) }));
+            const refusal = refusals.get(message.method as string);
+            ws.send(JSON.stringify({ type: "response", id: message.id, ...(refusal ? { error: refusal } : answer(ws, message.method as string, payload)) }));
           } catch {}
         };
         const wait = delays.get(message.method) ?? delay;
@@ -272,6 +276,10 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
     },
     setPerformAnswer: (answer) => {
       performAnswer = answer;
+    },
+    setRefusal: (method, error) => {
+      if (error) refusals.set(method, error);
+      else refusals.delete(method);
     },
     rename(id, label) {
       for (const s of sessions) {

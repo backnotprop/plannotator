@@ -646,10 +646,11 @@ export interface InboxLaunchSettings {
   /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
   bypass_off?: boolean;
   /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
-  scratch_dir?: string; scratch_dir_shown?: string;
-  /** Claude Code's settings file: only the path (the file may hold a secret), and as shown. */ settings_file?: string | null; settings_file_shown?: string;
-  /** "Start new agents in": the Inbox or Rex; whether Rex's app is attached here now; the agents that can start in Rex. Absent from an older Inbox. */
-  start_in?: 'inbox' | 'rex'; rex_here?: boolean; rex_agents?: string[];
+  scratch_dir?: string;
+  scratch_dir_shown?: string;
+  /** Only the path: the file may hold a secret. */
+  settings_file?: string | null;
+  settings_file_shown?: string;
 }
 
 /**
@@ -1883,7 +1884,6 @@ export const inboxApi = {
   launchSettingsFile: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { settings_file: path }),
   /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
   launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
-  launchStartIn: (startIn: 'inbox' | 'rex') => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { start_in: startIn }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */

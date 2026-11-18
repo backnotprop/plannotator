@@ -35,6 +35,9 @@ export const REX_MARK_WORDS: Record<Exclude<RexMarkKey, 'answered'>, string> = {
   error: 'Stopped on an error',
 };
 
+/** The state's words for a mark (a row's spoken name carries them too: the icon's own label is not always reached). */
+export const rexMarkWords = (mark: InboxRexMark): string => REX_MARK_WORDS[rexMarkKey(mark)];
+
 const marksOf = new WeakMap<readonly InboxAgentsGroup[], Map<string, InboxRexMark>>();
 
 /** Every listed agent's mark, by its id, its session and the sessions it goes on from. */
@@ -152,6 +155,14 @@ export function layoutRexPile(pile: Element): void {
   }
 }
 
+/** Piles watched for tiles coming and going (one observer each, for as long as the pile is there). */
+const watchedPiles = new WeakSet<Element>();
+function watchPile(pile: Element): void {
+  if (watchedPiles.has(pile) || typeof MutationObserver === 'undefined') return;
+  watchedPiles.add(pile);
+  new MutationObserver(() => layoutRexPile(pile)).observe(pile, { childList: true });
+}
+
 type Shown = { key: RexMarkKey; arrive: '' | 'now' | 'late'; out: RexMarkKey | null; outHow: 'answered' | 'fade' | null; n: number };
 
 /**
@@ -187,11 +198,14 @@ export function RexMark({ mark, seed, size = 16, side = false }: { mark: InboxRe
     if (next !== measured) setMeasured(next);
   });
 
-  // Its pile: laid out again whenever this mark changes, and once it goes.
+  // Its pile: laid out again whenever this mark changes, a tile comes or goes, and once it goes.
   useLayoutEffect(() => {
     const pile = ref.current?.closest(PILES) ?? null;
     pileRef.current = pile;
-    if (pile) layoutRexPile(pile);
+    if (pile) {
+      watchPile(pile);
+      layoutRexPile(pile);
+    }
   }, [key, measured]);
   useEffect(
     () => () => {

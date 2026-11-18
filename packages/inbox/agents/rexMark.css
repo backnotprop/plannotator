@@ -9,11 +9,14 @@
  * the extra pop) > .ib-rxm-jump > .ib-rxm-a > .ib-rxm-b (the body's beats) > shape, .ib-rxm-arc, .ib-rxm-ga >
  * .ib-rxm-gb > .ib-rxm-g (the glyph, lagging, with its kind's character).
  *
- * Z-order: the mark is above every tile of its pile (z-index 6); a pile with a mark isolates, so no mark rises over
- * anything outside its row. No tile gets a transform or will-change (they would trap the mark under the next tile).
+ * Z-order: the mark is above every tile of its pile (z-index 6); a pile with a mark isolates, and so does a lone
+ * icon's box, so no mark rises over anything outside its icon or pile (a sticky bar, a menu). No tile gets a
+ * transform or will-change (they would trap the mark under the next tile).
  */
 .ib-mk:has(> .ib-rxm) { position: relative; }
-:is(.ib-atiles, .ib-ss-pile):has(.ib-rxm) { isolation: isolate; }
+:is(.ib-atiles, .ib-ss-pile):has(.ib-rxm),
+.ib-mk:has(> .ib-rxm):not(:is(.ib-atiles, .ib-ss-pile) .ib-mk),
+.am-btn:has(> .ib-rxm) { isolation: isolate; }
 .ib-rxm {
   position: absolute; z-index: 6; pointer-events: none; overflow: visible;
   right: calc(var(--rx-r, -3px) - var(--rx-dx, 0px));

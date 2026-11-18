@@ -13,6 +13,7 @@ import { AgentMark, type AgentMarkPicks } from './AgentMark';
 import { GOGGLES_FRAME, GOGGLES_LENSES, GOGGLES_MOUTH } from './goggles';
 import { agentFacts, agentHostName, agentRowName, agentsGroups, type AgentEntry } from './model';
 import { showInRex, useRexShowNote } from '../data/actions/rexShow';
+import { rexMarkWords } from './rexMark';
 
 /**
  * The sidebar's Agents section (approval "inbox-agents-section", and the owner's rulings of 2026-11-09), in place
@@ -174,7 +175,7 @@ const AgentRow = memo(
     const named = agentIsNamed(entry.agent);
     // Stop and Delete as the launch's thread offers them (Thread.tsx `launchMenu`), for an agent the Inbox launched.
     const launch = entry.agent.launch;
-    const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null) ? props.onStop : undefined;
+    const onStop = launch && props.onStop && inboxLaunchStops(launch.started === true, launch.run ?? null, launch.rex === true) ? props.onStop : undefined;
     const onDelete = launch ? props.onDelete : undefined;
     // Show in Rex only where it works now (the list said so for this window): never a dead item.
     const onShowInRex = entry.agent.place?.show === true && !props.phone ? props.onShowInRex : undefined;
@@ -288,6 +289,7 @@ const AgentRow = memo(
             <span className="ib-sr">
               , {agentHostName(entry.agent.host)}
               {entry.agent.place ? `, in ${entry.agent.place.line.replace(' · ', ', ').replace(' / ', ', ')}` : ''}
+              {entry.agent.rex_mark ? `, ${rexMarkWords(entry.agent.rex_mark)}` : ''}
             </span>
           </button>
         </Tip>

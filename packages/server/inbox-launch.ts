@@ -90,8 +90,9 @@ import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-c
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { InboxRex, InboxRexStatus } from "./inbox-rex";
+import { inboxRexResumeHeld } from "./inbox-rex-resume";
 import { inboxId, inboxLaunchInRex, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxLaunchedSession, inboxRunOf, INBOX_REX_NOT_HERE_AGAIN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxLaunchedSession, inboxRunOf, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -166,6 +167,8 @@ interface Memo {
    * it started: a restart, not a new prompt (the Inbox list's Hide does not read it as new activity).
    */
   waitedFromBefore?: boolean;
+  /** In Rex: when a reply's restart last looked whether the session's old process still runs (inbox-rex-resume.ts). */
+  rexHeldAt?: number;
   /**
    * After Stop or a respawn, the session's earlier polls keep it "live" for a
    * while: it counts as live again only once it starts a poll past this count.
@@ -257,6 +260,8 @@ export function createInboxLaunch(options: {
   rex?: Pick<InboxRex, "open" | "appAttached">;
   /** What a session's confirmed Rex pane says it is doing (inbox-rex.ts `statuses`), for a launch that runs in Rex. */
   rexStatus?: (session: string) => InboxRexStatus | null;
+  /** Every process's command line (`ps`), for whether a Rex tab still runs a session (inbox-rex-resume.ts); tests stand in. */
+  processListing?: () => string | null;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -692,7 +697,7 @@ export function createInboxLaunch(options: {
       connector: host.connector,
       // In Rex its tab is the way in: no command opens it elsewhere.
       attachCommand: inRex ? null : host.attach(launch),
-      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}) } } : {}),
+      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}) } } : {}),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
       ...(launch.clone?.state === "cloning"
@@ -840,16 +845,17 @@ export function createInboxLaunch(options: {
    * Start in Rex (Settings → Agents' "Start new agents in", fixed on the record at Send): the host's own interactive
    * command in a new tab of the Rex session the Inbox made for the project, through the person's login shell. Rex owns
    * that process from then on. Null when Rex is not here (no app attached over this computer's socket, or it went
-   * before the tab was asked for): the caller starts it in the background. A tab asked for whose answer never came
-   * may be running: counted as started, with no line (it connects, or the line says to look in Rex).
+   * before the tab was asked for), or Rex said no to the ask (`refused`: an error answer, so it made nothing): the
+   * caller starts it in the background. A tab asked for whose answer never came may be running: counted as started,
+   * with no line (it connects, or the line says to look in Rex).
    */
   const startInRex = async (
     root: InboxMessage,
     host: LaunchHost,
     launch: InboxLaunchRecord,
     input: { name: string; login: LaunchEnv; resume: boolean },
-  ): Promise<{ ok: true; session: string; ref: string; line: string | null } | ({ ok: false } & LaunchStartFailure) | null> => {
-    if (!options.rex || !host.rexCommand) return null;
+  ): Promise<{ ok: true; session: string; ref: string; line: string | null } | ({ ok: false } & LaunchStartFailure) | { away: "absent" | "refused" }> => {
+    if (!options.rex || !host.rexCommand) return { away: "absent" };
     const made = await host.rexCommand(launch, input);
     if (!made.ok) return made;
     const opened = await options.rex.open({
@@ -859,9 +865,10 @@ export function createInboxLaunch(options: {
       command: made.command,
       pathPrepend: [...loginPath, ...options.installDirs],
     });
-    log(`Inbox launch ${launch.id}: Rex ${opened.opened ? "made the tab" : opened.sent ? "was asked, no answer" : "is not here"}`);
+    log(`Inbox launch ${launch.id}: Rex ${opened.opened ? "made the tab" : opened.sent ? "was asked, no answer" : !opened.opened && opened.refused ? "said no" : "is not here"}`);
     if (opened.opened) return { ok: true, session: made.session, ref: made.ref, line: opened.line };
-    return opened.sent ? { ok: true, session: made.session, ref: made.ref, line: null } : null;
+    if (opened.sent) return { ok: true, session: made.session, ref: made.ref, line: null };
+    return { away: opened.refused ? "refused" : "absent" };
   };
 
   /** Start (or start again after a failed start) the agent for a launched root: in Rex when it asked for Rex and Rex is here, else in the background. */
@@ -883,10 +890,12 @@ export function createInboxLaunch(options: {
       const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
       const name = head.thread_name ?? head.subject ?? "Inbox";
       const wantsRex = !!launch.rex && !!host.rexCommand;
-      const viaRex = wantsRex ? await startInRex(root, host, launch, { name, login, resume: false }) : null;
+      const asked = wantsRex ? await startInRex(root, host, launch, { name, login, resume: false }) : null;
+      const away = asked && "away" in asked ? asked.away : null;
+      const viaRex = asked && !("away" in asked) ? asked : null;
       const result = viaRex ?? (await host.start(launch, { name, login }));
-      // Rex not here: it started in the background, and the line says why.
-      const rex = !wantsRex ? undefined : viaRex === null ? { unavailable: true as const } : viaRex.ok && viaRex.line ? { line: viaRex.line } : undefined;
+      // Rex not here, or it said no: it started in the background, and the line says why.
+      const rex = !wantsRex ? undefined : away === "refused" ? { refused: true as const } : away ? { unavailable: true as const } : viaRex?.ok && viaRex.line ? { line: viaRex.line } : undefined;
       // Deleted while it started: the session it made goes too (one in Rex is Rex's: left), and the thread stays as the person left it.
       if (store.message(root.id)?.launch?.deleted_at) {
         if (result.ok && viaRex === null) {
@@ -1122,10 +1131,15 @@ ${result.text}`);
     const login = await readLogin();
     const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
     const made = await startInRex(root, host, launch, { name: head.thread_name ?? head.subject ?? "Inbox", login, resume: true });
-    if (made?.ok) return { exitCode: 0, text: `rex: ${made.line ?? "asked"}`, failure: null };
-    if (!made) return { exitCode: 1, text: "rex: not here", failure: { code: "failed", text: INBOX_REX_NOT_HERE_AGAIN } };
+    if ("away" in made) return { exitCode: 1, text: `rex: ${made.away}`, failure: { code: "failed", text: made.away === "refused" ? INBOX_REX_REFUSED_AGAIN : INBOX_REX_NOT_HERE_AGAIN } };
+    if (made.ok) return { exitCode: 0, text: `rex: ${made.line ?? "asked"}`, failure: null };
     return { exitCode: 1, text: made.text, failure: { code: made.code === "untrusted" ? "untrusted" : "failed", text: made.text } };
   };
+  /** How often a reply waiting on a Rex session whose old process may still run is looked at again. */
+  const REX_HELD_RECHECK_MS = 5_000;
+  /** Why a Rex session must not get a new tab now (its old process may still run), or null (inbox-rex-resume.ts). */
+  const rexHeld = (launch: InboxLaunchRecord): string | null =>
+    inboxRexResumeHeld({ session: launch.session ?? launch.session_ref, now: now(), bootAt, listing: options.processListing });
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
@@ -1164,6 +1178,13 @@ ${result.text}`);
     const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
     if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
+    // In Rex: never a second process on the session. Not before its connection could have come back since this Inbox
+    // started, and never while a process still runs it (its tab's): the reply waits for it (looked at every few seconds).
+    if (inboxLaunchInRex(launch)) {
+      if (now() - (memo.rexHeldAt ?? -Infinity) < REX_HELD_RECHECK_MS) return;
+      memo.rexHeldAt = now();
+      if (rexHeld(launch)) return;
+    }
     respawn(root, host, newest.id);
   };
   const unsubscribe = store.subscribe((line) => {
@@ -1248,7 +1269,7 @@ ${result.text}`);
    * switch (Claude Code's words, `settingsState`) and the scratch root. Off, those rows are hidden, so nothing else is
    * read (no Claude settings, no login shell).
    */
-  const settingsState = (): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
+  const settingsState = (rexHere = false): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
     // Windows: launch has no support there (off unless config.json says true), so Settings shows no switch.
     ...(options.platform === "win32" ? { unsupported: true } : {}),
     ...(enabled()
@@ -1260,8 +1281,9 @@ ${result.text}`);
           scratch_dir_shown: options.displayFolder(scratchRoot()),
           // "Start new agents in": the Inbox (in the background) or Rex; `rex_here` while Rex's app is attached on this
           // computer (the row's Rex choice shows then, or while it is the choice); `rex_agents` the ones that can.
+          // Rex is asked only for this computer's own settings answer (`rexHere`): never for a routine's tick or another reader.
           start_in: config().startIn,
-          rex_here: options.rex?.appAttached() === true,
+          rex_here: rexHere && options.rex?.appAttached() === true,
           rex_agents: hostList.filter((host) => host.rexCommand).map((host) => host.agent),
         }
       : { enabled: false, full_permissions: false }),
@@ -1416,6 +1438,8 @@ ${result.text}`);
     // The switch governs new starts only (the folder list above, compose's `to.launch` and block): an agent already
     // started keeps Stop, Open, Delete, Try again and Trust folder while it is off, and Settings → Agents' read and switch answer.
     // Settings → Agents, shown: the switch as it stands; never set, the login shell read again when stale.
+    // Rex is asked whether its app is attached only for this computer's own window (inbox-rex.ts reads its socket).
+    const here = via === "local" && !door;
     if (req.method === "GET" && match[1] === "settings" && !match[2]) {
       // Never another site's page: a read here may start the person's login shell.
       if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
@@ -1423,7 +1447,7 @@ ${result.text}`);
       // person's rc counts for that Send. One read at a time either way.
       const ahead = new URL(req.url).searchParams.get("ahead") === "1";
       if (enabled() && config().fullPermissions === null && (ahead || !shellFresh())) await readLogin();
-      return json({ launch: settingsState() });
+      return json({ launch: settingsState(here) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
     const body = await options.readBody(req);
@@ -1438,7 +1462,7 @@ ${result.text}`);
         // Only this key: saveConfig merges `inboxLaunch` key by key under its lock, so a change made at once elsewhere stays.
         saveConfig({ inboxLaunch: { enabled: body.enabled } });
         if (config().enabled !== body.enabled) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState() });
+        return json({ launch: settingsState(here) });
       }
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
       if ("scratch_dir" in body) {
@@ -1458,14 +1482,14 @@ ${result.text}`);
         // Undefined drops the key (the default) when config.json is written.
         saveConfig({ inboxLaunch: { scratchDir: path ? resolve(path) : undefined } as { scratchDir?: string } });
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState() });
+        return json({ launch: settingsState(here) });
       }
       if ("start_in" in body) {
         // Settings → Agents' "Start new agents in": new starts only; one already started stays where it runs.
         if (body.start_in !== "inbox" && body.start_in !== "rex") throw new InboxError("validation_error", 'start_in: "inbox" or "rex".', { field: "start_in" });
         saveConfig({ inboxLaunch: { startIn: body.start_in === "rex" ? "rex" : undefined } as { startIn?: "rex" } });
         if (config().startIn !== body.start_in) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState() });
+        return json({ launch: settingsState(here) });
       }
       if ("settings_file" in body) {
         // Checked now so a typo is said here rather than at the next start.
@@ -1480,12 +1504,12 @@ ${result.text}`);
         }
         saveConfig({ inboxLaunch: { settingsFile: typed || undefined } as { settingsFile?: string } });
         if (config().settingsFile !== (typed || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState() });
+        return json({ launch: settingsState(here) });
       }
       if (typeof body.full_permissions !== "boolean") throw new InboxError("validation_error", "full_permissions: a boolean.", { field: "full_permissions" });
       saveConfig({ inboxLaunch: { fullPermissions: body.full_permissions } });
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-      return json({ launch: settingsState() });
+      return json({ launch: settingsState(here) });
     }
     const { root, host } = launchById(match[1]!);
     const launch = root.launch!;
@@ -1497,6 +1521,8 @@ ${result.text}`);
         return json({ run: await stopLaunch(root, host) });
       case "open": {
         if (via === "tailnet") return localOnly();
+        // In Rex its tab is the way in: Terminal would run a second copy (or a command that fails).
+        if (inboxLaunchInRex(launch)) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_OPEN);
         const e = await environment();
         // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
         // first: `terminal` may hand a session over, and a refused Open must change nothing.
@@ -1642,6 +1668,11 @@ ${result.text}`);
     if (!launch.error && memo.turnError && runOfRoot(root)?.turn_error) {
       sendAgain(root, memo);
       return;
+    }
+    // In Rex: never a second process on the session (a tab still runs it, or may: this Inbox just started).
+    if (!launch.error && inboxLaunchInRex(launch)) {
+      const held = rexHeld(launch);
+      if (held) throw new InboxError("launch_in_rex", held);
     }
     // A reply's respawn that did not take: respawn once more (the session exists; a new start would make a second).
     if (!launch.error && launch.session_ref && root.to && respawnFailedOf(memo)) {
@@ -1800,7 +1831,7 @@ ${result.text}`);
      */
     async prepare(
       target: InboxLaunchTarget,
-      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null },
+      input: { name: string | null; body: string; resolveProject: (path: string) => Promise<InboxProject>; from?: InboxLaunchFrom | null; pressedHere?: boolean },
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
@@ -1955,8 +1986,10 @@ ${result.text}`);
         ...(effort ? { effort } : {}),
         ...(primaryAgent ? { primary_agent: primaryAgent } : {}),
         ...(input.from ? { from: { machine: input.from.machine, name: input.from.name } } : {}),
-        // Start new agents in Rex: asked for now, decided at the start (Rex may not be here then).
-        ...(config().startIn === "rex" && host.rexCommand ? { rex: {} } : {}),
+        // Start new agents in Rex: asked for now, decided at the start (Rex may not be here then). Only for a Send pressed
+        // in this computer's own window (`pressedHere`): a phone, the tailnet, a linked machine and a routine's run
+        // start in the background, as Rex's tab would be on a screen no one is at.
+        ...(config().startIn === "rex" && host.rexCommand && input.pressedHere === true ? { rex: {} } : {}),
       };
       if (host.choices) {
         try {
@@ -2191,7 +2224,8 @@ ${result.text}`);
     attachOf(threadId: string): string | null {
       const launch = threadLaunch(threadId)?.launch;
       const host = launch ? hostOf(launch) : null;
-      return host && launch!.session_ref && !launch!.deleted_at && !launch!.error ? host.attach(launch!) : null;
+      // In Rex its tab is the way in: no command opens it elsewhere (Claude's is not a background session; Pi's would be a second one).
+      return host && launch!.session_ref && !launch!.deleted_at && !launch!.error && !inboxLaunchInRex(launch!) ? host.attach(launch!) : null;
     },
 
     /** The list's row decorator (a launched row gets its run word, the switch off too: it governs new starts only). */

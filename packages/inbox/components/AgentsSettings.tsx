@@ -22,6 +22,7 @@ import type { InboxReloadRuntime } from '@plannotator/core/inbox-types';
 import { clockTime, dayWords, formatCount } from '../format';
 import { codexAccountLine } from '../codexAccount';
 import { hostLabel } from '../compose/model';
+import { launchStartIn } from '../data/actions/launchStartIn';
 
 /** The agents New message starts, as Settings names them in "Start new agents in". */
 const REX_LAUNCH_AGENTS = ['claude-code', 'pi', 'codex', 'opencode'];
@@ -691,7 +692,7 @@ export function AgentsSettings({
     setLaunchBusy(true);
     setError(null);
     try {
-      setLaunchState((await inboxApi.launchStartIn(next)).launch);
+      setLaunchState((await launchStartIn(next)).launch);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {

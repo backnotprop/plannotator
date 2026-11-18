@@ -498,6 +498,13 @@ describe("linked machines", () => {
     expect(group).toMatchObject({ machine: "ibx_far", total: 1, ended_today: 0 });
   });
 
+  test("another machine's agent never carries Rex's words here: no place, no pane status, no mark (Rex is this computer's own)", () => {
+    const sent = { id: "a", session: "a", state: "waiting", place: { kind: "rex", line: "Rex · x / y" }, rex_status: { state: "blocked", kind: "auth" }, rex_mark: { state: "blocked", kind: "auth" } };
+    const [agent] = inboxPeerAgentsGroup([{ agents: [sent] }], "ibx_far")!.agents;
+    expect(agent).toMatchObject({ id: "a", state: "waiting" });
+    expect([agent!.place, agent!.rex_status, agent!.rex_mark]).toEqual([undefined, undefined, undefined]);
+  });
+
   test("a machine keeps a tile choice only when its list says so: an older Inbox's group never claims it", () => {
     const agents = [{ id: "a", session: "a", state: "idle" }];
     expect(inboxPeerAgentsGroup([{ agents, faces: {}, faces_rev: 1, face_tiles: true }], "ibx_new")!.face_tiles).toBe(true);

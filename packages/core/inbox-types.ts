@@ -1200,6 +1200,7 @@ export interface InboxLaunchRecord {
    * Settings → Agents' "Start new agents in" said Rex when it was made (fixed at Send): the agent runs in a tab of
    * Rex (superlogical.com/rex) instead of in the background, and Rex owns its process. `line`: where Rex put it
    * ("Rex · <session> / <tab>") once the tab was made; `unavailable`: Rex was not on this computer at the start, so it
+   * started in the background as usual; `refused`: Rex answered the ask with an error (it made nothing), so it
    * started in the background as usual. Empty until the start.
    */
   rex?: InboxLaunchRex;
@@ -1209,11 +1210,12 @@ export interface InboxLaunchRecord {
 export interface InboxLaunchRex {
   line?: string;
   unavailable?: true;
+  refused?: true;
 }
 
 /** The launch runs in a Rex tab (it asked for Rex and Rex made the tab): Rex owns it, the Inbox never stops or removes it. */
 export function inboxLaunchInRex(launch: Pick<InboxLaunchRecord, "rex" | "session_ref">): boolean {
-  return !!launch.rex && !launch.rex.unavailable && !!launch.session_ref;
+  return !!launch.rex && !launch.rex.unavailable && !launch.rex.refused && !!launch.session_ref;
 }
 
 /**
@@ -1253,9 +1255,15 @@ export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting
 /**
  * Whether Stop is offered for a launch: it started (the host gave it a session) and it runs, at rest (no line) or
  * starting, working or at a prompt in Terminal. A prompt in the window has its own Stop on the permission card.
+ * Never for one that runs in Rex (`rex`): Rex owns its process, and the Inbox never stops it.
  */
-export function inboxLaunchStops(started: boolean, run: InboxRunState | null): boolean {
-  return started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+export function inboxLaunchStops(started: boolean, run: InboxRunState | null, rex = false): boolean {
+  return !rex && started && (run === null || run === "working" || run === "waiting_terminal" || run === "starting");
+}
+
+/** A run line's launch runs in a Rex tab (`InboxRun.rex`, not one that started in the background instead). */
+export function inboxRunInRex(run: Pick<InboxRun, "rex"> | null | undefined): boolean {
+  return !!run?.rex && !run.rex.unavailable && !run.rex.refused;
 }
 
 /** What a launched thread's run line shows (the thread route's `run`). */
@@ -1292,10 +1300,11 @@ export interface InboxRun {
   clone?: { url: string; host: string; slug: string; branch: string | null; pct: number | null; error: "auth" | "not_found" | "network" | "failed" | null; error_text: string | null; renamed_from: string | null; brings: string[] | null; folder_shown: string | null };
   /**
    * Started in Rex (`InboxLaunchRecord.rex`): `line` once Rex made its tab (null while asked); `unavailable`: Rex was not
-   * here, so it started in the background; `waiting`: `waiting_terminal` because its Rex pane says it waits on the
-   * person (OSC 7501 `blocked`), with the kind when it said one. Absent: not a Rex start. Additive.
+   * here, so it started in the background; `refused`: Rex said no to the ask, so it started in the background;
+   * `waiting`: `waiting_terminal` because its Rex pane says it waits on the person (OSC 7501 `blocked`), with the kind
+   * when it said one. Absent: not a Rex start. Additive.
    */
-  rex?: { line: string | null; unavailable?: true; waiting?: "permission" | "question" | "auth" | "other" };
+  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other" };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -3564,7 +3573,7 @@ export interface InboxAgent {
    * run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in
    * a project), absent from an older Inbox.
    */
-  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null };
+  launch?: { id: string; thread_id: string; started?: boolean; run?: InboxRunState | null; scratch?: string | null; rex?: true };
   /** `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said. */
   host: string | null;
   /** Its title as its connection last said it (the To picker's name). Absent when none. */
