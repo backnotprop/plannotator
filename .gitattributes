@@ -1,0 +1,4 @@
+# Generated contract files: collapsed in pull request diffs (docs/agent-guides/mobile.md).
+apps/mobile/contract/door.json linguist-generated=true
+apps/mobile/contract/schema/** linguist-generated=true
+apps/mobile/contract/generated/** linguist-generated=true

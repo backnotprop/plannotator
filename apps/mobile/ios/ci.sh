@@ -4,8 +4,8 @@
 #   bash apps/mobile/ios/ci.sh pr        build and `swift test` (no simulator)
 #   bash apps/mobile/ios/ci.sh nightly   the same, then the simulator UI suite
 #
-# Until the app's Swift package exists there is nothing to build: it says so
-# and exits 0.
+# Until the app's Swift package exists there is nothing to build but the
+# contract's Wire.swift: it says so and exits 0.
 set -euo pipefail
 
 mode=${1:-pr}
@@ -15,6 +15,13 @@ case "$mode" in
 esac
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
+# The contract's generated Swift (scripts/mobile/swift.ts) must compile on its own.
+wire="$here/../contract/generated/swift/Wire.swift"
+if [ -f "$wire" ]; then
+  echo "apps/mobile/contract: typecheck Wire.swift"
+  xcrun swiftc -typecheck -swift-version 6 "$wire"
+fi
 
 if [ ! -f "$here/InboxCore/Package.swift" ]; then
   echo "apps/mobile/ios: no Swift package yet, nothing to build ($mode)."
