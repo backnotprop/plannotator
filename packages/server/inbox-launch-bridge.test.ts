@@ -6,7 +6,7 @@
  * message and thread, the agent and the folder; Stop, Open and Resume act only on a chat exactly one launch owns and
  * post nothing otherwise; an answer over 1 MiB is refused; the port is read again for each request. On the engine: a
  * launch through the bridge settles to the app's host, its run line says Open in the app, Open starts no Terminal,
- * and a refused Stop says so.
+ * and a refused Stop says so; an agent the app does not list keeps the Inbox's own host.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -121,6 +121,18 @@ describe("a launch bridge: on only when its config holds", () => {
     // An agent's own id as the app's host would hand its chats to that agent's own ways in.
     const asAgent = setup(app.port, { config: { host: "codex" } });
     expect(createLaunchBridgeHosts(asAgent.context)).toEqual([]);
+    expect(app.seen).toEqual([]);
+  });
+
+  test("`agents` lists the agents the app hosts: only those get its hosts; a bad list turns the bridge off", () => {
+    const app = fakeApp();
+    const some = setup(app.port, { config: { agents: ["pi", "codex"] } });
+    expect(createLaunchBridgeHosts(some.context).map((h) => h.agent)).toEqual(["codex", "pi"]);
+    for (const agents of [[], ["codex", "codex"], ["codex", "gemini"], "codex", ["claude-code", "codex", "opencode", "pi", "pi"]]) {
+      const bad = setup(app.port, { config: { agents } });
+      expect(createLaunchBridgeHosts(bad.context)).toEqual([]);
+      expect(bad.logs.join("\n")).toContain("agents:");
+    }
     expect(app.seen).toEqual([]);
   });
 
@@ -251,7 +263,46 @@ describe("a launch bridge's requests", () => {
   });
 });
 
+/** A real launch engine over the temp Inbox, with the bridge's hosts beside the Inbox's own. */
+function engineOver(s: ReturnType<typeof setup>) {
+  writeFileSync(join(s.dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
+  const store = InboxStore.open(s.dataDir);
+  const project = store.ensureProject({ name: "project", root: s.folder });
+  const launch = createInboxLaunch({
+    store,
+    live: { runStateOf: () => null },
+    dataDir: s.dataDir,
+    serverSession: "srv",
+    homeDir: join(s.root, "home"),
+    platform: "darwin",
+    loginEnv: async () => ({ HOME: join(s.root, "home"), PATH: "" }),
+    ownEnv: () => ({ HOME: join(s.root, "home"), PATH: "" }),
+    installDirs: [],
+    displayFolder: (path) => path,
+    readBody: async (req) => (await req.json()) as Record<string, unknown>,
+    json: (body, status = 200) => Response.json(body, { status }),
+    onChange: () => {},
+    selfCommand: ["plannotator"],
+    hosts: createLaunchBridgeHosts,
+  });
+  restore.push(() => launch.stop());
+  return { store, project, launch };
+}
+
 describe("a launch through a bridge, on the engine", () => {
+  test("an agent the app does not list keeps the Inbox's own host", async () => {
+    let folder = "";
+    const app = fakeApp({ "GET /api/lifecycle/catalog": () => Response.json(CATALOG(folder)) });
+    const s = setup(app.port, { config: { agents: ["codex"] } });
+    folder = s.folder;
+    const { project, launch } = engineOver(s);
+    // Codex is the app's; Claude Code is the Inbox's own, which finds no `claude` on this PATH and says so in its own name.
+    expect((await launch.composeBlock())!.agents.map((a) => [a.agent, a.name])).toEqual([["codex", "Codex in Testapp"]]);
+    const target = launch.target({ launch: { agent: "claude-code", project_id: project.id } })!;
+    await expect(launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project })).rejects.toThrow(/^Claude Code can't be started here/);
+    expect(app.posts()).toEqual([]);
+  });
+
   test("settles to the app's host, its line says Open in the app, Open starts no Terminal, a refused Stop says why", async () => {
     let folder = "";
     let owners: { launchId: string }[] = [];
@@ -263,27 +314,7 @@ describe("a launch through a bridge, on the engine", () => {
     });
     const s = setup(app.port);
     folder = s.folder;
-    writeFileSync(join(s.dataDir, "config.json"), JSON.stringify({ inboxLaunch: { enabled: true } }));
-    const store = InboxStore.open(s.dataDir);
-    const project = store.ensureProject({ name: "project", root: s.folder });
-    const launch = createInboxLaunch({
-      store,
-      live: { runStateOf: () => null },
-      dataDir: s.dataDir,
-      serverSession: "srv",
-      homeDir: join(s.root, "home"),
-      platform: "darwin",
-      loginEnv: async () => ({ HOME: join(s.root, "home"), PATH: "" }),
-      ownEnv: () => ({ HOME: join(s.root, "home"), PATH: "" }),
-      installDirs: [],
-      displayFolder: (path) => path,
-      readBody: async (req) => (await req.json()) as Record<string, unknown>,
-      json: (body, status = 200) => Response.json(body, { status }),
-      onChange: () => {},
-      selfCommand: ["plannotator"],
-      hosts: createLaunchBridgeHosts,
-    });
-    restore.push(() => launch.stop());
+    const { store, project, launch } = engineOver(s);
     const post = (id: string, action: string) =>
       launch.route(
         new Request(`http://127.0.0.1/api/inbox/launch/${id}/${action}`, { method: "POST", headers: { Origin: "http://127.0.0.1", Host: "127.0.0.1" }, body: JSON.stringify({ serverSession: "srv" }) }),

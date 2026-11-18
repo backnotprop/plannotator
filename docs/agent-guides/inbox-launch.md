@@ -263,17 +263,18 @@ An app on this computer can host the agents the Inbox starts, as its own chats. 
 **Turning it on.** The app starts the Inbox with `PLANNOTATOR_LAUNCH_BRIDGE=<absolute path>` naming a private JSON file:
 
 ```json
-{ "v": 1, "host": "<id>", "name": "<app name>", "dataDir": "<this Inbox's data folder>", "address": "<file>", "key": "<file>" }
+{ "v": 1, "host": "<id>", "name": "<app name>", "dataDir": "<this Inbox's data folder>", "address": "<file>", "key": "<file>", "agents": ["codex"] }
 ```
 
 - `host`: 1 to 40 of `a-z`, `0-9` and `-`, never an agent's own id. The host the app's sessions connect as.
 - `name`: 1 to 40 characters, no control characters. Every word the person reads uses it: "Claude in <name>", "Open in <name>".
 - `dataDir`: must be this Inbox's data folder, so an app set up for one Inbox never drives another.
+- `agents` (optional): the launch agents the app hosts, 1 to 4 of `claude-code`, `codex`, `opencode` and `pi`, each once. Absent: all four. An agent it does not list keeps Plannotator's own host and starts as it does without the bridge.
 - `address`: an absolute path to a private file `{ "v": 1, "port": N }`. `key`: an absolute path to a private file of exactly 32 raw bytes. Both are read again for every request, so the app may restart on another port.
 
 A private file is a regular file of this user, with no group or other permission bits, never a symbolic link, and small. On Windows only the regular-file and size checks apply. The config is read once, when the Inbox starts. Unset, or a config that does not hold, and the bridge is off: Plannotator behaves as it does without it, and a config that does not hold says why once in the Inbox log.
 
-**The hosts.** One per agent of the launch list, named by its short name: "Claude in <name>", "Codex in <name>", "OpenCode in <name>", "Pi in <name>", with `routeHost` the config's `host` and `connector` "<name> plugin". The engine holds hosts by agent, so while the bridge is on each one takes the place of Plannotator's own host for that agent. New message offers an agent only while the app's catalog lists it and has the picked folder open.
+**The hosts.** One per agent the config lists (every launch agent when `agents` is absent), named by its short name: "Claude in <name>", "Codex in <name>", "OpenCode in <name>", "Pi in <name>", with `routeHost` the config's `host` and `connector` "<name> plugin". The engine holds hosts by agent, so while the bridge is on each one takes the place of Plannotator's own host for that agent. New message offers an agent only while the app's catalog lists it and has the picked folder open.
 
 **The protocol.** Every request goes to `http://127.0.0.1:<port>` with `Authorization: Bearer <key as lowercase hex>`. No redirect is followed, an answer over 1 MiB is refused, a GET waits 5 s and a POST 45 s.
 
@@ -345,5 +346,5 @@ Tests: `packages/server/inbox-launch-windows.test.ts` (the pure rules everywhere
 - Trusting a folder: `tests/e2e/inbox-launch-trust-compose.spec.ts` (New message: desktop, 390 and 320 wide; `LAUNCH_TRUST_COMPOSE_SHOTS_DIR` saves the approved pictures' names), `tests/e2e/inbox-launch-trust.spec.ts` (the thread's button). The gate, the order, 409 and `trust_failed` on a real server with the fake host: `packages/server/inbox-launch-trust-send.test.ts`. The window's states: `packages/inbox/composeTrust.test.tsx`. The reading and the write: `packages/server/inbox-launch-claude-trust.test.ts`. `fakeLaunchHost` (`tests/helpers/fake-launch-host.ts`) reaches a real server through `startInboxServer`'s `launchHosts`.
 - A turn that ends in an error: `packages/server/inbox-launch-turn-error.test.ts` (one note, an Inbox restart included; only a launched session read; cleared by the next good turn; the 300-character rule; Try again sends the message again; the transcript reader), and the e2e journey's step 10, with the fake `claude`'s `apiError`.
 - Unit: `packages/core/inbox-run-line.test.ts`, `packages/server/inbox-launch-env.test.ts` (the switches a launch keeps), `packages/server/inbox-launched-wake.test.ts` (which wake is launched, and its lines per agent and folder), `apps/hook/hooks/mod/inbox-launched-reminder.test.ts` (the reminder on a launched Claude Code session's first wake), `packages/server/inbox-launch-claude.test.ts`, the launch block of `packages/inbox/composeModel.test.ts`.
-- A launch bridge: `packages/server/inbox-launch-bridge.test.ts`, against a fake app on 127.0.0.1 (off unless its config holds, the agents the app offers, the key only to loopback and never through a redirect, the start's body, the owner check before Stop, Open and Resume, the 1 MiB cap, the port read again; on the engine, a launch that settles to the app's host with `open_in` on its line). The button's words: `packages/inbox/openInTerminal.test.tsx`.
+- A launch bridge: `packages/server/inbox-launch-bridge.test.ts`, against a fake app on 127.0.0.1 (off unless its config holds, the agents the config lists and the app offers, an unlisted agent kept on the Inbox's own host, the key only to loopback and never through a redirect, the start's body, the owner check before Stop, Open and Resume, the 1 MiB cap, the port read again; on the engine, a launch that settles to the app's host with `open_in` on its line). The button's words: `packages/inbox/openInTerminal.test.tsx`.
 - Real CLI (manual, never in CI): `scripts/launch-smoke/`. It runs real `claude` sessions in a scratch folder against a test Inbox on its own data dir; read its header before running it.

@@ -4,7 +4,8 @@
  * it leaves the bridge off and the Inbox's own hosts in place. See "An app that hosts the agents (launch bridge)" in
  * docs/agent-guides/inbox-launch.md.
  *
- * The config (a private file): `{ v: 1, host, name, dataDir, address, key }`. `address` names a private file
+ * The config (a private file): `{ v: 1, host, name, dataDir, address, key, agents? }`. `agents`: the launch agents
+ * the app hosts (all four when absent); every other agent keeps the Inbox's own host. `address` names a private file
  * `{ v: 1, port }`, `key` one of exactly 32 raw bytes; both are read again for every request (the app may restart on
  * another port). Every request goes to `http://127.0.0.1:<port>/api/lifecycle/…` with the key as a lowercase-hex
  * bearer, follows no redirect, and reads 1 MiB of answer at most. Server-only: nothing here reaches a window.
@@ -41,6 +42,8 @@ export interface LaunchBridgeConfig {
   address: string;
   /** The private file holding the 32-byte key. */
   key: string;
+  /** The launch agents the app hosts, in the launch list's order. */
+  agents: InboxLaunchAgent[];
 }
 
 /**
@@ -79,7 +82,16 @@ export function launchBridgeConfig(dataDir: string, env: Readonly<Record<string,
   if ([...name].length < 1 || [...name].length > 40 || !name.trim() || /\p{Cc}/u.test(name)) throw new Error("name: 1 to 40 characters, no control characters");
   if (!absolute(c.dataDir) || resolve(c.dataDir) !== resolve(dataDir)) throw new Error("dataDir is not this Inbox's data folder");
   if (!absolute(c.address) || !absolute(c.key)) throw new Error("address and key: absolute paths");
-  return { host: c.host, name, address: c.address, key: c.key };
+  const all = Object.keys(SHORT_NAMES) as InboxLaunchAgent[];
+  // Absent: the app hosts every launch agent. Listed: only those; the rest keep the Inbox's own hosts.
+  if (c.agents !== undefined) {
+    const listed: unknown[] = Array.isArray(c.agents) ? c.agents : [];
+    if (listed.length < 1 || listed.length > all.length || new Set(listed).size !== listed.length || !listed.every((a) => all.includes(a as InboxLaunchAgent))) {
+      throw new Error(`agents: 1 to ${all.length} of ${all.join(", ")}, each once`);
+    }
+  }
+  const agents = c.agents === undefined ? all : all.filter((a) => c.agents.includes(a));
+  return { host: c.host, name, address: c.address, key: c.key, agents };
 }
 
 interface SessionRow {
@@ -95,8 +107,8 @@ interface Catalog {
 }
 
 /**
- * The hosts of the app `PLANNOTATOR_LAUNCH_BRIDGE` names: one per agent of the launch list, each offered only while
- * the app's catalog lists it. None when the variable is unset or its config does not hold (said once in the log).
+ * The hosts of the app `PLANNOTATOR_LAUNCH_BRIDGE` names: one per agent the config lists (every launch agent when it
+ * lists none), each offered only while the app's catalog lists it. None when the variable is unset or its config does not hold (said once in the log).
  * The engine holds hosts by agent, so each takes the place of the Inbox's own host for its agent.
  */
 export function createLaunchBridgeHosts(context: LaunchHostContext): LaunchHost[] {
@@ -198,7 +210,7 @@ export function createLaunchBridgeHosts(context: LaunchHostContext): LaunchHost[
   const refused = (error: unknown): LaunchHostResult => ({ exitCode: 1, text: error instanceof Error ? error.message : String(error) });
   const folderIn = (data: Catalog, folder: string) => data.workspaces.some((w) => typeof w?.folder === "string" && resolve(w.folder) === resolve(folder));
 
-  return (Object.keys(SHORT_NAMES) as InboxLaunchAgent[]).map((agent): LaunchHost => {
+  return config.agents.map((agent): LaunchHost => {
     let snapshot: Catalog["sessions"] | null = null;
     return {
       agent,
