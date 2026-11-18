@@ -221,6 +221,16 @@ describe("Start in Rex", () => {
     expect(panes.closed.at(-1)).toBe("session:x/block:moved");
   });
 
+  test("Stop before the agent took its first message: the line says stopped by the person, never that it didn't connect", async () => {
+    const { clock, fake, panes, send, post } = setup();
+    const { id } = await send();
+    fake.poll("session-r1", true, clock.now);
+    clock.now += INBOX_RUN_START_GRACE_MS + 1_000;
+    const stopped = (await (await post(id, "stop"))!.json()) as { run: { state: string; stopped_by_person?: boolean } };
+    expect(panes.closed).toEqual(["session:x/block:z"]);
+    expect(stopped.run).toMatchObject({ state: "stopped", stopped_by_person: true });
+  });
+
   test("Stop in Rex that cannot work (no pane known, or Rex not closing it): refused with words, and nothing counts as stopped", async () => {
     const unknown = setup({ answer: async () => ({ opened: false, sent: true }) });
     const first = await unknown.send();

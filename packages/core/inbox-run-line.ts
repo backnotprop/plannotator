@@ -195,7 +195,8 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
-  if (!e.seenLive && !hostStopped) return line("failed", { cause: e.rex?.line !== undefined && !e.rex.unavailable && !e.rex.refused ? INBOX_RUN_REX_NOT_CONNECTED : `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
+  // The person's Stop says stopped, even before the agent took its first message (a Rex tab closed by Stop).
+  if (!e.seenLive && !hostStopped && e.stoppedByPersonAt === null) return line("failed", { cause: e.rex?.line !== undefined && !e.rex.unavailable && !e.rex.refused ? INBOX_RUN_REX_NOT_CONNECTED : `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
   const byPerson = e.stoppedByPersonAt !== null;
   // Not the person's Stop: the host's own words, when it has some.
   return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });
