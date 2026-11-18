@@ -62,7 +62,6 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
   interface Pending {
     request: SemDiffRequest;
     settle: (reply: SemDiffReply | null) => void;
-    limitMs: number;
   }
   const pending = new Map<number, Pending>();
   let watchdog: ReturnType<typeof setTimeout> | null = null;
@@ -73,7 +72,9 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const head = pending.keys().next();
     if (head.done) return;
     const id = head.value;
-    watchdog = setTimeout(() => headTimedOut(id), pending.get(id)!.limitMs);
+    const { request } = pending.get(id)!;
+    const limit = request.opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : warm.has(languageForPath(request.path) ?? '') ? timeoutMs : Math.max(timeoutMs, coldTimeoutMs);
+    watchdog = setTimeout(() => headTimedOut(id), limit);
   };
   const settle = (id: number, reply: SemDiffReply | null) => {
     const entry = pending.get(id);
@@ -142,7 +143,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const id = nextId++;
     const request: SemDiffRequest = { id, advert: advert!, origin, path, oldText, newText, ...(opinion ? { opinion: { rejected: [...opinion.rejected] } } : {}) };
     return new Promise<SemDiffReply | null>((resolve) => {
-      pending.set(id, { request, settle: resolve, limitMs: opinion ? Math.max(timeoutMs, SEM_DIFF_OPINION_TIMEOUT_MS) : warm.has(languageForPath(path) ?? '') ? timeoutMs : Math.max(timeoutMs, coldTimeoutMs) });
+      pending.set(id, { request, settle: resolve });
       post(id);
       if (pending.size === 1) watchHead();
     }).then((reply) => {
