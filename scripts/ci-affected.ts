@@ -102,11 +102,12 @@ export function nativeAppFile(path: string): boolean {
 }
 
 /**
- * The app contract's generated native sources (apps/mobile/contract/generated):
- * data the contract tests read by name and check for staleness, so a change
- * reaches those tests like any data file.
+ * The app contract's number (apps/mobile/contract/VERSION) and generated
+ * native sources (apps/mobile/contract/generated): data the contract tests read
+ * by name and check for staleness, so a change reaches those tests like any
+ * data file.
  */
-const CONTRACT_GENERATED = /^apps\/mobile\/contract\/generated\/([^/]+\/)*[^/]+\.(swift|kt|xcstrings|strings)$/;
+const CONTRACT_GENERATED = /^apps\/mobile\/contract\/(VERSION|generated\/([^/]+\/)*[^/]+\.(swift|kt|xcstrings|strings))$/;
 
 export function knownKind(path: string): boolean {
   const base = path.split('/').pop()!;

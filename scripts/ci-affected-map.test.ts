@@ -340,11 +340,12 @@ describe('the native app (apps/mobile)', () => {
     expect(run([ch('apps/mobile/other/Thing.swift')]).mode, 'Swift outside ios/ and the contract').toBe('all');
   });
 
-  test('a contract file reaches only the tests that name it; generated Swift is data', () => {
+  test('a contract file reaches only the tests that name it; generated Swift and the contract number are data', () => {
     const g = graph();
-    g.graph['tests/mobile-x.test.ts'] = N([], { refs: ['apps/mobile/contract/vectors/x.json', 'apps/mobile/contract/generated/swift/Wire.swift'] });
-    g.files.push('tests/mobile-x.test.ts', 'apps/mobile/contract/vectors/x.json', 'apps/mobile/contract/generated/swift/Wire.swift');
-    for (const f of ['apps/mobile/contract/vectors/x.json', 'apps/mobile/contract/generated/swift/Wire.swift']) {
+    const data = ['apps/mobile/contract/vectors/x.json', 'apps/mobile/contract/generated/swift/Wire.swift', 'apps/mobile/contract/VERSION'];
+    g.graph['tests/mobile-x.test.ts'] = N([], { refs: data });
+    g.files.push('tests/mobile-x.test.ts', ...data);
+    for (const f of data) {
       const p = plan(g, { changes: [ch(f)], docsOnly: false });
       expect(p.mode, f).toBe('subset');
       expect(p.tests.filter((t) => t.why !== 'scanner').map((t) => t.path), f).toEqual(['tests/mobile-x.test.ts']);
