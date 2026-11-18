@@ -1,0 +1,178 @@
+import Foundation
+import XCTest
+@testable import InboxCore
+import InboxStandIn
+import InboxWire
+
+final class PairLinkTests: XCTestCase {
+  // proves: pair-02
+  func testReadsEveryPartOfTheLinkTheComputerShows() throws {
+    let fp = String(repeating: "ab", count: 32)
+    let link = try PairLink("plannotator://pair?v=1&name=Work%20Mac&tailnet=work-mac.example.ts.net%3A8443&lan=192.168.1.20%3A51820&fp=\(fp)&secret=abcDEF_-123&code=004219")
+    XCTAssertEqual(link.name, "Work Mac")
+    XCTAssertEqual(link.secret, "abcDEF_-123")
+    XCTAssertEqual(link.code, "004219")
+    // The Wi-Fi first, then the tailnet: the order the contract gives for redeeming a secret.
+    XCTAssertEqual(link.addresses, [.wifi(hostPort: "192.168.1.20:51820", fingerprint: fp), .tailnet(hostPort: "work-mac.example.ts.net:8443")])
+  }
+
+  func testAWifiAddressWithNoFingerprintIsNeverUsed() throws {
+    let link = try PairLink("plannotator://pair?v=1&name=M&tailnet=m.example.ts.net%3A8443&lan=192.168.1.20%3A51820&secret=s&code=1")
+    XCTAssertEqual(link.addresses, [.tailnet(hostPort: "m.example.ts.net:8443")])
+    XCTAssertThrowsError(try PairLink("plannotator://pair?v=1&name=M&lan=192.168.1.20%3A51820&fp=nothex&secret=s")) { XCTAssertEqual($0 as? PairLink.Failure, .noAddress) }
+  }
+
+  func testALinkFromANewerInboxSaysSoAndOtherTextIsNotALink() {
+    XCTAssertThrowsError(try PairLink("plannotator://pair?v=2&name=M&tailnet=a%3A1&secret=s")) { XCTAssertEqual($0 as? PairLink.Failure, .newerVersion) }
+    for text in ["https://example.com/pair?v=1&secret=s", "plannotator://open?v=1&secret=s", "plannotator://pair?v=1&tailnet=a%3A1", "hello"] {
+      XCTAssertThrowsError(try PairLink(text)) { XCTAssertEqual($0 as? PairLink.Failure, .notAPairLink) }
+    }
+  }
+}
+
+final class SkewTests: XCTestCase {
+  private func health(_ door: String?) throws -> JSONValue {
+    try JSONDecoder().decode(JSONValue.self, from: Data("{\"ok\":true\(door.map { ",\"door\":\($0)" } ?? "")}".utf8))
+  }
+  private let client = DoorClientFacts(contract: 1, minInboxContract: 0, routesBeforeDoor: ["GET threads"])
+
+  func testOffersOnlyWhatTheDoorLists() throws {
+    let skew = DoorSkew.read(health: try health(#"{"contract":1,"routes":["GET threads","GET events"],"not_by_relay":["GET events"],"grants":[],"min_app_contract":1}"#), client: client)
+    XCTAssertTrue(skew.offers("GET threads"))
+    XCTAssertFalse(skew.offers("POST messages/:id/reply"))
+    XCTAssertTrue(skew.offers("GET events", path: .direct))
+    XCTAssertFalse(skew.offers("GET events", path: .relay))
+  }
+
+  func testAnInboxFromBeforeTheHandshakeOffersTheRoutesItHadThen() throws {
+    XCTAssertEqual(DoorSkew.read(health: try health(nil), client: client), .ok(contract: 0, routes: ["GET threads"], notByRelay: [], grants: []))
+  }
+
+  func testTheInboxsFloorRefusesAnOlderApp() throws {
+    let skew = DoorSkew.read(health: try health(#"{"contract":3,"routes":["GET threads"],"min_app_contract":2}"#), client: client)
+    XCTAssertEqual(skew, .appNeedsUpdate(contract: 3, minAppContract: 2))
+    XCTAssertFalse(skew.offers("GET threads"))
+  }
+
+  func testANumberThatIsNotASafeWholeNumberMakesTheDoorUnreadable() throws {
+    for contract in ["\"1\"", "-1", "1.5", "9007199254740993"] {
+      let skew = DoorSkew.read(health: try health("{\"contract\":\(contract),\"routes\":[\"GET search\"],\"min_app_contract\":1}"), client: client)
+      XCTAssertEqual(skew, .ok(contract: 0, routes: ["GET threads"], notByRelay: [], grants: []), contract)
+    }
+  }
+
+  func testTheAppNamesItselfInTheDoorsForm() {
+    XCTAssertEqual(AppIdentity(version: "1.4.0", contract: 14).headerValue, "ios 1.4.0 contract 14")
+    XCTAssertEqual(AppIdentity.parse("ios 1.4.0 contract 14"), AppIdentity(version: "1.4.0", contract: 14))
+    XCTAssertNil(AppIdentity.parse("ios 1.4.0"))
+    XCTAssertNil(AppIdentity.parse("ios 1.4.0 contract 01"))
+  }
+}
+
+final class QuestionAnswerTests: XCTestCase {
+  private func question(_ kind: InboxQuestionKind, answer: QuestionAnswer? = nil, revision: Int64 = 0) -> InboxQuestion {
+    InboxQuestion(key: "q", position: 0, kind: kind, prompt: "Ship it?", choices: [], holdsUp: [], orphaned: false, state: .openValue, answer: answer, revision: revision, sentRevision: 0, messageId: MessageID("m"))
+  }
+
+  func testATapMakesAChoiceAndTrimsItsNote() throws {
+    let answer = QuestionAnswers.choice(question(.single), selected: ["Yes"], note: "  after lunch ")
+    XCTAssertEqual(try JSONValue.of(answer), try JSONValue.of(QuestionAnswer(v: 1, key: "q", kind: .single, prompt: "Ship it?", selected: ["Yes"], note: "after lunch")))
+  }
+
+  func testOtherWordsReplaceThePicksAndAChoiceReplacesOtherWords() {
+    let other = QuestionAnswers.other(question(.multi), other: " Only staging ", note: "")
+    XCTAssertEqual(other.selected, [])
+    XCTAssertEqual(other.other, "Only staging")
+    XCTAssertEqual(other.kind, .multi)
+    let back = QuestionAnswers.choice(question(.multi, answer: other), selected: ["A", "B"], note: "")
+    XCTAssertNil(back.other)
+    XCTAssertEqual(back.selected, ["A", "B"])
+  }
+
+  func testSkipIsAnAnswerOfItsOwnAndAPickClearsIt() {
+    let skipped = QuestionAnswers.skip(question(.single), note: "")
+    XCTAssertEqual(skipped.skipped, true)
+    XCTAssertNil(QuestionAnswers.choice(question(.single, answer: skipped), selected: ["Yes"], note: "").skipped)
+  }
+
+  func testAPickNamesTheRevisionItReadAndTakingItBackWritesNull() throws {
+    let q = question(.single, revision: 2)
+    let body = QuestionAnswers.pickBody(key: q.key, revision: q.revision, answer: nil, unsentOnly: true, idempotencyKey: "key-1")
+    let json = try JSONValue.of(body)
+    XCTAssertEqual(json["idempotency_key"], .string("key-1"))
+    XCTAssertEqual(json["unsent_only"], .bool(true))
+    XCTAssertNil(json["confirm_full"])
+    XCTAssertEqual(json["questions"]?.items.first?["revision"], .number(2))
+    XCTAssertEqual(json["questions"]?.items.first?["answer"], .null, "a taken-back pick must be written as null, not left out")
+  }
+}
+
+final class SendPlanTests: XCTestCase {
+  private func message(_ id: String, _ author: InboxAuthor, picked: [String] = []) -> InboxMessageWire {
+    let questions = picked.map {
+      InboxQuestion(key: $0, position: 0, kind: .single, prompt: $0, choices: [], holdsUp: [], orphaned: false, state: .picked, revision: 1, sentRevision: 0, messageId: MessageID(id))
+    }
+    return InboxMessageWire(questions: questions.isEmpty ? nil : questions, id: MessageID(id), projectId: ProjectID("p"), threadId: ThreadID("t"), author: author, body: "", createdAt: "")
+  }
+  private func thread(_ messages: [InboxMessageWire]) -> InboxThread {
+    InboxThread(threadId: ThreadID("t"), project: InboxThreadProject(id: "p", key: "p", name: "p", root: "/", createdAt: ""), messages: messages)
+  }
+  private let a = InboxAuthor(kind: .agent, host: "claude-code", session: "A")
+  private let b = InboxAuthor(kind: .agent, host: "codex", session: "B")
+
+  // proves: answer-08
+  func testOneReplyPerAgentSessionWithTheWordsGoingToTheLatestWriter() {
+    let targets = SendPlan.targets(in: thread([message("m1", a, picked: ["q1"]), message("m2", b, picked: ["q2"]), message("m3", a, picked: ["q3"])]))
+    XCTAssertEqual(targets.map(\.message.rawValue), ["m2", "m3"], "session A wrote last, so its reply is last and carries the words")
+    // A pick on another message of the same session names that message; one on the reply's own message names none.
+    XCTAssertEqual(targets[1].questions.map { "\($0.messageId?.rawValue ?? "-")/\($0.key)" }, ["m1/q1", "-/q3"])
+  }
+
+  func testWordsAloneAnswerTheLatestAgentMessage() {
+    let targets = SendPlan.targets(in: thread([message("m1", a, picked: ["q1"]), message("m2", b)]))
+    XCTAssertEqual(targets.map(\.message.rawValue), ["m1", "m2"])
+    XCTAssertEqual(targets[1].questions, [])
+    XCTAssertFalse(SendPlan.hasSomethingToSend(thread: thread([message("m1", a)]), words: "  "))
+    XCTAssertTrue(SendPlan.hasSomethingToSend(thread: thread([message("m1", a)]), words: "ok"))
+  }
+}
+
+final class StreamAndTimeTests: XCTestCase {
+  func testFramesSurviveAnyCutAndCommentsAreSkipped() {
+    let text = ": ping\n\nevent: hello\ndata: {\"cursor\":4}\n\nid: 9\r\nevent: record\r\ndata: a\r\ndata: b\r\n\r\n"
+    let bytes = Data(text.utf8)
+    for size in [1, 2, 3, 7, bytes.count] {
+      var reader = EventStreamReader()
+      var frames: [EventFrame] = []
+      var start = 0
+      while start < bytes.count {
+        let end = min(start + size, bytes.count)
+        frames += reader.feed(bytes.subdata(in: start..<end))
+        start = end
+      }
+      XCTAssertEqual(frames, [EventFrame(event: "hello", data: "{\"cursor\":4}", id: nil), EventFrame(event: "record", data: "a\nb", id: "9")], "cut every \(size)")
+      XCTAssertEqual(reader.lastEventID, "9")
+    }
+  }
+
+  func testTimesReadAsTheWindowsDo() throws {
+    let words = TimeWords(locale: Locale(identifier: "en_US"), timeZone: TimeZone(identifier: "UTC")!)
+    let now = try XCTUnwrap(TimeWords.date("2026-11-18T15:30:00.000Z"))
+    XCTAssertEqual(TimeWords.normalise(words.short("2026-11-18T00:05:00.000Z", now: now)), "12:05 AM")
+    XCTAssertEqual(TimeWords.normalise(words.short("2026-11-17T23:55:00.000Z", now: now)), "Nov 17")
+    XCTAssertEqual(TimeWords.normalise(words.short("2025-09-02T20:22:00.000Z", now: now)), "Sep 2, 2025")
+    XCTAssertEqual(TimeWords.normalise(words.when("2026-11-17T08:00:00.000Z", now: now)), "Nov 17, 8:00 AM")
+    XCTAssertEqual(words.short("not a time", now: now), "")
+  }
+
+  func testCountsReadAsTheWindowsDo() {
+    XCTAssertEqual(CountWords.waiting(open: 1), "")
+    XCTAssertEqual(CountWords.waiting(open: 2), "2 questions")
+    XCTAssertEqual(CountWords.waiting(open: 3, actions: 2), "1 question, 2 action items")
+    XCTAssertEqual(CountWords.waiting(open: 1, actions: 1), "1 action item")
+  }
+
+  func testACertificatesFingerprintIsTheSha256OfItsBytesInLowercaseHex() {
+    XCTAssertEqual(CertificatePin.fingerprint(ofDER: Data("abc".utf8)), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad")
+  }
+}
