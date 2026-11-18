@@ -111,6 +111,18 @@ export async function readRelayBody(answer: Response, cap: number): Promise<Buff
 const RECONNECT_FIRST_MS = 1_000;
 const RECONNECT_LAST_MS = 60_000;
 
+/**
+ * The socket's liveness check: a ping after `intervalMs`, and a reconnect when
+ * its pong is `timeoutMs` late. A ping leaves after every byte already sent,
+ * and a result frame can be about 17.8 MiB, so the pong is not expected until
+ * those bytes could have left at `uplinkBytesPerMs` (about 256 kbit/s, a slow
+ * uplink), and Bun's send buffer still shrinking counts as an answer. Without
+ * that, a slow upload would be cut off mid-frame and its command sent again.
+ */
+const RELAY_HEARTBEAT = { intervalMs: 30_000, timeoutMs: 10_000, uplinkBytesPerMs: 32 };
+
+type RelaySocket = WebSocket & Pick<Bun.WebSocket, "ping" | "terminate">;
+
 export interface InboxRelayFile {
   v: 1;
   url: string;
@@ -241,6 +253,8 @@ export interface InboxRelayContext {
   log?: (line: string) => void;
   phones?: boolean;
   agents?: InboxRelayAgents;
+  /** Timing override for the loopback relay test. */
+  heartbeat?: Partial<typeof RELAY_HEARTBEAT>;
 }
 
 export function createInboxRelay(context: InboxRelayContext) {
@@ -254,6 +268,10 @@ export function createInboxRelay(context: InboxRelayContext) {
   let making: Promise<InboxRelayFile | null> | null = null;
   let socket: WebSocket | null = null;
   let retry: ReturnType<typeof setTimeout> | null = null;
+  let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+  const heartbeat = { ...RELAY_HEARTBEAT, ...context.heartbeat };
+  /** When every frame sent on this socket could have left at the heartbeat's slowest uplink. */
+  let drainedAt = 0;
   let delay = RECONNECT_FIRST_MS;
   let stopped = false;
   let reachable: boolean | null = null;
@@ -349,11 +367,16 @@ export function createInboxRelay(context: InboxRelayContext) {
     for (const id of sent.keys()) void pump(id);
   };
 
-  const send = (frame: unknown): boolean => {
+  /** Sends one frame on the open socket, and counts its bytes toward when the heartbeat may expect a pong. */
+  const transmit = (frame: string): boolean => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
-    socket.send(JSON.stringify(frame));
+    socket.send(frame);
+    // Frames are JSON around base64 text, so their length is their byte count.
+    drainedAt = Math.max(drainedAt, Date.now()) + frame.length / heartbeat.uplinkBytesPerMs;
     return true;
   };
+
+  const send = (frame: unknown): boolean => transmit(JSON.stringify(frame));
 
   /**
    * One store line's item frame, sealed under the phone's key. `after` is the
@@ -404,8 +427,7 @@ export function createInboxRelay(context: InboxRelayContext) {
             const frame = await recordFrame(deviceId, line, reached, key);
             // A carriage frame moved the cursor meanwhile: start again from it.
             if (sent.get(deviceId) !== reached) continue pass;
-            if (!socket || socket.readyState !== WebSocket.OPEN) return;
-            socket.send(frame);
+            if (!transmit(frame)) return;
             reached = line.seq;
             sent.set(deviceId, reached);
           }
@@ -481,7 +503,7 @@ export function createInboxRelay(context: InboxRelayContext) {
         answer = new Response(body, { status: first.status, headers: { "Content-Type": first.headers.get("content-type") ?? "application/json; charset=utf-8" } });
       }
       const item = await resultFrame(frame.device_id, opened.id, answer, keys.key);
-      if (socket && socket.readyState === WebSocket.OPEN) socket.send(item);
+      transmit(item);
     } else {
       log(`agent command ${frame.device_id} refused`);
     }
@@ -505,7 +527,7 @@ export function createInboxRelay(context: InboxRelayContext) {
       log(`command ${frame.device_id} ${command.method} ${answer.status}`);
       if (devices.get(frame.device_id)?.carriage) {
         const item = await resultFrame(frame.device_id, command.id, answer, keys.key);
-        if (socket && socket.readyState === WebSocket.OPEN) socket.send(item);
+        transmit(item);
       }
     } else {
       // Refused the same way whatever the reason: reported applied, so the relay lets it go.
@@ -539,28 +561,32 @@ export function createInboxRelay(context: InboxRelayContext) {
     }
   };
 
-  /** The one socket, open while the mailbox has a paired phone; it reconnects when it drops. */
+  const clearHeartbeat = () => {
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    heartbeatTimer = null;
+  };
+
+  /** The one socket, open while the mailbox has a paired device; it reconnects when it drops. */
   const connect = () => {
     if (stopped || socket || retry || !mailbox || served().length === 0) return;
     const url = `${mailbox.url.replace(/^http/, "ws")}${mailboxPath("/socket")}`;
     // Bun's WebSocket takes headers: the Inbox's bearer goes in Authorization, never in the URL.
-    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]);
+    const ws = new WebSocket(url, { headers: { Authorization: `Bearer ${mailbox.secret}` } } as unknown as string[]) as RelaySocket;
     socket = ws;
-    let opened = false;
-    ws.onopen = () => {
-      opened = true;
-      reachable = true;
-    };
-    ws.onmessage = (event) => {
-      if (typeof event.data !== "string") return;
-      const text = event.data;
-      frames = frames.then(() => (socket === ws ? onFrame(text) : undefined)).catch((error) => log(`frame failed: ${error instanceof Error ? error.message : String(error)}`));
-    };
-    ws.onclose = () => {
+    drainedAt = 0;
+    let awaiting: Buffer | null = null;
+    /** Bun's send buffer when the pong was last looked for. */
+    let buffered = 0;
+    const dropped = (reason?: string) => {
       if (socket !== ws) return;
-      if (!opened) reachable = false;
+      clearHeartbeat();
       socket = null;
       sent.clear();
+      reachable = false;
+      if (reason) {
+        log(reason);
+        ws.terminate();
+      }
       if (stopped || served().length === 0) return;
       retry = setTimeout(() => {
         retry = null;
@@ -568,11 +594,54 @@ export function createInboxRelay(context: InboxRelayContext) {
       }, delay);
       delay = Math.min(delay * 2, RECONNECT_LAST_MS);
     };
+    const awaitPong = (ms: number) => {
+      heartbeatTimer = setTimeout(() => {
+        if (socket !== ws) return;
+        // Bun's send buffer shrank since the last look: an upload is still leaving, slower than allowed for, so the socket is alive.
+        if (ws.bufferedAmount < buffered) {
+          buffered = ws.bufferedAmount;
+          awaitPong(heartbeat.timeoutMs);
+          return;
+        }
+        dropped("socket heartbeat timed out");
+      }, ms);
+    };
+    const schedulePing = () => {
+      heartbeatTimer = setTimeout(() => {
+        if (socket !== ws || ws.readyState !== WebSocket.OPEN) return;
+        // Cloudflare answers protocol pings without waking the mailbox or changing its wire format.
+        awaiting = randomBytes(8);
+        ws.ping(awaiting);
+        buffered = ws.bufferedAmount;
+        // The ping waits behind every frame already sent: its pong is due once those could have left.
+        awaitPong(Math.max(0, drainedAt - Date.now()) + heartbeat.timeoutMs);
+      }, heartbeat.intervalMs);
+    };
+    ws.onopen = () => {
+      if (socket !== ws) return;
+      reachable = true;
+      schedulePing();
+    };
+    ws.addEventListener("pong", (event) => {
+      if (socket !== ws || !awaiting || !(event instanceof MessageEvent)) return;
+      if (!Buffer.isBuffer(event.data) || !awaiting.equals(event.data)) return;
+      awaiting = null;
+      clearHeartbeat();
+      schedulePing();
+    });
+    ws.onmessage = (event) => {
+      if (typeof event.data !== "string") return;
+      const text = event.data;
+      frames = frames.then(() => (socket === ws ? onFrame(text) : undefined)).catch((error) => log(`frame failed: ${error instanceof Error ? error.message : String(error)}`));
+    };
+    ws.onerror = () => dropped("socket error");
+    ws.onclose = () => dropped();
   };
 
   const disconnect = () => {
     if (retry) clearTimeout(retry);
     retry = null;
+    clearHeartbeat();
     const ws = socket;
     socket = null;
     ws?.close(1000, "closed");
