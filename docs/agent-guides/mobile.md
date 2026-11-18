@@ -32,7 +32,7 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 
 | `parity/surface.json` | `scripts/mobile/surface.ts` | Everything the window and its server offer, as `<kind>:<name>` entries: door routes, the Inbox endpoints (paths, read from the server's code by `scripts/mobile/window-routes.ts`; `tests/inbox-api-table.test.ts` holds `server-and-storage.md`'s Inbox table to the same list), stream frames, record kinds, wire enum values, the keys the Settings write takes, capabilities, wire fields, message blocks, `:::` blocks, Settings sections and flow checks. The door, the endpoints and the wire types are read live from the product. |
 | `parity/ledger.json` | hand | One row per feature, with the phone's decision for it. See "The parity ledger". |
-| `flows/*.md` | hand | One file per flow: what the person sees and does, then numbered checks such as `[list-04]`. `flows/README.md` holds the rules every flow keeps. |
+| `flows/*.md` | hand | One file per flow: what the person sees and does, then numbered checks such as `[list-04]`. Each check is taken from the window's code and ends with where it comes from, `(path:line)`. Where the phone differs on purpose, the check says `phone differs:` and why. `flows/README.md` holds the rules every flow keeps. |
 
 `scripts/mobile/door-shapes.ts` declares the few door shapes that the product has no TypeScript type for: the pair exchange, the error body, the stream frames, and the bodies of `seen`, `picks` and `reply`. If the product gets a type for one of these, use the product's type in `ROOTS` and remove the shape from `door-shapes.ts`.
 
@@ -49,30 +49,67 @@ A word the window shows that is not in `words.json` is written inside a componen
 
 ## The parity ledger
 
-Every entry of `parity/surface.json` needs a row in `parity/ledger.json` that names it in `surface`. A row has:
+Every entry of `parity/surface.json` needs a row in `parity/ledger.json` that names it in `surface`. The surface is read from the product, never from the docs:
+
+- door routes, from the door itself;
+- window endpoints, from the server's code (`scripts/mobile/window-routes.ts`). These are paths without methods, and `<prefix>/*` is a family that a module splits itself;
+- stream frames and record kinds;
+- the values of every wire enum (`enum:`) and every field of a wire type;
+- message blocks and `:::` directives;
+- the Settings sections, the keys the Settings write takes (`setting:`, which includes the capability switches), and the capabilities;
+- the flows' numbered checks.
+
+A row has:
 
 - `id` and `title`;
 - `surface`: the entries it decides;
 - `flows`: the flow checks that prove it;
-- `mobile`: `v1`, `rethink` (in v1, done the phone's way), `later` or `never`;
-- `why`, which `later` and `never` must fill (SCOPE's reason codes: `L-door`, `L-off`, `L-size`, `L-ipad`, `L-ai`, `L-proxy`, `N-desk`, `N-web`, `N-self`; `L-nodoor` is a window endpoint that is not on the phone's door);
+- `mobile`: `v1`, `rethink` (in v1, done the phone's way), `later`, `never`, or `undecided`;
+- `why`. `later` and `never` must fill it, starting with a reason code. The codes are SCOPE's (`L-door`, `L-off`, `L-size`, `L-ipad`, `L-ai`, `L-proxy`, `N-desk`, `N-web`, `N-self`), plus `L-nodoor` for a window endpoint that is not on the phone's door;
+- `since` (`undecided` only): the day the row was added;
+- `decoded: true`: the app reads these entries through `Wire.swift`. That is a fact about reading. The mark says what the phone shows;
 - `ios.state`: `not-started`, `building`, `done` or `owed`.
 
-`owed` means the window changed something the app had, and the app has not caught up. It needs `owed_since` (a date), and the test fails when that date is more than 14 days old.
+Rules the test enforces:
 
-The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their marks and reasons. Entries were joined to rows by the routes, frames and fields each row names. Rows whose `source` starts with `seed:` cover the entries that no scope row names:
+- **One decision per entry.** `v1` and `rethink` agree. An entry that one row marks `v1` and another `later` or `never` fails. An `undecided` row beside a decided one does not count.
+- **A new entry forces a choice.** You can decide it, or run `bun scripts/mobile/parity.ts --defer`, which gives each new entry an `undecided` row dated today. The owner then decides it.
+- **Built features follow the window.** A `done` row records a fingerprint of its entries: a field's schema, a door route's entry, a flow check's line. When the window changes them, the test fails until `bun scripts/mobile/parity.ts --owed` marks the row `owed` with today's date.
+- **The clock** is a separate test, `tests/mobile-parity-debts.test.ts`. An `undecided` row or an `owed` debt older than 14 days fails. That test reads only the ledger, so it runs when the ledger changes and on main's full run, never on a pull request that only changes the Inbox.
 
-- wire fields grouped by type, which `Wire.swift` decodes;
-- the window endpoints with no door route;
-- the door routes, flows, blocks and frames left over.
+The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their marks and reasons. Entries were joined to rows by the routes, frames and fields each row names, then corrected by review. Rows whose `source` starts with `seed:` cover the entries no scope row names:
 
-When you fold such an entry into its feature's row, remove the seed row.
+- `type-<Type>`: the fields and enum values of one wire type, `decoded`, marked by the feature that reads the type. Update, machine updates, restart, notify reach, cloud wake, agent faces, tag colours and tidy are `later`. The outbox's view is `never`, because the phone keeps its own outbox;
+- `window-door` (the door itself, `v1`), `window-web` (the web window's own files, `never`), `window-mcp` (`never`), `window-ask` (`later`), `window-decisions` (`later`), `window-outbox` (`never`);
+- `window-door-gap`: v1 features whose route the door does not have yet. This is F5a's work list: drafts, a guide marked viewed, the comment draft's delete, agent icons;
+- `window-only-<segment>` (`later`, `L-nodoor`);
+- `health` (`v1`), `agent-session-fields` (`v1`), `setting-switches` (`later`, `L-door`), and `setting-keys` and `capabilities` (`undecided`);
+- the flows, blocks, frames and door routes left over.
+
+When you fold such an entry into its feature's row, take it out of the seed row.
 
 `tests/mobile-parity.test.ts` reads the live surface, not the committed file. It fails with:
 
-> The window gained `<entry>`. Decide for the phone: add it to apps/mobile/contract/parity/ledger.json as v1, later, never or rethink
+> The window gained `<entry>`. Decide for the phone: add it to apps/mobile/contract/parity/ledger.json as v1, later, never or rethink, or run `bun scripts/mobile/parity.ts --defer` to leave it undecided for the owner
 
-To fix it, add the entry to the feature's row, or to a new row with a mark. Then run `bun scripts/mobile/surface.ts`. A row that names an entry the window no longer has fails too. The test takes about half a second.
+Then run `bun scripts/mobile/all.ts`. A row that names an entry the window no longer has fails too. The test takes about half a second.
+
+`tests/inbox-api-table.test.ts` ties `docs/agent-guides/server-and-storage.md`'s Inbox API table to the same server-derived route list. An endpoint with no row there fails, whatever the phone decides.
+
+### What parity does not catch
+
+1. Purely visual or interaction changes: layout, gestures, durations, menus, animation.
+2. Any word written inside a component or a server message, which is most of the UI. Only the words in `words.json` are entries.
+3. A new option inside an existing Settings section that is not a key of the Settings write, and window addresses (`#board`, `#settings/...`). Their only table imports the window's React modules.
+4. A new route inside a family (`<prefix>/*`), and a method added to a path that already has one.
+5. A changed meaning of an existing field when its type stays the same. A type change only changes the fingerprint of a `done` row.
+6. Door answers whose types are not in the schema's roots: cards, pulls, search, sessions, launch, attachments' views and more.
+7. A frame sent from a module surface.ts does not read.
+8. Server-side changes to a body the kit still declares by hand in `door-shapes.ts`.
+9. Rule changes in code that no vector runs: folding, store apply, outbox, push, send, anchors.
+10. A window change to a built feature whose entries keep the same fingerprint.
+11. A capability that is not on the capability seam.
+12. The meaning of a mark: the test checks that each entry has one decision, not that the decision is right. The owner reviews the ledger.
 
 ## When a test fails on your pull request
 
@@ -85,9 +122,12 @@ To fix it, add the entry to the feature's row, or to a new row with a mark. Then
 - the window's error table in `packages/server/inbox.ts`;
 - the default theme, `packages/ui/themes/plannotator.css` (another theme file does not select it);
 - a module a word comes from (`scripts/mobile/words.ts` imports them);
+- what the parity surface reads: the server's route files, `packages/ui/types.ts` (blocks), `packages/inbox/settingsRoute.ts` (Settings sections) and the capability files;
 - the contract files themselves.
 
-A change to the window's components or `packages/inbox/api.ts`, or to the shared UI, does not select it. `scripts/ci-affected-map.test.ts` checks this.
+A change to the window's components or `packages/inbox/api.ts`, or to the rest of the shared UI, does not select it. `scripts/ci-affected-map.test.ts` checks this.
+
+`tests/mobile-flows.test.ts` checks that each flow check cites files that exist. The cited paths are only known at run time, so the picker runs it on every pull request, as a tree-scanning test. It takes milliseconds.
 
 If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 
@@ -107,6 +147,8 @@ If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 - `health.door` is not in the schema until brief F1 lands and its type joins `ROOTS`. After F1, match `health.door.routes` against `DoorRoute.name`.
 - Decode list rows one by one, so one bad row does not blank the list.
 - Seqs, cursors and revisions are `Int64`. Other numbers are `Double`.
+- The flows are checked against the window and cite it. In the list: left swipe is Archive only, the undo banner stays 7 s, the badge counts threads with unseen agent messages, and a picked card reads "Picked <time> · in your draft".
+- About 33 v1 features use door routes that a phone token cannot reach today (`grant: machine`: the Board, pulls, launch, open-in and more), and `window-door-gap` lists v1 features with no door route at all. S1 should use only `grant: phone` routes.
 - Only the words in `words.json` (about 30) are generated. Any other window word needs a product constant first, in its own pull request.
 - `tokens.json` names the fonts Inter and Geist Mono. Bundling them in the app needs their OFL notices.
 - `DoorPicksBody` in `door-shapes.ts` does not have `confirm_full` yet. Until it is made from the product's `inboxPickBody`, build picks the way `inboxPickBody` does.
