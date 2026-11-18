@@ -12,7 +12,7 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 
 ## Reading a newer or an older Inbox
 
-- `VERSION` is the contract number. It rises only for a breaking wire change, that is, one an app built from the older contract would misread. Adding a route, a field, a record kind or an enum value is not breaking. `VERSION` is the only generated contract file that holds the number; `Wire.swift` has it as `wireContract`.
+- `VERSION` is the contract number, generated from the door's own `DOOR_CONTRACT` (`packages/server/inbox-door-version.ts`), the number `health.door.contract` answers. It rises only for a breaking wire change, that is, one an app built from the older contract would misread. Adding a route, a field, a record kind or an enum value is not breaking: the app finds an addition in `health.door.routes`. `VERSION` is the only contract data file that holds the number; `Wire.swift` compiles it in as `wireContract`, and `schema/required.json` records which number its baseline began at. A test checks all three equal `DOOR_CONTRACT`.
 - An app reads a newer Inbox. Every generated struct keeps the fields it does not know in `unknownFields`, and every generated enum has an `unknown(String)` case.
 - A newer app reads an older Inbox. `schema/required.json` records, per struct, the fields that were required when this contract number began. `Wire.swift` decodes only those as required. A field the TypeScript makes required later is optional in `Wire.swift`, so an older Inbox that does not send it still decodes. The file starts again when `VERSION` rises.
 - Numbers: a field whose name says it counts or orders is an `integer` in the schema and `Int64` in Swift (`INTEGER_NAME` in `scripts/mobile/schema.ts`: `seq`, `cursor`, `revision`, `rev`, `ms`, `bytes`, `size`, `count`, `position`, `total`, `offset` and `limit`, alone or after `_`). Every other number is a `Double`.
@@ -22,8 +22,8 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 
 | Path | Made by | From |
 |---|---|---|
-| `VERSION` | hand | The contract number, a whole number. It rises only for a breaking wire change (see above). |
-| `door.json` | `scripts/mobile/door.ts` | The door's own route list (`doorRouteNames`, `doorRouteOf`, `doorWriteRoutes` in `packages/server/inbox-devices.ts`) and the write kinds (`DOOR_WRITES` in `packages/server/inbox-outbox.ts`). One entry per route, alternations written out. |
+| `VERSION` | `scripts/mobile/door.ts` | The contract number: `DOOR_CONTRACT`. Raise it there, never here (see above). |
+| `door.json` | `scripts/mobile/door.ts` | The door's own table, `doorRouteTable()` in `packages/server/inbox-devices.ts`: one entry per row, by the name `health.door.routes` lists, with its `grant` and `relay`. Plus the window route each reaches (`doorRouteOf`) and the write kinds (`DOOR_WRITES` in `packages/server/inbox-outbox.ts`). A test checks a phone's `health.door` lists exactly the `phone` entries. |
 | `schema/wire.schema.json` | `scripts/mobile/schema.ts` | The product's TypeScript types named in `ROOTS`, and every type they reach. It uses the TypeScript 5.8 compiler that `packages/core` installs. A compiler error in the files it reads stops it, so a broken import never becomes an untyped field. `SCHEMA_SOURCES` lists, as literals, every file the compiler reads, and the generator fails when the list and what it read differ. |
 | `generated/swift/Wire.swift` | `scripts/mobile/swift.ts` | The schema, `door.json`, and the error codes of the door (`refuse(…)`) and the window (`ERROR_STATUS` in `packages/server/inbox.ts`). |
 | `schema/required.json` | `scripts/mobile/swift.ts` | The fields `Wire.swift` decodes as required: those required when this contract number began. |
