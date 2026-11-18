@@ -2783,7 +2783,7 @@ export async function gitAddFile(
   // Patch paths are repo-root-relative; from a subdirectory launch the
   // pathspec must be applied at the toplevel or `git add` fails with
   // "did not match any files".
-  await ensureGitSuccess(runtime, ["add", "--", filePath], await resolveRepoToplevel(runtime, cwd));
+  await ensureGitSuccess(runtime, ["add", "--", `:(top,literal)${filePath}`], await resolveRepoToplevel(runtime, cwd));
 }
 
 export async function gitResetFile(
@@ -2793,7 +2793,7 @@ export async function gitResetFile(
 ): Promise<void> {
   validateFilePath(filePath);
   // Toplevel for the same reason as gitAddFile.
-  await ensureGitSuccess(runtime, ["reset", "HEAD", "--", filePath], await resolveRepoToplevel(runtime, cwd));
+  await ensureGitSuccess(runtime, ["reset", "HEAD", "--", `:(top,literal)${filePath}`], await resolveRepoToplevel(runtime, cwd));
 }
 
 export function parseP4DiffType(
