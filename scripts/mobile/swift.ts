@@ -425,10 +425,8 @@ function emitDoor(routes: DoorEntry[]): string[] {
     ...enumOf('DoorAnswer', ['json', 'bytes', 'stream']), '',
     '/// One route of the door, as door.json gives it.',
     'public struct DoorRoute: Hashable, Sendable {',
-    '  /// `POST threads/:id/seen`.',
+    '  /// `POST threads/:id/seen`: what `health.door.routes` lists for it, so the app offers a route only when it is listed.',
     '  public let name: String',
-    '  /// The door\'s own name for its entry: what `health.door.routes` lists.',
-    '  public let doorName: String',
     '  public let method: DoorMethod',
     '  /// Relative to `Door.prefix`, parameters in braces.',
     '  public let path: String',
@@ -455,7 +453,7 @@ function emitDoor(routes: DoorEntry[]): string[] {
   for (const r of routes) {
     lines.push(
       `  /// \`${r.name}\`${r.window ? `: the window's \`${r.window}\`` : ''}.`,
-      `  public static let ${ident(r.call)} = DoorRoute(name: ${lit(r.name)}, doorName: ${lit(r.door_name)}, method: .${r.method.toLowerCase()}, path: ${lit(r.path)}, grant: .${r.grant}, needsToken: ${r.auth === 'token'}, kind: .${r.kind}, key: ${r.key ? `.${r.key}` : 'nil'}, answer: .${r.answer}, range: ${r.range}, relay: ${r.relay})`,
+      `  public static let ${ident(r.call)} = DoorRoute(name: ${lit(r.name)}, method: .${r.method.toLowerCase()}, path: ${lit(r.path)}, grant: .${r.grant}, needsToken: ${r.auth === 'token'}, kind: .${r.kind}, key: ${r.key ? `.${r.key}` : 'nil'}, answer: .${r.answer}, range: ${r.range}, relay: ${r.relay})`,
     );
   }
   lines.push(`  public static let all: [DoorRoute] = [${routes.map((r) => ident(r.call)).join(', ')}]`, '}', '');

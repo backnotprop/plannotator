@@ -193,6 +193,13 @@
       "platform",
       "revoked_at"
     ],
+    "InboxDoorHealth": [
+      "contract",
+      "grants",
+      "min_app_contract",
+      "not_by_relay",
+      "routes"
+    ],
     "InboxDraft": [
       "body",
       "created_at",

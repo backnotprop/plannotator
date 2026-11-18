@@ -34,6 +34,7 @@ export const ROOTS: Record<string, string[]> = {
     'InboxDelivery', 'InboxRun', 'InboxRecordKind', 'InboxSectionId', 'InboxQuestionState', 'InboxUpload', 'InboxDraft',
   ],
   'packages/core/question-block.ts': ['QuestionAnswer'],
+  'packages/core/inbox-door-version.ts': ['InboxDoorHealth'],
   'packages/shared/inbox/devices.ts': ['InboxDevicePublic'],
   'packages/core/inbox-wire-models.ts': ['ListModel', 'ThreadModel', 'ReplyResult', 'ArchivedModel'],
   'scripts/mobile/door-shapes.ts': [
@@ -44,9 +45,9 @@ export const ROOTS: Record<string, string[]> = {
 
 /**
  * Every repository file the compiler reads for the schema, as literals, so
- * scripts/ci-affected.ts selects the contract's test when one changes (a file
- * reached only by `import type` is invisible to its import scan). buildSchema
- * fails when the list and what the compiler read differ.
+ * scripts/ci-affected.ts selects the contract's test when one changes whatever
+ * its import scan sees. buildSchema fails when the list and what the compiler
+ * read differ.
  */
 export const SCHEMA_SOURCES = [
   'packages/core/annotatable.ts',
@@ -65,6 +66,7 @@ export const SCHEMA_SOURCES = [
   'packages/core/inbox-codex.ts',
   'packages/core/inbox-combine.ts',
   'packages/core/inbox-delivery.ts',
+  'packages/core/inbox-door-version.ts',
   'packages/core/inbox-git-url.ts',
   'packages/core/inbox-initiatives.ts',
   'packages/core/inbox-launch-choice.ts',

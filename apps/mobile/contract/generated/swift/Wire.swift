@@ -2424,6 +2424,48 @@ public struct InboxDevicePublic: Codable, Hashable, Sendable {
   }
 }
 
+/// From `packages/core/inbox-door-version.ts`.
+public struct InboxDoorHealth: Codable, Hashable, Sendable {
+  public var contract: Double
+  public var routes: [String]
+  public var notByRelay: [String]
+  public var grants: [String]
+  public var minAppContract: Double
+  /// Fields this app does not know: kept, and written back when encoded.
+  public var unknownFields: [String: JSONValue] = [:]
+
+  static let knownKeys: Set<String> = ["contract", "routes", "not_by_relay", "grants", "min_app_contract"]
+
+  public init(contract: Double, routes: [String], notByRelay: [String], grants: [String], minAppContract: Double, unknownFields: [String: JSONValue] = [:]) {
+    self.contract = contract
+    self.routes = routes
+    self.notByRelay = notByRelay
+    self.grants = grants
+    self.minAppContract = minAppContract
+    self.unknownFields = unknownFields
+  }
+
+  public init(from decoder: Decoder) throws {
+    let c = try decoder.container(keyedBy: WireKey.self)
+    self.contract = try c.decode(Double.self, forKey: WireKey("contract"))
+    self.routes = try c.decode([String].self, forKey: WireKey("routes"))
+    self.notByRelay = try c.decode([String].self, forKey: WireKey("not_by_relay"))
+    self.grants = try c.decode([String].self, forKey: WireKey("grants"))
+    self.minAppContract = try c.decode(Double.self, forKey: WireKey("min_app_contract"))
+    self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
+  }
+
+  public func encode(to encoder: Encoder) throws {
+    var c = encoder.container(keyedBy: WireKey.self)
+    try c.encode(self.contract, forKey: WireKey("contract"))
+    try c.encode(self.routes, forKey: WireKey("routes"))
+    try c.encode(self.notByRelay, forKey: WireKey("not_by_relay"))
+    try c.encode(self.grants, forKey: WireKey("grants"))
+    try c.encode(self.minAppContract, forKey: WireKey("min_app_contract"))
+    try WireKey.write(unknownFields, to: &c)
+  }
+}
+
 /// From `packages/core/inbox-types.ts`.
 public struct InboxDraft: Codable, Hashable, Sendable {
   public var v: Double
@@ -9449,10 +9491,8 @@ public enum DoorAnswer: String, Hashable, Sendable {
 
 /// One route of the door, as door.json gives it.
 public struct DoorRoute: Hashable, Sendable {
-  /// `POST threads/:id/seen`.
+  /// `POST threads/:id/seen`: what `health.door.routes` lists for it, so the app offers a route only when it is listed.
   public let name: String
-  /// The door's own name for its entry: what `health.door.routes` lists.
-  public let doorName: String
   public let method: DoorMethod
   /// Relative to `Door.prefix`, parameters in braces.
   public let path: String
@@ -9477,235 +9517,237 @@ public struct DoorRequest: Hashable, Sendable {
 
 /// Every route of the door.
 public enum DoorRoutes {
-  /// `POST pair`.
-  public static let postPair = DoorRoute(name: "POST pair", doorName: "POST pair", method: .post, path: "pair", grant: .phone, needsToken: false, kind: .now, key: nil, answer: .json, range: false, relay: false)
-  /// `POST revoke`.
-  public static let postRevoke = DoorRoute(name: "POST revoke", doorName: "POST revoke", method: .post, path: "revoke", grant: .phone, needsToken: true, kind: .now, key: nil, answer: .json, range: false, relay: true)
   /// `GET health`: the window's `/api/inbox/health`.
-  public static let getHealth = DoorRoute(name: "GET health", doorName: "GET health", method: .get, path: "health", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getHealth = DoorRoute(name: "GET health", method: .get, path: "health", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET threads`: the window's `/api/inbox/threads`.
-  public static let getThreads = DoorRoute(name: "GET threads", doorName: "GET threads", method: .get, path: "threads", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThreads = DoorRoute(name: "GET threads", method: .get, path: "threads", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET projects`: the window's `/api/inbox/projects`.
-  public static let getProjects = DoorRoute(name: "GET projects", doorName: "GET projects", method: .get, path: "projects", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getProjects = DoorRoute(name: "GET projects", method: .get, path: "projects", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET whats-new`: the window's `/api/inbox/whats-new`.
-  public static let getWhatsNew = DoorRoute(name: "GET whats-new", doorName: "GET whats-new", method: .get, path: "whats-new", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getWhatsNew = DoorRoute(name: "GET whats-new", method: .get, path: "whats-new", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET whats-new/releases`: the window's `/api/inbox/whats-new/releases`.
-  public static let getWhatsNewReleases = DoorRoute(name: "GET whats-new/releases", doorName: "GET whats-new/releases", method: .get, path: "whats-new/releases", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getWhatsNewReleases = DoorRoute(name: "GET whats-new/releases", method: .get, path: "whats-new/releases", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET whats-new/image`: the window's `/api/inbox/whats-new/image`.
-  public static let getWhatsNewImage = DoorRoute(name: "GET whats-new/image", doorName: "GET whats-new/image", method: .get, path: "whats-new/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getWhatsNewImage = DoorRoute(name: "GET whats-new/image", method: .get, path: "whats-new/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET projects/:id/picture`: the window's `/api/inbox/projects/{project}/picture`.
-  public static let getProjectPicture = DoorRoute(name: "GET projects/:id/picture", doorName: "GET projects/:id/picture", method: .get, path: "projects/{project}/picture", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getProjectPicture = DoorRoute(name: "GET projects/:id/picture", method: .get, path: "projects/{project}/picture", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET threads/archived`: the window's `/api/inbox/threads/archived`.
-  public static let getThreadsArchived = DoorRoute(name: "GET threads/archived", doorName: "GET threads/archived", method: .get, path: "threads/archived", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThreadsArchived = DoorRoute(name: "GET threads/archived", method: .get, path: "threads/archived", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET threads/:id`: the window's `/api/inbox/threads/{thread}`.
-  public static let getThread = DoorRoute(name: "GET threads/:id", doorName: "GET threads/:id", method: .get, path: "threads/{thread}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThread = DoorRoute(name: "GET threads/:id", method: .get, path: "threads/{thread}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST threads/:id/seen`: the window's `/api/inbox/threads/{thread}/seen`.
-  public static let postThreadSeen = DoorRoute(name: "POST threads/:id/seen", doorName: "POST threads/:id/seen", method: .post, path: "threads/{thread}/seen", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadSeen = DoorRoute(name: "POST threads/:id/seen", method: .post, path: "threads/{thread}/seen", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/read`: the window's `/api/inbox/threads/{thread}/read`.
-  public static let postThreadRead = DoorRoute(name: "POST threads/:id/read", doorName: "POST threads/:id/(read|unread|mark-unread)", method: .post, path: "threads/{thread}/read", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadRead = DoorRoute(name: "POST threads/:id/read", method: .post, path: "threads/{thread}/read", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/unread`: the window's `/api/inbox/threads/{thread}/unread`.
-  public static let postThreadUnread = DoorRoute(name: "POST threads/:id/unread", doorName: "POST threads/:id/(read|unread|mark-unread)", method: .post, path: "threads/{thread}/unread", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadUnread = DoorRoute(name: "POST threads/:id/unread", method: .post, path: "threads/{thread}/unread", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/mark-unread`: the window's `/api/inbox/threads/{thread}/mark-unread`.
-  public static let postThreadMarkUnread = DoorRoute(name: "POST threads/:id/mark-unread", doorName: "POST threads/:id/(read|unread|mark-unread)", method: .post, path: "threads/{thread}/mark-unread", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadMarkUnread = DoorRoute(name: "POST threads/:id/mark-unread", method: .post, path: "threads/{thread}/mark-unread", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/snooze`: the window's `/api/inbox/threads/{thread}/snooze`.
-  public static let postThreadSnooze = DoorRoute(name: "POST threads/:id/snooze", doorName: "POST threads/:id/snooze", method: .post, path: "threads/{thread}/snooze", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadSnooze = DoorRoute(name: "POST threads/:id/snooze", method: .post, path: "threads/{thread}/snooze", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/pin`: the window's `/api/inbox/threads/{thread}/pin`.
-  public static let postThreadPin = DoorRoute(name: "POST threads/:id/pin", doorName: "POST threads/:id/pin", method: .post, path: "threads/{thread}/pin", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadPin = DoorRoute(name: "POST threads/:id/pin", method: .post, path: "threads/{thread}/pin", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST pins`: the window's `/api/inbox/pins`.
-  public static let postPins = DoorRoute(name: "POST pins", doorName: "POST pins", method: .post, path: "pins", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postPins = DoorRoute(name: "POST pins", method: .post, path: "pins", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/priority`: the window's `/api/inbox/threads/{thread}/priority`.
-  public static let postThreadPriority = DoorRoute(name: "POST threads/:id/priority", doorName: "POST threads/:id/priority", method: .post, path: "threads/{thread}/priority", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadPriority = DoorRoute(name: "POST threads/:id/priority", method: .post, path: "threads/{thread}/priority", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST agent-faces`: the window's `/api/inbox/agent-faces`.
-  public static let postAgentFaces = DoorRoute(name: "POST agent-faces", doorName: "POST agent-faces", method: .post, path: "agent-faces", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postAgentFaces = DoorRoute(name: "POST agent-faces", method: .post, path: "agent-faces", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/tags`: the window's `/api/inbox/threads/{thread}/tags`.
-  public static let postThreadTags = DoorRoute(name: "POST threads/:id/tags", doorName: "POST threads/:id/tags", method: .post, path: "threads/{thread}/tags", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadTags = DoorRoute(name: "POST threads/:id/tags", method: .post, path: "threads/{thread}/tags", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST initiatives/:id`: the window's `/api/inbox/initiatives/{initiative}`.
-  public static let postInitiative = DoorRoute(name: "POST initiatives/:id", doorName: "POST initiatives/:id", method: .post, path: "initiatives/{initiative}", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postInitiative = DoorRoute(name: "POST initiatives/:id", method: .post, path: "initiatives/{initiative}", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST tag-colours`: the window's `/api/inbox/tag-colours`.
-  public static let postTagColours = DoorRoute(name: "POST tag-colours", doorName: "POST tag-colours", method: .post, path: "tag-colours", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postTagColours = DoorRoute(name: "POST tag-colours", method: .post, path: "tag-colours", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET cards`: the window's `/api/inbox/cards`.
-  public static let getCards = DoorRoute(name: "GET cards", doorName: "GET cards", method: .get, path: "cards", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getCards = DoorRoute(name: "GET cards", method: .get, path: "cards", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET cards/:id`: the window's `/api/inbox/cards/{card}`.
-  public static let getCard = DoorRoute(name: "GET cards/:id", doorName: "GET cards/(crd_[^/]+)", method: .get, path: "cards/{card}", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getCard = DoorRoute(name: "GET cards/:id", method: .get, path: "cards/{card}", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET cards/:id/refs`: the window's `/api/inbox/cards/{card}/refs`.
-  public static let getCardRefs = DoorRoute(name: "GET cards/:id/refs", doorName: "GET cards/(crd_[^/]+)/refs", method: .get, path: "cards/{card}/refs", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getCardRefs = DoorRoute(name: "GET cards/:id/refs", method: .get, path: "cards/{card}/refs", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST cards/:id`: the window's `/api/inbox/cards/{card}`.
-  public static let postCard = DoorRoute(name: "POST cards/:id", doorName: "POST cards/(crd_[^/]+)", method: .post, path: "cards/{card}", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postCard = DoorRoute(name: "POST cards/:id", method: .post, path: "cards/{card}", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST cards/seen`: the window's `/api/inbox/cards/seen`.
-  public static let postCardsSeen = DoorRoute(name: "POST cards/seen", doorName: "POST cards/seen", method: .post, path: "cards/seen", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postCardsSeen = DoorRoute(name: "POST cards/seen", method: .post, path: "cards/seen", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST cards/dropped/seen`: the window's `/api/inbox/cards/dropped/seen`.
-  public static let postCardsDroppedSeen = DoorRoute(name: "POST cards/dropped/seen", doorName: "POST cards/dropped/seen", method: .post, path: "cards/dropped/seen", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postCardsDroppedSeen = DoorRoute(name: "POST cards/dropped/seen", method: .post, path: "cards/dropped/seen", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET pulls`: the window's `/api/inbox/pulls`.
-  public static let getPulls = DoorRoute(name: "GET pulls", doorName: "GET pulls", method: .get, path: "pulls", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPulls = DoorRoute(name: "GET pulls", method: .get, path: "pulls", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET reviews/branches`: the window's `/api/inbox/reviews/branches`.
-  public static let getReviewsBranches = DoorRoute(name: "GET reviews/branches", doorName: "GET reviews/branches", method: .get, path: "reviews/branches", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getReviewsBranches = DoorRoute(name: "GET reviews/branches", method: .get, path: "reviews/branches", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/risk`: the window's `/api/inbox/pulls/risk`.
-  public static let getPullsRisk = DoorRoute(name: "GET pulls/risk", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/risk", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsRisk = DoorRoute(name: "GET pulls/risk", method: .get, path: "pulls/risk", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/details`: the window's `/api/inbox/pulls/details`.
-  public static let getPullsDetails = DoorRoute(name: "GET pulls/details", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/details", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsDetails = DoorRoute(name: "GET pulls/details", method: .get, path: "pulls/details", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/diff`: the window's `/api/inbox/pulls/diff`.
-  public static let getPullsDiff = DoorRoute(name: "GET pulls/diff", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/diff", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsDiff = DoorRoute(name: "GET pulls/diff", method: .get, path: "pulls/diff", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/file`: the window's `/api/inbox/pulls/file`.
-  public static let getPullsFile = DoorRoute(name: "GET pulls/file", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/file", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsFile = DoorRoute(name: "GET pulls/file", method: .get, path: "pulls/file", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/repo-files`: the window's `/api/inbox/pulls/repo-files`.
-  public static let getPullsRepoFiles = DoorRoute(name: "GET pulls/repo-files", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/repo-files", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsRepoFiles = DoorRoute(name: "GET pulls/repo-files", method: .get, path: "pulls/repo-files", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/repo-file`: the window's `/api/inbox/pulls/repo-file`.
-  public static let getPullsRepoFile = DoorRoute(name: "GET pulls/repo-file", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/repo-file", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsRepoFile = DoorRoute(name: "GET pulls/repo-file", method: .get, path: "pulls/repo-file", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/avatar`: the window's `/api/inbox/pulls/avatar`.
-  public static let getPullsAvatar = DoorRoute(name: "GET pulls/avatar", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/avatar", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsAvatar = DoorRoute(name: "GET pulls/avatar", method: .get, path: "pulls/avatar", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/media`: the window's `/api/inbox/pulls/media`.
-  public static let getPullsMedia = DoorRoute(name: "GET pulls/media", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/media", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsMedia = DoorRoute(name: "GET pulls/media", method: .get, path: "pulls/media", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET pulls/media/sizes`: the window's `/api/inbox/pulls/media/sizes`.
-  public static let getPullsMediaSizes = DoorRoute(name: "GET pulls/media/sizes", doorName: "GET pulls/(risk|details|diff|file|repo-files|repo-file|avatar|media|media/sizes)", method: .get, path: "pulls/media/sizes", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getPullsMediaSizes = DoorRoute(name: "GET pulls/media/sizes", method: .get, path: "pulls/media/sizes", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST pulls/close`: the window's `/api/inbox/pulls/close`.
-  public static let postPullsClose = DoorRoute(name: "POST pulls/close", doorName: "POST pulls/(close|reopen|merge|owner)", method: .post, path: "pulls/close", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  public static let postPullsClose = DoorRoute(name: "POST pulls/close", method: .post, path: "pulls/close", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST pulls/reopen`: the window's `/api/inbox/pulls/reopen`.
-  public static let postPullsReopen = DoorRoute(name: "POST pulls/reopen", doorName: "POST pulls/(close|reopen|merge|owner)", method: .post, path: "pulls/reopen", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  public static let postPullsReopen = DoorRoute(name: "POST pulls/reopen", method: .post, path: "pulls/reopen", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST pulls/merge`: the window's `/api/inbox/pulls/merge`.
-  public static let postPullsMerge = DoorRoute(name: "POST pulls/merge", doorName: "POST pulls/(close|reopen|merge|owner)", method: .post, path: "pulls/merge", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  public static let postPullsMerge = DoorRoute(name: "POST pulls/merge", method: .post, path: "pulls/merge", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST pulls/owner`: the window's `/api/inbox/pulls/owner`.
-  public static let postPullsOwner = DoorRoute(name: "POST pulls/owner", doorName: "POST pulls/(close|reopen|merge|owner)", method: .post, path: "pulls/owner", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  public static let postPullsOwner = DoorRoute(name: "POST pulls/owner", method: .post, path: "pulls/owner", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST pulls/looked`: the window's `/api/inbox/pulls/looked`.
-  public static let postPullsLooked = DoorRoute(name: "POST pulls/looked", doorName: "POST pulls/looked", method: .post, path: "pulls/looked", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postPullsLooked = DoorRoute(name: "POST pulls/looked", method: .post, path: "pulls/looked", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET threads/:id/pulls`: the window's `/api/inbox/threads/{thread}/pulls`.
-  public static let getThreadPulls = DoorRoute(name: "GET threads/:id/pulls", doorName: "GET threads/:id/pulls", method: .get, path: "threads/{thread}/pulls", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThreadPulls = DoorRoute(name: "GET threads/:id/pulls", method: .get, path: "threads/{thread}/pulls", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST threads/:id/pulls`: the window's `/api/inbox/threads/{thread}/pulls`.
-  public static let postThreadPulls = DoorRoute(name: "POST threads/:id/pulls", doorName: "POST threads/:id/pulls", method: .post, path: "threads/{thread}/pulls", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadPulls = DoorRoute(name: "POST threads/:id/pulls", method: .post, path: "threads/{thread}/pulls", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET events`: the window's `/api/inbox/events`.
-  public static let getEvents = DoorRoute(name: "GET events", doorName: "GET events", method: .get, path: "events", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .stream, range: false, relay: false)
+  public static let getEvents = DoorRoute(name: "GET events", method: .get, path: "events", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .stream, range: false, relay: false)
   /// `POST messages/:id/picks`: the window's `/api/inbox/messages/{message}/picks`.
-  public static let postMessagePicks = DoorRoute(name: "POST messages/:id/picks", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/picks", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessagePicks = DoorRoute(name: "POST messages/:id/picks", method: .post, path: "messages/{message}/picks", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/reply`: the window's `/api/inbox/messages/{message}/reply`.
-  public static let postMessageReply = DoorRoute(name: "POST messages/:id/reply", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/reply", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageReply = DoorRoute(name: "POST messages/:id/reply", method: .post, path: "messages/{message}/reply", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/resolve`: the window's `/api/inbox/messages/{message}/resolve`.
-  public static let postMessageResolve = DoorRoute(name: "POST messages/:id/resolve", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/resolve", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageResolve = DoorRoute(name: "POST messages/:id/resolve", method: .post, path: "messages/{message}/resolve", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/to`: the window's `/api/inbox/messages/{message}/to`.
-  public static let postMessageTo = DoorRoute(name: "POST messages/:id/to", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/to", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageTo = DoorRoute(name: "POST messages/:id/to", method: .post, path: "messages/{message}/to", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/ack`: the window's `/api/inbox/messages/{message}/ack`.
-  public static let postMessageAck = DoorRoute(name: "POST messages/:id/ack", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/ack", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageAck = DoorRoute(name: "POST messages/:id/ack", method: .post, path: "messages/{message}/ack", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/send-now`: the window's `/api/inbox/messages/{message}/send-now`.
-  public static let postMessageSendNow = DoorRoute(name: "POST messages/:id/send-now", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/send-now", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageSendNow = DoorRoute(name: "POST messages/:id/send-now", method: .post, path: "messages/{message}/send-now", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/take-back`: the window's `/api/inbox/messages/{message}/take-back`.
-  public static let postMessageTakeBack = DoorRoute(name: "POST messages/:id/take-back", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/take-back", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageTakeBack = DoorRoute(name: "POST messages/:id/take-back", method: .post, path: "messages/{message}/take-back", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/reask`: the window's `/api/inbox/messages/{message}/reask`.
-  public static let postMessageReask = DoorRoute(name: "POST messages/:id/reask", doorName: "POST messages/:id/(picks|reply|resolve|to|ack|send-now|take-back|reask)", method: .post, path: "messages/{message}/reask", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageReask = DoorRoute(name: "POST messages/:id/reask", method: .post, path: "messages/{message}/reask", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/handoff/undo`: the window's `/api/inbox/messages/{message}/handoff/undo`.
-  public static let postMessageHandoffUndo = DoorRoute(name: "POST messages/:id/handoff/undo", doorName: "POST messages/:id/handoff/undo", method: .post, path: "messages/{message}/handoff/undo", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageHandoffUndo = DoorRoute(name: "POST messages/:id/handoff/undo", method: .post, path: "messages/{message}/handoff/undo", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/actions/:id`: the window's `/api/inbox/messages/{message}/actions/{action}`.
-  public static let postMessageAction = DoorRoute(name: "POST messages/:id/actions/:id", doorName: "POST messages/:id/actions/(a-[0-9a-f]{8}(?:-\\d{1,3})?)", method: .post, path: "messages/{message}/actions/{action}", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageAction = DoorRoute(name: "POST messages/:id/actions/:id", method: .post, path: "messages/{message}/actions/{action}", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST threads/:id/delete`: the window's `/api/inbox/threads/{thread}/delete`.
-  public static let postThreadDelete = DoorRoute(name: "POST threads/:id/delete", doorName: "POST threads/:id/delete", method: .post, path: "threads/{thread}/delete", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadDelete = DoorRoute(name: "POST threads/:id/delete", method: .post, path: "threads/{thread}/delete", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET threads/:id/draft`: the window's `/api/inbox/threads/{thread}/draft`.
-  public static let getThreadDraft = DoorRoute(name: "GET threads/:id/draft", doorName: "GET threads/:id/draft", method: .get, path: "threads/{thread}/draft", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThreadDraft = DoorRoute(name: "GET threads/:id/draft", method: .get, path: "threads/{thread}/draft", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET threads/:id/attachments`: the window's `/api/inbox/threads/{thread}/attachments`.
-  public static let getThreadAttachments = DoorRoute(name: "GET threads/:id/attachments", doorName: "GET threads/:id/attachments", method: .get, path: "threads/{thread}/attachments", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThreadAttachments = DoorRoute(name: "GET threads/:id/attachments", method: .get, path: "threads/{thread}/attachments", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET threads/:id/decisions`: the window's `/api/inbox/threads/{thread}/decisions`.
-  public static let getThreadDecisions = DoorRoute(name: "GET threads/:id/decisions", doorName: "GET threads/:id/decisions", method: .get, path: "threads/{thread}/decisions", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getThreadDecisions = DoorRoute(name: "GET threads/:id/decisions", method: .get, path: "threads/{thread}/decisions", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET attachments/:id/view`: the window's `/api/inbox/attachments/{attachment}/view`.
-  public static let getAttachmentView = DoorRoute(name: "GET attachments/:id/view", doorName: "GET attachments/:id/view", method: .get, path: "attachments/{attachment}/view", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getAttachmentView = DoorRoute(name: "GET attachments/:id/view", method: .get, path: "attachments/{attachment}/view", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET attachments/:id/image`: the window's `/api/inbox/attachments/{attachment}/image`.
-  public static let getAttachmentImage = DoorRoute(name: "GET attachments/:id/image", doorName: "GET attachments/:id/(image|video|audio|download)", method: .get, path: "attachments/{attachment}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getAttachmentImage = DoorRoute(name: "GET attachments/:id/image", method: .get, path: "attachments/{attachment}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET attachments/:id/video`: the window's `/api/inbox/attachments/{attachment}/video`.
-  public static let getAttachmentVideo = DoorRoute(name: "GET attachments/:id/video", doorName: "GET attachments/:id/(image|video|audio|download)", method: .get, path: "attachments/{attachment}/video", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
+  public static let getAttachmentVideo = DoorRoute(name: "GET attachments/:id/video", method: .get, path: "attachments/{attachment}/video", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
   /// `GET attachments/:id/audio`: the window's `/api/inbox/attachments/{attachment}/audio`.
-  public static let getAttachmentAudio = DoorRoute(name: "GET attachments/:id/audio", doorName: "GET attachments/:id/(image|video|audio|download)", method: .get, path: "attachments/{attachment}/audio", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
+  public static let getAttachmentAudio = DoorRoute(name: "GET attachments/:id/audio", method: .get, path: "attachments/{attachment}/audio", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
   /// `GET attachments/:id/download`: the window's `/api/inbox/attachments/{attachment}/download`.
-  public static let getAttachmentDownload = DoorRoute(name: "GET attachments/:id/download", doorName: "GET attachments/:id/(image|video|audio|download)", method: .get, path: "attachments/{attachment}/download", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
+  public static let getAttachmentDownload = DoorRoute(name: "GET attachments/:id/download", method: .get, path: "attachments/{attachment}/download", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
   /// `GET attachments/:id/markdown-image`: the window's `/api/inbox/attachments/{attachment}/markdown-image`.
-  public static let getAttachmentMarkdownImage = DoorRoute(name: "GET attachments/:id/markdown-image", doorName: "GET attachments/:id/(markdown-image|linked-page)", method: .get, path: "attachments/{attachment}/markdown-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getAttachmentMarkdownImage = DoorRoute(name: "GET attachments/:id/markdown-image", method: .get, path: "attachments/{attachment}/markdown-image", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET attachments/:id/linked-page`: the window's `/api/inbox/attachments/{attachment}/linked-page`.
-  public static let getAttachmentLinkedPage = DoorRoute(name: "GET attachments/:id/linked-page", doorName: "GET attachments/:id/(markdown-image|linked-page)", method: .get, path: "attachments/{attachment}/linked-page", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getAttachmentLinkedPage = DoorRoute(name: "GET attachments/:id/linked-page", method: .get, path: "attachments/{attachment}/linked-page", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET markups/:id`: the window's `/api/inbox/markups/{name}`.
-  public static let getMarkup = DoorRoute(name: "GET markups/:id", doorName: "GET markups/:id", method: .get, path: "markups/{name}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getMarkup = DoorRoute(name: "GET markups/:id", method: .get, path: "markups/{name}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET messages/:id/image`: the window's `/api/inbox/messages/{message}/image`.
-  public static let getMessageImage = DoorRoute(name: "GET messages/:id/image", doorName: "GET messages/:id/image", method: .get, path: "messages/{message}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getMessageImage = DoorRoute(name: "GET messages/:id/image", method: .get, path: "messages/{message}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET html-assets/:id/:path`: the window's `/api/html-assets/{token}/{path}`.
-  public static let getHtmlAsset = DoorRoute(name: "GET html-assets/:id/:path", doorName: "GET html-assets/:id/(.+)", method: .get, path: "html-assets/{token}/{path}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getHtmlAsset = DoorRoute(name: "GET html-assets/:id/:path", method: .get, path: "html-assets/{token}/{path}", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `POST annotations`: the window's `/api/inbox/annotations`.
-  public static let postAnnotations = DoorRoute(name: "POST annotations", doorName: "POST annotations", method: .post, path: "annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postAnnotations = DoorRoute(name: "POST annotations", method: .post, path: "annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST annotations/:id/remove`: the window's `/api/inbox/annotations/{annotation}/remove`.
-  public static let postAnnotationRemove = DoorRoute(name: "POST annotations/:id/remove", doorName: "POST annotations/:id/remove", method: .post, path: "annotations/{annotation}/remove", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postAnnotationRemove = DoorRoute(name: "POST annotations/:id/remove", method: .post, path: "annotations/{annotation}/remove", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET messages/:id/guide`: the window's `/api/inbox/messages/{message}/guide`.
-  public static let getMessageGuide = DoorRoute(name: "GET messages/:id/guide", doorName: "GET messages/:id/guide", method: .get, path: "messages/{message}/guide", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getMessageGuide = DoorRoute(name: "GET messages/:id/guide", method: .get, path: "messages/{message}/guide", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST messages/:id/guide/reviewed`: the window's `/api/inbox/messages/{message}/guide/reviewed`.
-  public static let postMessageGuideReviewed = DoorRoute(name: "POST messages/:id/guide/reviewed", doorName: "POST messages/:id/guide/reviewed", method: .post, path: "messages/{message}/guide/reviewed", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageGuideReviewed = DoorRoute(name: "POST messages/:id/guide/reviewed", method: .post, path: "messages/{message}/guide/reviewed", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/guide/annotations`: the window's `/api/inbox/messages/{message}/guide/annotations`.
-  public static let postMessageGuideAnnotations = DoorRoute(name: "POST messages/:id/guide/annotations", doorName: "POST messages/:id/guide/annotations", method: .post, path: "messages/{message}/guide/annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageGuideAnnotations = DoorRoute(name: "POST messages/:id/guide/annotations", method: .post, path: "messages/{message}/guide/annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST messages/:id/annotations`: the window's `/api/inbox/messages/{message}/annotations`.
-  public static let postMessageAnnotations = DoorRoute(name: "POST messages/:id/annotations", doorName: "POST messages/:id/annotations", method: .post, path: "messages/{message}/annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessageAnnotations = DoorRoute(name: "POST messages/:id/annotations", method: .post, path: "messages/{message}/annotations", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET threads/:id/sessions`: the window's `/api/inbox/threads/{thread}/sessions`.
-  public static let getThreadSessions = DoorRoute(name: "GET threads/:id/sessions", doorName: "GET threads/:id/sessions", method: .get, path: "threads/{thread}/sessions", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThreadSessions = DoorRoute(name: "GET threads/:id/sessions", method: .get, path: "threads/{thread}/sessions", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET threads/:id/taggable`: the window's `/api/inbox/threads/{thread}/taggable`.
-  public static let getThreadTaggable = DoorRoute(name: "GET threads/:id/taggable", doorName: "GET threads/:id/taggable", method: .get, path: "threads/{thread}/taggable", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getThreadTaggable = DoorRoute(name: "GET threads/:id/taggable", method: .get, path: "threads/{thread}/taggable", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST threads/:id/message`: the window's `/api/inbox/threads/{thread}/message`.
-  public static let postThreadMessage = DoorRoute(name: "POST threads/:id/message", doorName: "POST threads/:id/message", method: .post, path: "threads/{thread}/message", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postThreadMessage = DoorRoute(name: "POST threads/:id/message", method: .post, path: "threads/{thread}/message", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET sessions`: the window's `/api/inbox/sessions`.
-  public static let getSessions = DoorRoute(name: "GET sessions", doorName: "GET sessions", method: .get, path: "sessions", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getSessions = DoorRoute(name: "GET sessions", method: .get, path: "sessions", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST messages`: the window's `/api/inbox/messages`.
-  public static let postMessages = DoorRoute(name: "POST messages", doorName: "POST messages", method: .post, path: "messages", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postMessages = DoorRoute(name: "POST messages", method: .post, path: "messages", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET search`: the window's `/api/inbox/search`.
-  public static let getSearch = DoorRoute(name: "GET search", doorName: "GET search", method: .get, path: "search", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getSearch = DoorRoute(name: "GET search", method: .get, path: "search", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST projects/:id/read`: the window's `/api/inbox/projects/{project}/read`.
-  public static let postProjectRead = DoorRoute(name: "POST projects/:id/read", doorName: "POST projects/:id/(read|unread|resolve)", method: .post, path: "projects/{project}/read", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postProjectRead = DoorRoute(name: "POST projects/:id/read", method: .post, path: "projects/{project}/read", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST projects/:id/unread`: the window's `/api/inbox/projects/{project}/unread`.
-  public static let postProjectUnread = DoorRoute(name: "POST projects/:id/unread", doorName: "POST projects/:id/(read|unread|resolve)", method: .post, path: "projects/{project}/unread", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postProjectUnread = DoorRoute(name: "POST projects/:id/unread", method: .post, path: "projects/{project}/unread", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST projects/:id/resolve`: the window's `/api/inbox/projects/{project}/resolve`.
-  public static let postProjectResolve = DoorRoute(name: "POST projects/:id/resolve", doorName: "POST projects/:id/(read|unread|resolve)", method: .post, path: "projects/{project}/resolve", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postProjectResolve = DoorRoute(name: "POST projects/:id/resolve", method: .post, path: "projects/{project}/resolve", grant: .phone, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET skills`: the window's `/api/inbox/skills`.
-  public static let getSkills = DoorRoute(name: "GET skills", doorName: "GET skills", method: .get, path: "skills", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getSkills = DoorRoute(name: "GET skills", method: .get, path: "skills", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET skills/content`: the window's `/api/inbox/skills/content`.
-  public static let getSkillsContent = DoorRoute(name: "GET skills/content", doorName: "GET skills/content", method: .get, path: "skills/content", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getSkillsContent = DoorRoute(name: "GET skills/content", method: .get, path: "skills/content", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST uploads/reuse`: the window's `/api/inbox/uploads/reuse`.
-  public static let postUploadsReuse = DoorRoute(name: "POST uploads/reuse", doorName: "POST uploads/reuse", method: .post, path: "uploads/reuse", grant: .phone, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  public static let postUploadsReuse = DoorRoute(name: "POST uploads/reuse", method: .post, path: "uploads/reuse", grant: .phone, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST uploads`: the window's `/api/inbox/uploads`.
-  public static let postUploads = DoorRoute(name: "POST uploads", doorName: "POST uploads", method: .post, path: "uploads", grant: .phone, needsToken: true, kind: .bytes, key: .query, answer: .json, range: false, relay: false)
+  public static let postUploads = DoorRoute(name: "POST uploads", method: .post, path: "uploads", grant: .phone, needsToken: true, kind: .bytes, key: .query, answer: .json, range: false, relay: false)
   /// `POST markups`: the window's `/api/inbox/markups`.
-  public static let postMarkups = DoorRoute(name: "POST markups", doorName: "POST markups", method: .post, path: "markups", grant: .phone, needsToken: true, kind: .bytes, key: .query, answer: .json, range: false, relay: false)
+  public static let postMarkups = DoorRoute(name: "POST markups", method: .post, path: "markups", grant: .phone, needsToken: true, kind: .bytes, key: .query, answer: .json, range: false, relay: false)
   /// `GET uploads/:id/text`: the window's `/api/inbox/uploads/{upload}/text`.
-  public static let getUploadText = DoorRoute(name: "GET uploads/:id/text", doorName: "GET uploads/:id/text", method: .get, path: "uploads/{upload}/text", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getUploadText = DoorRoute(name: "GET uploads/:id/text", method: .get, path: "uploads/{upload}/text", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET uploads/:id/image`: the window's `/api/inbox/uploads/{upload}/image`.
-  public static let getUploadImage = DoorRoute(name: "GET uploads/:id/image", doorName: "GET uploads/:id/image", method: .get, path: "uploads/{upload}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
+  public static let getUploadImage = DoorRoute(name: "GET uploads/:id/image", method: .get, path: "uploads/{upload}/image", grant: .phone, needsToken: true, kind: .read, key: nil, answer: .bytes, range: false, relay: true)
   /// `GET tidy`: the window's `/api/inbox/tidy`.
-  public static let getTidy = DoorRoute(name: "GET tidy", doorName: "GET tidy", method: .get, path: "tidy", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getTidy = DoorRoute(name: "GET tidy", method: .get, path: "tidy", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST tidy`: the window's `/api/inbox/tidy`.
-  public static let postTidy = DoorRoute(name: "POST tidy", doorName: "POST tidy", method: .post, path: "tidy", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postTidy = DoorRoute(name: "POST tidy", method: .post, path: "tidy", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET combine`: the window's `/api/inbox/combine`.
-  public static let getCombine = DoorRoute(name: "GET combine", doorName: "GET combine", method: .get, path: "combine", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getCombine = DoorRoute(name: "GET combine", method: .get, path: "combine", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST combine`: the window's `/api/inbox/combine`.
-  public static let postCombine = DoorRoute(name: "POST combine", doorName: "POST combine", method: .post, path: "combine", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  public static let postCombine = DoorRoute(name: "POST combine", method: .post, path: "combine", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `POST combine/:id/cancel`: the window's `/api/inbox/combine/{combine}/cancel`.
-  public static let postCombineCancel = DoorRoute(name: "POST combine/:id/cancel", doorName: "POST combine/(cmb_[^/]+)/(cancel|undo)", method: .post, path: "combine/{combine}/cancel", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postCombineCancel = DoorRoute(name: "POST combine/:id/cancel", method: .post, path: "combine/{combine}/cancel", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST combine/:id/undo`: the window's `/api/inbox/combine/{combine}/undo`.
-  public static let postCombineUndo = DoorRoute(name: "POST combine/:id/undo", doorName: "POST combine/(cmb_[^/]+)/(cancel|undo)", method: .post, path: "combine/{combine}/undo", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postCombineUndo = DoorRoute(name: "POST combine/:id/undo", method: .post, path: "combine/{combine}/undo", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST launch/:id/stop`: the window's `/api/inbox/launch/{launch}/stop`.
-  public static let postLaunchStop = DoorRoute(name: "POST launch/:id/stop", doorName: "POST launch/:id/(stop|retry|trust|delete)", method: .post, path: "launch/{launch}/stop", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postLaunchStop = DoorRoute(name: "POST launch/:id/stop", method: .post, path: "launch/{launch}/stop", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST launch/:id/retry`: the window's `/api/inbox/launch/{launch}/retry`.
-  public static let postLaunchRetry = DoorRoute(name: "POST launch/:id/retry", doorName: "POST launch/:id/(stop|retry|trust|delete)", method: .post, path: "launch/{launch}/retry", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postLaunchRetry = DoorRoute(name: "POST launch/:id/retry", method: .post, path: "launch/{launch}/retry", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST launch/:id/trust`: the window's `/api/inbox/launch/{launch}/trust`.
-  public static let postLaunchTrust = DoorRoute(name: "POST launch/:id/trust", doorName: "POST launch/:id/(stop|retry|trust|delete)", method: .post, path: "launch/{launch}/trust", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postLaunchTrust = DoorRoute(name: "POST launch/:id/trust", method: .post, path: "launch/{launch}/trust", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST launch/:id/delete`: the window's `/api/inbox/launch/{launch}/delete`.
-  public static let postLaunchDelete = DoorRoute(name: "POST launch/:id/delete", doorName: "POST launch/:id/(stop|retry|trust|delete)", method: .post, path: "launch/{launch}/delete", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postLaunchDelete = DoorRoute(name: "POST launch/:id/delete", method: .post, path: "launch/{launch}/delete", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `GET open-in/file/view`: the window's `/api/inbox/open-in/file/view`.
-  public static let getOpenInFileView = DoorRoute(name: "GET open-in/file/view", doorName: "GET open-in/file/(view|raw)", method: .get, path: "open-in/file/view", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getOpenInFileView = DoorRoute(name: "GET open-in/file/view", method: .get, path: "open-in/file/view", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET open-in/file/raw`: the window's `/api/inbox/open-in/file/raw`.
-  public static let getOpenInFileRaw = DoorRoute(name: "GET open-in/file/raw", doorName: "GET open-in/file/(view|raw)", method: .get, path: "open-in/file/raw", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
+  public static let getOpenInFileRaw = DoorRoute(name: "GET open-in/file/raw", method: .get, path: "open-in/file/raw", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .bytes, range: true, relay: true)
   /// `POST open-in/file/attach`: the window's `/api/inbox/open-in/file/attach`.
-  public static let postOpenInFileAttach = DoorRoute(name: "POST open-in/file/attach", doorName: "POST open-in/file/attach", method: .post, path: "open-in/file/attach", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
+  public static let postOpenInFileAttach = DoorRoute(name: "POST open-in/file/attach", method: .post, path: "open-in/file/attach", grant: .machine, needsToken: true, kind: .now, key: .body, answer: .json, range: false, relay: true)
   /// `GET launch/folders`: the window's `/api/inbox/launch/folders`.
-  public static let getLaunchFolders = DoorRoute(name: "GET launch/folders", doorName: "GET launch/folders", method: .get, path: "launch/folders", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getLaunchFolders = DoorRoute(name: "GET launch/folders", method: .get, path: "launch/folders", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET launch/clone`: the window's `/api/inbox/launch/clone`.
-  public static let getLaunchClone = DoorRoute(name: "GET launch/clone", doorName: "GET launch/(clone|clone-check)", method: .get, path: "launch/clone", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getLaunchClone = DoorRoute(name: "GET launch/clone", method: .get, path: "launch/clone", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `GET launch/clone-check`: the window's `/api/inbox/launch/clone-check`.
-  public static let getLaunchCloneCheck = DoorRoute(name: "GET launch/clone-check", doorName: "GET launch/(clone|clone-check)", method: .get, path: "launch/clone-check", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getLaunchCloneCheck = DoorRoute(name: "GET launch/clone-check", method: .get, path: "launch/clone-check", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  /// `POST pair`.
+  public static let postPair = DoorRoute(name: "POST pair", method: .post, path: "pair", grant: .phone, needsToken: false, kind: .now, key: nil, answer: .json, range: false, relay: false)
+  /// `POST revoke`.
+  public static let postRevoke = DoorRoute(name: "POST revoke", method: .post, path: "revoke", grant: .phone, needsToken: true, kind: .now, key: nil, answer: .json, range: false, relay: true)
   /// `GET accounts`.
-  public static let getAccounts = DoorRoute(name: "GET accounts", doorName: "GET accounts", method: .get, path: "accounts", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
+  public static let getAccounts = DoorRoute(name: "GET accounts", method: .get, path: "accounts", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST link-back`.
-  public static let postLinkBack = DoorRoute(name: "POST link-back", doorName: "POST link-back", method: .post, path: "link-back", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postLinkBack = DoorRoute(name: "POST link-back", method: .post, path: "link-back", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
   /// `POST unlink`.
-  public static let postUnlink = DoorRoute(name: "POST unlink", doorName: "POST unlink", method: .post, path: "unlink", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let postUnlink = DoorRoute(name: "POST unlink", method: .post, path: "unlink", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  /// `GET update`.
+  public static let getUpdate = DoorRoute(name: "GET update", method: .get, path: "update", grant: .machine, needsToken: true, kind: .read, key: nil, answer: .json, range: false, relay: true)
   /// `POST update`.
-  public static let postUpdate = DoorRoute(name: "POST update", doorName: "POST update", method: .post, path: "update", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
-  public static let all: [DoorRoute] = [postPair, postRevoke, getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, postPullsLooked, getThreadPulls, postThreadPulls, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postMessageAction, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, getOpenInFileView, getOpenInFileRaw, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, getAccounts, postLinkBack, postUnlink, postUpdate]
+  public static let postUpdate = DoorRoute(name: "POST update", method: .post, path: "update", grant: .machine, needsToken: true, kind: .hold, key: .body, answer: .json, range: false, relay: true)
+  public static let all: [DoorRoute] = [getHealth, getThreads, getProjects, getWhatsNew, getWhatsNewReleases, getWhatsNewImage, getProjectPicture, getThreadsArchived, getThread, postThreadSeen, postThreadRead, postThreadUnread, postThreadMarkUnread, postThreadSnooze, postThreadPin, postPins, postThreadPriority, postAgentFaces, postThreadTags, postInitiative, postTagColours, getCards, getCard, getCardRefs, postCard, postCardsSeen, postCardsDroppedSeen, getPulls, getReviewsBranches, getPullsRisk, getPullsDetails, getPullsDiff, getPullsFile, getPullsRepoFiles, getPullsRepoFile, getPullsAvatar, getPullsMedia, getPullsMediaSizes, postPullsClose, postPullsReopen, postPullsMerge, postPullsOwner, postPullsLooked, getThreadPulls, postThreadPulls, getEvents, postMessagePicks, postMessageReply, postMessageResolve, postMessageTo, postMessageAck, postMessageSendNow, postMessageTakeBack, postMessageReask, postMessageHandoffUndo, postMessageAction, postThreadDelete, getThreadDraft, getThreadAttachments, getThreadDecisions, getAttachmentView, getAttachmentImage, getAttachmentVideo, getAttachmentAudio, getAttachmentDownload, getAttachmentMarkdownImage, getAttachmentLinkedPage, getMarkup, getMessageImage, getHtmlAsset, postAnnotations, postAnnotationRemove, getMessageGuide, postMessageGuideReviewed, postMessageGuideAnnotations, postMessageAnnotations, getThreadSessions, getThreadTaggable, postThreadMessage, getSessions, postMessages, getSearch, postProjectRead, postProjectUnread, postProjectResolve, getSkills, getSkillsContent, postUploadsReuse, postUploads, postMarkups, getUploadText, getUploadImage, getTidy, postTidy, getCombine, postCombine, postCombineCancel, postCombineUndo, postLaunchStop, postLaunchRetry, postLaunchTrust, postLaunchDelete, getOpenInFileView, getOpenInFileRaw, postOpenInFileAttach, getLaunchFolders, getLaunchClone, getLaunchCloneCheck, postPair, postRevoke, getAccounts, postLinkBack, postUnlink, getUpdate, postUpdate]
 }
 
 /// The door's routes as requests: `Door.postThreadSeen(thread: id)`.
@@ -9724,8 +9766,6 @@ public enum Door {
     value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? value
   }
 
-  public static func postPair() -> DoorRequest { DoorRequest(route: DoorRoutes.postPair, path: "pair") }
-  public static func postRevoke() -> DoorRequest { DoorRequest(route: DoorRoutes.postRevoke, path: "revoke") }
   public static func getHealth() -> DoorRequest { DoorRequest(route: DoorRoutes.getHealth, path: "health") }
   public static func getThreads() -> DoorRequest { DoorRequest(route: DoorRoutes.getThreads, path: "threads") }
   public static func getProjects() -> DoorRequest { DoorRequest(route: DoorRoutes.getProjects, path: "projects") }
@@ -9834,8 +9874,11 @@ public enum Door {
   public static func getLaunchFolders() -> DoorRequest { DoorRequest(route: DoorRoutes.getLaunchFolders, path: "launch/folders") }
   public static func getLaunchClone() -> DoorRequest { DoorRequest(route: DoorRoutes.getLaunchClone, path: "launch/clone") }
   public static func getLaunchCloneCheck() -> DoorRequest { DoorRequest(route: DoorRoutes.getLaunchCloneCheck, path: "launch/clone-check") }
+  public static func postPair() -> DoorRequest { DoorRequest(route: DoorRoutes.postPair, path: "pair") }
+  public static func postRevoke() -> DoorRequest { DoorRequest(route: DoorRoutes.postRevoke, path: "revoke") }
   public static func getAccounts() -> DoorRequest { DoorRequest(route: DoorRoutes.getAccounts, path: "accounts") }
   public static func postLinkBack() -> DoorRequest { DoorRequest(route: DoorRoutes.postLinkBack, path: "link-back") }
   public static func postUnlink() -> DoorRequest { DoorRequest(route: DoorRoutes.postUnlink, path: "unlink") }
+  public static func getUpdate() -> DoorRequest { DoorRequest(route: DoorRoutes.getUpdate, path: "update") }
   public static func postUpdate() -> DoorRequest { DoorRequest(route: DoorRoutes.postUpdate, path: "update") }
 }
