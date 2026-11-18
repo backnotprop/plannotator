@@ -26,7 +26,7 @@ const MESSAGE = { id: 'msg_live_1', body: BODY };
 
 const blockView = (extra: Partial<RunBlockView> = {}): RunBlockView => ({ folder: '~/p', folder_missing: false, hidden: null, uses: [], needs: [], fields: [], lookalike: null, shell_note: null, ...extra });
 const runView = (run: Partial<RunView>): RunView => ({ key: KEY, run_id: 'run_1', state: 'running', exit_code: null, signal: null, started_at: '', ended_at: null, duration_ms: 0, lines: [], total_lines: 0, partial: '', waiting_for_input: false, needs_terminal: false, error: null, interrupted: null, left_running: null, ...run });
-const wire = (run: RunView | null, block: Partial<RunBlockView> = {}, secrets: RunStateWire['secrets'] = []): RunStateWire => ({ computer: 'your Mac', store: 'saved in your Keychain', shell: 'zsh', blocks: { [KEY]: blockView(block) }, runs: run ? { [KEY]: run } : {}, secrets });
+const wire = (run: RunView | null, block: Partial<RunBlockView> = {}, secrets: RunStateWire['secrets'] = []): RunStateWire => ({ computer: 'your Mac', store: 'in your Keychain', shell: 'zsh', blocks: { [KEY]: blockView(block) }, runs: run ? { [KEY]: run } : {}, secrets });
 
 const real = hasDom ? { ...runApi } : null;
 let root: Root | null = null;
@@ -160,6 +160,7 @@ test.if(hasDom)('a needed secret not saved: Run waits for it, and "Save and run"
   expect(calls).toEqual([]);
   const save = host!.querySelector<HTMLButtonElement>('[data-secret-save]')!;
   expect(save.textContent).toBe('Save and run');
+  expect(host!.querySelector('[data-secret-kept]')!.textContent).toBe('Stays on your Mac, in your Keychain. Claude gets only the name. Then this command runs with it.');
   const input = host!.querySelector<HTMLInputElement>('[data-secret-input]')!;
   act(() => {
     const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
@@ -197,4 +198,6 @@ test.if(hasDom)('after Save, focus moves to Replace (the control that takes the 
   act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   await until(() => !!host!.querySelector('[data-secret-replace]'));
   expect(document.activeElement).toBe(host!.querySelector('[data-secret-replace]'));
+  // After Save the card names the same store it named before.
+  expect(host!.querySelector('[data-secret-detail]')!.textContent).toMatch(/ · in your Keychain$/);
 });

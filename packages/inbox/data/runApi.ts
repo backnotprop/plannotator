@@ -54,7 +54,7 @@ export interface SavedSecret {
 export interface RunStateWire {
   /** "your Mac" in its own window; its name on a phone or a linked machine. */
   computer: string;
-  /** Where a saved value goes, in words ("saved in your Keychain"). */
+  /** Where a saved value is kept, in words, the same before and after Save ("in your Keychain"; "in its Keychain" when `computer` is a name). */
   store: string;
   /** The shell a command runs in ("zsh", "Git Bash", "PowerShell"); null before the computer has read it. */
   shell: string | null;

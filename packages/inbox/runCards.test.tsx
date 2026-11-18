@@ -39,7 +39,7 @@ const runView = (key: string, run: Partial<RunView>): RunView => ({
 });
 const state = (key: string, extra: Partial<RunBlockView> = {}, run?: Partial<RunView>): RunStateWire => ({
   computer: 'your Mac',
-  store: 'saved in your Keychain',
+  store: 'in your Keychain',
   shell: 'zsh',
   blocks: { [key]: blockView(extra) },
   runs: run ? { [key]: runView(key, run) } : {},
@@ -162,7 +162,7 @@ describe('the secret card', () => {
     expect(html).toContain('data-secret-state="empty"');
     expect(html).toContain('type="password"');
     expect(html).toContain('Find it on example.com');
-    expect(html).toContain('Stays on your Mac, saved in your Keychain. Claude gets only the name.');
+    expect(html).toContain('Stays on your Mac, in your Keychain. Claude gets only the name. Commands you run here that name it will have it.');
   });
 
   test('saved: when and where, Replace and Remove, no field and no part of the value', () => {
@@ -191,6 +191,14 @@ describe('the review\'s second round', () => {
     expect(html).toMatch(/<button[^>]*aria-disabled="true"[^>]*data-run-start=""/);
     expect(html).toContain('Needs API_TOKEN');
     expect(html).toContain('Save and run');
+    // What Save does, under the field itself, naming the store the saved line names after.
+    expect(html).toContain('Stays on your Mac, in your Keychain. Claude gets only the name. Then this command runs with it.');
+  });
+
+  test('seen from a phone, the field says the computer by name and its store', () => {
+    const b = block('curl -H "Bearer $API_TOKEN" x');
+    const named = { ...state(b.key, { uses: ['API_TOKEN'], needs: ['API_TOKEN'] }), computer: 'Studio Mac', store: 'in its Keychain' };
+    expect(renderToStaticMarkup(<RunCard messageId="msg_1" block={b} state={named} agent="Claude" />)).toContain('Stays on Studio Mac, in its Keychain. Claude gets only the name. Then this command runs with it.');
   });
 
   test('one field per secret: a card whose field is elsewhere says Needs and offers to go there', () => {

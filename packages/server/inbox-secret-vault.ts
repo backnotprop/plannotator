@@ -23,12 +23,20 @@ import { join } from "node:path";
 /** Which store holds the values, and its words for the card. */
 export type InboxSecretStoreKind = "keychain" | "secret-service" | "dpapi" | "file";
 
-export const INBOX_SECRET_STORE_WORDS: Record<InboxSecretStoreKind, string> = {
-  keychain: "saved in your Keychain",
-  "secret-service": "saved in your system keyring",
-  dpapi: "saved with Windows data protection for your account",
-  file: "saved to a file only you can read",
-};
+/**
+ * Where a saved value is kept, as the card says it before and after Save ("Stays on your Mac, in your Keychain.",
+ * "Saved 10:12 AM · in your Keychain"). `own`: the computer's own window ("your Keychain"); a phone or a linked
+ * machine names the computer, so its store is "its" ("Stays on MacBook Pro, in its Keychain.").
+ */
+export function inboxSecretStorePlace(kind: InboxSecretStoreKind, own: boolean): string {
+  const whose = own ? "your" : "its";
+  return {
+    keychain: `in ${whose} Keychain`,
+    "secret-service": `in ${whose} system keyring`,
+    dpapi: "protected by Windows for your account",
+    file: "in a file only you can read",
+  }[kind];
+}
 
 /** Where a value is read from, in words, for "Couldn't read NAME from your Keychain." */
 export const INBOX_SECRET_STORE_FROM: Record<InboxSecretStoreKind, string> = {

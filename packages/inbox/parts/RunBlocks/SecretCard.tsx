@@ -20,9 +20,9 @@ const hostOf = (url: string) => {
   }
 };
 
-/** "Stays on your Mac, saved in your Keychain. Claude gets only the name." */
-export function secretKeptWords(state: RunStateWire | null, agent: string): string {
-  return `Stays on ${state?.computer ?? 'your computer'}, ${state?.store ?? 'saved where only you can read it'}. ${agent} gets only the name.`;
+/** What Save does, under every secret field: "Stays on your Mac, in your Keychain. Claude gets only the name." and what comes next. */
+export function secretKeptWords(state: RunStateWire | null, agent: string, next: string): string {
+  return `Stays on ${state?.computer ?? 'your computer'}, ${state?.store ?? 'where only you can read it'}. ${agent} gets only the name. ${next}`;
 }
 
 export function SecretCard({ messageId, secret, state, agent }: { messageId: string; secret: ParsedInboxSecret; state: RunStateWire | null; agent: string }) {
@@ -99,7 +99,7 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
               focusReplace.current = true;
               setReplacing(false);
             }} {...(replacing ? { onCancel: () => setReplacing(false) } : {})} />
-          <p className="ib-rb-hint">{secretKeptWords(state, agent)}</p>
+          <p className="ib-rb-hint" data-secret-kept="">{secretKeptWords(state, agent, 'Commands you run here that name it will have it.')}</p>
         </>
       )}
       {error && (

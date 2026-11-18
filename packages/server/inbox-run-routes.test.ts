@@ -23,7 +23,7 @@ import { createInboxRunRoutes, inboxRunFolder } from "./inbox-run-routes";
 import { inboxRunArgv, inboxRunShellNote, isPowerShellOwnVariable, posixRunShell, powerShellEncoded, runShellFor, WINDOWS_CLIPBOARD_SCRIPT, type InboxRunShell } from "./inbox-run-shell";
 import { keptLoginEnv, lostRunStillRunning, macTmp } from "./inbox-run-setup";
 import { checkSecretValue, createInboxSecrets, hideSecretPrefixTail, loginEnvCredentials, redactSecrets } from "./inbox-secrets";
-import { memoryVault } from "./inbox-secret-vault";
+import { inboxSecretStorePlace, memoryVault } from "./inbox-secret-vault";
 
 const SENTINEL = "TEST_ONLY_NOT_A_KEY_123";
 const SESSION = "srv_session_1";
@@ -499,6 +499,9 @@ describe("the review's second round", () => {
     const w = world();
     expect((await w.read()).computer).toBe("your Mac");
     expect((await w.read({}, { device_id: "dev_p", name: "Phone", platform: "ios", window: false })).computer).toBe("Studio Mac");
+    // Where a saved value is kept, the same words before and after Save: "your" in its own window, "its" once the computer is named.
+    expect((await w.read()).store).toBe("in your Keychain");
+    expect((await w.read({}, { device_id: "dev_p", name: "Phone", platform: "ios", window: false })).store).toBe("in its Keychain");
     expect(macTmp("/private/tmp/qa/proj", "darwin")).toBe("/tmp/qa/proj");
     expect(macTmp("/private/tmp/qa/proj", "linux")).toBe("/private/tmp/qa/proj");
     expect(macTmp("/private/var/x", "darwin")).toBe("/private/var/x");
@@ -592,4 +595,11 @@ describe("the kept login env", () => {
     }
     expect(await lostRunStillRunning(123, 0, "win32")).toBeNull();
   });
+});
+
+test("each store, in the words the card says before and after Save", () => {
+  expect([true, false].map((own) => (["keychain", "secret-service", "dpapi", "file"] as const).map((kind) => inboxSecretStorePlace(kind, own)))).toEqual([
+    ["in your Keychain", "in your system keyring", "protected by Windows for your account", "in a file only you can read"],
+    ["in its Keychain", "in its system keyring", "protected by Windows for your account", "in a file only you can read"],
+  ]);
 });

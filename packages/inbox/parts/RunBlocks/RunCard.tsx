@@ -13,6 +13,7 @@ import { runApi, type RunStateWire, type RunView } from '../../data/runApi';
 import { refreshRunState } from '../../data/runStore';
 import { Icon } from '../../icons';
 import { RunOutput } from './RunOutput';
+import { secretKeptWords } from './SecretCard';
 import { SecretField } from './SecretField';
 
 const secs = (ms: number) => (ms < 10_000 ? `${(ms / 1000).toFixed(1)} s` : `${Math.round(ms / 1000)} s`);
@@ -182,6 +183,7 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
                   )}
                 </p>
                 {here && (
+                  <>
                   <SecretField
                     messageId={messageId}
                     name={name}
@@ -196,6 +198,10 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
                         }
                       : {})}
                   />
+                  <p className="ib-rb-hint" data-secret-kept="">
+                    {secretKeptWords(state, agent, needs.length === 1 ? 'Then this command runs with it.' : 'This command gets it when it runs.')}
+                  </p>
+                  </>
                 )}
               </div>
             );
