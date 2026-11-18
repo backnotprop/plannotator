@@ -264,6 +264,7 @@ import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxLiveReview } from "./inbox-live-review";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_PULL_WINDOW_ONLY_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
+import { createLaunchBridgeHosts } from "./inbox-launch-bridge";
 import { createInboxCodexAccount } from "./inbox-codex-account";
 import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
@@ -4810,7 +4811,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
     selfCommand,
-    hosts: options.launchHosts,
+    // A test's own hosts win; else an app named by PLANNOTATOR_LAUNCH_BRIDGE hosts the agents it offers (none when unset).
+    hosts: options.launchHosts ?? createLaunchBridgeHosts,
   });
   launchReady = true;
   // Routines (inbox-scheduled.ts): a run is a launch. The clock and the login item follow the switch.
