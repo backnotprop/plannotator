@@ -484,21 +484,8 @@ export type { CloudflareAccessSettings, TailscaleSettings };
 /** Split (old beside new) or Unified (one column): the diff layout code review and guided reviews share. */
 export type InboxDiffStyle = 'split' | 'unified';
 
-/**
- * How diffs are drawn (config.json `diffOptions`, shared with code review), by
- * the wire's names: each null when never chosen. Whole file, Hide whitespace
- * and the fonts are code review's alone.
- */
-export interface InboxDiffOptions {
-  diff_style: InboxDiffStyle | null;
-  overflow: 'scroll' | 'wrap' | null;
-  indicators: 'bars' | 'classic' | 'none' | null;
-  line_diff_type: 'word-alt' | 'word' | 'char' | 'none' | null;
-  line_numbers: boolean | null;
-  background: boolean | null;
-  background_intensity: 'subtle' | 'normal' | 'strong' | null;
-  tab_size: number | null;
-}
+export type { InboxDiffOptions } from './diffOptionTypes';
+import type { InboxDiffOptions } from './diffOptionTypes';
 
 /** Settings → General's cookie switch (SettingsModel.cookie_host). */
 export interface InboxCookieHost {
@@ -1808,6 +1795,7 @@ export const inboxApi = {
   /** How diffs are drawn, written to config.json `diffOptions` (shared with code review): only the fields given. */
   saveDiffOptions: (change: Partial<InboxDiffOptions>) =>
     post<{ diff_style: InboxDiffStyle | null; diff_options: InboxDiffOptions }>(inboxUrl('/settings'), { diff_options: change }),
+  semDiff: (timeoutMs: number) => getWithin<{ advert: unknown }>(inboxUrl('/sem-diff'), timeoutMs),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>(inboxUrl('/settings'), { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.
@@ -1954,8 +1942,8 @@ export const inboxApi = {
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(cardUrl(id), change),
-  /** The opened card's edits: title, notes; a link (a thread, an issue or PR); sent to an agent (the thread just started). */
-  editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'send'; thread_id: string }) =>
+  /** The opened card's edits: title, notes; a link (a thread, an issue or PR) added, or one removed (by its URL); sent to an agent (the thread just started). */
+  editCard: (id: string, change: { op: 'edit'; title?: string; notes?: string | null } | { op: 'link'; thread_id?: string; ref?: string } | { op: 'unlink'; url: string } | { op: 'send'; thread_id: string }) =>
     post<{ card: InboxCardWire }>(cardUrl(id), change),
   /** The opened card: the card and its history, newest first, and its project's repo (absent from an older Inbox). */
   card: (id: string) => get<{ card: InboxCardWire; history: InboxCardHistoryEntry[]; repo?: InboxProjectRepo | null }>(cardUrl(id)),

@@ -11,16 +11,23 @@
  * PR back. One toast with Undo, as the board's Close.
  */
 import { useSyncExternalStore } from 'react';
-import { inboxPullLabel, type InboxPull, type InboxPullHidden, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullLabel, inboxPullRepoOfKey, type InboxPull, type InboxPullHidden, type InboxPullsAnswer, type InboxRepoHidden, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { pullInProject } from './model';
 import { post } from '../api';
 import { inboxUrl } from '../inboxUrl';
 import type { InboxToastModel } from '../components/Toast';
 import { forgeName } from './labels';
 import { rowInSlot } from '../settle';
 
-/** A change made here that the lists may not show yet: hidden (with its record) or shown again; `since`, when (ms). */
-export type HiddenChange = ({ hide: true; record: InboxPullHidden } | { hide: false }) & { since: number };
+/**
+ * A change made here that the lists may not show yet: hidden (with its record) or shown again; `since`, when (ms). A
+ * repository's change is keyed `repo:<repo key>` (`repoChangeKey`) and carries its record as `repo`.
+ */
+export type HiddenChange = ({ hide: true; record: InboxPullHidden } | { hide: true; repo: InboxRepoHidden } | { hide: false }) & { since: number };
+
+/** A repository's change's key in the changes made here. */
+export const repoChangeKey = (repoKey: string) => `repo:${repoKey}`;
 export type HiddenChanges = ReadonlyMap<string, HiddenChange>;
 
 const NONE: HiddenChanges = new Map();
@@ -87,9 +94,9 @@ export const HIDDEN_SETTLE_MS = 10_000;
 export const HIDDEN_GIVE_UP_MS = 60_000;
 
 /** An answer came: a change it already shows is settled (an answer read before the write landed settles nothing). */
-export function settleHidden(hidden: readonly InboxPullHidden[] | undefined, now = Date.now()): void {
+export function settleHidden(hidden: readonly InboxPullHidden[] | undefined, now = Date.now(), repos?: readonly InboxRepoHidden[]): void {
   if (!hidden || pending.size === 0) return;
-  const keys = new Set(hidden.map((h) => h.key));
+  const keys = new Set([...hidden.map((h) => h.key), ...(repos ?? []).map((r) => repoChangeKey(r.key))]);
   const holds = (key: string, change: HiddenChange) => {
     const age = now - change.since;
     if (age < HIDDEN_SETTLE_MS) return true;
@@ -103,17 +110,25 @@ export function settleHidden(hidden: readonly InboxPullHidden[] | undefined, now
 /** The hidden list with the changes made here: the newest first. */
 export function hiddenWith(hidden: readonly InboxPullHidden[] | undefined, changes: HiddenChanges): InboxPullHidden[] {
   const kept = (hidden ?? []).filter((h) => !changes.has(h.key));
-  const added = [...changes.values()].flatMap((change) => (change.hide ? [change.record] : []));
+  const added = [...changes.values()].flatMap((change) => (change.hide && 'record' in change ? [change.record] : []));
   return [...added, ...kept].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
 }
 
-const hiddenHere = (changes: HiddenChanges) => (key: string) => changes.get(key)?.hide === true;
+/** The hidden repositories with the changes made here: the newest first. */
+export function reposWith(repos: readonly InboxRepoHidden[] | undefined, changes: HiddenChanges): InboxRepoHidden[] {
+  const kept = (repos ?? []).filter((r) => !changes.has(repoChangeKey(r.key)));
+  const added = [...changes.values()].flatMap((change) => (change.hide && 'repo' in change ? [change.repo] : []));
+  return [...added, ...kept].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0));
+}
+
+/** A PR hidden here: itself, or its repository. */
+const hiddenHere = (changes: HiddenChanges) => (key: string) => changes.get(key)?.hide === true || changes.get(repoChangeKey(inboxPullRepoOfKey(key)))?.hide === true;
 
 /** The PR list without the PRs hidden here. */
 export function pullsShown(answer: InboxPullsAnswer | null, changes: HiddenChanges): InboxPullsAnswer | null {
   if (!answer || changes.size === 0) return answer;
   const hidden = hiddenHere(changes);
-  return { ...answer, pulls: answer.pulls.filter((pull) => !hidden(pull.key)), hidden: hiddenWith(answer.hidden, changes) };
+  return { ...answer, pulls: answer.pulls.filter((pull) => !hidden(pull.key)), hidden: hiddenWith(answer.hidden, changes), hidden_repos: reposWith(answer.hidden_repos, changes) };
 }
 
 /**
@@ -129,7 +144,7 @@ export function reviewsShown(answer: InboxReviewsAnswer | null, changes: HiddenC
     if (left.length === 0) return [];
     return [{ ...row, pull_keys: left, stacks: row.stacks.map((stack) => ({ ...stack, layers: stack.layers.filter((layer) => !hidden(layer.key)) })).filter((stack) => stack.layers.length > 0) }];
   });
-  return { ...answer, rows, hidden: hiddenWith(answer.hidden, changes) };
+  return { ...answer, rows, hidden: hiddenWith(answer.hidden, changes), hidden_repos: reposWith(answer.hidden_repos, changes) };
 }
 
 const written = () => {
@@ -249,12 +264,47 @@ export function hidLead(what: string, threads: number, pulls = 1): string {
 }
 
 /**
- * The hidden PRs Reviews' Hidden fold lists under its project filter: those of a repository that is a clone of the
- * project (`projects`, the answer's repository-to-project map; a key is `host/owner/repo#n`). No filter: all of them.
+ * The hidden PRs and repositories Reviews' Hidden fold lists under its project filter, by Reviews' own project rule
+ * (model.ts `pullInProject`): of a repository that is a clone of the project, or, for a PR from a fork, whose head
+ * repository is (`head_repo`, kept at hide time; a record from before has none). A PR's key is `host/owner/repo#n`, a
+ * repository's `host/owner/repo`. No filter: all of them.
  */
-export function hiddenInProject<T extends Pick<InboxPullHidden, 'key'>>(hidden: readonly T[], project: string | null, projects: Readonly<Record<string, readonly string[]>>): T[] {
+export function hiddenInProject<T extends { key: string; head_repo?: string }>(hidden: readonly T[], project: string | null, projects: Readonly<Record<string, readonly string[]>>): T[] {
   if (!project) return [...hidden];
-  return hidden.filter((h) => (projects[h.key.replace(/#\d+(?::[a-z]+)?$/, '').toLowerCase()] ?? []).includes(project));
+  return hidden.filter((h) => {
+    const repo = inboxPullRepoOfKey(h.key);
+    const slash = repo.indexOf('/');
+    return pullInProject({ host: repo.slice(0, slash), repo: repo.slice(slash + 1), head_repo: h.head_repo ?? null }, project, projects);
+  });
+}
+
+/**
+ * Hide a repository (the board's Hide repository): every PR in it leaves the board and Reviews at once, new ones too.
+ * It never takes a thread out of the Inbox list. A refused write puts it back and throws.
+ */
+export async function hideRepo(repo: Pick<InboxRepoHidden, 'key' | 'label'>, now = new Date()): Promise<void> {
+  const key = repoChangeKey(repo.key);
+  const was = change([key], () => ({ hide: true, repo: { key: repo.key, label: repo.label, at: now.toISOString() }, since: now.getTime() }));
+  try {
+    await writeHidden({ hide_repos: [{ key: repo.key, label: repo.label }] });
+  } catch (cause) {
+    putBack([key], was);
+    throw cause;
+  }
+  written();
+}
+
+/** Show a repository again: its PRs are back on the next read. A refused write puts it back in Hidden and throws. */
+export async function showRepo(repoKey: string): Promise<void> {
+  const key = repoChangeKey(repoKey);
+  const was = change([key], () => ({ hide: false, since: Date.now() }));
+  try {
+    await writeHidden({ show_repos: [repoKey] });
+  } catch (cause) {
+    putBack([key], was);
+    throw cause;
+  }
+  written();
 }
 
 /** "Hid #12" for one, "Hid 3 pull requests" for several. */
@@ -286,12 +336,14 @@ export function hiddenRepo(hidden: Pick<InboxPullHidden, 'key'>): string {
 }
 
 /** Hide PRs from Reviews, the board and their counts, or show them again (`POST /api/inbox/pulls/hidden`): kept on this machine, nothing goes to the forge. */
-const writeHidden = (change: { hide?: readonly { key: string; title: string; url: string }[]; threads?: readonly string[]; show?: readonly string[]; show_threads?: readonly string[] }) =>
-  post<{ hidden: InboxPullHidden[]; hid?: string[]; rehid?: string[]; threads_left?: string[]; threads_back?: string[] }>(inboxUrl('/pulls/hidden'), {
+const writeHidden = (change: { hide?: readonly { key: string; title: string; url: string }[]; threads?: readonly string[]; show?: readonly string[]; show_threads?: readonly string[]; hide_repos?: readonly { key: string; label: string }[]; show_repos?: readonly string[] }) =>
+  post<{ hidden: InboxPullHidden[]; hidden_repos?: InboxRepoHidden[]; hid?: string[]; rehid?: string[]; threads_left?: string[]; threads_back?: string[] }>(inboxUrl('/pulls/hidden'), {
     hide: [...(change.hide ?? [])],
     threads: [...(change.threads ?? [])],
     show: [...(change.show ?? [])],
     ...(change.show_threads ? { show_threads: [...change.show_threads] } : {}),
+    ...(change.hide_repos ? { hide_repos: [...change.hide_repos] } : {}),
+    ...(change.show_repos ? { show_repos: [...change.show_repos] } : {}),
   });
 
 export type Toast = (toast: Omit<InboxToastModel, 'id'>, ms: number) => void;
@@ -415,4 +467,40 @@ export function focusWhenGone(items: () => readonly { id: string; el: HTMLElemen
 /** The items under `root` that carry `attr`, in order, by its value. */
 export function itemsBy(root: () => ParentNode | null, attr: string): () => { id: string; el: HTMLElement }[] {
   return () => [...(root()?.querySelectorAll<HTMLElement>(`[${attr}]`) ?? [])].map((el) => ({ id: el.getAttribute(attr) ?? '', el }));
+}
+
+/**
+ * Hide repository (the board's section header), with its one toast and Undo (its button only), which shows the
+ * repository again. Resolves true when it was hidden.
+ */
+export async function hideRepoWithUndo(repo: Pick<InboxRepoHidden, 'key' | 'label'> & Pick<InboxPull, 'platform'>, toast: Toast | undefined): Promise<boolean> {
+  try {
+    await hideRepo({ key: repo.key, label: repo.label });
+  } catch (cause) {
+    toast?.({ icon: 'warn', lead: 'Couldn’t hide', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS);
+    return false;
+  }
+  toast?.(
+    {
+      icon: 'check',
+      lead: `Hid ${repo.label}`,
+      detail: `New pull requests there stay hidden too · Still open on ${forgeName(repo)}`,
+      onUndo: () => void showRepoWithToast({ key: repo.key, label: repo.label }, toast),
+      noKey: true,
+      wrap: true,
+    },
+    HIDE_UNDO_MS,
+  );
+  return true;
+}
+
+/** Show a repository again (Hidden's button, or Undo), with its toast. */
+export async function showRepoWithToast(repo: Pick<InboxRepoHidden, 'key' | 'label'>, toast: Toast | undefined): Promise<void> {
+  try {
+    await showRepo(repo.key);
+  } catch (cause) {
+    toast?.({ icon: 'warn', lead: 'Couldn’t show it again', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS);
+    return;
+  }
+  toast?.({ icon: 'check', lead: shownToast([repo.label]) }, HIDE_UNDO_MS);
 }

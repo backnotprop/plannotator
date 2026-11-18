@@ -88,6 +88,7 @@ import { INBOX_CONNECTION_USAGE, runInboxConnectionCommand, stdinLines } from ".
 import { runInboxProjectsCommand } from "./inbox-projects-command";
 import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxStartTrace } from "./inbox-start-trace";
+import { loadEmbeddedSemDiff } from "./sem-diff";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -429,6 +430,7 @@ async function serveInbox(dataDir: string, open: boolean, htmlContent: string | 
       htmlContent,
       // Live sites (packages/server/inbox-live.ts): the live bridge's sources, as annotate's live sessions get them.
       liveBridge: { bridgeScript: BRIDGE_SCRIPT, bridgeBootstrap: LIVE_BRIDGE_BOOTSTRAP, annotationCss: ANNOTATION_HIGHLIGHT_CSS },
+      semDiff: loadEmbeddedSemDiff,
       selfCommand: selfCommand(),
       publishTailnet: tailscale,
       // Testing knob: how long a reply waits on a busy agent before it goes in by itself (default 5 minutes).

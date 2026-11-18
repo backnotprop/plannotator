@@ -76,7 +76,7 @@ function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; wit
     selfCommand: ["plannotator"],
   });
   cleanup.push(() => launch.stop());
-  const send = async (body: string, choice: { model?: string; effort?: string } = {}) => {
+  const send = async (body: string, choice: { model?: string; effort?: string; primary_agent?: string } = {}) => {
     const target = launch.target({ launch: { agent: "opencode", project_id: project.id, ...choice } })!;
     const prepared = await launch.prepare(target, { name: "Tidy", body, resolveProject: async () => project });
     const message = store.startPersonThread({ project_id: project.id, body, to: prepared.to, idempotency_key: `send-${body}`, thread_name: "Tidy", launch: prepared.launch }).message;
@@ -126,6 +126,29 @@ describe("OpenCode through the launch engine, against the fake opencode2", () =>
     expect(created!.body).toEqual({ location: { directory: t.folder }, title: "Tidy", model: { providerID: "opencode", id: "flint-40b-free", variant: "high" } });
     await until("the root went in as a turn", () => t.fake.turns().some((turn) => turn.session === session && turn.text.includes("Tidy the readme.")));
     await until("the root marked delivered", () => t.store.message(root.id)!.delivery);
+  });
+
+  test("OpenCode's own agents are offered beside the model; the one picked is the new session's agent, and one it does not list is refused", async () => {
+    const t = setup({
+      state: {
+        agents: [
+          { id: "build", mode: "primary", hidden: false },
+          { id: "plan", mode: "primary", hidden: false },
+          { id: "general", mode: "subagent", hidden: false },
+        ],
+      },
+    });
+    const choices = await until("the lists", async () => (await t.launch.composeBlock())!.agents.find((a) => a.agent === "opencode")?.choices);
+    expect(choices.primary_agents).toEqual(["build", "plan"]);
+    await expect(t.send("Not this one.", { primary_agent: "general" })).rejects.toThrow("OpenCode has no agent general");
+
+    const root = await t.send("Plan the readme.", { model: "opencode/big-pickle", primary_agent: "plan" });
+    await until("the session", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.store.message(root.id)!.launch).toMatchObject({ model: "opencode/big-pickle", primary_agent: "plan" });
+    const [created] = t.fake.http("POST", /^\/api\/session$/);
+    expect(created!.body).toEqual({ location: { directory: t.folder }, title: "Tidy", model: { providerID: "opencode", id: "big-pickle" }, agent: "plan" });
+    // The next start offers it first.
+    expect((await t.launch.composeBlock())!.agents.find((a) => a.agent === "opencode")?.choices?.last).toEqual({ model: "opencode/big-pickle", primary_agent: "plan" });
   });
 
   test("Stop ends the server; the next reply starts one that watches the session from the start, and the reply goes in there", async () => {

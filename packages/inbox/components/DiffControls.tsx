@@ -14,6 +14,7 @@ import { DiffLayoutToggle, diffLayoutToggleTip } from '@plannotator/ui/component
 import { DiffDisplayOptionsPopover } from '@plannotator/ui/components/DiffDisplayOptions';
 import { chooseDiffOption } from '../diffOptions';
 import { usePhone } from '../phone';
+import { useSemDiffAdvert } from '../semDiffAdvert';
 import { Tip } from './Tip';
 
 /** Fold or open every file's diff: what GuideReader's `collapseAll` takes. */
@@ -53,6 +54,7 @@ export function DiffControls({
 }) {
   const phone = usePhone();
   const style = useConfigValue('diffStyle');
+  const semanticOption = useSemDiffAdvert() != null && layout;
   if (phone) return null;
   const folded = collapseAll?.collapsed === true;
   return (
@@ -69,7 +71,7 @@ export function DiffControls({
           </button>
         </Tip>
       )}
-      <DiffDisplayOptionsPopover repositoryOptions={false} onChange={(key, value) => chooseDiffOption(key as never, value as never)} triggerClassName="ib-iconbtn ib-dctl-b" triggerTitleSide="bottom" />
+      <DiffDisplayOptionsPopover repositoryOptions={false} semanticOption={semanticOption} onChange={(key, value) => chooseDiffOption(key as never, value as never)} triggerClassName="ib-iconbtn ib-dctl-b" triggerTitleSide="bottom" />
     </span>
   );
 }

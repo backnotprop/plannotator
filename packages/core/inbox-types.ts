@@ -1189,6 +1189,8 @@ export interface InboxLaunchRecord {
   /** Fixed at Send, so Try again and every restart start the same. */
   model?: string;
   effort?: string;
+  /** OpenCode's own primary agent the session started as (build, plan, …); absent: its default. */
+  primary_agent?: string;
   error?: InboxLaunchError | null;
   /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
   deleted_at?: string;

@@ -4874,6 +4874,8 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-cp-lchname > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-cp-lchprov { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-filterable]) { width: min(480px, calc(100% - 28px)); }
+/* OpenCode's Agent column (build, plan) beside the model and the variant: the same room as a filterable list. */
+.ib-cp-picker.ib-cp-lch:not([data-phone]):has([data-compose-choice-menu="primary_agent"]) { width: min(480px, calc(100% - 28px)); }
 .ib-cp-to[data-start] { flex-wrap: wrap; row-gap: 0; }
 /* Trust and start (approval "inbox-launch-trust-compose"). The question circle, quiet as any icon button unless the folder has hooks or similar;
    its details, the Inbox's popover at the button (`.ib-state.ib-nmpop`, a sheet on a phone), over the dialog: nothing under it moves. */
@@ -7480,6 +7482,12 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-crdp-rjira { color: var(--muted-foreground); transition: color 120ms ease; }
 .ib-crdp-ref:is(:hover, :focus-within) .ib-crdp-rjira { color: var(--foreground); }
 .ib-crdp-rn:focus-visible { color: var(--foreground); text-decoration: underline; }
+/* A link's Remove, at the row's end: quiet until the row is hovered or focused; always there on a touch screen. */
+.pn-inbox .ib-crdp-rx { flex: none; margin-left: auto; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px; display: flex; align-items: center; justify-content: center; background: none; color: var(--muted-foreground); cursor: pointer; opacity: 0; transition: opacity 120ms ease; }
+.pn-inbox .ib-crdp-ref:is(:hover, :focus-within) .ib-crdp-rx { opacity: 1; }
+.pn-inbox .ib-crdp-rx:hover { color: var(--foreground); background: var(--ib-hover); }
+.pn-inbox .ib-crdp-rx:focus-visible { opacity: 1; outline: 2px solid var(--ring); outline-offset: 1px; }
+@media (hover: none) { .pn-inbox .ib-crdp-rx { opacity: 1; width: 44px; height: 44px; margin-right: -10px; } }
 @media (forced-colors: active) { .ib-crdp-rjira { color: CanvasText; } }
 /*
  * A web link (user feedback #10): its label (host and path, already cut in the middle at 44
@@ -9675,15 +9683,15 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-review.ib-rv-walk.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
 /* The comments panel closed from the header's Comments button: the diff takes the width, nothing of the panel stays. */
 .ib-review.ib-rv-walk.ib-rv-shut .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
-/* All files: the PR page's file tree on the left (approval "review-allfiles-tree"; pulls/RailTree.tsx, its rows'
-   styles are `.ib-prp-files` below). Walkthrough has none. A phone has no rail: its Files button opens the tree as a
+/* All files: the PR page's file tree on the left (approval "review-allfiles-tree"; guide/PullChangesTree.tsx, the
+   review app's tree). Walkthrough has none. A phone has no rail: its Files button opens the tree as a
    sheet over the diff, as the PR page's does. */
 .ib-review.ib-rv-walk.ib-rv-tree .ib-rsplit { grid-template-columns: 280px minmax(0, 1fr) 300px; }
 .ib-review.ib-rv-walk.ib-rv-tree:is(.ib-fold, .ib-rv-shut) .ib-rsplit { grid-template-columns: 280px minmax(0, 1fr); }
 .ib-rv-tree .ib-rrail { --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); padding: 0; gap: 0; overflow: hidden; }
 .ib-rv-filesbtn { gap: 6px; }
-/* The tree's head: "N files" on the left, "N viewed" at the right end (RailTree's own head, which the PR page
-   replaces with its scope switch). */
+/* The tree's head: "N files" on the left, "N viewed" at the right end (pulls/RailFilesHead.tsx; the PR page leads
+   with its scope switch). */
 .ib-prp-fileshead .ib-sp { flex: 1; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-review.ib-rv-walk.ib-rv-tree .ib-rsplit, .ib-review.ib-rv-walk.ib-rv-tree:is(.ib-fold, .ib-rv-shut) .ib-rsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
@@ -9979,7 +9987,9 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .pn-inbox .ib-rvc-link { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 .pn-inbox .ib-rvc-link:hover { color: var(--foreground); }
 /* A centred word in the list column, with its one button: Code review off, no reviews yet. */
-.ib-pr-off { display: flex; flex: 1; align-items: center; justify-content: center; text-align: center; }
+/* Its empty line, then (when there is one) a project's unreported branches and the Hidden fold below it, full width. */
+.ib-pr-off { display: flex; flex-direction: column; flex: 1; align-items: center; justify-content: center; text-align: center; }
+.ib-pr-off > :not(.ib-pr-empty) { align-self: stretch; text-align: start; }
 .ib-pr-off .ib-btn { margin-top: 14px; }
 .ib-prrow .ib-l3.ib-pr-l3 { justify-content: flex-start; gap: 7px; }
 .ib-prrow .ib-l3.ib-pr-l3 > .ib-pv { margin-right: 0; }
@@ -10775,47 +10785,6 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-prp-files.ib-prp-pierre { display: flex; flex-direction: column; overflow: hidden; }
 .ib-prp-pierre > .review-file-tree { flex: 1 1 0; min-height: 0; }
 .ib-prp-fileshead { display: flex; align-items: center; padding: 0 6px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ib-prp-list { list-style: none; margin: 0; padding: 0; }
-.pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding-right: 6px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); text-align: left; color: var(--foreground); }
-.pn-inbox .ib-prp-file:hover, .pn-inbox .ib-prp-folder:hover { background: var(--ib-prp-fill); }
-.pn-inbox .ib-prp-folder { color: var(--muted-foreground); }
-.ib-prp-folder svg { flex: none; transition: transform 100ms ease; }
-.ib-prp-folder svg.ib-prp-open { transform: rotate(90deg); }
-/* A name stays on one line and whole while it fits, and nothing on the row fades. Short of room a folder gives way in
-   its middle (its head ends in "…", its last folder stays), and where not even that fits beside the name it leaves the
-   line whole, wrapped onto a second line that is cut off, so no sliver of it reads as a stray mark. A name alone too
-   long gives way the same way, keeping its end. The row's tip has the path. */
-.ib-prp-fname { flex: 1 1 auto; display: flex; min-width: 0; height: 1.45em; line-height: 1.45em; overflow: hidden; }
-.ib-prp-fname[data-has-dir] { flex-flow: row-reverse wrap; justify-content: flex-end; }
-/* The name is laid out first, so the folder is what wraps out of sight; row-reverse draws it before the name. */
-.ib-prp-fname[data-has-dir] > .ib-prp-base { order: -1; }
-.ib-prp-cutbox { display: flex; min-width: 0; white-space: nowrap; }
-.ib-prp-base, .ib-prp-dirname { flex: 0 1 auto; }
-.ib-prp-dir { flex: 1 1 4.5em; max-width: max-content; color: var(--muted-foreground); }
-.ib-prp-cut { flex: 0 1000000 auto; min-width: 1.1em; overflow: hidden; text-overflow: ellipsis; }
-.ib-prp-keep { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* A last folder longer than the row gives way in its own middle once the head is spent: its end stays. */
-.ib-prp-keep[data-split] { display: flex; }
-.ib-prp-cut2 { flex: 0 1 auto; min-width: 1.1em; overflow: hidden; text-overflow: ellipsis; }
-.ib-prp-end { flex: 0 0 auto; }
-/* The review app's +/- columns (review-editor/index.css `.review-count-columns`), sized by the rail's widest row. */
-.ib-prp-files .review-count-columns { display: grid; grid-template-columns: minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content); column-gap: 4px; justify-items: end; align-items: center; flex-shrink: 0; margin-left: auto; font-size: var(--ib-fs-11, 11px); font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ib-prp-files .review-count-columns .additions { color: var(--success, #0a7f33); }
-.ib-prp-files .review-count-columns .deletions { color: var(--destructive); }
-.ib-prp-files .review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions) { color: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); }
-/* A row's (and a folder's) +/- are one pair at the row's end, 4 px apart, as on GitHub's file tree: the − number's
-   right edge on the row's end padding, the + number just before it, an add-only row's + on that same edge. Tabular
-   digits, so equal numbers line up row to row. */
-.ib-prp-files :is(.ib-prp-file, .ib-prp-folder) > .review-count-columns { display: inline-flex; justify-content: flex-end; gap: 4px; }
-.ib-prp-files :is(.ib-prp-file, .ib-prp-folder) > .review-count-columns > span:empty { display: none; }
-.ib-prp-file[data-seen] .ib-prp-base { color: var(--muted-foreground); }
-.ib-prp-c { flex: none; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-/* The review app's file row spacing (review-editor index.css `.review-sidebar .file-tree-item`, `.review-change-letter`):
-   6 px between the parts, 8 px at the row's end, the letter pulled 2 px in on each side. */
-.pn-inbox .ib-prp-files .ib-prp-file, .pn-inbox .ib-prp-files .ib-prp-folder { gap: 6px; padding-right: 8px; }
-.ib-prp-files .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
-.ib-prp-files .ib-prp-fname ~ .ib-prp-c { margin-left: -2px; }
-@media (pointer: coarse) { .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 40px; } }
 /* Files as the code review app draws them (approval pr-view-one-surface, 11-07 "fix all four"): one surface, a file its
    header and its code, edge to edge, in the page's colour, with the header's own hairline under it (FileHeader's) and
    the next file's header right under the last code row. No band above the first file: Split | Unified is in the bar. */
@@ -10859,7 +10828,7 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
 .ib-prreview .ib-prp-row.ib-on .ib-refmark[data-ref-state="open"] { color: var(--foreground); opacity: 1; }
 .ib-prp-all svg { color: var(--muted-foreground); }
 .ib-prreview .ib-prp-num { color: var(--muted-foreground); font-weight: 400; }
-.pn-inbox .ib-prreview .ib-prp-row, .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 28px; }
+.pn-inbox .ib-prreview .ib-prp-row { min-height: 28px; }
 .ib-prp-files { padding-top: 16px; }
 .ib-prp-fileshead { padding-bottom: 6px; }
 
@@ -11908,9 +11877,6 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 .ib-lt-fold .ib-lt-name { flex: 0 1 auto; max-width: 38%; font-weight: 500; color: var(--muted-foreground); }
 .ib-lt-line { flex: 1 1 0; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ib-lt-n { font-variant-numeric: tabular-nums; }
-/* The file rail: each file's open threads, after the person's own count. */
-.ib-prp-t { flex: none; display: inline-flex; align-items: center; gap: 3px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-prp-t > svg { flex: none; }
 /* A thread on a whole file (FileThread; the owner's pick B, 2026-11-09): a full-width band under the file's header,
    above its first lines, folded to one line ("On this file", who, the first words, when). Folded it rides in the
    sticky header at a fixed height (FILE_BAND_HEIGHT, two rows on a phone), so the header is sized for it before it
@@ -12557,3 +12523,4 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 .ib-topen[data-thread-drop-label="refuse"] { color: var(--muted-foreground); }
 /* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
 .ib-topen[data-ghost-says] { visibility: hidden; }
+.pn-inbox span.ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: none; }

@@ -14,6 +14,7 @@ type ReadyRepoFiles = Extract<RepoFilesState, { status: 'ready' }>;
 
 export interface RepoTreeHandle {
   setAllFoldersExpanded: (expanded: boolean) => void;
+  focus: () => void;
 }
 
 interface RepoTreeViewProps extends FileRowState {
@@ -187,6 +188,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
     }
   }, [model]);
   const searchKeys = useTreeSearchKeys(model);
+  const focusing = useRef(false);
 
   useEffect(() => {
     let lastFocused = model.getFocusedPath();
@@ -194,7 +196,7 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       const focused = model.getFocusedPath();
       if (focused === lastFocused) return;
       lastFocused = focused;
-      if (!model.getFileTreeContainer()?.shadowRoot?.activeElement || searchKeys.quiet()) return;
+      if (focusing.current || !model.getFileTreeContainer()?.shadowRoot?.activeElement || searchKeys.quiet()) return;
       openFocused();
     });
   }, [model, openFocused, searchKeys]);
@@ -238,6 +240,25 @@ export const RepoTreeView: React.FC<RepoTreeViewProps> = (props) => {
       model.resetPaths(listPaths(live.current.props.repo, live.current.props.files.map((f) => f.path)), { initialExpandedPaths: dirs });
       model.setGitStatus(gitStatus);
       for (const dir of dirs) ensureLoaded(dir);
+    },
+    focus: () => {
+      const { activePath: active } = live.current.props;
+      const target = (active && known.current.has(active) ? active : undefined) ?? model.getVisibleRows(0, 0)[0]?.path;
+      if (!target) return;
+      focusing.current = true;
+      for (const dir of ancestorsOf(target)) (model.getItem(dir) as { expand?: () => void } | null)?.expand?.();
+      model.scrollToPath(target, { focus: true, offset: 'nearest' });
+      const land = (tries: number) => {
+        const rows = model.getFileTreeContainer()?.shadowRoot?.querySelectorAll<HTMLElement>('[data-item-path]') ?? [];
+        const row = [...rows].find((r) => r.dataset.itemPath === target);
+        if (!row && tries > 0 && typeof requestAnimationFrame !== 'undefined') {
+          requestAnimationFrame(() => land(tries - 1));
+          return;
+        }
+        row?.focus({ preventScroll: true });
+        setTimeout(() => { focusing.current = false; }, 0);
+      };
+      land(4);
     },
   }), [model, gitStatus, ensureLoaded]);
 

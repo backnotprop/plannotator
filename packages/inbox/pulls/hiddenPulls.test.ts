@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxPullStacks, inboxReviewRows, type InboxListRow, type InboxPull, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { forgetHiddenChanges, hiddenInProject, hidLead, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
+import { forgetHiddenChanges, hiddenInProject, hidLead, hideRepo, repoChangeKey, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
 import { rowMenuActions } from '../rowMenu';
 import { reviewsOnYou } from './reviewsModel';
 import { sheetModel } from '../prs/sheetModel';
@@ -115,6 +115,32 @@ describe('labels', () => {
   });
 });
 
+describe('a repository hidden here leaves at once', () => {
+  const REPO = 'github.com/northwind/api';
+  const web = pull(20, { key: 'github.com/northwind/web#20', repo: 'northwind/web', host: 'github.com' });
+  const repoHid: HiddenChanges = new Map([[repoChangeKey(REPO), { hide: true, repo: { key: REPO, label: 'api', at: '2026-11-17T10:00:00.000Z' }, since: 1_000 }]]);
+
+  test("every PR in it leaves the board, its counts and Reviews; Hidden lists the repository, not each PR", () => {
+    const model = pullsShown({ ...MODEL, pulls: [...PULLS, web] }, repoHid)!;
+    expect(model.pulls.map((p) => p.key)).toEqual([web.key]);
+    expect(sheetModel(model, Date.now(), {}).head).toMatchObject({ open: 1, repos: 1 });
+    expect(model.hidden).toEqual([]);
+    expect(model.hidden_repos!.map((r) => r.key)).toEqual([REPO]);
+    expect(reviewsShown(REVIEWS, repoHid)!.rows).toEqual([]);
+  });
+
+  test('a refused write puts it back and says why', async () => {
+    const saved = globalThis.fetch;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ error: 'No.' }), { status: 400, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch;
+    try {
+      await expect(hideRepo({ key: REPO, label: 'api' })).rejects.toThrow();
+      expect(pullsShown(MODEL, hiddenChangesNow())!.pulls).toHaveLength(PULLS.length);
+    } finally {
+      globalThis.fetch = saved;
+    }
+  });
+});
+
 test("a Hide's toast says its thread for one PR, their thread for several, and counts several threads", () => {
   expect(hidLead('Hid #7', 0, 1)).toBe('Hid #7');
   const one = hidLead('Hid #7', 1, 1);
@@ -129,4 +155,8 @@ test("Reviews' Hidden fold under a project filter lists that project's hidden PR
   const projects = { 'github.com/northwind/api': ['prj_api'], 'github.com/northwind/web': ['prj_web'] };
   expect(hiddenInProject(records, 'prj_web', projects).map((h) => h.key)).toEqual(['github.com/northwind/web#20']);
   expect(hiddenInProject(records, null, projects)).toHaveLength(2);
+  expect(hiddenInProject([{ key: 'github.com/northwind/api' }], 'prj_web', projects)).toEqual([]);
+  // A fork-based project (its clone is the person's fork): a PR to upstream is in it by its head repository.
+  const fork = { key: 'github.com/upstream/web#31', head_repo: 'northwind/web' };
+  expect(hiddenInProject([fork, { key: 'github.com/upstream/web#32' }], 'prj_web', projects)).toEqual([fork]);
 });

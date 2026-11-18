@@ -45,6 +45,7 @@ import {
   GITLAB_PROJECTS_PER_QUERY,
   gitlabOthersQueries,
   INBOX_PULL_DIFF_MAX_BYTES,
+  INBOX_PULL_DIFF_FRESH_MS,
   INBOX_PULLS_FRESH_MS,
   INBOX_PULLS_OTHERS_CALLS_MAX,
   INBOX_PULLS_OTHERS_DEADLINE_MS,
@@ -701,6 +702,33 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
     expect((await threadRows(w.base)).some((r) => r.thread_id === handed)).toBe(false);
   });
 
+  test("a hidden repository: every PR in it leaves the board and Reviews, never a thread from the Inbox list; Show again brings them back; nothing goes to the forge", async () => {
+    const w = await world({ codeReview: true, answer: everywhere() });
+    const handed = await w.send("Ready for review.", "handed");
+    const board = await listed(w, "?everywhere=1");
+    const REPO = "github.com/northwind/billing-svc";
+    const inRepo = board.pulls.filter((p) => p.key.startsWith(`${REPO}#`));
+    expect(inRepo.length).toBeGreaterThan(0);
+    expect((await w.own([KEY], handed)).status).toBe(200);
+    const before = w.forge.calls.length;
+    const res = await call(w.base, { hide_repos: [{ key: REPO, label: "billing-svc" }] });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { hidden_repos: { key: string }[]; threads_left: string[] };
+    expect(body.hidden_repos.map((r) => r.key)).toEqual([REPO]);
+    expect(body.threads_left).toEqual([]);
+    expect(w.forge.calls.slice(before).filter((c) => c.args.some((arg) => /PATCH|POST|pulls\/\d|issues\/\d/.test(arg)))).toEqual([]);
+    const after = await listed(w, "?everywhere=1");
+    expect(after.pulls.some((p) => p.key.startsWith(`${REPO}#`))).toBe(false);
+    expect(after.hidden_repos?.map((r) => r.key)).toEqual([REPO]);
+    const rows = await reviews(w.base);
+    expect(rows.rows.some((row) => row.pull_keys.some((k) => k.startsWith(`${REPO}#`)))).toBe(false);
+    // The thread handed #412 stays in the Inbox list, and still offers Hide for that PR on its own.
+    expect((await threadRows(w.base)).find((row) => row.thread_id === handed)?.hide_pulls).toEqual([KEY]);
+    expect((await call(w.base, { show_repos: [REPO] })).status).toBe(200);
+    expect((await listed(w, "?everywhere=1")).pulls.filter((p) => p.key.startsWith(`${REPO}#`)).length).toBe(inRepo.length);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+  });
+
   test("the Inbox list: a pinned thread is never left out", async () => {
     const { w, handed } = await handedAndHidden();
     const pin = await fetch(`${w.base}/api/inbox/threads/${handed}/pin`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pinned: true }) });
@@ -1274,6 +1302,28 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     f.heads = [newer, newer];
     expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
     expect(f.heads).toEqual([]);
+  });
+
+  test("a file read naming the head it was drawn from reuses that diff at any age, and reads at once share one", async () => {
+    const f = forge(stackAnswer);
+    let clock = 1_000_000;
+    const pulls = createInboxPulls({ run: f.run, now: () => clock });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const key = "github.com/northwind/billing-svc#22";
+    const head = "b".repeat(40);
+    f.heads = [head, head];
+    const start = f.calls.length;
+    expect((await pulls.diff(key, "layer")).head_sha).toBe(head);
+    const one = f.calls.length - start;
+    clock += INBOX_PULL_DIFF_FRESH_MS * 3;
+    const pinnedAt = f.calls.length;
+    expect((await pulls.diff(key, "layer", undefined, head)).head_sha).toBe(head);
+    expect(f.calls.length).toBe(pinnedAt);
+    f.heads = [head, head];
+    const together = f.calls.length;
+    const answers = await Promise.all([pulls.diff(key, "layer"), pulls.diff(key, "layer"), pulls.diff(key, "layer")]);
+    expect(answers.map((answer) => answer.head_sha)).toEqual([head, head, head]);
+    expect(f.calls.length - together).toBe(one);
   });
 
   test("a label moving updated_at reads nothing again; a new head does", async () => {

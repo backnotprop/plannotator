@@ -3,6 +3,8 @@ import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { PULLS_FOCUS_MS, PULLS_PENDING_MS, PULLS_TICK_MS } from '../pulls/usePulls';
 import { onHiddenWritten, pullsShown, settleHidden, useHiddenChanges } from '../pulls/hiddenPulls';
+import type { Route } from '../app/route';
+import { boardInProject, boardProjectName, sheetModel } from './sheetModel';
 
 export interface SheetPullsState {
   model: InboxPullsAnswer | null;
@@ -40,7 +42,7 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
         .then((answer) => {
           if (controller.signal.aborted) return;
           setModel(answer);
-          settleHidden(answer.hidden);
+          settleHidden(answer.hidden, Date.now(), answer.hidden_repos);
           setError(null);
           // Others (the projects' other PRs) and a linked machine's board still being read: on the server's next answer.
           const pending = answer.hosts.some((h) => h.others_pending) || Object.values(answer.machines ?? {}).some((m) => m.pending);
@@ -100,3 +102,15 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
   const changes = useHiddenChanges();
   return { model: useMemo(() => pullsShown(model, changes), [model, changes]), error, loading, refresh };
 }
+
+/**
+ * The board as the window shows it: it follows Reviews' project filter, in Reviews' pane, on its own page (a phone's)
+ * and beside a thread opened from Reviews (`project`), and its head (the sidebar's summary) counts that project's.
+ */
+export function useBoardInProject(model: InboxPullsAnswer | null, route: Pick<Route, 'page' | 'project' | 'reviews'>, names: ReadonlyMap<string, string>, projects: readonly { id: string; name: string }[]) {
+  const project = route.page === 'reviews' || route.page === 'prs' ? (route.project ?? null) : (route.reviews?.project ?? null);
+  const board = useMemo(() => (model ? boardInProject(model, project) : null), [model, project]);
+  const head = useMemo(() => (board ? sheetModel(board, Date.now(), {}).head : null), [board]);
+  return { project, board, head, name: boardProjectName(project, names, projects) };
+}
+

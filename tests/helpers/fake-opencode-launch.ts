@@ -5,6 +5,8 @@ export interface FakeOpenCodeLaunchState {
   version?: string;
   plugin?: { version: string; status?: "active" | "failed"; error?: string } | null;
   models?: { providerID: string; id: string; variants: string[] }[];
+  /** OpenCode's own agents (`GET /api/agent`); absent, that read fails, as an OpenCode that can't list them. */
+  agents?: { id: string; mode: "primary" | "subagent" | "all"; hidden: boolean }[];
   failTurn?: string | null;
   turnMs?: number;
 }
@@ -43,6 +45,7 @@ const models = () => (state().models || [
 if (args[0] === "--standalone" && args[1] === "api") {
   log({ event: "cli", argv: args });
   if (args[2] === "GET" && args[3] === "/api/model") { process.stdout.write(JSON.stringify({ location: { directory: process.cwd() }, data: models() })); process.exit(0); }
+  if (args[2] === "GET" && args[3] === "/api/agent" && s0.agents) { process.stdout.write(JSON.stringify({ location: { directory: process.cwd() }, data: s0.agents })); process.exit(0); }
   process.exit(1);
 }
 if (args[0] !== "serve") { log({ event: "cli", argv: args }); process.exit(0); }

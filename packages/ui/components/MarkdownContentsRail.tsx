@@ -61,7 +61,6 @@ import {
 } from '../utils/headingScrollSpy';
 import { usePrefersReducedMotion } from '../hooks/usePrefersReducedMotion';
 
-const MIN_HEADING_COUNT = CONTENTS_RAIL_MIN_HEADINGS;
 const COLLAPSED_MARKER_LIMIT = 10;
 const PANEL_WIDTH = 256;
 const DOCK_WIDTH = 36;
@@ -285,6 +284,11 @@ export interface MarkdownContentsRailProps {
    * after the headings. Default: none.
    */
   readonly panelAction?: ReactNode;
+  /**
+   * The fewest headings (levels 1 to 4) the rail shows for. Default
+   * `CONTENTS_RAIL_MIN_HEADINGS` (4); the Plannotator Inbox passes 2.
+   */
+  readonly minHeadings?: number;
 }
 
 export function MarkdownContentsRail({
@@ -295,6 +299,7 @@ export function MarkdownContentsRail({
   hidden = false,
   onAvailableChange,
   panelAction,
+  minHeadings = CONTENTS_RAIL_MIN_HEADINGS,
 }: MarkdownContentsRailProps) {
   const items = useMemo(
     () => buildContentsItems(hostBlocks ?? markdownBlocks(markdown)),
@@ -364,7 +369,7 @@ export function MarkdownContentsRail({
   }, [refreshActiveSection]);
 
   const measure = useCallback(() => {
-    if (scrollViewport === null || items.length < MIN_HEADING_COUNT) {
+    if (scrollViewport === null || items.length < minHeadings) {
       bindingsRef.current = [];
       setAvailable(false);
       return;
@@ -398,9 +403,9 @@ export function MarkdownContentsRail({
     setRailGeometry((current) =>
       current.left === geometry.left && current.top === geometry.top ? current : geometry,
     );
-    setAvailable(bindings.length >= MIN_HEADING_COUNT && hasRailSpace);
+    setAvailable(bindings.length >= minHeadings && hasRailSpace);
     refreshActiveSection();
-  }, [blockIds, contentSelector, items.length, refreshActiveSection, scrollViewport]);
+  }, [blockIds, contentSelector, items.length, minHeadings, refreshActiveSection, scrollViewport]);
 
   const scheduleMeasure = useCallback(() => {
     if (measureFrameRef.current !== null) cancelAnimationFrame(measureFrameRef.current);
@@ -422,7 +427,7 @@ export function MarkdownContentsRail({
   }, [available]);
 
   useEffect(() => {
-    if (scrollViewport === null || items.length < MIN_HEADING_COUNT) {
+    if (scrollViewport === null || items.length < minHeadings) {
       setAvailable(false);
       return;
     }
@@ -477,7 +482,7 @@ export function MarkdownContentsRail({
       resizeObserver?.disconnect();
       mutationObserver?.disconnect();
     };
-  }, [contentSelector, items.length, measure, scheduleActiveRefresh, scheduleMeasure, scrollViewport]);
+  }, [contentSelector, items.length, measure, minHeadings, scheduleActiveRefresh, scheduleMeasure, scrollViewport]);
 
   useEffect(() => {
     const list = listRef.current;

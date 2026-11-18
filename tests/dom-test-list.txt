@@ -381,6 +381,7 @@ packages/review-editor/edit/selectionActionPopover.test.ts
 packages/review-editor/components/AllFilesCodeView.lifecycle.test.tsx
 packages/review-editor/components/AllFilesCodeView.flushTrailing.test.tsx
 packages/review-editor/components/AllFilesCodeView.hostLineNotes.test.tsx
+packages/review-editor/components/AllFilesCodeView.hostSemantic.test.tsx
 packages/review-editor/components/AllFilesCodeView.generated.test.tsx
 packages/review-editor/components/AllFilesCodeView.autoViewed.test.tsx
 packages/review-editor/components/AllFilesCodeView.imagePreview.test.tsx
@@ -649,6 +650,7 @@ packages/inbox/tabIconChoice.test.tsx
 packages/inbox/themeChooser.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
+packages/ui/hooks/pickUndo.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/inbox/reviewPaneGuide.test.tsx
@@ -658,6 +660,7 @@ packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
+packages/inbox/prs/checksTurn.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideChapterDiagram.test.tsx
 packages/inbox/guideOverviewMermaid.test.tsx
@@ -666,7 +669,6 @@ packages/inbox/guideCollapseAllAfterSwitch.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/pullAllFiles.test.tsx
-packages/inbox/pulls/railTree.test.tsx
 packages/inbox/pulls/face.test.tsx
 packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
