@@ -64,6 +64,9 @@ import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsMo
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
+import { canStartPullThread, isPullThread } from './startThread';
+import { PULL_THREAD_TAKEN, PullThreadStart } from './PullThreadStart';
+import { untiedPullThread } from './threadStarts';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
@@ -123,7 +126,12 @@ export interface PullsPageProps {
   onScope: (next: { filter: PullFilter; project: string | null }) => void;
   /** Phase 1's review mode on one layer (`scope` layer), or on the stack up to it (`stack`). */
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
-  onOpenThread: (threadId: string) => void;
+  /**
+   * `replace`: in place of the PR's page in history (a PR whose page is its thread, `isPullThread`). `reply`: its reply
+   * box open (a thread the person just started from the PR's page); words: also these words in it, not sent (what a
+   * Start a thread's Send did not send).
+   */
+  onOpenThread: (threadId: string, replace?: boolean, reply?: boolean | string) => void;
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
@@ -440,6 +448,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
   const agent = linkAgentName(link);
+  // Start a thread pressed: the page is an empty thread for the PR (`PullThreadStart`) until it is sent or left.
+  const [drafting, setDrafting] = useState(false);
+  // A PR whose thread was started from its page: that thread is its page from then on (mock "V1"), in place of this one.
+  const threadPage = stack.layers.length === 1 && !!startLayer(stack) && isPullThread(link) ? link!.thread_id : null;
+  useEffect(() => {
+    if (threadPage) props.onOpenThread(threadPage, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadPage]);
   // The Board is optional: a card shows only while the Board is on and one links a layer (the answer has none otherwise).
   const card = stack.layers.map((l) => model.cards?.[l.key]).find((c) => !!c) ?? null;
   const now = useRelativeClock(true);
@@ -538,6 +554,44 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     ) : null;
   // One open PR opens its launchpad; a stack of several keeps this page.
   if (stack.layers.length === 1 && start) {
+    const newReview = (opener: HTMLElement) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener);
+    const hide = () => {
+      // The pane closes onto a row that leaves with it: focus goes to the Reviews row now in its place.
+      const list = () => document.querySelector('.pn-inbox .ib-lbody');
+      const gone = list()?.querySelector(`[data-pulls-row="${CSS.escape(props.item.stack.id)}"]`)?.getAttribute('data-reviews-row');
+      if (gone) focusWhenGone(itemsBy(list, 'data-reviews-row'), gone, () => document.querySelector<HTMLElement>('[data-pulls-heading]'));
+      props.onClose();
+      void hideWithUndo([start], props.onToast);
+    };
+    if (drafting && canStartPullThread(start, link, projects)) {
+      return (
+        <PullThreadStart
+          stack={stack}
+          pr={start}
+          projects={projects}
+          phone={phone}
+          stacked={!phone && !!props.stacked}
+          onClose={props.onClose}
+          onHide={hide}
+          onLeave={() => {
+            setDrafting(false);
+            // Back on the PR's page, on the button that left it.
+            requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-pulls-stack="${CSS.escape(stack.id)}"] [data-launch-go="start-thread"]`)?.focus());
+          }}
+          onGuide={canStart ? newReview : null}
+          onDiff={() => props.onReview(stack.id, start.key, 'layer')}
+          onStarted={(threadId, carried) => {
+            props.state.reload();
+            props.onOpenThread(threadId, true, carried || true);
+          }}
+          onTaken={(threadId, carried, detail) => {
+            props.state.reload();
+            props.onOpenThread(threadId, true, carried || undefined);
+            props.onToast?.({ icon: 'check', lead: PULL_THREAD_TAKEN, detail }, 8000);
+          }}
+        />
+      );
+    }
     return (
       <PullLaunchpad
         stack={stack}
@@ -548,7 +602,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         stacked={!phone && !!props.stacked}
         now={now}
         heading={heading}
-        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: (opener) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener) } : null}
+        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: newReview } : null}
+        startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
+        untiedThread={link ? null : untiedPullThread(start.key)}
         shapes={props.shapes ?? null}
         system={!!props.system}
         risk={riskLines}
@@ -557,14 +613,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         onThread={props.onOpenThread}
         onGuide={(thread, message) => (props.onOpenGuide ? props.onOpenGuide(thread, message) : props.onOpenThread(thread))}
         onShape={(shape) => props.onOpenShape?.(shape)}
-        onHide={() => {
-          // The pane closes onto a row that leaves with it: focus goes to the Reviews row now in its place.
-          const list = () => document.querySelector('.pn-inbox .ib-lbody');
-          const gone = list()?.querySelector(`[data-pulls-row="${CSS.escape(props.item.stack.id)}"]`)?.getAttribute('data-reviews-row');
-          if (gone) focusWhenGone(itemsBy(list, 'data-reviews-row'), gone, () => document.querySelector<HTMLElement>('[data-pulls-heading]'));
-          props.onClose();
-          void hideWithUndo([start], props.onToast);
-        }}
+        onHide={hide}
         foot={link?.last && !ended ? <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} /> : null}
       />
     );
@@ -645,7 +694,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
 const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: boolean; mentioned?: boolean; now: number }>(function ThreadLine({ link, ended, mentioned, now }, ref) {
   const name = linkAgentName(link) ?? 'Agent';
   // The ask (the person started it), until the agent's guided review arrives in the thread.
-  const asked = link.via === 'owner' && link.ask && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
+  // A thread started from the PR's page (`thread`) asked for nothing: the launchpad's own rule (`onItsWay`).
+  const asked = link.via === 'owner' && (link.ask === 'guide' || link.ask === 'custom') && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
   return (
     <div ref={ref} tabIndex={-1} className="ib-pr-thread" data-pulls-thread-line={ended ? 'ended' : asked ? 'asked' : 'live'} data-pulls-thread={link.thread_id}>
       <div className="ib-pr-thread-h">

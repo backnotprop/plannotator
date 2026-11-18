@@ -203,6 +203,7 @@ import { measureOpenPlaces } from '../thread/openPlaces';
 import { takeMergedFiles as takeMergedFilesInto, takeTheirWords as takeTheirWordsInto } from '../thread/draftTakes';
 import { readFeedbackTexts } from '../data/queries/feedbackTexts';
 import { ReplyTextField } from '../parts/ReplyTextField';
+import { ReviewContextLine } from '../thread/ReviewContextLine';
 import { replyWordsWithMentions, useMentionBoxOpener } from '../threadMentions';
 import { labelledAuthorName } from '../parts/AuthorName';
 import { MessageBody } from '../parts/MessageBody/MessageBody';
@@ -4862,22 +4863,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
-        {reviewView && (
-          <div className="ib-rvctx" data-review-context="">
-            <Icon name={reviewView.kind === 'local' ? 'laptop' : 'pullRequest'} size={15} />
-            <span dir="auto">{reviewView.context}</span>
-            {reviewView.onOpenPull && (
-              <button type="button" className="ib-rvctx-link" onClick={reviewView.onOpenPull} data-review-open-pull="">
-                See the pull request
-              </button>
-            )}
-            {reviewView.pullUrl && (
-              <a className="ib-rvctx-link" href={reviewView.pullUrl} target="_blank" rel="noreferrer noopener" data-review-pull-link="">
-                See the pull request
-              </a>
-            )}
-          </div>
-        )}
+        {reviewView && <ReviewContextLine view={reviewView} thread={thread} onOpenGuide={onOpenGuide} />}
         <ThreadTagLine threadId={thread.thread_id} phone={phone} />
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
