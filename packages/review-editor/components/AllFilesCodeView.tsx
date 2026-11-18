@@ -2467,6 +2467,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const host = path.find((node): node is HTMLElement => node instanceof HTMLElement && node.tagName === 'DIFFS-CONTAINER');
       const itemId = host ? nodeToItemIdRef.current.get(host) : undefined;
       if (itemId == null) return;
+      if (event.type === 'click') {
+        markExpanded(itemId);
+        return;
+      }
       const touch = (event as TouchEvent).changedTouches?.[0];
       if (event.type === 'touchstart') tapStart = touch ? { itemId, x: touch.clientX, y: touch.clientY } : null;
       else if (event.type === 'touchend') {
@@ -2484,6 +2488,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     scrollEl.addEventListener('focusin', readAheadOfExpand);
     scrollEl.addEventListener('keydown', readAheadOfExpand, { capture: true });
     scrollEl.addEventListener('touchend', readAheadOfExpand, { passive: true, capture: true });
+    scrollEl.addEventListener('click', readAheadOfExpand, { capture: true });
     return () => {
       scrollEl.removeEventListener('pointermove', readAheadOfExpand);
       scrollEl.removeEventListener('pointerdown', readAheadOfExpand, { capture: true });
@@ -2491,6 +2496,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       scrollEl.removeEventListener('focusin', readAheadOfExpand);
       scrollEl.removeEventListener('keydown', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('touchend', readAheadOfExpand, { capture: true });
+      scrollEl.removeEventListener('click', readAheadOfExpand, { capture: true });
     };
   }, [scrollEl, opensWholeFiles]);
 
