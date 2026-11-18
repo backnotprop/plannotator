@@ -305,8 +305,13 @@ const belowBy = async (view: View, file: string) => {
 };
 
 async function justBelow(view: View, file: string) {
-  await bring(view, `${file}'s top below the bottom edge`, () => belowBy(view, file), 130, 50);
-  return async () => ((await belowBy(view, file)) ?? 0) > 60;
+  const height = await view.page.evaluate((selector) => {
+    const box = document.querySelector(selector)!.getBoundingClientRect();
+    return Math.min(innerHeight, box.bottom) - Math.max(0, box.top);
+  }, view.scroller);
+  const past = Math.round(height / 3) + 100;
+  await bring(view, `${file}'s top more than a third of a screen below the bottom edge`, () => belowBy(view, file), past, 50);
+  return async () => ((await belowBy(view, file)) ?? 0) > height / 3;
 }
 
 async function heldUntilWatched(view: View, name: string, file: string, ends: 'off' | 'semantic') {

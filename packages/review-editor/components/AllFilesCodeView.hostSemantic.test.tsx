@@ -647,6 +647,13 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
+  test.skipIf(!hasDom)('a file only just below the bottom edge counts as on screen: a fling can bring it in before the draw', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 800 });
+    document.dispatchEvent(new Event('wheel'));
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
   test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
     const page = await reading(['a.ts', 'b.ts', 'c.ts'], { 'a.ts': -3000, 'b.ts': 3000, 'c.ts': 3000 });
     document.dispatchEvent(new Event('pointerdown'));

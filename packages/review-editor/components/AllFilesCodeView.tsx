@@ -2184,11 +2184,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const viewBottom = Math.min(window.innerHeight, pageBox.bottom);
     if (page.scrollHeight - page.scrollTop - page.clientHeight <= viewBottom - viewTop) return false;
     const node = itemNodeRef.current.get(itemId);
-    if (node?.isConnected) return node.getBoundingClientRect().top >= viewBottom + stickyHeaderHeight(node);
+    const anyNode = node?.isConnected ? node : [...itemNodeRef.current.values()].find((candidate) => candidate.isConnected);
+    const margin = Math.max(stickyHeaderHeight(anyNode), (viewBottom - viewTop) / 3);
+    if (node?.isConnected) return node.getBoundingClientRect().top >= viewBottom + margin;
     const viewer = viewerRef.current?.getInstance();
     const top = viewer?.getTopForItem(itemId);
-    const anyNode = [...itemNodeRef.current.values()].find((candidate) => candidate.isConnected);
-    return top != null && viewer != null && top >= viewer.getScrollTop() + viewer.getHeight() + stickyHeaderHeight(anyNode);
+    return top != null && viewer != null && top >= viewer.getScrollTop() + viewer.getHeight() + margin;
   });
 
   const applySemanticResult = useStableCallback((
