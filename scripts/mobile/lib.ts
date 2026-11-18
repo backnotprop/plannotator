@@ -20,6 +20,10 @@ export const OUT = {
   schema: 'apps/mobile/contract/schema/wire.schema.json',
   swift: 'apps/mobile/contract/generated/swift/Wire.swift',
   required: 'apps/mobile/contract/schema/required.json',
+  tokens: 'apps/mobile/contract/tokens/tokens.json',
+  catalog: 'apps/mobile/contract/generated/swift/Tokens.xcassets/Contents.json',
+  words: 'apps/mobile/contract/words/words.json',
+  wordsSwift: 'apps/mobile/contract/generated/swift/Words.swift',
 } as const;
 
 /**

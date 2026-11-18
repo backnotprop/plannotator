@@ -14,7 +14,10 @@
  *    would not select this test for it ("the schema names what it reads");
  *  - the check passing a stale or missing file ("the check finds");
  *  - the route table losing a door route, or a phone reaching a linked
- *    computer's route ("door.json is the door").
+ *    computer's route ("door.json is the door");
+ *  - a color drawn other than the CSS says ("colors");
+ *  - a word template that no longer prints what the window prints, or a word
+ *    function that branches on its part, so one template cannot hold it ("words").
  */
 import { describe, expect, test } from 'bun:test';
 import { mkdtempSync } from 'node:fs';
@@ -27,6 +30,10 @@ import { GENERATORS } from '../scripts/mobile/all';
 import { OUT, REGENERATE, VERSION_FILE, emit, readRepoText, type Output } from '../scripts/mobile/lib';
 import { SCHEMA_SOURCES, buildSchema, schemaWith } from '../scripts/mobile/schema';
 
+import { displayP3, linearSrgb, srgbHex } from '../scripts/mobile/tokens';
+import { buildWords } from '../scripts/mobile/words';
+import { autoAfterText, reaskRowLine, sentRowLine } from '../packages/core/inbox-delivery-line';
+import { INBOX_SECTIONS } from '../packages/core/inbox-types';
 const sample = (path: string) => path.replace(/\{path\}/g, 'a/b.png').replace(/\{card\}/g, 'crd_x').replace(/\{combine\}/g, 'cmb_x').replace(/\{action\}/g, 'a-0123abcd').replace(/\{\w+\}/g, 'x_1');
 
 describe('the contract is up to date', () => {
@@ -98,5 +105,56 @@ describe('door.json is the door', () => {
     }
     expect(entries.find((e) => e.name === 'GET events')!.relay).toBe(false);
     expect(entries.find((e) => e.name === 'POST pair')!.auth).toBe('none');
+  });
+});
+
+describe('colors', () => {
+  test('oklch and hex convert to the sRGB and Display P3 a browser draws', () => {
+    // CSS Color 4's own reference points: sRGB red, green and blue, and white.
+    expect(srgbHex(linearSrgb('oklch(0.62796 0.25768 29.234)')!)).toBe('#ff0000');
+    expect(srgbHex(linearSrgb('oklch(0.86644 0.29483 142.495)')!)).toBe('#00ff00');
+    expect(srgbHex(linearSrgb('oklch(0.45201 0.31321 264.052)')!)).toBe('#0000ff');
+    expect(displayP3(linearSrgb('oklch(1 0 0)')!)).toEqual([1, 1, 1]);
+    expect(displayP3(linearSrgb('#ff0000')!)).toEqual([0.9175, 0.2003, 0.1386]);
+    expect(srgbHex(linearSrgb('#336699')!)).toBe('#336699');
+    expect(linearSrgb('0.625rem')).toBeNull();
+  });
+});
+
+/** Each word with a part, made by the product's own function (a word that branches on its part would differ from its template). */
+const WORD_MAKERS: Record<string, (part: string) => string> = {
+  'delivery.auto_after': (m) => autoAfterText(Number(m)),
+  'delivery.sent_queued': (n) => sentRowLine(n, true),
+  'delivery.sent_saved': (n) => sentRowLine(n, false),
+  'delivery.reask_waiting': (n) => reaskRowLine(n, '2026-01-01T00:00:00.000Z', true),
+  'delivery.reask_queued': (n) => reaskRowLine(n, null, true),
+  'delivery.reask_saved': (n) => reaskRowLine(n, null, false),
+};
+
+describe('words', () => {
+  const words = buildWords();
+  const fill = (key: string, parts: Record<string, string>) => words[key]!.text.replace(/\{(\w+)\}/g, (_, p: string) => parts[p]!);
+
+  test('a template filled in prints what the window prints', () => {
+    expect(fill('delivery.sent_queued', { name: 'Ada' })).toBe(sentRowLine('Ada', true));
+    expect(fill('delivery.sent_saved', { name: 'Ada' })).toBe(sentRowLine('Ada', false));
+    expect(fill('delivery.reask_waiting', { name: 'Ada' })).toBe(reaskRowLine('Ada', '2026-02-02T00:00:00.000Z', false));
+    expect(fill('delivery.reask_saved', { name: 'Ada' })).toBe(reaskRowLine('Ada', null, false));
+  });
+
+  test('a template holds for every value of its part, not only the marker it was made with', () => {
+    for (const key of Object.keys(words).filter((k) => words[k]!.parts.length)) {
+      const word = words[key]!;
+      const numeric = word.parts.includes('minutes');
+      for (const sample of numeric ? ['0', '1', '2', '17'] : ['Ada', 'Grace Hopper', 'a', '2']) {
+        const made = WORD_MAKERS[key]?.(sample);
+        if (made === undefined) throw new Error(`no maker for ${key}: add it to WORD_MAKERS`);
+        expect(word.text.replace(/\{(\w+)\}/g, sample), `${key} with ${sample}`).toBe(made);
+      }
+    }
+  });
+
+  test('every section has its name', () => {
+    for (const { id, label } of INBOX_SECTIONS) expect(words[`section.${id}`]?.text, id).toBe(label);
   });
 });

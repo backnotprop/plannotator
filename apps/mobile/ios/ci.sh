@@ -16,11 +16,11 @@ esac
 
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
-# The contract's generated Swift (scripts/mobile/swift.ts) must compile on its own.
-wire="$here/../contract/generated/swift/Wire.swift"
-if [ -f "$wire" ]; then
-  echo "apps/mobile/contract: typecheck Wire.swift"
-  xcrun swiftc -typecheck -swift-version 6 "$wire"
+# The contract's generated Swift (scripts/mobile/swift.ts, words.ts) must compile on its own.
+generated="$here/../contract/generated/swift"
+if [ -f "$generated/Wire.swift" ]; then
+  echo "apps/mobile/contract: typecheck the generated Swift"
+  xcrun swiftc -typecheck -swift-version 6 "$generated/Wire.swift" "$generated/Words.swift"
 fi
 
 if [ ! -f "$here/InboxCore/Package.swift" ]; then

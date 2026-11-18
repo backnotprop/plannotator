@@ -10,12 +10,16 @@ import { generateDoor } from './door';
 import { REGENERATE, emit, type Output } from './lib';
 import { generateSchema } from './schema';
 import { generateSwift } from './swift';
+import { generateTokens } from './tokens';
+import { generateWords } from './words';
 
 /** In order: swift reads the schema and door.json as written. */
 export const GENERATORS: readonly (readonly [string, () => Output[] | Promise<Output[]>])[] = [
   ['door', generateDoor],
   ['schema', generateSchema],
   ['swift', generateSwift],
+  ['tokens', generateTokens],
+  ['words', generateWords],
 ];
 
 if (import.meta.main) {
