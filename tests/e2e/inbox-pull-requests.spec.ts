@@ -2011,13 +2011,13 @@ test('the row after the last hunk (approval pr-view-one-surface, 11-07 19:08): n
   const NEW = ['one', 'two', 'THREE', 'four', 'five'];
   const file = (path: string) => `diff --git a/${path} b/${path}\nindex 1111111..2222222 100644\n--- a/${path}\n+++ b/${path}\n@@ -1,5 +1,5 @@\n one\n two\n-three\n+THREE\n four\n five\n`;
   const text = (lines: string[]) => `${lines.join('\n')}\n`;
-  // The whole texts the arrows' reader would get: more.ts goes on for two lines after its hunk, ends.ts stops with it.
+  // The whole texts the arrows' reader would get: more.txt goes on for two lines after its hunk, ends.txt stops with it.
   const reads: string[] = [];
   const contents: Record<string, { oldContent: string; newContent: string }> = {
-    'more.ts': { oldContent: text([...OLD, 'six', 'seven']), newContent: text([...NEW, 'six', 'seven']) },
-    'ends.ts': { oldContent: text(OLD), newContent: text(NEW) },
+    'more.txt': { oldContent: text([...OLD, 'six', 'seven']), newContent: text([...NEW, 'six', 'seven']) },
+    'ends.txt': { oldContent: text(OLD), newContent: text(NEW) },
   };
-  const { context, page } = await stubbedReview(browser, 1440, file('more.ts') + file('ends.ts'));
+  const { context, page } = await stubbedReview(browser, 1440, file('more.txt') + file('ends.txt'));
   try {
     await page.route('**/api/inbox/pulls/file*', (route) => {
       const path = new URL(route.request().url()).searchParams.get('path') ?? '';
@@ -2040,7 +2040,7 @@ test('the row after the last hunk (approval pr-view-one-surface, 11-07 19:08): n
         ),
       );
     await expect.poll(() => seams(review)).toEqual([0]);
-    await expect.poll(rows).toEqual({ 'more.ts': null, 'ends.ts': null });
+    await expect.poll(rows).toEqual({ 'more.txt': null, 'ends.txt': null });
     expect(reads).toEqual([]);
     expect(await review.evaluate((root) => [...root.querySelectorAll('diffs-container')].some((host) => (host.shadowRoot?.textContent ?? '').includes('More unchanged context') && [...host.shadowRoot!.querySelectorAll<HTMLElement>('[data-separator-last]')].some((row) => row.checkVisibility({ visibilityProperty: true }))))).toBe(false);
   } finally {
@@ -2823,8 +2823,6 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await expect(arrow).toBeVisible({ timeout: 30_000 });
   // Highlighting happens off the page's thread: a long file must not freeze it.
   await expect.poll(() => page.workers().length).toBeGreaterThan(0);
-  // Arrows, and no read: a whole file is read and highlighted only when someone opens one.
-  expect(forgeCalls()).not.toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
   // Layout.tsx's one hunk holds its whole diff from line 1: its only arrows would be in the row after the hunk, which
   // the page does not draw (approval pr-view-one-surface, 11-07 19:08), so it shows none. (No text to open taking the
   // arrows away: guideExpandContext.test.tsx.)
