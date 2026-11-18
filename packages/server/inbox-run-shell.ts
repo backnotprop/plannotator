@@ -7,6 +7,12 @@
  * PowerShell 7, else Windows PowerShell; in PowerShell each secret the command names is set as `$NAME` before it,
  * so the same text reads it. The choice comes from the login environment only: a saved secret never picks the
  * program (its names cannot be PATH, SHELL and the like either; core/inbox-run-blocks.ts).
+ *
+ * The command's bytes reach the shell as they are. A POSIX argv is exact. Windows hands a program one command line
+ * that Git Bash (and its bin\bash.exe wrapper) and PowerShell parse again, so there the agent's text never goes on
+ * it: Git Bash gets a fixed `eval "$PLANNOTATOR_RUN_COMMAND"` and the command in that variable (an environment
+ * string is not parsed again; no secret can have a PLANNOTATOR_ name), and PowerShell gets `-EncodedCommand`, the
+ * script as base64 of its UTF-16LE bytes.
  */
 
 import { existsSync } from "node:fs";
@@ -63,15 +69,47 @@ export function runShellFor(platform: NodeJS.Platform, env: Readonly<Record<stri
   return { kind: "powershell", path: "powershell.exe", name: "PowerShell", edition: 5 };
 }
 
+/** The variable Git Bash reads the command from (a fixed `eval` on the command line, the text in the env). */
+export const INBOX_RUN_COMMAND_VAR = "PLANNOTATOR_RUN_COMMAND";
+
 /**
- * The program and arguments a command runs as. POSIX shells and Git Bash get the command as it is. PowerShell gets
- * `$NAME = $env:NAME;` for each secret the command names, then the command, with the execution policy lifted for
- * this one process (npm.ps1 and the like would be refused otherwise).
+ * PowerShell's own variables (automatic and preference ones, any case): a secret named like one is not set as
+ * `$NAME` (it would fail, or change how PowerShell behaves); the command reads it as `$env:NAME` there.
  */
-export function inboxRunArgv(command: string, shell: InboxRunShell, secretNames: readonly string[] = []): string[] {
-  if (shell.kind !== "powershell") return [shell.path, "-c", command];
-  const preamble = secretNames.map((name) => `$${name} = $env:${name}; `).join("");
-  return [shell.path, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", `${preamble}${command}`];
+const POWERSHELL_OWN = new Set([
+  "ARGS", "CONSOLEFILENAME", "ENABLEDEXPERIMENTALFEATURES", "ERROR", "EVENT", "EVENTARGS", "EVENTSUBSCRIBER",
+  "EXECUTIONCONTEXT", "FALSE", "FOREACH", "HOME", "HOST", "INPUT", "ISCORECLR", "ISLINUX", "ISMACOS", "ISWINDOWS",
+  "LASTEXITCODE", "MATCHES", "MYINVOCATION", "NESTEDPROMPTLEVEL", "NULL", "PID", "PROFILE", "PSBOUNDPARAMETERS",
+  "PSCMDLET", "PSCOMMANDPATH", "PSCULTURE", "PSDEBUGCONTEXT", "PSEDITION", "PSHOME", "PSITEM", "PSSCRIPTROOT",
+  "PSSENDERINFO", "PSUICULTURE", "PSVERSIONTABLE", "PWD", "SENDER", "SHELLID", "STACKTRACE", "SWITCH", "THIS", "TRUE",
+  "CONFIRMPREFERENCE", "DEBUGPREFERENCE", "ERRORACTIONPREFERENCE", "ERRORVIEW", "FORMATENUMERATIONLIMIT",
+  "INFORMATIONPREFERENCE", "LOGCOMMANDHEALTHEVENT", "LOGCOMMANDLIFECYCLEEVENT", "LOGENGINEHEALTHEVENT",
+  "LOGENGINELIFECYCLEEVENT", "LOGPROVIDERHEALTHEVENT", "LOGPROVIDERLIFECYCLEEVENT", "MAXIMUMALIASCOUNT",
+  "MAXIMUMDRIVECOUNT", "MAXIMUMERRORCOUNT", "MAXIMUMFUNCTIONCOUNT", "MAXIMUMHISTORYCOUNT", "MAXIMUMVARIABLECOUNT",
+  "OFS", "OUTPUTENCODING", "PROGRESSPREFERENCE", "PSDEFAULTPARAMETERVALUES", "PSEMAILSERVER",
+  "PSMODULEAUTOLOADINGPREFERENCE", "PSNATIVECOMMANDARGUMENTPASSING", "PSNATIVECOMMANDUSEERRORACTIONPREFERENCE",
+  "PSSESSIONAPPLICATIONNAME", "PSSESSIONCONFIGURATIONNAME", "PSSESSIONOPTION", "PSSTYLE", "TRANSCRIPT",
+  "VERBOSEPREFERENCE", "WARNINGPREFERENCE", "WHATIFPREFERENCE",
+]);
+export const isPowerShellOwnVariable = (name: string): boolean => POWERSHELL_OWN.has(name.toUpperCase());
+
+/** A PowerShell script as `-EncodedCommand` takes it: base64 of its UTF-16LE bytes. */
+export const powerShellEncoded = (script: string): string => Buffer.from(script, "utf16le").toString("base64");
+
+/**
+ * The program, its arguments and what its environment adds, for a command. POSIX shells get `-c` and the command
+ * as it is. Git Bash gets a fixed `eval` and the command in `PLANNOTATOR_RUN_COMMAND`. PowerShell gets the script
+ * encoded: `$NAME = $env:NAME;` for each secret the command names (not PowerShell's own names), then the command,
+ * with the execution policy lifted for this one process (npm.ps1 and the like would be refused otherwise).
+ */
+export function inboxRunArgv(command: string, shell: InboxRunShell, secretNames: readonly string[] = []): { argv: string[]; env: Record<string, string> } {
+  if (shell.kind === "posix") return { argv: [shell.path, "-c", command], env: {} };
+  if (shell.kind === "git-bash") return { argv: [shell.path, "-c", `eval "$${INBOX_RUN_COMMAND_VAR}"`], env: { [INBOX_RUN_COMMAND_VAR]: command } };
+  const preamble = secretNames.filter((name) => !isPowerShellOwnVariable(name)).map((name) => `$${name} = $env:${name}; `).join("");
+  return {
+    argv: [shell.path, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text", "-EncodedCommand", powerShellEncoded(`${preamble}${command}`)],
+    env: {},
+  };
 }
 
 /** Syntax PowerShell does not read as a POSIX shell does (`export`, a heredoc, `if …; then`, `[[`, `VAR=x cmd`). */
@@ -81,12 +119,21 @@ const POSIX_ONLY_RE = /(^|[\s;&|])export\s+[A-Za-z_]\w*=|<<-?\s*['"]?[A-Za-z_]\w
  * Why a command may not work in the shell it would run in, for the card; null when nothing says so. Only
  * PowerShell can disagree with a POSIX snippet: Git Bash and the POSIX shells read it as written.
  */
-export function inboxRunShellNote(command: string, shell: InboxRunShell, computer: string): string | null {
+export function inboxRunShellNote(command: string, shell: InboxRunShell, computer: string, secretNames: readonly string[] = []): string | null {
   if (shell.kind !== "powershell") return null;
-  const posix = POSIX_ONLY_RE.test(command) || (shell.edition === 5 && /&&|\|\|/.test(command));
-  if (!posix) return null;
-  return `This is written for a Unix shell, and ${computer} has no Git Bash, so it would run in PowerShell, where it may not work. Install Git for Windows, or open it in your terminal.`;
+  const notes: string[] = [];
+  if (POSIX_ONLY_RE.test(command) || (shell.edition === 5 && /&&|\|\|/.test(command))) {
+    notes.push(`This is written for a Unix shell, and ${computer} has no Git Bash, so it would run in PowerShell, where it may not work. Install Git for Windows, or open it in your terminal.`);
+  }
+  const own = secretNames.filter(isPowerShellOwnVariable);
+  if (own.length > 0) {
+    notes.push(`In PowerShell, ${own.map((n) => `$${n}`).join(" and ")} ${own.length === 1 ? "is" : "are"} PowerShell's own: the command gets ${own.length === 1 ? "this secret" : "these secrets"} only as ${own.map((n) => `$env:${n}`).join(" and ")}.`);
+  }
+  return notes.length > 0 ? notes.join(" ") : null;
 }
+
+/** Windows: the clipboard from stdin, read as UTF-8. */
+export const WINDOWS_CLIPBOARD_SCRIPT = "[Console]::InputEncoding = [Text.Encoding]::UTF8; Set-Clipboard -Value ([Console]::In.ReadToEnd())";
 
 /**
  * Put text on this computer's clipboard (Open in terminal: the command, to paste into the terminal that just opened
@@ -95,7 +142,8 @@ export function inboxRunShellNote(command: string, shell: InboxRunShell, compute
 export function systemClipboard(platform: NodeJS.Platform, which: (cmd: string) => string | null): (text: string) => Promise<boolean> {
   const argv = (): string[] | null => {
     if (platform === "darwin") return ["/usr/bin/pbcopy"];
-    if (platform === "win32") return ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", "Set-Clipboard -Value ([Console]::In.ReadToEnd())"];
+    // Redirected stdin is read in the console's code page: UTF-8 is set first, so any text arrives as it is.
+    if (platform === "win32") return ["powershell.exe", "-NoProfile", "-NonInteractive", "-EncodedCommand", powerShellEncoded(WINDOWS_CLIPBOARD_SCRIPT)];
     const wl = which("wl-copy");
     if (wl) return [wl];
     const xclip = which("xclip");

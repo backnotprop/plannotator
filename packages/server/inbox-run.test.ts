@@ -4,14 +4,17 @@
  * output (also split across chunks, or half written), Stop or a deleted thread leaving the command's children
  * running, a Stop during the env read not stopping it, an Inbox stop leaving orphans or no word to the agent, a lost
  * run not reported after a restart, a run that waits for typing hanging silently, and output with no line end
- * growing without bound. Every test ends its runs; none leaves a process or a timer. The quiet window and the sweep
- * are shortened (no real 2 s waits).
+ * growing without bound, part of a secret shown where a long line is cut, a lost run's command left running with no
+ * way to stop it, and finished runs piling up in memory. Every test ends its runs; none leaves a process or a timer.
+ * These run in real time against real processes (no injected clock): the quiet window and the sweep are shortened,
+ * so no test waits the real 2 s.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { cleanRunLine, createInboxRuns, INBOX_RUN_LINE_MAX, RunLineBuffer, type InboxRunEnded, type InboxRunPrepared, type InboxRuns } from "./inbox-run";
+import { lostRunStillRunning } from "./inbox-run-setup";
 import { memoryRunJournal, type InboxRunJournal } from "./inbox-run-journal";
 
 const SENTINEL = "TEST_ONLY_NOT_A_KEY_123";
@@ -166,13 +169,48 @@ describe.if(posix)("a run", () => {
     const pid = Number(first.view().lines[0]);
     // A kill -9 of the Inbox: nothing ends the run's record. (The test still ends the process it left.)
     process.kill(-pid, "SIGKILL");
-    const again = createInboxRuns({ messageAlive: () => true, journal });
+    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: (p, at) => lostRunStillRunning(p, at) });
     const lost: string[] = [];
-    again.recover((record) => lost.push(`${record.message_id}/${record.key}/${record.title}`));
-    again.recover((record) => lost.push(record.key));
+    await again.recover((record) => lost.push(`${record.message_id}/${record.key}/${record.title}`));
+    await again.recover((record) => lost.push(record.key));
     expect(lost).toEqual(["msg_1/r-0000000a/Run it"]);
-    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ state: "stopped", interrupted: "lost" });
+    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ state: "stopped", interrupted: "lost", left_running: false });
     again.stopAll();
+  });
+
+  test("a lost run whose command still runs: found by its group and start time, its output kept, and Stop ends it", async () => {
+    const journal = memoryRunJournal();
+    const first = world(() => true, journal);
+    first.start("echo $$; echo started; sleep 30");
+    await until(() => first.view().lines.length === 2);
+    const pid = Number(first.view().lines[0]);
+    // The sweep writes what it printed to the journal within a few seconds (an Inbox that dies keeps it).
+    await until(() => journal.records.some((r) => r.view.lines.includes("started")), 5_000);
+    // A kill -9 of the Inbox: the first Inbox's runs are never told; its command goes on.
+    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: (p, at) => lostRunStillRunning(p, at) });
+    const told: (boolean | null | undefined)[] = [];
+    await again.recover((record) => told.push(record.view.left_running));
+    expect(told).toEqual([true]);
+    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ interrupted: "lost", left_running: true, lines: [String(pid), "started"] });
+    expect(gone(pid)).toBe(false);
+    expect(again.stop("msg_1", "r-0000000a")).toBe(true);
+    await until(() => gone(pid), 4_000);
+    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: false, signal: "SIGTERM" });
+    again.stopAll();
+  });
+
+  test("finished runs past the first twenty keep only their record's last lines in memory", async () => {
+    const w = world();
+    const keys = Array.from({ length: 23 }, (_, i) => `r-${String(i).padStart(8, "0")}`);
+    for (const key of keys) {
+      w.start("i=0; while [ $i -lt 100 ]; do echo line $i; i=$((i+1)); done", {}, [], key);
+      await until(() => w.ended.length === keys.indexOf(key) + 1);
+    }
+    const views = w.runs.views("msg_1");
+    expect(Object.keys(views)).toHaveLength(23);
+    expect(views[keys[0]!]!.lines).toHaveLength(60);
+    expect(views[keys[0]!]!.total_lines).toBe(100);
+    expect(views[keys[22]!]!.lines).toHaveLength(100);
   });
 
   test("a prompt that waits for typing says so; a second Run while one runs is refused", async () => {
@@ -210,6 +248,16 @@ describe.if(posix)("output", () => {
     await until(() => w.ended.length === 1);
   });
 
+  test("a secret straddling the cut of a long line: not in the card, the journal or the agent's report", async () => {
+    const journal = memoryRunJournal();
+    const w = world(() => true, journal);
+    w.start(`printf '%3990s' '' | tr ' ' x; printf '${SENTINEL}'; printf '%2000s\\n' '' | tr ' ' x; echo done`, {}, [SENTINEL]);
+    await until(() => w.ended.length === 1);
+    const where = [JSON.stringify(w.view()), JSON.stringify(journal.records), JSON.stringify(w.ended[0])];
+    for (const text of where) for (let n = SENTINEL.length; n >= 4; n--) expect(text.includes(SENTINEL.slice(0, n))).toBe(false);
+    expect(w.ended[0]!.view.lines.at(-1)).toBe("done");
+  });
+
   test("megabytes with no line end, and a long \\r progress bar, stay bounded and quick", async () => {
     const w = world();
     const began = Date.now();
@@ -237,7 +285,7 @@ describe("a line as the card shows it", () => {
     const began = performance.now();
     for (let i = 0; i < 80; i++) expect(buffer.push(piece)).toEqual([]);
     expect(buffer.partial.length).toBeLessThanOrEqual(INBOX_RUN_LINE_MAX * 2);
-    expect(buffer.push("tail\nnext")).toEqual(["x".repeat(INBOX_RUN_LINE_MAX + 1)]);
+    expect(buffer.push("tail\nnext")).toEqual([{ text: "x".repeat(INBOX_RUN_LINE_MAX + 1), cut: true }]);
     expect(buffer.partial).toBe("next");
     expect(performance.now() - began).toBeLessThan(1_000);
   });
@@ -247,6 +295,35 @@ describe("a line as the card shows it", () => {
     for (let i = 0; i < 100_000; i++) buffer.push(`\r${i}%`);
     expect(buffer.partial.length).toBeLessThan(20);
     expect(cleanRunLine(buffer.partial, [])).toBe("99999%");
-    expect(buffer.push("\r\u001b[K\n")).toEqual(["99999%\r\u001b[K"]);
+    expect(buffer.push("\r\u001b[K\n")).toEqual([{ text: "99999%\r\u001b[K", cut: false }]);
+  });
+
+  /** No 3-character or longer start of the value anywhere in the text (nor the whole). */
+  const noPartOf = (text: string, value: string) => {
+    for (let n = value.length; n >= 3; n--) expect([n, text.includes(value.slice(0, n))]).toEqual([n, false]);
+  };
+
+  test("a secret where a long line is cut: never shown, whole or its first characters, at any offset", () => {
+    for (const at of [1_950, 1_985, 1_990, 1_995, 1_998, 2_000, 2_001, 3_990]) {
+      const raw = `${"x".repeat(at)}${SENTINEL}${"x".repeat(2_000)}`;
+      const buffer = new RunLineBuffer();
+      const lines = [...buffer.push(raw.slice(0, 4_500)), ...buffer.push(raw.slice(4_500)), ...buffer.push("\n")];
+      expect(lines).toHaveLength(1);
+      const shown = cleanRunLine(lines[0]!.text, [SENTINEL], { cut: lines[0]!.cut });
+      expect(shown.endsWith("…")).toBe(true);
+      noPartOf(shown, SENTINEL);
+    }
+    // A cut line that is short once its colour codes go still says it was cut.
+    expect(cleanRunLine("\u001b[31mred", [], { cut: true })).toBe("red…");
+  });
+
+  test("the line still being written, long and cut in a secret: no part of it shows", () => {
+    for (const at of [1_960, 1_990, 1_999, 2_000]) {
+      const buffer = new RunLineBuffer();
+      buffer.push(`${"y".repeat(at)}${SENTINEL}${"y".repeat(2_500)}`);
+      expect(buffer.partialCut).toBe(true);
+      noPartOf(cleanRunLine(buffer.partial, [SENTINEL], { open: true, cut: buffer.partialCut }), SENTINEL);
+    }
+    noPartOf(cleanRunLine(`${"z".repeat(2_100)}${SENTINEL.slice(0, 9)}`, [SENTINEL], { open: true }), SENTINEL);
   });
 });

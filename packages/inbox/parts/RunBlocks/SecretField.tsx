@@ -8,9 +8,9 @@
  */
 import { useId, useState } from 'react';
 import { runApi } from '../../data/runApi';
-import { refreshRunState } from '../../data/runStore';
+import { refreshAllRunStates } from '../../data/runStore';
 
-export function SecretField({ messageId, name, onDone, onCancel, autoFocus }: { messageId: string; name: string; onDone?: () => void; onCancel?: () => void; autoFocus?: boolean }) {
+export function SecretField({ messageId, name, onDone, onCancel, autoFocus, saveLabel = 'Save' }: { messageId: string; name: string; onDone?: () => void; onCancel?: () => void; autoFocus?: boolean; saveLabel?: string }) {
   const id = useId();
   const [value, setValue] = useState('');
   const [saving, setSaving] = useState(false);
@@ -23,7 +23,8 @@ export function SecretField({ messageId, name, onDone, onCancel, autoFocus }: { 
       await runApi.saveSecret(messageId, name, value);
       setValue('');
       onDone?.();
-      await refreshRunState(messageId);
+      // Every card that waits for this name (here, in other messages of the thread) sees it saved at once.
+      await refreshAllRunStates();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
@@ -58,7 +59,7 @@ export function SecretField({ messageId, name, onDone, onCancel, autoFocus }: { 
         data-secret-input=""
       />
       <button type="button" className="ib-btn ib-pri" disabled={value === '' || saving} onClick={() => void save()} data-secret-save="">
-        {saving ? 'Saving…' : 'Save'}
+        {saving ? 'Saving…' : saveLabel}
       </button>
       {onCancel && (
         <button type="button" className="ib-btn ib-ghost" onClick={onCancel} data-secret-cancel="">

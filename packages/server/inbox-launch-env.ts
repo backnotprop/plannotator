@@ -187,6 +187,9 @@ export function loginSeedEnv(own: Readonly<Record<string, string | undefined>>):
  * from `loginSeedEnv`. When the shell cannot be read in time, the Inbox's
  * plain env stands in, and the cause is logged.
  */
+/** The envs `createLoginEnv` gave when the login shell did not answer (its own env instead): never kept as the login one. */
+export const LOGIN_ENV_FALLBACKS = new WeakSet<object>();
+
 export function createLoginEnv(options: {
   run: LoginEnvRunner;
   env: () => Readonly<Record<string, string | undefined>>;
@@ -208,6 +211,9 @@ export function createLoginEnv(options: {
     }
     if (!env) options.log?.(`Inbox launch: could not read the login shell's env (${shell}); using the Inbox's own.`);
     else options.log?.(`Inbox launch: login env read, ${Object.keys(env).length} names: ${Object.keys(env).filter((n) => n.startsWith("CLAUDE")).join(" ") || "no CLAUDE_*"}`);
-    return env ?? launchPlainEnv(own);
+    if (env) return env;
+    const fallback = launchPlainEnv(own);
+    LOGIN_ENV_FALLBACKS.add(fallback);
+    return fallback;
   };
 }

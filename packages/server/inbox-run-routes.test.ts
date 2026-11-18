@@ -5,8 +5,10 @@
  * stored block, a hidden character (command or folder) getting through, a run getting a saved secret it does not
  * name, a saved name picking the program or being one programs start from, a secret that cannot be read leaving the
  * run with it empty, Remove hiding a vault failure, Open in terminal saying it copied when it did not, a lost run
- * not reaching the agent, a gone project's secrets staying in the vault, and a secret's value landing in the store,
- * the index, a note to the agent or a read.
+ * not reaching the agent, a gone project's secrets staying in the vault (or a store that loads empty taking every
+ * saved value with it), a run with an unsaved secret running with it empty, one secret getting a field on every card,
+ * an expected refusal answering 5xx, the agent's text reaching a Windows shell through its parsed command line, and
+ * a secret's value landing in the store, the index, a note to the agent or a read.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
@@ -18,7 +20,8 @@ import type { InboxDoorCaller } from "./inbox-devices";
 import type { InboxRunStart, InboxRunView } from "./inbox-run";
 import type { InboxRunRecord } from "./inbox-run-journal";
 import { createInboxRunRoutes, inboxRunFolder } from "./inbox-run-routes";
-import { inboxRunArgv, inboxRunShellNote, posixRunShell, runShellFor, type InboxRunShell } from "./inbox-run-shell";
+import { inboxRunArgv, inboxRunShellNote, isPowerShellOwnVariable, posixRunShell, powerShellEncoded, runShellFor, WINDOWS_CLIPBOARD_SCRIPT, type InboxRunShell } from "./inbox-run-shell";
+import { keptLoginEnv, lostRunStillRunning, macTmp } from "./inbox-run-setup";
 import { checkSecretValue, createInboxSecrets, hideSecretPrefixTail, loginEnvCredentials, redactSecrets } from "./inbox-secrets";
 import { memoryVault } from "./inbox-secret-vault";
 
@@ -63,21 +66,21 @@ function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string
       stop: (_id: string, key: string) => (stopped.push(key), true),
       views: () => ({}),
       running: () => 0,
-      recover: (onLost: (record: InboxRunRecord) => void) => {
+      recover: async (onLost: (record: InboxRunRecord) => void) => {
         for (const record of (options.lost ?? []).map((r) => ({ ...r, message_id: r.message_id || message.id }))) onLost(record);
       },
       stopAll: () => {},
     },
     secrets,
     vault,
-    loginEnv: { get: async () => LOGIN, peek: () => LOGIN },
+    loginEnv: { get: async () => LOGIN, forPress: async () => LOGIN, peek: () => LOGIN },
     shellFor: (env) => {
       shells.push({ ...env });
       return SH;
     },
     copyToClipboard: async (text) => (clipboard.push(text), true),
     door: (req) => doors.get(req),
-    computer: () => "your Mac",
+    computer: (viaDoor) => (viaDoor ? "Studio Mac" : "your Mac"),
     displayFolder: (path) => path.replace(dir, "~"),
     openTerminal: async () => ({ ok: true, app: "Terminal" }),
   });
@@ -93,8 +96,11 @@ function world(body = RUN_BODY, options: { lost?: InboxRunRecord[]; dir?: string
     if (typeof from === "object") doors.set(req, from);
     return routes.route(req, `/api/inbox/messages/${message.id}/${what}`);
   };
-  const read = async (headers: Record<string, string> = {}) =>
-    (await (await routes.route(new Request(`http://${HOST}/api/inbox/messages/${message.id}/run`, { headers }), `/api/inbox/messages/${message.id}/run`))!.json()) as Record<string, any>;
+  const read = async (headers: Record<string, string> = {}, door?: InboxDoorCaller) => {
+    const req = new Request(`http://${HOST}/api/inbox/messages/${message.id}/run`, { headers });
+    if (door) doors.set(req, door);
+    return (await (await routes.route(req, `/api/inbox/messages/${message.id}/run`))!.json()) as Record<string, any>;
+  };
   return { dir, root, store, project, message, vault, secrets, started, stopped, clipboard, shells, request, read, routes };
 }
 
@@ -126,6 +132,7 @@ describe("who may press", () => {
   test("the person's window, their phone, and a window on their linked machine can", async () => {
     const w = world();
     const key = await keyOf(w);
+    await w.secrets.save(w.project.id, "API_TOKEN", SENTINEL);
     expect((await w.request("run", { key, op: "start", command: COMMAND }))!.status).toBe(200);
     expect((await w.request("run", { key, op: "start", command: COMMAND }, { device_id: "dev_p", name: "Phone", platform: "ios", window: false }))!.status).toBe(200);
     expect((await w.request("run", { key, op: "start", command: COMMAND }, { device_id: "dev_m", name: "Studio", platform: "machine", window: true }))!.status).toBe(200);
@@ -199,6 +206,7 @@ describe("what runs", () => {
 
   test("the login env's credentials are hidden in the output too (the report goes to the agent)", async () => {
     const w = world();
+    await w.secrets.save(w.project.id, "API_TOKEN", SENTINEL);
     await w.request("run", { key: await keyOf(w), op: "start", command: COMMAND });
     expect((await w.started[0]!.prepare()).redact).toContain("sk-login-env-token-1234");
   });
@@ -255,6 +263,7 @@ describe("what runs", () => {
   test("the end of a run reaches the agent as the person's reply, at once", async () => {
     const w = world();
     const key = await keyOf(w);
+    await w.secrets.save(w.project.id, "API_TOKEN", SENTINEL);
     await w.request("run", { key, op: "start", command: COMMAND });
     w.started[0]!.onEnd({
       message_id: w.message.id,
@@ -303,10 +312,8 @@ describe("where and how it runs", () => {
     const gitThere = (path: string) => path === "C:\\Program Files\\Git\\cmd\\git.exe" || path === "C:\\Program Files\\Git\\bin\\bash.exe";
     const bash = runShellFor("win32", env, { exists: gitThere });
     expect(bash).toEqual({ kind: "git-bash", path: "C:\\Program Files\\Git\\bin\\bash.exe", name: "Git Bash" });
-    expect(inboxRunArgv('echo "$API_TOKEN" && ls', bash, ["API_TOKEN"])).toEqual([bash.path, "-c", 'echo "$API_TOKEN" && ls']);
     const ps = runShellFor("win32", { PATH: "C:\\Windows\\System32" }, { exists: () => false });
     expect(ps).toMatchObject({ kind: "powershell", path: "powershell.exe", edition: 5 });
-    expect(inboxRunArgv('echo "$API_TOKEN"', ps, ["API_TOKEN"])).toEqual(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", '$API_TOKEN = $env:API_TOKEN; echo "$API_TOKEN"']);
     expect(runShellFor("win32", {}, { exists: () => false, pwsh: "C:\\pwsh\\pwsh.exe" })).toMatchObject({ edition: 7 });
   });
 
@@ -339,6 +346,8 @@ describe("hiding values", () => {
 
   test("credential-like login env values, not paths or plain words", () => {
     expect(loginEnvCredentials({ OPENAI_API_KEY: "sk-abcdefgh123", SSH_AUTH_SOCK: "/tmp/agent.sock", GH_TOKEN: "short", HOME: "/home/p", NPM_TOKEN: "npm_abcdefghij" })).toEqual(["sk-abcdefgh123", "npm_abcdefghij"]);
+    // Named by how they end: an author's email or a session manager's name is not a credential.
+    expect(loginEnvCredentials({ GIT_AUTHOR_EMAIL: "person@example.invalid", GIT_COMMITTER_NAME: "Person Name", SESSION_MANAGER: "local/host:@/tmp/.ICE", AUTHOR_KEYWORDS: "plannotator", AWS_SESSION_TOKEN: "FwoGZXIvYXdzEJr", AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMIK7MDENG" })).toEqual(["FwoGZXIvYXdzEJr", "wJalrXUtnFEMIK7MDENG"]);
   });
 });
 
@@ -369,7 +378,7 @@ describe("a secret", () => {
     await w.request("secret", { name: "API_TOKEN", value: "short-pw" });
     w.vault.failRemove = true;
     const refused = (await w.request("secret", { name: "API_TOKEN", value: null }))!;
-    expect(refused.status).toBe(500);
+    expect(refused.status).toBe(409);
     expect(((await refused.json()) as { code: string }).code).toBe("secret_not_removed");
     expect((await w.read()).secrets.map((s: { name: string }) => s.name)).toEqual(["API_TOKEN"]);
     w.vault.failRemove = false;
@@ -378,24 +387,209 @@ describe("a secret", () => {
     expect(w.vault.values.size).toBe(0);
   });
 
-  test("a project that is gone: its secrets leave the vault when the routes start", async () => {
+  test("a project the person deletes takes its secrets with it; one the store does not know at start keeps them", async () => {
     const dir = mkdtempSync(join(tmpdir(), "plannotator-run-routes-"));
     dirs.push(dir);
     const vault = memoryVault();
     const index = createInboxSecrets({ file: join(dir, "inbox", "secrets.json"), vault });
-    await index.save("prj_gone", "API_TOKEN", SENTINEL);
-    world(RUN_BODY, { dir, vault });
+    // A project id the store does not have (an unreadable log, a store that loaded empty): never pruned.
+    await index.save("prj_unknown", "API_TOKEN", SENTINEL);
+    const w = world(RUN_BODY, { dir, vault });
     await Bun.sleep(20);
-    expect([...vault.values.keys()].some((account) => account.startsWith("prj_gone:"))).toBe(false);
-    expect(index.list("prj_gone")).toEqual([]);
+    expect(vault.values.has("prj_unknown:API_TOKEN")).toBe(true);
+    expect(index.list("prj_unknown").map((s) => s.name)).toEqual(["API_TOKEN"]);
+    // The person deletes a project: its secrets go, the unknown one's stay.
+    const other = w.store.ensureProject({ name: "other", root: join(dir, "other") });
+    w.store.sendMessage({ project_id: other.id, author: { kind: "agent", host: "claude-code", session: "ses_b", name: null }, body: "hi", thread: "t2", idempotency_key: "k-other" });
+    await index.save(other.id, "OTHER_TOKEN", SENTINEL);
+    w.store.deleteProject(other.id);
+    await Bun.sleep(20);
+    expect(vault.values.has(`${other.id}:OTHER_TOKEN`)).toBe(false);
+    expect(index.list(other.id)).toEqual([]);
+    expect(vault.values.has("prj_unknown:API_TOKEN")).toBe(true);
   });
 
   test("a store that refuses: an error without the value, and nothing kept", async () => {
     const w = world();
     w.vault.failNext = true;
     const answer = (await w.request("secret", { name: "API_TOKEN", value: SENTINEL }))!;
-    expect(answer.status).toBe(500);
+    expect(answer.status).toBe(409);
     expect(await answer.text()).not.toContain(SENTINEL);
     expect((await w.read()).secrets).toEqual([]);
+  });
+});
+
+describe("the review's second round", () => {
+  test("a named secret not saved yet: the run is refused with a clear answer, never run with it empty", async () => {
+    const w = world();
+    const key = await keyOf(w);
+    const answer = (await w.request("run", { key, op: "start", command: COMMAND }))!;
+    expect(answer.status).toBe(409);
+    expect(await answer.json()).toMatchObject({ code: "run_needs_secret", needs: ["API_TOKEN"], error: "Save API_TOKEN first: this command needs it." });
+    expect(w.started).toEqual([]);
+  });
+
+  test("one field per secret per thread: the secret's own card, else the first run card that needs it", async () => {
+    const asked = world([RUN_BODY, "", ":::run", "Again", "```", 'echo "$API_TOKEN"', "```", ":::"].join("\n"));
+    const blocks = (await asked.read()).blocks;
+    for (const view of Object.values(blocks) as { needs: string[]; fields: string[] }[]) expect(view).toMatchObject({ needs: ["API_TOKEN"], fields: [] });
+    const runsOnly = world([":::run", "One", "Uses: PAY_KEY", "```", 'echo "$PAY_KEY"', "```", ":::", "", ":::run", "Two", "Uses: PAY_KEY", "```", "env", "```", ":::"].join("\n"));
+    const views = Object.values((await runsOnly.read()).blocks) as { needs: string[]; fields: string[] }[];
+    expect(views.map((v) => v.needs)).toEqual([["PAY_KEY"], ["PAY_KEY"]]);
+    expect(views.map((v) => v.fields)).toEqual([["PAY_KEY"], []]);
+  });
+
+  test("expected refusals are 4xx: no terminal app, a store that would not save or remove", async () => {
+    const w = world();
+    const key = await keyOf(w);
+    const routes = createInboxRunRoutes({
+      store: w.store,
+      serverSession: SESSION,
+      readBody: async (req) => (await req.json()) as Record<string, unknown>,
+      json: (value, status = 200) => Response.json(value, { status }),
+      runs: { start: () => ({}) as InboxRunView, stop: () => true, views: () => ({}), running: () => 0, recover: async () => {}, stopAll: () => {} },
+      secrets: w.secrets,
+      vault: w.vault,
+      loginEnv: { get: async () => LOGIN, forPress: async () => LOGIN, peek: () => LOGIN },
+      shellFor: () => SH,
+      copyToClipboard: async () => false,
+      door: () => undefined,
+      computer: () => "your Mac",
+      displayFolder: (path) => path,
+      openTerminal: async () => ({ ok: false, error: "No terminal app was found on this computer." }),
+    });
+    const answer = (await routes.route(new Request(`http://${HOST}/api/inbox/messages/${w.message.id}/run`, { method: "POST", headers: { "Content-Type": "application/json", Host: HOST, Origin: `http://${HOST}` }, body: JSON.stringify({ key, op: "terminal", command: COMMAND, serverSession: SESSION }) }), `/api/inbox/messages/${w.message.id}/run`))!;
+    expect(answer.status).toBe(409);
+    expect(await answer.json()).toEqual({ error: "No terminal app was found on this computer.", code: "terminal_failed" });
+  });
+
+  test("a value gone from the store (removed in Keychain Access): said truly, and the card asks for it again", async () => {
+    const w = world();
+    await w.request("secret", { name: "API_TOKEN", value: SENTINEL });
+    w.vault.values.delete(`${w.project.id}:API_TOKEN`);
+    await w.request("run", { key: await keyOf(w), op: "start", command: COMMAND });
+    const failure = await w.started[0]!.prepare().catch((error: Error) => error.message);
+    expect(failure).toBe("API_TOKEN is no longer in your Keychain (removed there). Save it again here, then run again");
+    expect(failure).not.toContain("Unlock");
+    expect((await w.read()).blocks[await keyOf(w)].needs).toEqual(["API_TOKEN"]);
+  });
+
+  test("a store that fails for another reason says its own words, not 'unlock'", async () => {
+    const vault = memoryVault();
+    const w = world(RUN_BODY, { vault });
+    await w.request("secret", { name: "API_TOKEN", value: SENTINEL });
+    vault.get = async () => {
+      throw new Error("The Keychain did not give it back: SecKeychainSearchCopyNext: bad item.");
+    };
+    await w.request("run", { key: await keyOf(w), op: "start", command: COMMAND });
+    expect(await w.started[0]!.prepare().catch((error: Error) => error.message)).toBe("Couldn't read API_TOKEN from your Keychain: The Keychain did not give it back: SecKeychainSearchCopyNext: bad item");
+  });
+
+  test("a folder outside the project: the card and the agent's report say the real place", async () => {
+    const w = world([":::run", "Up", "Folder: ..", "```", "pwd", "```", ":::"].join("\n"));
+    const key = await keyOf(w);
+    expect((await w.read()).blocks[key].folder).toBe("~");
+    await w.request("run", { key, op: "start", command: "pwd" });
+    expect(w.started[0]!.cwd).toBe(w.dir);
+    w.started[0]!.onEnd({ message_id: w.message.id, outcome: "exited", waited_for_input: false, view: { key, run_id: "r", state: "done", exit_code: 0, signal: null, started_at: "", ended_at: "", duration_ms: 10, lines: [w.dir], total_lines: 1, partial: "", waiting_for_input: false, needs_terminal: false, error: null, interrupted: null, left_running: null } });
+    expect(w.store.thread(w.message.thread_id)!.messages.at(-1)!.body).toContain('"Up", in ~.');
+  });
+
+  test("the computer is 'your Mac' in its own window and its name on a phone or a linked machine", async () => {
+    const w = world();
+    expect((await w.read()).computer).toBe("your Mac");
+    expect((await w.read({}, { device_id: "dev_p", name: "Phone", platform: "ios", window: false })).computer).toBe("Studio Mac");
+    expect(macTmp("/private/tmp/qa/proj", "darwin")).toBe("/tmp/qa/proj");
+    expect(macTmp("/private/tmp/qa/proj", "linux")).toBe("/private/tmp/qa/proj");
+    expect(macTmp("/private/var/x", "darwin")).toBe("/private/var/x");
+  });
+
+  test("a lost run that still runs: the agent is told so, with the output it had", async () => {
+    const view = { key: "r-00000001", run_id: "run_1", state: "stopped", exit_code: null, signal: null, started_at: "", ended_at: null, duration_ms: 4000, lines: ["QA started"], total_lines: 1, partial: "", waiting_for_input: false, needs_terminal: false, error: null, interrupted: "lost", left_running: true } as InboxRunView;
+    const w = world(RUN_BODY, { lost: [{ message_id: "", key: "r-00000001", title: "Check the deploy", folder: "~/project", view, live: false }] });
+    await Bun.sleep(5);
+    const note = w.store.thread(w.message.thread_id)!.messages.at(-1)!.body;
+    expect(note).toContain("It is still running on their computer, and its card lets the person stop it.");
+    expect(note).toContain("QA started");
+  });
+});
+
+describe("the exact bytes reach the shell (Windows parses a command line again)", () => {
+  const CASES = ['echo "a b"', 'echo "C:\\dir\\"', 'printf \'%s\\n\' "x\\"y"', "ls'*'", "@foo", "set -e\ncd sub\nnpm test", "echo héllo ✓ 日本"];
+  const BASH: InboxRunShell = { kind: "git-bash", path: "C:\\Program Files\\Git\\bin\\bash.exe", name: "Git Bash" };
+  const PS: InboxRunShell = { kind: "powershell", path: "powershell.exe", name: "PowerShell", edition: 5 };
+
+  test("POSIX: the command is argv as it is", () => {
+    for (const command of CASES) expect(inboxRunArgv(command, SH)).toEqual({ argv: ["/bin/sh", "-c", command], env: {} });
+  });
+
+  test("Git Bash: a fixed command line, and the command in PLANNOTATOR_RUN_COMMAND", () => {
+    for (const command of CASES) {
+      const program = inboxRunArgv(command, BASH, ["API_TOKEN"]);
+      expect(program.argv).toEqual([BASH.path, "-c", 'eval "$PLANNOTATOR_RUN_COMMAND"']);
+      expect(program.env).toEqual({ PLANNOTATOR_RUN_COMMAND: command });
+    }
+  });
+
+  test("PowerShell: -EncodedCommand, the UTF-16LE script with each secret set first, never PowerShell's own names", () => {
+    for (const command of CASES) {
+      const { argv } = inboxRunArgv(command, PS, ["API_TOKEN", "HOST", "ERRORACTIONPREFERENCE"]);
+      expect(argv.slice(0, -1)).toEqual(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-OutputFormat", "Text", "-EncodedCommand"]);
+      expect(argv.at(-1)).toMatch(/^[A-Za-z0-9+/=]+$/);
+      expect(Buffer.from(argv.at(-1)!, "base64").toString("utf16le")).toBe(`$API_TOKEN = $env:API_TOKEN; ${command}`);
+    }
+    expect(isPowerShellOwnVariable("Host")).toBe(true);
+    expect(isPowerShellOwnVariable("API_TOKEN")).toBe(false);
+    expect(inboxRunShellNote("echo $HOST", PS, "your PC", ["HOST"])).toBe("In PowerShell, $HOST is PowerShell's own: the command gets this secret only as $env:HOST.");
+  });
+
+  test("the Windows clipboard reads its stdin as UTF-8", () => {
+    expect(WINDOWS_CLIPBOARD_SCRIPT.startsWith("[Console]::InputEncoding = [Text.Encoding]::UTF8;")).toBe(true);
+    expect(Buffer.from(powerShellEncoded(WINDOWS_CLIPBOARD_SCRIPT), "base64").toString("utf16le")).toBe(WINDOWS_CLIPBOARD_SCRIPT);
+  });
+});
+
+describe("the kept login env", () => {
+  test("a press uses the kept copy at once and reads it again behind itself; a fallback is never kept", async () => {
+    let reads = 0;
+    let next: Record<string, string> = { PATH: "/usr/bin" };
+    const fallback = { PATH: "/fallback" };
+    const kept = keptLoginEnv(async () => (reads++, next), { isFallback: (env) => env === fallback });
+    expect(kept.peek()).toBeNull();
+    expect(await kept.get()).toEqual({ PATH: "/usr/bin" });
+    expect(reads).toBe(1);
+    next = { PATH: "/usr/bin:/new/tool" };
+    expect(await kept.forPress()).toEqual({ PATH: "/usr/bin" });
+    await Bun.sleep(1);
+    expect(reads).toBe(2);
+    expect(await kept.forPress()).toEqual({ PATH: "/usr/bin:/new/tool" });
+    // The login shell timed out: its stand-in serves that press but the good copy stays kept.
+    next = fallback;
+    await kept.forPress();
+    await Bun.sleep(1);
+    expect(kept.peek()).toEqual({ PATH: "/usr/bin:/new/tool" });
+    const cold = keptLoginEnv(async () => fallback, { isFallback: (env) => env === fallback });
+    expect(await cold.get()).toBe(fallback);
+    expect(cold.peek()).toBeNull();
+  });
+
+  test("a lost run still runs: its group and the same start time; gone or another process: no", async () => {
+    // No such group: ended.
+    expect(await lostRunStillRunning(2 ** 22 - 7, 0, "linux", async () => "gone")).toBe(false);
+    // Our own group is alive (this test's process group): the leader's start time decides.
+    const pgid = process.pid;
+    let group = true;
+    try {
+      process.kill(-pgid, 0);
+    } catch {
+      group = false;
+    }
+    if (group && process.platform !== "win32") {
+      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => 1_000_500)).toBe(true);
+      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => 9_000_000)).toBe(false);
+      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => "gone")).toBe(true);
+      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => null)).toBeNull();
+    }
+    expect(await lostRunStillRunning(123, 0, "win32")).toBeNull();
   });
 });

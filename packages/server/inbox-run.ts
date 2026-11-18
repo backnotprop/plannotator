@@ -26,7 +26,7 @@
 import { childEnv } from "@plannotator/shared/child-env";
 import { spawn, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
-import type { InboxRunJournal, InboxRunRecord } from "./inbox-run-journal";
+import { INBOX_RUN_JOURNAL_LINES, type InboxRunJournal, type InboxRunRecord } from "./inbox-run-journal";
 import { hideSecretPrefixTail, redactSecrets } from "./inbox-secrets";
 
 /** Lines a run keeps for its card. */
@@ -38,6 +38,8 @@ const PENDING_MAX = INBOX_RUN_LINE_MAX * 2;
 /** Quiet this long on a prompt-like last line: it waits for typing. */
 export const INBOX_RUN_QUIET_MS = 2_000;
 const STOP_GRACE_MS = 2_000;
+/** How often a running command's output is written to the journal (only when it printed something). */
+const JOURNAL_EVERY_MS = 2_000;
 const CLOSE_GRACE_MS = 500;
 
 export type InboxRunState = "starting" | "running" | "done" | "stopped" | "failed";
@@ -61,6 +63,8 @@ export interface InboxRunView {
   error: string | null;
   /** The Inbox ended while it ran: it quit and stopped it ("closed"), or died and found it after ("lost"). */
   interrupted: "closed" | "lost" | null;
+  /** A lost run's command, checked when the Inbox started again: still running (Stop can end it), ended, or unknown. */
+  left_running: boolean | null;
 }
 
 /** What a run needs once pressed, read after the press: the program, its env, and the values to hide. */
@@ -103,6 +107,8 @@ interface Run {
   err: RunLineBuffer;
   timers: Set<ReturnType<typeof setTimeout>>;
   ended: boolean;
+  /** When its process was started (this Inbox's clock), for the journal. */
+  spawnedAt: number | null;
 }
 
 // eslint-disable-next-line no-control-regex
@@ -111,12 +117,24 @@ const PROMPT_END_RE = /[:?>\]\)]\s*$/;
 const PROMPT_WORDS_RE = /password|passphrase|\by\/n\b|\[y\/n\]|\(y\/n\)|yes\/no|press (enter|return|any key)|continue\?|verification code|one-time code/i;
 const NEEDS_TERMINAL_RE = /not a tty|no tty present|a terminal is required|stdin is not a terminal|inappropriate ioctl for device|must be run (from|in) a terminal|isn't a tty|not a terminal|no tty available|requires an interactive/i;
 
-/** One line as the card shows it: no colour codes, a progress line at its last state, secrets hidden, capped. */
-export function cleanRunLine(raw: string, secrets: readonly string[]): string {
+/** A line as the line buffer gives it: `cut` when only its head was kept. */
+export interface RunLine {
+  text: string;
+  cut: boolean;
+}
+
+/**
+ * One line as the card shows it: no colour codes, a progress line at its last state, secrets hidden, capped. Whole
+ * values are hidden before the line is cut, and a value whose first characters end what is kept (a cut line, or
+ * the line still being written: `open`) loses those too, so no part of a secret is shown. A cut line ends in "…".
+ */
+export function cleanRunLine(raw: string, secrets: readonly string[], options: { cut?: boolean; open?: boolean } = {}): string {
   const parts = raw.replace(/\r$/, "").split("\r");
   const last = [...parts].reverse().find((part) => part.replace(ANSI_RE, "").trim() !== "") ?? parts[parts.length - 1] ?? "";
   const line = redactSecrets(last.replace(ANSI_RE, ""), secrets);
-  return line.length > INBOX_RUN_LINE_MAX ? `${line.slice(0, INBOX_RUN_LINE_MAX)}…` : line;
+  if (line.length > INBOX_RUN_LINE_MAX) return `${hideSecretPrefixTail(line.slice(0, INBOX_RUN_LINE_MAX), secrets)}…`;
+  if (options.cut) return `${hideSecretPrefixTail(line, secrets)}…`;
+  return options.open ? hideSecretPrefixTail(line, secrets) : line;
 }
 
 /** Text from its second-to-last `\r` on: the progress line's last two states (the last may be only a clear). */
@@ -137,11 +155,11 @@ export class RunLineBuffer {
   private cut = false;
 
   /** The complete lines in `text`, in order. */
-  push(text: string): string[] {
-    const lines: string[] = [];
+  push(text: string): RunLine[] {
+    const lines: RunLine[] = [];
     let from = 0;
     for (let nl = text.indexOf("\n", from); nl !== -1; nl = text.indexOf("\n", from)) {
-      lines.push(this.cut ? this.pending : lastStates(this.pending + text.slice(from, nl)));
+      lines.push(this.cut ? { text: this.pending, cut: true } : { text: lastStates(this.pending + text.slice(from, nl)), cut: false });
       this.pending = "";
       this.cut = false;
       from = nl + 1;
@@ -168,12 +186,17 @@ export class RunLineBuffer {
     return this.pending;
   }
 
+  /** The line still being written was cut to its head. */
+  get partialCut(): boolean {
+    return this.cut;
+  }
+
   /** Ends the stream: its last line, when it had one. */
-  end(): string[] {
-    const last = this.pending;
+  end(): RunLine[] {
+    const last = { text: this.pending, cut: this.cut };
     this.pending = "";
     this.cut = false;
-    return last === "" ? [] : [last];
+    return last.text === "" ? [] : [last];
   }
 }
 
@@ -213,7 +236,13 @@ const emptyView = (key: string, runId: string, startedAt: string): InboxRunView 
   needs_terminal: false,
   error: null,
   interrupted: null,
+  left_running: null,
 });
+
+/** Finished runs kept whole in memory; older ones keep only what the journal keeps (their card's last lines). */
+const FINISHED_KEPT = 20;
+/** Past runs (from the journal, and finished ones let go) kept at most. */
+const PAST_KEPT = 300;
 
 export function createInboxRuns(options: {
   messageAlive: (messageId: string) => boolean;
@@ -224,6 +253,11 @@ export function createInboxRuns(options: {
   /** How often the sweep looks (deleted messages, waiting for typing). */
   sweepMs?: number;
   journal?: InboxRunJournal;
+  /**
+   * Whether a lost run's command still runs, by its process group and the time it started: true (Stop can end it),
+   * false (it ended), null (this computer cannot tell). Absent: unknown.
+   */
+  stillRunning?: (pid: number, startedAt: number) => Promise<boolean | null>;
 }) {
   const now = options.now ?? (() => Date.now());
   const platform = options.platform ?? process.platform;
@@ -242,17 +276,56 @@ export function createInboxRuns(options: {
     record.live = false;
     record.view = { ...record.view, state: "stopped", partial: "", waiting_for_input: false, interrupted: "lost" };
   }
+  const recordOf = (run: Run): InboxRunRecord => ({
+    message_id: run.start.message_id,
+    key: run.start.key,
+    title: run.start.title,
+    folder: run.start.folder,
+    view: { ...run.view, lines: run.view.lines.slice(-INBOX_RUN_JOURNAL_LINES), duration_ms: run.ended ? run.view.duration_ms : Math.max(0, now() - Date.parse(run.view.started_at)) },
+    live: !run.ended,
+    pid: run.ended ? null : (run.child?.pid ?? null),
+    spawned_at: run.spawnedAt,
+  });
+  let journalAt = 0;
+  let journalStale = false;
   const writeJournal = () => {
+    journalAt = now();
+    journalStale = false;
     if (!options.journal) return;
     const records = new Map(past);
-    for (const run of runs.values()) {
-      records.set(id(run.start.message_id, run.start.key), { message_id: run.start.message_id, key: run.start.key, title: run.start.title, folder: run.start.folder, view: { ...run.view, lines: [...run.view.lines] }, live: !run.ended });
-    }
+    for (const run of runs.values()) records.set(id(run.start.message_id, run.start.key), recordOf(run));
     options.journal.save([...records.values()]);
+  };
+  // Finished runs past the first few keep only their record (what the journal has), so memory stays bounded.
+  const finishedOrder: string[] = [];
+  const letGo = (runId: string) => {
+    finishedOrder.push(runId);
+    while (finishedOrder.length > FINISHED_KEPT) {
+      const oldest = finishedOrder.shift()!;
+      const run = runs.get(oldest);
+      if (!run || !run.ended) continue;
+      runs.delete(oldest);
+      past.set(oldest, recordOf(run));
+    }
+    while (past.size > PAST_KEPT) past.delete(past.keys().next().value!);
   };
   if (lost.length > 0) writeJournal();
 
   const live = () => [...runs.values()].filter((run) => !run.ended);
+  /** Stop on a lost run's card whose command still runs: its group goes (TERM, then KILL). */
+  const stopLeftRunning = (messageId: string, key: string): boolean => {
+    const record = past.get(id(messageId, key));
+    if (!record || record.view.left_running !== true || !record.pid) return false;
+    const pid = record.pid;
+    killRunTree(pid, "SIGTERM", platform);
+    const timer = setTimeout(() => killRunTree(pid, "SIGKILL", platform), STOP_GRACE_MS);
+    (timer as { unref?: () => void }).unref?.();
+    record.pid = null;
+    // The person stopped it: the card says so, not that it ended by itself.
+    record.view = { ...record.view, left_running: false, signal: "SIGTERM" };
+    writeJournal();
+    return true;
+  };
   const killAllNow = () => {
     for (const run of live()) killRunTree(run.child?.pid, "SIGKILL", platform);
   };
@@ -279,6 +352,8 @@ export function createInboxRuns(options: {
         run.view.waiting_for_input =
           run.view.state === "running" && quiet && ((partial !== "" && (PROMPT_END_RE.test(partial) || PROMPT_WORDS_RE.test(partial))) || (partial === "" && PROMPT_WORDS_RE.test(lastLine)));
       }
+      // What a running command printed reaches the journal every few seconds, so a lost run's card keeps it.
+      if (journalStale && now() - journalAt >= JOURNAL_EVERY_MS) writeJournal();
       if (live().length === 0) unwatch();
     }, options.sweepMs ?? 500);
     (sweep as { unref?: () => void }).unref?.();
@@ -289,19 +364,21 @@ export function createInboxRuns(options: {
     process.removeListener("exit", onExit);
   };
 
-  const add = (run: Run, lines: readonly string[]) => {
+  const add = (run: Run, lines: readonly RunLine[]) => {
     for (const line of lines) {
-      run.view.lines.push(cleanRunLine(line, run.redact));
+      run.view.lines.push(cleanRunLine(line.text, run.redact, { cut: line.cut }));
       run.view.total_lines += 1;
     }
     if (run.view.lines.length > INBOX_RUN_KEEP_LINES) run.view.lines.splice(0, run.view.lines.length - INBOX_RUN_KEEP_LINES);
   };
   const push = (run: Run, stream: "out" | "err", text: string) => {
     run.lastOutput = now();
+    journalStale = true;
     run.view.waiting_for_input = false;
     add(run, run[stream].push(text));
     // The line still being written: a secret's first characters are hidden before its last arrive.
-    run.view.partial = hideSecretPrefixTail(cleanRunLine(run.out.partial || run.err.partial, run.redact), run.redact);
+    const open = run.out.partial ? run.out : run.err;
+    run.view.partial = cleanRunLine(open.partial, run.redact, { open: true, cut: open.partialCut });
   };
 
   const finish = (run: Run, outcome: InboxRunEnded["outcome"], code: number | null, signal: string | null, error: string | null = null) => {
@@ -326,6 +403,7 @@ export function createInboxRuns(options: {
     view.needs_terminal = view.state === "failed" && view.lines.slice(-20).some((line) => NEEDS_TERMINAL_RE.test(line));
     if (live().length === 0) unwatch();
     writeJournal();
+    letGo(id(run.start.message_id, run.start.key));
     if (options.messageAlive(run.start.message_id)) run.start.onEnd({ message_id: run.start.message_id, view: { ...view, lines: [...view.lines] }, outcome, waited_for_input: waited });
   };
 
@@ -352,7 +430,10 @@ export function createInboxRuns(options: {
       return;
     }
     run.child = child;
+    run.spawnedAt = now();
     run.view.state = "running";
+    // Its process is in the journal from here: an Inbox that dies can find it again (recover).
+    writeJournal();
     run.lastOutput = now();
     const decoders = { out: new StringDecoder("utf8"), err: new StringDecoder("utf8") };
     child.stdout?.on("data", (chunk: Buffer) => push(run, "out", decoders.out.write(chunk)));
@@ -386,9 +467,13 @@ export function createInboxRuns(options: {
         err: new RunLineBuffer(),
         timers: new Set(),
         ended: false,
+        spawnedAt: null,
       };
-      runs.set(id(start.message_id, start.key), run);
-      past.delete(id(start.message_id, start.key));
+      const runId = id(start.message_id, start.key);
+      const index = finishedOrder.indexOf(runId);
+      if (index !== -1) finishedOrder.splice(index, 1);
+      runs.set(runId, run);
+      past.delete(runId);
       writeJournal();
       watch();
       void begin(run);
@@ -397,7 +482,7 @@ export function createInboxRuns(options: {
     /** Stop: TERM to the group, KILL after a grace; before it started, it never starts. False when nothing runs. */
     stop(messageId: string, key: string): boolean {
       const run = runs.get(id(messageId, key));
-      if (!run || run.ended) return false;
+      if (!run || run.ended) return stopLeftRunning(messageId, key);
       run.stopping = true;
       if (!run.child) return true;
       killRunTree(run.child.pid, "SIGTERM", platform);
@@ -420,9 +505,21 @@ export function createInboxRuns(options: {
     running(): number {
       return live().length;
     },
-    /** The runs this Inbox found unfinished from before it started, each heard once (the agent gets a word). */
-    recover(onLost: (record: InboxRunRecord) => void): void {
-      for (const record of lost.splice(0)) if (options.messageAlive(record.message_id)) onLost(record);
+    /**
+     * The runs this Inbox found unfinished from before it started, each heard once (the agent gets a word), after
+     * looking whether each command still runs. Those found running before keep being looked at too.
+     */
+    async recover(onLost: (record: InboxRunRecord) => void): Promise<void> {
+      const fresh = lost.splice(0);
+      const again = [...past.values()].filter((record) => record.view.left_running === true && !fresh.includes(record));
+      for (const record of [...fresh, ...again]) {
+        const pid = record.pid ?? null;
+        const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at).catch(() => null) : null;
+        record.view = { ...record.view, left_running: left };
+        if (left !== true) record.pid = null;
+      }
+      if (fresh.length > 0 || again.length > 0) writeJournal();
+      for (const record of fresh) if (options.messageAlive(record.message_id)) onLost(record);
     },
     /** The Inbox stops: every run's group goes now, and each is reported as the Inbox closing. */
     stopAll(): void {

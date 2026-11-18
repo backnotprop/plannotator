@@ -11,7 +11,7 @@
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { INBOX_SECRET_NAME_RE, inboxSecretNameRefused } from "@plannotator/core/inbox-run-blocks";
-import type { InboxSecretStoreKind, InboxSecretVault } from "./inbox-secret-vault";
+import { InboxSecretReadError, type InboxSecretStoreKind, type InboxSecretVault } from "./inbox-secret-vault";
 
 export interface InboxSavedSecret {
   name: string;
@@ -36,11 +36,13 @@ export interface InboxSecrets {
   remove: (projectId: string, name: string) => Promise<boolean>;
   /**
    * The values of the saved names among `names`, read at once, for a run's environment and its output's
-   * redaction. `unreadable`: saved names the vault did not give back (locked, denied, gone, too slow).
+   * redaction. `missing`: saved names the store no longer has (removed in Keychain Access); they leave the list, so
+   * the card asks for them again. `unreadable`: those it would not give back (`locked`: it said it is locked or
+   * asked the person, or it did not answer in time).
    */
-  read: (projectId: string, names: readonly string[]) => Promise<{ values: Record<string, string>; unreadable: string[] }>;
-  /** Removes the secrets of projects that are gone (a deleted project's values leave the vault too). */
-  prune: (projectAlive: (projectId: string) => boolean) => Promise<void>;
+  read: (projectId: string, names: readonly string[]) => Promise<{ values: Record<string, string>; missing: string[]; unreadable: string[]; locked: boolean; said: string | null }>;
+  /** Removes these projects' secrets, values and names (a project the person deleted). */
+  prune: (projectIds: readonly string[]) => Promise<void>;
 }
 
 /** A value the person pasted, checked. Never says the value back. */
@@ -116,24 +118,48 @@ export function createInboxSecrets(options: { file: string; vault: InboxSecretVa
       const wanted = names.filter((name) => saved[name]);
       const values: Record<string, string> = {};
       const unreadable: string[] = [];
+      const missing: string[] = [];
+      let locked = false;
+      let said: string | null = null;
+      const SLOW = Symbol("slow");
       await Promise.all(
         wanted.map(async (name) => {
           let timer: ReturnType<typeof setTimeout> | undefined;
-          const slow = new Promise<null>((done) => {
-            timer = setTimeout(() => done(null), options.readMs ?? INBOX_SECRET_READ_MS);
+          const slow = new Promise<typeof SLOW>((done) => {
+            timer = setTimeout(() => done(SLOW), options.readMs ?? INBOX_SECRET_READ_MS);
           });
-          const value = await Promise.race([options.vault.get(secretAccount(projectId, name)).catch(() => null), slow]);
-          clearTimeout(timer);
-          if (value === null) unreadable.push(name);
-          else values[name] = value;
+          try {
+            const value = await Promise.race([options.vault.get(secretAccount(projectId, name)), slow]);
+            if (value === SLOW) {
+              // A store that does not answer is most often asking the person to unlock it.
+              locked = true;
+              unreadable.push(name);
+            } else if (value === null) missing.push(name);
+            else values[name] = value;
+          } catch (error) {
+            unreadable.push(name);
+            if (error instanceof InboxSecretReadError && error.locked) locked = true;
+            else said ??= error instanceof Error ? error.message : String(error);
+          } finally {
+            clearTimeout(timer);
+          }
         }),
       );
-      return { values, unreadable: names.filter((name) => unreadable.includes(name)) };
+      if (missing.length > 0) {
+        await serial(async () => {
+          const projects = read();
+          for (const name of missing) delete projects[projectId]?.[name];
+          if (projects[projectId] && Object.keys(projects[projectId]!).length === 0) delete projects[projectId];
+          write(projects);
+        });
+      }
+      const order = (list: string[]) => names.filter((name) => list.includes(name));
+      return { values, missing: order(missing), unreadable: order(unreadable), locked, said };
     },
-    prune: (projectAlive) =>
+    prune: (projectIds) =>
       serial(async () => {
         const projects = read();
-        const gone = Object.keys(projects).filter((projectId) => !projectAlive(projectId));
+        const gone = projectIds.filter((projectId) => projects[projectId]);
         if (gone.length === 0) return;
         for (const projectId of gone) {
           for (const name of Object.keys(projects[projectId]!)) await options.vault.remove(secretAccount(projectId, name)).catch(() => {});
@@ -169,8 +195,11 @@ export function hideSecretPrefixTail(text: string, values: readonly string[]): s
   return text;
 }
 
-/** Names in a login environment that usually hold a credential (OPENAI_API_KEY, GH_TOKEN, DB_PASSWORD). */
-const CREDENTIAL_NAME_RE = /KEY|TOKEN|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIAL|AUTH|COOKIE|SESSION/i;
+/**
+ * Names in a login environment that hold a credential (OPENAI_API_KEY, GH_TOKEN, DB_PASSWORD, AWS_SESSION_TOKEN): by
+ * how they end, so GIT_AUTHOR_EMAIL or SESSION_MANAGER are not taken for one.
+ */
+const CREDENTIAL_NAME_RE = /(?:^|_)(?:KEY|KEYS|TOKEN|TOKENS|SECRET|PASSWORD|PASSWD|PASSPHRASE|CREDENTIALS?|AUTH|COOKIE|PAT)$/i;
 
 /** The login env's credential-like values, hidden in a run's output too (it goes to the agent). Not paths. */
 export function loginEnvCredentials(env: Readonly<Record<string, string | undefined>>): string[] {

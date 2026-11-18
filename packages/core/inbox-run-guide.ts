@@ -41,7 +41,7 @@ export const INBOX_RUN_TOOL_TEXT = [
 
 /** When to write each block, and what comes back: `plannotator inbox --help` and /llms carry it whole. */
 export const INBOX_RUN_GUIDE = [
-  "A command the person should run on their own computer, as themselves (it needs their machine, their sign-in or a secret you do not have, or they asked to run it): write an Inbox-only `:::run` block. First line: what it does, short. Then one line of why. Optional `Folder: <path>` (relative to the project; default the project folder). Optional `Uses: NAME, OTHER`: saved secrets the program reads from its environment itself. Then the command in one fenced code block (```), exactly as it should run, in POSIX shell syntax (on Windows it runs in Git Bash when Git for Windows is there, else in PowerShell): one command or a short script per block, one block per command. The person sees a Run button and presses it; it runs on their computer in that folder with their login shell's environment, and you get the exit code and the last lines of output in a reply. What it starts in the background (`&`, `nohup`) is stopped when it ends, so a run cannot leave a server going. A command that asks for typing (a password, a sign-in, y/n) cannot be answered there: give it as a plain fenced code block for their own terminal, and a `:::run` that checks it worked if you need to know. Use a plain fenced code block too for a command you only show or can run yourself.",
+  "A command the person should run on their own computer, as themselves (it needs their machine, their sign-in or a secret you do not have, or they asked to run it): write an Inbox-only `:::run` block. First line: what it does, short. Then one line of why. Optional `Folder: <path>` (relative to the project; default the project folder). Optional `Uses: NAME, OTHER`: saved secrets the program reads from its environment itself. Then the command in one fenced code block (```), exactly as it should run, in POSIX shell syntax (on Windows it runs in Git Bash when Git for Windows is there, else in PowerShell): one command or a short script per block, one block per command. The person sees a Run button and presses it; it runs on their computer in that folder with their login shell's environment, and you get the exit code and the last lines of output in a reply. What it starts in the background (`&`, `nohup`) is stopped when it ends, so a run cannot leave a server going (on Windows, a background process can outlive it). A command that asks for typing (a password, a sign-in, y/n) cannot be answered there: give it as a plain fenced code block for their own terminal, and a `:::run` that checks it worked if you need to know. Use a plain fenced code block too for a command you only show or can run yourself.",
   "When a command needs a secret (an API key, a token, a password), never ask for it in chat, in a :::question or in a file. Write a `:::secret` block: first line its name, env-var style (PAYMENTS_TEST_KEY; not a name programs read to start, like PATH, HOME, NODE_OPTIONS, LD_* or GIT_*, which the person cannot save); then why, in one line; optional `Where: <url or place>` for where to find it. Put it before the `:::run` that uses it, in the same message or an earlier one; a run card that uses a name not saved yet shows the field too. The person saves it on their computer (the Keychain or its like); you get a reply naming it, never the value. A `:::run` gets a saved secret only when it names it: `$PAYMENTS_TEST_KEY` in the command, or `Uses: PAYMENTS_TEST_KEY` for a program that reads it itself; no other run gets it. Never print a secret, write it to a file, or put it in a command's text.",
 ].join("\n");
 
@@ -69,6 +69,8 @@ export interface InboxRunReportInput {
   waited_for_input: boolean;
   /** Why it could not start (folder gone, no shell), when it did not. */
   error?: string | null;
+  /** A lost run's command, looked for when the Inbox started again: still running, ended, or unknown. */
+  left_running?: boolean | null;
 }
 
 /** How many lines of output the agent gets: enough to see a failure, short enough for its context. */
@@ -91,7 +93,11 @@ export function inboxRunReportText(run: InboxRunReportInput): string {
       : run.outcome === "inbox_closed"
         ? `The Inbox closed while it ran, after ${seconds(run.duration_ms)}, and the command was stopped with it. Ask the person to run it again if you still need it.`
         : run.outcome === "inbox_lost"
-          ? "The Inbox stopped while it ran, so its result was not recorded; it may have gone on by itself. Ask the person to run it again if you still need it."
+          ? run.left_running === true
+            ? "The Inbox stopped while it ran, so its result was not recorded. It is still running on their computer, and its card lets the person stop it. Ask them to run it again if you need its result."
+            : run.left_running === false
+              ? "The Inbox stopped while it ran, so its result was not recorded; it has ended since. Ask the person to run it again if you still need it."
+              : "The Inbox stopped while it ran, so its result was not recorded; it may have gone on by itself. Ask the person to run it again if you still need it."
           : run.outcome === "stopped"
             ? `The person pressed Stop after ${seconds(run.duration_ms)}${run.waited_for_input ? "; it was waiting for someone to type something" : ""}.`
             : run.exit_code !== null
@@ -99,12 +105,12 @@ export function inboxRunReportText(run: InboxRunReportInput): string {
               : `It ended on signal ${run.signal ?? "unknown"} after ${seconds(run.duration_ms)}.`;
   const tail = run.tail.slice(-INBOX_RUN_REPORT_LINES);
   const lines = [head, ended];
-  if (run.outcome !== "failed_to_start" && run.outcome !== "inbox_lost") {
+  if (run.outcome !== "failed_to_start" && (run.outcome !== "inbox_lost" || tail.length > 0)) {
     if (tail.length === 0) lines.push("", "It printed nothing.");
     else {
       const text = tail.join("\n");
       const fence = fenceFor(text);
-      const which = tail.length < run.total_lines ? `The last ${tail.length} of ${run.total_lines} lines of output` : "Its output";
+      const which = tail.length < run.total_lines ? `The last ${tail.length} of ${run.total_lines.toLocaleString("en-US")} lines of output` : run.outcome === "inbox_lost" ? "Its output before the Inbox stopped" : "Its output";
       lines.push("", `${which} (secrets hidden as ••••):`, "", `${fence}text`, text, fence);
     }
   }

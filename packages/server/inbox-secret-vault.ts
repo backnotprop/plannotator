@@ -38,8 +38,35 @@ export const INBOX_SECRET_STORE_FROM: Record<InboxSecretStoreKind, string> = {
   file: "from its file",
 };
 
+/** Where a missing value would have been, in words: "NAME is no longer in your Keychain." */
+export const INBOX_SECRET_STORE_IN: Record<InboxSecretStoreKind, string> = {
+  keychain: "in your Keychain",
+  "secret-service": "in your system keyring",
+  dpapi: "in its protected file",
+  file: "in its file",
+};
+
+/**
+ * A read the store refused or could not answer. `locked`: it said it is locked or that it asked the person (a
+ * Keychain waiting to be unlocked, a denied prompt), so "Unlock it if it asks" is true.
+ */
+export class InboxSecretReadError extends Error {
+  constructor(
+    message: string,
+    readonly locked: boolean,
+  ) {
+    super(message);
+  }
+}
+const LOCKED_RE = /lock|interaction|denied|cancel|not allowed|authoriz|prompt|dismiss/i;
+const readFailure = (where: string, stderr: string, code: number): InboxSecretReadError => {
+  const said = stderr.trim().split("\n")[0]?.slice(0, 200).replace(/\.+$/, "") ?? "";
+  return new InboxSecretReadError(`${where} did not give it back${said ? `: ${said}` : ` (exit ${code})`}.`, LOCKED_RE.test(said));
+};
+
 export interface InboxSecretVault {
   kind: InboxSecretStoreKind;
+  /** The value; null when there is none (removed in the store itself); throws when the store would not answer. */
   get: (account: string) => Promise<string | null>;
   set: (account: string, value: string) => Promise<void>;
   remove: (account: string) => Promise<void>;
@@ -72,7 +99,10 @@ export function keychainVault(run: VaultRun): InboxSecretVault {
     get: async (account) => {
       checkAccount(account);
       const out = await run(["/usr/bin/security", "find-generic-password", "-s", SERVICE, "-a", account, "-w"], {});
-      return out.code === 0 ? out.stdout.replace(/\n$/, "") : null;
+      if (out.code === 0) return out.stdout.replace(/\n$/, "");
+      // 44: no such item (deleted in Keychain Access). Anything else: locked, denied, or no answer.
+      if (out.code === 44) return null;
+      throw readFailure("The Keychain", out.stderr, out.code);
     },
     set: async (account, value) => {
       checkAccount(account);
@@ -97,7 +127,10 @@ export function secretServiceVault(run: VaultRun, tool = "secret-tool"): InboxSe
     get: async (account) => {
       checkAccount(account);
       const out = await run([tool, "lookup", "service", SERVICE, "account", account], {});
-      return out.code === 0 && out.stdout !== "" ? out.stdout.replace(/\n$/, "") : null;
+      if (out.code === 0 && out.stdout !== "") return out.stdout.replace(/\n$/, "");
+      // Nothing said: no such item. Words on stderr: the keyring refused (locked, no daemon).
+      if (out.stderr.trim() === "") return null;
+      throw readFailure("The system keyring", out.stderr, out.code);
     },
     set: async (account, value) => {
       checkAccount(account);
@@ -140,7 +173,8 @@ export function dpapiVault(run: VaultRun, dir: string, powershell = "powershell.
         return null;
       }
       const out = await run(ps(UNPROTECT), { stdin: blob });
-      return out.code === 0 ? out.stdout : null;
+      if (out.code === 0) return out.stdout;
+      throw readFailure("Windows data protection", out.stderr, out.code);
     },
     set: async (account, value) => {
       checkAccount(account);
@@ -190,7 +224,7 @@ export function memoryVault(kind: InboxSecretStoreKind = "keychain"): InboxSecre
     /** Accounts whose read fails (a locked Keychain, a denied read). */
     locked: new Set<string>(),
     get: async (account: string) => {
-      if (vault.locked.has(account)) throw new Error("The Keychain is locked.");
+      if (vault.locked.has(account)) throw new InboxSecretReadError("The Keychain is locked.", true);
       return values.get(account) ?? null;
     },
     set: async (account: string, value: string) => {
@@ -227,7 +261,12 @@ export function systemSecretVault(options: { platform: NodeJS.Platform; dir: str
 export function withFileFallback(primary: InboxSecretVault, file: InboxSecretVault): InboxSecretVault {
   const vault: InboxSecretVault = {
     kind: primary.kind,
-    get: async (account) => (await primary.get(account).catch(() => null)) ?? (await file.get(account)),
+    // The file first (a value the keyring refused to keep), then the keyring; its refusal counts only when the file
+    // has nothing either.
+    get: async (account) => {
+      const kept = await file.get(account);
+      return kept !== null ? kept : primary.get(account);
+    },
     set: async (account, value) => {
       try {
         await primary.set(account, value);

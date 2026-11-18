@@ -48,7 +48,7 @@ import type { InboxRunEnded, InboxRuns } from "./inbox-run";
 import type { InboxRunRecord } from "./inbox-run-journal";
 import { inboxRunArgv, inboxRunShellNote, type InboxRunShell } from "./inbox-run-shell";
 import { checkSecretValue, loginEnvCredentials, type InboxSecrets } from "./inbox-secrets";
-import { INBOX_SECRET_STORE_FROM, INBOX_SECRET_STORE_WORDS, scrubSecret, type InboxSecretVault } from "./inbox-secret-vault";
+import { INBOX_SECRET_STORE_FROM, INBOX_SECRET_STORE_IN, INBOX_SECRET_STORE_WORDS, scrubSecret, type InboxSecretVault } from "./inbox-secret-vault";
 
 export const INBOX_RUN_WINDOW_ONLY_BODY = { error: "A command runs, and a secret is saved, only from the person's own Inbox window or phone.", code: "window_only" } as const;
 
@@ -60,16 +60,19 @@ export interface InboxRunRoutesOptions {
   runs: InboxRuns;
   secrets: InboxSecrets;
   vault: InboxSecretVault;
-  /** The login shell's environment: `get` waits for it (a cached copy at once), `peek` is the cached copy or null. */
-  loginEnv: { get: () => Promise<Record<string, string>>; peek: () => Record<string, string> | null };
+  /**
+   * The login shell's environment: `get` waits for it (a kept copy at once), `forPress` the same and reads it again
+   * behind the press, `peek` is the kept copy or null.
+   */
+  loginEnv: { get: () => Promise<Record<string, string>>; forPress: () => Promise<Record<string, string>>; peek: () => Record<string, string> | null };
   /** The program a command runs under, from the login environment alone (inbox-run-shell.ts). */
   shellFor: (loginEnv: Readonly<Record<string, string>>) => InboxRunShell;
   /** Puts text on this computer's clipboard (Open in terminal's command); false when it could not. */
   copyToClipboard: (text: string) => Promise<boolean>;
   /** Through the device door: who (a phone, or a linked machine and whether a window there pressed). */
   door: (req: Request) => InboxDoorCaller | undefined;
-  /** "your Mac", or this computer's name. */
-  computer: () => string;
+  /** This computer as a card says it: "your Mac" in its own window, its name for a phone or a linked machine. */
+  computer: (viaDoor: boolean) => string;
   /** A path as the person reads it (`~/…`). */
   displayFolder: (path: string) => string;
   /** The person's own terminal, opened in a folder; the app's name, or why not. */
@@ -144,35 +147,56 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
   const secretsOf = (block: ParsedInboxRun, saved: Set<string>, asked: Set<string>): string[] =>
     inboxRunSecretNames(block).filter((name) => saved.has(name) || asked.has(name) || block.uses.includes(name));
 
-  const blockView = (message: InboxMessage, block: ParsedInboxRun, saved: Set<string>, asked: Set<string>, shell: InboxRunShell | null) => {
+  /**
+   * Where each secret this thread needs and has not saved gets its one field: the `:::secret` card when the thread
+   * asks for it, else the first run card (in thread order) that needs it. `${message id}/${key}`, or "secret".
+   */
+  const fieldOwners = (message: InboxMessage, saved: Set<string>, asked: Set<string>): Map<string, string> => {
+    const owners = new Map<string, string>();
+    for (const name of asked) if (!saved.has(name)) owners.set(name, "secret");
+    for (const m of store.thread(message.thread_id)?.messages ?? [message]) {
+      if (m.author.kind !== "agent") continue;
+      for (const block of parseInboxRunBlocks(m.body)) {
+        for (const name of secretsOf(block, saved, asked)) if (!saved.has(name) && !owners.has(name)) owners.set(name, `${m.id}/${block.key}`);
+      }
+    }
+    return owners;
+  };
+
+  const blockView = (message: InboxMessage, block: ParsedInboxRun, saved: Set<string>, asked: Set<string>, owners: Map<string, string>, shell: InboxRunShell | null, computer: string) => {
     const root = rootOf(message);
     const folder = root ? inboxRunFolder(root, block.folder) : null;
     const hidden = inboxRunBlockHidden(block);
     const uses = secretsOf(block, saved, asked);
+    const needs = uses.filter((name) => !saved.has(name));
     return {
       folder: folder ? options.displayFolder(folder) : null,
       folder_missing: folder === null || !isDir(folder),
       hidden: hidden ? { ...hidden.hidden, words: hidden.words, where: hidden.where } : null,
-      // The secrets this run gets, and those of them not saved yet (the card shows a field for each).
+      // The secrets this run gets, and those of them not saved yet: Run waits for them.
       uses,
-      needs: uses.filter((name) => !saved.has(name)),
+      needs,
+      // Of `needs`, those whose one field in this thread is on this card (the others' field is elsewhere).
+      fields: needs.filter((name) => owners.get(name) === `${message.id}/${block.key}`),
       lookalike: inboxRunLookalikes(block.command),
-      shell_note: shell ? inboxRunShellNote(block.command, shell, options.computer()) : null,
+      shell_note: shell ? inboxRunShellNote(block.command, shell, computer, uses) : null,
     };
   };
 
-  const state = (message: InboxMessage) => {
+  const state = (message: InboxMessage, viaDoor: boolean) => {
     const saved = options.secrets.list(message.project_id);
     const savedNames = new Set(saved.map((s) => s.name));
     const asked = askedNames(message);
+    const owners = fieldOwners(message, savedNames, asked);
+    const computer = options.computer(viaDoor);
     const login = options.loginEnv.peek();
     // A card is on screen: read the login env now, so a press does not wait for the shell.
     if (!login) void options.loginEnv.get().catch(() => {});
     const shell = login ? options.shellFor(login) : null;
     const blocks: Record<string, ReturnType<typeof blockView>> = {};
-    for (const block of parseInboxRunBlocks(message.body)) blocks[block.key] = blockView(message, block, savedNames, asked, shell);
+    for (const block of parseInboxRunBlocks(message.body)) blocks[block.key] = blockView(message, block, savedNames, asked, owners, shell, computer);
     return {
-      computer: options.computer(),
+      computer,
       store: INBOX_SECRET_STORE_WORDS[options.vault.kind],
       shell: shell?.name ?? null,
       blocks,
@@ -207,24 +231,38 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
     }
   };
 
-  // A run the last Inbox lost (it died while the run went on): the agent hears it, once.
-  options.runs.recover((record: InboxRunRecord) => {
-    const text = inboxRunReportText({
-      title: record.title,
-      command: "",
-      folder: record.folder,
-      outcome: "inbox_lost",
-      exit_code: null,
-      signal: null,
-      duration_ms: record.view.duration_ms,
-      tail: [],
-      total_lines: 0,
-      waited_for_input: false,
-    });
-    note({ id: record.message_id }, text, "a lost run's word");
+  // A run the last Inbox lost (it died while the run went on): the agent hears it once, with whether it still runs.
+  void options.runs
+    .recover((record: InboxRunRecord) => {
+      const text = inboxRunReportText({
+        title: record.title,
+        command: "",
+        folder: record.folder,
+        outcome: "inbox_lost",
+        exit_code: null,
+        signal: null,
+        duration_ms: record.view.duration_ms,
+        tail: record.view.lines,
+        total_lines: record.view.total_lines,
+        waited_for_input: false,
+        left_running: record.view.left_running,
+      });
+      note({ id: record.message_id }, text, "a lost run's word");
+    })
+    .catch(() => {});
+  // A project the person deletes takes its secrets with it. Only a deletion seen here counts (one project gone
+  // between two looks): a store that loads empty or in part never removes a value.
+  let projectIds = new Set(store.allProjects().map((p) => p.id));
+  // A project made later is known too (only added here: a deletion is what takes one out).
+  store.subscribe(() => {
+    for (const project of store.allProjects()) projectIds.add(project.id);
   });
-  // A deleted project's secrets leave the vault too.
-  void options.secrets.prune((projectId) => store.project(projectId) !== null).catch(() => {});
+  store.onDeletion(() => {
+    const now = new Set(store.allProjects().map((p) => p.id));
+    const gone = [...projectIds].filter((id) => !now.has(id));
+    projectIds = now;
+    if (gone.length === 1) void options.secrets.prune(gone).catch(() => {});
+  });
 
   const run = async (message: InboxMessage, body: Record<string, unknown>): Promise<Response> => {
     const key = typeof body.key === "string" && INBOX_RUN_KEY_RE.test(body.key) ? body.key : null;
@@ -248,13 +286,16 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
     }
     if (op === "terminal") {
       const opened = await options.openTerminal(folder);
-      if (!opened.ok) return json({ error: opened.error, code: "terminal_failed" }, 500);
+      if (!opened.ok) return json({ error: opened.error, code: "terminal_failed" }, 409);
       // The command goes on this computer's clipboard, where the terminal opened, whichever device pressed.
       const copied = await options.copyToClipboard(block.command).catch(() => false);
       return json({ ok: true, terminal: opened.app, copied });
     }
     const saved = new Set(options.secrets.list(message.project_id).map((s) => s.name));
     const names = secretsOf(block, saved, askedNames(message));
+    // A named secret not saved yet: it does not run with an empty value (the card waits for it too).
+    const unsaved = names.filter((name) => !saved.has(name));
+    if (unsaved.length > 0) return json({ error: `Save ${unsaved.join(" and ")} first: this command needs ${unsaved.length === 1 ? "it" : "them"}.`, code: "run_needs_secret", needs: unsaved }, 409);
     try {
       // The run exists from here on (a Stop now means it never starts); what it needs is read after.
       options.runs.start({
@@ -264,15 +305,23 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
         folder: options.displayFolder(folder),
         cwd: folder,
         prepare: async () => {
-          const [login, read] = await Promise.all([options.loginEnv.get(), options.secrets.read(message.project_id, names)]);
-          if (read.unreadable.length > 0) throw new Error(`Couldn't read ${read.unreadable.join(" or ")} ${INBOX_SECRET_STORE_FROM[options.vault.kind]}. Unlock it if it asks, then run again`);
+          const [login, read] = await Promise.all([options.loginEnv.forPress(), options.secrets.read(message.project_id, names)]);
+          if (read.missing.length > 0) {
+            const them = read.missing.join(" and ");
+            throw new Error(`${them} ${read.missing.length === 1 ? "is" : "are"} no longer ${INBOX_SECRET_STORE_IN[options.vault.kind]} (removed there). Save ${read.missing.length === 1 ? "it" : "them"} again here, then run again`);
+          }
+          if (read.unreadable.length > 0) {
+            const from = `Couldn't read ${read.unreadable.join(" or ")} ${INBOX_SECRET_STORE_FROM[options.vault.kind]}`;
+            throw new Error(read.locked ? `${from}. Unlock it if it asks, then run again` : `${from}${read.said ? `: ${read.said.replace(/\.$/, "")}` : ""}`);
+          }
           // Secrets go into the environment after the shell is chosen, and their names can never be one a program
           // starts from (core/inbox-run-blocks.ts refuses them), so no saved value picks what runs.
           const shell = options.shellFor(login);
           const secretEnv = Object.fromEntries(Object.entries(read.values).filter(([name]) => INBOX_SECRET_NAME_RE.test(name) && !inboxSecretNameRefused(name)));
+          const program = inboxRunArgv(block.command, shell, Object.keys(secretEnv));
           return {
-            argv: inboxRunArgv(block.command, shell, Object.keys(secretEnv)),
-            env: { ...login, ...secretEnv },
+            argv: program.argv,
+            env: { ...login, ...secretEnv, ...program.env },
             redact: [...Object.values(secretEnv), ...loginEnvCredentials(login)],
           };
         },
@@ -293,7 +342,7 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
       try {
         await options.secrets.remove(message.project_id, name);
       } catch (error) {
-        return json({ error: `${name} was not removed. ${error instanceof Error ? error.message : String(error)}`, code: "secret_not_removed" }, 500);
+        return json({ error: `${name} was not removed. ${error instanceof Error ? error.message : String(error)}`, code: "secret_not_removed" }, 409);
       }
       return json({ ok: true });
     }
@@ -304,7 +353,7 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
       note(message, inboxSecretSavedText(name, replaced), "a saved secret's name");
     } catch (error) {
       const said = scrubSecret(error instanceof Error ? error.message : String(error), checked.value);
-      return json({ error: `${name} was not saved. ${said}`, code: "secret_not_saved" }, 500);
+      return json({ error: `${name} was not saved. ${said}`, code: "secret_not_saved" }, 409);
     }
     return json({ ok: true });
   };
@@ -320,7 +369,7 @@ export function createInboxRunRoutes(options: InboxRunRoutesOptions) {
       if (req.method === "GET" && match[2] === "run") {
         if (isCrossSiteRequest(req)) return json(INBOX_CROSS_SITE_BODY, 403);
         if (!message) return json({ error: "No such agent message.", code: "message_not_found" }, 404);
-        return json(state(message));
+        return json(state(message, !!options.door(req)));
       }
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
       const body = await options.readBody(req);

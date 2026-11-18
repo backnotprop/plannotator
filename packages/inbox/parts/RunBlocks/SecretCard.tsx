@@ -3,11 +3,11 @@
  * computer that owns the thread. Saved: its name, when and where, Replace and Remove; no part of the value. A name
  * programs read to start (PATH, NODE_OPTIONS…) gets no field: the card says why.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { inboxSecretRefusedWords, type ParsedInboxSecret } from '@plannotator/core/inbox-run-blocks';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { runApi, type RunStateWire } from '../../data/runApi';
-import { refreshRunState } from '../../data/runStore';
+import { refreshAllRunStates } from '../../data/runStore';
 import { clockTime } from '../../format';
 import { Icon } from '../../icons';
 import { SecretField } from './SecretField';
@@ -29,11 +29,20 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
   const saved = state?.secrets.find((s) => s.name === secret.name) ?? null;
   const [replacing, setReplacing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // After Save the field goes: focus moves to Replace, the control that takes its place.
+  const replaceRef = useRef<HTMLButtonElement>(null);
+  const focusReplace = useRef(false);
+  useEffect(() => {
+    if (saved && !replacing && focusReplace.current) {
+      focusReplace.current = false;
+      replaceRef.current?.focus();
+    }
+  }, [saved, replacing]);
   const remove = async () => {
     setError(null);
     try {
       await runApi.removeSecret(messageId, secret.name);
-      await refreshRunState(messageId);
+      await refreshAllRunStates();
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     }
@@ -76,7 +85,7 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
             {`Saved ${clockTime(saved.saved_at)} · ${state?.store ?? ''}`}
           </p>
           <div className="ib-rb-acts">
-            <button type="button" className="ib-btn" onClick={() => setReplacing(true)} data-secret-replace="">
+            <button ref={replaceRef} type="button" className="ib-btn" onClick={() => setReplacing(true)} data-secret-replace="">
               Replace
             </button>
             <button type="button" className="ib-btn ib-ghost" onClick={() => void remove()} data-secret-remove="">
@@ -86,7 +95,10 @@ export function SecretCard({ messageId, secret, state, agent }: { messageId: str
         </>
       ) : (
         <>
-          <SecretField messageId={messageId} name={secret.name} autoFocus={replacing} onDone={() => setReplacing(false)} {...(replacing ? { onCancel: () => setReplacing(false) } : {})} />
+          <SecretField messageId={messageId} name={secret.name} autoFocus={replacing} onDone={() => {
+              focusReplace.current = true;
+              setReplacing(false);
+            }} {...(replacing ? { onCancel: () => setReplacing(false) } : {})} />
           <p className="ib-rb-hint">{secretKeptWords(state, agent)}</p>
         </>
       )}

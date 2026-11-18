@@ -3,9 +3,13 @@
  * Copy or a terminal button (also before the computer has answered); a run that needs a secret losing its inline
  * field; a run not showing which secrets it gets; a running command without Stop; a prompt that waits for typing not
  * saying so; a run the Inbox lost reading as never run; a secret's field the browser offers to save as a password;
- * a saved one showing any part of its value; a name programs start from getting a field.
+ * a saved one showing any part of its value; a name programs start from getting a field; Run offered while a secret
+ * it needs is not saved; the same secret's field drawn on every card that needs it; a hint saying the agent got an
+ * exit code when there was none; a lost run that still runs with no Stop; a Uses word dropped without a word.
  */
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { parseInboxRunBlocks, parseInboxSecretBlocks } from '@plannotator/core/inbox-run-blocks';
 import type { RunBlockView, RunStateWire, RunView } from './data/runApi';
@@ -13,7 +17,7 @@ import { RunCard } from './parts/RunBlocks/RunCard';
 import { SecretCard } from './parts/RunBlocks/SecretCard';
 
 const block = (command: string, extraLines: string[] = []) => parseInboxRunBlocks([':::run', 'Check the deploy', 'One line of why.', ...extraLines, '', '```sh', command, '```', ':::'].join('\n'))[0]!;
-const blockView = (extra: Partial<RunBlockView> = {}): RunBlockView => ({ folder: '~/projects/site', folder_missing: false, hidden: null, uses: [], needs: [], lookalike: null, shell_note: null, ...extra });
+const blockView = (extra: Partial<RunBlockView> = {}): RunBlockView => ({ folder: '~/projects/site', folder_missing: false, hidden: null, uses: [], needs: [], fields: extra.needs ?? [], lookalike: null, shell_note: null, ...extra });
 const runView = (key: string, run: Partial<RunView>): RunView => ({
   key,
   run_id: 'run_1',
@@ -30,6 +34,7 @@ const runView = (key: string, run: Partial<RunView>): RunView => ({
   needs_terminal: false,
   error: null,
   interrupted: null,
+  left_running: null,
   ...run,
 });
 const state = (key: string, extra: Partial<RunBlockView> = {}, run?: Partial<RunView>): RunStateWire => ({
@@ -40,8 +45,8 @@ const state = (key: string, extra: Partial<RunBlockView> = {}, run?: Partial<Run
   runs: run ? { [key]: runView(key, run) } : {},
   secrets: [],
 });
-const draw = (command: string, extra?: Partial<RunBlockView>, run?: Partial<RunView>) => {
-  const b = block(command);
+const draw = (command: string, extra?: Partial<RunBlockView>, run?: Partial<RunView>, extraLines: string[] = []) => {
+  const b = block(command, extraLines);
   return renderToStaticMarkup(<RunCard messageId="msg_1" block={b} state={state(b.key, extra, run)} agent="Claude" />);
 };
 
@@ -177,5 +182,53 @@ describe('the secret card', () => {
     expect(html).not.toContain('type="password"');
     expect(html).toContain("NODE_OPTIONS can&#x27;t hold a secret");
     expect(html).toContain('Ask Claude for another name.');
+  });
+});
+
+describe('the review\'s second round', () => {
+  test('a needed secret not saved: Run waits (not pressable), the reason is the "Needs" line', () => {
+    const html = draw('curl -H "Bearer $API_TOKEN" x', { uses: ['API_TOKEN'], needs: ['API_TOKEN'] });
+    expect(html).toMatch(/<button[^>]*aria-disabled="true"[^>]*data-run-start=""/);
+    expect(html).toContain('Needs API_TOKEN');
+    expect(html).toContain('Save and run');
+  });
+
+  test('one field per secret: a card whose field is elsewhere says Needs and offers to go there', () => {
+    const html = draw('curl -H "Bearer $API_TOKEN" x', { uses: ['API_TOKEN'], needs: ['API_TOKEN'], fields: [] });
+    expect(html).toContain('Needs API_TOKEN');
+    expect(html).not.toContain('type="password"');
+    expect(html).toContain('data-run-needs-go=""');
+  });
+
+  test('each way a run ends says what the agent truly got', () => {
+    const hint = (run: Partial<RunView>) => /data-run-hint="">([^<]*)</.exec(draw('bun test', {}, run))![1]!.replace(/&#x27;/g, "'");
+    expect(hint({ state: 'done', exit_code: 0 })).toBe('Claude got the exit code and the last lines of output.');
+    expect(hint({ state: 'stopped', interrupted: 'closed', lines: ['a'], total_lines: 1 })).toBe('Claude was told the Inbox closed while it ran, with the last lines of output.');
+    expect(hint({ state: 'stopped', lines: [], total_lines: 0 })).toBe('Claude was told you stopped it.');
+    expect(hint({ state: 'failed', error: "Couldn't read A", lines: [], total_lines: 0 })).toBe("Claude was told why it couldn't start.");
+    expect(hint({ state: 'stopped', interrupted: 'lost', left_running: false, lines: [], total_lines: 0 })).toBe('It ended while the Inbox was away. Claude was told the Inbox stopped while it ran.');
+    expect(hint({ state: 'stopped', interrupted: 'lost', left_running: false, signal: 'SIGTERM', lines: [], total_lines: 0 })).toBe('You stopped it. Claude was told the Inbox stopped while it ran.');
+    expect(hint({ state: 'stopped', interrupted: 'lost', left_running: null, lines: [], total_lines: 0 })).toBe('It may still be running on your Mac. Claude was told the Inbox stopped while it ran.');
+  });
+
+  test('a lost run that still runs: the card says so, keeps its output, and offers Stop', () => {
+    const html = draw('bun test', {}, { state: 'stopped', interrupted: 'lost', left_running: true, lines: ['QA started'], total_lines: 1 });
+    expect(html).toContain('It is still running on your Mac: Stop ends it.');
+    expect(html).toContain('QA started');
+    expect(html).toContain('data-run-stop=""');
+    expect(html).not.toContain('data-run-start');
+  });
+
+  test('a Uses word it cannot use is said on the card', () => {
+    const html = draw('bun test', {}, undefined, ['Uses: PAY_KEY; LD_PRELOAD']);
+    expect(html).toContain('data-run-unusable=""');
+    expect(html).toContain('LD_PRELOAD can&#x27;t hold a secret');
+  });
+
+  test('a long command scrolls inside its box (all of it stays reachable by keyboard)', () => {
+    const html = draw(Array.from({ length: 80 }, (_, i) => `echo ${i}`).join('\n'));
+    expect(html).toMatch(/<pre class="ib-rb-cmd"[^>]*tabindex="0"/);
+    const css = readFileSync(join(import.meta.dir, 'parts/RunBlocks/runBlocks.css'), 'utf8');
+    expect(css).toMatch(/\.ib-rb-cmd \{[^}]*max-height: [^;]+;[^}]*overflow: auto;/);
   });
 });

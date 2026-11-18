@@ -129,17 +129,51 @@ test("an Inbox that quits while a command runs stops it and tells the agent; the
   const key = Object.keys(((await (await fetch(route)).json()) as Json).blocks)[0]!;
   const press = await fetch(route, { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify({ key, op: "start", command: "echo started; read -r line", serverSession: first.serverSession }) });
   expect(press.status).toBe(200);
+  let lines: string[] = [];
   for (let i = 0; i < 200; i++) {
-    const runs = ((await (await fetch(route)).json()) as Json).runs;
-    if (runs[key]?.lines?.length) break;
+    lines = ((await (await fetch(route)).json()) as Json).runs[key]?.lines ?? [];
+    if (lines.length) break;
     await Bun.sleep(25);
   }
+  // It ran (not a run still starting, which would also read as "closed").
+  expect(lines).toEqual(["started"]);
   servers.splice(servers.indexOf(first), 1);
   first.stop();
   const again = await startInboxServer({ dataDir, binaryPath: null });
   servers.push(again);
   const after = (await (await fetch(`http://127.0.0.1:${again.port}/api/inbox/messages/${sent.message_id}/run`)).json()) as Json;
-  expect(after.runs[key]).toMatchObject({ state: "stopped", interrupted: "closed" });
+  expect(after.runs[key]).toMatchObject({ state: "stopped", interrupted: "closed", lines: ["started"] });
   const notes = JSON.stringify(await (await fetch(`http://127.0.0.1:${again.port}/api/inbox/threads/${sent.thread_id}`)).json());
   expect(notes).toContain("The Inbox closed while it ran");
+});
+
+test("a phone saves a secret and runs a block: its value is in no file but the vault (device-commands.jsonl, the outbox, every other)", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-run-")));
+  roots.push(root);
+  const project = join(root, "site");
+  mkdirSync(project);
+  const dataDir = join(root, "data");
+  const server = await startInboxServer({ dataDir, binaryPath: null, phones: true });
+  servers.push(server);
+  const base = `http://127.0.0.1:${server.port}`;
+  const client = new Client({ name: "inbox-run-test", version: "1.0.0" });
+  await client.connect(new StreamableHTTPClientTransport(new URL(`${base}/mcp`)));
+  clients.push(client);
+  const sent = ((await client.callTool({ name: "send_message", arguments: { ...AGENT, project_path: project, body: BODY } })) as { structuredContent: Json }).structuredContent;
+  const made = (await (await fetch(`${base}/api/inbox/pairing`, { method: "POST", body: "{}" })).json()) as Json;
+  const paired = (await (await fetch(`${base}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) })).json()) as Json;
+  let n = 0;
+  const door = (what: "run" | "secret", body: Json) =>
+    fetch(`${base}/api/inbox/device/messages/${sent.message_id}/${what}`, { method: "POST", headers: { Authorization: `Bearer ${paired.token}`, "Content-Type": "application/json" }, body: JSON.stringify({ ...body, idempotency_key: `k-${++n}` }) });
+  expect((await door("secret", { name: "API_TOKEN", value: SENTINEL })).status).toBe(200);
+  const key = Object.keys(((await (await fetch(`${base}/api/inbox/messages/${sent.message_id}/run`)).json()) as Json).blocks)[0]!;
+  expect((await door("run", { key, op: "start", command: 'echo "hi $API_TOKEN"; exit 4' })).status).toBe(200);
+  for (let i = 0; i < 200; i++) {
+    const run = ((await (await fetch(`${base}/api/inbox/messages/${sent.message_id}/run`)).json()) as Json).runs[key];
+    if (run && run.state !== "starting" && run.state !== "running") break;
+    await Bun.sleep(25);
+  }
+  const files = filesUnder(dataDir, join(dataDir, "inbox", "secrets") + "/");
+  expect(files.some((file) => file.endsWith("device-commands.jsonl"))).toBe(true);
+  for (const file of files) expect([file, readFileSync(file, "utf8").includes(SENTINEL)]).toEqual([file, false]);
 });

@@ -12,6 +12,7 @@ import {
   inboxRunNames,
   inboxRunSecretNames,
   inboxRunShowHidden,
+  inboxRunUnusableWords,
   inboxSecretNameRefused,
   parseInboxRunBlocks,
   parseInboxSecretBlocks,
@@ -53,8 +54,17 @@ describe(":::run blocks", () => {
 
   test("the secrets a run may get: what its command names and its Uses: line, never a name programs start from", () => {
     const [block] = parseInboxRunBlocks(run('Deploy\nUses: `WEBHOOK_SECRET`, NODE_OPTIONS PATH\n```\nDEPLOY="$DEPLOY_TOKEN" $HOME/bin/deploy\n```'));
-    expect(block!.uses).toEqual(["WEBHOOK_SECRET", "NODE_OPTIONS", "PATH"]);
+    expect(block!.uses).toEqual(["WEBHOOK_SECRET"]);
+    expect(block!.uses_unusable).toEqual(["NODE_OPTIONS", "PATH"]);
     expect(inboxRunSecretNames(block!)).toEqual(["DEPLOY_TOKEN", "WEBHOOK_SECRET"]);
+  });
+
+  test("Uses: reads names however they are separated; what it cannot use is said, not dropped", () => {
+    const [block] = parseInboxRunBlocks(run("Deploy\nUses: A_KEY; B_TOKEN | ${C_SECRET} and $D_PASSWORD, api_key, LD_PRELOAD\n```\nls\n```"));
+    expect(block!.uses).toEqual(["A_KEY", "B_TOKEN", "C_SECRET", "D_PASSWORD"]);
+    expect(block!.uses_unusable).toEqual(["api_key", "LD_PRELOAD"]);
+    expect(inboxRunUnusableWords(block!.uses_unusable)).toBe("Its Uses line names what this run can't get: LD_PRELOAD can't hold a secret (programs read it to decide how they start); \"api_key\" isn't a secret's name.");
+    expect(inboxRunUnusableWords([])).toBeNull();
   });
 
   test("the title and why lose direction marks and invisible characters; the command keeps its bytes", () => {
@@ -64,6 +74,29 @@ describe(":::run blocks", () => {
 });
 
 describe("names a secret may not have", () => {
+  const REFUSED = [
+    "JAVA_HOME", "JAVA_OPTS", "MAVEN_OPTS", "MAVEN_ARGS", "GRADLE_OPTS", "GRADLE_USER_HOME", "SBT_OPTS", "ELECTRON_RUN_AS_NODE",
+    "OPENSSL_CONF", "OPENSSL_ENGINES", "OPENSSL_MODULES", "GCONV_PATH", "KUBECONFIG", "DOCKER_HOST", "DOCKER_CONFIG", "DOCKER_CONTEXT",
+    "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "CURL_HOME", "WGETRC", "RSYNC_RSH", "MAKEFLAGS", "MAKEFILES", "PHPRC",
+    "PHP_INI_SCAN_DIR", "GOTOOLCHAIN", "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOINSECURE", "SSL_CERT_FILE", "SSL_CERT_DIR",
+    "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "AWS_CA_BUNDLE", "NODE_TLS_REJECT_UNAUTHORIZED", "SSLKEYLOGFILE", "_JAVA_OPTIONS",
+    "DOTNET_STARTUP_HOOKS", "COREHOST_TRACE", "COR_PROFILER", "CORECLR_PROFILER_PATH", "COMPLUS_ETWENABLED", "CARGO_HOME",
+    "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUNNER", "CARGO_BUILD_RUSTC_WRAPPER", "RUSTUP_TOOLCHAIN", "GIT_CONFIG_KEY_0",
+    "PLANNOTATOR_API_KEY", "PLANNOTATOR_TOKEN",
+  ];
+  const ALLOWED = [
+    "PYTHONANYWHERE_TOKEN", "PERLMUTTER_KEY", "BUN_AUTH_TOKEN", "BUN_CONFIG_TOKEN", "DENO_DEPLOY_TOKEN", "DENO_AUTH_TOKENS", "GIT_TOKEN",
+    "CARGO_REGISTRY_TOKEN", "GITHUB_TOKEN", "GH_TOKEN", "NPM_TOKEN", "NODE_AUTH_TOKEN", "OPENAI_API_KEY", "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "CORS_ORIGIN_KEY", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "PIP_INDEX_URL", "UV_INDEX_URL", "GOPROXY", "GITLAB_TOKEN", "GEM_HOST_API_KEY",
+  ];
+  test.each(REFUSED)("%s is refused (it changes how a program starts or what it trusts)", (name) => {
+    expect(inboxSecretNameRefused(name)).toBe(true);
+  });
+  test.each(ALLOWED)("%s may hold a secret", (name) => {
+    expect(inboxSecretNameRefused(name)).toBe(false);
+  });
+
   test.each(["PATH", "HOME", "SHELL", "BASH_ENV", "ZDOTDIR", "NODE_OPTIONS", "LD_PRELOAD", "DYLD_INSERT_LIBRARIES", "PYTHONSTARTUP", "PERL5OPT", "RUBYOPT", "GIT_SSH_COMMAND", "NPM_CONFIG_PREFIX", "JAVA_TOOL_OPTIONS", "PROMPT_COMMAND", "EDITOR", "PLANNOTATOR_DATA_DIR"])("%s is refused", (name) => {
     expect(inboxSecretNameRefused(name)).toBe(true);
     expect(parseInboxSecretBlocks(`:::secret\n${name}\nPaste it.\n:::`)[0]).toMatchObject({ name, refused: true });

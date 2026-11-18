@@ -51,29 +51,63 @@ export const INBOX_SECRET_NAME_RE = /^[A-Z][A-Z0-9_]{1,63}$/;
 
 /**
  * Names a secret may not have: programs read them to decide what runs and how it starts (a shell, its startup
- * files, a library preloaded, an interpreter's options, git's helpers), or every command needs them as they are
- * (PATH, HOME). A value saved under one could make a command do something other than what the card shows, or
- * break every run. The one list the parser, the card and the server read.
+ * files, a library or a config that runs code, an interpreter's options, git's helpers, which certificates to
+ * trust), or every command needs them as they are (PATH, HOME). A value saved under one could make a command do
+ * something other than what the card shows, or break every run. The one list the parser, the card and the server
+ * read. Proxy and package-index URLs stay allowed: they often carry the credential itself.
  */
 export const INBOX_SECRET_REFUSED_NAMES: ReadonlySet<string> = new Set([
   // The shell and the session.
   "PATH", "HOME", "SHELL", "USER", "LOGNAME", "PWD", "OLDPWD", "IFS", "CDPATH", "ENV", "BASH_ENV", "ZDOTDIR",
   "PROMPT_COMMAND", "PS1", "PS2", "PS4", "TMPDIR", "TERM", "LANG", "TZ", "DISPLAY", "SSH_AUTH_SOCK",
   // Programs a command may hand control to.
-  "EDITOR", "VISUAL", "PAGER", "MANPAGER", "BROWSER", "SSH_ASKPASS", "SUDO_ASKPASS",
-  // Interpreters' startup options and module paths.
+  "EDITOR", "VISUAL", "PAGER", "MANPAGER", "BROWSER", "SSH_ASKPASS", "SUDO_ASKPASS", "RSYNC_RSH",
+  // Interpreters' and build tools' startup options and module paths.
   "NODE_OPTIONS", "NODE_PATH", "NODE_EXTRA_CA_CERTS", "RUBYOPT", "RUBYLIB", "JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS",
-  "CLASSPATH", "LUA_INIT", "LUA_PATH", "LUA_CPATH", "GEM_HOME", "GEM_PATH", "BUNDLE_GEMFILE", "GOFLAGS",
-  "CARGO_HOME", "RUSTC_WRAPPER", "RUSTFLAGS", "CC", "CXX", "LESSOPEN", "LESSCLOSE",
+  "_JAVA_OPTIONS", "JAVA_HOME", "JAVA_OPTS", "MAVEN_OPTS", "MAVEN_ARGS", "GRADLE_OPTS", "GRADLE_USER_HOME", "SBT_OPTS",
+  "CLASSPATH", "LUA_INIT", "LUA_PATH", "LUA_CPATH", "GEM_HOME", "GEM_PATH", "BUNDLE_GEMFILE", "GOFLAGS", "GOTOOLCHAIN",
+  "RUSTC_WRAPPER", "RUSTFLAGS", "CC", "CXX", "LESSOPEN", "LESSCLOSE", "ELECTRON_RUN_AS_NODE", "MAKEFLAGS", "MAKEFILES",
+  "PHPRC", "PHP_INI_SCAN_DIR",
+  // Libraries and configs that load or run code.
+  "OPENSSL_CONF", "OPENSSL_ENGINES", "OPENSSL_MODULES", "GCONV_PATH", "KUBECONFIG", "DOCKER_HOST", "DOCKER_CONFIG",
+  "DOCKER_CONTEXT", "AWS_CONFIG_FILE", "AWS_SHARED_CREDENTIALS_FILE", "CURL_HOME", "WGETRC",
+  // Which code and certificates are trusted.
+  "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK", "GOINSECURE", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
+  "CURL_CA_BUNDLE", "AWS_CA_BUNDLE", "NODE_TLS_REJECT_UNAUTHORIZED", "SSLKEYLOGFILE",
   // Windows: how a program is found and started.
   "COMSPEC", "PATHEXT", "SYSTEMROOT", "WINDIR", "PSMODULEPATH", "USERPROFILE", "APPDATA", "LOCALAPPDATA",
 ]);
-/** Name prefixes refused the same way: the loader, interpreters, git, npm, bash functions, Bun, this Inbox. */
-export const INBOX_SECRET_REFUSED_PREFIXES: readonly string[] = ["LD_", "DYLD_", "PYTHON", "PERL", "GIT_", "NPM_CONFIG_", "BASH_FUNC", "BUN_", "DENO_", "LC_", "XDG_", "PLANNOTATOR_"];
+/**
+ * Name prefixes refused the same way: the loader, interpreters, git, npm, bash functions, Bun, Deno, .NET, Cargo,
+ * rustup, this Inbox. `COR_` is the .NET profiler's (CORS_* is not caught).
+ */
+export const INBOX_SECRET_REFUSED_PREFIXES: readonly string[] = [
+  "LD_", "DYLD_", "PYTHON", "PERL", "GIT_", "NPM_CONFIG_", "BASH_FUNC", "BUN_", "DENO_", "LC_", "XDG_", "DOTNET_",
+  "COREHOST_", "COR_", "CORECLR_", "COMPLUS_", "CARGO_", "RUSTUP_", "PLANNOTATOR_",
+];
+/**
+ * A name caught only by a prefix is still a secret's when it ends like one (GIT_TOKEN, CARGO_REGISTRY_TOKEN,
+ * PYTHONANYWHERE_TOKEN): no startup variable of those families ends so. Never for this Inbox's own names.
+ */
+const SECRET_ENDING_RE = /_(?:TOKENS?|KEY|API_KEY|SECRET|PASSWORD)$/;
 
 /** Whether a name may hold a secret (it has the shape, and no program reads it to start). */
 export function inboxSecretNameRefused(name: string): boolean {
-  return INBOX_SECRET_REFUSED_NAMES.has(name) || INBOX_SECRET_REFUSED_PREFIXES.some((prefix) => name.startsWith(prefix));
+  if (INBOX_SECRET_REFUSED_NAMES.has(name)) return true;
+  const prefix = INBOX_SECRET_REFUSED_PREFIXES.find((p) => name.startsWith(p));
+  if (!prefix) return false;
+  return prefix === "PLANNOTATOR_" || !SECRET_ENDING_RE.test(name);
+}
+
+/** Why a `Uses:` word gives the run nothing, for the card. */
+export function inboxRunUnusableWords(words: readonly string[]): string | null {
+  if (words.length === 0) return null;
+  const refused = words.filter((w) => INBOX_SECRET_NAME_RE.test(w));
+  const odd = words.filter((w) => !INBOX_SECRET_NAME_RE.test(w));
+  const parts: string[] = [];
+  if (refused.length > 0) parts.push(`${refused.join(", ")} can't hold a secret (programs read ${refused.length === 1 ? "it" : "them"} to decide how they start)`);
+  if (odd.length > 0) parts.push(`${odd.map((w) => `"${w}"`).join(", ")} ${odd.length === 1 ? "isn't a secret's name" : "aren't secrets' names"}`);
+  return `Its Uses line names what this run can't get: ${parts.join("; ")}.`;
 }
 
 /** Why a refused name cannot hold a secret, for the card and the route's error. */
@@ -92,6 +126,8 @@ export interface ParsedInboxRun {
   command: string;
   /** `Uses:` names: saved secrets the program reads from its environment itself. [] when none. */
   uses: string[];
+  /** Words on `Uses:` that cannot be a secret here: not a name, or one programs start from. The card says so. */
+  uses_unusable: string[];
   /** 1-based line of the block's opening `:::run`, as the Viewer's block has it. */
   startLine: number;
 }
@@ -126,6 +162,7 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
   let title: string | null = null;
   let folder: string | null = null;
   let uses: string[] | null = null;
+  const unusable: string[] = [];
   const why: string[] = [];
   let command: string | null = null;
   let fences = 0;
@@ -156,9 +193,12 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
     const usesLine = USES_RE.exec(line);
     if (usesLine && uses === null) {
       uses = [];
-      for (const word of usesLine[1]!.split(/[\s,]+/)) {
+      for (const word of usesLine[1]!.split(/[^A-Za-z0-9_$`{}]+/)) {
         const name = word.replace(/^`|`$/g, "").replace(/^\$\{?|\}$/g, "");
-        if (INBOX_SECRET_NAME_RE.test(name) && !uses.includes(name)) uses.push(name);
+        if (name === "" || /^(and|or)$/i.test(name)) continue;
+        if (INBOX_SECRET_NAME_RE.test(name) && !inboxSecretNameRefused(name)) {
+          if (!uses.includes(name)) uses.push(name);
+        } else if (!unusable.includes(name)) unusable.push(name);
       }
       continue;
     }
@@ -171,7 +211,7 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
     why.push(inboxRunPlainWords(line));
   }
   if (title === null || command === null || fences !== 1 || command.trim() === "") return null;
-  return { title, why: why.length > 0 ? why.join("\n") : null, folder, command, uses: uses ?? [] };
+  return { title, why: why.length > 0 ? why.join("\n") : null, folder, command, uses: uses ?? [], uses_unusable: unusable };
 }
 
 /** Every `:::run` block of a message body, in order, keys de-duplicated. [] when none. */

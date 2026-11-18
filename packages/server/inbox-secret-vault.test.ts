@@ -8,7 +8,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dpapiVault, fileVault, keychainVault, memoryVault, scrubSecret, secretServiceVault, systemSecretVault, withFileFallback, type VaultRun } from "./inbox-secret-vault";
+import { dpapiVault, fileVault, InboxSecretReadError, keychainVault, memoryVault, scrubSecret, secretServiceVault, systemSecretVault, withFileFallback, type VaultRun } from "./inbox-secret-vault";
 
 const SENTINEL = "TEST_ONLY_NOT_A_KEY_123";
 const dirs: string[] = [];
@@ -43,11 +43,17 @@ describe("the Keychain (macOS)", () => {
     expect(fake.calls[0]!.stdin).not.toContain(SENTINEL);
   });
 
-  test("reads with -w, and a missing item is null", async () => {
-    const fake = fakeRun((argv) => (argv.includes("prj_1:A_KEY") ? { code: 0, stdout: `${SENTINEL}\n` } : { code: 44 }));
+  test("reads with -w; a missing item is null, a locked or denied one is an error that says so", async () => {
+    const fake = fakeRun((argv) => (argv.includes("prj_1:A_KEY") ? { code: 0, stdout: `${SENTINEL}\n` } : argv.includes("prj_1:B_KEY") ? { code: 44 } : argv.includes("prj_1:C_KEY") ? { code: 36, stderr: "security: User interaction is not allowed." } : { code: 1, stderr: "security: SecKeychainSearchCopyNext: bad item." }));
     const vault = keychainVault(fake.run);
     expect(await vault.get("prj_1:A_KEY")).toBe(SENTINEL);
     expect(await vault.get("prj_1:B_KEY")).toBeNull();
+    const locked = await vault.get("prj_1:C_KEY").catch((e: unknown) => e);
+    expect(locked).toBeInstanceOf(InboxSecretReadError);
+    expect((locked as InboxSecretReadError).locked).toBe(true);
+    const other = await vault.get("prj_1:D_KEY").catch((e: unknown) => e);
+    expect((other as InboxSecretReadError).locked).toBe(false);
+    expect((other as Error).message).toBe("The Keychain did not give it back: security: SecKeychainSearchCopyNext: bad item.");
   });
 
   test("a refusal is an error without the value in it", async () => {

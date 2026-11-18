@@ -24,6 +24,8 @@ export interface RunView {
   error: string | null;
   /** The Inbox ended while it ran: it quit and stopped it ("closed"), or died and found it after ("lost"). */
   interrupted: 'closed' | 'lost' | null;
+  /** A lost run's command, looked for when the Inbox started again: still running (Stop ends it), ended, or unknown. */
+  left_running?: boolean | null;
 }
 
 export interface RunBlockView {
@@ -33,8 +35,10 @@ export interface RunBlockView {
   hidden: { what: string; code: string; line: number; column: number; words: string; where: 'command' | 'folder' } | null;
   /** The saved secrets this run gets (`$NAME` in its command, or its `Uses:` line). */
   uses: string[];
-  /** Those of `uses` not saved yet: the card shows a field for each. */
+  /** Those of `uses` not saved yet: Run waits for them. */
   needs: string[];
+  /** Of `needs`, those whose one field in the thread is on this card (the others' is on the secret's card or another run's). */
+  fields: string[];
   /** Letters that look like Latin ones (Cyrillic, Greek…), in words, or null. */
   lookalike: string | null;
   /** Why it may not work in the shell it runs in (PowerShell on a PC with no Git Bash), or null. */
@@ -48,7 +52,7 @@ export interface SavedSecret {
 }
 
 export interface RunStateWire {
-  /** "your Mac", or this computer's name. */
+  /** "your Mac" in its own window; its name on a phone or a linked machine. */
   computer: string;
   /** Where a saved value goes, in words ("saved in your Keychain"). */
   store: string;

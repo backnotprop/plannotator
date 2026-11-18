@@ -18,6 +18,9 @@ export interface InboxRunRecord {
   view: InboxRunView;
   /** It was running when this was written. */
   live: boolean;
+  /** Its process (group leader) while it ran, and when this Inbox started it: a lost run is looked for by these. */
+  pid?: number | null;
+  spawned_at?: number | null;
 }
 
 export interface InboxRunJournal {

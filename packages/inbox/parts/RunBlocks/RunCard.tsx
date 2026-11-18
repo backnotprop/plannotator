@@ -5,8 +5,8 @@
  * command on that computer's clipboard. A command (or folder) with a hidden character cannot be run or copied, and
  * the card says why: it knows that from the block itself, before and without the computer's answer.
  */
-import { useState } from 'react';
-import { inboxRunBlockHidden, inboxRunShowHidden, type ParsedInboxRun } from '@plannotator/core/inbox-run-blocks';
+import { useRef, useState } from 'react';
+import { inboxRunBlockHidden, inboxRunShowHidden, inboxRunUnusableWords, type ParsedInboxRun } from '@plannotator/core/inbox-run-blocks';
 import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { runApi, type RunStateWire, type RunView } from '../../data/runApi';
@@ -29,38 +29,84 @@ export function runStatus(run: RunView): { text: string; tone: 'live' | 'ok' | '
   return { text: `${run.state === 'done' ? 'Done' : 'Failed'} · ${how} · ${secs(run.duration_ms)}`, tone: run.state === 'done' ? 'ok' : 'bad' };
 }
 
+/** What the agent was told, in one line, for a run that ended (true for each way it can end). */
+export function runHint(run: RunView, agent: string, computer: string): string {
+  if (run.interrupted === 'lost') {
+    if (run.left_running === true) return `It is still running on ${computer}: Stop ends it. ${agent} was told the Inbox stopped while it ran.`;
+    if (run.left_running === false && run.signal) return `You stopped it. ${agent} was told the Inbox stopped while it ran.`;
+    if (run.left_running === false) return `It ended while the Inbox was away. ${agent} was told the Inbox stopped while it ran.`;
+    return `It may still be running on ${computer}. ${agent} was told the Inbox stopped while it ran.`;
+  }
+  if (run.interrupted === 'closed') return `${agent} was told the Inbox closed while it ran${run.total_lines > 0 ? ', with the last lines of output' : ''}.`;
+  if (run.error && run.exit_code === null && run.total_lines === 0) return `${agent} was told why it couldn't start.`;
+  if (run.state === 'stopped') return `${agent} was told you stopped it${run.total_lines > 0 ? ', with the last lines of output' : ''}.`;
+  if (run.exit_code === null) return `${agent} got how it ended and the last lines of output.`;
+  return `${agent} got the exit code and the last lines of output.`;
+}
+
+/** Brings a secret's one field into view and into focus (it sits on its secret card, or another run's card). */
+const goToField = (name: string) => {
+  const input = document.querySelector<HTMLInputElement>(`[data-secret-form="${name}"] input`);
+  if (!input) return;
+  input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  input.focus({ preventScroll: true });
+};
+
 export function RunCard({ messageId, block, state, agent }: { messageId: string; block: ParsedInboxRun; state: RunStateWire | null; agent: string }) {
   const view = state?.blocks[block.key] ?? null;
   const run = state?.runs[block.key] ?? null;
   const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState<'ok' | 'failed' | null>(null);
   const [pressing, setPressing] = useState(false);
+  // A second press while one is on its way is swallowed (a double click), before React draws anything.
+  const pressingRef = useRef(false);
+  // One button that is Run, then Stop, then Run again: focus stays on it through each change.
+  const mainRef = useRef<HTMLButtonElement>(null);
   const live = run?.state === 'starting' || run?.state === 'running';
+  const leftRunning = run?.interrupted === 'lost' && run.left_running === true;
   // Read from the block here, so Copy is never offered for a hidden character while the computer's answer is on its way.
   const hidden = inboxRunBlockHidden(block);
   const computer = state?.computer ?? 'your computer';
-  const using = view?.uses.filter((name) => !view.needs.includes(name)) ?? [];
+  const needs = view?.needs ?? [];
+  const using = view?.uses.filter((name) => !needs.includes(name)) ?? [];
+  const unusable = inboxRunUnusableWords(block.uses_unusable);
 
-  const act = async (work: () => Promise<unknown>, after?: string) => {
+  const act = async (work: () => Promise<unknown>) => {
+    if (pressingRef.current) return;
+    pressingRef.current = true;
     setPressing(true);
     setNote(null);
     try {
       await work();
-      if (after) setNote(after);
     } catch (failure) {
       setNote(failure instanceof Error ? failure.message : String(failure));
     } finally {
+      pressingRef.current = false;
       setPressing(false);
       await refreshRunState(messageId);
     }
   };
+  const start = () => act(() => runApi.start(messageId, block.key, block.command));
+  const stop = () => act(() => runApi.stop(messageId, block.key));
   const copy = async () => setCopied((await copyTextToClipboard(block.command)) ? 'ok' : 'failed');
   const terminal = () =>
     act(async () => {
       const opened = await runApi.terminal(messageId, block.key, block.command);
       const where = `Opened ${opened.terminal} on ${computer} in ${view?.folder ?? 'the project folder'}.`;
-      setNote(opened.copied ? `${where} The command is on its clipboard: paste it there.` : `${where} Copy the command from this card and paste it there.`);
+      const paste = opened.copied ? 'The command is on its clipboard: paste it there.' : 'Copy the command from this card and paste it there.';
+      const names = view?.uses ?? [];
+      const unset = names.length > 0 ? ` ${names.join(' and ')} ${names.length === 1 ? "isn't" : "aren't"} set in that terminal.` : '';
+      setNote(`${where} ${paste}${unset}`);
     });
+
+  const stopping = live || leftRunning;
+  const waiting = needs.length > 0 && !stopping;
+  const unavailable = pressing || waiting;
+  const main = {
+    label: stopping ? 'Stop' : run ? 'Run again' : 'Run',
+    icon: stopping ? 'stop' : run ? 'replay' : 'play',
+    primary: stopping ? !run?.waiting_for_input : !(run?.needs_terminal || waiting),
+  } as const;
 
   return (
     <section className="ib-rb" data-run-card={block.key} data-run-state={hidden ? 'refused' : (run?.state ?? 'idle')} aria-label={block.title.replace(/[*_`~]/g, '')}>
@@ -87,7 +133,9 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
       ) : (
         <>
           <div className="ib-rb-cmdrow">
-            <pre className="ib-rb-cmd" data-run-command="">{block.command}</pre>
+            <pre className="ib-rb-cmd" data-run-command="" tabIndex={0} aria-label="Command">
+              {block.command}
+            </pre>
             <button type="button" className="ib-btn ib-ghost ib-sm ib-rb-copy" onClick={() => void copy()} data-run-copy="">
               <Icon name={copied === 'ok' ? 'check' : 'copy'} />
               {copied === 'ok' ? 'Copied' : copied === 'failed' ? "Couldn't copy" : 'Copy'}
@@ -102,6 +150,12 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
               {`Uses ${using.join(', ')}`}
             </p>
           )}
+          {unusable && (
+            <p className="ib-rb-warn" data-run-unusable="">
+              <Icon name="warn" />
+              <span>{unusable}</span>
+            </p>
+          )}
           {view?.lookalike && (
             <p className="ib-rb-warn" data-run-lookalike="">
               <Icon name="warn" />
@@ -114,15 +168,38 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
               <span>{view.shell_note}</span>
             </p>
           )}
-          {view?.needs.map((name) => (
-            <div key={name} className="ib-rb-need" data-run-needs={name}>
-              <p className="ib-rb-needs-l">
-                <Icon name="lock" />
-                {`Needs ${name}`}
-              </p>
-              <SecretField messageId={messageId} name={name} />
-            </div>
-          ))}
+          {needs.map((name) => {
+            const here = view?.fields.includes(name) ?? false;
+            return (
+              <div key={name} className="ib-rb-need" data-run-needs={name}>
+                <p className="ib-rb-needs-l">
+                  <Icon name="lock" />
+                  {`Needs ${name}`}
+                  {!here && (
+                    <button type="button" className="ib-btn ib-ghost ib-sm" onClick={() => goToField(name)} data-run-needs-go="">
+                      Save it above
+                    </button>
+                  )}
+                </p>
+                {here && (
+                  <SecretField
+                    messageId={messageId}
+                    name={name}
+                    // The last secret it waits for: one press saves it and runs.
+                    {...(needs.length === 1 && !live
+                      ? {
+                          saveLabel: 'Save and run',
+                          onDone: () => {
+                            mainRef.current?.focus();
+                            void start();
+                          },
+                        }
+                      : {})}
+                  />
+                )}
+              </div>
+            );
+          })}
           {run && !((run.error || run.interrupted === 'lost') && run.total_lines === 0) && <RunOutput run={run} />}
           {run?.error && (
             <p className="ib-rb-warn" data-run-error="">
@@ -143,31 +220,35 @@ export function RunCard({ messageId, block, state, agent }: { messageId: string;
             </p>
           )}
           {run && !live && (
-            <p className="ib-rb-hint">{run.interrupted === 'lost' ? `${agent} was told the Inbox stopped while it ran.` : run.error && run.exit_code === null && run.total_lines === 0 ? `${agent} was told why it couldn't start.` : `${agent} got the exit code and the last lines of output.`}</p>
+            <p className="ib-rb-hint" data-run-hint="">
+              {runHint(run, agent, computer)}
+            </p>
           )}
           <div className="ib-rb-acts">
-            {live ? (
-              <button type="button" className={`ib-btn ${run?.waiting_for_input ? '' : 'ib-pri'}`} disabled={pressing} onClick={() => void act(() => runApi.stop(messageId, block.key))} data-run-stop="">
-                <Icon name="stop" />
-                Stop
-              </button>
-            ) : (
-              <button
-                type="button"
-                className={`ib-btn ${run?.needs_terminal || (view?.needs.length ?? 0) > 0 ? '' : 'ib-pri'}`}
-                disabled={pressing || !view || view.folder_missing}
-                onClick={() => void act(() => runApi.start(messageId, block.key, block.command))}
-                data-run-start=""
-              >
-                <Icon name={run ? 'replay' : 'play'} />
-                {run ? 'Run again' : 'Run'}
-              </button>
-            )}
+            <button
+              ref={mainRef}
+              type="button"
+              className={`ib-btn ${main.primary ? 'ib-pri' : ''}`}
+              disabled={!view || (!stopping && view.folder_missing)}
+              aria-disabled={unavailable || undefined}
+              title={waiting ? `Needs ${needs.join(' and ')}` : undefined}
+              onClick={() => {
+                if (unavailable) return;
+                void (stopping ? stop() : start());
+              }}
+              {...(stopping ? { 'data-run-stop': '' } : { 'data-run-start': '' })}
+            >
+              <Icon name={main.icon} />
+              {main.label}
+            </button>
             <button
               type="button"
               className={`ib-btn ${run?.needs_terminal || run?.waiting_for_input ? 'ib-pri' : 'ib-ghost'}`}
-              disabled={pressing || !view || view.folder_missing}
-              onClick={() => void terminal()}
+              disabled={!view || view.folder_missing}
+              aria-disabled={pressing || undefined}
+              onClick={() => {
+                if (!pressing) void terminal();
+              }}
               data-run-terminal=""
             >
               <Icon name="terminal" />

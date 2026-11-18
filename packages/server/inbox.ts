@@ -5374,7 +5374,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     readLoginEnv: process.platform === "win32" && !process.env.PLANNOTATOR_TEST_SANDBOX ? async () => launchPlainEnv(launchOwnEnv(), [], "win32") : loginEnv,
     door: (req) => fromDeviceDoor.get(req),
-    computer: () => phones?.machineDoor.computerName() ?? (process.platform === "darwin" ? "your Mac" : process.platform === "win32" ? "your PC" : "your computer"),
+    computer: (viaDoor) => (viaDoor ? phones?.machineDoor.computerName() : null) ?? (process.platform === "darwin" ? "your Mac" : process.platform === "win32" ? "your PC" : "your computer"),
     displayFolder: (path) => displayPath(path, agentEnvironment) ?? path,
     openInLauncher,
   });
