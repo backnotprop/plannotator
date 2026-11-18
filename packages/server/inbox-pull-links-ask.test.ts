@@ -5,7 +5,7 @@
  * (the PR's page stops being its thread); or kept when the PR goes to another thread.
  */
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInboxPullLinks } from "./inbox-pull-links";
@@ -36,12 +36,28 @@ test("the page mark: set by the `thread` ask, kept when that thread asks for a g
   expect(createInboxPullLinks(dir).get(key)?.page).toBeUndefined();
 });
 
-test("a Show me asked in a PR's thread is kept across a restart, and the thread stays the PR's page", () => {
+test("a guided review and a Show me on the way together: asking for one never drops the other; another thread drops both", () => {
   const dir = mkdtempSync(join(tmpdir(), "pull-links-show-me-"));
   dirs.push(dir);
   const key = "github.com/northwind/web-app#880";
   const links = createInboxPullLinks(dir);
   links.set([key], "thr_1", { ask: "thread" });
-  links.set([key], "thr_1", { ask: "show_me" });
-  expect(createInboxPullLinks(dir).get(key)).toMatchObject({ thread_id: "thr_1", ask: "show_me", page: true });
+  links.set([key], "thr_1", { ask: "guide" }, "2026-11-18T10:00:00.000Z");
+  links.set([key], "thr_1", { ask: "show_me" }, "2026-11-18T10:01:00.000Z");
+  expect(createInboxPullLinks(dir).get(key)).toMatchObject({ thread_id: "thr_1", ask: "guide", show_me_at: "2026-11-18T10:01:00.000Z", page: true });
+  links.set([key], "thr_1", { ask: "custom" }, "2026-11-18T10:02:00.000Z");
+  expect(createInboxPullLinks(dir).get(key)).toMatchObject({ ask: "custom", show_me_at: "2026-11-18T10:01:00.000Z" });
+  links.set([key], "thr_2", { ask: "guide" });
+  expect(createInboxPullLinks(dir).get(key)?.show_me_at).toBeUndefined();
+});
+
+test("a link stored with the single `show_me` ask reads as a Show me asked at that time, with no other ask", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pull-links-show-me-old-"));
+  dirs.push(dir);
+  const key = "github.com/northwind/web-app#880";
+  mkdirSync(join(dir, "inbox"), { recursive: true });
+  writeFileSync(join(dir, "inbox", "pull-links.json"), JSON.stringify({ v: 1, links: { [key]: { thread_id: "thr_1", at: "2026-11-18T09:00:00.000Z", ask: "show_me" } } }));
+  const owner = createInboxPullLinks(dir).get(key);
+  expect(owner).toMatchObject({ thread_id: "thr_1", show_me_at: "2026-11-18T09:00:00.000Z" });
+  expect(owner?.ask).toBeUndefined();
 });

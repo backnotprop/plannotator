@@ -2165,13 +2165,15 @@ function threadFacts(store: InboxPullLinkStore, threadId: string) {
   const ids = store.threadMessageIds(threadId);
   let last: InboxMessage | null = null;
   let guide: InboxMessage | null = null;
-  for (let i = ids.length - 1; i >= 0 && (!last || !guide); i--) {
+  let showMe: InboxMessage | null = null;
+  for (let i = ids.length - 1; i >= 0 && (!last || !guide || !showMe); i--) {
     const message = store.message(ids[i]!);
     if (!message || message.author.kind !== "agent") continue;
     if (!last) last = message;
     if (!guide && message.guide) guide = message;
+    if (!showMe && message.show_me) showMe = message;
   }
-  return { last, guide };
+  return { last, guide, showMe };
 }
 
 /**
@@ -2202,7 +2204,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; page?: true }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; show_me_at?: string; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -2247,7 +2249,7 @@ export function linkInboxPulls(
   }
 
   const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
-    const { last, guide } = threadFacts(store, threadId);
+    const { last, guide, showMe } = threadFacts(store, threadId);
     const root = store.message(threadId)?.to ?? null;
     return {
       via,
@@ -2260,6 +2262,7 @@ export function linkInboxPulls(
       guide: guide?.guide
         ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true, session: guide.author.kind === "agent" ? guide.author.session : null }
         : null,
+      ...(showMe?.show_me ? { show_me_page: { message_id: showMe.id, title: showMe.show_me.title, at: showMe.created_at } } : {}),
     };
   };
 
@@ -2267,7 +2270,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.page ? { page: true as const } : {}) };
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}), ...(owner.show_me_at ? { show_me_asked_at: owner.show_me_at } : {}), ...(owner.page ? { page: true as const } : {}) };
       continue;
     }
     const started = startedThread.get(pull.key);
