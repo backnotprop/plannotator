@@ -3924,7 +3924,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onCollapseToggle={() => toggleItemCollapsed(item.id)}
         semanticNote={(() => {
           const semState = semStateRef.current.get(item.id);
-          if (!semState) return undefined;
+          if (!semState || !semanticEnabledRef.current) return undefined;
           return <SemanticFileNote state={semState} onToggle={() => showSemantic(item.id, semState.status !== 'semantic')} />;
         })()}
         />

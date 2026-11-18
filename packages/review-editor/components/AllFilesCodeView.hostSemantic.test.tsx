@@ -405,6 +405,15 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     });
   }
 
+  test.skipIf(!hasDom)('the switch turned off takes every semantic note out of the headers at once', async () => {
+    const { client } = fakeClient(moved);
+    const { read } = hostReader();
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read });
+    expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe('semantic');
+    await act(async () => configStore.set('diffSemantic', false));
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')).toBeNull();
+  });
+
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();
     await mount([changed('a.ts'), changed('b.ts')], { fetchFileContent: read });
