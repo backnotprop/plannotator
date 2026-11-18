@@ -72,6 +72,8 @@ export function openCodeSpawnEnv(login: Readonly<LaunchEnv>, dataDir: string | n
     [OPENCODE_LAUNCH_ENV]: "1",
     ...(session ? { [OPENCODE_LAUNCH_SESSION_ENV]: session } : {}),
     ...(dataDir ? { PLANNOTATOR_DATA_DIR: dataDir } : {}),
+    // OpenCode 2 checks the current name before the legacy server password.
+    OPENCODE_PASSWORD: password,
     OPENCODE_SERVER_USERNAME: "opencode",
     OPENCODE_SERVER_PASSWORD: password,
   };
