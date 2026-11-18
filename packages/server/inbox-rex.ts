@@ -182,11 +182,11 @@ export function inboxRaiseApp(pid: number, platform: NodeJS.Platform = process.p
   if (platform !== "darwin") return;
   void (async () => {
     try {
-      const ps = Bun.spawn(["/bin/ps", "-o", "comm=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      const ps = Bun.spawn(["/bin/ps", "-o", "comm=", "-p", String(pid)], { env: process.env, stdout: "pipe", stderr: "ignore", stdin: "ignore", windowsHide: true });
       const executable = (await new Response(ps.stdout).text()).trim();
       const app = /^(\/.+?\.app)\/Contents\/MacOS\//.exec(executable)?.[1];
       if (!app) return;
-      Bun.spawn(["/usr/bin/open", "-a", app], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+      Bun.spawn(["/usr/bin/open", "-a", app], { env: process.env, stdout: "ignore", stderr: "ignore", stdin: "ignore", windowsHide: true });
     } catch {
       // Shown all the same: the app went to the pane.
     }
