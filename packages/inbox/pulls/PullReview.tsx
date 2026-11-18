@@ -71,7 +71,7 @@ import { DetailsButton, DetailsTitle, PullDetails, usePullDetails } from './Pull
 import { FILE_BAND_HEIGHT, FILE_BAND_HEIGHT_PHONE, FileThread, fileThreadOpen, LineThread, ThreadMemory } from './LineThreads';
 import { fileThreadKey, placeThreads, threadKey } from './threadPlaces';
 import type { GuideFileNote, GuideLineNote } from '../guide/types';
-import { RailScopeSwitch } from './RailScope';
+import { RailScopeSwitch, focusScopeWhenLost } from './RailScope';
 import { useTreeScope } from '@plannotator/ui/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
@@ -744,6 +744,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
     if (filesSheet) closeFiles();
   };
   const pickScope = (next: 'changes' | 'all') => {
+    if (railRef.current?.contains(document.activeElement)) focusScopeWhenLost(railRef.current, next);
     setTreeScope(next);
     if (next === 'changes') setRepoOpen(null);
   };
