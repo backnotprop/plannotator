@@ -532,6 +532,14 @@ describe('the real graph', () => {
     expect([app.mode, app.tests.length, app.unit.lanes.length, app.dom.lanes.length]).toEqual(['docs', 0, 0, 0]);
   });
 
+  test("the app contract's check runs for a wire change, not for the window's or the shared UI's code", () => {
+    // Picked at all (a tree-scanning pick would run it on every pull request).
+    const picks = (path: string) => plan(g, { changes: [ch(path)], docsOnly: false }).tests.some((t) => t.path === 'tests/mobile-vectors.test.ts');
+    // A file the schema reaches only by `import type` too (scripts/mobile/schema.ts SCHEMA_SOURCES).
+    for (const wire of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts']) expect(picks(wire), wire).toBe(true);
+    for (const window of ['packages/inbox/api.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) expect(picks(window), window).toBe(false);
+  });
+
   test('the tree-scanning set includes the guards that read the whole tree', () => {
     const p = plan(g, { changes: [ch('README.md')], docsOnly: false });
     const scanners = p.tests.filter((t) => t.why === 'scanner').map((t) => t.path);
