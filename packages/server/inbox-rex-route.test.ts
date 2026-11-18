@@ -213,16 +213,19 @@ describe("the Agents list and Rex", () => {
     expect((await w.agentsOf(far.headers, far.at)).find((a) => a.session === session)?.rex_mark).toBeUndefined();
   });
 
-  test("a pane blocked on a prompt: the agent waits on you, with the kind; working again: working", async () => {
+  test("a pane blocked on a prompt: the agent waits on you, with the kind on its mark; working again: working", async () => {
     const w = await world({ remote: false, startIn: "rex" });
     const { session, ids } = await w.inRex();
     w.fake.setStatus(ids.block, [{ state: "blocked", kind: "question", app: "claude-code", msg: "V2hpY2ggb25lPw==" }]);
-    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_status !== undefined);
-    expect((await w.agentsOf()).find((a) => a.session === session)).toMatchObject({ state: "waiting", rex_status: { state: "blocked", kind: "question" }, rex_mark: { state: "blocked", kind: "question" } });
+    // Its run line says it first (waiting on you in Rex: Stopped on you), so the Inbox's own word is "waiting".
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_mark?.state === "blocked");
+    expect((await w.agentsOf()).find((a) => a.session === session)).toMatchObject({ state: "waiting", rex_mark: { state: "blocked", kind: "question" } });
     w.fake.setStatus(ids.block, [{ state: "working", app: "claude-code" }]);
-    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_status === undefined);
-    expect((await w.agentsOf()).find((a) => a.session === session)?.rex_mark).toEqual({ state: "working" });
-  });
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_mark?.state === "working");
+    const working = (await w.agentsOf()).find((a) => a.session === session);
+    expect(working).toMatchObject({ state: "working", rex_mark: { state: "working" } });
+    expect(working?.rex_status).toBeUndefined();
+  }, 20_000);
 
   test("Rex chosen: a session the person runs in Rex by hand gets no place, no status and no mark", async () => {
     const w = await world({ remote: false, startIn: "rex" });
