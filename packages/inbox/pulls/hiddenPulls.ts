@@ -13,6 +13,7 @@
 import { useSyncExternalStore } from 'react';
 import { inboxPullLabel, inboxPullRepoOfKey, type InboxPull, type InboxPullHidden, type InboxPullsAnswer, type InboxRepoHidden, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { pullInProject } from './model';
 import { inboxApi } from '../api';
 import type { InboxToastModel } from '../components/Toast';
 import { forgeName } from './labels';
@@ -262,13 +263,18 @@ export function hidLead(what: string, threads: number, pulls = 1): string {
 }
 
 /**
- * The hidden PRs and repositories Reviews' Hidden fold lists under its project filter: those of a repository that is a
- * clone of the project (`projects`, the answer's repository-to-project map; a PR's key is `host/owner/repo#n`, a
- * repository's `host/owner/repo`). No filter: all of them.
+ * The hidden PRs and repositories Reviews' Hidden fold lists under its project filter, by Reviews' own project rule
+ * (model.ts `pullInProject`): of a repository that is a clone of the project, or, for a PR from a fork, whose head
+ * repository is (`head_repo`, kept at hide time; a record from before has none). A PR's key is `host/owner/repo#n`, a
+ * repository's `host/owner/repo`. No filter: all of them.
  */
-export function hiddenInProject<T extends Pick<InboxPullHidden, 'key'>>(hidden: readonly T[], project: string | null, projects: Readonly<Record<string, readonly string[]>>): T[] {
+export function hiddenInProject<T extends { key: string; head_repo?: string }>(hidden: readonly T[], project: string | null, projects: Readonly<Record<string, readonly string[]>>): T[] {
   if (!project) return [...hidden];
-  return hidden.filter((h) => (projects[inboxPullRepoOfKey(h.key)] ?? []).includes(project));
+  return hidden.filter((h) => {
+    const repo = inboxPullRepoOfKey(h.key);
+    const slash = repo.indexOf('/');
+    return pullInProject({ host: repo.slice(0, slash), repo: repo.slice(slash + 1), head_repo: h.head_repo ?? null }, project, projects);
+  });
 }
 
 /**

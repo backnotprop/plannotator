@@ -42,6 +42,14 @@ describe("the PRs a machine keeps hidden", () => {
     expect(createInboxPullHidden(dataDir).has(KEY)).toBe(false);
   });
 
+  test("a fork's PR keeps its head repository across a restart (the Hidden fold's project rule); one without has none", () => {
+    const dataDir = scratch();
+    createInboxPullHidden(dataDir).change({ hide: [{ ...hide(8), head_repo: "dana/api" }, { ...hide(9), head_repo: null }], show: [] }, new Date("2026-11-17T10:00:00Z"));
+    const kept = createInboxPullHidden(dataDir).list();
+    expect(kept.find((h) => h.key.endsWith("#8"))?.head_repo).toBe("dana/api");
+    expect(kept.find((h) => h.key.endsWith("#9"))).not.toHaveProperty("head_repo");
+  });
+
   test("a hidden PR leaves the list; the newest hidden comes first", () => {
     const hidden = createInboxPullHidden(scratch());
     hidden.change({ hide: [hide(7)], show: [] }, new Date("2026-11-17T10:00:00Z"));

@@ -6,7 +6,7 @@
  * machine asleep, a search cut short, another account), so absence forgets nothing. New activity on it does not bring
  * it back.
  *
- *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id? } }, repos?: { [repo key]: { label, at } }, back?: { [thread id]: at }, rehid?: { [thread id]: at } }
+ *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id?, head_repo? } }, repos?: { [repo key]: { label, at } }, back?: { [thread id]: at }, rehid?: { [thread id]: at } }
  *
  * `repos`: repositories the person hid from the board (`inboxPullRepoKey`): every PR in one is left out of the board
  * and Reviews as a hidden PR is, new ones too, until the repository is shown again (a record goes only then; the newest
@@ -35,9 +35,9 @@ export const PULL_HIDDEN_KEPT = 500;
 /** One write names at most this many PRs or threads (the window sends more in parts). */
 export const PULL_HIDDEN_MAX = 200;
 
-type Kept = { title: string; url: string; at: string; thread_id?: string };
+type Kept = { title: string; url: string; at: string; thread_id?: string; head_repo?: string };
 /** A PR to hide: the list's own key, title and link, and the thread it belongs to when known. */
-export type PullToHide = { key: string; title: string; url: string; thread_id?: string | null };
+export type PullToHide = { key: string; title: string; url: string; thread_id?: string | null; head_repo?: string | null };
 
 function isKept(value: unknown): value is Kept {
   const kept = value as Partial<Kept> | null;
@@ -48,11 +48,12 @@ function isKept(value: unknown): value is Kept {
     typeof kept.url === "string" &&
     typeof kept.at === "string" &&
     Number.isFinite(Date.parse(kept.at)) &&
-    (kept.thread_id === undefined || typeof kept.thread_id === "string")
+    (kept.thread_id === undefined || typeof kept.thread_id === "string") &&
+    (kept.head_repo === undefined || typeof kept.head_repo === "string")
   );
 }
 
-const keptOf = (value: Kept): Kept => ({ title: value.title, url: value.url, at: value.at, ...(value.thread_id ? { thread_id: value.thread_id } : {}) });
+const keptOf = (value: Kept): Kept => ({ title: value.title, url: value.url, at: value.at, ...(value.thread_id ? { thread_id: value.thread_id } : {}), ...(value.head_repo ? { head_repo: value.head_repo } : {}) });
 
 /**
  * A write's body: `hide`, PRs to hide, each `{ key, title, url }` (the list's own); `threads`, Inbox threads whose open
@@ -242,9 +243,9 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
         for (const [key] of [...repos].sort((a, b) => (a[1].at < b[1].at ? -1 : 1)).slice(0, repos.size - PULL_HIDDEN_KEPT)) repos.delete(key);
       }
       for (const key of show) changed = map.delete(key) || changed;
-      for (const { key, title, url, thread_id } of hide) {
+      for (const { key, title, url, thread_id, head_repo } of hide) {
         if (map.has(key)) continue;
-        map.set(key, { title, url, at: now.toISOString(), ...(thread_id ? { thread_id } : {}) });
+        map.set(key, { title, url, at: now.toISOString(), ...(thread_id ? { thread_id } : {}), ...(head_repo ? { head_repo } : {}) });
         changed = true;
       }
       if (map.size > PULL_HIDDEN_KEPT) {

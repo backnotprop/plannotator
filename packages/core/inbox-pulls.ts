@@ -193,6 +193,8 @@ export interface InboxPullHidden {
   at: string;
   /** The Inbox thread it belongs to (its review, hand-off or the thread's own PR list), when one does: Hidden opens it. */
   thread_id?: string;
+  /** Its head repository (`owner/repo`) when it came from a fork, as the list knew it at hide time: the project rule's fork case. */
+  head_repo?: string;
 }
 
 /** A repository the person hid from their lists (every PR in it, new ones too): nothing is done on the forge. */

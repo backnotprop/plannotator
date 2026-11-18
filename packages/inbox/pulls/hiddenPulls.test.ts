@@ -156,4 +156,7 @@ test("Reviews' Hidden fold under a project filter lists that project's hidden PR
   expect(hiddenInProject(records, 'prj_web', projects).map((h) => h.key)).toEqual(['github.com/northwind/web#20']);
   expect(hiddenInProject(records, null, projects)).toHaveLength(2);
   expect(hiddenInProject([{ key: 'github.com/northwind/api' }], 'prj_web', projects)).toEqual([]);
+  // A fork-based project (its clone is the person's fork): a PR to upstream is in it by its head repository.
+  const fork = { key: 'github.com/upstream/web#31', head_repo: 'northwind/web' };
+  expect(hiddenInProject([fork, { key: 'github.com/upstream/web#32' }], 'prj_web', projects)).toEqual([fork]);
 });

@@ -5815,7 +5815,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const fromThreads = threadIds.flatMap((id) => [...(inPlay?.get(id)?.values() ?? [])]);
         const threadOf = input.hide.length > 0 ? pullThreadLookup() : () => null;
         // Hidden one by one (`atOf`): a PR in a hidden repository is hidden for itself too, so its thread can leave the list.
-        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].filter((pull, i, all) => pullHidden.atOf(pull.key) === null && all.findIndex((other) => other.key === pull.key) === i);
+        // With its head repository as the PR list knows it (a fork's): the Hidden fold's project rule.
+        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].map((pull) => ({ ...pull, head_repo: pulls.find(pull.key)?.head_repo ?? null })).filter((pull, i, all) => pullHidden.atOf(pull.key) === null && all.findIndex((other) => other.key === pull.key) === i);
         // A thread whose PRs were all hidden already (it came back, or began after they were hidden): hidden again as
         // a thread (`rehid`), newer than what brought it back. Undo (`show_threads`) takes that off; its PRs stay hidden.
         const rehid = threadIds.filter((id) => {
