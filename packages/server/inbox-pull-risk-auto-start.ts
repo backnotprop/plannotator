@@ -41,7 +41,9 @@ export function pullRiskAutoStart(deps: PullRiskAutoStartDeps): (job: PullRiskAu
     }
     if (result.replayed) deps.launch.abandon(prepared.launch, prepared.project);
     else deps.launch.begin(result.message);
-    deps.own([job.key], result.message.thread_id, job.made);
+    try {
+      deps.own([job.key], result.message.thread_id, job.made);
+    } catch {}
     return { thread_id: result.message.thread_id };
   };
 }

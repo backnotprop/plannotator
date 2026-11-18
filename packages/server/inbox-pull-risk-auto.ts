@@ -50,10 +50,12 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     }
   }
   const save = () => {
-    mkdirSync(dir, { recursive: true });
-    const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs) })}\n`, { mode: 0o600 });
-    renameSync(temp, file);
+    try {
+      mkdirSync(dir, { recursive: true });
+      const temp = `${file}.${process.pid}.tmp`;
+      writeFileSync(temp, `${JSON.stringify({ v: 1, runs: Object.fromEntries(runs) })}\n`, { mode: 0o600 });
+      renameSync(temp, file);
+    } catch {}
   };
   let running: Promise<void> | null = null;
   let stopped = false;
@@ -95,7 +97,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
     }
     const next = [...runs].find(([key, run]) => run.state === "queued" && options.pullOf(key));
     if (!next) return;
-    running = startOne(...next).finally(() => {
+    running = startOne(...next).catch(() => {}).finally(() => {
       running = null;
       pump();
     });
@@ -111,7 +113,7 @@ export function createPullRiskAuto(options: PullRiskAutoOptions): PullRiskAuto {
         runs.set(pull.key, { at: new Date(now()).toISOString(), level, made: auto.make, state: "queued", thread_id: null });
         save();
         pump();
-      })();
+      })().catch(() => {});
       checks.add(check);
       void check.finally(() => checks.delete(check));
     },

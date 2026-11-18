@@ -1,5 +1,5 @@
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxPull, InboxPullRiskAuto, InboxPullRiskLevel } from "@plannotator/core/inbox-types";
@@ -250,4 +250,44 @@ test("turned off while PRs wait: they are dropped quietly and never start", asyn
   await w.auto.idle();
   expect(w.started.map((job) => job.pull.number)).toEqual([1]);
   expect(Object.keys(w.auto.runs())).toEqual([pr(1).key]);
+});
+
+test("a run list that can't be written loses no promise: nothing is left unhandled and the start still happens", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "pull-risk-auto-"));
+  writeFileSync(join(dataDir, "inbox"), "not a folder");
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown) => unhandled.push(reason);
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    const w = world({ level: "high", make: "show_me" }, dataDir);
+    w.judged(pr(1), "high");
+    await w.auto.idle();
+    await Bun.sleep(5);
+    expect(unhandled).toEqual([]);
+    expect(w.started.map((job) => job.pull.number)).toEqual([1]);
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+});
+
+test("the thread is the start: a PR link that can't be kept leaves it started, its agent running", async () => {
+  const { pullRiskAutoStart } = await import("./inbox-pull-risk-auto-start");
+  const begun: string[] = [];
+  const start = pullRiskAutoStart({
+    store: { startPersonThread: () => ({ message: { thread_id: "thr_1" }, replayed: false }) } as never,
+    launch: {
+      enabled: () => true,
+      composeBlock: async () => ({ agents: [{ agent: "claude-code" }] }) as never,
+      prepare: async () => ({ project: { id: "prj_web" }, to: { host: "claude-code", session: "launch:1" }, launch: { id: "l1" }, trust: null }) as never,
+      abandon: () => {},
+      begin: (message: { thread_id: string }) => begun.push(message.thread_id),
+    } as never,
+    resolveProject: async () => ({}) as never,
+    projectOf: async () => "prj_web",
+    own: () => {
+      throw new Error("pull-links.json can't be written");
+    },
+  });
+  expect(await start({ key: pr(880).key, pull: pr(880), made: "guide", agent: null })).toEqual({ thread_id: "thr_1" });
+  expect(begun).toEqual(["thr_1"]);
 });
