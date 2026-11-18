@@ -115,6 +115,8 @@ async function type(el: HTMLTextAreaElement, value: string): Promise<void> {
     el.selectionStart = el.selectionEnd = value.length;
     el.dispatchEvent(new Event('input', { bubbles: true }));
   });
+  // A change syncs the mirror in the next frame, before that frame paints.
+  await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }
 
 describe('composer overlay gutter', () => {
