@@ -18,6 +18,8 @@ function scrollerOf(element: HTMLElement): HTMLElement {
 export interface PageScroll {
   /** The next moves are a jump asked for by name (a line, a comment): take them as they come. */
   expectJump(): void;
+  /** The root's next change of height keeps what follows it in place, while the root runs off the top of the viewport and ends inside it. */
+  keepWhatFollows(): void;
   undo(): void;
 }
 
@@ -87,7 +89,29 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
         });
   for (const child of Array.from(page.children)) moved?.observe(child);
 
+  let held: { bottom: number; until: number } | null = null;
+  const viewBottom = () => (page === document.documentElement || page === document.scrollingElement ? window.innerHeight : page.getBoundingClientRect().bottom);
+  const resized =
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          if (!held) return;
+          if (performance.now() > held.until) {
+            held = null;
+            return;
+          }
+          const delta = realRect().bottom - held.bottom;
+          if (delta !== 0) page.scrollTop += delta;
+          held.bottom = realRect().bottom;
+        });
+  resized?.observe(root);
+
   return {
+    keepWhatFollows: () => {
+      const rect = realRect();
+      const viewTop = pageTop();
+      held = rect.top < viewTop && rect.bottom > viewTop && rect.bottom <= viewBottom() ? { bottom: rect.bottom, until: performance.now() + JUMP_MS } : null;
+    },
     expectJump: () => {
       jumpUntil = performance.now() + JUMP_MS;
     },
@@ -95,6 +119,7 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
       page.removeEventListener('scroll', follow);
       for (const type of FORWARDED_INTENT) page.removeEventListener(type, intent);
       moved?.disconnect();
+      resized?.disconnect();
       cancelAnimationFrame(frame);
       delete (root as { scrollTop?: number }).scrollTop;
       delete (root as { scrollTo?: unknown }).scrollTo;

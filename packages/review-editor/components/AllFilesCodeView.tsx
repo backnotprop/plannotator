@@ -39,6 +39,7 @@ import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFil
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { holdPlacePastItem } from '../utils/anchorPastItem';
 import { scrollWithPage, type PageScroll } from '../utils/scrollWithPage';
 import { newLineOf } from '../utils/newLineOf';
 import { fileKind } from '@plannotator/core/file-kind';
@@ -2059,6 +2060,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (kept.length === folds.length) return fileDiff;
     return { ...fileDiff, semanticFolds: kept.length > 0 ? kept : undefined, cacheKey: `${fileDiff.cacheKey ?? itemId}:open${folds.map((fold) => (kept.includes(fold) ? '' : fold.old.start)).join('.')}` };
   });
+  const keepPlacePast = useStableCallback((itemId: string) => {
+    if (scrollsWithPageRef.current) pageScrollRef.current?.keepWhatFollows();
+    else if (scrollRef.current) holdPlacePastItem(viewerRef.current?.getInstance(), itemId, scrollRef.current);
+  });
   const showSemantic = useStableCallback((itemId: string, on: boolean) => {
     const pair = semDiffsRef.current.get(itemId);
     const handle = viewerRef.current;
@@ -2157,7 +2162,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
       semDiffsRef.current.set(itemId, { plain, semantic });
       semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`)) showSemantic(itemId, semanticEnabledRef.current);
+      if (swap && !arrowLoadedRef.current.has(`${generation}::${itemId}`)) {
+        if (semanticEnabledRef.current) keepPlacePast(itemId);
+        showSemantic(itemId, semanticEnabledRef.current);
+      }
       else refreshItem(itemId);
     });
   });
