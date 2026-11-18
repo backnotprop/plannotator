@@ -203,7 +203,10 @@ function readHunk(header: RegExpExecArray, rows: readonly string[], from: number
     if (row === undefined) return null;
     const text = row.slice(1);
     if (row.startsWith("\\")) continue;
-    if (row.startsWith(" ") && oldLeft > 0 && newLeft > 0) {
+    // Git's diff.suppressBlankEmpty omits the space on an empty context
+    // row. The final split sentinel is not a row in the patch.
+    const contextRow = row.startsWith(" ") || (row === "" && i < rows.length - 1);
+    if (contextRow && oldLeft > 0 && newLeft > 0) {
       hunk.lines.push({ kind: "context", oldLine: oldLine++, newLine: newLine++, text });
       oldLeft -= 1;
       newLeft -= 1;
