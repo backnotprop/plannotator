@@ -344,7 +344,7 @@ import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
 import { createProjectPictures, pictureSources, type ProjectPictureOptions } from "./inbox-project-pictures";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullSafeBranch, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
-import { inboxPullRefOfKey, inboxPullUrlOfKey, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
+import { INBOX_PULL_ASKS, inboxPullRefOfKey, inboxPullUrlOfKey, isInboxPullAsk, type InboxPull, type InboxPullLink } from "@plannotator/core/inbox-types";
 import { inboxThreadPullsSummary, parseInboxThreadPullRef, type InboxThreadPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { createInboxBranchService } from "./inbox-branch-service";
@@ -6357,8 +6357,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const links = linkInboxPulls((keys as string[]).map((key) => pulls.find(key)!), pullLinkStore, projectsByRepo, pullOwnersNow());
           return json({ serverSession, ok: true, owner: Object.values(links).find((link) => link.via === "owner")?.thread_id ?? null });
         }
-        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
-        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
+        if (body.ask !== undefined && !isInboxPullAsk(body.ask)) throw new InboxError("validation_error", `ask: ${INBOX_PULL_ASKS.join(", ")}.`, { field: "ask" });
+        pullOwners.set(keys as string[], threadId, { ask: body.ask ?? null, theirs });
         couplePulls(keys as string[], threadId);
         return json({ serverSession, ok: true });
       }

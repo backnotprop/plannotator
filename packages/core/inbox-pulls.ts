@@ -122,7 +122,7 @@ export interface InboxPullLink {
    * `owner` only: what the hand-off asked for first (a guided review, or the person's own curation), or `thread`: nothing
    * (a PR page's Start a thread; the thread is the PR's page from then on). Absent for an older choice.
    */
-  ask?: "guide" | "custom" | "thread";
+  ask?: InboxPullAsk;
   /**
    * `owner` only: the thread was started from the PR's page (Start a thread), so it is the PR's page; kept when that
    * thread later asks for a guided review (`ask` then `guide`). Absent otherwise.
@@ -694,6 +694,10 @@ export function inboxPullUrlsIn(text: string): string[] {
 }
 
 /** How a PR hand-off's details begin (the window's `pullHandoffMessage` opening): what tells them apart from the words. */
+export type InboxPullAsk = "guide" | "custom" | "thread" | "show_me";
+export const INBOX_PULL_ASKS: readonly InboxPullAsk[] = ["guide", "custom", "thread", "show_me"];
+export const isInboxPullAsk = (value: unknown): value is InboxPullAsk => INBOX_PULL_ASKS.includes(value as InboxPullAsk);
+
 export const PULL_DETAILS_START = "You're being asked to help me review and understand a ";
 /** Only a Start a thread's details have this step (`pullHandoffMessage`'s `thread` kind). */
 export const PULL_THREAD_STEP = "We discuss it in this thread.";

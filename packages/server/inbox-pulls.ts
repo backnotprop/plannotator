@@ -65,6 +65,7 @@ import {
   type InboxPullHost,
   inboxPullLabel,
   inboxPullSafeBranch,
+  type InboxPullAsk,
   type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
@@ -2201,7 +2202,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread"; page?: true }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: InboxPullAsk; page?: true }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;

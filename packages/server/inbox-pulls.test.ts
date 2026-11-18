@@ -974,6 +974,17 @@ describe("on", () => {
     expect(moved?.page).toBeUndefined();
   });
 
+  test("a Show me asked of a PR's thread: the `show_me` ask is kept and served, the page mark stays", async () => {
+    const w = await world({ codeReview: true });
+    const talk = await w.send("Ready.", "talk");
+    await w.pulls();
+    const key = "github.com/northwind/billing-svc#412";
+    expect((await w.own([key], talk, { ask: "thread" })).status).toBe(200);
+    expect((await w.own([key], talk, { ask: "show_me" })).status).toBe(200);
+    expect(((await (await w.pulls()).json()) as InboxPullsAnswer).links[key]).toMatchObject({ via: "owner", thread_id: talk, ask: "show_me", page: true });
+    expect((await w.own([key], talk, { ask: "show-me" })).status).toBe(422);
+  });
+
   test("validate_only says which thread a PR is already given to (another window's Start a thread), and none for a free one", async () => {
     const w = await world({ codeReview: true });
     const talk = await w.send("Ready.", "talk");

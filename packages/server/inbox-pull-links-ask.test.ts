@@ -35,3 +35,13 @@ test("the page mark: set by the `thread` ask, kept when that thread asks for a g
   links.set([key], "thr_2", { ask: "guide" });
   expect(createInboxPullLinks(dir).get(key)?.page).toBeUndefined();
 });
+
+test("a Show me asked in a PR's thread is kept across a restart, and the thread stays the PR's page", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pull-links-show-me-"));
+  dirs.push(dir);
+  const key = "github.com/northwind/web-app#880";
+  const links = createInboxPullLinks(dir);
+  links.set([key], "thr_1", { ask: "thread" });
+  links.set([key], "thr_1", { ask: "show_me" });
+  expect(createInboxPullLinks(dir).get(key)).toMatchObject({ thread_id: "thr_1", ask: "show_me", page: true });
+});

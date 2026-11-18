@@ -29,6 +29,7 @@ import type { ArchivedModel, ListModel, MachineUpdateView, MachineView, OutboxVi
 export type { ArchivedModel, ListModel, MachineUpdateView, MachineView, OutboxView, ProjectFolder, ReplyResult, ThreadModel, UpdateCheckFailing } from '@plannotator/core/inbox-wire-models';
 import type {
   InboxCardMark,
+  InboxPullAsk,
   InboxInitiative,
   InboxDecisionsModel,
   InboxGuideRef,
@@ -1807,7 +1808,7 @@ export const inboxApi = {
   pullFile: (key: string, scope: InboxPullDiffScope, path: string, pin: PatchBlobIds | { head: string }, signal?: AbortSignal, from?: string) =>
     get<InboxFileContents>(pullUrl('/pulls/file', key, `scope=${scope}${from ? `&from=${encodeURIComponent(from)}` : ''}&path=${encodeURIComponent(path)}&${'head' in pin ? `head=${pin.head}` : `old=${pin.oldId}&new=${pin.newId}`}`), signal),
   /** The person started a review thread for PRs (a stack's open layers, or the board's picks of one repository); `machine`: the thread's, whose list has them. */
-  pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom' | 'thread', machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
+  pullOwner: (keys: readonly string[], threadId: string, ask?: InboxPullAsk, machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
   /**
    * Post a review to the PR on GitHub/GitLab (`POST /api/inbox/pulls/review`): the raw answer, which the review app's

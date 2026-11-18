@@ -26,12 +26,13 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "
 import { join } from "node:path";
 import { inboxReviewLandingId, type InboxReviewLanding, type InboxReviewPosted, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
+import { isInboxPullAsk, type InboxPullAsk } from "@plannotator/core/inbox-types";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
 /** At most this many PRs keep an owner: the oldest choices go first. */
 export const INBOX_PULL_LINKS_MAX = 2_000;
 
-export type InboxPullAsk = "guide" | "custom" | "thread";
+export type { InboxPullAsk } from "@plannotator/core/inbox-types";
 
 export interface InboxPullOwner {
   thread_id: string;
@@ -87,7 +88,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
           links.set(key, {
             thread_id: owner.thread_id,
             at: owner.at,
-            ...(owner.ask === "guide" || owner.ask === "custom" || owner.ask === "thread" ? { ask: owner.ask } : {}),
+            ...(isInboxPullAsk(owner.ask) ? { ask: owner.ask } : {}),
             ...(owner.theirs === true ? { theirs: true as const } : {}),
             ...(owner.page === true ? { page: true as const } : {}),
           });
