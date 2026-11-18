@@ -424,10 +424,29 @@ describe("/plannotator-inbox", () => {
   });
 });
 
+describe("Amp Plannotator Inbox reminder", () => {
+  test("a thread's first prompt gets what the CLI prints, hidden; later prompts and a quiet CLI add nothing", async () => {
+    await withCommandHarness(async ({ event, argsPath }) => {
+      const first = await event("agent.start", { thread: { id: "T-1" }, message: "hi", id: "m-1" }, "REMINDER LINE\n");
+      expect(first).toEqual({ message: { content: "REMINDER LINE", display: false } });
+      expect(JSON.parse(readFileSync(argsPath, "utf8")).slice(-4)).toEqual(["inbox", "reminder", "--agent", "amp"]);
+      // The same thread again: nothing, and the CLI is not asked.
+      writeFileSync(argsPath, "[]");
+      expect(await event("agent.start", { thread: { id: "T-1" }, message: "more", id: "m-2" }, "REMINDER LINE\n")).toBeUndefined();
+      expect(JSON.parse(readFileSync(argsPath, "utf8"))).toEqual([]);
+      // Reminder off (the CLI prints nothing), or an older CLI without the command (exit 1): nothing.
+      expect(await event("agent.start", { thread: { id: "T-2" }, message: "hi", id: "m-3" }, "")).toBeUndefined();
+      expect(await event("agent.start", { thread: { id: "T-3" }, message: "hi", id: "m-4" }, "", { stderr: "Unknown inbox option: reminder\n", status: 1 })).toBeUndefined();
+    });
+  });
+});
+
 interface CommandHarness {
   configPath: string;
   /** The arguments the stand-in CLI got last (JSON). */
   argsPath: string;
+  /** Fire a plugin event; the stand-in CLI prints `stdout`. Answers the handler's result. */
+  event: (name: string, event: unknown, stdout: string, options?: { stderr?: string; status?: number }) => Promise<unknown>;
   run: (
     command: string,
     stdout: string,
@@ -477,16 +496,26 @@ process.exit(result.status ?? 0);
 
     const { default: plugin } = await import(pathToFileURL(pluginPath).href);
     const commands = new Map<string, (ctx: PluginCommandContext) => Promise<void>>();
+    const events = new Map<string, (event: unknown) => Promise<unknown>>();
     plugin({
       logger: { log() {} },
       registerCommand(name: string, _options: unknown, handler: (ctx: PluginCommandContext) => Promise<void>) {
         commands.set(name, handler);
+      },
+      on(event: string, handler: (event: unknown) => Promise<unknown>) {
+        events.set(event, handler);
       },
     } as unknown as PluginAPI);
 
     await run({
       configPath: join(dataDir, "config.json"),
       argsPath,
+      async event(name, event, stdout, options = {}) {
+        writeFileSync(resultPath, JSON.stringify({ stdout, stderr: options.stderr, status: options.status }));
+        const handler = events.get(name);
+        if (!handler) throw new Error(`Event was not handled: ${name}`);
+        return handler(event);
+      },
       async run(command, stdout, options = {}) {
         writeFileSync(resultPath, JSON.stringify({ stdout, stderr: options.stderr, status: options.status }));
         const appended: Array<{ type: string; content: string }> = [];

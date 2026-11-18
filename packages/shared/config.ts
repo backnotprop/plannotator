@@ -95,7 +95,7 @@ export interface PromptConfig {
   inbox?: {
     reminder?: string;
     rules?: string;
-    runtimes?: Partial<Record<InboxToolHost, { reminder?: string; rules?: string }>>;
+    runtimes?: Partial<Record<InboxReminderHost, { reminder?: string; rules?: string }>>;
   };
 }
 
@@ -384,7 +384,7 @@ export interface PlannotatorConfig {
    * var of its own. Read once when a session starts. Unset (or a host left
    * out): on wherever the tool is on.
    */
-  inboxReminder?: boolean | Partial<Record<InboxToolHost, boolean>>;
+  inboxReminder?: boolean | Partial<Record<InboxReminderHost, boolean>>;
   /**
    * The Plannotator Inbox's debug log (`inbox/debug.log` in the data dir), as
    * `PLANNOTATOR_INBOX_DEBUG=1`. Config-only, read when the Inbox starts.
@@ -751,7 +751,7 @@ export interface PlannotatorConfig {
      */
     asked?: string[];
     /** Notes written by themselves that the window has not said yet (`{ agent, path }`, path with `~`); cleared when said. */
-    auto?: { agent: string; path: string }[];
+    auto?: { agent: string; path: string; hook_review?: true }[];
   };
   /**
    * The Plannotator Inbox's phone surface: pairing, the device door
@@ -2174,12 +2174,32 @@ export const INBOX_TOOL_DEFAULTS: Readonly<Record<InboxToolHost, boolean>> = {
 export const INBOX_TOOL_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode", "dsh", "cline", "openclaw", "hermes"];
 
 /**
- * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT) with
- * the tool. DeepSeek Harness does not yet: it has no hidden-message slot like
- * Pi's, and a context message there shows as the person's own words. Nor does
- * Cline (its plugin has no hidden-message slot either).
+ * The agents that reach the Inbox through its MCP server (`plannotator-inbox`)
+ * and get the reminder from a hook of their own, which runs `plannotator inbox
+ * reminder --agent <id>` at session start and after a compaction where the
+ * agent has such an event (packages/shared/inbox/reminder-hook.ts): Qwen Code
+ * (our extension's hooks.json), Gemini CLI (`~/.gemini/settings.json`), Amp (our
+ * plugin, a thread's first prompt), Kiro (`~/.kiro/hooks/plannotator-inbox.json`)
+ * and Codex (`$CODEX_HOME/hooks.json`). Their "tool" is the MCP connection.
  */
-export const INBOX_REMINDER_HOSTS: readonly InboxToolHost[] = ["claude-code", "pi", "opencode"];
+export type InboxHookReminderHost = "qwen" | "gemini" | "amp" | "kiro" | "codex";
+export const INBOX_HOOK_REMINDER_HOSTS: readonly InboxHookReminderHost[] = ["qwen", "gemini", "amp", "kiro", "codex"];
+
+/** A host that can give a session the Inbox reminder: one that registers the tool, or one with a reminder hook. */
+export type InboxReminderHost = InboxToolHost | InboxHookReminderHost;
+
+/** Whether `host` gets its reminder from a hook (INBOX_HOOK_REMINDER_HOSTS). */
+export function isInboxHookReminderHost(host: string): host is InboxHookReminderHost {
+  return (INBOX_HOOK_REMINDER_HOSTS as readonly string[]).includes(host);
+}
+
+/**
+ * The hosts that give a session the Inbox reminder (INBOX_REMINDER_TEXT): the
+ * three that register the tool, then the hook hosts. DeepSeek Harness does not
+ * yet: a context message there shows as the person's own words. Nor does Cline
+ * (its plugin has no hidden-message slot either).
+ */
+export const INBOX_REMINDER_HOSTS: readonly InboxReminderHost[] = ["claude-code", "pi", "opencode", ...INBOX_HOOK_REMINDER_HOSTS];
 
 /** The PLANNOTATOR_INBOX_TOOL override, or undefined when it does not decide. */
 export function parseInboxToolEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
@@ -2237,7 +2257,7 @@ export function resolveInboxTool(
 }
 
 /** config.inboxReminder for one host: the shared boolean, the host's own entry, or undefined. */
-export function configuredInboxReminder(config: PlannotatorConfig, host: InboxToolHost): boolean | undefined {
+export function configuredInboxReminder(config: PlannotatorConfig, host: InboxReminderHost): boolean | undefined {
   const value = config.inboxReminder;
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return parseConfigBoolean((value as Record<string, unknown>)[host]);
@@ -2250,14 +2270,18 @@ export function configuredInboxReminder(config: PlannotatorConfig, host: InboxTo
  * (INBOX_REMINDER_TEXT): only where that session gets the Inbox tool
  * (resolveInboxTool), then config.inboxReminder (shared or per host), on by
  * default. No env var of its own: PLANNOTATOR_INBOX_TOOL decides it through
- * the tool. Hosts call it once per session start, with the tool.
+ * the tool. Hosts call it once per session start, with the tool. A hook host
+ * (INBOX_HOOK_REMINDER_HOSTS) has no tool switch: this is its switch alone, and
+ * its caller checks that the agent reaches the Inbox (its MCP connection).
  */
 export function resolveInboxReminder(
   config: PlannotatorConfig,
   env: NodeJS.ProcessEnv,
-  host: InboxToolHost,
+  host: InboxReminderHost,
 ): boolean {
-  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
+  if (!INBOX_REMINDER_HOSTS.includes(host)) return false;
+  if (!isInboxHookReminderHost(host) && !resolveInboxTool(config, env, host)) return false;
+  return configuredInboxReminder(config, host) ?? true;
 }
 
 /**
@@ -2270,7 +2294,7 @@ export function resolveInboxReminder(
  */
 export function resolveInboxReminderText(
   config: PlannotatorConfig,
-  host: InboxToolHost,
+  host: InboxReminderHost,
   options: { wakes?: boolean; toolName?: string } = {},
 ): string {
   return inboxReminderFor(inboxReminderCustomText(config, host), options.toolName ?? INBOX_TOOL_NAME, { wakes: options.wakes, rules: inboxReminderRulesText(config, host) });

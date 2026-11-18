@@ -1418,7 +1418,7 @@ function writableFile(target: string, mode: number): boolean {
 }
 
 /** The smallest middle span that differs between two texts. */
-function textChange(original: string, next: string): JsonEntryUndo {
+export function textChange(original: string, next: string): JsonEntryUndo {
   let start = 0;
   while (start < original.length && start < next.length && original[start] === next[start]) start++;
   let end = 0;

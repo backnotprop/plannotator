@@ -44,6 +44,7 @@ import { takeDownInboxTailscale } from "./inbox-tailscale";
 import { inboxLoginItem } from "./inbox-scheduled-login";
 import { agentHomeAllowed, forgetInboxAgents, planInboxAgentRemoval, type AgentEnvironment } from "./inbox-agents";
 import { qwenTrustRemoval, type QwenRevokeResult } from "./inbox-qwen-trust";
+import { planInboxReminderHookRemoval } from "./inbox-reminder-hooks";
 import { hermesPluginInstalled } from "./inbox-hermes";
 import { HERMES_PLUGIN_REMOVE } from "@plannotator/core/inbox-hermes";
 import { planInboxNoteRemoval } from "./inbox-agent-notes";
@@ -507,6 +508,9 @@ export async function runPlannotatorUninstall(
   const paths = resolveOwnedPaths(environment);
 
   await removeHostPlugins(request, environment, paths, state);
+  // Before the host hooks: the Inbox reminder hooks go losslessly, so Codex's hooks.json is back to the installer's
+  // shape (byte for byte) when its Stop hook cleanup reads it, and can go once that leaves it empty.
+  removeInboxReminderHooks(request, environment, state);
   removeHostConfigEntries(request, environment, paths, state);
   // Plain uninstall too: with the binary gone, an agent's plannotator-inbox
   // entry would fail to start at every launch.
@@ -692,6 +696,23 @@ async function removeInboxAgentConnections(
   // A plain uninstall keeps the data: forget these records so a reinstall connects them again. An agent with an
   // entry left (one of two a move left could not go) keeps its whole record, so the next uninstall tries again.
   if (!request.purge) forgetInboxAgents(state.dataDir, removed.filter((id) => !kept.has(id)));
+}
+
+/**
+ * The Inbox reminder hooks Plannotator wrote (inbox-reminder-hooks.ts): Gemini CLI's and Codex's SessionStart entry,
+ * Kiro's file. Only ours, the file given back byte for byte while our entry is untouched. A failure is a warning: the
+ * hook check after the cleanup names any that is left.
+ */
+function removeInboxReminderHooks(request: UninstallRequest, environment: UninstallEnvironment, state: MutableUninstallResult): void {
+  for (const item of planInboxReminderHookRemoval(state.dataDir, agentEnvironmentOf(environment))) {
+    if (request.dryRun) {
+      state.planned.push(item.describe);
+      continue;
+    }
+    const problem = item.apply();
+    if (problem) state.warnings.push(`Could not remove Plannotator's Inbox reminder hook: ${problem}.`);
+    else state.removed.push(item.describe);
+  }
 }
 
 function formatUninstallRetryCommand(request: UninstallRequest): string {
@@ -979,7 +1000,9 @@ function removeHostConfigEntries(
 
   cleanupHooksJson(
     join(paths.codexDir, "hooks.json"),
-    [{ event: "Stop", suffix: "" }],
+    // The Inbox reminder hook went first (removeInboxReminderHooks); listed here so a dry run counts it as removed,
+    // and so one that lossless removal had to leave (the person's hook in its entry) goes here, theirs kept.
+    [{ event: "Stop", suffix: "" }, { event: "SessionStart", suffix: "inbox reminder --agent codex" }],
     paths.binaryPaths,
     environment.platform,
     {
@@ -1735,8 +1758,9 @@ function cleanupGeminiSettings(
     state,
   );
   if (!parsed) return;
+  // The Inbox reminder hook is removed before this (removeInboxReminderHooks): a dry run counts it as removed.
   if (request.dryRun) reportRemainingHookReferences("Gemini CLI", parsed, filePath, binaryPaths, platform, false, request, state,
-    [{ event: "BeforeTool", matcher: "exit_plan_mode", suffix: "" }]);
+    [{ event: "BeforeTool", matcher: "exit_plan_mode", suffix: "" }, { event: "SessionStart", suffix: "inbox reminder --agent gemini" }]);
   const wasInstallerTemplate = isGeminiInstallerTemplate(
     parsed,
     binaryPaths,

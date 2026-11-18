@@ -89,7 +89,7 @@ function overCap(value: unknown): number | null {
 export function inboxPromptsModel(
   config: PlannotatorConfig,
   on: Record<InboxPromptHost, boolean>,
-  wakes: Record<InboxPromptHost, boolean> = { "claude-code": true, pi: true, opencode: true },
+  wakes: Record<InboxPromptHost, boolean> = { "claude-code": true, pi: true, opencode: true, qwen: false, gemini: false, amp: false, kiro: false, codex: false },
 ): InboxPromptsSettings {
   const inbox = record(record(config.prompts)?.inbox);
   const prompts = record(config.prompts);
@@ -167,10 +167,10 @@ export function parseInboxPromptsChange(input: unknown): InboxPromptsChange {
   if ("rules" in inbox!) change.inbox.rules = text(inbox!.rules, "prompts.inbox.rules");
   if ("runtimes" in inbox!) {
     const runtimes = record(inbox!.runtimes);
-    if (!runtimes || Object.keys(runtimes).length === 0) fail("prompts.inbox.runtimes: { <claude-code|pi|opencode>: { reminder } }.", "prompts.inbox.runtimes");
+    if (!runtimes || Object.keys(runtimes).length === 0) fail(`prompts.inbox.runtimes: { <${INBOX_PROMPT_HOSTS.join("|")}>: { reminder } }.`, "prompts.inbox.runtimes");
     change.inbox.runtimes = {};
     for (const [host, entry] of Object.entries(runtimes!)) {
-      if (!(INBOX_PROMPT_HOSTS as readonly string[]).includes(host)) fail(`prompts.inbox.runtimes.${host}: not an agent (claude-code, pi, opencode).`, `prompts.inbox.runtimes.${host}`);
+      if (!(INBOX_PROMPT_HOSTS as readonly string[]).includes(host)) fail(`prompts.inbox.runtimes.${host}: not an agent (${INBOX_PROMPT_HOSTS.join(", ")}).`, `prompts.inbox.runtimes.${host}`);
       const fields = record(entry);
       const keys = fields ? Object.keys(fields) : [];
       if (keys.length === 0 || keys.some((key) => key !== "reminder" && key !== "rules")) {

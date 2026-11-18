@@ -59,7 +59,7 @@ export function ConnectLine({
                   </Fragment>
                 ))}
                 {added.after}
-                <span className="ib-sr"> ({added.files})</span>.
+                <span className="ib-sr"> ({added.files})</span>.{added.hint && <span data-connect-hook-hint=""> {added.hint}</span>}
               </span>
             </p>
           )}

@@ -2,7 +2,8 @@ import { basename, isAbsolute } from "node:path";
 import { simpleShellCommandWords } from "@plannotator/shared/plannotator-tool";
 import { parseT3HookCommand } from "@plannotator/shared/t3-hook-command";
 
-type HookSuffix = "" | "improve-context" | "t3-hook";
+/** The arguments after the binary, as words joined by one space (the Inbox reminder hooks take four: inbox-reminder-hooks.ts). */
+type HookSuffix = "" | "improve-context" | "t3-hook" | "inbox reminder --agent codex" | "inbox reminder --agent gemini";
 export type ManagedHookSpec = { readonly event: string; readonly matcher?: string; readonly suffix: HookSuffix };
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -82,7 +83,7 @@ export function isManagedHook(
   }
   return suffix === ""
     ? remaining.length === 0
-    : remaining.length === 1 && remaining[0] === suffix;
+    : remaining.length > 0 && remaining.join(" ") === suffix;
 }
 
 /** Split only outside quotes/comments. These segments are inspected, never executed or auto-removed. */

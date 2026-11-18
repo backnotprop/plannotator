@@ -254,6 +254,23 @@ test("the reminder switch per host, and the tool switch for Pi's extension", asy
   expect(loadConfig()).toMatchObject({ inboxTool: { pi: true }, inboxReminder: { pi: false } });
 });
 
+test("Codex's reminder comes from its hook: a switch once it reaches the Inbox, the hook written then; its switch saved; reach off takes the hook out", async () => {
+  fake.install("codex");
+  const hooks = join(fake.env.CODEX_HOME!, "hooks.json");
+  const s = await start();
+  expect(row(await get(s), "codex").reminder).toBeNull();
+  await post(s, "/api/inbox/agents", { agent: "codex", reach: true });
+  // The model waits for the pass that writes the hook.
+  expect(row(await get(s), "codex").reminder).toEqual({ on: true, locked: false, needs_tool: false });
+  expect(readFileSync(hooks, "utf8")).toContain("inbox reminder --agent codex");
+  const model = (await (await post(s, "/api/inbox/agents", { agent: "codex", reminder: false })).json()) as Model;
+  expect(row(model, "codex").reminder?.on).toBe(false);
+  expect(loadConfig().inboxReminder).toEqual({ codex: false });
+  await post(s, "/api/inbox/agents", { agent: "codex", reach: false });
+  // Plannotator created hooks.json for it: gone with our entry.
+  expect(existsSync(hooks)).toBe(false);
+});
+
 // DSH has no slot for a hidden reminder yet (a context message would read as the person's own words).
 test("DeepSeek Harness: the tool switch turns its plugin's tool on, and it has no reminder switch", async () => {
   mkdirSync(join(fake.home, ".dsh", "profiles", "web"), { recursive: true });
@@ -417,7 +434,7 @@ test("PLANNOTATOR_INBOX_NOTES=0: no offer, no row for an agent without a note, a
 
 // The approved "inbox-agent-note-dialog" design: the question is asked once PER AGENT. Since
 // "inbox-agent-note-auto" the note is written by itself for the agents proven to load it.
-type Asked = Model & { notes_asked: string[]; notes_auto?: { agent: string; path: string }[]; results?: { ok: boolean; agent: string }[] };
+type Asked = Model & { notes_asked: string[]; notes_auto?: { agent: string; path: string; hook_review?: true }[]; results?: { ok: boolean; agent: string }[] };
 
 test("the run that connects an agent writes its note by itself, once; the window's line lists it until seen; an agent that connects later gets its own", async () => {
   fake.install("codex");
@@ -427,7 +444,9 @@ test("the run that connects an agent writes its note by itself, once; the window
   expect(row(first, "codex").note?.state).toBe("added");
   expect(readFileSync(join(fake.home, ".codex", "AGENTS.md"), "utf8")).toContain(INBOX_NOTE_START);
   expect(first.notes_asked).toEqual(["codex"]);
-  expect(first.notes_auto).toEqual([{ agent: "codex", path: "~/.codex/AGENTS.md" }]);
+  // The same pass added Codex's reminder hook, so the line also says once to approve it in /hooks.
+  expect(readFileSync(join(fake.env.CODEX_HOME!, "hooks.json"), "utf8")).toContain("inbox reminder --agent codex");
+  expect(first.notes_auto).toEqual([{ agent: "codex", path: "~/.codex/AGENTS.md", hook_review: true }]);
   expect(first.last_report?.seen).toBe(false);
   // The line said it: the run's news and the notes, both seen.
   const seen = (await (await post(s, "/api/inbox/agents/seen", {})).json()) as Asked;

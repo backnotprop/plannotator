@@ -376,6 +376,166 @@ export function setJsonMember(text: string, path: readonly string[], key: string
   return { ok: true, text: prep.bom + out, changed: true };
 }
 
+interface ArraySpan {
+  open: number;
+  /** The closing bracket. */
+  close: number;
+  items: { start: number; end: number }[];
+}
+
+function scanArray(t: string, i: number): ArraySpan {
+  if (t[i] !== "[") throw new ScanError("expected a list");
+  const open = i;
+  i = skipWs(t, i + 1);
+  const items: ArraySpan["items"] = [];
+  if (t[i] === "]") return { open, close: i, items };
+  for (;;) {
+    const start = i;
+    const end = scanValue(t, i);
+    items.push({ start, end });
+    i = skipWs(t, end);
+    if (t[i] === ",") {
+      i = skipWs(t, i + 1);
+      continue;
+    }
+    if (t[i] === "]") return { open, close: i, items };
+    throw new ScanError("expected a comma or a closing bracket");
+  }
+}
+
+/** The list `key` at `path`: its span, null when the member is missing, or why it can't be edited. */
+function findArray(t: string, start: number, path: readonly string[], key: string): { span: ArraySpan } | { missing: true } | { error: string } {
+  const found = walk(t, start, path);
+  if ("error" in found) return found;
+  if (found.missingAt !== null) return { missing: true };
+  const named = found.chain[found.chain.length - 1]!.members.filter((m) => m.key === key);
+  if (named.length > 1) return { error: `it has "${key}" twice` };
+  if (named.length === 0) return { missing: true };
+  if (t[named[0]!.valueStart] !== "[") return { error: `its "${key}" is not a list` };
+  return { span: scanArray(t, named[0]!.valueStart) };
+}
+
+/** The value at `path` + `key` in a parsed object (undefined when a step is missing). */
+function valueAt(root: unknown, path: readonly string[], key: string): unknown {
+  let node: unknown = root;
+  for (const name of [...path, key]) {
+    if (!node || typeof node !== "object" || Array.isArray(node)) return undefined;
+    node = (node as Record<string, unknown>)[name];
+  }
+  return node;
+}
+
+/**
+ * `text` with `item` added at the end of the list `key` at `path`, touching no
+ * other byte: in the list's own style (one per line, or on one line), after a
+ * comment that ends the last item's line. A missing list is added as
+ * `[item]` (`addJsonMember`). Refused when the member is not a list, or when
+ * the edit would change anything else.
+ */
+export function appendJsonArrayItem(text: string, path: readonly string[], key: string, item: unknown, options: JsonEditOptions = {}): JsonEdit {
+  const comments = options.comments === true;
+  if (!text.trim()) return addJsonMember(text, path, key, [item], options);
+  const prep = prepare(text, comments);
+  if ("error" in prep) return { ok: false, reason: prep.error };
+  let out: string;
+  try {
+    const found = findArray(prep.body, prep.start, path, key);
+    if ("error" in found) return { ok: false, reason: found.error };
+    if ("missing" in found) return addJsonMember(text, path, key, [item], options);
+    const t = prep.body;
+    const { span } = found;
+    const unit = indentUnit(t);
+    const nl = newlineOf(t);
+    if (span.items.length === 0) {
+      const interior = t.slice(span.open + 1, span.close);
+      if (!blank(interior)) return { ok: false, reason: `its "${key}" list holds only a comment` };
+      const pretty = t.includes("\n");
+      const outer = lineIndent(t, span.open);
+      out = pretty
+        ? `${t.slice(0, span.open + 1)}${nl}${outer}${unit}${render(item, true, unit, outer + unit, nl)}${nl}${outer}${t.slice(span.close)}`
+        : `${t.slice(0, span.open + 1)}${JSON.stringify(item)}${t.slice(span.close)}`;
+    } else {
+      const first = span.items[0]!;
+      const last = span.items[span.items.length - 1]!;
+      const sepText = t.slice(span.open + 1, first.start);
+      let sep = blank(sepText) ? sepText : sepText.includes("\n") ? `${nl}${lineIndent(t, first.start)}` : " ";
+      if (span.items.length > 1) {
+        // The gap between the last two items, past their comma, is the list's own separator.
+        const between = t.slice(span.items[span.items.length - 2]!.end, last.start).replace(/^\s*,/, "");
+        if (blank(between)) sep = between;
+      }
+      const after = skipLineTrailer(t, last.end);
+      const trailer = t.slice(last.end, after);
+      if (trailer.includes("//") && !sep.includes("\n")) sep = `${nl}${lineIndent(t, last.start)}`;
+      const pretty = sep.includes("\n");
+      const indent = pretty ? sep.slice(sep.lastIndexOf("\n") + 1) : "";
+      const rendered = render(item, pretty, unit, indent, nl);
+      out = blank(trailer)
+        ? `${t.slice(0, last.end)},${sep}${rendered}${t.slice(last.end)}`
+        : `${t.slice(0, last.end)},${trailer}${sep}${rendered}${t.slice(after)}`;
+    }
+  } catch (error) {
+    return { ok: false, reason: scanFailure(error, comments) };
+  }
+  const before = parseText(prep.body, comments);
+  (valueAt(before, path, key) as unknown[]).push(item);
+  let after: unknown;
+  try {
+    after = parseText(out, comments);
+  } catch {
+    return { ok: false, reason: comments ? "the edit would not stay valid JSON" : "the edit would not stay plain JSON" };
+  }
+  if (!sameJson(after, before)) return { ok: false, reason: "the edit would change more than one entry" };
+  return { ok: true, text: prep.bom + out, changed: true };
+}
+
+/**
+ * `text` without the item at `index` of the list `key` at `path`, touching no
+ * other byte: the item and one comma go, a comment beside it stays. Unchanged
+ * when the list or the item is not there.
+ */
+export function removeJsonArrayItem(text: string, path: readonly string[], key: string, index: number, options: JsonEditOptions = {}): JsonEdit {
+  const comments = options.comments === true;
+  if (!text.trim()) return { ok: true, text, changed: false };
+  const prep = prepare(text, comments);
+  if ("error" in prep) return { ok: false, reason: prep.error };
+  let out: string;
+  try {
+    const found = findArray(prep.body, prep.start, path, key);
+    if ("error" in found) return { ok: false, reason: found.error };
+    if ("missing" in found || index < 0 || index >= found.span.items.length) return { ok: true, text, changed: false };
+    const t = prep.body;
+    const { items, open, close } = found.span;
+    const item = items[index]!;
+    const [from, to] = items.length === 1 ? [open + 1, close] : index > 0 ? [items[index - 1]!.end, item.end] : [item.start, items[1]!.start];
+    const beside = t.slice(from, item.start) + t.slice(item.end, Math.max(item.end, to));
+    if (/^[\s,]*$/.test(beside)) out = `${t.slice(0, from)}${t.slice(to)}`;
+    else {
+      const start = cutStart(t, item.start);
+      if (items.length === 1) out = `${t.slice(0, start)}${t.slice(item.end)}`;
+      else if (index > 0) {
+        const comma = commaAfter(t, items[index - 1]!.end);
+        out = `${t.slice(0, comma)}${t.slice(comma + 1, start)}${t.slice(item.end)}`;
+      } else {
+        const comma = commaAfter(t, item.end);
+        out = `${t.slice(0, start)}${t.slice(item.end, comma)}${t.slice(comma + 1)}`;
+      }
+    }
+  } catch (error) {
+    return { ok: false, reason: scanFailure(error, comments) };
+  }
+  const before = parseText(prep.body, comments);
+  (valueAt(before, path, key) as unknown[]).splice(index, 1);
+  let after: unknown;
+  try {
+    after = parseText(out, comments);
+  } catch {
+    return { ok: false, reason: comments ? "the edit would not stay valid JSON" : "the edit would not stay plain JSON" };
+  }
+  if (!sameJson(after, before)) return { ok: false, reason: "the edit would change more than one entry" };
+  return { ok: true, text: prep.bom + out, changed: true };
+}
+
 /** `text` without `key` at `path`; unchanged when it is not there. */
 export function removeJsonMember(text: string, path: readonly string[], key: string, options: JsonEditOptions = {}): JsonEdit {
   const comments = options.comments === true;

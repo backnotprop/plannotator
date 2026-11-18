@@ -4,7 +4,7 @@
  * safely is refused.
  */
 import { describe, expect, test } from "bun:test";
-import { addJsonMember, removeJsonMember } from "./json-edit";
+import { addJsonMember, appendJsonArrayItem, removeJsonArrayItem, removeJsonMember } from "./json-edit";
 
 const V = { command: "/p", args: ["inbox", "mcp"] };
 
@@ -85,5 +85,40 @@ describe("JSON with comments (Qwen Code's settings.json)", () => {
     expect(addJsonMember('{"a": 1,}', ["m"], "k", 1, C)).toEqual({ ok: false, reason: "it is not valid JSON" });
     expect(addJsonMember('{"a": 1 /* x', ["m"], "k", 1, C)).toEqual({ ok: false, reason: "it is not valid JSON" });
     expect(addJsonMember("{ // x\n}", ["m"], "k", 1)).toEqual({ ok: false, reason: "it is not plain JSON" });
+  });
+});
+
+describe("a list's items (the Inbox reminder hooks: inbox-reminder-hooks.ts)", () => {
+  const P = ["hooks"];
+  const K = "SessionStart";
+  const ITEM = { a: 1 };
+  const roundTrip = (before: string, options = {}) => {
+    const added = appendJsonArrayItem(before, P, K, ITEM, options);
+    if (!added.ok) throw new Error(added.reason);
+    const count = (JSON.parse(added.text.replace(/\/\/.*$/gm, "")) as { hooks: { SessionStart: unknown[] } }).hooks.SessionStart.length;
+    const removed = removeJsonArrayItem(added.text, P, K, count - 1, options);
+    expect(removed).toEqual({ ok: true, changed: true, text: before });
+    return added.text;
+  };
+
+  test("an item goes at the end in the list's own style, nothing else changes, and taking it out gives the file back", () => {
+    expect(roundTrip('{\n  "hooks": {\n    "SessionStart": [\n      { "hooks": [] }\n    ]\n  }\n}\n')).toBe('{\n  "hooks": {\n    "SessionStart": [\n      { "hooks": [] },\n      {\n        "a": 1\n      }\n    ]\n  }\n}\n');
+    expect(roundTrip('{"hooks":{"SessionStart":[{"x":1}]}}')).toBe('{"hooks":{"SessionStart":[{"x":1},{"a":1}]}}');
+    // A comment ending the last item's line stays on that item's line.
+    expect(roundTrip('{"hooks": {"SessionStart": [\n  {"x": 1} // mine\n]}}', { comments: true })).toBe('{"hooks": {"SessionStart": [\n  {"x": 1}, // mine\n  {\n    "a": 1\n  }\n]}}');
+  });
+
+  test("a missing list is added holding the item; an empty one gets it; the first item out leaves the rest as they were", () => {
+    expect(appendJsonArrayItem('{\n  "model": "x"\n}\n', P, K, ITEM)).toEqual({ ok: true, changed: true, text: '{\n  "model": "x",\n  "hooks": {\n    "SessionStart": [\n      {\n        "a": 1\n      }\n    ]\n  }\n}\n' });
+    expect(appendJsonArrayItem("", P, K, ITEM)).toMatchObject({ ok: true, changed: true });
+    expect(appendJsonArrayItem('{\n  "hooks": {\n    "SessionStart": []\n  }\n}\n', P, K, ITEM)).toEqual({ ok: true, changed: true, text: '{\n  "hooks": {\n    "SessionStart": [\n      {\n        "a": 1\n      }\n    ]\n  }\n}\n' });
+    expect(removeJsonArrayItem('{"hooks":{"SessionStart":[{"x":1},{"a":1}]}}', P, K, 0)).toEqual({ ok: true, changed: true, text: '{"hooks":{"SessionStart":[{"a":1}]}}' });
+  });
+
+  test("refused or left alone: a member that is not a list, an item that is not there, a file that is not JSON", () => {
+    expect(appendJsonArrayItem('{"hooks":{"SessionStart":{}}}', P, K, ITEM)).toEqual({ ok: false, reason: 'its "SessionStart" is not a list' });
+    expect(removeJsonArrayItem('{"hooks":{"SessionStart":[{"x":1}]}}', P, K, 3)).toEqual({ ok: true, changed: false, text: '{"hooks":{"SessionStart":[{"x":1}]}}' });
+    expect(removeJsonArrayItem('{"model":"x"}', P, K, 0)).toEqual({ ok: true, changed: false, text: '{"model":"x"}' });
+    expect(appendJsonArrayItem('{"hooks": {"SessionStart": [] // x\n}}', P, K, ITEM)).toEqual({ ok: false, reason: "it is not plain JSON" });
   });
 });

@@ -114,8 +114,10 @@ import {
 } from "@plannotator/core/inbox-types";
 import { checkServerSession, createServerSessionNonce, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import {
+  INBOX_HOOK_REMINDER_HOSTS,
   INBOX_REMINDER_HOSTS,
   INBOX_TOOL_HOSTS,
+  isInboxHookReminderHost,
   cookieHostState,
   inboxChapterDiagramsOn,
   loadConfig,
@@ -134,10 +136,12 @@ import {
   inboxToolWith,
   configuredInboxReminder,
   resolveInboxReminder,
+  type InboxReminderHost,
   type InboxToolHost,
   type PlannotatorConfig,
   type ThemeConfig,
 } from "@plannotator/shared/config";
+import { inboxAgentReachedByRecord, inboxHookReminderWakes } from "@plannotator/shared/inbox/reminder-hook";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { decodePathSegment } from "@plannotator/shared/path-segment";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
@@ -402,7 +406,8 @@ import {
   writeInboxAgents,
   type AgentEnvironment,
 } from "./inbox-agents";
-import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
+import { addInboxNote, autoAddInboxNotes, INBOX_NOTE_BLOCK, inboxNotesDisabled, markAutoNotesSaid, markCodexHookReview, markNotesAsked, noteCandidateIds, notesAsked, noteStatus, refreshInboxNotes, removeInboxNote, unsaidAutoNotes } from "./inbox-agent-notes";
+import { removeRecordedInboxReminderHook, syncInboxReminderHooks } from "./inbox-reminder-hooks";
 import {
   displayInboxSubject,
   INBOX_AGENT_IDS,
@@ -2455,6 +2460,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       } catch {
         // Tried again at the next start or run.
       }
+      // The reminder hooks of the agents reached through MCP that need one written (Gemini CLI, Kiro, Codex;
+      // inbox-reminder-hooks.ts), after the notes: a Codex hook added with a Codex note not said yet is said with it.
+      try {
+        if (syncInboxReminderHooks({ dataDir, selfCommand, environment: agentEnvironment }).includes("codex")) markCodexHookReview();
+      } catch {
+        // Tried again at the next start or run.
+      }
     });
     return notesPass;
   };
@@ -2499,10 +2511,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               ...(modOff ? { mod_off: true } : {}),
             }
           : null;
-        // No tool (the inboxTool switch, or Claude Code's mod off): no reminder.
-        const reminder = host && INBOX_REMINDER_HOSTS.includes(host)
-          ? { on: !modOff && resolveInboxReminder(config, env, host), locked: toolEnv !== undefined, needs_tool: modOff || !resolveInboxTool(config, env, host) }
-          : null;
+        // No tool (the inboxTool switch, or Claude Code's mod off): no reminder. An agent whose reminder comes from a hook
+        // (INBOX_HOOK_REMINDER_HOSTS) has its switch once it reaches the Inbox through MCP (its record, as the hook's
+        // command reads it): before that there is nothing to remind it of. PLANNOTATOR_INBOX_TOOL does not decide it.
+        const reminder = isInboxHookReminderHost(id)
+          ? reach.on && inboxAgentReachedByRecord(dataDir, id)
+            ? { on: resolveInboxReminder(config, env, id), locked: false, needs_tool: false }
+            : null
+          : host && INBOX_REMINDER_HOSTS.includes(host)
+            ? { on: !modOff && resolveInboxReminder(config, env, host), locked: toolEnv !== undefined, needs_tool: modOff || !resolveInboxTool(config, env, host) }
+            : null;
         // With PLANNOTATOR_INBOX_NOTES=0 only a note already written is listed, so it can still be turned off.
         const status = (INBOX_NOTE_AGENT_IDS as readonly string[]).includes(id) ? noteStatus(id as InboxNoteAgentId, dataDir, agentEnvironment) : null;
         const note = status && (!notesOff || status.state === "added" || status.state === "edited") ? status : null;
@@ -2558,6 +2576,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (typeof body.reach === "boolean") {
       const problem = await setInboxAgentReach(agent, body.reach, { dataDir, selfCommand, environment: agentEnvironment });
       if (problem) problems.push(problem);
+      // Off: the reminder hook Plannotator wrote for it goes too (it would print nothing). On: written if it never had one.
+      else if (!body.reach) {
+        const hook = removeRecordedInboxReminderHook(agent, { dataDir, environment: agentEnvironment });
+        if (hook) problems.push(hook);
+      } else void autoNotes();
     }
     if (typeof body.tool === "boolean") {
       if (!(INBOX_TOOL_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "tool: only Claude Code, Pi, OpenCode, DeepSeek Harness, Cline, OpenClaw and Hermes Agent have one.", { field: "tool" });
@@ -2565,18 +2588,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (problem) problems.push(problem);
     }
     if (typeof body.reminder === "boolean") {
-      if (!(INBOX_REMINDER_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "reminder: only Claude Code, Pi and OpenCode have one.", { field: "reminder" });
-      if (parseInboxToolEnv(agentEnvironment.env as NodeJS.ProcessEnv) !== undefined) problems.push("PLANNOTATOR_INBOX_TOOL decides this");
+      if (!(INBOX_REMINDER_HOSTS as readonly string[]).includes(agent)) throw new InboxError("validation_error", "reminder: only Claude Code, Pi, OpenCode, Qwen Code, Gemini CLI, Amp, Kiro and Codex have one.", { field: "reminder" });
+      // PLANNOTATOR_INBOX_TOOL decides the reminder through the tool; a hook host has no tool, so it never decides there.
+      if (!isInboxHookReminderHost(agent) && parseInboxToolEnv(agentEnvironment.env as NodeJS.ProcessEnv) !== undefined) problems.push("PLANNOTATOR_INBOX_TOOL decides this");
       else {
         const current = loadConfig().inboxReminder;
-        const next: Partial<Record<InboxToolHost, boolean>> = {};
-        for (const host of INBOX_TOOL_HOSTS) {
+        const next: Partial<Record<InboxReminderHost, boolean>> = {};
+        for (const host of [...INBOX_TOOL_HOSTS, ...INBOX_HOOK_REMINDER_HOSTS]) {
           const value = configuredInboxReminder({ inboxReminder: current }, host);
           if (value !== undefined) next[host] = value;
         }
-        next[agent as InboxToolHost] = body.reminder;
+        next[agent as InboxReminderHost] = body.reminder;
         saveConfig({ inboxReminder: next });
-        if (configuredInboxReminder(loadConfig(), agent as InboxToolHost) !== body.reminder) problems.push("Plannotator's config.json can't be written");
+        if (configuredInboxReminder(loadConfig(), agent as InboxReminderHost) !== body.reminder) problems.push("Plannotator's config.json can't be written");
+        // Turned on: an agent whose hook Plannotator writes gets it now if it never had one.
+        else if (body.reminder) void autoNotes();
       }
     }
     if (typeof body.note === "boolean") {
@@ -3879,13 +3905,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const config = loadConfig();
     const env = agentEnvironment.env as NodeJS.ProcessEnv;
     const modOff = !claudeCodeModOn(agentEnvironment);
-    const on = Object.fromEntries(
-      INBOX_TOOL_HOSTS.map((host) => [host, !(host === "claude-code" && modOff) && resolveInboxReminder(config, env, host)]),
-    ) as Record<InboxToolHost, boolean>;
+    const on = Object.fromEntries([
+      ...INBOX_TOOL_HOSTS.map((host) => [host, !(host === "claude-code" && modOff) && resolveInboxReminder(config, env, host)]),
+      // A hook host needs its MCP connection (its record, as the command reads it).
+      ...INBOX_HOOK_REMINDER_HOSTS.map((host) => [host, inboxAgentReachedByRecord(dataDir, host) && resolveInboxReminder(config, env, host)]),
+    ]) as Record<InboxReminderHost, boolean>;
     return inboxPromptsModel(config, on, promptWakes());
   };
-  // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line.
-  const promptWakes = () => ({ "claude-code": true, pi: true, opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1" });
+  // OpenCode 1 cannot bring a reply back as a turn: its default is the no-wake line. The agents whose reminder comes
+  // from a hook get the wording that hook prints (inboxHookReminderWakes): Qwen Code's wake line only while the Inbox
+  // holds its trusted-sender token; Codex, Gemini CLI, Amp and Kiro the no-wake line.
+  const promptWakes = () => {
+    const canWake = (agent: string) => agent === "qwen" && qwenWake.canWake();
+    return {
+      "claude-code": true,
+      pi: true,
+      opencode: inboxPluginStatus("opencode", agentEnvironment)?.generation !== "1",
+      qwen: inboxHookReminderWakes("qwen", canWake),
+      gemini: inboxHookReminderWakes("gemini", canWake),
+      amp: inboxHookReminderWakes("amp", canWake),
+      kiro: inboxHookReminderWakes("kiro", canWake),
+      codex: inboxHookReminderWakes("codex", canWake),
+    };
+  };
 
   /**
    * What Settings and the connect snippets read. `withStore`: the

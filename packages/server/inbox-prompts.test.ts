@@ -17,6 +17,10 @@ import { createAgentEnvironmentFor } from "./inbox-agents";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
+/** One value per agent with a reminder (INBOX_PROMPT_HOSTS), some set apart. */
+const hosts = <T,>(value: T, over: Record<string, T> = {}) => ({ "claude-code": value, pi: value, opencode: value, qwen: value, gemini: value, amp: value, kiro: value, codex: value, ...over });
+/** The hooks' agents get the no-wake line: Gemini CLI, Amp and Kiro are never woken, Codex's wake is not claimed, and Qwen Code has no trusted-sender token here. */
+const WAKES = hosts(true, { qwen: false, gemini: false, amp: false, kiro: false, codex: false });
 let previousDataDir: string | undefined;
 
 afterEach(() => {
@@ -58,12 +62,12 @@ describe("Settings → Prompts", () => {
     const prompts = await read(server);
     expect(prompts.reminder).toEqual({
       shared: null,
-      runtimes: { "claude-code": null, pi: null, opencode: null },
+      runtimes: hosts(null),
       defaults: { wake: INBOX_REMINDER_TEXT, no_wake: INBOX_REMINDER_TEXT_NO_WAKE },
       max: INBOX_REMINDER_MAX_CHARS,
       on: prompts.reminder.on,
-      wakes: { "claude-code": true, pi: true, opencode: true },
-      over: { shared: null, runtimes: { "claude-code": null, pi: null, opencode: null } },
+      wakes: WAKES,
+      over: { shared: null, runtimes: hosts(null) },
     });
     expect(prompts.others.map((item) => item.key)).toEqual([
       "prompts.plan.approved",
@@ -108,7 +112,7 @@ describe("Settings → Prompts", () => {
     expect(answer.prompts.reminder.shared).toBe("Shared line.");
     expect(answer.prompts.reminder.on.opencode).toBe(false);
     answer = await ok(await post(server, { serverSession: server.serverSession, prompts: { inbox: { runtimes: { pi: { reminder: "Pi line." } } } } }));
-    expect(answer.prompts.reminder.runtimes).toEqual({ "claude-code": null, pi: "Pi line.", opencode: null });
+    expect(answer.prompts.reminder.runtimes).toEqual(hosts(null, { pi: "Pi line." }));
     expect(answer.prompts.reminder.shared).toBe("Shared line.");
     expect(onDisk()).toEqual({
       displayName: "Ann",
@@ -149,10 +153,10 @@ describe("Settings → Prompts", () => {
     const { server } = await world({ prompts: { inbox: { reminder: long, runtimes: { pi: { reminder: long }, opencode: { reminder: "OC." } } } } });
     const reminder = (await read(server)).reminder;
     expect([reminder.shared, reminder.runtimes.pi, reminder.runtimes.opencode]).toEqual([null, null, "OC."]);
-    expect(reminder.over).toEqual({ shared: INBOX_REMINDER_MAX_CHARS + 72, runtimes: { "claude-code": null, pi: INBOX_REMINDER_MAX_CHARS + 72, opencode: null } });
+    expect(reminder.over).toEqual({ shared: INBOX_REMINDER_MAX_CHARS + 72, runtimes: hosts<number | null>(null, { pi: INBOX_REMINDER_MAX_CHARS + 72 }) });
     // Reset to default deletes it like any other text.
     const reset = await post(server, { serverSession: server.serverSession, prompts: { inbox: { reminder: null, runtimes: { pi: { reminder: null } } } } });
-    expect(((await reset.json()) as { prompts: InboxPromptsSettings }).prompts.reminder.over).toEqual({ shared: null, runtimes: { "claude-code": null, pi: null, opencode: null } });
+    expect(((await reset.json()) as { prompts: InboxPromptsSettings }).prompts.reminder.over).toEqual({ shared: null, runtimes: hosts(null) });
   });
 
   test("OpenCode 1 (its config's `plugin` list): `wakes.opencode` is false, so the page shows it the no-wake default", async () => {
@@ -172,9 +176,9 @@ describe("Settings → Prompts", () => {
       agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "", OPENCODE_CONFIG_DIR: opencodeDir } }),
     });
     servers.push(server);
-    expect((await read(server)).reminder.wakes).toEqual({ "claude-code": true, pi: true, opencode: false });
+    expect((await read(server)).reminder.wakes).toEqual({ ...WAKES, opencode: false });
     writeFileSync(join(opencodeDir, "opencode.json"), JSON.stringify({ plugins: [] }));
-    expect((await read(server)).reminder.wakes).toEqual({ "claude-code": true, pi: true, opencode: true });
+    expect((await read(server)).reminder.wakes).toEqual(WAKES);
   });
 
   test("Guided reviews: the one guide-instructions.md file the review UI edits; set, read back, capped, deleted, config.json untouched", async () => {
@@ -207,7 +211,7 @@ describe("Settings → Prompts", () => {
       { inbox: {} },
       { inbox: { reminder: 5 } },
       { inbox: { other: "x" } },
-      { inbox: { runtimes: { codex: { reminder: "x" } } } },
+      { inbox: { runtimes: { cursor: { reminder: "x" } } } },
       { inbox: { runtimes: { pi: "x" } } },
       { inbox: { runtimes: { pi: { reminder: "x", extra: 1 } } } },
       { inbox: { runtimes: {} } },
@@ -241,14 +245,17 @@ describe("Settings → Prompts", () => {
     let prompts = await save({ rules: "Only message me when you are blocked or done." });
     prompts = await save({ runtimes: { pi: { rules: "Keep messages under 10 lines." } } });
     expect(prompts.rules?.shared).toBe("Only message me when you are blocked or done.");
-    expect(prompts.rules?.runtimes).toEqual({ "claude-code": null, pi: "Keep messages under 10 lines.", opencode: null });
+    expect(prompts.rules?.runtimes).toEqual(hosts(null, { pi: "Keep messages under 10 lines." }));
+    // An agent whose reminder comes from its hook has its own too.
+    prompts = await save({ runtimes: { kiro: { rules: "Only for Kiro." } } });
+    expect(prompts.rules?.runtimes.kiro).toBe("Only for Kiro.");
     expect(onDisk().prompts.inbox).toEqual({
       reminder: "Shared line.",
       rules: "Only message me when you are blocked or done.",
-      runtimes: { pi: { reminder: "Pi line.", rules: "Keep messages under 10 lines." } },
+      runtimes: { pi: { reminder: "Pi line.", rules: "Keep messages under 10 lines." }, kiro: { rules: "Only for Kiro." } },
     });
     await save({ rules: null });
-    await save({ runtimes: { pi: { rules: null } } });
+    await save({ runtimes: { pi: { rules: null }, kiro: { rules: null } } });
     expect(onDisk().prompts.inbox).toEqual({ reminder: "Shared line.", runtimes: { pi: { reminder: "Pi line." } } });
   });
 

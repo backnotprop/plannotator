@@ -10,7 +10,7 @@
 import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAgentsModel, InboxConnectReport, InboxNoteAutoAdd } from '@plannotator/core/inbox-types';
+import { INBOX_CODEX_HOOK_HINT, type InboxAgentsModel, type InboxConnectReport, type InboxNoteAutoAdd } from '@plannotator/core/inbox-types';
 import { connectLineNews } from './agents';
 import { tooltipOf } from './testing/tooltip';
 
@@ -86,6 +86,18 @@ test.skipIf(!hasDom)('the run\'s news and several notes: connected first, then t
     'Pi needs connecting yourself: Settings → Agents',
   ]);
   expect(await tooltipOf(el.querySelector('[data-note-agent="gemini"]')!)).toBe('~/.gemini/GEMINI.md');
+});
+
+test.skipIf(!hasDom)('the Codex reminder hook added with its note: the approval line once, after the full stop; never without it', () => {
+  const codex: InboxNoteAutoAdd = { agent: 'codex', path: '~/.codex/AGENTS.md', hook_review: true };
+  const one = mount(null, [codex, CLAUDE_NOTE]).el;
+  expect(lines(one)).toHaveLength(1);
+  expect(lines(one)[0]!.endsWith(`). ${INBOX_CODEX_HOOK_HINT}`)).toBe(true);
+  expect(one.querySelectorAll('[data-connect-hook-hint]')).toHaveLength(1);
+  act(() => root?.unmount());
+  host?.remove();
+  const none = mount(null, [{ agent: 'codex', path: '~/.codex/AGENTS.md' }]).el;
+  expect(none.querySelector('[data-connect-hook-hint]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('Got it hides it; the Settings → Agents link goes there', () => {
