@@ -49,6 +49,7 @@ export const SemanticFileNote: React.FC<{ state: SemanticFileState; onToggle: ()
       className={`flex-none whitespace-nowrap text-[11px] px-1.5 py-0.5 rounded transition-colors hover:bg-muted ${on ? 'text-muted-foreground' : 'text-muted-foreground/50 line-through'}`}
       title={title}
       aria-label={title}
+      aria-pressed={on}
     >
       {semanticNoteLabel(state.summary)}
     </button>

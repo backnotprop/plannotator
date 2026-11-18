@@ -641,9 +641,10 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     await engaged.land();
     expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
     const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
-    expect(offered?.textContent).toContain('1 moved');
+    expect([offered?.textContent?.includes('1 moved'), offered?.getAttribute('aria-pressed')]).toEqual([true, 'false']);
     await act(async () => offered!.click());
     expect(engaged.swapped('a.ts')).toBe(true);
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
   test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
