@@ -87,6 +87,7 @@
     "./shape-animate": "./shape-animate.ts",
     "./shape-skill": "./shape-skill.ts",
     "./create-routine-skill": "./create-routine-skill.ts",
+    "./inbox-pull-handoff": "./inbox-pull-handoff.ts",
     "./show-me-skill": "./show-me-skill.ts",
     "./show-me-page": "./show-me-page.ts",
     "./shape-kit.mjs": "./shape-kit.mjs",
