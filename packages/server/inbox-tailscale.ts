@@ -94,7 +94,7 @@ import {
 } from "./tailscale-serve";
 import { parseTailscaleBackend, runTailscaleQuietly } from "./inbox-pairing-checks";
 import { syncSection } from "./inbox-perf";
-import { INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE } from "./inbox-tailnet-door";
+import { DOOR_TARGETS_KEPT, INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE, loopbackPortFree } from "./inbox-tailnet-door";
 
 /** The ports the device door may take (inbox-tailnet-door.ts, 8443 to 8450): the window's mapping never takes one. */
 export const isDoorTailnetPort = (port: number): boolean => INBOX_TAILNET_HTTPS_PORTS.includes(port);
@@ -255,10 +255,13 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
    * one that started since, nor make a removed data folder again.
    */
   const save = (value: InboxRegistryEntry["tailscale"] | undefined) => {
+    // The ports this Inbox mapped ride every save while publishing is on, so a take-down that read an empty `serve
+    // status` (Tailscale stopped) never forgets a mapping that comes back with Tailscale.
+    const made = value && !value.made_proxy_ports && record()?.made_proxy_ports?.length ? { made_proxy_ports: record()!.made_proxy_ports } : {};
     const apply = (target: InboxRegistryEntry) => {
       // The relay's record rides every save while its mapping may exist.
       const relay = relayKept !== null ? { relay_port: relayKept } : {};
-      if (value) target.tailscale = { ...value, ...relay };
+      if (value) target.tailscale = { ...value, ...made, ...relay };
       else if (relayKept !== null) target.tailscale = { url: null, error: null, ...relay };
       else delete target.tailscale;
     };
@@ -295,9 +298,24 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     save({ url: null, error, ...(kept?.https_port ? { https_port: kept.https_port, proxy_port: kept.proxy_port } : {}) });
   };
 
-  /** Proxy targets a mapping of this Inbox's own points at: this run's listener, or the one inbox.json names. */
-  const ownTargets = () =>
-    [listener?.port, record()?.proxy_port].filter((p): p is number => typeof p === "number" && p > 0).map((p) => `http://127.0.0.1:${p}`);
+  /**
+   * Proxy targets a mapping of this Inbox's own points at: this run's listener, the one inbox.json names, and any port
+   * it mapped before (`made_proxy_ports`) where nothing listens now: a mapping a crash or an unclean stop left there is
+   * dead and still the Inbox's. A port something listens on is never one of them unless it is this run's listener.
+   */
+  const ownTargets = () => {
+    const mine = listener?.port;
+    const kept = record();
+    const ports = [mine, kept?.proxy_port].filter((p): p is number => typeof p === "number" && p > 0);
+    for (const p of kept?.made_proxy_ports ?? []) if (!ports.includes(p) && loopbackPortFree(p)) ports.push(p);
+    return ports.map((p) => `http://127.0.0.1:${p}`);
+  };
+  /** `made_proxy_ports` with `port` added at the end, the newest `DOOR_TARGETS_KEPT`. */
+  const madeWith = (...ports: (number | undefined)[]): number[] => {
+    const out = (record()?.made_proxy_ports ?? []).filter((p) => !ports.includes(p));
+    for (const p of ports) if (typeof p === "number" && p > 0 && !out.includes(p)) out.push(p);
+    return out.slice(-DOOR_TARGETS_KEPT);
+  };
 
   // ── The tailnet-only listener ──
 
@@ -489,13 +507,18 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     }
     const kept = record();
     if (!kept?.https_port || !kept.proxy_port || kept.proxy_port === listener?.port) return true;
+    // Something listens there now (an Inbox of this data folder still running, or any program): not this run's to
+    // take down. The publish then finds the mapping and says so, as for any mapping it did not make.
+    if (!loopbackPortFree(kept.proxy_port)) return true;
     const result = yield* takeDownOwnServeSteps(kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
     if (result === "failed") {
       state.error = `Could not remove the tailnet address an earlier run left; it is retried at the next start. Or run "tailscale serve --https=${kept.https_port} off".`;
       keepRecord(state.error);
       return false;
     }
-    save({ url: null, error: null });
+    // "none" may be Tailscale stopped (its `serve status` is then empty) with the mapping still kept: the port stays
+    // known as one this Inbox made, so the publish re-points that mapping once Tailscale runs (`ownTargets`).
+    save(result === "none" ? { url: null, error: null, made_proxy_ports: madeWith(kept.proxy_port) } : { url: null, error: null });
     return true;
   };
 
@@ -514,7 +537,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       if (state.exposed.some((e) => e.https_port === port)) throw new Error(exposureWarning(state.exposed));
       const proxyPort = openListener();
       // Recorded before it exists, so a crash between here and a clean stop always leaves a record to take down.
-      save({ url: null, error: null, https_port: port, proxy_port: proxyPort });
+      save({ url: null, error: null, https_port: port, proxy_port: proxyPort, made_proxy_ports: madeWith(record()?.proxy_port, proxyPort) });
       const { url } = yield* enableServeSteps(proxyPort, { httpsPort: port, ownTargets: ownTargets(), persist: true });
       servedHostname = new URL(url).hostname.toLowerCase();
       httpsPort = port;

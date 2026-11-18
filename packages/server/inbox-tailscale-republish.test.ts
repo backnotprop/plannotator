@@ -47,6 +47,14 @@ function world(config: Record<string, unknown> = { inboxTailscale: true }): stri
   return dataDir;
 }
 
+/** A loopback port nothing listens on now (bound, then let go). */
+async function freePort(): Promise<number> {
+  const probe = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response(null) });
+  const port = probe.port as number;
+  probe.stop(true);
+  return port;
+}
+
 /** A clock the test drives: what is waiting, for how long, and firing it. */
 function fakeClock() {
   const pending = new Map<number, { fn: () => void; ms: number }>();
@@ -273,20 +281,57 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
     expect(republished).toHaveLength(1);
   });
 
-  test("restarted while Tailscale was stopped (daemon up): serve said nothing, the record went, so the mapping it left blocks the publish; the slow retry waits for the person", async () => {
+  test("restarted while Tailscale was stopped (daemon up): serve said nothing, yet the mapping the last run left is still known as its own and is re-pointed once Tailscale runs", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
-    // Stopped: `serve status` answers empty, so the take-down finds nothing and forgets the record.
-    ts.serve.set(PORT, "http://127.0.0.1:40001");
+    // Stopped: `serve status` answers empty, so the take-down finds nothing; the mapping comes back with Tailscale.
+    const dead = await freePort();
+    ts.serve.set(PORT, `http://127.0.0.1:${dead}`);
     const clock = fakeClock();
-    const { module, republished } = create(dataDir, ts.run, clock, { url: null, error: null, https_port: PORT, proxy_port: 40001 });
+    const { module, republished } = create(dataDir, ts.run, clock, { url: null, error: null, https_port: PORT, proxy_port: dead });
     module.start();
     expect(clock.waits()).toEqual([WAIT[0]!]);
     ts.tailscale.backend = "Running";
     await clock.fire();
-    expect(module.state().error).toStartWith(`Another tailscale serve mapping already uses port ${PORT}`);
-    expect(clock.waits()).toEqual([INBOX_TAILSCALE_REPUBLISH.stuckMs]);
-    expect(republished).toHaveLength(0);
+    expect(module.state()).toMatchObject({ url: `https://${MAGIC}:${PORT}/`, error: null });
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${module.listenerPort()}`);
+    expect(republished).toHaveLength(1);
+  });
+
+  test("an Inbox that crashed while published: the next start (Tailscale running) re-points the mapping it left, from the ports it recorded", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const dead = await freePort();
+    // The last run's record after a failed start forgot `proxy_port`, but kept the ports it mapped.
+    ts.serve.set(PORT, `http://127.0.0.1:${dead}`);
+    const clock = fakeClock();
+    const { module } = create(dataDir, ts.run, clock, { url: null, error: "Tailscale did not say who owns this machine.", made_proxy_ports: [dead] });
+    module.start();
+    expect(module.state()).toMatchObject({ url: `https://${MAGIC}:${PORT}/`, error: null });
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${module.listenerPort()}`);
+    expect(clock.waits()).toEqual([]);
+  });
+
+  test("a port this Inbox mapped before that something listens on now: its mapping is not touched, and the words are the usual ones", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const live = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("someone") });
+    try {
+      const port = live.port as number;
+      ts.serve.set(PORT, `http://127.0.0.1:${port}`);
+      const clock = fakeClock();
+      const { module } = create(dataDir, ts.run, clock, { url: null, error: null, https_port: PORT, proxy_port: port, made_proxy_ports: [port] });
+      module.start();
+      expect(module.state().error).toBe(
+        `Another tailscale serve mapping already uses port ${PORT}, the Inbox's port. The Inbox never replaces it: remove it with "tailscale serve --https=${PORT} off" if nothing needs it.`,
+      );
+      expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${port}`);
+      expect(ts.serveCalls()).toEqual([]);
+    } finally {
+      live.stop(true);
+    }
   });
 
   test("published at start: no timer; off: no timer; no `tailscale` CLI at all: no timer, as before", async () => {

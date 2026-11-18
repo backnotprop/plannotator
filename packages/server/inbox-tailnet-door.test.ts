@@ -10,7 +10,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adoptLegacyTailnetDoor, chooseTailnetDoorPort, writeTailnetDoorRecord } from "./inbox-tailnet-door";
+import { adoptLegacyTailnetDoor, chooseTailnetDoorPort, loopbackPortFree, loopbackTargetDead, readTailnetDoorRecord, withMadeTargets, writeTailnetDoorRecord } from "./inbox-tailnet-door";
 
 /** `tailscale serve status --json` with these mappings. */
 const status = (mappings: Record<number, string>) =>
@@ -50,6 +50,42 @@ describe("chooseTailnetDoorPort", () => {
     expect(chooseTailnetDoorPort(status({ 8445: THEIRS }), record)).toEqual({ state: "held", port: 8445 });
     // After a take-down (published: false), even the old exact target on that port is someone else's.
     expect(chooseTailnetDoorPort(status({ 8445: DOOR }), { ...record, published: false })).toEqual({ state: "held", port: 8445 });
+  });
+
+  test("a mapping this Inbox made where nothing listens now (a crash, a stop whose take-down read an empty serve status) is its own leftover: re-pointed; any other stays held", () => {
+    const OLD = "http://127.0.0.1:52901";
+    const record = { https_port: 8445, target: DOOR, published: false, made: [OLD, DOOR] };
+    const dead = (target: string) => target === DOOR || target === OLD;
+    // Its last target, after a take-down wrote published: false.
+    expect(chooseTailnetDoorPort(status({ 8445: DOOR }), record, dead)).toEqual({ state: "usable", port: 8445, own: DOOR });
+    // A target it made before that.
+    expect(chooseTailnetDoorPort(status({ 8445: OLD }), record, dead)).toEqual({ state: "usable", port: 8445, own: OLD });
+    // Something listens on its old target now: not dead, so never taken.
+    expect(chooseTailnetDoorPort(status({ 8445: DOOR }), record, () => false)).toEqual({ state: "held", port: 8445 });
+    // Someone else's mapping, dead or not: never the Inbox's.
+    expect(chooseTailnetDoorPort(status({ 8445: THEIRS }), record, () => true)).toEqual({ state: "held", port: 8445 });
+  });
+
+  test("made targets ride the record, each once, the newest kept", () => {
+    const dir = dataDir();
+    const made = withMadeTargets(["http://127.0.0.1:1", "http://127.0.0.1:2"], "http://127.0.0.1:1", null, "http://127.0.0.1:3", "https://example.com");
+    expect(made).toEqual(["http://127.0.0.1:2", "http://127.0.0.1:1", "http://127.0.0.1:3"]);
+    writeTailnetDoorRecord(dir, { https_port: 8443, target: "http://127.0.0.1:3", published: false, made });
+    expect(readTailnetDoorRecord(dir)?.made).toEqual(made);
+    expect(withMadeTargets(Array.from({ length: 20 }, (_, i) => `http://127.0.0.1:${i + 1}`)).length).toBe(8);
+  });
+
+  test("a loopback port something listens on is never dead; once let go it is", () => {
+    const live = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("x") });
+    const port = live.port as number;
+    try {
+      expect(loopbackPortFree(port)).toBe(false);
+      expect(loopbackTargetDead(`http://127.0.0.1:${port}`)).toBe(false);
+    } finally {
+      live.stop(true);
+    }
+    expect(loopbackPortFree(port)).toBe(true);
+    expect(loopbackTargetDead("https://example.com:443")).toBe(false);
   });
 
   test("output it cannot read is malformed, never a guess", () => {

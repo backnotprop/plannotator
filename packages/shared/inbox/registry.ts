@@ -73,7 +73,12 @@ export interface InboxRegistryEntry {
    * `relay_port` (additive): the prototype relay's mapping (inbox-tailscale.ts), `tailscale serve --https=<relay_port>`
    * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
    */
-  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number };
+  /**
+   * `made_proxy_ports` (additive): every proxy port this Inbox pointed the mapping at, newest last, kept through
+   * take-downs and failed publishes (inbox-tailscale.ts): a mapping a crash or a stop left on one of them, where nothing
+   * listens now, is the Inbox's own and is re-pointed rather than refused.
+   */
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number; made_proxy_ports?: number[] };
   cloudflare_access?: {
     url: string | null;
     error: string | null;
