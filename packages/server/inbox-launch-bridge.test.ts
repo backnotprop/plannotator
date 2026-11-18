@@ -1,8 +1,9 @@
 /**
  * A launch bridge (inbox-launch-bridge.ts): an app on this computer that hosts the agents the Inbox starts, against a
  * fake app on 127.0.0.1. What each test guards: the bridge is off (no hosts, nothing sent) unless its config holds and
- * names this Inbox; its hosts are the launch agents the app offers, named with the app's name; the key goes only to
- * loopback, never through a redirect, and never when it is not exactly 32 bytes; a start carries the launch, its
+ * names this Inbox; its hosts are the launch agents the app offers, named with the app's name; requests go only to
+ * loopback, signed (the port too), never through a redirect, and never with a key that is not exactly 32 bytes; the key
+ * itself is never sent; an answer without the app's proof counts for nothing; a start carries the launch, its
  * message and thread, the agent and the folder; Stop, Open and Resume act only on a chat exactly one launch owns and
  * post nothing otherwise; an answer over 1 MiB is refused; the port is read again for each request. On the engine: a
  * launch through the bridge settles to the app's host, its run line says Open in the app, Open starts no Terminal,
@@ -12,6 +13,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createHash, createHmac } from "node:crypto";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxLaunch } from "./inbox-launch";
@@ -33,25 +35,47 @@ function setEnv(name: string, value: string | undefined) {
   });
 }
 
+/** The key the app and the Inbox share (the test's key file holds it). */
+const KEY = Buffer.alloc(32, 7);
+const sha256 = (bytes: Uint8Array | string) => createHash("sha256").update(bytes).digest("hex");
+const mac = (text: string, key: Uint8Array = KEY) => createHmac("sha256", key).update(text, "utf8").digest("hex");
+
 interface Seen {
   method: string;
   path: string;
-  auth: string | null;
+  /** Every header and the body, as received: the key must be in none of them. */
+  raw: string;
+  /** The request's signature matched, computed here with this app's own port. */
+  signed: boolean;
   body: Record<string, unknown> | null;
 }
 
-/** The app's side: every request it got, and what it answers per path (`<METHOD> <path without query>`). */
-function fakeApp(answers: Record<string, (req: Request, url: URL) => Response | Promise<Response>> = {}) {
+/**
+ * The app's side: every request it got, and what it answers per path (`<METHOD> <path without query>`). Like a real
+ * app it checks each request's signature with its own port (401 when it does not hold) and proves every answer.
+ * `proof`: `none` or `wrong` makes it a listener that does not hold the key.
+ */
+function fakeApp(answers: Record<string, (req: Request, url: URL) => Response | Promise<Response>> = {}, options: { proof?: "none" | "wrong" } = {}) {
   const seen: Seen[] = [];
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
-    async fetch(req) {
+    async fetch(req, srv) {
       const url = new URL(req.url);
-      const text = req.method === "POST" ? await req.text() : "";
-      seen.push({ method: req.method, path: url.pathname + url.search, auth: req.headers.get("authorization"), body: text ? JSON.parse(text) : null });
+      const bytes = new Uint8Array(await req.arrayBuffer());
+      const text = new TextDecoder().decode(bytes);
+      const path = url.pathname + url.search;
+      const [scheme, version, ts = "", nonce = "", sig = ""] = (req.headers.get("authorization") ?? "").split(/[ ,]/);
+      const port = srv.port;
+      const signed = scheme === "Plannotator-Bridge" && version === "v1" && sig === mac(`request\n${req.method}\n127.0.0.1:${port}\n${path}\n${ts}\n${nonce}\n${sha256(bytes)}`);
+      seen.push({ method: req.method, path, raw: `${[...req.headers].map(([k, v]) => `${k}: ${v}`).join("\n")}\n\n${text}`, signed, body: text ? JSON.parse(text) : null });
       const answer = answers[`${req.method} ${url.pathname}`];
-      return answer ? answer(req, url) : Response.json({ ok: false, text: "not here" }, { status: 404 });
+      const made = !signed ? Response.json({ ok: false, text: "not signed" }, { status: 401 }) : answer ? await answer(req, url) : Response.json({ ok: false, text: "not here" }, { status: 404 });
+      const out = new Uint8Array(await made.arrayBuffer());
+      const headers = new Headers(made.headers);
+      const proof = mac(`answer\n${nonce}\n${made.status}\n${sha256(out)}`, options.proof === "wrong" ? Buffer.alloc(32, 9) : KEY);
+      if (options.proof !== "none") headers.set("Plannotator-Bridge-Proof", proof);
+      return new Response(out, { status: made.status, headers });
     },
   });
   restore.push(() => server.stop(true));
@@ -80,7 +104,7 @@ function setup(port: number, options: { config?: Record<string, unknown>; mode?:
   mkdirSync(app, { recursive: true, mode: 0o700 });
   setEnv("PLANNOTATOR_DATA_DIR", dataDir);
   setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-  const key = Buffer.alloc(32, 7);
+  const key = KEY;
   const files = { config: join(app, "bridge.json"), address: join(app, "address.json"), key: join(app, "key") };
   const write = (path: string, data: string | Buffer, mode = 0o600) => {
     writeFileSync(path, data, { mode });
@@ -161,7 +185,7 @@ describe("a launch bridge: on only when its config holds", () => {
 });
 
 describe("a launch bridge's requests", () => {
-  test("the key goes as a lowercase-hex bearer to 127.0.0.1 only, whatever else the address file says", async () => {
+  test("requests go to 127.0.0.1 only, whatever else the address file says, each signed", async () => {
     const app = fakeApp({ "GET /api/lifecycle/catalog": () => Response.json(CATALOG("/")) });
     const s = setup(app.port);
     s.write(s.files.address, JSON.stringify({ v: 1, port: app.port, host: "example.com", url: "http://example.com/" }));
@@ -174,7 +198,61 @@ describe("a launch bridge's requests", () => {
     const hosts = createLaunchBridgeHosts(s.context);
     expect((await hosts[0]!.available()).ok).toBe(true);
     expect(urls).toEqual([`http://127.0.0.1:${app.port}/api/lifecycle/catalog`]);
-    expect(app.seen[0]!.auth).toBe(`Bearer ${s.key.toString("hex")}`);
+    expect(app.seen[0]!.signed).toBe(true);
+  });
+
+  test("the key itself is never sent: in no header and no body, raw or as hex or base64", async () => {
+    const app = fakeApp({
+      "GET /api/lifecycle/catalog": () => Response.json(CATALOG("/")),
+      "POST /api/lifecycle/start": () => Response.json({ ok: true, session: "chat-1", ref: "chat-1" }),
+      "GET /api/lifecycle/status": (_req, url) => statusOf(url.searchParams.get("session")!, [{ launchId: "lch_1" }]),
+      "POST /api/lifecycle/stop": () => Response.json({ ok: true }),
+    });
+    const s = setup(app.port);
+    const host = hostFor(createLaunchBridgeHosts(s.context), "claude-code");
+    await host.available();
+    await host.start(launchIn(s.folder), { name: "n", login: {}, source: { messageId: "m1", threadId: "t1" } });
+    expect((await host.stop("chat-1")).exitCode).toBe(0);
+    expect(app.seen.map((r) => r.signed)).toEqual([true, true, true, true]);
+    for (const form of [KEY.toString("hex"), KEY.toString("hex").toUpperCase(), KEY.toString("base64"), KEY.toString("latin1")]) {
+      for (const r of app.seen) expect(r.raw).not.toContain(form);
+    }
+  });
+
+  test("a signature covers the port: a request taken from one port is refused on another", async () => {
+    const start = () => Response.json({ ok: true, session: "chat-1", ref: "chat-1" });
+    const first = fakeApp({ "POST /api/lifecycle/start": start });
+    const second = fakeApp({ "POST /api/lifecycle/start": start });
+    const s = setup(first.port);
+    let taken: { headers: Headers; body: string } | null = null;
+    const real = globalThis.fetch;
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => ((taken = { headers: new Headers(init!.headers), body: String(init!.body) }), real(input, init))) as typeof fetch;
+    restore.push(() => {
+      globalThis.fetch = real;
+    });
+    const host = hostFor(createLaunchBridgeHosts(s.context), "codex");
+    expect((await host.start(launchIn(s.folder), { name: "n", login: {}, source: { messageId: "m1", threadId: "t1" } })).ok).toBe(true);
+    const replay = await real(`http://127.0.0.1:${second.port}/api/lifecycle/start`, { method: "POST", headers: taken!.headers, body: taken!.body });
+    expect(replay.status).toBe(401);
+    expect([first.seen[0]!.signed, second.seen[0]!.signed]).toEqual([true, false]);
+  });
+
+  test.each(["none", "wrong"] as const)("a listener whose answer has %s proof is not the app: its 200 and its body count for nothing", async (proof) => {
+    let folder = "";
+    const app = fakeApp(
+      {
+        "GET /api/lifecycle/catalog": () => Response.json(CATALOG(folder)),
+        "POST /api/lifecycle/start": () => Response.json({ ok: true, session: "chat-x", ref: "chat-x" }),
+      },
+      { proof },
+    );
+    const s = setup(app.port);
+    folder = s.folder;
+    const host = hostFor(createLaunchBridgeHosts(s.context), "claude-code");
+    expect(await host.available([s.folder])).toMatchObject({ ok: false, reason: "Testapp is not running." });
+    expect(host.trusts(s.folder)).toBe(false);
+    expect(await host.sessions()).toBeNull();
+    await expect(host.start(launchIn(s.folder), { name: "n", login: {}, source: { messageId: "m1", threadId: "t1" } })).rejects.toThrow("Testapp did not answer as itself.");
   });
 
   test("a key that is not exactly 32 bytes, or a key file others can read: nothing is sent", async () => {
@@ -188,7 +266,7 @@ describe("a launch bridge's requests", () => {
     expect(app.seen).toEqual([]);
   });
 
-  test("a redirect is refused, so the key never follows it", async () => {
+  test("a redirect is refused, so a signed request never follows it", async () => {
     const elsewhere = fakeApp({ "POST /api/lifecycle/start": () => Response.json({ ok: true, session: "x", ref: "x" }) });
     const app = fakeApp({ "POST /api/lifecycle/start": () => new Response(null, { status: 307, headers: { Location: `http://127.0.0.1:${elsewhere.port}/api/lifecycle/start` } }) });
     const s = setup(app.port);

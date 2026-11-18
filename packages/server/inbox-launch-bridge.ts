@@ -7,12 +7,14 @@
  * The config (a private file): `{ v: 1, host, name, dataDir, address, key, agents? }`. `agents`: the launch agents
  * the app hosts (all four when absent); every other agent keeps the Inbox's own host. `address` names a private file
  * `{ v: 1, port }`, `key` one of exactly 32 raw bytes; both are read again for every request (the app may restart on
- * another port). Every request goes to `http://127.0.0.1:<port>/api/lifecycle/…` with the key as a lowercase-hex
- * bearer, follows no redirect, and reads 1 MiB of answer at most. Server-only: nothing here reaches a window.
+ * another port). The key never leaves this computer's files: every request to `http://127.0.0.1:<port>/api/lifecycle/…`
+ * is signed with it (HMAC-SHA256, `Authorization: Plannotator-Bridge v1,<ts>,<nonce>,<sig>`), and an answer counts
+ * only with its proof (`Plannotator-Bridge-Proof`), checked before its body is read. No redirect is followed, and an
+ * answer is 1 MiB at most. Server-only: nothing here reaches a window.
  */
 import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { InboxLaunchAgent, InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import type { LaunchHost, LaunchHostContext, LaunchHostResult } from "./inbox-launch-host";
 
@@ -32,6 +34,24 @@ const GET_TIMEOUT_MS = 5_000;
 const POST_TIMEOUT_MS = 45_000;
 /** How long one catalog read stands for every host (they all ask at once). */
 const CATALOG_FRESH_MS = 2_000;
+
+/** The header an app's answer proves itself with. */
+export const LAUNCH_BRIDGE_PROOF = "Plannotator-Bridge-Proof";
+
+const sha256Hex = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+
+/** Lowercase-hex HMAC-SHA256 under the 32 raw key bytes. */
+export const launchBridgeMac = (key: Uint8Array, text: string) => createHmac("sha256", key).update(text, "utf8").digest("hex");
+
+/**
+ * What a request's signature covers: the method, the address with its port (a captured request can't be replayed to
+ * the app on another port), the path and query exactly as sent, the time (unix ms), the nonce and the body's hash.
+ */
+export const launchBridgeRequestText = (method: string, port: number, path: string, ts: string, nonce: string, body: Uint8Array) =>
+  `request\n${method}\n127.0.0.1:${port}\n${path}\n${ts}\n${nonce}\n${sha256Hex(body)}`;
+
+/** What an answer's proof covers: the request's nonce, the status and the body's hash. */
+export const launchBridgeAnswerText = (nonce: string, status: number, body: Uint8Array) => `answer\n${nonce}\n${status}\n${sha256Hex(body)}`;
 
 export interface LaunchBridgeConfig {
   /** The host its sessions connect as (`to.host`). */
@@ -129,15 +149,21 @@ export function createLaunchBridgeHosts(context: LaunchHostContext): LaunchHost[
     if (!address || address.v !== 1 || !Number.isInteger(address.port) || address.port < 1 || address.port > 65_535 || key.length !== 32) {
       throw new Error(`${app} is not reachable.`);
     }
-    return { port: address.port as number, key: key.toString("hex") };
+    return { port: address.port as number, key };
   };
   const request = async (action: string, body?: unknown): Promise<any> => {
     const { port, key } = bridge();
-    const response = await fetch(`http://127.0.0.1:${port}/api/lifecycle/${action}`, {
-      method: body === undefined ? "GET" : "POST",
+    const method = body === undefined ? "GET" : "POST";
+    const path = `/api/lifecycle/${action}`;
+    const sent = body === undefined ? "" : JSON.stringify(body);
+    const ts = String(Date.now());
+    const nonce = randomBytes(16).toString("hex");
+    const sig = launchBridgeMac(key, launchBridgeRequestText(method, port, path, ts, nonce, Buffer.from(sent, "utf8")));
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method,
       redirect: "error",
-      headers: { Authorization: `Bearer ${key}`, Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      headers: { Authorization: `Plannotator-Bridge v1,${ts},${nonce},${sig}`, Accept: "application/json", ...(body === undefined ? {} : { "Content-Type": "application/json" }) },
+      ...(body === undefined ? {} : { body: sent }),
       signal: AbortSignal.timeout(body === undefined ? GET_TIMEOUT_MS : POST_TIMEOUT_MS),
     });
     const reader = response.body?.getReader();
@@ -154,7 +180,14 @@ export function createLaunchBridgeHosts(context: LaunchHostContext): LaunchHost[
       }
       chunks.push(part.value);
     }
-    const result = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    const bytes = Buffer.concat(chunks);
+    // Whatever answers on the port must prove it holds the key before anything it said is read: else it is
+    // another process on the app's old port, and counts as the app not answering at all.
+    const expected = Buffer.from(launchBridgeMac(key, launchBridgeAnswerText(nonce, response.status, bytes)), "hex");
+    const said = response.headers.get(LAUNCH_BRIDGE_PROOF) ?? "";
+    const proof = /^[0-9a-f]{64}$/.test(said) ? Buffer.from(said, "hex") : Buffer.alloc(0);
+    if (proof.length !== expected.length || !timingSafeEqual(proof, expected)) throw new Error(`${app} did not answer as itself.`);
+    const result = JSON.parse(bytes.toString("utf8"));
     if (!response.ok || !result || typeof result !== "object") throw new Error(`${app} refused the action.`);
     return result;
   };
