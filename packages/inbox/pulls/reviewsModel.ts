@@ -8,6 +8,7 @@ import {
   type InboxMessageWire,
   type InboxPull,
   type InboxPullLink,
+  type InboxPullRiskAutoRun,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
@@ -151,7 +152,23 @@ export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][
   return (handed ? row.landed.find((landing) => landing.key === handed.key) : row.landed[0]) ?? null;
 }
 
-export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
+const LEVEL_WORD = { high: 'High', medium: 'Medium', low: 'Low' } as const;
+
+export function reviewRowAutoRun(row: Pick<InboxReviewRow, 'stacks'>, runs: Readonly<Record<string, InboxPullRiskAutoRun>> | undefined): InboxPullRiskAutoRun | null {
+  const layer = runs ? row.stacks[0]?.layers.find((pull) => runs[pull.key]) : undefined;
+  return layer ? runs![layer.key]! : null;
+}
+
+export function reviewRowAutoWords(run: InboxPullRiskAutoRun | null, link: InboxPullLink | null): string | null {
+  if (!run) return null;
+  if (run.state === 'failed') return `Couldn't start: ${run.reason ?? 'the agent did not start.'}`;
+  const page = link?.show_me_page && (!run.thread_id || link.thread_id === run.thread_id) && link.show_me_page.at >= run.at;
+  if (run.made !== 'guide' && page) return `Show me ready, made when it ranked ${LEVEL_WORD[run.level]}`;
+  if (run.made !== 'show_me' && link?.guide?.review) return null;
+  return run.made === 'show_me' ? 'Making a Show me page…' : run.made === 'both' ? 'Making a guided review and a Show me page…' : 'Making a guided review…';
+}
+
+export function reviewRowLine(row: InboxReviewRow, autoRuns?: Readonly<Record<string, InboxPullRiskAutoRun>>): ReviewRowLine {
   const stack = row.stacks[0];
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
@@ -159,7 +176,8 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const said = statusOf(row);
   const { tone } = said;
   // A walkthrough has nothing to review: Ready once it's in, Writing… while the agent writes it.
-  const parts: Words = reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
+  const auto = reviewRowAutoWords(reviewRowAutoRun(row, autoRuns), row.link ?? null);
+  const parts: Words = auto ? [auto] : reviewIsWalkthrough(row) && (row.reason === 'review_ready' || row.reason === 'curating') ? [row.reason === 'review_ready' ? 'Ready' : 'Writing…'] : said.status;
   const status = wordsText(parts);
   if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status, parts, tone };
   if (stack) {

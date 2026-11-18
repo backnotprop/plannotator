@@ -311,3 +311,17 @@ test("the bar's name in Reviews is the row's title: the review's once it landed,
   // A PR row's title is the PR's: the bar keeps its thread name.
   expect(view(row({ stacks: [inboxPullStacks([pull(869)])[0]!] })).name).toBeNull();
 });
+
+test("a PR made for when it ranked: the row says what is being made, the page once it is in, or why it couldn't start", () => {
+  const stacked = (link: Record<string, unknown> | null = null) => row({ reviewed: true, reason: 'curating', review: null, stacks: inboxPullStacks([pull(880)]), link } as unknown as Partial<InboxReviewRow>);
+  const key = pull(880).key;
+  const runs = (fields: Record<string, unknown>) => ({ [key]: { at: '2026-11-18T10:00:00.000Z', level: 'high', made: 'show_me', state: 'started', thread_id: 't', ...fields } }) as never;
+  expect(reviewRowLine(stacked(), runs({})).status).toBe('Making a Show me page…');
+  expect(reviewRowLine(stacked(), runs({ made: 'both' })).status).toBe('Making a guided review and a Show me page…');
+  expect(reviewRowLine(stacked(), runs({ state: 'queued', thread_id: null, made: 'guide' })).status).toBe('Making a guided review…');
+  const page = { thread_id: 't', guide: null, show_me_page: { message_id: 'm', title: 'Retries', at: '2026-11-18T10:05:00.000Z' } };
+  expect(reviewRowLine(stacked(page), runs({ level: 'high' })).status).toBe('Show me ready, made when it ranked High');
+  expect(reviewRowLine(stacked(page), runs({ made: 'both', level: 'medium' })).status).toBe('Show me ready, made when it ranked Medium');
+  expect(reviewRowLine(stacked(), runs({ state: 'failed', thread_id: null, reason: 'Codex can’t be started here.' })).status).toBe("Couldn't start: Codex can’t be started here.");
+  expect(reviewRowLine(stacked()).status).toBe('Curating…');
+});
