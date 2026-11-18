@@ -11,6 +11,7 @@
  * a secret's value landing in the store, the index, a note to the agent or a read.
  */
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -357,6 +358,8 @@ describe("hiding values", () => {
     expect(loginEnvCredentials({ PGPASSWORD: "pg-secret-1234", MYSQL_PWD: "my-secret-1234", STRIPE_APIKEY: "stripeapikey99", GH_AUTH_TOKEN: "ghauthtoken99", SVC_PASSWD: "svc-passwd-99", PWD: "/home/p/work", OLDPWD: "/home/p" })).toEqual(["pg-secret-1234", "my-secret-1234", "stripeapikey99", "ghauthtoken99", "svc-passwd-99"]);
     // A URL with a password, whatever its variable is called: the password, as written and decoded.
     expect(loginEnvCredentials({ DATABASE_URL: "postgres://app:s3cr%40t-pass@db.example.invalid:5432/app", REDIS_URL: "redis://:only-pass-99@cache.invalid", SITE_URL: "https://example.invalid/a:b@c", NO_PASS: "https://user@example.invalid" })).toEqual(["s3cr%40t-pass", "s3cr@t-pass", "only-pass-99"]);
+    // Not a password that is its user name, nor a short one (raw or decoded): those would hide every "postgres".
+    expect(loginEnvCredentials({ DATABASE_URL: "postgres://postgres:postgres@localhost/app", SHORT_URL: "mysql://app:short1@db", ENCODED_URL: "redis://u:%61%62%63%64%65@c" })).toEqual(["%61%62%63%64%65"]);
   });
 });
 
@@ -680,10 +683,32 @@ describe("the kept login env", () => {
     if (group && process.platform !== "win32") {
       expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => 1_000_500)).toBe(true);
       expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => 9_000_000)).toBe(false);
-      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => "gone")).toBe(true);
+      // The leader gone: the group is ours only with a process of it started while ours ran (by when it was seen).
+      const gone = async () => "gone" as const;
+      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", gone, 1_060_000, async () => [1_000_400, 1_030_000])).toBe(true);
+      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", gone, 1_060_000, async () => [5_000_000])).toBeNull();
+      expect(await lostRunStillRunning(pgid, 1_000_000, "linux", gone, 1_060_000, async () => null)).toBeNull();
       expect(await lostRunStillRunning(pgid, 1_000_000, "linux", async () => null)).toBeNull();
     }
     expect(await lostRunStillRunning(123, 0, "win32")).toBeNull();
+  });
+
+  test.if(process.platform !== "win32")("a real group whose leader left: ours when one of it started while ours ran, unknown when all started after", async () => {
+    // `sh` starts a sleep in its own group and leaves; the sleep lives on in that group.
+    const spawnedAt = Date.now();
+    const leader = spawn("/bin/sh", ["-c", "sleep 30 & exit 0"], { detached: true, stdio: "ignore" });
+    const pgid = leader.pid!;
+    try {
+      await new Promise((resolve) => leader.once("exit", resolve));
+      await Bun.sleep(50);
+      expect(await lostRunStillRunning(pgid, spawnedAt, process.platform, processStartedAt, Date.now())).toBe(true);
+      // Written down a minute before any of it started (a group by that id made by another program since): unknown.
+      expect(await lostRunStillRunning(pgid, spawnedAt - 120_000, process.platform, processStartedAt, spawnedAt - 60_000)).toBeNull();
+    } finally {
+      try {
+        process.kill(-pgid, "SIGKILL");
+      } catch {}
+    }
   });
 });
 

@@ -75,7 +75,8 @@ export function RunCard({ messageId, block, state, agent, cardRef }: { messageId
       const opened = await runApi.terminal(messageId, block.key, block.command);
       const where = `Opened ${opened.terminal} on ${computer} in ${view?.folder ?? 'the project folder'}.`;
       const paste = opened.copied ? 'The command is on its clipboard: paste it there.' : 'Copy the command from this card and paste it there.';
-      const names = view?.uses ?? [];
+      // Names the person's own shell sets are set in that terminal too: only the saved ones are not.
+      const names = (view?.uses ?? []).filter((name) => !(view?.from_shell ?? []).includes(name));
       const unset = names.length > 0 ? ` ${names.join(' and ')} ${names.length === 1 ? "isn't" : "aren't"} set in that terminal.` : '';
       setNote(`${where} ${paste}${unset}`);
     });

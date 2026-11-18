@@ -169,7 +169,7 @@ describe.if(posix)("a run", () => {
     const pid = Number(first.view().lines[0]);
     // A kill -9 of the Inbox: nothing ends the run's record. (The test still ends the process it left.)
     process.kill(-pid, "SIGKILL");
-    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: (p, at) => lostRunStillRunning(p, at) });
+    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: (p, at, seen) => lostRunStillRunning(p, at, process.platform, undefined, seen) });
     const lost: string[] = [];
     await again.recover((record) => lost.push(`${record.message_id}/${record.key}/${record.title}`));
     await again.recover((record) => lost.push(record.key));
@@ -187,7 +187,7 @@ describe.if(posix)("a run", () => {
     // The sweep writes what it printed to the journal within a few seconds (an Inbox that dies keeps it).
     await until(() => journal.records.some((r) => r.view.lines.includes("started")), 5_000);
     // A kill -9 of the Inbox: the first Inbox's runs are never told; its command goes on.
-    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: (p, at) => lostRunStillRunning(p, at) });
+    const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: (p, at, seen) => lostRunStillRunning(p, at, process.platform, undefined, seen) });
     const told: (boolean | null | undefined)[] = [];
     await again.recover((record) => told.push(record.view.left_running));
     expect(told).toEqual([true]);
@@ -213,21 +213,26 @@ describe.if(posix)("a run", () => {
     const asked: number[] = [];
     const changed: string[] = [];
     const again = createInboxRuns({ messageAlive: () => true, journal, stillRunning: async (p) => (asked.push(p), same), onChange: (id) => changed.push(id) });
-    await again.recover(() => {});
-    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: true });
-    same = false;
-    expect(await again.stopLost("msg_1", "r-0000000a")).toBeNull();
-    expect(asked).toEqual([pid, pid]);
-    // No signal reached it: the group still runs.
-    await Bun.sleep(300);
-    expect(gone(pid)).toBe(false);
-    expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: false });
-    expect(changed).toEqual(["msg_1"]);
-    process.kill(-pid, "SIGKILL");
-    again.stopAll();
+    try {
+      await again.recover(() => {});
+      expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: true });
+      same = false;
+      expect(await again.stopLost("msg_1", "r-0000000a")).toBeNull();
+      expect(asked).toEqual([pid, pid]);
+      // No signal reached it: the group still runs.
+      await Bun.sleep(300);
+      expect(gone(pid)).toBe(false);
+      expect(again.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: false });
+      expect(changed).toEqual(["msg_1"]);
+    } finally {
+      try {
+        process.kill(-pid, "SIGKILL");
+      } catch {}
+      again.stopAll();
+    }
   });
 
-  test("a lost run said to be running is looked at again when its card is read (at most every few seconds)", async () => {
+  test("a lost run said to be running is looked at again when its card is read (at most every few seconds); one ps that cannot tell keeps it, only an end drops Stop", async () => {
     let clock = 1_000_000;
     let left: boolean | null = true;
     let asked = 0;
@@ -242,9 +247,16 @@ describe.if(posix)("a run", () => {
     runs.recheck("msg_1");
     await Bun.sleep(10);
     expect(asked).toBe(2);
-    // ps cannot tell now: no Stop is offered, and the words say it may still be running.
-    expect(runs.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: null });
+    // One ps that cannot tell: still running stays (Stop stays), and Stop pressed now signals nothing.
+    expect(runs.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: true });
     expect(await runs.stopLost("msg_1", "r-0000000a")).toBeNull();
+    expect(runs.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: true });
+    // A definite end is what drops it.
+    clock += 5_000;
+    left = false;
+    runs.recheck("msg_1");
+    await Bun.sleep(10);
+    expect(runs.views("msg_1")["r-0000000a"]).toMatchObject({ left_running: false });
   });
 
   test("PowerShell's run has its stdin closed at once (it would wait for it to close), and is not watched for a prompt", async () => {

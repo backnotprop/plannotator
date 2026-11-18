@@ -13,7 +13,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxRunBlocks } from '@plannotator/core/inbox-run-blocks';
@@ -54,7 +54,12 @@ class FakeIntersectionObserver {
   disconnect() {}
 }
 const scrollTo = (target: Element, on: boolean) => act(() => observed.get(target)?.([{ target, isIntersecting: on }]));
+const realObserver = Object.getOwnPropertyDescriptor(globalThis, 'IntersectionObserver');
 if (hasDom) (globalThis as Record<string, unknown>).IntersectionObserver = FakeIntersectionObserver;
+afterAll(() => {
+  if (realObserver) Object.defineProperty(globalThis, 'IntersectionObserver', realObserver);
+  else delete (globalThis as Record<string, unknown>).IntersectionObserver;
+});
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -289,7 +294,8 @@ test.if(hasDom)('a card off screen reads nothing, even while its command runs, u
   const visibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState') ?? Object.getOwnPropertyDescriptor(document, 'visibilityState');
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
   try {
-    await settle(80);
+    // A poll already on its way may land once; after that, nothing.
+    await settle(200);
     const hidden = reads.length;
     await settle(300);
     expect(reads.length).toBe(hidden);
@@ -361,4 +367,46 @@ test.if(hasDom)('a command taller than its box fades at its foot until it is scr
       else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
     }
   }
+});
+
+test.if(hasDom)('a Save reads each card once: the Inbox\'s own event for it, heard meanwhile, is not read again', async () => {
+  const secretBody = [':::secret', 'PAY_KEY', 'For the payment tests.', ':::'].join('\n');
+  const reads: string[] = [];
+  runApi.state = async (id) => (reads.push(id), { ...wire(null), blocks: {} });
+  runApi.saveSecret = async () => {
+    // The server says every card changed before its answer reaches this window.
+    runEvents.emit({ all: true });
+    await Bun.sleep(5);
+    return { ok: true };
+  };
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  act(() => root!.render(<div className="pn-inbox">{runBlockFor({ id: 'msg_s', body: secretBody }, { startLine: 1, directiveKind: 'secret' }, 'Claude')}{runBlockFor({ id: 'msg_r', body: BODY }, { startLine: parseInboxRunBlocks(BODY)[0]!.startLine, directiveKind: 'run' }, 'Claude')}</div>));
+  await until(() => reads.length === 2 && !!host!.querySelector('[data-secret-input]'));
+  reads.length = 0;
+  const input = host!.querySelector<HTMLInputElement>('[data-secret-input]')!;
+  act(() => {
+    const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+    set.call(input, 'TEST_ONLY_NOT_A_KEY_123');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  act(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
+  await settle(200);
+  expect(reads.sort()).toEqual(['msg_r', 'msg_s']);
+  // Another window's save later is still heard.
+  act(() => runEvents.emit({ all: true }));
+  await settle(60);
+  expect(reads.length).toBe(4);
+});
+
+test.if(hasDom)('after Open in terminal, the note names only the secrets not set there: a name from the shell is', async () => {
+  runApi.state = async () => wire(null, { uses: ['OPENAI_API_KEY', 'PAY_KEY'], from_shell: ['OPENAI_API_KEY'] });
+  runApi.terminal = async () => ({ ok: true, terminal: 'Terminal', copied: true });
+  mount();
+  await until(() => !host!.querySelector<HTMLButtonElement>('[data-run-terminal]')!.disabled);
+  act(() => host!.querySelector<HTMLButtonElement>('[data-run-terminal]')!.click());
+  await until(() => card().textContent!.includes('Opened Terminal'), 3_000);
+  expect(card().textContent).toContain("PAY_KEY isn't set in that terminal.");
+  expect(card().textContent).not.toContain('OPENAI_API_KEY and');
 });

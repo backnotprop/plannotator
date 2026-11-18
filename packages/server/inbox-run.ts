@@ -213,13 +213,14 @@ export class RunLineBuffer {
   }
 }
 
-/** Stops a process group (POSIX) or tree (Windows); quiet when it is already gone. Never blocks the Inbox. */
 /** A spawn's failure in words: a command too long for Windows' command line says so plainly. */
 const spawnWords = (error: unknown): string => {
   const code = (error as { code?: unknown } | null)?.code;
   if (code === "ENAMETOOLONG" || code === "E2BIG") return INBOX_RUN_TOO_LONG_WORDS;
   return error instanceof Error ? error.message : String(error);
 };
+
+/** Stops a process group (POSIX) or tree (Windows); quiet when it is already gone. Never blocks the Inbox. */
 
 export function killRunTree(pid: number | undefined, signal: "SIGTERM" | "SIGKILL", platform: NodeJS.Platform = process.platform): void {
   if (!pid) return;
@@ -277,7 +278,7 @@ export function createInboxRuns(options: {
    * Whether a lost run's command still runs, by its process group and the time it started: true (Stop can end it),
    * false (it ended), null (this computer cannot tell). Absent: unknown.
    */
-  stillRunning?: (pid: number, startedAt: number) => Promise<boolean | null>;
+  stillRunning?: (pid: number, startedAt: number, seenAt: number) => Promise<boolean | null>;
   /** A message's run changed (it started, ended, was stopped, or a lost one was found ended): its cards read again. */
   onChange?: (messageId: string) => void;
 }) {
@@ -314,6 +315,7 @@ export function createInboxRuns(options: {
     live: !run.ended,
     pid: run.ended ? null : (run.child?.pid ?? null),
     spawned_at: run.spawnedAt,
+    seen_at: run.ended ? null : now(),
   });
   let journalAt = 0;
   let journalStale = false;
@@ -343,15 +345,15 @@ export function createInboxRuns(options: {
   const live = () => [...runs.values()].filter((run) => !run.ended);
   /**
    * Whether a lost run's command still runs, looked at again now: its pid may since have gone to another program
-   * (the start time tells them apart). A record found otherwise stops offering Stop: false, it ended; null, this
-   * computer cannot tell. Never a signal here.
+   * (the start time tells them apart). Only a definite "ended" (false) stops the card offering Stop; one `ps` that
+   * could not tell (null) leaves "still running" as it was (and Stop, pressed then, signals nothing). Never a signal here.
    */
   const lostChecked = new Map<InboxRunRecord, number>();
   const recheckLost = async (record: InboxRunRecord): Promise<boolean | null> => {
     lostChecked.set(record, now());
     const pid = record.pid ?? null;
-    const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at).catch(() => null) : null;
-    if (left !== true && record.view.left_running === true) {
+    const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at, record.seen_at ?? record.spawned_at).catch(() => null) : null;
+    if (left === false && record.view.left_running === true) {
       record.pid = null;
       record.view = { ...record.view, left_running: left };
       writeJournal();
@@ -369,11 +371,12 @@ export function createInboxRuns(options: {
     if (!record || record.view.left_running !== true || !record.pid || !record.spawned_at) return null;
     const pid = record.pid;
     const startedAt = record.spawned_at;
+    const seenAt = record.seen_at ?? startedAt;
     if ((await recheckLost(record)) !== true) return null;
     killRunTree(pid, "SIGTERM", platform);
     const timer = setTimeout(() => {
       void (async () => {
-        if (options.stillRunning && (await options.stillRunning(pid, startedAt).catch(() => null)) === true) killRunTree(pid, "SIGKILL", platform);
+        if (options.stillRunning && (await options.stillRunning(pid, startedAt, seenAt).catch(() => null)) === true) killRunTree(pid, "SIGKILL", platform);
       })();
     }, STOP_GRACE_MS);
     (timer as { unref?: () => void }).unref?.();
@@ -591,10 +594,12 @@ export function createInboxRuns(options: {
       const again = [...past.values()].filter((record) => record.view.left_running === true && !fresh.includes(record));
       for (const record of [...fresh, ...again]) {
         const pid = record.pid ?? null;
-        const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at).catch(() => null) : null;
-        record.view = { ...record.view, left_running: left };
+        const left = pid && record.spawned_at && options.stillRunning ? await options.stillRunning(pid, record.spawned_at, record.seen_at ?? record.spawned_at).catch(() => null) : null;
+        // One `ps` that could not tell never undoes "still running" found before (only a definite end does).
+        const kept = left === null && record.view.left_running === true && !fresh.includes(record) ? true : left;
+        record.view = { ...record.view, left_running: kept };
         lostChecked.set(record, now());
-        if (left !== true) record.pid = null;
+        if (kept !== true) record.pid = null;
       }
       if (fresh.length > 0 || again.length > 0) writeJournal();
       for (const record of fresh) if (options.messageAlive(record.message_id)) onLost(record);

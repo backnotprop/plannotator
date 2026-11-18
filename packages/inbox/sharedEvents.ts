@@ -43,6 +43,7 @@
  * tailnet address never share (and a tab left on an old port has its own).
  */
 
+import { runEvents } from './data/runEvents';
 import { inboxUrl } from './inboxUrl';
 import { STREAM_STALE_MS, watchLiveStream, type LiveStreamTimers } from './liveStream';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
@@ -340,9 +341,13 @@ export function subscribeSharedInboxEvents(
    * closed tab for good.
    */
   let departed = false;
+  let connected = false;
   const tabHandlers: InboxEventHandlers = {
     ...handlers,
     onConnect: (hello) => {
+      // A reconnect may have missed `event: runs`: the run cards on screen read again (not on the first connect).
+      if (connected) runEvents.emit({ all: true });
+      connected = true;
       if (!departed) handlers.onConnect?.(hello);
     },
   };

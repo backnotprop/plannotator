@@ -203,7 +203,7 @@ export function hideSecretPrefixTail(text: string, values: readonly string[]): s
 const CREDENTIAL_NAME_RE = /(?:(?:^|_)(?:KEY|KEYS|TOKEN|TOKENS|SECRET|CREDENTIALS?|AUTH|COOKIE|PAT|DSN)|PASSWORD|PASSWD|PASSPHRASE|APIKEY|PWD)$/i;
 
 /** A URL with a password in it (`postgres://user:pass@host/db`): the password, from any variable (DATABASE_URL…). */
-const URL_PASSWORD_RE = /[a-z][a-z0-9+.-]*:\/\/[^/\s:@]*:([^@\s/]+)@/gi;
+const URL_PASSWORD_RE = /[a-z][a-z0-9+.-]*:\/\/([^/\s:@]*):([^@\s/]+)@/gi;
 
 /** The login env's credential-like values, hidden in a run's output too (it goes to the agent). Not paths. */
 export function loginEnvCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
@@ -211,7 +211,14 @@ export function loginEnvCredentials(env: Readonly<Record<string, string | undefi
   for (const [name, value] of Object.entries(env)) {
     if (!value) continue;
     // A password inside a URL, whatever the variable is called: hidden on its own (the rest of the URL is not secret).
-    for (const match of value.matchAll(URL_PASSWORD_RE)) if (match[1]!.length >= 4) out.push(match[1]!, safeDecode(match[1]!));
+    // Not one that is its user name, or short (`postgres://postgres:postgres@…` would hide every "postgres").
+    for (const match of value.matchAll(URL_PASSWORD_RE)) {
+      const user = safeDecode(match[1]!);
+      const raw = match[2]!;
+      const decoded = safeDecode(raw);
+      if (decoded === user || raw === match[1]) continue;
+      for (const word of [raw, decoded]) if (word.length >= 8) out.push(word);
+    }
     if (value.length < 8 || !CREDENTIAL_NAME_RE.test(name) || /^[/~.]|^[A-Za-z]:[\\/]/.test(value) || /\s/.test(value)) continue;
     out.push(value);
   }

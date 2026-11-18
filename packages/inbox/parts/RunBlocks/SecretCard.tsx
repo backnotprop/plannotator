@@ -41,8 +41,7 @@ export function SecretCard({ messageId, secret, state, agent, cardRef }: { messa
   const remove = async () => {
     setError(null);
     try {
-      await runApi.removeSecret(messageId, secret.name);
-      await refreshAllRunStates();
+      await refreshAllRunStates(() => runApi.removeSecret(messageId, secret.name));
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     }

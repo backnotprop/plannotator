@@ -20,11 +20,12 @@ export function SecretField({ messageId, name, onDone, onCancel, autoFocus, save
     setSaving(true);
     setError(null);
     try {
-      await runApi.saveSecret(messageId, name, value);
-      setValue('');
-      onDone?.();
       // Every card that waits for this name (here, in other messages of the thread) sees it saved at once.
-      await refreshAllRunStates();
+      await refreshAllRunStates(async () => {
+        await runApi.saveSecret(messageId, name, value);
+        setValue('');
+        onDone?.();
+      });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {

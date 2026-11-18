@@ -203,7 +203,7 @@ export function parseInboxRunBlock(inner: string): Omit<ParsedInboxRun, "key" | 
       uses = [];
       // Split where a person would (spaces, commas, semicolons, bars), so a word that is not a name is said as written.
       for (const word of usesLine[1]!.split(/[\s,;|]+/)) {
-        const name = word.replace(/[.:]+$/, "").replace(/^`|`$/g, "").replace(/^\$\{?|\}$/g, "");
+        const name = word.replace(/[.:]+$/, "").replace(/^(["'`])(.*)\1$/, "$2").replace(/^\$\{?|\}$/g, "");
         if (name === "" || /^(and|or)$/i.test(name)) continue;
         if (INBOX_SECRET_NAME_RE.test(name) && !inboxSecretNameRefused(name)) {
           if (!uses.includes(name)) uses.push(name);

@@ -75,6 +75,10 @@ describe(":::run blocks", () => {
     expect(inboxRunUnusableWords(block!.uses_unusable)).toBe("Its Uses line names what this run can't get: NODE_OPTIONS can't hold a secret (programs read it to decide how they start); SSL_CERT_FILE can't hold a secret (it changes which servers programs trust); \"not-a-name\" isn't a secret's name.");
     expect(inboxSecretRefusedWords("REQUESTS_CA_BUNDLE")).toBe("REQUESTS_CA_BUNDLE can't hold a secret: it changes which servers programs trust, so a value saved under it could change who every command talks to.");
     expect(inboxSecretRefusedWords("NODE_OPTIONS")).toContain("programs read it to decide how they start");
+    // A name in quotes is that name.
+    const [quoted] = parseInboxRunBlocks(run('Deploy\nUses: "API_KEY", \'B_TOKEN\', `C_SECRET`\n```\nls\n```'));
+    expect(quoted!.uses).toEqual(["API_KEY", "B_TOKEN", "C_SECRET"]);
+    expect(quoted!.uses_unusable).toEqual([]);
   });
 
   test("the title and why lose direction marks and invisible characters; the command keeps its bytes", () => {

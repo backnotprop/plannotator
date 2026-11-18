@@ -123,12 +123,43 @@ export async function processStartedAt(pid: number, ps: PsStart = psStart): Prom
   return self && self.code === 0 && parsePsStart(self.text) !== null ? "gone" : null;
 }
 
+/** The start times of a process group's live processes (ms), or null when `ps` cannot tell. */
+export type GroupStarts = (pgid: number) => Promise<number[] | null>;
+const psGroupStarts: GroupStarts = async (pgid) => {
+  const ps = ["/bin/ps", "/usr/bin/ps"].find((path) => existsSync(path));
+  if (!ps) return null;
+  try {
+    const child = Bun.spawn([ps, "-A", "-o", "pgid=,lstart="], { stdout: "pipe", stderr: "ignore", stdin: "ignore", env: { ...childEnv(), LC_ALL: "C", TZ: "UTC0" }, windowsHide: true });
+    const [text, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    if (code !== 0) return null;
+    const starts: number[] = [];
+    for (const line of text.split("\n")) {
+      const m = /^\s*(\d+)\s+(.+)$/.exec(line);
+      if (!m || Number(m[1]) !== pgid) continue;
+      const at = parsePsStart(m[2]!);
+      if (at === null) return null;
+      starts.push(at);
+    }
+    return starts;
+  } catch {
+    return null;
+  }
+};
+
 /**
  * Whether a lost run's command still runs (POSIX): its process group is there, and its leader is the process this
- * Inbox started (same start time, to the second), or gone while the group lives on (a group id is not given out
- * again while the group exists). Windows: null, unknown.
+ * Inbox started (same start time, to the second), or the leader is gone and a process of the group started between
+ * the run's start and when the Inbox last wrote it down (`seenAt`): a group by that id made since by another program
+ * has none such. Anything it cannot tell: null, unknown (no signal). Windows: null.
  */
-export async function lostRunStillRunning(pid: number, startedAt: number, platform: NodeJS.Platform = process.platform, startedOf = processStartedAt): Promise<boolean | null> {
+export async function lostRunStillRunning(
+  pid: number,
+  startedAt: number,
+  platform: NodeJS.Platform = process.platform,
+  startedOf = processStartedAt,
+  seenAt: number = startedAt,
+  groupStarts: GroupStarts = psGroupStarts,
+): Promise<boolean | null> {
   if (platform === "win32") return null;
   try {
     process.kill(-pid, 0);
@@ -136,10 +167,12 @@ export async function lostRunStillRunning(pid: number, startedAt: number, platfo
     return false;
   }
   const started = await startedOf(pid);
-  // The leader is gone while its group lives on: still our command (a group id is not reused while the group exists).
-  if (started === "gone") return true;
   if (started === null) return null;
-  return Math.abs(started - startedAt) <= 2_000;
+  if (started !== "gone") return Math.abs(started - startedAt) <= 2_000;
+  // The leader is gone while a group by its id lives on: ours only with a process of it from while ours ran.
+  const starts = await groupStarts(pid);
+  if (starts === null) return null;
+  return starts.some((at) => at >= startedAt - 2_000 && at <= seenAt + 2_000) ? true : null;
 }
 
 export function createInboxRunSetup(options: {
@@ -170,7 +203,7 @@ export function createInboxRunSetup(options: {
     serverSession: options.serverSession,
     readBody: options.readBody,
     json: options.json,
-    runs: createInboxRuns({ messageAlive: (id) => store.message(id) !== null, journal: fileRunJournal(join(dataDir, "inbox", "runs.json")), stillRunning: (pid, at) => lostRunStillRunning(pid, at), onChange: (id) => options.changed([id]) }),
+    runs: createInboxRuns({ messageAlive: (id) => store.message(id) !== null, journal: fileRunJournal(join(dataDir, "inbox", "runs.json")), stillRunning: (pid, at, seen) => lostRunStillRunning(pid, at, process.platform, processStartedAt, seen), onChange: (id) => options.changed([id]) }),
     secrets: createInboxSecrets({ file: join(dataDir, "inbox", "secrets.json"), vault }),
     vault,
     loginEnv: keptLoginEnv(options.readLoginEnv, { isFallback: (env) => LOGIN_ENV_FALLBACKS.has(env) }),

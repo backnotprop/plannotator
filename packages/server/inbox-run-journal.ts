@@ -21,6 +21,8 @@ export interface InboxRunRecord {
   /** Its process (group leader) while it ran, and when this Inbox started it: a lost run is looked for by these. */
   pid?: number | null;
   spawned_at?: number | null;
+  /** When this Inbox last wrote it while it ran: a lost run's group counts as its own only with a process started by then. */
+  seen_at?: number | null;
 }
 
 export interface InboxRunJournal {

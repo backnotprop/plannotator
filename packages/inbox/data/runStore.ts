@@ -63,7 +63,9 @@ const schedule = (entry: Entry) => {
   if (every === null) return;
   entry.timer = setTimeout(() => {
     entry.timer = null;
-    void read(entry);
+    // Hidden or scrolled away since: nothing (it reads when seen again).
+    if (seen(entry)) void read(entry);
+    else entry.stale = true;
   }, every);
 };
 
@@ -143,13 +145,31 @@ export async function refreshRunState(messageId: string): Promise<void> {
   return read(entryOf(messageId));
 }
 
-/** Read every message a card shows now: a secret saved on one card shows on the others at once. */
-export async function refreshAllRunStates(): Promise<void> {
+/**
+ * Do a change every card may show (a secret saved or removed), then read every message a card shows: it shows on
+ * the others at once. The Inbox's own `runs` event for that change, heard meanwhile, is not read a second time.
+ */
+let ownChangeUntil = 0;
+export async function refreshAllRunStates(change?: () => Promise<unknown>): Promise<void> {
+  if (change) {
+    ownChangeUntil = Date.now() + 3_000;
+    try {
+      await change();
+    } catch (failure) {
+      ownChangeUntil = 0;
+      throw failure;
+    }
+  }
   await Promise.all([...entries.values()].filter((entry) => entry.listeners.size > 0).map((entry) => read(entry)));
 }
 
 // This Inbox says a card's state changed: those cards read again (on screen now, the others when they come on screen).
 runEvents.subscribe((change) => {
+  if ('all' in change && Date.now() < ownChangeUntil) {
+    // This window's own save: it reads every card itself once the save lands.
+    ownChangeUntil = 0;
+    return;
+  }
   for (const entry of entries.values()) {
     if (entry.listeners.size === 0) continue;
     if ('all' in change || change.message_ids.includes(entry.messageId)) readWhenSeen(entry);
@@ -227,6 +247,7 @@ export function useRunState(messageId: string): Snapshot & { cardRef: (element: 
 export function resetRunStateForTests(times: { poll?: number; idle?: number } = {}): void {
   for (const entry of entries.values()) stopPolling(entry);
   entries.clear();
+  ownChangeUntil = 0;
   RUN_POLL_MS = times.poll ?? 500;
   RUN_IDLE_POLL_MS = times.idle ?? 5_000;
 }

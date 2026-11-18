@@ -17,6 +17,7 @@
 import { afterEach, expect, jest, test } from 'bun:test';
 import type { InboxEventFrame, InboxEventHandlers, InboxEventWindow } from './api';
 import { dispatchInboxFrame } from './api';
+import { runEvents } from './data/runEvents';
 import {
   browserSharedEventsEnv,
   discardPreparedInboxEvents,
@@ -1485,4 +1486,15 @@ test("a linked machine's steps line never reaches the window; its other records 
   const read = { seq: 10, kind: 'read', message_id: 'msg_far' };
   dispatchInboxFrame(machineFrame(read), handlers);
   expect(got).toEqual([read]);
+});
+
+test('a reconnect (the stream back, its hello again) has the run cards read again; the first connect does not', async () => {
+  const heard: unknown[] = [];
+  const stop = runEvents.subscribe((change) => heard.push(change));
+  await (world().open(), settle());
+  const first = heard.length;
+  worlds[0]!.server.broadcast('hello', JSON.stringify({ serverSession: 's', cursor: worlds[0]!.server.seq }));
+  await settle();
+  stop();
+  expect([first, ...heard]).toEqual([0, { all: true }]);
 });
