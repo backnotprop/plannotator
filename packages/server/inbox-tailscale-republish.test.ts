@@ -6,6 +6,7 @@
  * loopback. Temp PLANNOTATOR_DATA_DIR only; the real `tailscale` never runs.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { createServer } from "node:net";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -75,7 +76,8 @@ function fakeClock() {
       const due = [...pending.entries()];
       for (const [id] of due) pending.delete(id);
       for (const [, t] of due) t.fn();
-      await Bun.sleep(1);
+      // A look may probe a loopback port (two connects) before it publishes.
+      await Bun.sleep(30);
     },
   };
 }
@@ -145,7 +147,7 @@ function create(dataDir: string, run: TailscaleRunner, clock: ReturnType<typeof 
     onRepublished: () => void republished.push(Date.now()),
   });
   modules.push(module);
-  return { module, republished };
+  return { module, republished, registry };
 }
 
 const WAIT = INBOX_TAILSCALE_REPUBLISH.waitMs;
@@ -298,40 +300,87 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
     expect(republished).toHaveLength(1);
   });
 
-  test("an Inbox that crashed while published: the next start (Tailscale running) re-points the mapping it left, from the ports it recorded", async () => {
+  test("an Inbox that crashed while published: its record lost the proxy port, but the ports it made on this port are kept; a refused connect makes the mapping its own, re-pointed at once", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
     ts.tailscale.backend = "Running";
     const dead = await freePort();
-    // The last run's record after a failed start forgot `proxy_port`, but kept the ports it mapped.
     ts.serve.set(PORT, `http://127.0.0.1:${dead}`);
     const clock = fakeClock();
-    const { module } = create(dataDir, ts.run, clock, { url: null, error: "Tailscale did not say who owns this machine.", made_proxy_ports: [dead] });
+    const { module, republished } = create(dataDir, ts.run, clock, { url: null, error: "Tailscale did not say who owns this machine.", made: { https_port: PORT, proxy_ports: [dead] } });
     module.start();
+    // The start itself never probes (it would block): it finds a mapping, and a look runs at once.
+    expect(module.state().url).toBeNull();
+    expect(clock.waits()).toEqual([0]);
+    await clock.fire();
     expect(module.state()).toMatchObject({ url: `https://${MAGIC}:${PORT}/`, error: null });
     expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${module.listenerPort()}`);
+    expect(republished).toHaveLength(1);
     expect(clock.waits()).toEqual([]);
   });
 
-  test("a port this Inbox mapped before that something listens on now: its mapping is not touched, and the words are the usual ones", async () => {
+  test("a port this Inbox mapped before that something listens on now (on 0.0.0.0): its mapping is never touched, and the words are the usual ones", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
     ts.tailscale.backend = "Running";
-    const live = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("someone") });
+    const live = createServer(() => {});
+    await new Promise<void>((resolve) => live.listen(0, "0.0.0.0", resolve));
     try {
-      const port = live.port as number;
+      const port = (live.address() as { port: number }).port;
       ts.serve.set(PORT, `http://127.0.0.1:${port}`);
       const clock = fakeClock();
-      const { module } = create(dataDir, ts.run, clock, { url: null, error: null, https_port: PORT, proxy_port: port, made_proxy_ports: [port] });
+      const { module } = create(dataDir, ts.run, clock, { url: null, error: null, made: { https_port: PORT, proxy_ports: [port] } });
       module.start();
+      await clock.fire();
       expect(module.state().error).toBe(
         `Another tailscale serve mapping already uses port ${PORT}, the Inbox's port. The Inbox never replaces it: remove it with "tailscale serve --https=${PORT} off" if nothing needs it.`,
       );
       expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${port}`);
       expect(ts.serveCalls()).toEqual([]);
+      // No fast loop: the next look is the slow one.
+      expect(clock.waits()).toEqual([INBOX_TAILSCALE_REPUBLISH.stuckMs]);
     } finally {
-      live.stop(true);
+      await new Promise<void>((resolve) => live.close(() => resolve()));
     }
+  });
+
+  test("ports made on another https port do not count for this one", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const dead = await freePort();
+    ts.serve.set(PORT, `http://127.0.0.1:${dead}`);
+    const clock = fakeClock();
+    const { module } = create(dataDir, ts.run, clock, { url: null, error: null, made: { https_port: PORT + 1, proxy_ports: [dead] } });
+    module.start();
+    expect(module.state().error).toStartWith(`Another tailscale serve mapping already uses port ${PORT}`);
+    expect(clock.waits()).toEqual([INBOX_TAILSCALE_REPUBLISH.stuckMs]);
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${dead}`);
+  });
+
+  test("a clean stop while Tailscale is stopped keeps the record (serve's empty answer proves nothing); the next start with Tailscale back takes its mapping back", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const clock = fakeClock();
+    const first = create(dataDir, ts.run, clock);
+    first.module.start();
+    const left = ts.serve.get(PORT)!;
+    expect(left).toBe(`http://127.0.0.1:${first.module.listenerPort()}`);
+    // Tailscale stops, then the Inbox stops cleanly: `serve status` reads empty, and the mapping stays with Tailscale.
+    ts.tailscale.backend = "Stopped";
+    first.module.stop();
+    expect(ts.serve.get(PORT)).toBe(left);
+    const kept = first.registry.tailscale!;
+    expect(kept).toMatchObject({ https_port: PORT, made: { https_port: PORT } });
+    expect(kept.made!.proxy_ports).toContain(Number(left.split(":").at(-1)));
+
+    // Started again with Tailscale back: the mapping the last run left is its own, and points at this run's listener.
+    ts.tailscale.backend = "Running";
+    const next = create(dataDir, ts.run, fakeClock(), kept);
+    next.module.start();
+    expect(next.module.state()).toMatchObject({ url: `https://${MAGIC}:${PORT}/`, error: null });
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${next.module.listenerPort()}`);
   });
 
   test("published at start: no timer; off: no timer; no `tailscale` CLI at all: no timer, as before", async () => {

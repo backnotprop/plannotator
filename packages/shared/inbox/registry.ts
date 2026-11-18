@@ -74,11 +74,11 @@ export interface InboxRegistryEntry {
    * pointed at the loopback listener on the same port number; recorded before it is made, taken down like the window's.
    */
   /**
-   * `made_proxy_ports` (additive): every proxy port this Inbox pointed the mapping at, newest last, kept through
-   * take-downs and failed publishes (inbox-tailscale.ts): a mapping a crash or a stop left on one of them, where nothing
-   * listens now, is the Inbox's own and is re-pointed rather than refused.
+   * `made` (additive): the proxy ports this Inbox pointed its mapping on `https_port` at, newest last (at most 3), kept
+   * through take-downs and failed publishes until the switch goes off (inbox-tailscale.ts): a mapping on that port to
+   * one of them, where a connect is refused now, is the Inbox's own and is re-pointed rather than refused.
    */
-  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number; made_proxy_ports?: number[] };
+  tailscale?: { url: string | null; error: string | null; https_port?: number; proxy_port?: number; relay_port?: number; made?: { https_port: number; proxy_ports: number[] } };
   cloudflare_access?: {
     url: string | null;
     error: string | null;

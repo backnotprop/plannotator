@@ -73,6 +73,7 @@ import {
   describeTailscaleFailure,
   parseTailscaleSelfIdentity,
   runTailscale,
+  serveStatusProxy,
   serveStatusRoutes,
   serveTargetIsLoopbackPort,
   TAILSCALE_CLI_TIMEOUT_MS,
@@ -94,7 +95,10 @@ import {
 } from "./tailscale-serve";
 import { parseTailscaleBackend, runTailscaleQuietly } from "./inbox-pairing-checks";
 import { syncSection } from "./inbox-perf";
-import { DOOR_TARGETS_KEPT, INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE, loopbackPortFree } from "./inbox-tailnet-door";
+import { INBOX_TAILNET_HTTPS_PORTS, INBOX_TAILNET_PORT_RANGE, loopbackPortRefused } from "./inbox-tailnet-door";
+
+/** How many proxy ports the record keeps as the Inbox's own (`made`), for its one https port. */
+export const WINDOW_PROXY_PORTS_KEPT = 3;
 
 /** The ports the device door may take (inbox-tailnet-door.ts, 8443 to 8450): the window's mapping never takes one. */
 export const isDoorTailnetPort = (port: number): boolean => INBOX_TAILNET_HTTPS_PORTS.includes(port);
@@ -257,7 +261,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   const save = (value: InboxRegistryEntry["tailscale"] | undefined) => {
     // The ports this Inbox mapped ride every save while publishing is on, so a take-down that read an empty `serve
     // status` (Tailscale stopped) never forgets a mapping that comes back with Tailscale.
-    const made = value && !value.made_proxy_ports && record()?.made_proxy_ports?.length ? { made_proxy_ports: record()!.made_proxy_ports } : {};
+    const made = value && !value.made && record()?.made ? { made: record()!.made } : {};
     const apply = (target: InboxRegistryEntry) => {
       // The relay's record rides every save while its mapping may exist.
       const relay = relayKept !== null ? { relay_port: relayKept } : {};
@@ -299,22 +303,50 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   };
 
   /**
-   * Proxy targets a mapping of this Inbox's own points at: this run's listener, the one inbox.json names, and any port
-   * it mapped before (`made_proxy_ports`) where nothing listens now: a mapping a crash or an unclean stop left there is
-   * dead and still the Inbox's. A port something listens on is never one of them unless it is this run's listener.
+   * Proxy ports this Inbox mapped before (`made`) that a connect found dead just before a publish (`probeLeftover`,
+   * without blocking): a mapping a crash or an unclean stop left on one of them is still the Inbox's.
+   */
+  const deadPorts = new Set<number>();
+
+  /**
+   * Proxy targets a mapping of this Inbox's own points at: this run's listener, the one inbox.json names, and a port it
+   * mapped before on this https port (`made`) found dead (`deadPorts`). A port found alive, or never probed, is not.
    */
   const ownTargets = () => {
     const mine = listener?.port;
     const kept = record();
     const ports = [mine, kept?.proxy_port].filter((p): p is number => typeof p === "number" && p > 0);
-    for (const p of kept?.made_proxy_ports ?? []) if (!ports.includes(p) && loopbackPortFree(p)) ports.push(p);
+    if (kept?.made && kept.made.https_port === context.port()) for (const p of kept.made.proxy_ports) if (!ports.includes(p) && deadPorts.has(p)) ports.push(p);
     return ports.map((p) => `http://127.0.0.1:${p}`);
   };
-  /** `made_proxy_ports` with `port` added at the end, the newest `DOOR_TARGETS_KEPT`. */
-  const madeWith = (...ports: (number | undefined)[]): number[] => {
-    const out = (record()?.made_proxy_ports ?? []).filter((p) => !ports.includes(p));
-    for (const p of ports) if (typeof p === "number" && p > 0 && !out.includes(p)) out.push(p);
-    return out.slice(-DOOR_TARGETS_KEPT);
+  /** `made` for the https port `port` with `proxies` added at the end, the newest `WINDOW_PROXY_PORTS_KEPT`; another https port starts over. */
+  const madeWith = (port: number, ...proxies: (number | undefined)[]): { https_port: number; proxy_ports: number[] } => {
+    const kept = record()?.made;
+    const out = (kept && kept.https_port === port ? kept.proxy_ports : []).filter((p) => !proxies.includes(p));
+    for (const p of proxies) if (typeof p === "number" && p > 0 && !out.includes(p)) out.push(p);
+    return { https_port: port, proxy_ports: out.slice(-WINDOW_PROXY_PORTS_KEPT) };
+  };
+  /**
+   * Before a publish, without blocking: the mapping on the Inbox's port, when it points at a proxy port this Inbox made
+   * (not this run's listener), is probed; a refused connect puts it in `deadPorts`.
+   */
+  const probeLeftover = async () => {
+    deadPorts.clear();
+    const kept = record()?.made;
+    const port = context.port();
+    if (!kept || kept.https_port !== port || kept.proxy_ports.length === 0) return;
+    let serve: TailscaleRunResult;
+    try {
+      serve = await runAsync(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+    } catch {
+      return;
+    }
+    if (serve.error || serve.status !== 0) return;
+    const mapped = serveStatusProxy(serve.stdout, port);
+    const proxy = mapped.state === "mapped" ? /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(mapped.proxy)?.[1] : undefined;
+    const leftover = proxy === undefined ? null : Number(proxy);
+    if (leftover === null || leftover === listener?.port || !kept.proxy_ports.includes(leftover)) return;
+    if (await loopbackPortRefused(leftover)) deadPorts.add(leftover);
   };
 
   // ── The tailnet-only listener ──
@@ -448,6 +480,10 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   /** "wait": Tailscale was not ready at the last try, so only its status is read. "stuck": it was, and the publish failed anyway. */
   let retryMode: "wait" | "stuck" = "wait";
   let retryStep = 0;
+  /** A publish found another mapping on the port that may be a dead one of this Inbox's own: look at once. */
+  let probeSoon = false;
+  /** The look is probing and publishing: a conflict it meets is final for this round. */
+  let probing = false;
   /** Tailscale was ready (`ready`) when the last publish was tried: its failure was for another reason. */
   let triedReady = false;
   /** No `tailscale` command at all: nothing to wait for, as before this retry existed. */
@@ -507,18 +543,14 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     }
     const kept = record();
     if (!kept?.https_port || !kept.proxy_port || kept.proxy_port === listener?.port) return true;
-    // Something listens there now (an Inbox of this data folder still running, or any program): not this run's to
-    // take down. The publish then finds the mapping and says so, as for any mapping it did not make.
-    if (!loopbackPortFree(kept.proxy_port)) return true;
     const result = yield* takeDownOwnServeSteps(kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
     if (result === "failed") {
       state.error = `Could not remove the tailnet address an earlier run left; it is retried at the next start. Or run "tailscale serve --https=${kept.https_port} off".`;
       keepRecord(state.error);
       return false;
     }
-    // "none" may be Tailscale stopped (its `serve status` is then empty) with the mapping still kept: the port stays
-    // known as one this Inbox made, so the publish re-points that mapping once Tailscale runs (`ownTargets`).
-    save(result === "none" ? { url: null, error: null, made_proxy_ports: madeWith(kept.proxy_port) } : { url: null, error: null });
+    // The port stays known as one this Inbox made (`made`), so a mapping that is still there later is known as its own.
+    save({ url: null, error: null, made: madeWith(kept.https_port, kept.proxy_port) });
     return true;
   };
 
@@ -537,7 +569,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       if (state.exposed.some((e) => e.https_port === port)) throw new Error(exposureWarning(state.exposed));
       const proxyPort = openListener();
       // Recorded before it exists, so a crash between here and a clean stop always leaves a record to take down.
-      save({ url: null, error: null, https_port: port, proxy_port: proxyPort, made_proxy_ports: madeWith(record()?.proxy_port, proxyPort) });
+      save({ url: null, error: null, https_port: port, proxy_port: proxyPort, made: madeWith(port, record()?.https_port === port ? record()?.proxy_port : undefined, proxyPort) });
       const { url } = yield* enableServeSteps(proxyPort, { httpsPort: port, ownTargets: ownTargets(), persist: true });
       servedHostname = new URL(url).hostname.toLowerCase();
       httpsPort = port;
@@ -549,6 +581,10 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     } catch (error) {
       state.url = null;
       state.error = failureWords(error, port);
+      // Another mapping on the port, perhaps a dead one of this Inbox's own: a look without blocking can tell (`probeLeftover`).
+      const made = record()?.made;
+      const mine = listener?.port;
+      if (error instanceof TailscaleServeError && error.code === "conflict" && !probing && made?.https_port === port && made.proxy_ports.some((p) => p !== mine)) probeSoon = true;
       const targets = ownTargets();
       closeListener();
       httpsPort = null;
@@ -609,8 +645,14 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   /** After every publish (or a change that may have made one): the next look, or none. */
   const afterAttempt = () => {
     cancelRetry();
+    const soon = probeSoon;
+    probeSoon = false;
     if (!retryWanted()) return;
-    if (triedReady) {
+    if (soon) {
+      // Once, at once: the look probes the mapping on the port, then publishes.
+      retryMode = "stuck";
+      arm(0);
+    } else if (triedReady) {
       retryMode = "stuck";
       arm(INBOX_TAILSCALE_REPUBLISH.stuckMs);
     } else {
@@ -639,9 +681,14 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       }
     }
     let published = false;
+    probing = true;
     try {
+      await probeLeftover();
+      if (!retryWanted()) return;
       published = await runTailscaleStepsAsync(publish(true), runAsync);
     } finally {
+      probing = false;
+      deadPorts.clear();
       afterAttempt();
     }
     if (published) context.onRepublished?.();
@@ -695,6 +742,8 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     // A change still running may publish after this: its record stays for the next start until it is down.
     if (record()) {
       if (pending > 0) keepRecord(`Stopped while publishing; the tailnet address is taken down at the next start, or run "tailscale serve --https=${port} off".`);
+      // The ports it mapped stay known until the switch goes off, so a mapping Tailscale brings back later is its own.
+      else if (record()?.made) save({ url: null, error: null });
       else save(undefined);
     }
     return { failedPort: null };

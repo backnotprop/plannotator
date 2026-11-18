@@ -855,7 +855,7 @@ describe("the tailnet door with Phones off, in process", () => {
       expect(tailscale.serve.get(8443)).toBe(theirs);
       expect(tailscale.doorCalls()).toEqual([]);
       // What the Inbox made is recorded: port, target, and that the mapping may exist.
-      expect(record()).toMatchObject({ v: 1, https_port: 8444, target: door, published: true });
+      expect(record()).toEqual({ v: 1, https_port: 8444, target: door, published: true, made: [door] });
 
       // Linking: the way back handed to the other machine carries the port.
       const linked = await fetch(`${base}/api/inbox/machines/link`, { method: "POST", body: JSON.stringify({ serverSession, link: offered.link.replace(/id=[^&]+/, `id=${OTHER}`), address: `http://127.0.0.1:${peer.port}` }) });
@@ -922,7 +922,8 @@ describe("the tailnet door with Phones off, in process", () => {
     try {
       expect(own.tailscale.doorCalls()).toEqual(["on"]);
       expect([...own.tailscale.serve.keys()]).toEqual([8443]);
-      expect(own.record()).toMatchObject({ v: 1, https_port: 8443, target: own.tailscale.serve.get(8443), published: true });
+      expect(own.record()).toEqual({ v: 1, https_port: 8443, target: own.tailscale.serve.get(8443), published: true, made: expect.arrayContaining([own.tailscale.serve.get(8443)]) });
+      expect((own.record().made as string[]).at(-1)).toBe(own.tailscale.serve.get(8443));
     } finally {
       inbox.stop();
     }

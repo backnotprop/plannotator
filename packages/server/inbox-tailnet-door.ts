@@ -22,7 +22,8 @@
  *    wrote `published: false`.
  * A mapping on that port with exactly that target, while `published`, is the
  * Inbox's. So is one whose target is in `made` (or is `target`) and where
- * nothing listens now (`loopbackPortFree`): a dead mapping it made itself.
+ * nothing listens now (`loopbackTargetDead`, read before the choice): a dead
+ * mapping it made itself.
  * Anything else is never adopted, re-pointed or removed, even a mapping whose
  * target is the port the door listener happens to bind.
  *
@@ -35,6 +36,7 @@
  */
 
 import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { serveStatusProxy } from "@plannotator/shared/tailscale";
@@ -66,26 +68,53 @@ export function withMadeTargets(made: readonly string[] | undefined, ...targets:
   return out.slice(-DOOR_TARGETS_KEPT);
 }
 
+/** How long a connect to a loopback port may take before "something may be there". */
+export const LOOPBACK_PROBE_MS = 1_000;
+
 /**
- * Nothing listens on this loopback port now: it can be bound here and is let go at once. A mapping this Inbox made
- * to such a port is dead (its process crashed, or stopped without taking it down), so it is still the Inbox's to
- * re-point. A port something holds (another Inbox, any program) is never treated as dead.
+ * One connect: "refused" only for ECONNREFUSED (and `alsoRefused`); a connection, a timeout or any other error is
+ * "maybe".
  */
-export function loopbackPortFree(port: number): boolean {
-  if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) return false;
-  try {
-    const probe = Bun.serve({ hostname: "127.0.0.1", port, fetch: () => new Response(null, { status: 404 }) } as Parameters<typeof Bun.serve>[0]);
-    probe.stop(true);
-    return true;
-  } catch {
-    return false;
-  }
+function connectOnce(host: string, port: number, timeoutMs: number, alsoRefused: readonly string[] = []): Promise<"refused" | "maybe"> {
+  return new Promise((resolve) => {
+    let done = false;
+    const socket = connect({ host, port });
+    const finish = (answer: "refused" | "maybe") => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(answer);
+    };
+    const timer = setTimeout(() => finish("maybe"), timeoutMs);
+    socket.once("connect", () => finish("maybe"));
+    socket.once("error", (error: NodeJS.ErrnoException) => finish(error.code === "ECONNREFUSED" || alsoRefused.includes(error.code ?? "") ? "refused" : "maybe"));
+  });
 }
 
-/** A `http://127.0.0.1:<port>` target where nothing listens now. */
-export function loopbackTargetDead(target: string): boolean {
+/**
+ * Nothing listens on this loopback port now: a connect to 127.0.0.1 and to ::1 are both refused. A mapping this Inbox
+ * made to such a port is dead (its process crashed, or stopped without taking it down; serve answers 502), so it is
+ * still the Inbox's to re-point. A connection, a timeout or any other error means something may be there, and it is
+ * never treated as dead. The port is never bound to find out (a bind can succeed beside a listener on 0.0.0.0 on macOS).
+ */
+export async function loopbackPortRefused(port: number, timeoutMs = LOOPBACK_PROBE_MS): Promise<boolean> {
+  if (!Number.isSafeInteger(port) || port <= 0 || port > 65535) return false;
+  if ((await connectOnce("127.0.0.1", port, timeoutMs)) !== "refused") return false;
+  // A computer with no IPv6 loopback has no ::1 to listen on: those errors say so, and only those.
+  return (await connectOnce("::1", port, timeoutMs, ["EADDRNOTAVAIL", "EAFNOSUPPORT", "ENETUNREACH"])) === "refused";
+}
+
+/** The port of a `http://127.0.0.1:<port>` target, or null. */
+export function loopbackTargetPort(target: string): number | null {
   const port = /^http:\/\/127\.0\.0\.1:(\d+)$/.exec(target)?.[1];
-  return port !== undefined && loopbackPortFree(Number(port));
+  return port === undefined ? null : Number(port);
+}
+
+/** A `http://127.0.0.1:<port>` target where nothing listens now (`loopbackPortRefused`). */
+export async function loopbackTargetDead(target: string, timeoutMs = LOOPBACK_PROBE_MS): Promise<boolean> {
+  const port = loopbackTargetPort(target);
+  return port !== null && (await loopbackPortRefused(port, timeoutMs));
 }
 
 const recordPath = (dataDir: string) => join(inboxDir(dataDir), INBOX_TAILNET_DOOR_FILE);
@@ -158,9 +187,21 @@ export type TailnetDoorPort =
   | { state: "malformed" };
 
 /**
+ * The mapping on the record's port when it is one this Inbox made (the record's `target`, or one of `made`) and is not
+ * simply its live, published mapping: a leftover to probe (`loopbackTargetDead`) before the choice. Null otherwise.
+ */
+export function ownLeftoverTarget(serveStatus: string, record: TailnetDoorRecord | null): string | null {
+  if (!record) return null;
+  const mapped = serveStatusProxy(serveStatus, record.https_port);
+  if (mapped.state !== "mapped" || !LOOPBACK_TARGET.test(mapped.proxy)) return null;
+  if (record.published && mapped.proxy === record.target) return null;
+  return mapped.proxy === record.target || (record.made ?? []).includes(mapped.proxy) ? mapped.proxy : null;
+}
+
+/**
  * The port the door takes, read from `tailscale serve status --json`: the record's port, else (first publish) the first
- * free one. `dead`: a target where nothing listens now (`loopbackTargetDead`); a mapping the record says this Inbox made
- * (`target` or `made`) that points at such a target is its own leftover and is re-pointed. Default: none is.
+ * free one. `dead`: targets found dead just before (`loopbackTargetDead`); a mapping the record says this Inbox made
+ * that points at one of them is its own leftover and is re-pointed. Default: none is.
  */
 export function chooseTailnetDoorPort(serveStatus: string, record: TailnetDoorRecord | null, dead: (target: string) => boolean = () => false): TailnetDoorPort {
   if (record) {

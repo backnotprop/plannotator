@@ -38,6 +38,7 @@ import {
   extractServeHttpsUrl,
   runTailscale,
   serveStatusProxy,
+  TAILSCALE_CLI_TIMEOUT_MS,
   TAILSCALE_SERVE_TIMEOUT_MS,
   type TailscaleRunResult,
   type TailscaleRunner,
@@ -300,13 +301,32 @@ export function takeDownOwnServeMapping(
   return runTailscaleSteps(takeDownOwnServeSteps(httpsPort, targets), run);
 }
 
-/** `takeDownOwnServeMapping`'s calls. */
+/**
+ * Tailscale says it is not running (`BackendState` other than "Running"). Then `serve status` reads empty while
+ * Tailscale keeps the mapping and restores it once it runs, so an empty read proves nothing. A status that cannot be
+ * read, or that names no state, is not taken as "not running".
+ */
+function saysNotRunning(status: TailscaleRunResult): boolean {
+  if (status.error || status.status !== 0) return false;
+  try {
+    const state = (JSON.parse(status.stdout) as { BackendState?: unknown }).BackendState;
+    return typeof state === "string" && state !== "Running";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `takeDownOwnServeMapping`'s calls. Nothing on the port while Tailscale is not running is not "none": the mapping
+ * may come back with Tailscale, so it answers "failed" (it may still exist) and a caller keeps its record.
+ */
 export function* takeDownOwnServeSteps(httpsPort: number, targets: readonly string[]): TailscaleSteps<"removed" | "none" | "failed"> {
   if (targets.length === 0) return "none";
   const status = yield step(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
   if (status.error || status.status !== 0) return "failed";
   const existing = serveStatusProxy(status.stdout, httpsPort);
   if (existing.state === "malformed") return "failed";
+  if (existing.state === "free" && saysNotRunning(yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS))) return "failed";
   if (existing.state !== "mapped" || !targets.includes(existing.proxy)) return "none";
   return (yield* serveOffSteps(httpsPort)) ? "removed" : "failed";
 }

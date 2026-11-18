@@ -1,12 +1,13 @@
 /**
  * The tailnet door (linked machines' way in) publishes again by itself (`INBOX_DOOR_REPUBLISH`,
  * packages/server/inbox-devices.ts): an Inbox started while Tailscale was stopped publishes its door once Tailscale
- * runs, a mapping it made itself where nothing listens now (a crash, a stop that could not take it down) is re-pointed,
+ * runs, a mapping it made itself where a connect is refused now (a crash, a stop that could not take it down) is re-pointed,
  * and a mapping it did not make, or one something still listens behind, is never touched. The module alone, with a
  * scripted `tailscale` and a hand-driven clock: no Inbox server starts; the only listeners are the door's own on
  * loopback. Temp PLANNOTATOR_DATA_DIR only; the real `tailscale` never runs.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { createServer } from "node:net";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -69,7 +70,8 @@ function fakeClock() {
       const due = [...pending.entries()];
       for (const [id] of due) pending.delete(id);
       for (const [, t] of due) t.fn();
-      await Bun.sleep(5);
+      // A look may probe a loopback port (two connects) before it publishes.
+      await Bun.sleep(30);
     },
   };
 }
@@ -77,7 +79,7 @@ function fakeClock() {
 /** Tailscale as a scripted CLI: running or stopped, its serve config (kept while stopped, shown only while running), every call. */
 function fakeTailscale() {
   const serve = new Map<number, string>();
-  const tailscale = { running: false };
+  const tailscale = { running: false, serveRefuses: false };
   const calls: string[][] = [];
   const run: TailscaleRunner = (args) => {
     calls.push(args);
@@ -94,6 +96,7 @@ function fakeTailscale() {
     }
     const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
     if (!tailscale.running) return { status: 1, stdout: "", stderr: "Tailscale is stopped." };
+    if (tailscale.serveRefuses && !args.includes("off")) return { status: 1, stdout: "", stderr: "serve is not enabled on your tailnet" };
     if (args.includes("off")) {
       serve.delete(httpsPort);
       return ok();
@@ -166,7 +169,7 @@ describe("the tailnet door publishes again by itself", () => {
     expect(clock.waits()).toEqual([INBOX_DOOR_REPUBLISH.checkMs]);
   });
 
-  test("the mapping a crashed run left (its record says it made it, nothing listens there): re-pointed at this run's door, at start", () => {
+  test("the mapping a crashed run left (its record says it made it, a connect is refused there): re-pointed at this run's door by the look that runs at once", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
     ts.tailscale.running = true;
@@ -175,9 +178,14 @@ describe("the tailnet door publishes again by itself", () => {
     // As a take-down that read an empty `serve status` (Tailscale stopped) left it: published false, the mapping kept.
     writeTailnetDoorRecord(dataDir, { https_port: DOOR, target: dead, published: false });
     const clock = fakeClock();
-    const { devices, view } = door(dataDir, ts.run, clock);
+    const { devices, view, republished } = door(dataDir, ts.run, clock);
     devices.startTailnet();
+    // The start never probes (it would block): the mapping reads as held, and a look runs at once.
+    expect(view().address).toBeNull();
+    expect(clock.waits()).toEqual([0]);
+    await clock.fire();
     expect(view()).toEqual({ address: `${MAGIC}:${DOOR}`, error: null });
+    expect(republished).toHaveLength(1);
     expect(ts.serve.get(DOOR)).not.toBe(dead);
     expect(readTailnetDoorRecord(dataDir)).toMatchObject({ published: true, target: ts.serve.get(DOOR), made: expect.arrayContaining([dead, ts.serve.get(DOOR)]) });
   });
@@ -200,7 +208,7 @@ describe("the tailnet door publishes again by itself", () => {
     expect(republished).toHaveLength(1);
   });
 
-  test("a mapping this Inbox did not make: never touched, the words unchanged, looked at again slowly", () => {
+  test("a mapping this Inbox did not make: never touched, the words unchanged, looked at again after 10, then 30 minutes", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
     ts.tailscale.running = true;
@@ -210,32 +218,84 @@ describe("the tailnet door publishes again by itself", () => {
     const clock = fakeClock();
     const { devices, view } = door(dataDir, ts.run, clock);
     devices.startTailnet();
+    expect(clock.waits()).toEqual([0]);
     expect(view().address).toBeNull();
     expect(view().error).toStartWith(`Another tailscale serve mapping now uses port ${DOOR}, where linked machines reach this Inbox.`);
     expect(ts.serve.get(DOOR)).toBe(theirs);
+    const words = view().error;
+    for (const wait of [...INBOX_DOOR_REPUBLISH.stuckMs, INBOX_DOOR_REPUBLISH.stuckMs.at(-1)!]) {
+      await clock.fire();
+      expect(clock.waits()).toEqual([wait]);
+    }
+    // Looks read only: no serve write, the same words.
+    expect(ts.serve.get(DOOR)).toBe(theirs);
     expect(ts.serveWrites()).toEqual([]);
-    expect(clock.waits()).toEqual([INBOX_DOOR_REPUBLISH.checkMs]);
+    expect(view().error).toBe(words);
   });
 
-  test("a mapping it made whose port something listens on now: never touched", () => {
+  test("a mapping it made whose port something listens on now (on 0.0.0.0): never touched", async () => {
     const dataDir = world();
     const ts = fakeTailscale();
     ts.tailscale.running = true;
-    const live = Bun.serve({ hostname: "127.0.0.1", port: 0, fetch: () => new Response("someone") });
+    const live = createServer(() => {});
+    await new Promise<void>((resolve) => live.listen(0, "0.0.0.0", resolve));
     try {
-      const target = `http://127.0.0.1:${live.port as number}`;
+      const target = `http://127.0.0.1:${(live.address() as { port: number }).port}`;
       ts.serve.set(DOOR, target);
       writeTailnetDoorRecord(dataDir, { https_port: DOOR, target, published: false });
       const clock = fakeClock();
       const { devices, view } = door(dataDir, ts.run, clock);
       devices.startTailnet();
+      await clock.fire();
       expect(view().address).toBeNull();
       expect(view().error).toStartWith(`Another tailscale serve mapping now uses port ${DOOR}`);
       expect(ts.serve.get(DOOR)).toBe(target);
       expect(ts.serveWrites()).toEqual([]);
+      expect(clock.waits()).toEqual([INBOX_DOOR_REPUBLISH.stuckMs[0]!]);
     } finally {
-      live.stop(true);
+      await new Promise<void>((resolve) => live.close(() => resolve()));
     }
+  });
+
+  test("a clean stop while Tailscale is stopped keeps the record (serve's empty answer proves nothing); the next start with Tailscale back takes its mapping back", () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.running = true;
+    const first = door(dataDir, ts.run, fakeClock());
+    first.devices.startTailnet();
+    const left = ts.serve.get(DOOR)!;
+    expect(left).toStartWith("http://127.0.0.1:");
+    ts.tailscale.running = false;
+    first.devices.stopTailnet();
+    // The mapping stays with Tailscale, and so does the record of it.
+    expect(ts.serve.get(DOOR)).toBe(left);
+    expect(readTailnetDoorRecord(dataDir)).toMatchObject({ https_port: DOOR, target: left, published: true, made: [left] });
+
+    ts.tailscale.running = true;
+    const next = door(dataDir, ts.run, fakeClock());
+    next.devices.startTailnet();
+    expect(next.view()).toEqual({ address: `${MAGIC}:${DOOR}`, error: null });
+    expect(readTailnetDoorRecord(dataDir)).toMatchObject({ published: true, target: ts.serve.get(DOOR) });
+  });
+
+  test("Tailscale runs but serve refuses (Serve off for the tailnet): no 5-minute loop; looked at again after 10, then 30 minutes", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    const clock = fakeClock();
+    const { devices, view } = door(dataDir, ts.run, clock);
+    devices.startTailnet();
+    expect(clock.waits()).toEqual([WAIT[0]!]);
+    ts.tailscale.running = true;
+    ts.tailscale.serveRefuses = true;
+    await clock.fire();
+    expect(view().address).toBeNull();
+    expect(clock.waits()).toEqual([INBOX_DOOR_REPUBLISH.stuckMs[0]!]);
+    await clock.fire();
+    expect(clock.waits()).toEqual([INBOX_DOOR_REPUBLISH.stuckMs[1]!]);
+    ts.tailscale.serveRefuses = false;
+    await clock.fire();
+    expect(view().address).toBe(`${MAGIC}:${DOOR}`);
+    expect(clock.waits()).toEqual([INBOX_DOOR_REPUBLISH.checkMs]);
   });
 
   test("published, then Tailscale lost its serve config: the next look publishes the door again", async () => {
