@@ -165,7 +165,8 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   the attachment at once; the owner adds a file to its message once, so a
  *   second copy answers the same attachment); and a Combine, or a Tidy with the
  *   person's words, which asks an agent there to act on the person's threads
- *   (one held for days would archive threads nobody is looking at).
+ *   (one held for days would archive threads nobody is looking at); and Show in
+ *   Rex for an agent there (`rex/show`), which moves Rex's app at the click.
  * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
  *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
  *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
@@ -246,6 +247,9 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "f
   "POST launch/:id/retry": "set",
   "POST launch/:id/trust": "set",
   "POST launch/:id/delete": "set",
+  // Show in Rex for an agent on another machine (inbox-rex-far.ts): a press that moves Rex's app now; held for later it
+  // would move it when nobody asked.
+  "POST rex/show": "now",
   "POST link-back": "set",
   "POST unlink": "set",
   // On this table so rule 8 knows it. The forward refuses it before this is read: an Update is never held to run days later.

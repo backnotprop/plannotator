@@ -423,6 +423,9 @@ describe("plannotator inbox mcp inside an agent Ask AI started (PLANNOTATOR_ASK_
     const detached = detachedInboxEnv({ PATH: "/bin", ...pane }, "/data");
     expect(Object.keys(detached).filter((name) => name.startsWith("REX_") || name === "TERM_PROGRAM")).toEqual([]);
     expect(detached.PATH).toBe("/bin");
+    // Which Rex server is this computer's stays known, under the Inbox's own name (a socket here; never another computer's address).
+    expect(detached.PLANNOTATOR_INBOX_REX_SERVER).toBe("/tmp/rex.sock");
+    expect(detachedInboxEnv({ PATH: "/bin", REX_SERVER: "https://build.example.ts.net" }, "/data").PLANNOTATOR_INBOX_REX_SERVER).toBeUndefined();
   });
 });
 

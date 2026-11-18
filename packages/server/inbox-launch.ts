@@ -268,7 +268,7 @@ export function createInboxLaunch(options: {
    * Rex (a tab of the Inbox's own Rex session for the project), and `appAttached` for that setting's row; Stop closes
    * its pane, and a reply finds out at once when that pane is gone. Absent: no Rex.
    */
-  rex?: Pick<InboxRex, "open" | "appAttachedNow" | "paneGone" | "closePane">;
+  rex?: Pick<InboxRex, "open" | "appAttachedNow" | "paneGone" | "closePane"> & { headless?: boolean };
   /** Where a live session says it runs (its polls' place hint): Stop of a launch in Rex finds out whether it is still in its own pane. */
   placeOf?: (session: string) => InboxPlace | null;
   /** What a session's confirmed Rex pane says it is doing (inbox-rex.ts `statuses`), for a launch that runs in Rex. */
@@ -860,7 +860,8 @@ export function createInboxLaunch(options: {
   /**
    * Start in Rex (Settings → Agents' "Start new agents in", fixed on the record at Send): the host's own interactive
    * command in a new tab of the Rex session the Inbox made for the project, through the person's login shell. Rex owns
-   * that process from then on. Null when Rex is not here (no app attached over this computer's socket, or it went
+   * that process from then on. Null when Rex is not here (on a Mac, no app attached over this computer's socket; a
+   * headless Rex, no server answering; or it went
    * before the tab was asked for), or Rex said no to the ask (`refused`: an error answer, so it made nothing): the
    * caller starts it in the background. A tab asked for whose answer never came may be running: counted as started,
    * with no line (it connects, or the line says to look in Rex).
@@ -1628,7 +1629,10 @@ ${result.text}`);
       const ahead = new URL(req.url).searchParams.get("ahead") === "1";
       if (enabled() && config().fullPermissions === null && (ahead || !shellFresh())) await readLogin();
       // Settings → Agents' own read (not New message's `ahead`): whether Rex's app is here, read now if stale.
-      const rexHere = here && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
+      // A headless Rex (a server with no app on this computer, inbox-rex-where.ts) answers any window of this Inbox:
+      // such a machine is used from another computer, and the row has to show there for Rex to be chosen at all.
+      const rexAsked = here || (options.rex?.headless === true && !door);
+      const rexHere = rexAsked && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
       return json({ launch: settingsState(rexHere) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);

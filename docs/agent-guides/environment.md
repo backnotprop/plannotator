@@ -186,6 +186,10 @@
 
 **Rex's pane (`TERM_PROGRAM`, `REX_SESSION`, `REX_BLOCK`; read, never set):** an agent connection (the Claude Code mod, and every host on `packages/shared/inbox/agent-link.ts`) reads them from the environment its host started with to tell the Plannotator Inbox which Rex pane the session runs in (`inboxPlaceFromEnv`): only when `TERM_PROGRAM` is `rex`, so tmux inside Rex says nothing, and never under test (`NODE_ENV=test`, as `bun test` sets, or `PLANNOTATOR_TEST_SANDBOX`). `REX_SERVER` is never read.
 
+**Rex's server (`REX_SERVER`, `REX_RUNTIME_DIR`, `XDG_RUNTIME_DIR`, `XDG_STATE_HOME`; read, never set; `PLANNOTATOR_INBOX_REX_SERVER`):** where the Plannotator Inbox looks for this computer's Rex server (`packages/server/inbox-rex-where.ts`; "Any system Rex runs on" in `inbox-notifications-and-agents.md`). `REX_SERVER` counts only when it is a unix socket's path; the detached Inbox drops every `REX_*` name of the pane it was started from, so `detachedInboxEnv` carries that path on as `PLANNOTATOR_INBOX_REX_SERVER`, which wins when both are set. The Inbox is Bun only.
+
+**`PLANNOTATOR_TEST_REX_HEADLESS`** (test sandboxes only): `1` makes a sandboxed Inbox treat its Rex (`PLANNOTATOR_TEST_REX_SOCKET`) as a server with no app on its computer, whatever system the test runs on. Outside a sandbox the system decides (every one but macOS).
+
 **`PLANNOTATOR_TEST_REX_SOCKET`** (test sandboxes only): the Rex socket a sandboxed Inbox (`PLANNOTATOR_TEST_SANDBOX` set) talks to, a fake Rex's (`tests/helpers/fake-rex.ts`). Ignored outside a sandbox. Under a sandbox without it, and under `bun test` always, the Inbox reaches no Rex at all (a test names its own through `startInboxServer`'s `rex` option). See "Where an agent lives: Rex" in `inbox-notifications-and-agents.md`.
 
 **Devcontainer/SSH usage:**

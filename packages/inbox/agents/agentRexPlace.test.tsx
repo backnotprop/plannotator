@@ -193,19 +193,36 @@ test.skipIf(!hasDom)("shown: the item stays, and nothing is said", async () => {
   expect(await itemsOf('ses_show')).toContain('Show in Rex');
 });
 
-test.skipIf(!hasDom)("never on a phone, nor for a linked machine's agent", async () => {
+test.skipIf(!hasDom)('never on a phone', async () => {
   const place = { kind: 'rex' as const, line: LINE, show: true as const };
   mount([group([agent('ses_phone', { place })])], { phone: true });
   await settle();
   const onPhone = await itemsOf('ses_phone');
   expect(onPhone === null || !onPhone.includes('Show in Rex')).toBe(true);
-  act(() => root!.unmount());
-  document.body.innerHTML = '';
-  mount([group([agent('ses_here', { place })], SELF), group([agent('ses_there', { place })], MAC)], { linked: true });
+});
+
+test.skipIf(!hasDom)("a linked machine's agent: offered only when that machine's list says so, and the ask goes to that machine through the link", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if ((init?.method ?? 'GET') === 'POST') posts.push(String(input));
+    if ((init?.method ?? 'GET') === 'POST') bodies.push(JSON.parse(String(init?.body ?? '{}')));
+    return Response.json(String(input).endsWith('/rex/show') ? { shown: false } : { faces: {}, rev: 0 });
+  }) as unknown as typeof fetch;
+  const place = { kind: 'rex' as const, line: LINE, show: true as const };
+  mount([group([agent('ses_here', { place })], SELF), group([agent('ses_there', { place }), agent('ses_quiet', { place: { kind: 'rex', line: LINE } })], MAC)], { linked: true, own: true });
   await settle();
   expect(await itemsOf('ses_here')).toContain('Show in Rex');
-  const there = await itemsOf('ses_there');
-  expect(there === null || !there.includes('Show in Rex')).toBe(true);
+  const quiet = await itemsOf('ses_quiet');
+  expect(quiet === null || !quiet.includes('Show in Rex')).toBe(true);
+  await press(row('ses_there')!.querySelector('[data-agent-more]')!);
+  await press(document.querySelector('[data-agent-action="rex"]')!);
+  await settle();
+  // That machine's Inbox is asked (its Rex holds the pane), never this one's.
+  expect(posts).toEqual([`/api/inbox/m/${MAC}/rex/show`]);
+  expect(bodies[0]).toMatchObject({ session: 'ses_there' });
+  // It did not show it: the line is under that agent's row, and its item goes.
+  expect(row('ses_there')!.nextElementSibling).toBe(document.querySelector('[data-agent-rex-note]'));
+  const after = await itemsOf('ses_there');
+  expect(after === null || !after.includes('Show in Rex')).toBe(true);
 });
 
 test.skipIf(!hasDom)("the place is a Where row on the hover card and in the row's spoken name (no dot); none without one", () => {

@@ -48,7 +48,7 @@ async function until(check: () => boolean) {
 type OpenRequest = { project: string; projectKey: string; tab: string; command: string; pathPrepend?: readonly string[] };
 const opened: InboxRexOpened = { opened: true, session: "session:x", window: "window:y", block: "block:z", line: "Rex · my-app / Fake Agent" };
 
-function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequest) => Promise<InboxRexOpened>; attached?: boolean; scratch?: boolean } = {}) {
+function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequest) => Promise<InboxRexOpened>; attached?: boolean; scratch?: boolean; headless?: boolean } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-rex-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -97,6 +97,7 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
     rex: {
       open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)),
       appAttachedNow: async () => (asked.attached++, options.attached ?? true),
+      ...(options.headless ? { headless: true } : {}),
       paneGone: async (place) => (panes.asked.push(`${place.session}/${place.block}`), await panes.hold, panes.gone),
       closePane: async (place) => (panes.closed.push(`${place.session}/${place.block}`), panes.closes),
     },
@@ -567,6 +568,16 @@ describe("Settings → Agents: Start new agents in", () => {
     await behind.send();
     expect([...behind.launch.backgroundSessions()]).toEqual(["session-f1"]);
     expect(behind.launch.rexPanes()!.size).toBe(0);
+  });
+
+  test("a Rex with no app on its computer (a server used from elsewhere): the tailnet's Settings read says whether it is here too, so the row shows where the person is; a linked machine's or a phone's read never asks", async () => {
+    const { launch, asked } = setup({ startIn: "inbox", headless: true });
+    const read = (via: string, door?: { platform: string; window: boolean }) => launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via, door);
+    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
+    expect(((await (await read("local"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
+    expect(asked.attached).toBe(2);
+    expect(((await (await read("tailnet", { platform: "ios", window: false }))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
+    expect(asked.attached).toBe(2);
   });
 
   test("Rex is asked whether its app is here only for this computer's own Settings answer: never for the routines' clock or the tailnet", async () => {

@@ -34,7 +34,7 @@ export function setInboxAgents(next: unknown): void {
     ? next
         .filter((group): group is InboxAgentsGroup => !!group && typeof group === 'object' && Array.isArray((group as InboxAgentsGroup).agents))
         .map((group) => {
-          // `show` as this Inbox sent it: it never passes one on from a linked machine (inboxPeerAgentsGroup).
+          // `show` as this Inbox sent it: its own, and a linked machine's as that machine offered it (inboxPeerAgentsGroup).
           const agents = group.agents.filter(isAgent).map((agent) => inboxAgentNamesChecked(agent, { show: true }));
           return {
             ...(typeof group.machine === 'string' ? { machine: group.machine } : {}),
