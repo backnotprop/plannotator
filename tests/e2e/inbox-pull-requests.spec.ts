@@ -167,6 +167,9 @@ const TOKENS_CHANGED = TOKENS.flatMap((line, i) => (i === 29 ? ['export const SP
 
 const SEM_PATH = 'src/build/text.ts';
 const SEM_PLAIN_PATH = 'docs/upgrade.md';
+const ARROW_TXT_PATH = 'notes/steps.txt';
+const ARROW_TXT_BASE = lines(...Array.from({ length: 16 }, (_, i) => `step ${i + 1}`));
+const ARROW_TXT_HEAD = lines(...Array.from({ length: 16 }, (_, i) => (i === 7 ? 'step 8, twice' : `step ${i + 1}`)));
 const semFunction = (name: string, body: string[]) => [`export function ${name}(input: string): string {`, ...body.map((line) => `  ${line}`), '}', ''];
 const TRIM = semFunction('trimEdges', ['const start = input.search(/\\S/);', "if (start < 0) return '';", "const end = input.length - [...input].reverse().join('').search(/\\S/);", 'return input.slice(start, end);']);
 const SLUG = semFunction('slugify', ['const lower = input.toLowerCase();', "const dashed = lower.replace(/[^a-z0-9]+/g, '-');", "return dashed.replace(/^-+|-+$/g, '');"]);
@@ -471,10 +474,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     src,
     'web-app',
     'https://github.com/northwind/web-app.git',
-    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}'), [TOKENS_PATH]: lines(...TOKENS), [SEM_PATH]: SEM_BASE, [SEM_PLAIN_PATH]: lines('# Upgrading', '', 'Run the build once.') },
+    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}'), [TOKENS_PATH]: lines(...TOKENS), [SEM_PATH]: SEM_BASE, [SEM_PLAIN_PATH]: lines('# Upgrading', '', 'Run the build once.'), [ARROW_TXT_PATH]: ARROW_TXT_BASE },
     [
       { name: 'tomas/rtl-settings', from: 'main', files: { [TOKENS_PATH]: lines(...TOKENS_CHANGED), 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  // Logical margins, so the sidebar sits on the right in Arabic and Hebrew.', '  return <div className="settings ms-6" dir="auto">{children}</div>;', '}') } },
-      { name: 'codex/vite-8', from: 'main', files: { 'package.json': lines('{', '  "devDependencies": { "vite": "8.0.1" }', '}'), [SEM_PATH]: SEM_HEAD, [SEM_PLAIN_PATH]: lines('# Upgrading', '', 'Run the build once, then the tests.') } },
+      { name: 'codex/vite-8', from: 'main', files: { 'package.json': lines('{', '  "devDependencies": { "vite": "8.0.1" }', '}'), [SEM_PATH]: SEM_HEAD, [SEM_PLAIN_PATH]: lines('# Upgrading', '', 'Run the build once, then the tests.'), [ARROW_TXT_PATH]: ARROW_TXT_HEAD } },
       { name: 'locale-fallback', from: 'main', files: { 'src/i18n/fallback.ts': lines("export const FALLBACK = 'en';") } },
     ],
   );
@@ -507,7 +510,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${'880'.padStart(40, '0')}`, lines(...TOKENS_CHANGED));
   forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`, lines(...TOKENS));
   forge.gh('repos/northwind/web-app/pulls/872', vite);
-  for (const [path, base, head] of [[SEM_PATH, SEM_BASE, SEM_HEAD], [SEM_PLAIN_PATH, lines('# Upgrading', '', 'Run the build once.'), lines('# Upgrading', '', 'Run the build once, then the tests.')]] as const) {
+  for (const [path, base, head] of [[SEM_PATH, SEM_BASE, SEM_HEAD], [SEM_PLAIN_PATH, lines('# Upgrading', '', 'Run the build once.'), lines('# Upgrading', '', 'Run the build once, then the tests.')], [ARROW_TXT_PATH, ARROW_TXT_BASE, ARROW_TXT_HEAD]] as const) {
     forge.gh(`repos/northwind/web-app/contents/${path}?ref=${'872'.padStart(40, '0')}`, head);
     forge.gh(`repos/northwind/web-app/contents/${path}?ref=${MERGE_BASE}`, base);
   }
@@ -4153,6 +4156,16 @@ test('the PR page draws moved and renamed code, says so in the file header, and 
   const calls = forgeCalls();
   expect(calls).toContain(`gh diff repos/northwind/web-app/contents/${SEM_PATH}?ref=${MERGE_BASE}`);
   expect(calls.filter((call) => call.includes(`contents/${SEM_PLAIN_PATH}`))).toEqual([]);
+
+  const txt = review.locator(`[data-guide-file-shell="${ARROW_TXT_PATH}"]`);
+  await txt.scrollIntoViewIfNeeded();
+  await expect(txt.locator('[data-expand-button]').first()).toBeVisible();
+  await expect(txt.locator('[data-semantic-note]')).toHaveCount(0);
+  expect(forgeCalls().filter((call) => call.includes(`contents/${ARROW_TXT_PATH}`))).toEqual([]);
+  await txt.locator('[data-expand-button][data-expand-down]').first().click();
+  await expect.poll(() => forgeCalls().filter((call) => call.includes(`contents/${ARROW_TXT_PATH}`)).length).toBeGreaterThan(0);
+  await expect(txt.locator('[data-column-number="1"]').first()).toBeVisible();
+  await moved.scrollIntoViewIfNeeded();
 
   await page.locator('[data-diff-display-options]').click();
   const toggle = page.getByRole('switch', { name: 'Show moved & renamed code' });

@@ -47,3 +47,32 @@ test('a renamed file reads; an added or deleted one is already whole and asks no
   expect(asked.count).toBe(0);
   expect(await read({ ...file, oldPath: 'b.ts', status: 'renamed' }, signal)).toEqual(TEXTS);
 });
+
+test('reads made in the background go two at a time, and an arrow read does not wait behind them', async () => {
+  const started: string[] = [];
+  const answers = new Map<string, (contents: InboxFileContents) => void>();
+  const reader = wholeFileReader(
+    (path) => {
+      started.push(path);
+      return new Promise((resolve) => answers.set(path, resolve));
+    },
+    new Map(),
+  );
+  const file = (path: string): DiffFile => ({ path, patch: `p ${path}`, additions: 1, deletions: 1, status: 'modified' });
+  const signal = new AbortController().signal;
+  const later = new AbortController();
+  const background = ['a.ts', 'b.ts', 'c.ts', 'd.ts'].map((path) => reader(file(path), path === 'd.ts' ? later.signal : signal, { background: true }));
+  void background[3]!.catch(() => {});
+  const arrow = reader(file('e.ts'), signal);
+  await Promise.resolve();
+  await Promise.resolve();
+  expect([...started].sort()).toEqual(['a.ts', 'b.ts', 'e.ts']);
+  later.abort();
+  await expect(background[3]!).rejects.toBeDefined();
+  answers.get('a.ts')!({ oldContent: 'a', newContent: 'a' });
+  await background[0];
+  await Promise.resolve();
+  expect([...started].sort()).toEqual(['a.ts', 'b.ts', 'c.ts', 'e.ts']);
+  answers.get('e.ts')!({ oldContent: 'e', newContent: 'e' });
+  expect(await arrow).toEqual({ oldContent: 'e', newContent: 'e' });
+});

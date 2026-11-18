@@ -45,6 +45,7 @@ import {
   GITLAB_PROJECTS_PER_QUERY,
   gitlabOthersQueries,
   INBOX_PULL_DIFF_MAX_BYTES,
+  INBOX_PULL_DIFF_FRESH_MS,
   INBOX_PULLS_FRESH_MS,
   INBOX_PULLS_OTHERS_CALLS_MAX,
   INBOX_PULLS_OTHERS_DEADLINE_MS,
@@ -1051,6 +1052,28 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     f.heads = [newer, newer];
     expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
     expect(f.heads).toEqual([]);
+  });
+
+  test("a file read naming the head it was drawn from reuses that diff at any age, and reads at once share one", async () => {
+    const f = forge(stackAnswer);
+    let clock = 1_000_000;
+    const pulls = createInboxPulls({ run: f.run, now: () => clock });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const key = "github.com/northwind/billing-svc#22";
+    const head = "b".repeat(40);
+    f.heads = [head, head];
+    const start = f.calls.length;
+    expect((await pulls.diff(key, "layer")).head_sha).toBe(head);
+    const one = f.calls.length - start;
+    clock += INBOX_PULL_DIFF_FRESH_MS * 3;
+    const pinnedAt = f.calls.length;
+    expect((await pulls.diff(key, "layer", undefined, head)).head_sha).toBe(head);
+    expect(f.calls.length).toBe(pinnedAt);
+    f.heads = [head, head];
+    const together = f.calls.length;
+    const answers = await Promise.all([pulls.diff(key, "layer"), pulls.diff(key, "layer"), pulls.diff(key, "layer")]);
+    expect(answers.map((answer) => answer.head_sha)).toEqual([head, head, head]);
+    expect(f.calls.length - together).toBe(one);
   });
 
   test("a label moving updated_at reads nothing again; a new head does", async () => {

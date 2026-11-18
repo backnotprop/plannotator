@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react';
 import { inboxApi } from './api';
 
+export const SEM_DIFF_ADVERT_MS = 5_000;
+
 let advert: unknown = undefined;
 let pending: Promise<unknown> | null = null;
 const listeners = new Set<() => void>();
 
-export function loadSemDiffAdvert(): Promise<unknown> {
+export function loadSemDiffAdvert(timeoutMs = SEM_DIFF_ADVERT_MS): Promise<unknown> {
   if (advert !== undefined) return Promise.resolve(advert);
-  pending ??= inboxApi.semDiff().then(
+  pending ??= inboxApi.semDiff(timeoutMs).then(
     (answer) => {
       advert = answer.advert ?? null;
       for (const listener of listeners) listener();

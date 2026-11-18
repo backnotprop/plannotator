@@ -1,6 +1,7 @@
 import { afterAll, afterEach, describe, expect, mock, test } from 'bun:test';
 import React, { act, useCallback, useImperativeHandle, useRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { configStore } from '@plannotator/ui/config';
 import type { DiffFile } from '../types';
 import type { SemDiffClient, SemDiffResult } from '../semDiff/semDiffClient';
 
@@ -179,6 +180,7 @@ async function headerOf(path: string): Promise<HTMLElement> {
 }
 
 afterEach(async () => {
+  configStore.set('diffSemantic', true);
   for (const headerRoot of headerRoots.splice(0)) await act(async () => headerRoot.unmount());
   if (root) await act(async () => root?.unmount());
   root = null;
@@ -230,6 +232,35 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(staleRead.reads).toEqual(['a.ts']);
     expect(stale.asked).toEqual([]);
     expect([...items.values()][0]!.fileDiff.isPartial).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('semantic diffs saved off: a host with a client reads nothing on mount', async () => {
+    configStore.set('diffSemantic', false);
+    const { client, asked } = fakeClient(moved);
+    const { read, reads } = hostReader();
+    await mount([changed('a.ts'), changed('b.ts')], { semDiffClient: client, fetchFileContent: read });
+    expect(reads).toEqual([]);
+    expect(asked).toEqual([]);
+  });
+
+  test.skipIf(!hasDom)('an arrow opened while the first read is on its way still brings the file its note', async () => {
+    const { client, asked } = fakeClient(moved);
+    const texts = { oldContent: 'old\nsame\n', newContent: 'new\nsame\n' };
+    let calls = 0;
+    const read = (_file: DiffFile, signal?: AbortSignal) => {
+      calls++;
+      if (calls === 1) return new Promise<typeof texts>((_resolve, reject) => signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+      return Promise.resolve(texts);
+    };
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read });
+    const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
+    await act(async () => {
+      await options.loadDiffFiles({ name: 'a.ts' });
+      await new Promise((resolve) => setTimeout(resolve, 260));
+    });
+    expect(calls).toBe(2);
+    expect(asked).toEqual(['a.ts']);
+    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.textContent).toContain('1 moved');
   });
 
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {

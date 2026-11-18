@@ -249,7 +249,7 @@ export interface AllFilesCodeViewProps {
    * file. Null, a side left null, or text that no longer fits the patch takes
    * the arrows away and leaves the file as the patch shows it. Absent: as before.
    */
-  fetchFileContent?: (file: DiffFile, signal: AbortSignal) => Promise<{ oldContent: string | null; newContent: string | null } | null>;
+  fetchFileContent?: (file: DiffFile, signal: AbortSignal, how?: { background?: boolean }) => Promise<{ oldContent: string | null; newContent: string | null } | null>;
   /**
    * Before/After image preview for a hunkless image chunk (#1598), rendered in
    * place of the binary notice. A render prop rather than a flag so the
@@ -2223,7 +2223,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const prefetchWholeFile = useCallback((itemId: string) => {
     const hostRead = fetchFileContentRef.current;
     const semClient = semClientRef.current;
-    if (hostRead && !semClient) return;
+    if (hostRead && (!semClient || !semanticEnabledRef.current)) return;
     const augmentState = augmentRef.current;
     const generation = fileSetKeyRef.current;
     const existing = augmentState.get(itemId);
@@ -2242,7 +2242,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     }
     augmentState.set(itemId, { status: 'pending', controller, generation });
     const isStale = () => controller.signal.aborted || fileSetKeyRef.current !== generation;
-    (hostRead ?? readWholeFileFromReview)(file, controller.signal).then(
+    (hostRead ? hostRead(file, controller.signal, { background: true }) : readWholeFileFromReview(file, controller.signal)).then(
       (data) => {
         if (isStale()) return;
         if (data) keptWholeFilesRef.current.keep(itemId, generation, data);
@@ -2290,6 +2290,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (data?.oldContent == null || data.newContent == null) return none();
         // The file may have moved on since this diff was captured: whole text that no longer fits would break the layout.
         if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) return none();
+        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal);
         return {
           oldFile: { name: file.oldPath || file.path, contents: data.oldContent },
           newFile: { name: file.path, contents: data.newContent },
