@@ -665,6 +665,8 @@ export function AgentsSettings({
       live = false;
     };
   }, [launch?.enabled]);
+  /** A save's answer: it never asks Rex (`rex_here` absent), so the pane keeps what its own read said. */
+  const takeLaunch = (next: InboxLaunchSettings) => setLaunchState((was) => ({ ...next, rex_here: next.rex_here ?? was?.rex_here }));
   // "Start agents from New message": config.json `inboxLaunch.enabled`, read live (New message's New session rows follow).
   const toggleEnabled = async () => {
     if (!launchState || launchBusy) return;
@@ -672,7 +674,7 @@ export function AgentsSettings({
     setError(null);
     try {
       const next = (await inboxApi.launchEnabled(!launchState.enabled)).launch;
-      setLaunchState(next);
+      takeLaunch(next);
       // Turned on: the full-permissions row as a launch would start now (the login shell, read once it was on).
       if (next.enabled) {
         void inboxApi
@@ -693,7 +695,7 @@ export function AgentsSettings({
     setLaunchBusy(true);
     setError(null);
     try {
-      setLaunchState((await launchStartIn(next)).launch);
+      takeLaunch((await launchStartIn(next)).launch);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -748,7 +750,7 @@ export function AgentsSettings({
     setLaunchBusy(true);
     setError(null);
     try {
-      setLaunchState((await inboxApi.launchSettings(!launchState.full_permissions)).launch);
+      takeLaunch((await inboxApi.launchSettings(!launchState.full_permissions)).launch);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -790,7 +792,7 @@ export function AgentsSettings({
     setLaunchBusy(true);
     setError(null);
     try {
-      setLaunchState((await inboxApi.launchScratchDir(scratchEdit.trim() || null)).launch);
+      takeLaunch((await inboxApi.launchScratchDir(scratchEdit.trim() || null)).launch);
       setScratchEdit(null);
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
@@ -924,7 +926,7 @@ export function AgentsSettings({
             busy={busy.has(row.id)}
             settling={model.connecting}
             onChange={(input) => void change(row.id, input)}
-            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{launchState?.enabled && <LaunchSettingsFile launch={launchState} busy={launchBusy} onLaunch={setLaunchState} onError={setError} />}{scratchRow}</> } : {})}
+            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{launchState?.enabled && <LaunchSettingsFile launch={launchState} busy={launchBusy} onLaunch={takeLaunch} onError={setError} />}{scratchRow}</> } : {})}
             {...(row.id === 'codex' && row.detected ? { extra: <CodexAccountRow /> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />

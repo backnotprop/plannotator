@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
-import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_MARK_STALE_MS, INBOX_REX_SHOW_REFUSED_MS, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
+import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_MARK_STALE_MS, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 
 /** Every method the Inbox may call: view (ids and labels), status records (`block.method` `program_status` only), a new session or tab with its command, focus. */
@@ -173,6 +173,15 @@ describe("the app attached here", () => {
     expect(rex.offersShow()).toBe(true);
   });
 
+  test("the first ask after the Inbox starts (Settings → Agents' read) waits for one read: right at once, not the empty answer", async () => {
+    const { fake, rex } = setup();
+    expect(await rex.appAttachedNow()).toBe(true);
+    const gone = setup();
+    gone.fake.setApp(false);
+    expect(await gone.rex.appAttachedNow()).toBe(false);
+    expect(fake.connections().opened).toBe(1);
+  });
+
   test("an app attached over the tailnet (another computer's) is never one", async () => {
     const { fake, rex } = setup({ appTransport: "tailscale", remote: true });
     rex.appAttached();
@@ -224,7 +233,7 @@ describe("Show in Rex", () => {
     expect(fake.methods()).not.toContain("session.focus_block");
   });
 
-  test("offered while the app is attached; a refusal (Remote Control off) hides it a while, then it is offered again", async () => {
+  test("offered while the app is attached; a refusal (Remote Control off) hides it until Rex's app is gone and back, never as a dead item meanwhile", async () => {
     let clock = Date.parse("2026-11-18T09:00:00.000Z");
     const { fake, rex } = setup({ remote: true }, { now: () => clock });
     const ids = fake.addSession("p", "t");
@@ -238,7 +247,21 @@ describe("Show in Rex", () => {
     // A start in Rex asks the app nothing, so it neither offers nor hides it.
     expect((await rex.open({ project: "p", projectKey: "p", tab: "t2", command: "c" })).opened).toBe(true);
     expect(rex.offersShow()).toBe(false);
-    clock += INBOX_REX_SHOW_REFUSED_MS + 1;
+    // However long after: still hidden while that app stays.
+    clock += 60 * 60_000;
+    expect(rex.offersShow()).toBe(false);
+    rex.appAttached();
+    await rex.settled();
+    expect(rex.offersShow()).toBe(false);
+    // Rex's app quit and came back (Remote Control may be on now): offered again.
+    fake.setApp(false);
+    clock += 3_000;
+    rex.appAttached();
+    await rex.settled();
+    fake.setApp(true);
+    clock += 3_000;
+    rex.appAttached();
+    await rex.settled();
     expect(rex.offersShow()).toBe(true);
     fake.setRemote(true);
     expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
@@ -435,6 +458,16 @@ describe("Start in Rex (its tab)", () => {
     // A new tab in its own session that Rex refuses (an option this Rex does not take): the same.
     fake.setRefusal("session.new_window", { code: "bad_request", message: "unknown option path_prepend", status: 400 });
     expect(await rex.open({ project: "p", projectKey: "p", tab: "t2", command: "c" })).toEqual({ opened: false, sent: false, refused: true });
+  });
+
+  test("Rex says no to finding its own session again, or to attaching it: refused (said so), never that Rex isn't open", async () => {
+    const { fake, rex } = setup({ remote: false });
+    expect((await rex.open({ project: "p", projectKey: "p", tab: "t", command: "c" })).opened).toBe(true);
+    fake.setRefusal("target.resolve", { code: "bad_request", message: "no", status: 400 });
+    expect(await rex.open({ project: "p", projectKey: "p", tab: "t2", command: "c" })).toEqual({ opened: false, sent: false, refused: true });
+    fake.setRefusal("target.resolve", null);
+    fake.setRefusal("session.attach", { code: "forbidden", message: "no", status: 403 });
+    expect(await rex.open({ project: "p", projectKey: "p", tab: "t3", command: "c" })).toEqual({ opened: false, sent: false, refused: true });
   });
 
   test("two starts at once for one project make one session of it (the second waits, then gets a tab there)", async () => {

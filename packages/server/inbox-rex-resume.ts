@@ -7,23 +7,29 @@
  *
  *  - this Inbox has run long enough for any connection from before it to have come back (the connection retries at
  *    most every `INBOX_RETRY_MS.max`, and counts as live for `INBOX_SESSION_LIVE_MS` after a poll);
- *  - no process on this computer runs that session id (`--session-id <id>` or `--resume <id>` on its command line:
- *    Claude Code's and Pi's Rex commands both name it). A listing that cannot be read counts as one that runs it.
+ *  - no process on this computer runs that session id: Claude Code keeps its argv (`--session-id <id>` or
+ *    `--resume <id>`, as the tab's shell line does); Pi sets `process.title = "pi"`, so its own check is asked too
+ *    (`LaunchHost.runsSession`: the claim its extension wrote, against the same listing). A listing that cannot be
+ *    read counts as one that runs it.
  *
- * Otherwise the reply waits for the session (Try again says why). Rex tabs run on this computer, so `ps` sees them.
+ * Otherwise the reply waits for the session (its line says so; Try again says why). Rex tabs run on this computer,
+ * so `ps` sees them. The listing is read without blocking the server.
  */
 import { INBOX_RETRY_MS } from "@plannotator/shared/inbox/agent-link";
 import { INBOX_SESSION_LIVE_MS } from "@plannotator/shared/inbox/connection";
-import { INBOX_REX_MAY_RUN, INBOX_REX_STILL_RUNS } from "@plannotator/core/inbox-run-line";
 
 /** How long after this Inbox starts a Rex session it has not heard from may still be running. */
 export const INBOX_REX_RESUME_AFTER_BOOT_MS = INBOX_RETRY_MS.max + INBOX_SESSION_LIVE_MS;
 
+/** Why a Rex session gets no new tab now: it may still run (this Inbox just started), or a process still runs it. */
+export type InboxRexHeld = "may_run" | "still_runs";
+
 /** Every process's pid, parent and whole command line, or null when ps could not run. */
-export function inboxProcessListing(): string | null {
+export async function inboxProcessListing(): Promise<string | null> {
   try {
-    const ps = Bun.spawnSync(["/bin/ps", "-A", "-ww", "-o", "pid=,ppid=,command="], { env: { PATH: "/usr/bin:/bin" }, stdout: "pipe", stderr: "ignore", windowsHide: true });
-    return ps.exitCode === 0 ? ps.stdout.toString() : null;
+    const ps = Bun.spawn(["/bin/ps", "-A", "-ww", "-o", "pid=,ppid=,command="], { env: { PATH: "/usr/bin:/bin" }, stdin: "ignore", stdout: "pipe", stderr: "ignore", windowsHide: true });
+    const [text, code] = await Promise.all([new Response(ps.stdout).text(), ps.exited]);
+    return code === 0 ? text : null;
   } catch {
     return null;
   }
@@ -39,12 +45,19 @@ export function inboxListingRunsSession(listing: string, session: string): boole
 }
 
 /**
- * Why a Rex session must not get a new tab now, or null when it may: the words for Try again. `listing` reads the
- * processes (`inboxProcessListing` unless a test stands in).
+ * Why a Rex session must not get a new tab now, or null when it may. `listing` reads the processes
+ * (`inboxProcessListing` unless a test stands in); `runs` is the agent's own check against it (Pi's claims).
  */
-export function inboxRexResumeHeld(input: { session: string | null | undefined; now: number; bootAt: number; listing?: () => string | null }): string | null {
-  if (input.now - input.bootAt < INBOX_REX_RESUME_AFTER_BOOT_MS) return INBOX_REX_MAY_RUN;
+export async function inboxRexResumeHeld(input: {
+  session: string | null | undefined;
+  now: number;
+  bootAt: number;
+  listing?: () => Promise<string | null>;
+  runs?: (listing: string, session: string) => boolean;
+}): Promise<InboxRexHeld | null> {
+  if (input.now - input.bootAt < INBOX_REX_RESUME_AFTER_BOOT_MS) return "may_run";
   if (!input.session) return null;
-  const listing = (input.listing ?? inboxProcessListing)();
-  return listing === null || inboxListingRunsSession(listing, input.session) ? INBOX_REX_STILL_RUNS : null;
+  const listing = await (input.listing ?? inboxProcessListing)();
+  if (listing === null) return "still_runs";
+  return inboxListingRunsSession(listing, input.session) || input.runs?.(listing, input.session) === true ? "still_runs" : null;
 }

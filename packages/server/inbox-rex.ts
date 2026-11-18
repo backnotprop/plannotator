@@ -19,9 +19,9 @@
  *    A start never moves Rex's app: the tab is made without being selected (`focus: false`, no `session.select`).
  *  - Show in Rex. Rex's app goes to an agent's pane (`session.select`, then `session.focus_block` in a session the
  *    Inbox made: never in one it did not), on the person's click only. It is offered while Rex's app is attached here,
- *    and hidden for a while (INBOX_REX_SHOW_REFUSED_MS) after that app refused, failed or timed out on one (its Remote
- *    Control setting is off): the only way to know is the app's own answer to an action, and nothing asks it in the
- *    background or when a menu opens.
+ *    and hidden once that app refused, failed or timed out on one (its Remote Control setting is off) until Rex is
+ *    seen without that app (it quit or restarted): the only way to know is the app's own answer to an action, and
+ *    nothing asks it in the background or when a menu opens.
  *
  * What it never does: start a Rex server (no `rex` binary: only an existing socket, owned by this user, is connected
  * to), type into a pane, read a pane's contents, list or show sessions that did not connect to the Inbox themselves,
@@ -40,8 +40,6 @@ export const INBOX_REX_READ_TIMEOUT_MS = 400;
 export const INBOX_REX_OPEN_TIMEOUT_MS = 10_000;
 /** The longest Show in Rex waits for the app. */
 export const INBOX_REX_SHOW_TIMEOUT_MS = 3_000;
-/** After Rex's app refused a Show (or failed or timed out on one), how long Show in Rex stays hidden for that app. */
-export const INBOX_REX_SHOW_REFUSED_MS = 5 * 60_000;
 /** After a Rex that did not answer in time, how long nothing asks it again. */
 export const INBOX_REX_SLOW_BACKOFF_MS = 30_000;
 /** How old the last read may be before a list starts another (it still answers from the last one at once). */
@@ -193,6 +191,7 @@ export function createInboxRex(options: InboxRexOptions) {
   const confirmed = new Map<string, { place: InboxPlace; line: string; status: InboxRexStatus | null; at: number }>();
   let app: { id: string | null; at: number } = { id: null, at: 0 };
   /** The app that last refused (or failed or timed out on) a Show, and when: Show in Rex is hidden for it a while. */
+  /** The app that refused a Show (Remote Control off): none is offered again until Rex's app is seen gone and back. */
   let refusedShow: { app: string; at: number } | null = null;
   const jumped = (appId: string, ok: boolean) => {
     const next = ok ? null : { app: appId, at: now() };
@@ -387,6 +386,8 @@ export function createInboxRex(options: InboxRexOptions) {
       }
       if (found.app !== app.id) moved = true;
       app = { id: found.app, at };
+      // Rex answered with no app, or another one (it went and came back): a Show it refused may be offered again.
+      if (refusedShow && found.app !== refusedShow.app) refusedShow = null;
     }
     if (moved) changed();
   };
@@ -421,11 +422,22 @@ export function createInboxRex(options: InboxRexOptions) {
       };
       // The session the Inbox made for this project, by the id it kept (never one found by its name), while Rex
       // still names it as the Inbox did: renamed, it is the person's now, and the Inbox makes another.
+      // Rex's own "no" to an ask (an error answer, not a timeout or a dropped connection): it made nothing.
+      const refusedBy = (error: unknown): InboxRexOpened => {
+        if (error instanceof RexCallError) return { opened: false, sent: false, refused: true };
+        throw error;
+      };
       const keptOne = kept.of(request.projectKey);
       let own: string | null = null;
       let ownLabel = project;
       if (keptOne) {
-        const result = resultsOf(await within(openTimeout, rex.call("target.resolve", { kinds: ["session"], queries: [keptOne.id] })))[0];
+        let resolved: Record<string, unknown>;
+        try {
+          resolved = await within(openTimeout, rex.call("target.resolve", { kinds: ["session"], queries: [keptOne.id] }));
+        } catch (error) {
+          return refusedBy(error);
+        }
+        const result = resultsOf(resolved)[0];
         if (result?.status === "resolved" && result.target?.session_id === keptOne.id && result.target?.label === keptOne.label) {
           own = keptOne.id;
           ownLabel = cleanName(keptOne.label) || project;
@@ -433,13 +445,12 @@ export function createInboxRex(options: InboxRexOptions) {
       }
       let session: string;
       let window: string;
-      // Rex's own "no" to the ask (an error answer, not a timeout or a dropped connection): it made nothing.
-      const refusedBy = (error: unknown): InboxRexOpened => {
-        if (error instanceof RexCallError) return { opened: false, sent: false, refused: true };
-        throw error;
-      };
       if (own) {
-        await within(openTimeout, rex.call("session.attach", { session_id: own }));
+        try {
+          await within(openTimeout, rex.call("session.attach", { session_id: own }));
+        } catch (error) {
+          return refusedBy(error);
+        }
         sent = true;
         let made: Record<string, unknown>;
         try {
@@ -520,10 +531,20 @@ export function createInboxRex(options: InboxRexOptions) {
       return appHere() !== null;
     },
 
+    /**
+     * The same, for this computer's Settings → Agents: a read older than a couple of seconds is made again first and
+     * waited for (bounded by the read timeout), so the first answer after the Inbox starts is right, not the empty one.
+     */
+    async appAttachedNow(): Promise<boolean> {
+      refresh(lastHints);
+      if (reading) await reading;
+      return appHere() !== null;
+    },
+
     /** Show in Rex may be offered: Rex's app is attached here, and it has not refused a Show in the last while. */
     offersShow(): boolean {
       const id = appHere();
-      return id !== null && !(refusedShow && refusedShow.app === id && now() - refusedShow.at < INBOX_REX_SHOW_REFUSED_MS);
+      return id !== null && !(refusedShow && refusedShow.app === id);
     },
 
     /** What the list's Rex part depends on (the delivery watch says `agents` when it moves). */

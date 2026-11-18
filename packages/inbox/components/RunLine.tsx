@@ -67,6 +67,8 @@ export function RunLine({
 }) {
   const [busy, setBusy] = useState<null | 'stop' | 'open' | 'retry' | 'trust'>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Try again on an agent in Rex that may still run: why nothing started, as a plain note (it is not an error). */
+  const [note, setNote] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [cloneCopied, setCloneCopied] = useState(false);
   const [whatsIn, setWhatsIn] = useState(false);
@@ -82,6 +84,7 @@ export function RunLine({
   const act = async (what: 'stop' | 'open' | 'retry' | 'trust') => {
     setBusy(what);
     setError(null);
+    setNote(null);
     try {
       if (what === 'stop') await inboxApi.launchStop(run.launch_id, machine);
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id, machine);
@@ -89,6 +92,10 @@ export function RunLine({
       else await inboxApi.launchOpen(run.launch_id);
       onChanged();
     } catch (cause) {
+      if (what === 'retry' && cause instanceof InboxApiError && cause.code === 'launch_in_rex') {
+        setNote(cause.message);
+        return;
+      }
       setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
       // The folder changed since this line was read: draw the new warning for the next click.
       if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') onChanged();
@@ -313,12 +320,17 @@ export function RunLine({
     case 'stopped':
       icon = 'stop';
       // `cause`: the host's words for a stop that was not the person's (`LaunchHost.stoppedNote`). Anyone's reply starts it again.
+      // In Rex, a reply waiting while its old process may still run: never "Your reply starts it again" meanwhile.
       text =
-        run.stopped_by_person && run.since
-          ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
-          : run.cause
-            ? `${name} stopped. ${run.cause}`
-            : `${name} stopped. Your reply starts it again.`;
+        run.rex?.held === 'may_run'
+          ? `${name} may still be running in Rex. Your reply waits for it to connect, or starts it again in a minute or two.`
+          : run.rex?.held === 'still_runs'
+            ? `${name} is still running in its tab in Rex. Your reply waits for it there.`
+            : run.stopped_by_person && run.since
+              ? `You stopped ${name} at ${whenTime(run.since)}. Your reply starts it again.`
+              : run.cause
+                ? `${name} stopped. ${run.cause}`
+                : `${name} stopped. Your reply starts it again.`;
       break;
     case 'failed':
       icon = 'warn';
@@ -424,6 +436,11 @@ export function RunLine({
           {run.rex?.unavailable && (run.state === 'starting' || run.state === 'working') && (
             <span className="ib-run-sub" data-run-rex-away="">
               Rex isn't open on this computer, so it started in the background.
+            </span>
+          )}
+          {note && (
+            <span className="ib-run-sub" data-run-note="">
+              {note}
             </span>
           )}
           {run.rex?.refused && (run.state === 'starting' || run.state === 'working') && (

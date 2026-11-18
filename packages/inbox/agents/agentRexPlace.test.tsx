@@ -254,6 +254,31 @@ test.skipIf(!hasDom)("a run started in Rex: where Rex put it while it connects, 
   expect(draw({ state: 'starting' }).textContent).toContain('Starting Claude Code in billing…');
 });
 
+test.skipIf(!hasDom)("a reply waiting on a Rex session that may still run: the line says it waits, never that the reply starts it; Try again's why is a plain note, not an error", async () => {
+  const base = { launch_id: 'lch_1', agent: 'claude-code', project: 'billing', folder: '/work/billing', since: null, again: false, stopped_by_person: false, cause: null, untrusted: false, attach_command: null };
+  const draw = (run: Record<string, unknown>) => {
+    document.body.innerHTML = '';
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    root = createRoot(host);
+    act(() => root!.render(<RunLine run={{ ...base, ...run } as unknown as InboxRun} canOpen={true} machine={null} machineName={null} onChanged={() => {}} />));
+    return host;
+  };
+  const stopped = (held?: string) => draw({ state: 'stopped', rex: { line: LINE, ...(held ? { held } : {}) } }).textContent ?? '';
+  expect(stopped()).toContain('Your reply starts it again.');
+  for (const held of ['may_run', 'still_runs']) {
+    expect(stopped(held)).not.toContain('Your reply starts it again.');
+    expect(stopped(held)).toContain('Your reply waits');
+  }
+  const why = "It's still running in its tab in Rex. Look there.";
+  globalThis.fetch = (async () => Response.json({ error: why, code: 'launch_in_rex' }, { status: 409 })) as unknown as typeof fetch;
+  const failed = draw({ state: 'failed', rex: { line: LINE }, cause: 'Its tab' });
+  await act(async () => (failed.querySelector('[data-run-retry]') as HTMLButtonElement).click());
+  await act(async () => await new Promise((done) => setTimeout(done, 0)));
+  expect(failed.querySelector('[data-run-note]')?.textContent).toBe(why);
+  expect(failed.querySelector('[data-run-error]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("the hover card says what the Rex pane said, where the Inbox had nothing of its own", () => {
   const facts = (extra: Partial<InboxAgent>) => agentFacts({ agent: agent('a', { place: { kind: 'rex', line: LINE }, ...extra }), machine: null, name: 'a', thread: null }, null).state;
   expect(facts({ state: 'waiting', waiting: 0, rex_status: { state: 'blocked', kind: 'question' } })).toBe('Waiting on you in Rex: a question');

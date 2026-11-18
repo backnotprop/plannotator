@@ -90,9 +90,9 @@ import { claudeSettingsFilePath, readClaudeSettingsFile } from "./inbox-launch-c
 import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstatSync, mkdirSync, readdirSync, realpathSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { InboxRex, InboxRexStatus } from "./inbox-rex";
-import { inboxRexResumeHeld } from "./inbox-rex-resume";
+import { inboxRexResumeHeld, type InboxRexHeld } from "./inbox-rex-resume";
 import { inboxId, inboxLaunchInRex, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxLaunchedSession, inboxRunOf, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -167,8 +167,11 @@ interface Memo {
    * it started: a restart, not a new prompt (the Inbox list's Hide does not read it as new activity).
    */
   waitedFromBefore?: boolean;
-  /** In Rex: when a reply's restart last looked whether the session's old process still runs (inbox-rex-resume.ts). */
-  rexHeldAt?: number;
+  /**
+   * In Rex, a reply waiting to start the session again: the last look at whether its old process may still run
+   * (inbox-rex-resume.ts), `pending` while it reads; `held` is what the line says meanwhile.
+   */
+  rexCheck?: { at: number; held: InboxRexHeld | null; pending: boolean };
   /**
    * After Stop or a respawn, the session's earlier polls keep it "live" for a
    * while: it counts as live again only once it starts a poll past this count.
@@ -257,11 +260,11 @@ export function createInboxLaunch(options: {
    * This computer's Rex (inbox-rex.ts): where a new agent starts when Settings → Agents' "Start new agents in" says
    * Rex (a tab of the Inbox's own Rex session for the project), and `appAttached` for that setting's row. Absent: no Rex.
    */
-  rex?: Pick<InboxRex, "open" | "appAttached">;
+  rex?: Pick<InboxRex, "open" | "appAttachedNow">;
   /** What a session's confirmed Rex pane says it is doing (inbox-rex.ts `statuses`), for a launch that runs in Rex. */
   rexStatus?: (session: string) => InboxRexStatus | null;
   /** Every process's command line (`ps`), for whether a Rex tab still runs a session (inbox-rex-resume.ts); tests stand in. */
-  processListing?: () => string | null;
+  processListing?: () => Promise<string | null>;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -697,7 +700,7 @@ export function createInboxLaunch(options: {
       connector: host.connector,
       // In Rex its tab is the way in: no command opens it elsewhere.
       attachCommand: inRex ? null : host.attach(launch),
-      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}) } } : {}),
+      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}) } } : {}),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
       ...(launch.clone?.state === "cloning"
@@ -1138,8 +1141,16 @@ ${result.text}`);
   /** How often a reply waiting on a Rex session whose old process may still run is looked at again. */
   const REX_HELD_RECHECK_MS = 5_000;
   /** Why a Rex session must not get a new tab now (its old process may still run), or null (inbox-rex-resume.ts). */
-  const rexHeld = (launch: InboxLaunchRecord): string | null =>
-    inboxRexResumeHeld({ session: launch.session ?? launch.session_ref, now: now(), bootAt, listing: options.processListing });
+  const rexHeld = (launch: InboxLaunchRecord): Promise<InboxRexHeld | null> => {
+    const host = hostOf(launch);
+    return inboxRexResumeHeld({ session: launch.session ?? launch.session_ref, now: now(), bootAt, listing: options.processListing, runs: host?.runsSession ? (listing, session) => host.runsSession!(session, listing) : undefined });
+  };
+  /** Try again on a Rex launch: refused while its old process may still run (the words say why). */
+  const refuseIfRexHeld = async (launch: InboxLaunchRecord) => {
+    if (launch.error || !inboxLaunchInRex(launch)) return;
+    const held = await rexHeld(launch);
+    if (held) throw new InboxError("launch_in_rex", held === "may_run" ? INBOX_REX_MAY_RUN : INBOX_REX_STILL_RUNS);
+  };
   const maybeRespawn = (root: InboxMessage) => {
     const launch = root.launch!;
     const host = hostOf(launch);
@@ -1172,18 +1183,39 @@ ${result.text}`);
     // read null as soon as its stop begins).
     if (stopping.has(launch.id) || deleting.has(launch.id)) return;
     const memo = memoOf(launch);
-    if (liveOf(host, root, memo)) return;
+    const waiting = () => {
+      // Nothing waits on a Rex session any more (it came back, or the reply went): its line says so no longer.
+      if (memo.rexCheck && !memo.rexCheck.pending) {
+        memo.rexCheck = undefined;
+        options.onChange();
+      }
+    };
+    if (liveOf(host, root, memo)) return waiting();
     if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
     // The person's reply starts it again: from this computer or over the tailnet.
     const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
     // Once per reply: one that did not take waits for Try again or the person's next reply.
-    if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return;
+    if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return waiting();
     // In Rex: never a second process on the session. Not before its connection could have come back since this Inbox
-    // started, and never while a process still runs it (its tab's): the reply waits for it (looked at every few seconds).
+    // started, and never while a process still runs it (its tab's): the reply waits for it, looked at every few
+    // seconds without blocking the server, and its line says why meanwhile.
     if (inboxLaunchInRex(launch)) {
-      if (now() - (memo.rexHeldAt ?? -Infinity) < REX_HELD_RECHECK_MS) return;
-      memo.rexHeldAt = now();
-      if (rexHeld(launch)) return;
+      const check = memo.rexCheck;
+      if (check?.pending) return;
+      if (!check || now() - check.at >= REX_HELD_RECHECK_MS) {
+        memo.rexCheck = { at: now(), held: check?.held ?? null, pending: true };
+        void rexHeld(launch)
+          .catch((): InboxRexHeld => "still_runs")
+          .then((held) => {
+            const was = memo.rexCheck?.held ?? null;
+            memo.rexCheck = { at: now(), held, pending: false };
+            if (held !== was) options.onChange();
+            if (!held) maybeRespawn(store.message(root.id) ?? root);
+          });
+        return;
+      }
+      if (check.held) return;
+      memo.rexCheck = undefined;
     }
     respawn(root, host, newest.id);
   };
@@ -1269,7 +1301,7 @@ ${result.text}`);
    * switch (Claude Code's words, `settingsState`) and the scratch root. Off, those rows are hidden, so nothing else is
    * read (no Claude settings, no login shell).
    */
-  const settingsState = (rexHere = false): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
+  const settingsState = (rexHere?: boolean): { enabled: boolean; full_permissions: boolean } & Record<string, unknown> => ({
     // Windows: launch has no support there (off unless config.json says true), so Settings shows no switch.
     ...(options.platform === "win32" ? { unsupported: true } : {}),
     ...(enabled()
@@ -1281,9 +1313,10 @@ ${result.text}`);
           scratch_dir_shown: options.displayFolder(scratchRoot()),
           // "Start new agents in": the Inbox (in the background) or Rex; `rex_here` while Rex's app is attached on this
           // computer (the row's Rex choice shows then, or while it is the choice); `rex_agents` the ones that can.
-          // Rex is asked only for this computer's own settings answer (`rexHere`): never for a routine's tick or another reader.
+          // Rex is asked only for this computer's own Settings → Agents read (`rexHere`): never for a routine's tick, New
+          // message's agent pick, a save's answer or another reader, so with the default setting nothing else contacts it.
           start_in: config().startIn,
-          ...(rexHere ? { rex_here: options.rex?.appAttached() === true } : {}),
+          ...(rexHere !== undefined ? { rex_here: rexHere } : {}),
           rex_agents: hostList.filter((host) => host.rexCommand).map((host) => host.agent),
         }
       : { enabled: false, full_permissions: false }),
@@ -1447,7 +1480,9 @@ ${result.text}`);
       // person's rc counts for that Send. One read at a time either way.
       const ahead = new URL(req.url).searchParams.get("ahead") === "1";
       if (enabled() && config().fullPermissions === null && (ahead || !shellFresh())) await readLogin();
-      return json({ launch: settingsState(here) });
+      // Settings → Agents' own read (not New message's `ahead`): whether Rex's app is here, read now if stale.
+      const rexHere = here && !ahead && enabled() ? (await options.rex?.appAttachedNow()) === true : undefined;
+      return json({ launch: settingsState(rexHere) });
     }
     if (req.method !== "POST") return json({ error: "Use POST." }, 405);
     const body = await options.readBody(req);
@@ -1462,7 +1497,7 @@ ${result.text}`);
         // Only this key: saveConfig merges `inboxLaunch` key by key under its lock, so a change made at once elsewhere stays.
         saveConfig({ inboxLaunch: { enabled: body.enabled } });
         if (config().enabled !== body.enabled) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState(here) });
+        return json({ launch: settingsState() });
       }
       if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
       if ("scratch_dir" in body) {
@@ -1482,14 +1517,14 @@ ${result.text}`);
         // Undefined drops the key (the default) when config.json is written.
         saveConfig({ inboxLaunch: { scratchDir: path ? resolve(path) : undefined } as { scratchDir?: string } });
         if (config().scratchDir !== (path ? resolve(path) : null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState(here) });
+        return json({ launch: settingsState() });
       }
       if ("start_in" in body) {
         // Settings → Agents' "Start new agents in": new starts only; one already started stays where it runs.
         if (body.start_in !== "inbox" && body.start_in !== "rex") throw new InboxError("validation_error", 'start_in: "inbox" or "rex".', { field: "start_in" });
         saveConfig({ inboxLaunch: { startIn: body.start_in === "rex" ? "rex" : undefined } as { startIn?: "rex" } });
         if (config().startIn !== body.start_in) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState(here) });
+        return json({ launch: settingsState() });
       }
       if ("settings_file" in body) {
         // Checked now so a typo is said here rather than at the next start.
@@ -1504,12 +1539,12 @@ ${result.text}`);
         }
         saveConfig({ inboxLaunch: { settingsFile: typed || undefined } as { settingsFile?: string } });
         if (config().settingsFile !== (typed || null)) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-        return json({ launch: settingsState(here) });
+        return json({ launch: settingsState() });
       }
       if (typeof body.full_permissions !== "boolean") throw new InboxError("validation_error", "full_permissions: a boolean.", { field: "full_permissions" });
       saveConfig({ inboxLaunch: { fullPermissions: body.full_permissions } });
       if (config().fullPermissions !== body.full_permissions) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed.");
-      return json({ launch: settingsState(here) });
+      return json({ launch: settingsState() });
     }
     const { root, host } = launchById(match[1]!);
     const launch = root.launch!;
@@ -1590,6 +1625,9 @@ ${result.text}`);
           return json({ run: runOfRoot(store.message(root.id)!) });
         }
         if (!isFolder(launch.folder)) throw new InboxError("folder_missing", `${options.displayFolder(launch.folder)} isn't there any more.`);
+        // In Rex: never a second process on the session (a tab still runs it, or may: this Inbox just started).
+        await refuseIfRexHeld(launch);
+        if (starting.has(launch.id) || respawning.has(launch.id)) throw new InboxError("validation_error", "It is starting already.");
         tryAgain(root, host);
         return json({ run: runOfRoot(store.message(root.id)!) });
       }
@@ -1610,7 +1648,10 @@ ${result.text}`);
           await saveTrust(offer);
           // The write can wait on the agent's own lock: a Delete may have come through meanwhile.
           const current = store.message(root.id)!;
-          if (refusedForTrust(current)) tryAgain(current, host);
+          if (refusedForTrust(current)) {
+            await refuseIfRexHeld(current.launch!);
+            tryAgain(current, host);
+          }
           return runNow();
         })();
         trusting.set(launch.id, done);
@@ -1668,11 +1709,6 @@ ${result.text}`);
     if (!launch.error && memo.turnError && runOfRoot(root)?.turn_error) {
       sendAgain(root, memo);
       return;
-    }
-    // In Rex: never a second process on the session (a tab still runs it, or may: this Inbox just started).
-    if (!launch.error && inboxLaunchInRex(launch)) {
-      const held = rexHeld(launch);
-      if (held) throw new InboxError("launch_in_rex", held);
     }
     // A reply's respawn that did not take: respawn once more (the session exists; a new start would make a second).
     if (!launch.error && launch.session_ref && root.to && respawnFailedOf(memo)) {

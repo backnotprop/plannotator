@@ -71,7 +71,7 @@ function scriptedTailscale(): TailscaleRunner {
 const clock = { ahead: 0 };
 const sessionsNow = () => Date.now() + clock.ahead;
 
-async function world(options: { remote: boolean; startIn?: "rex" }) {
+async function world(options: { remote: boolean; startIn?: "rex"; phones?: boolean }) {
   clock.ahead = 0;
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-rex-")));
   roots.push(root);
@@ -91,7 +91,7 @@ async function world(options: { remote: boolean; startIn?: "rex" }) {
   const server = await startInboxServer({
     dataDir,
     binaryPath: null,
-    phones: false,
+    phones: options.phones === true,
     tailscale: scriptedTailscale(),
     readProjectRepo: async () => null,
     sessionsNow,
@@ -159,7 +159,25 @@ async function world(options: { remote: boolean; startIn?: "rex" }) {
     await poll(session, ids);
     return { session, ids };
   };
-  return { fake, agent, poll, launched, inRex, agentsOf, show, tailnet, base, server };
+  /** A New message that starts an agent, sent to `url` with `headers`: its root once the agent started. */
+  let sends = 0;
+  const sendNew = async (headers: Record<string, string>, url = `${base}/api/inbox/messages`, withSession = true) => {
+    const folder = server.store.ensureProject({ name: "my-app", root: project });
+    const key = `00000000-0000-4000-8000-${String(++sends).padStart(12, "0")}`;
+    const body = { ...(withSession ? { serverSession: server.serverSession } : {}), idempotency_key: key, body: "Tidy the readme.", to: { launch: { agent: FAKE, project_id: folder.id } } };
+    const sent = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
+    expect({ status: sent.status, body: sent.status === 200 ? null : await sent.text() }).toEqual({ status: 200, body: null });
+    const id = ((await sent.json()) as { message: { id: string } }).message.id;
+    for (let i = 0; i < 400 && !server.store.message(id)?.launch?.session_ref; i++) await Bun.sleep(5);
+    return server.store.message(id)!;
+  };
+  /** A paired phone's token, through the real pairing routes. */
+  const pairPhone = async () => {
+    const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const made = (await (await post("/api/inbox/pairing", {})).json()) as { offer: { code: string } };
+    return ((await (await post("/api/inbox/device/pair", { code: made.offer.code, name: "iPhone", platform: "ios" })).json()) as { token: string }).token;
+  };
+  return { fake, agent, poll, launched, inRex, agentsOf, show, tailnet, sendNew, pairPhone, base, server };
 }
 
 /** Wait for the list to say it (Rex is read in the background; the list answers from the last read). */
@@ -241,6 +259,24 @@ describe("the Agents list and Rex", () => {
     // Never read about: no status asked of its block.
     expect(w.fake.calls.filter((c) => c.method === "block.method" && c.payload.block_id === theirs.block)).toEqual([]);
   });
+
+  test("Rex chosen: a Send from the tailnet or a paired phone starts in the background (the window's headers copied or not); this window's starts in Rex", async () => {
+    const w = await world({ remote: false, startIn: "rex", phones: true });
+    const far = w.tailnet();
+    const fromTailnet = await w.sendNew(far.headers, `${far.at}/api/inbox/messages`);
+    expect(fromTailnet.launch!.session_ref).toBeTruthy();
+    expect(fromTailnet.launch!.rex).toBeUndefined();
+    const token = await w.pairPhone();
+    const fromPhone = await w.sendNew({ Authorization: `Bearer ${token}`, "Sec-Fetch-Site": "same-origin", Origin: w.base }, `${w.base}/api/inbox/device/messages`, false);
+    expect(fromPhone.launch!.session_ref).toBeTruthy();
+    expect(fromPhone.launch!.rex).toBeUndefined();
+    expect(w.fake.methods()).not.toContain("session.create");
+    expect(w.fake.methods()).not.toContain("session.new_window");
+    // The same Send pressed in this computer's own window: Rex.
+    const here = await w.sendNew({ Origin: w.base, "Sec-Fetch-Site": "same-origin" });
+    expect(here.launch!.rex).toBeDefined();
+    expect(w.fake.methods()).toContain("session.create");
+  }, 20_000);
 
   test("over the tailnet: no place, and Rex is not read", async () => {
     const w = await world({ remote: true });

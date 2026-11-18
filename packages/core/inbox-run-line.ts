@@ -44,9 +44,9 @@ export const INBOX_REX_STILL_RUNS = "It's still running in its tab in Rex. Look 
 /** Stop of a session that runs in Rex (its line offers none; an older window's press): Rex owns it. */
 export const INBOX_RUN_IN_REX_STOP = "This agent runs in Rex. Stop it in its tab there.";
 /** A reply to a session that ran in Rex, while Rex is not on this computer: the failed line's cause. */
-export const INBOX_REX_NOT_HERE_AGAIN = "Rex isn't open on this computer, so it did not start again.";
+export const INBOX_REX_NOT_HERE_AGAIN = "Rex isn't open on this computer, so it didn't start again.";
 /** A reply to a session that ran in Rex, when Rex said no to its new tab (an error answer): the failed line's cause. */
-export const INBOX_REX_REFUSED_AGAIN = "Rex didn't open its tab, so it did not start again.";
+export const INBOX_REX_REFUSED_AGAIN = "Rex didn't open its tab, so it didn't start again.";
 /** Open in Terminal for a session that runs in Rex (its line offers none; an older window's press). */
 export const INBOX_RUN_IN_REX_OPEN = "This agent runs in Rex. Open its tab there.";
 

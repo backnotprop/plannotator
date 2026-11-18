@@ -753,6 +753,12 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
      * the Inbox tool on and this Inbox's data dir, as Open in Terminal runs it. The extension connects it at its
      * start, as that id, and takes the root as its first turn: the message is never on the command line.
      */
+    /** Start in Rex: a Pi lists as `pi` alone, so the claim its extension wrote (this Inbox's data dir) says which session it runs. */
+    runsSession(session: string, listing: string) {
+      const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
+      return piSessionProcesses(listing, session, own, readPiSessionClaims(ctx.dataDir)).some((found) => found.pid !== process.pid);
+    },
+
     async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
       const session = input.resume && launch.session ? launch.session : randomUUID();
       const dataDir = dataDirArg();

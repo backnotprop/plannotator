@@ -1304,7 +1304,11 @@ export interface InboxRun {
    * `waiting`: `waiting_terminal` because its Rex pane says it waits on the person (OSC 7501 `blocked`), with the kind
    * when it said one. Absent: not a Rex start. Additive.
    */
-  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other" };
+  /**
+   * `held`: a reply waits to start it again, as its old process may still run (`may_run`: the Inbox just started and
+   * has not heard from it yet) or still does (`still_runs`: a process runs that session).
+   */
+  rex?: { line: string | null; unavailable?: true; refused?: true; waiting?: "permission" | "question" | "auth" | "other"; held?: "may_run" | "still_runs" };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */

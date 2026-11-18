@@ -208,6 +208,26 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(again.ok && again.command).toContain(made.session);
   });
 
+  test("Start in Rex: a Pi in its tab lists as `pi` alone, so the claim its extension wrote says which session it runs", async () => {
+    const { host, dataDir } = setup();
+    // A live process standing in for the tab's Pi (Pi sets process.title = "pi": ps shows `pi` and no argument).
+    const tab = Bun.spawn(["/bin/sleep", "30"], { stdout: "ignore", stderr: "ignore" });
+    try {
+      const session = randomUUID();
+      const listing = `  1     0 /sbin/launchd\n  ${tab.pid}     1 pi\n`;
+      expect(host.runsSession!(session, listing)).toBe(false);
+      writePiSessionClaim(dataDir, { session, pid: tab.pid, rpc: false, title: "pi", owner: "tab" });
+      expect(host.runsSession!(session, listing)).toBe(true);
+      expect(host.runsSession!(randomUUID(), listing)).toBe(false);
+      // Not listed, or its pid now another program: not that Pi.
+      expect(host.runsSession!(session, "  1     0 /sbin/launchd\n")).toBe(false);
+      expect(host.runsSession!(session, `  ${tab.pid}     1 /bin/sleep 30\n`)).toBe(false);
+    } finally {
+      tab.kill();
+      await tab.exited;
+    }
+  });
+
   test("Stop ends the process (abort, then its stdin); a reply's resume reopens the same session file", async () => {
     const { fake, host, started } = setup();
     const { launch, session, pid } = await started();

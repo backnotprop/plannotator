@@ -282,6 +282,12 @@ export interface LaunchHost {
    * member: this agent always starts in the background.
    */
   rexCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex: whether a process on this computer runs `session`, by `listing` (`ps -A -o pid=,ppid=,command=`),
+   * for an agent whose running process does not keep its argv (Pi sets `process.title`). No member: its argv names
+   * the session (inbox-rex-resume.ts reads it).
+   */
+  runsSession?(session: string, listing: string): boolean;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */

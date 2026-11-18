@@ -84,9 +84,9 @@ function setup(options: { startIn?: "inbox" | "rex"; answer?: (request: OpenRequ
     onChange: () => {},
     selfCommand: ["plannotator"],
     hosts: () => [fake.host],
-    rex: { open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)), appAttached: () => (asked.attached++, options.attached ?? true) },
+    rex: { open: async (request) => (opens.push(request), (options.answer ?? (async () => opened))(request)), appAttachedNow: async () => (asked.attached++, options.attached ?? true) },
     rexStatus: (session) => statuses.get(session) ?? null,
-    processListing: () => processes.listing,
+    processListing: async () => processes.listing,
     now: () => clock.now,
   });
   restore.push(() => launch.stop());
@@ -208,7 +208,7 @@ describe("Start in Rex", () => {
   });
 
   test("a reply after an Inbox restart, its Rex tab's agent not heard from yet: no second tab on the session", async () => {
-    const { clock, fake, store, opens, processes, send, post } = setup();
+    const { clock, fake, store, opens, processes, send, post, launch } = setup();
     const { root, id } = await send();
     fake.poll("session-r1", false, clock.now);
     store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
@@ -220,12 +220,15 @@ describe("Start in Rex", () => {
     await Bun.sleep(30);
     expect(opens).toHaveLength(1);
     expect(fake.calls).not.toContain("rexCommand resume");
+    // Its line says the reply waits, never "Your reply starts it again" meanwhile.
+    expect((await launch.runOf(root.thread_id))?.rex?.held).toBe("may_run");
     // Past that, while its tab still runs the session (a dialog there holds it): still none, and Try again says why.
     clock.now += INBOX_REX_RESUME_AFTER_BOOT_MS;
     processes.listing = `  1     0 /sbin/launchd\n 4242     1 claude --resume session-r1 --settings /tmp/s.json\n`;
     store.sendReply(answer.id, { words: "Hello?", idempotency_key: "reply-h1b" });
     await Bun.sleep(30);
     expect(opens).toHaveLength(1);
+    expect((await launch.runOf(root.thread_id))?.rex?.held).toBe("still_runs");
     await expect(post(id, "retry")).rejects.toMatchObject({ code: "launch_in_rex", message: INBOX_REX_STILL_RUNS });
     // A listing that cannot be read is one that may run it.
     processes.listing = null;
@@ -236,6 +239,34 @@ describe("Start in Rex", () => {
     store.sendReply(answer.id, { words: "Once more.", idempotency_key: "reply-h1c" });
     await until(() => opens.length === 2);
     expect(opens[1]!.command).toContain("--session session-r1");
+    expect((await launch.runOf(root.thread_id))?.rex?.held).toBeUndefined();
+  });
+
+  test("an agent whose running process does not keep its argv (Pi lists as `pi` alone): its host's own check holds the session", async () => {
+    const { clock, fake, store, opens, processes, send, post } = setup();
+    // As Pi: `ps` shows `pi`, and only the claim its extension wrote says which session that pid runs.
+    const asked: [string, string][] = [];
+    (fake.host as { runsSession?: (session: string, listing: string) => boolean }).runsSession = (session, listing) => (asked.push([session, listing]), listing.includes(" pi\n"));
+    const { root, id } = await send();
+    // Never connected, after the Inbox's first minute and a half: Try again never opens a second tab beside it.
+    clock.now += INBOX_REX_RESUME_AFTER_BOOT_MS;
+    processes.listing = "  1     0 /sbin/launchd\n 4242     1 pi\n";
+    await expect(post(id, "retry")).rejects.toMatchObject({ code: "launch_in_rex", message: INBOX_REX_STILL_RUNS });
+    expect(asked.at(-1)).toEqual(["session-r1", processes.listing]);
+    // It connected once, then went quiet past its live window (a Mac that slept): a reply waits for it too.
+    fake.poll("session-r1", false, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
+    const answer = store.sendMessage({ project_id: root.project_id, author: { kind: "agent", host: FAKE, session: "session-r1", name: "Fake Agent" }, body: "Done.", reply_to: root.id, idempotency_key: "answer-pi" }).message;
+    fake.ended("session-r1");
+    clock.now += INBOX_RUN_START_GRACE_MS + 1_000;
+    store.sendReply(answer.id, { words: "Still there?", idempotency_key: "reply-pi" });
+    await Bun.sleep(30);
+    expect(opens).toHaveLength(1);
+    // That Pi quit: the next look opens the one new tab.
+    processes.listing = "  1     0 /sbin/launchd\n";
+    clock.now += 10_000;
+    store.sendReply(answer.id, { words: "Once more.", idempotency_key: "reply-pi-2" });
+    await until(() => opens.length === 2);
   });
 
   test("Try again right after an Inbox restart: refused, as the tab's agent may still be running", async () => {
@@ -291,11 +322,24 @@ describe("Settings → Agents: Start new agents in", () => {
     const read = (via: string) => launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via);
     expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
     expect(asked.attached).toBe(0);
+    // New message's agent pick reads ahead: no Rex either.
+    const ahead = await launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings?ahead=1", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", "local");
+    expect(((await ahead!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
+    expect(asked.attached).toBe(0);
+    // A save's answer: no Rex.
+    const saved = await launch.route(
+      new Request("http://127.0.0.1/api/inbox/launch/settings", { method: "POST", headers: { Origin: "http://127.0.0.1", Host: "127.0.0.1" }, body: JSON.stringify({ serverSession: "srv", full_permissions: false }) }),
+      "/api/inbox/launch/settings",
+      "local",
+    );
+    expect(((await saved!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
+    expect(asked.attached).toBe(0);
+    // Settings → Agents' own read on this computer: the one that asks.
     expect(((await (await read("local"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
     expect(asked.attached).toBe(1);
   });
 
-  test("saved to config.json, read back with whether Rex is here and which agents can start there; anything else is refused", async () => {
+  test("saved to config.json, read back with which agents can start there (whether Rex is here stays the pane's own read); anything else is refused", async () => {
     const { launch, dataDir } = setup({ startIn: "inbox", attached: true });
     const route = (body: Record<string, unknown>) =>
       launch.route(
@@ -305,7 +349,8 @@ describe("Settings → Agents: Start new agents in", () => {
       );
     const saved = (await (await route({ start_in: "rex" }))!.json()) as { launch: Record<string, unknown> };
     // Claude Code and Pi connect by themselves from a terminal; Codex and OpenCode never start in Rex (no dead choice).
-    expect(saved.launch).toMatchObject({ start_in: "rex", rex_here: true, rex_agents: ["claude-code", "pi", FAKE] });
+    expect(saved.launch).toMatchObject({ start_in: "rex", rex_agents: ["claude-code", "pi", FAKE] });
+    expect(saved.launch.rex_here).toBeUndefined();
     expect(JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")).inboxLaunch.startIn).toBe("rex");
     const back = (await (await route({ start_in: "inbox" }))!.json()) as { launch: Record<string, unknown> };
     expect(back.launch.start_in).toBe("inbox");

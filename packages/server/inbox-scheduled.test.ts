@@ -77,7 +77,7 @@ function world(start = "2026-11-16T13:59:00.000Z", startIn: "rex" | null = null)
       onChange: () => {},
       selfCommand: ["plannotator"],
       hosts: () => [fake.host, other],
-      rex: { open: async (request) => (rexOpens.push(request.command), { opened: true, session: "session:x", window: "window:y", line: "Rex · project / Fake Agent" }), appAttached: () => true },
+      rex: { open: async (request) => (rexOpens.push(request.command), { opened: true, session: "session:x", window: "window:y", line: "Rex · project / Fake Agent" }), appAttachedNow: async () => true },
       now: () => clock.now,
     });
     restore.push(() => made.stop());
