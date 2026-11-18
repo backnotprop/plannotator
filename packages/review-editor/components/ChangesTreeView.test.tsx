@@ -155,10 +155,10 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     expect(trail(el, 'committed.ts')).toEqual(['+1']);
   });
 
-  test('a renamed file names its old path on hover', async () => {
+  test('a renamed file names its old path then its new path on hover', async () => {
     const el = await mount(<Tree files={[{ ...file('docs/setup.md'), status: 'renamed', oldPath: 'docs/old-setup.md' }, file('src/a.ts')]} activeFileIndex={1} />);
     const path = rows(el).find((p) => p?.endsWith('setup.md'))!;
-    expect(row(el, path).getAttribute('title')).toBe('Renamed from docs/old-setup.md');
+    expect(row(el, path).getAttribute('title')).toBe('docs/old-setup.md → docs/setup.md');
   });
 
   test('hide viewed files drops viewed rows but keeps the open one', async () => {
@@ -233,6 +233,20 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     } finally {
       window.removeEventListener('keydown', listen);
     }
+  });
+
+  test('Escape clears the search and keeps the box; Escape on the empty box lands on the current row, not the page', async () => {
+    const el = await mount(<Tree files={[file('src/a.ts'), file('src/b.ts')]} activeFileIndex={1} />);
+    const host = el.querySelector('[data-changes-tree]')!;
+    await typeInSearch(host, 'b');
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    expect(searchInput(host).value).toBe('');
+    expect(shadow(el).activeElement).toBe(searchInput(host));
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    expect(document.activeElement === host).toBe(true);
+    expect(shadow(el).activeElement?.getAttribute('data-item-path')).toEndWith('b.ts');
   });
 
   test('after a search is cleared, a click on a row moves focus to it and arrows walk the tree', async () => {
