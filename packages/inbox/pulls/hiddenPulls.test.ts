@@ -6,7 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { inboxPullStacks, inboxReviewRows, type InboxListRow, type InboxPull, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { forgetHiddenChanges, hiddenInProject, hidLead, hideRepo, repoChangeKey, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
+import { forgetHiddenChanges, hiddenInProject, hidLead, hideRepo, repoChangeKey, HIDDEN_GIVE_UP_MS, HIDDEN_SETTLE_MS, hiddenChangesNow, hiddenLabel, hiddenRepo, hiddenWith, hideKeysWords, hidePulls, hidToast, onHiddenWritten, showPulls, pullsShown, reviewsShown, settleHidden, shownToast, type HiddenChanges } from './hiddenPulls';
 import { rowMenuActions } from '../rowMenu';
 import { reviewsOnYou } from './reviewsModel';
 import { sheetModel } from '../prs/sheetModel';
@@ -85,6 +85,32 @@ describe('a change made here settles', () => {
     settleHidden([], start + HIDDEN_GIVE_UP_MS);
     expect(keys()).toEqual([]);
   });
+});
+
+test('a rejected second bulk hide keeps the first batch hidden and reloads the list', async () => {
+  const picks = Array.from({ length: 201 }, (_, i) => pull(i + 1));
+  const savedFetch = globalThis.fetch;
+  let writes = 0;
+  let reloads = 0;
+  const unsubscribe = onHiddenWritten(() => { reloads++; });
+  globalThis.fetch = (async () => {
+    const body = ++writes === 1 ? { hidden: [] } : { error: 'Second batch refused' };
+    return Response.json(body, { status: writes === 1 ? 200 : 400 });
+  }) as unknown as typeof fetch;
+  try {
+    await expect(hidePulls(picks)).rejects.toThrow('Second batch refused');
+    const model = pullsShown({ ...MODEL, pulls: picks }, hiddenChangesNow())!;
+    expect(model.pulls.map((p) => p.key)).toEqual([picks[200]!.key]);
+    expect(reloads).toBe(1);
+
+    writes = 0;
+    await expect(showPulls(picks.map((p) => p.key))).rejects.toThrow('Second batch refused');
+    expect(hiddenChangesNow().get(picks[0]!.key)?.hide).toBe(false);
+    expect(reloads).toBe(2);
+  } finally {
+    unsubscribe();
+    globalThis.fetch = savedFetch;
+  }
 });
 
 describe('the Inbox list\'s Hide', () => {

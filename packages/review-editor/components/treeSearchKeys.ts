@@ -24,7 +24,10 @@ export function useTreeSearchKeys(model: SearchableTree) {
       } else if (event.key === 'Escape' && !model.isSearchOpen()) {
         event.preventDefault();
         event.stopPropagation();
-        (input as HTMLInputElement).blur();
+        const row = host.shadowRoot?.querySelector<HTMLElement>('[data-type="item"][tabindex="0"]')
+          ?? host.shadowRoot?.querySelector<HTMLElement>('[data-type="item"]');
+        if (row) row.focus({ preventScroll: true });
+        else (input as HTMLInputElement).blur();
       }
     };
     const onPress = (event: PointerEvent) => {
