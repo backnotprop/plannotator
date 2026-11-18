@@ -45,8 +45,6 @@ export function setInboxAgents(next: unknown): void {
             ...(typeof group.machine === 'string' && group.faces !== undefined ? { faces: readInboxAgentFaces(group.faces), faces_rev: typeof group.faces_rev === 'number' ? group.faces_rev : 0 } : {}),
             // And whether it keeps a tile choice (agents/projectFace.tsx): only when it says so.
             ...(typeof group.machine === 'string' && group.faces !== undefined && group.face_tiles === true ? { face_tiles: true as const } : {}),
-            // Rex's app is attached here: the run line offers Open in Rex (its own group only, for a window on this computer).
-            ...(group.open_in === 'rex' ? { open_in: 'rex' as const } : {}),
           };
         })
     : null;
@@ -75,18 +73,6 @@ export function subscribeInboxAgents(listener: () => void): () => void {
 }
 
 const snapshot = () => current;
-
-/** Whether the run line offers Open in Rex now (its own group's `open_in`, as the last read said). */
-export function useOpensInRex(): boolean {
-  const opens = () => current?.some((group) => group.open_in === 'rex') === true;
-  const [on, setOn] = useState(opens);
-  useEffect(() => {
-    const read = () => setOn(opens());
-    read();
-    return onInboxAgentsSet(read);
-  }, []);
-  return on;
-}
 
 /** Show in Rex was refused (the pane is gone, or Rex's app takes no actions now): the item goes until a read offers it again. */
 export function dropRexShow(session: string): void {

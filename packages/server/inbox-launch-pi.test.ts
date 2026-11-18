@@ -188,6 +188,26 @@ describe("Pi's launch host, against the fake pi", () => {
     expect(fake.sessionFiles()).toHaveLength(1);
   });
 
+  test("Start in Rex: the command, run as a Rex tab runs it, is interactive Pi on a session id picked now, in the folder, with the Inbox tool and this Inbox's data dir; the Inbox runs nothing itself", async () => {
+    const { fake, host, folder, dataDir, env, runTerminal } = setup();
+    const launch: InboxLaunchRecord = { id: "lch_01J00000000000000000000REX", agent: "pi", session_ref: null, folder, scratch: false, started_at: new Date().toISOString() };
+    const made = await host.rexCommand!(launch, { name: "Tidy the readme", login: env, resume: false });
+    if (!made.ok) throw new Error("no command");
+    expect(made.ref).toBe(made.session);
+    expect(made.command).not.toContain("readme");
+    expect(fake.starts()).toEqual([]);
+    runTerminal(made.command);
+    await until("the tab's pi to start", () => fake.terminals().length === 1, 4_000);
+    const [call] = fake.terminals();
+    expect(call!.argv).toEqual(["--session-id", made.session]);
+    expect(call!.cwd).toBe(folder);
+    expect(call!.inboxTool).toBe("1");
+    expect(call!.dataDir).toBe(dataDir);
+    // A reply to it once it ended: the same session.
+    const again = await host.rexCommand!({ ...launch, session: made.session, session_ref: made.session }, { name: "Tidy", login: env, resume: true });
+    expect(again.ok && again.command).toContain(made.session);
+  });
+
   test("Stop ends the process (abort, then its stdin); a reply's resume reopens the same session file", async () => {
     const { fake, host, started } = setup();
     const { launch, session, pid } = await started();

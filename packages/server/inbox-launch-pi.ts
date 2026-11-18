@@ -748,6 +748,20 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
       return { ok: true as const, session, ref: session };
     },
 
+    /**
+     * Start in Rex: interactive Pi in the folder on the session id the Inbox picks now (or the same one again), with
+     * the Inbox tool on and this Inbox's data dir, as Open in Terminal runs it. The extension connects it at its
+     * start, as that id, and takes the root as its first turn: the message is never on the command line.
+     */
+    async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {
+      const session = input.resume && launch.session ? launch.session : randomUUID();
+      const dataDir = dataDirArg();
+      const choice = launchChoiceArgs(PI, { model: launch.model, effort: launch.effort });
+      const env = ["PLANNOTATOR_INBOX_TOOL=1", ...(dataDir ? [`PLANNOTATOR_DATA_DIR=${dataDir}`] : [])];
+      const command = `cd ${shellQuote(launch.folder)} && exec env ${[...env, "pi", "--session-id", session, ...choice].map(shellQuote).join(" ")}`;
+      return { ok: true as const, session, ref: session, command };
+    },
+
     /** What this Inbox's processes say: running (busy or idle), stopped once one ended, absent when none ran here. */
     async sessions() {
       return (ref: string) => {

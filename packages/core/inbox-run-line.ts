@@ -35,6 +35,13 @@ import type { InboxLaunchRecord, InboxRun } from "./inbox-types";
  */
 export const INBOX_TURN_FAILED_WORDS = "couldn't answer";
 
+/** A start in Rex whose session never connected: the failed line's cause (the agent's own tab says why). */
+export const INBOX_RUN_REX_NOT_CONNECTED = "Started in Rex, but not connected to the Inbox. Look at its tab in Rex.";
+/** Stop of a session that runs in Rex (its line offers none; an older window's press): Rex owns it. */
+export const INBOX_RUN_IN_REX_STOP = "This agent runs in Rex. Stop it in its tab there.";
+/** A reply to a session that ran in Rex, while Rex is not on this computer: the failed line's cause. */
+export const INBOX_REX_NOT_HERE_AGAIN = "Rex isn't open on this computer, so it did not start again.";
+
 /** A start that has not connected within this long is not "starting" any more. */
 export const INBOX_RUN_START_GRACE_MS = 60_000;
 
@@ -83,6 +90,8 @@ export interface InboxRunEvidence {
   cloneRunning?: boolean;
   /** When the oldest permission question of ours still open was asked (its hook holds it), or null. */
   permissionSince?: number | null;
+  /** A start in Rex (`InboxRun.rex`): on every line it gives. */
+  rex?: InboxRun["rex"];
 }
 
 const iso = (ms: number | null) => (ms === null ? null : new Date(ms).toISOString());
@@ -144,6 +153,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
     cause: null,
     untrusted: false,
     attach_command: e.attachCommand,
+    ...(e.rex ? { rex: e.rex } : {}),
     // A clone that is done: the line after it still names it (E11's "Cloned into …", E10's trust words).
     ...(clone && clone.state === "done" ? { clone: cloneOf() } : {}),
     ...extra,
@@ -177,7 +187,7 @@ export function inboxRunOf(e: InboxRunEvidence): InboxRun | null {
   if (e.cliAvailable === false) return e.turnWaiting ? line("missing") : null;
   if (inGrace) return starting();
   const hostStopped = e.host === "absent" || host?.state === "stopped" || host?.state === "done";
-  if (!e.seenLive && !hostStopped) return line("failed", { cause: `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
+  if (!e.seenLive && !hostStopped) return line("failed", { cause: e.rex?.line !== undefined && !e.rex.unavailable ? INBOX_RUN_REX_NOT_CONNECTED : `Started, but not connected to the Inbox. Is Plannotator's ${e.connector ?? "plugin"} on in that folder?` });
   const byPerson = e.stoppedByPersonAt !== null;
   // Not the person's Stop: the host's own words, when it has some.
   return line("stopped", { stopped_by_person: byPerson, since: iso(e.stoppedByPersonAt), ...(!byPerson && e.stoppedNote ? { cause: e.stoppedNote } : {}) });

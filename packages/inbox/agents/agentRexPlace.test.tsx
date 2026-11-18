@@ -1,10 +1,10 @@
 /**
  * Rex in the window: an agent's place (Rex · session / tab) as a Where row on its hover card and in its row's spoken
- * name, Show in Rex on its menu, and the run line's Open in Rex. What this catches: Show in Rex offered when the list
+ * name, Show in Rex on its menu, a run started in Rex, and what its Rex pane says on the card. What this catches: Show in Rex offered when the list
  * did not say (the app has not confirmed a jump, another computer's window), on a phone, or for a linked machine's
- * agent; its press reaching the wrong agent; a failed Show not shown under its row; the place missing from the card's facts; the button saying
- * one place and the server asked for the other; an open in Rex not saying where it went. A person without Rex sees
- * no change.
+ * agent; its press reaching the wrong agent; a failed Show not shown under its row; the place missing from the card's facts; a Rex run
+ * offering Stop or Open in Terminal, or not saying where Rex put it or why it started in the background; Rex's word
+ * shown over the Inbox's own. A person without Rex sees no change.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
  */
@@ -217,30 +217,41 @@ test.skipIf(!hasDom)("the place is a Where row on the hover card and in the row'
   expect(agentFacts({ agent: agent('b'), machine: null, name: 'b', thread: null }, null).rows.some(([key]) => key === 'Where')).toBe(false);
 });
 
-test.skipIf(!hasDom)("the run line: the button says where, the server is asked for that place, and an open in Rex says where it went", async () => {
-  const run = { state: 'waiting_terminal', launch_id: 'lch_1', agent: 'claude-code', project: 'billing', folder: '/work/billing', since: null, again: false, stopped_by_person: false, cause: null, untrusted: false, attach_command: null } as unknown as InboxRun;
-  const draw = () => {
+test.skipIf(!hasDom)("a run started in Rex: where Rex put it while it connects, no Stop (Rex owns it), its pane's prompt with the kind, and why it started in the background when Rex wasn't open", () => {
+  const base = { launch_id: 'lch_1', agent: 'claude-code', project: 'billing', folder: '/work/billing', since: null, again: false, stopped_by_person: false, cause: null, untrusted: false, attach_command: null };
+  const draw = (run: Record<string, unknown>) => {
+    document.body.innerHTML = '';
     const host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
-    act(() => root!.render(<RunLine run={run} canOpen={true} machine={null} machineName={null} onChanged={() => {}} />));
+    act(() => root!.render(<RunLine run={{ ...base, ...run } as unknown as InboxRun} canOpen={true} machine={null} machineName={null} onChanged={() => {}} />));
     return host;
   };
-  setInboxAgents([group([agent('ses_a')])]);
-  let el = draw();
-  expect(el.querySelector('[data-run-open]')!.textContent).toBe('Open in Terminal');
-  act(() => setInboxAgents([{ ...group([agent('ses_a')]), open_in: 'rex' }]));
-  await settle();
-  expect(el.querySelector('[data-run-open]')!.textContent).toBe('Open in Rex');
-  await act(async () => (el.querySelector('[data-run-open]') as HTMLButtonElement).click());
-  await settle();
-  expect(posts).toEqual(['/api/inbox/launch/lch_1/open']);
-  expect(bodies[0]).toMatchObject({ in: 'rex' });
-  expect(el.querySelector('[data-run-opened]')!.textContent).toBe('Opened in Rex · billing / Claude Code');
-  act(() => setInboxAgents([group([agent('ses_a')])]));
-  await settle();
-  expect(el.querySelector('[data-run-open]')!.textContent).toBe('Open in Terminal');
-  await act(async () => (el.querySelector('[data-run-open]') as HTMLButtonElement).click());
-  await settle();
-  expect(bodies[1]).not.toHaveProperty('in');
+  expect(draw({ state: 'starting', rex: { line: null } }).textContent).toContain('Starting Claude Code in Rex…');
+  expect(draw({ state: 'starting', rex: { line: LINE } }).querySelector('[data-run-rex]')!.textContent).toBe(`Started in ${LINE}`);
+  const working = draw({ state: 'working', rex: { line: LINE } });
+  expect(working.textContent).toContain('Claude Code is working');
+  expect(working.querySelector('[data-run-stop]')).toBeNull();
+  const waiting = draw({ state: 'waiting_terminal', rex: { line: LINE, waiting: 'permission' } });
+  expect(waiting.textContent).toContain('Claude Code is waiting on you in Rex: a permission prompt');
+  // Its tab is the way in: no Open in Terminal, no Stop.
+  expect(waiting.querySelector('[data-run-open]')).toBeNull();
+  expect(waiting.querySelector('[data-run-stop]')).toBeNull();
+  const away = draw({ state: 'working', rex: { line: null, unavailable: true } });
+  expect(away.querySelector('[data-run-rex-away]')!.textContent).toBe("Rex isn't open on this computer, so it started in the background.");
+  expect(away.querySelector('[data-run-stop]')).not.toBeNull();
+  // Not a Rex start: the line as before.
+  expect(draw({ state: 'starting' }).textContent).toContain('Starting Claude Code in billing…');
+});
+
+test.skipIf(!hasDom)("the hover card says what the Rex pane said, where the Inbox had nothing of its own", () => {
+  const facts = (extra: Partial<InboxAgent>) => agentFacts({ agent: agent('a', { place: { kind: 'rex', line: LINE }, ...extra }), machine: null, name: 'a', thread: null }, null).state;
+  expect(facts({ state: 'waiting', waiting: 0, rex_status: { state: 'blocked', kind: 'question' } })).toBe('Waiting on you in Rex: a question');
+  expect(facts({ state: 'waiting', waiting: 0, rex_status: { state: 'blocked', kind: 'auth' } })).toBe('Waiting on you in Rex: a sign-in');
+  expect(facts({ state: 'waiting', waiting: 0, rex_status: { state: 'blocked' } })).toBe('Waiting on you in Rex');
+  // A thread of its own waiting on the person: the Inbox's words.
+  expect(facts({ state: 'waiting', waiting: 2, rex_status: { state: 'blocked', kind: 'permission' } })).toBe('2 threads waiting on you');
+  expect(facts({ state: 'idle', rex_status: { state: 'done' } })).toBe('Done');
+  expect(facts({ state: 'idle', rex_status: { state: 'error' } })).toBe('Stopped on an error');
+  expect(facts({ state: 'idle' })).toBe('Idle');
 });

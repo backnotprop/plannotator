@@ -1,20 +1,21 @@
 /**
  * The Inbox and Rex (inbox-rex.ts), against a fake Rex server (tests/helpers/fake-rex.ts): where an agent lives is
  * shown only when Rex confirms it and a list never waits on Rex; Show in Rex asks the app only at the click and counts
- * only a confirmed success; Open in Rex makes its tab only in a session the Inbox made, through a login shell; only an
- * app attached over this computer's own socket is ever acted through; and nothing beyond ids, labels, new tabs and
- * focus is ever asked of Rex.
+ * only a confirmed success; starting in Rex makes its tab only in a session the Inbox made, through a login shell; what
+ * a pane says it is doing is read only for a confirmed block, state and kind only, never with an attach; only an app
+ * attached over this computer's own socket is ever acted through; and nothing beyond ids, labels, status records, new
+ * tabs and focus is ever asked of Rex.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { join } from "node:path";
 import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { startFakeRex, type FakeRex } from "../../tests/helpers/fake-rex";
-import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
+import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inboxRexStatusOf, INBOX_REX_SLOW_BACKOFF_MS, type InboxRex } from "./inbox-rex";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 
-/** Every method the Inbox may call: view (ids and labels), a new session or tab with its command, focus. */
-const ALLOWED = new Set(["target.resolve", "client.list", "client.perform", "session.attach", "session.create", "session.new_window", "session.focus_block"]);
+/** Every method the Inbox may call: view (ids and labels), status records (`block.method` `program_status` only), a new session or tab with its command, focus. */
+const ALLOWED = new Set(["target.resolve", "client.list", "client.perform", "session.attach", "session.create", "session.new_window", "session.focus_block", "block.method"]);
 
 const fakes: FakeRex[] = [];
 const rexes: InboxRex[] = [];
@@ -22,6 +23,7 @@ afterEach(async () => {
   for (const rex of rexes.splice(0)) rex.close();
   for (const fake of fakes.splice(0)) {
     expect(fake.methods().filter((m) => !ALLOWED.has(m))).toEqual([]);
+    expect(fake.calls.filter((c) => c.method === "block.method" && c.payload.method !== "program_status")).toEqual([]);
     await fake.stop();
   }
 });
@@ -261,7 +263,66 @@ describe("Show in Rex", () => {
   });
 });
 
-describe("Open in Rex", () => {
+describe("what a pane says it is doing", () => {
+  test("the confirmed block's own record, state and kind only: never its free text, never another block's, never with an attach", async () => {
+    let clock = 1_000_000;
+    const { fake, rex } = setup({}, { now: () => clock });
+    const mine = fake.addSession("proj", "Claude Code");
+    const other = fake.addSession("theirs", "zsh");
+    fake.setStatus(mine.block, [
+      { state: "blocked", kind: "permission", app: "claude-code", title: "VGl0bGU=", msg: "Run rm -rf build?" },
+      // A child record (a helper's) is not the program's own state.
+      { id: "plannotator/plan", state: "working", app: "plannotator" },
+    ]);
+    fake.setStatus(other.block, [{ state: "working", app: "bash" }]);
+    const hints = new Map([["ses_a", placeOf(mine)]]);
+    await placesRead(rex, hints);
+    expect(rex.statuses(hints).get("ses_a")).toEqual({ state: "blocked", kind: "permission" });
+    const asked = fake.calls.filter((c) => c.method === "block.method");
+    expect(asked.map((c) => c.payload.block_id)).toEqual([mine.block]);
+    expect(fake.methods()).not.toContain("session.attach");
+
+    // It changes: the next read says so (and the list hears of it).
+    const before = rex.version();
+    fake.setStatus(mine.block, [{ state: "working", app: "claude-code" }]);
+    clock += 3_000;
+    await placesRead(rex, hints);
+    expect(rex.statuses(hints).get("ses_a")).toEqual({ state: "working" });
+    expect(rex.version()).toBeGreaterThan(before);
+  });
+
+  test("no record, an unknown state or a failed read: no status (the place still shows)", async () => {
+    const { fake, rex } = setup();
+    const ids = fake.addSession("proj", "Pi");
+    const hints = new Map([["ses_b", placeOf(ids)]]);
+    expect((await placesRead(rex, hints)).get("ses_b")).toBe("Rex · proj / Pi");
+    expect(rex.statuses(hints).size).toBe(0);
+    expect(inboxRexStatusOf({ records: [{ state: "sleeping" }] })).toBeNull();
+    expect(inboxRexStatusOf({ records: [{ state: "blocked", kind: "payment" }] })).toEqual({ state: "blocked" });
+    expect(inboxRexStatusOf({ records: [{ state: "done", kind: "question" }] })).toEqual({ state: "done" });
+    expect(inboxRexStatusOf(null)).toBeNull();
+  });
+
+  test("while a window watches, the read is kept fresh without a list read (at most every few seconds)", async () => {
+    let clock = 1_000_000;
+    const { fake, rex } = setup({}, { now: () => clock });
+    const ids = fake.addSession("proj", "Claude Code");
+    const hints = new Map([["ses_c", placeOf(ids)]]);
+    rex.watch(hints);
+    await rex.settled();
+    const reads = () => fake.calls.filter((c) => c.method === "block.method").length;
+    expect(reads()).toBe(1);
+    rex.watch(hints);
+    await rex.settled();
+    expect(reads()).toBe(1);
+    clock += 3_000;
+    rex.watch(hints);
+    await rex.settled();
+    expect(reads()).toBe(2);
+  });
+});
+
+describe("Start in Rex (its tab)", () => {
   const terminal = (command: string, path?: string[]) => ({
     block: { flavor: "com.superlogical.terminal.shell", options: { command: ["/bin/sh", "-c", command], login: true, ...(path ? { path_prepend: path } : {}) } },
   });

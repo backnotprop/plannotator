@@ -273,6 +273,15 @@ export interface LaunchHost {
    * session (`settleLaunch`) and its own channel delivers it. It writes its own start.log entries.
    */
   start(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv }): Promise<{ ok: true; session: string; ref: string } | ({ ok: false } & LaunchStartFailure)>;
+  /**
+   * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
+   * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
+   * at its start, as the session id given here (so the root, addressed to it, is its first turn through its own
+   * channel, as for `start`): never the person's message on the command line. `resume`: the same session again (a
+   * reply to one that ended). It writes what the session needs (Claude Code's settings file) but runs nothing. No
+   * member: this agent always starts in the background.
+   */
+  rexCommand?(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }): Promise<{ ok: true; session: string; ref: string; command: string } | ({ ok: false } & LaunchStartFailure)>;
   /** Every session it knows, read once (the engine caches it 10 s, and only while a line could change); null when it could not be read. */
   sessions(): Promise<LaunchSessions | null>;
   /** The session connected to the Inbox now; null when not. `polls` must rise whenever it shows new life (Stop waits for a higher count). */

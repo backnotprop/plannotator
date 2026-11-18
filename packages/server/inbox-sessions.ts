@@ -1416,11 +1416,15 @@ export function createInboxLiveSessions(options: {
     return entry && isLive(entry) ? (entry.place ?? null) : null;
   };
 
+  /** The live sessions that said where they live (a Rex pane): what the delivery watch keeps Rex's read fresh for. */
+  const placedSessions = (): string[] => [...sessions].flatMap(([session, entry]) => (entry.place && isLive(entry) ? [session] : []));
+
   return {
     lastHeardOf,
     endedOf,
     pollStarted,
     placeOf,
+    placedSessions,
     stateChanged,
     seenWakeOnly,
     pinCloud,

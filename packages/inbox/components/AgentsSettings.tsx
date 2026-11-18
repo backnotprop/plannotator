@@ -21,6 +21,12 @@ import { CommandLine, CopyCommand, Fold, OpenCodeQuiet, OpenCodeWords, openCodeC
 import type { InboxReloadRuntime } from '@plannotator/core/inbox-types';
 import { clockTime, dayWords, formatCount } from '../format';
 import { codexAccountLine } from '../codexAccount';
+import { hostLabel } from '../compose/model';
+
+/** The agents New message starts, as Settings names them in "Start new agents in". */
+const REX_LAUNCH_AGENTS = ['claude-code', 'pi', 'codex', 'opencode'];
+/** "Claude Code and Pi", "Codex, OpenCode and Pi". */
+const listWords = (names: readonly string[]) => (names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`);
 
 /** Whether any host has an open session that needs a restart or an update: Settings' Agents dot. */
 export function agentsNeedRestart(model: InboxAgentsModel | null | undefined): boolean {
@@ -678,6 +684,50 @@ export function AgentsSettings({
       setLaunchBusy(false);
     }
   };
+  // "Start new agents in" (`inboxLaunch.startIn`): the Inbox, in the background, or Rex. Rex is offered while its app is
+  // attached on this computer, or while it is the choice (so it can be turned back); the agents that can't run in Rex say so.
+  const pickStartIn = async (next: 'inbox' | 'rex') => {
+    if (!launchState || launchBusy || launchState.start_in === next) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      setLaunchState((await inboxApi.launchStartIn(next)).launch);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  const inRex = launchState?.start_in === 'rex';
+  const rexNames = (launchState?.rex_agents ?? []).map(hostLabel);
+  const notRexNames = REX_LAUNCH_AGENTS.filter((id) => !(launchState?.rex_agents ?? []).includes(id)).map(hostLabel);
+  const startInRow =
+    launchState?.enabled && rexNames.length > 0 && (launchState.rex_here || inRex) ? (
+      <Row
+        k="Start new agents in"
+        v={
+          <span className="ib-seg" role="group" aria-label="Start new agents in">
+            {(['inbox', 'rex'] as const).map((where) => (
+              <button key={where} type="button" className="ib-seg-o" aria-pressed={(launchState.start_in ?? 'inbox') === where} data-on={(launchState.start_in ?? 'inbox') === where ? '' : undefined} disabled={launchBusy} onClick={() => void pickStartIn(where)} data-launch-start-in={where}>
+                {where === 'inbox' ? 'The Inbox (in the background)' : 'Rex'}
+              </button>
+            ))}
+          </span>
+        }
+        sub={
+          <>
+            In Rex, each new agent runs in its own tab of a Rex session for its project, and keeps running there after the Inbox closes. {listWords(rexNames)} can start in Rex
+            {notRexNames.length > 0 ? `; ${listWords(notRexNames)} always ${notRexNames.length === 1 ? 'starts' : 'start'} in the background.` : '.'}
+            {inRex && !launchState.rex_here && (
+              <span className="block" data-launch-rex-away="">
+                Rex isn't open on this computer now, so new agents start in the background until it is.
+              </span>
+            )}
+          </>
+        }
+        data={{ 'data-launch-start-in-row': launchState.start_in ?? 'inbox' }}
+      />
+    ) : null;
   // Windows (`unsupported`): no switch; launch there is config.json only.
   const enabledRow = launchState && !launchState.unsupported ? (
     <div className="ib-agent ib-aglaunch" data-launch-enabled-group="">
@@ -688,6 +738,7 @@ export function AgentsSettings({
         data={{ 'data-launch-enabled-row': launchState.enabled ? 'on' : 'off' }}
         r={<Switch on={launchState.enabled} label="Start agents from New message" busy={launchBusy} onClick={() => void toggleEnabled()} />}
       />
+      {startInRow}
     </div>
   ) : null;
   const toggleFull = async () => {

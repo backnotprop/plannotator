@@ -1,21 +1,26 @@
 /**
  * Plannotator Inbox and Rex (superlogical.com/rex), a terminal server with sessions, tabs ("windows") and panes
- * ("blocks"): where an agent lives, Open in Rex and Show in Rex (backnotprop/plannotator#3303).
+ * ("blocks"): where an agent lives, what its pane says it is doing, starting agents in Rex and Show in Rex
+ * (backnotprop/plannotator#3303).
  *
  *  - Where it lives. A session in a Rex pane says so on its poll (INBOX_PLACE_POLL_FIELD: Rex's ids, a hint). Rex is
  *    asked whether that block exists and sits in a window of that session, and the session's and the tab's names are
  *    read then. A list never waits on Rex: `places` answers from what the last read confirmed and starts the next
  *    read in the background (`onChange` says when it brought something new). The names live in memory only, for a
  *    few seconds; a miss, no Rex, a slow Rex: nothing is shown.
- *  - Open in Rex. A launched session's attach command opens in a new tab of a Rex session the Inbox made for the
- *    project, recognised by the id it recorded when it made it (`sessionsFile`), never by its name: the Inbox never
+ *  - What it is doing. The same read asks Rex for that confirmed block's program status (OSC 7501, the record a
+ *    program in the pane reported: `block.method` `program_status`), and keeps only the root record's `state` and
+ *    `kind`: its `title` and `msg` are a program's free text and are never kept. Never another block's, never a
+ *    pane's contents, never an event stream (that would carry every pane of the session).
+ *  - Start in Rex (the launch backend, inbox-launch.ts). A new agent's command opens in a new tab of a Rex session the
+ *    Inbox made for the project, recognised by the id it recorded when it made it (`sessionsFile`), never by its name: the Inbox never
  *    makes a tab in, or changes the active tab of, a session it did not make. The command runs through the person's
  *    login shell (Rex's own `login` option), with the Inbox's login PATH added (Rex's `path_prepend`; a real login profile puts its own first).
  *  - Show in Rex. Rex's app goes to an agent's pane (`session.select`, then `session.focus_block`), on the person's
  *    click only. It is offered only while Rex's app is known to perform actions for other programs (its Remote
  *    Control setting), and the only way to know is the app's own answer to an action: nothing asks it in the
  *    background or when a menu opens. So it is hidden at first, offered once the app confirmed a jump in this run
- *    (the select Open in Rex makes, or a Show), and hidden again after any refusal, error, timeout or answer of an
+ *    (the select a start in Rex makes, or a Show), and hidden again after any refusal, error, timeout or answer of an
  *    unknown shape, until the next confirmed one.
  *
  * What it never does: start a Rex server (no `rex` binary: only an existing socket, owned by this user, is connected
@@ -31,7 +36,7 @@ import { connectRex, RexUnavailable, type RexConnection } from "./inbox-rex-sock
 
 /** The longest a background read (where agents live) may take, connecting included; past it nothing is shown. */
 export const INBOX_REX_READ_TIMEOUT_MS = 400;
-/** The longest Open in Rex may take to make its tab (it is never retried elsewhere once asked). */
+/** The longest starting in Rex may take to make its tab (it is never retried elsewhere once asked). */
 export const INBOX_REX_OPEN_TIMEOUT_MS = 10_000;
 /** The longest Show in Rex waits for the app. */
 export const INBOX_REX_SHOW_TIMEOUT_MS = 3_000;
@@ -46,8 +51,24 @@ const NAME_MAX = 60;
 const TERMINAL_FLAVOR = "com.superlogical.terminal.shell";
 const SESSION_ID = /^session:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
 
-/** What a failed Open in Rex says (the window shows it under the run line). */
-export const INBOX_REX_OPEN_FAILED = "Rex didn't open it. Copy the command instead.";
+/** A program's state in its pane, as Rex keeps it (OSC 7501's root record): only `state` and `kind`, never its free text. */
+export interface InboxRexStatus {
+  state: "idle" | "working" | "done" | "blocked" | "error";
+  /** With `blocked` only: what it waits for. */
+  kind?: "permission" | "question" | "auth";
+}
+const STATUS_STATES = new Set<string>(["idle", "working", "done", "blocked", "error"]);
+const STATUS_KINDS = new Set<string>(["permission", "question", "auth"]);
+
+/** `program_status`'s answer: the root record's state and kind (a record with no `id`); null when none or unknown. */
+export function inboxRexStatusOf(answer: unknown): InboxRexStatus | null {
+  const records = answer && typeof answer === "object" && Array.isArray((answer as { records?: unknown }).records) ? ((answer as { records: unknown[] }).records as Record<string, unknown>[]) : [];
+  const root = records.find((r) => r && typeof r === "object" && (r.id === undefined || r.id === null || r.id === ""));
+  if (!root || typeof root.state !== "string" || !STATUS_STATES.has(root.state)) return null;
+  const state = root.state as InboxRexStatus["state"];
+  return state === "blocked" && typeof root.kind === "string" && STATUS_KINDS.has(root.kind) ? { state, kind: root.kind as InboxRexStatus["kind"] } : { state };
+}
+const statusKey = (status: InboxRexStatus | null | undefined) => (status ? `${status.state}:${status.kind ?? ""}` : "");
 
 /** Where this computer's Rex server listens, on macOS (the app's server); null elsewhere. */
 export function inboxRexSocketPath(platform: string, homeDir: string): string | null {
@@ -82,7 +103,7 @@ export function inboxRexSocketOk(path: string, uid: number | null): boolean {
 }
 
 /**
- * Rex sessions the Inbox made for Open in Rex, by project: their ids and the label the Inbox gave them. Only these
+ * Rex sessions the Inbox made for agents it started in Rex, by project: their ids and the label the Inbox gave them. Only these
  * ever get a tab from it, and only while Rex still names them so: a session the person renamed is theirs now.
  */
 type KeptSession = { id: string; label: string };
@@ -142,7 +163,7 @@ export interface InboxRexOptions {
   onChange?: () => void;
 }
 
-/** What Open in Rex did. `sent`: the tab was asked for (whatever came of it): Terminal must not open as well. */
+/** What a start in Rex did. `sent`: the tab was asked for (whatever came of it): the agent must not start elsewhere as well. */
 export type InboxRexOpened = { opened: true; session: string; window: string; line: string } | { opened: false; sent: boolean };
 
 export type InboxRex = ReturnType<typeof createInboxRex>;
@@ -159,7 +180,7 @@ export function createInboxRex(options: InboxRexOptions) {
   /** No asking before this (a Rex that did not answer in time). */
   let quietUntil = 0;
   /** What the last reads confirmed: each hinted session's place and line, and the app attached here. */
-  const confirmed = new Map<string, { place: InboxPlace; line: string; at: number }>();
+  const confirmed = new Map<string, { place: InboxPlace; line: string; status: InboxRexStatus | null; at: number }>();
   let app: { id: string | null; at: number } = { id: null, at: 0 };
   /** The app that last confirmed a jump (`performed_by` itself), until it refuses or fails one: Show in Rex is offered. */
   let jumps: string | null = null;
@@ -318,7 +339,16 @@ export function createInboxRex(options: InboxRexOptions) {
       const sessions = [...new Set(rows.map((r) => r.place.session))];
       const named = sessions.length ? resultsOf(await rex.call("target.resolve", { kinds: ["session"], queries: sessions })) : [];
       const sessionNames = new Map(sessions.map((s, i) => [s, named[i]?.status === "resolved" && named[i]!.target?.session_id === s ? cleanName(named[i]!.target?.label) : ""]));
-      return { rows, sessionNames, windowNames, app: await appOf(rex) };
+      // Each confirmed block's own status record, read together; one that fails is no status (never an attach).
+      const statuses = await Promise.all(
+        rows.map((r) =>
+          rex.call("block.method", { session_id: r.place.session, block_id: r.place.block, method: "program_status" }).then(
+            (answer) => inboxRexStatusOf(answer),
+            () => null,
+          ),
+        ),
+      );
+      return { rows, statuses, sessionNames, windowNames, app: await appOf(rex) };
     });
     const at = now();
     lastRead = at;
@@ -329,7 +359,7 @@ export function createInboxRex(options: InboxRexOptions) {
       confirmed.clear();
       app = { id: null, at };
     } else {
-      const lines = new Map(found.rows.map((r) => [r.session, { place: r.place, line: inboxRexLine(found.sessionNames.get(r.place.session) ?? "", found.windowNames.get(r.window) ?? "") }]));
+      const lines = new Map(found.rows.map((r, i) => [r.session, { place: r.place, status: found.statuses[i] ?? null, line: inboxRexLine(found.sessionNames.get(r.place.session) ?? "", found.windowNames.get(r.window) ?? "") }]));
       for (const session of hints.keys()) {
         const next = lines.get(session);
         const was = confirmed.get(session);
@@ -337,7 +367,7 @@ export function createInboxRex(options: InboxRexOptions) {
           if (was) moved = true;
           confirmed.delete(session);
         } else {
-          if (!was || was.line !== next.line || was.place.block !== next.place.block) moved = true;
+          if (!was || was.line !== next.line || was.place.block !== next.place.block || statusKey(was.status) !== statusKey(next.status)) moved = true;
           confirmed.set(session, { ...next, at });
         }
       }
@@ -361,7 +391,7 @@ export function createInboxRex(options: InboxRexOptions) {
   };
 
   // The last read's answer stands until the next read replaces it (a list read after a quiet spell starts that read:
-  // a time limit here would drop the line, or Open in Rex, for that one read).
+  // a time limit here would drop the line for that one read).
   const appHere = () => app.id;
 
   return {
@@ -377,6 +407,21 @@ export function createInboxRex(options: InboxRexOptions) {
         if (known && known.place.session === place.session && known.place.block === place.block) out.set(session, known.line);
       }
       return out;
+    },
+
+    /** What each of these sessions' confirmed panes says it is doing (its status record), from the last read; no read starts. */
+    statuses(hints: ReadonlyMap<string, InboxPlace>): Map<string, InboxRexStatus> {
+      const out = new Map<string, InboxRexStatus>();
+      for (const [session, place] of hints) {
+        const known = confirmed.get(session);
+        if (known?.status && known.place.session === place.session && known.place.block === place.block) out.set(session, known.status);
+      }
+      return out;
+    },
+
+    /** Keep these places fresh while a window watches (the delivery watch's tick): a read when the last is stale. */
+    watch(hints: ReadonlyMap<string, InboxPlace>): void {
+      if (hints.size > 0) refresh(hints);
     },
 
     /** Rex's app is attached here over this computer's own socket (as the last read said); starts a read when stale. */

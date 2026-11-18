@@ -1,0 +1,18 @@
+/**
+ * What an agent's Rex pane says it is doing (inbox-rex.ts `statuses`: OSC 7501's root record, state and kind only),
+ * folded into what the Inbox already says of it. The Inbox's own knowledge comes first: a thread waiting on the person
+ * stays `waiting`, an ended session stays `ended`. Rex fills in what the Inbox cannot know: a pane blocked on the
+ * person (a permission prompt, a question, a sign-in in the terminal) is `waiting`, with its kind; a pane working is
+ * `working` though the Inbox heard nothing of a turn; a pane that says it is done or failed keeps the Inbox's `idle`
+ * and says so in its card. A pane at rest says nothing new.
+ */
+import type { InboxAgent } from "@plannotator/core/inbox-types";
+import type { InboxRexStatus } from "./inbox-rex";
+
+export function withRexStatus(agent: InboxAgent, status: InboxRexStatus | null | undefined): InboxAgent {
+  if (!status || agent.state === "waiting" || agent.state === "ended") return agent;
+  if (status.state === "blocked") return { ...agent, state: "waiting", rex_status: { state: "blocked", ...(status.kind ? { kind: status.kind } : {}) } };
+  if (status.state === "working") return agent.state === "working" ? agent : { ...agent, state: "working" };
+  if ((status.state === "done" || status.state === "error") && agent.state === "idle") return { ...agent, rex_status: { state: status.state } };
+  return agent;
+}

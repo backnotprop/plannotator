@@ -11,6 +11,11 @@
  * connection first (409 `conflict`), as the real server does. With Remote Control off, the app answers every
  * action `refused` (403) with the real app's words (as a real one answered, 2026-11-18). What a
  * real app answers with Remote Control on was never seen: here, the documented success (`performed_by`).
+ *
+ * Program status (OSC 7501, Rex's `build/program-status`): each block holds the records its programs reported, read
+ * with `block.method` `program_status` as a real server answered it (`{ records: [{ id?, state, kind?, app,
+ * effective_app, title?, msg?, updated_at, owner }] }`, the root record with no `id`). The manual lists no `conflict`
+ * for `block.method`, so the fake needs no attach for it (unseen on a real one: the Inbox never attaches to read it).
  */
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -64,6 +69,8 @@ export interface FakeRex {
   setPerformAnswer(answer: Record<string, unknown> | null): void;
   /** Rename a session or a window (labels are read at show time). */
   rename(id: string, label: string): void;
+  /** A block's program status records, as programs reported them (replaces them all; [] clears). */
+  setStatus(block: string, records: Record<string, unknown>[]): void;
   /** Add a session of one window of one block; its ids. */
   addSession(label: string, windowLabel: string): { session: string; window: string; block: string };
   /** Connections opened so far, and those still open. */
@@ -91,6 +98,7 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
   let open = 0;
   const sessions: FakeRexSession[] = [];
   const calls: FakeRexCall[] = [];
+  const statuses = new Map<string, Record<string, unknown>[]>();
 
   const sessionOf = (id: unknown) => sessions.find((s) => s.session_id === id);
   const fail = (code: string, message: string, status: number) => ({ error: { code, message, status } });
@@ -185,6 +193,14 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
         if (!ws.data.attached.has(s.session_id)) return fail("conflict", "attach to the session first", 409);
         return s.windows.some((w) => w.blocks.includes(payload.block_id as string)) ? { payload: {} } : fail("not_found", "no such block", 404);
       }
+      case "block.method": {
+        const s = sessionOf(payload.session_id);
+        if (!s) return fail("session_not_found", "no such session", 404);
+        if (typeof payload.block_id !== "string") return fail("bad_request", "block_id is required", 400);
+        if (!s.windows.some((w) => w.blocks.includes(payload.block_id as string))) return fail("not_found", "no such block", 404);
+        if (payload.method !== "program_status") return fail("method_not_found", `no block method ${String(payload.method)}`, 404);
+        return { payload: { records: statuses.get(payload.block_id) ?? [] } };
+      }
       case "session.destroy": {
         const at = sessions.findIndex((s) => s.session_id === payload.session_id);
         if (at < 0) return fail("session_not_found", "no such session", 404);
@@ -262,6 +278,9 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
         if (s.session_id === id) s.label = label;
         for (const w of s.windows) if (w.window_id === id) w.label = label;
       }
+    },
+    setStatus(block, records) {
+      statuses.set(block, records.map((r) => ({ effective_app: r.app, updated_at: "2026-11-18T08:00:00Z", owner: { pid: 4242, name: "claude" }, ...r })));
     },
     addSession(label, windowLabel) {
       const block = `block:${uuid()}`;

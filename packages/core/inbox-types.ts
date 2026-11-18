@@ -1194,6 +1194,24 @@ export interface InboxLaunchRecord {
   deleted_at?: string;
   /** Started from a linked machine's window (remote launch): which one. Where the click came from, never a credential. Absent: this computer. */
   from?: InboxLaunchFrom;
+  /**
+   * Settings → Agents' "Start new agents in" said Rex when it was made (fixed at Send): the agent runs in a tab of
+   * Rex (superlogical.com/rex) instead of in the background, and Rex owns its process. `line`: where Rex put it
+   * ("Rex · <session> / <tab>") once the tab was made; `unavailable`: Rex was not on this computer at the start, so it
+   * started in the background as usual. Empty until the start.
+   */
+  rex?: InboxLaunchRex;
+}
+
+/** `InboxLaunchRecord.rex`. */
+export interface InboxLaunchRex {
+  line?: string;
+  unavailable?: true;
+}
+
+/** The launch runs in a Rex tab (it asked for Rex and Rex made the tab): Rex owns it, the Inbox never stops or removes it. */
+export function inboxLaunchInRex(launch: Pick<InboxLaunchRecord, "rex" | "session_ref">): boolean {
+  return !!launch.rex && !launch.rex.unavailable && !!launch.session_ref;
 }
 
 /**
@@ -1270,6 +1288,12 @@ export interface InboxRun {
   made_folder?: string;
   /** A launch that clones first (E1-E11): the repo, the percent once git says one (after a few seconds), why it failed, and what it brings. */
   clone?: { url: string; host: string; slug: string; branch: string | null; pct: number | null; error: "auth" | "not_found" | "network" | "failed" | null; error_text: string | null; renamed_from: string | null; brings: string[] | null; folder_shown: string | null };
+  /**
+   * Started in Rex (`InboxLaunchRecord.rex`): `line` once Rex made its tab (null while asked); `unavailable`: Rex was not
+   * here, so it started in the background; `waiting`: `waiting_terminal` because its Rex pane says it waits on the
+   * person (OSC 7501 `blocked`), with the kind when it said one. Absent: not a Rex start. Additive.
+   */
+  rex?: { line: string | null; unavailable?: true; waiting?: "permission" | "question" | "auth" | "other" };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
@@ -3565,6 +3589,12 @@ export interface InboxAgent {
   last_seen_at: string | null;
   /** Where it lives (`InboxAgentPlace`): a Rex pane Rex confirmed for this read. Absent when none. Additive. */
   place?: InboxAgentPlace;
+  /**
+   * What that confirmed Rex pane says the agent is doing (OSC 7501's root record, state and kind only), when it says
+   * more than the Inbox knows: `blocked` (`state` then `waiting`), `done` or `error` (`state` idle). This
+   * computer's own window only. Additive.
+   */
+  rex_status?: { state: "blocked" | "done" | "error"; kind?: "permission" | "question" | "auth" };
 }
 
 /** The most agents a list names per machine; `total` says how many there are past that. */
@@ -3575,12 +3605,16 @@ export const INBOX_AGENTS_LISTED_MAX = 40;
  * `first_thread` that is not text is dropped, the rest of the agent kept.
  */
 export function inboxAgentNamesChecked(agent: InboxAgent, options: { show: boolean } = { show: false }): InboxAgent {
-  const { label, title, first_thread, place, ...rest } = agent as InboxAgent & Record<string, unknown>;
+  const { label, title, first_thread, place, rex_status, ...rest } = agent as InboxAgent & Record<string, unknown>;
   const thread = first_thread as unknown as Record<string, unknown> | null | undefined;
   const where = inboxAgentPlaceChecked(place, options);
+  const status = rex_status && typeof rex_status === "object" ? (rex_status as Record<string, unknown>) : null;
+  const statusState = status && (status.state === "blocked" || status.state === "done" || status.state === "error") ? status.state : null;
+  const statusKind = statusState === "blocked" && (status!.kind === "permission" || status!.kind === "question" || status!.kind === "auth") ? status!.kind : null;
   return {
     ...rest,
     ...(where ? { place: where } : {}),
+    ...(statusState ? { rex_status: { state: statusState, ...(statusKind ? { kind: statusKind } : {}) } } : {}),
     ...(typeof label === "string" ? { label } : {}),
     ...(typeof title === "string" ? { title } : {}),
     ...(thread && typeof thread === "object" && typeof thread.id === "string" && typeof thread.name === "string" ? { first_thread: { id: thread.id, name: thread.name } } : {}),
@@ -3612,11 +3646,6 @@ export interface InboxAgentsGroup {
    * an Inbox from before tiles: the window then draws and offers that machine's agents what it can keep (no tile).
    */
   face_tiles?: true;
-  /**
-   * `rex`: this machine's Open in Terminal opens a Rex tab instead (Rex's app is attached here; packages/server/inbox-rex.ts),
-   * so the window words it "Open in Rex". Only on this computer's own group, for a window on this computer. Additive.
-   */
-  open_in?: "rex";
 }
 
 /** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */

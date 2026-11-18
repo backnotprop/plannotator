@@ -3,10 +3,10 @@ import type { InboxRun } from '@plannotator/core/inbox-types';
 import { INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
-import { useOpensInRex } from '../agentsList';
 import { whenTime } from '../format';
 import { Icon } from '../icons';
 import { hostLabel } from '../compose/model';
+import { REX_WAITING_WORDS } from '../agents/model';
 import { Tip } from './Tip';
 import { useMinuteClock } from './Undelivered';
 
@@ -70,8 +70,6 @@ export function RunLine({
   const [copied, setCopied] = useState(false);
   const [cloneCopied, setCloneCopied] = useState(false);
   const [whatsIn, setWhatsIn] = useState(false);
-  // Where Open in Rex put it ("Rex · <session> / <tab>"): said under the line, so a tab the app did not jump to is found.
-  const [opened, setOpened] = useState<string | null>(null);
   const clone = run.clone ?? null;
   // The machine in a clone's words: its name, else this computer (a sentence's first word takes a capital).
   const where = machineName ?? 'this computer';
@@ -79,25 +77,19 @@ export function RunLine({
   const ticking = run.state === 'working' || run.state === 'waiting_answer' || run.state === 'waiting_terminal';
   const now = useMinuteClock(ticking);
   const name = hostLabel(run.agent);
-  // Rex is where the person works here (the list's `open_in`): the same button opens a Rex tab.
-  const inRex = useOpensInRex();
   const minutes = ticking ? minutesSince(run.since, now) : null;
 
   const act = async (what: 'stop' | 'open' | 'retry' | 'trust') => {
     setBusy(what);
     setError(null);
-    setOpened(null);
     try {
       if (what === 'stop') await inboxApi.launchStop(run.launch_id, machine);
       else if (what === 'retry') await inboxApi.launchRetry(run.launch_id, machine);
       else if (what === 'trust') await inboxApi.launchTrust(run.launch_id, run.trust?.warning ?? null, machine);
-      else {
-        const answer = await inboxApi.launchOpen(run.launch_id, inRex);
-        setOpened(answer.opened === 'rex' && typeof answer.line === 'string' ? answer.line : null);
-      }
+      else await inboxApi.launchOpen(run.launch_id);
       onChanged();
     } catch (cause) {
-      setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? (inRex ? "Rex didn't open it. Copy the command instead." : 'Terminal did not open; copy the command instead.') : 'That did not work; try again.');
+      setError(cause instanceof InboxApiError ? cause.message : what === 'open' ? 'Terminal did not open; copy the command instead.' : 'That did not work; try again.');
       // The folder changed since this line was read: draw the new warning for the next click.
       if (cause instanceof InboxApiError && cause.code === 'trust_warning_changed') onChanged();
     } finally {
@@ -128,9 +120,9 @@ export function RunLine({
     </Tip>
   );
   const openTerminal = (
-    <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('open')} data-run-open={inRex ? 'rex' : ''}>
+    <button type="button" className="ib-btn ib-sm" disabled={busy !== null} onClick={() => void act('open')} data-run-open="">
       <Icon name="terminal" size={14} />
-      {inRex ? 'Open in Rex' : 'Open in Terminal'}
+      Open in Terminal
     </button>
   );
   const attach = run.attach_command && (
@@ -152,9 +144,20 @@ export function RunLine({
   );
   const kept = 'Your message is kept.';
   let bar: number | null = null;
+  // Started in Rex (Settings → Agents' "Start new agents in"): Rex owns it, so no Stop here; its tab is the way in.
+  const inRex = !!run.rex && !run.rex.unavailable;
+  const rexLine = inRex ? run.rex!.line : null;
   switch (run.state) {
     case 'starting':
-      text = run.again ? `Starting ${name} again…` : (
+      text = run.again ? `Starting ${name} again…` : inRex ? (
+        rexLine ? (
+          <span data-run-rex="">
+            Started in <bdi>{rexLine}</bdi>
+          </span>
+        ) : (
+          `Starting ${name} in Rex…`
+        )
+      ) : (
         <>
           Starting {name} in <bdi>{run.project}</bdi>…
           {/* E11: the name was taken between the pick and the clone. */}
@@ -267,7 +270,7 @@ export function RunLine({
           {name} is working{minutes ? ` · ${minutes}` : ''}
         </>
       );
-      actions = stop;
+      actions = inRex ? null : stop;
       break;
     case 'waiting_answer':
       // A permission prompt asked above, as a question card (screen 09): answering it is the action.
@@ -276,10 +279,22 @@ export function RunLine({
           {name} is waiting on your answer{minutes ? ` · ${minutes}` : ''}
         </>
       );
-      actions = stop;
+      actions = inRex ? null : stop;
       break;
     case 'waiting_terminal':
       icon = 'warn';
+      // Its Rex pane says it waits on the person (a prompt in that tab): the Agents row's Show in Rex goes there.
+      if (inRex) {
+        text = (
+          <>
+            <b>
+              {name} is waiting on you in Rex{REX_WAITING_WORDS[run.rex!.waiting ?? 'other']}
+            </b>
+            {minutes ? ` · ${minutes}` : ''}
+          </>
+        );
+        break;
+      }
       text = (
         <>
           <b>{name} is waiting on a permission prompt</b>
@@ -406,9 +421,9 @@ export function RunLine({
         {icon === 'spin' ? <span className="ib-run-spin" aria-hidden="true" /> : icon === 'warn' ? <Icon name="warn" size={14} /> : <span className="ib-run-stopmark" aria-hidden="true" />}
         <span className="ib-run-text" role={run.state === 'failed' || run.state === 'waiting_terminal' || run.state === 'clone_failed' ? 'status' : undefined}>
           {text}
-          {opened && (
-            <span className="ib-run-sub" data-run-opened="">
-              Opened in <bdi>{opened}</bdi>
+          {run.rex?.unavailable && (run.state === 'starting' || run.state === 'working') && (
+            <span className="ib-run-sub" data-run-rex-away="">
+              Rex isn't open on this computer, so it started in the background.
             </span>
           )}
           {bar !== null && (

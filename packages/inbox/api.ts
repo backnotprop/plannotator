@@ -659,11 +659,10 @@ export interface InboxLaunchSettings {
   /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
   bypass_off?: boolean;
   /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
-  scratch_dir?: string;
-  scratch_dir_shown?: string;
-  /** Only the path: the file may hold a secret. */
-  settings_file?: string | null;
-  settings_file_shown?: string;
+  scratch_dir?: string; scratch_dir_shown?: string;
+  /** Claude Code's settings file: only the path (the file may hold a secret), and as shown. */ settings_file?: string | null; settings_file_shown?: string;
+  /** "Start new agents in": the Inbox or Rex; whether Rex's app is attached here now; the agents that can start in Rex. Absent from an older Inbox. */
+  start_in?: 'inbox' | 'rex'; rex_here?: boolean; rex_agents?: string[];
 }
 
 /**
@@ -1880,7 +1879,7 @@ export const inboxApi = {
     post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages', undefined, machine), { ...input }),
   // Launch (behind `inboxLaunch.enabled`, on unless false): the run line's buttons and Settings → Agents' switches.
   launchStop: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`, undefined, machine), {}),
-  launchOpen: (launchId: string, inRex = false) => post<{ ok: true; command: string; opened?: 'rex'; line?: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), inRex ? { in: 'rex' } : {}),
+  launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
   launchDelete: (launchId: string, machine?: string | null) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`, undefined, machine), {}),
   launchRetry: (launchId: string, machine?: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`, undefined, machine), {}),
   /** `warning`: the line the person read (`run.trust.warning`): a server that now reads another saves nothing. */
@@ -1896,6 +1895,7 @@ export const inboxApi = {
   launchSettingsFile: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { settings_file: path }),
   /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
   launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
+  launchStartIn: (startIn: 'inbox' | 'rex') => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { start_in: startIn }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */

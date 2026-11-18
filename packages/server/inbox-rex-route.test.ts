@@ -1,8 +1,9 @@
 /**
  * Rex in a running Inbox (CI runs this: it starts one), with a fake Rex (tests/helpers/fake-rex.ts) as this
  * computer's. What it guards: an agent's place reaches the Agents list only as Rex confirms it, as one line, and only
- * for this computer's own window (the tailnet gets none, and makes no Rex read); a session the Inbox launched never
- * gets one; Show in Rex is offered only after the app confirmed a jump, asks the app only at the click, and a
+ * for this computer's own window (the tailnet gets none, and makes no Rex read); a session the Inbox launched in the
+ * background never gets one, one it started in Rex gets its own tab's; what the pane says (blocked on a prompt) is the
+ * agent's state on the list, with its kind; Show in Rex is offered only after the app confirmed a jump, asks the app only at the click, and a
  * refusal takes the item away; the Show route answers
  * only this computer's own window (never the tailnet, never another site); a session that never said it lives in
  * Rex is never shown there.
@@ -70,7 +71,7 @@ function scriptedTailscale(): TailscaleRunner {
 const clock = { ahead: 0 };
 const sessionsNow = () => Date.now() + clock.ahead;
 
-async function world(options: { remote: boolean }) {
+async function world(options: { remote: boolean; startIn?: "rex" }) {
   clock.ahead = 0;
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-rex-")));
   roots.push(root);
@@ -83,7 +84,7 @@ async function world(options: { remote: boolean }) {
   process.env.PLANNOTATOR_BROWSER = NO_BROWSER;
   process.env.PLANNOTATOR_TEST_SANDBOX = dataDir;
   delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxLaunch: { enabled: true } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxLaunch: { enabled: true, ...(options.startIn ? { startIn: options.startIn } : {}) } }));
   const fake = startFakeRex({ remote: options.remote });
   fakes.push(fake);
   const launchHost = fakeLaunchHost();
@@ -154,7 +155,8 @@ async function world(options: { remote: boolean }) {
 
 /** Wait for the list to say it (Rex is read in the background; the list answers from the last read). */
 async function until(check: () => Promise<boolean>) {
-  for (let i = 0; i < 100; i++) {
+  // Up to 5 s: a list read starts Rex's next read only once the last is a couple of seconds old.
+  for (let i = 0; i < 250; i++) {
     if (await check()) return;
     await Bun.sleep(20);
   }
@@ -178,7 +180,30 @@ describe("the Agents list and Rex", () => {
     expect(w.fake.methods()).not.toContain("client.perform");
   });
 
-  test("a session the Inbox launched gets no place, whatever pane it says", async () => {
+  test("a pane blocked on a prompt: the agent waits on you, with the kind; working again: working", async () => {
+    const w = await world({ remote: false });
+    const ids = w.fake.addSession("my-app", "Claude Code");
+    w.fake.setStatus(ids.block, [{ state: "blocked", kind: "question", app: "claude-code", msg: "V2hpY2ggb25lPw==" }]);
+    await w.agent("ses-blocked", ids);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_status !== undefined);
+    expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")).toMatchObject({ state: "waiting", waiting: 0, rex_status: { state: "blocked", kind: "question" } });
+    w.fake.setStatus(ids.block, [{ state: "working", app: "claude-code" }]);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-blocked")?.state === "working");
+    expect((await w.agentsOf()).find((a) => a.session === "ses-blocked")?.rex_status).toBeUndefined();
+  });
+
+  test("started in Rex: the Inbox's own Rex session for the project gets a tab running the agent, and its place is that tab", async () => {
+    const w = await world({ remote: false, startIn: "rex" });
+    const session = await w.launched();
+    const made = w.fake.sessions.find((s) => s.label === "my-app");
+    expect(made?.windows.map((win) => win.label)).toEqual(["Fake Agent"]);
+    expect(w.fake.calls.find((c) => c.method === "session.create")?.payload).toMatchObject({ initial_windows: [{ layout: { block: { options: { login: true, command: ["/bin/sh", "-c", expect.stringContaining(`--session ${session}`)] } } } }] });
+    await w.poll(session, { session: made!.session_id, block: made!.windows[0]!.blocks[0]! });
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.place !== undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)?.place).toEqual({ kind: "rex", line: "Rex · my-app / Fake Agent" });
+  });
+
+  test("a session the Inbox launched in the background gets no place, whatever pane it says", async () => {
     const w = await world({ remote: true });
     const ids = w.fake.addSession("my-app", "Claude Code");
     const session = await w.launched();
