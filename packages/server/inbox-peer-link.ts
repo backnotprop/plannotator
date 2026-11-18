@@ -508,9 +508,8 @@ export class PeerLink {
 
   /** A window asked for the merged Board: this machine's is read now (when its list takes `cards`) and kept current. */
   wantCards(): Promise<void> {
-    if (this.cardsWanted) return this.cardsReading ?? Promise.resolve();
     this.cardsWanted = true;
-    return this.refreshCards();
+    return this.cardsReading ?? (this.cards ? Promise.resolve() : this.refreshCards());
   }
 
   refreshCards(): Promise<void> {

@@ -231,6 +231,37 @@ test.skipIf(!hasDom)("a phone's Files sheet opened in All files: focus goes into
   }
 });
 
+test.skipIf(!hasDom)("a phone's Files sheet: tapping All files keeps focus on the All files switch at the head of the All files list, not the page", async () => {
+  const savedMatchMedia = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query.includes('max-width: 767px') || query.includes('pointer: coarse'),
+    media: query,
+    onchange: null,
+    addEventListener: () => {},
+    removeEventListener: () => {},
+    addListener: () => {},
+    removeListener: () => {},
+    dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    mount(pr);
+    await settle();
+    await act(async () => el('[data-pull-review-files-button]').click());
+    await settle();
+    await act(async () => {
+      el('[data-tree-scope="all"]').focus();
+      el('[data-tree-scope="all"]').click();
+    });
+    await settle();
+    expect(document.activeElement === document.body).toBe(false);
+    expect(document.activeElement?.getAttribute('data-tree-scope')).toBe('all');
+    expect(document.activeElement?.getAttribute('aria-pressed')).toBe('true');
+    expect(el('[data-pull-all-files]').contains(document.activeElement)).toBe(true);
+  } finally {
+    window.matchMedia = savedMatchMedia;
+  }
+});
+
 test.skipIf(!hasDom)('no head commit known: no switch, the file count as before', async () => {
   diffHead = null;
   const { head_sha: _gone, ...noHead } = pr;

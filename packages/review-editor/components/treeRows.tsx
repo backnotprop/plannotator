@@ -89,7 +89,7 @@ export function notePart(path: string, p: FileRowState): FileTreeRowPart | null 
 export function fileRowParts(file: DiffFile, p: FileRowState, mark: FileTreeRowPart | null = notePart(file.path, p)): FileTreeRowParts {
   return {
     muted: p.showViewedControls && p.viewedFiles.has(file.path),
-    title: file.oldPath ? `Renamed from ${file.oldPath}` : file.path,
+    title: file.oldPath ? `${file.oldPath} → ${file.path}` : file.path,
     trail: [...(mark ? [mark] : []), ...countParts(file.additions, file.deletions)],
   };
 }
