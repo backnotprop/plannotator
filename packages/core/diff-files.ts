@@ -78,9 +78,10 @@ function deriveStatus(lines: string[], oldPath: string, newPath: string): DiffFi
 
 /**
  * A patch's added and removed lines, counted only inside its hunks: before a
- * file's first `@@ ` the `---`/`+++` lines are its headers, and inside a hunk
+ * file's first `@@` the `---`/`+++` lines are its headers, and inside a hunk
  * a line such as `----` (a removed `---` rule) or `--- x` (a removed SQL
- * comment) is content, as git's numstat counts it.
+ * comment) is content, as git's numstat counts it. A combined diff
+ * (`diff --cc`, hunks headed `@@@`) is counted by its first column.
  */
 export function countPatchChanges(patch: string): { additions: number; deletions: number } {
   return countPatchLines(patch.split("\n"));
@@ -93,7 +94,8 @@ function countPatchLines(lines: readonly string[]): { additions: number; deletio
   for (const line of lines) {
     // A new file's headers follow its `diff` line; no hunk line starts with `diff`.
     if (line.startsWith("diff ")) inHunk = false;
-    else if (line.startsWith("@@ ")) inHunk = true;
+    // `@@ ` heads a hunk, `@@@ ` a combined diff's; no hunk line starts with `@`.
+    else if (line.startsWith("@@")) inHunk = true;
     else if (!inHunk) continue;
     else if (line.startsWith("+")) additions += 1;
     else if (line.startsWith("-")) deletions += 1;
