@@ -75,6 +75,8 @@ test('reads made in the background go two at a time, and an arrow read does not 
   expect([...started].sort()).toEqual(['a.ts', 'b.ts', 'c.ts', 'e.ts']);
   answers.get('e.ts')!({ oldContent: 'e', newContent: 'e' });
   expect(await arrow).toEqual({ oldContent: 'e', newContent: 'e' });
+  for (const path of ['b.ts', 'c.ts']) answers.get(path)!({ oldContent: path, newContent: path });
+  await Promise.all([background[1], background[2]]);
 });
 
 test('a background read that never answers gives up its place in the queue, and the read is told to stop', async () => {
