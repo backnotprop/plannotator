@@ -8070,6 +8070,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       payload: eventPayload,
       apply: devices.asDevice,
       phones: phonesOn,
+      // The push's badge and `time_sensitive` (push version 2): the rows as the window places them, a session on a prompt in Stopped on you.
+      rows: () => store.listRows().map(launch.rowDecorator()),
       agents: {
         apply: (deviceId, request, commandId) => agentDoor.asAgent(deviceId, request, commandId),
         signalsFor: (line) => agentSignalsFor(line),
