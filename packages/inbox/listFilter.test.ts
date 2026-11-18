@@ -34,7 +34,7 @@ import {
   type ListFilter,
 } from './listFilter';
 import { toggledTagPick, withLiveTagPicks } from './listFilterTags';
-import { routineThreadTest } from './listFilterRoutines';
+import { routineHold, routineThreadTest, routineThreadsState } from './listFilterRoutines';
 import type { InboxScheduledRow } from '@plannotator/core/inbox-scheduled-types';
 import { clearedFrom } from './components/ListFilter';
 import { setStorageBackend, resetStorageBackend, getItem } from '@plannotator/ui/utils/storage';
@@ -351,6 +351,25 @@ describe('Routine picks (Routine threads, Other threads)', () => {
     expect(isRoutine(ROWS.billingToday)).toBe(true);
     expect(isRoutine({ ...ROWS.billingToday, machine: OTHER } as InboxListRow)).toBe(false);
     expect(routineThreadTest(null)).toBeNull();
+  });
+
+  test('a deleted routine leaves the routines list: its thread stays and counts as Other', () => {
+    const afterDelete = routineThreadTest([routine('mixed')])!;
+    expect(afterDelete(ROWS.billingToday)).toBe(false);
+    expect(ALL.filter((r) => rowMatches(r, { ...NO_LIST_FILTER, routines: ['other'] }, NOW, undefined, undefined, afterDelete)).map((r) => r.thread_id)).toContain('billingToday');
+  });
+
+  test('three states: off (or a failed read) steps aside, not read yet waits, read applies; "not read" is never "no routine threads"', () => {
+    const state = (on: boolean | null, rows: InboxScheduledRow[] | null, error: string | null = null) => routineThreadsState({ on, rows, error });
+    expect(state(false, null)).toBe('off');
+    expect(state(null, null)).toBe('pending');
+    expect(state(true, null)).toBe('pending');
+    expect(state(true, null, 'Could not read routines')).toBe('off');
+    expect(state(true, [])).toBe('ready');
+    // Only a saved Routine pick waits; with none, nothing is held.
+    expect(routineHold({ state: 'pending' }, { routines: ['routine'] })).toBe(true);
+    expect(routineHold({ state: 'pending' }, { routines: [] })).toBe(false);
+    expect(routineHold({ state: 'off' }, { routines: ['routine'] })).toBe(false);
   });
 
   test('while Routines are off (or not read) the picks step aside: they neither filter nor count; on, they do', () => {

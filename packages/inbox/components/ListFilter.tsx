@@ -110,9 +110,10 @@ export function ListFilterButton({ source, phone }: { source: ListFilterSource; 
   // Tags (approval "inbox-thread-tags", step 2): the window's, read with the rows' own rule (`rowTags`).
   const host = useThreadTags();
   const tagScoped = !!host?.listed;
-  // Routines: null while they are off or not read, when the Routine picks step aside and no group is offered.
-  const isRoutine = useRoutineThreads();
-  const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped, isRoutine !== null), host?.tags ?? null);
+  // Routines: off, the Routine picks step aside; not read yet, they still count in the badge; the group shows once read.
+  const routineThreads = useRoutineThreads();
+  const isRoutine = routineThreads.state === 'ready' ? routineThreads.test : null;
+  const filter = withLiveTagPicks(appliedFilter(source.filter, scoped, tagScoped, routineThreads.state !== 'off'), host?.tags ?? null);
   const tagsOf = host?.rowTags;
   const routineTest = isRoutine ?? undefined;
   const countOf = (group: Parameters<typeof countWhere>[3], test: (row: InboxListRow) => boolean) => countWhere(rows, filter, now, group, test, tagsOf, routineTest);

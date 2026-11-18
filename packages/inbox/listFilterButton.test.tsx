@@ -29,8 +29,9 @@ const { InboxList } = (hasDom ? await import('./components/InboxList') : {}) as 
 const { ListFilterEmpty, clearedFrom } = (hasDom ? await import('./components/ListFilter') : {}) as typeof import('./components/ListFilter');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { LIST_FILTER_COOKIE, appliedFilter, filterListSections, pickCount, resetListFilterForTests, useListFilter } = await import('./listFilter');
-const { useRoutineThreads } = await import('./listFilterRoutines');
+const { routineHold, useRoutineThreads } = await import('./listFilterRoutines');
 const { resetScheduledForTests } = await import('./scheduled/store');
+const { scheduledApi } = await import('./scheduled/client');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const stored = new Map<string, string>();
@@ -109,11 +110,12 @@ let list = LIST;
 /** App.tsx's wiring: the picks from this browser, the sections filtered, the rows before the filter for the menu. */
 function Harness({ scoped }: { scoped: boolean }) {
   const [picks, setPicks] = useListFilter();
-  const isRoutine = useRoutineThreads();
-  const applied = appliedFilter(picks, scoped, false, isRoutine !== null);
+  const routines = useRoutineThreads();
+  const applied = appliedFilter(picks, scoped, false, routines.state !== 'off');
+  const held = routineHold(routines, applied);
   const base = scoped ? list.map((s) => ({ ...s, threads: s.threads.filter((r) => r.project.id === 'prj_web') })) : list;
-  const shown = filterListSections(base, applied, Date.now(), undefined, undefined, isRoutine ?? undefined);
-  const none = pickCount(applied) > 0 && shown.every((s) => s.threads.length === 0);
+  const shown = held ? base.map((s) => ({ ...s, threads: [] })) : filterListSections(base, applied, Date.now(), undefined, undefined, routines.state === 'ready' ? routines.test : undefined);
+  const none = !held && pickCount(applied) > 0 && shown.every((s) => s.threads.length === 0);
   return (
     <InboxList
       title={scoped ? 'web' : 'Inbox'}
@@ -368,6 +370,42 @@ describe.skipIf(!hasDom)('the funnel', () => {
     const on = rerender();
     expect(rowIds(on)).toEqual(['n-web']);
     expect(badge()).toBe('1');
+  });
+
+  test('Routines on, not read yet, a Routine pick saved: no row drawn (never every row), the badge counts it; read, it applies', async () => {
+    const list0 = scheduledApi.list;
+    let answer: (value: { scheduled: InboxScheduledRow[]; launch_on: boolean }) => void = () => {};
+    scheduledApi.list = () => new Promise((resolve) => (answer = resolve));
+    try {
+      stored.set(LIST_FILTER_COOKIE, JSON.stringify({ routines: ['other'] }));
+      resetScheduledForTests(null, true);
+      const el = render();
+      await settle();
+      expect(rowIds(el)).toEqual([]);
+      expect(el.textContent).not.toContain('No threads match');
+      expect(badge()).toBe('1');
+      await act(async () => answer({ scheduled: [routine('n-web')], launch_on: true }));
+      await settle();
+      expect(rowIds(el)).toEqual(['w-billing', 'w-web', 'n-docs-old']);
+      expect(badge()).toBe('1');
+    } finally {
+      scheduledApi.list = list0;
+    }
+  });
+
+  test('a failed routines read is Routines off: the saved pick steps aside and every row shows', async () => {
+    const list0 = scheduledApi.list;
+    scheduledApi.list = () => Promise.reject(new Error('Could not read routines'));
+    try {
+      stored.set(LIST_FILTER_COOKIE, JSON.stringify({ routines: ['routine'] }));
+      resetScheduledForTests(null, true);
+      const el = render();
+      await settle();
+      expect(rowIds(el)).toEqual(['w-billing', 'w-web', 'n-web', 'n-docs-old']);
+      expect(badge()).toBeNull();
+    } finally {
+      scheduledApi.list = list0;
+    }
   });
 
   test('Routines on with no routine\'s thread in the list: no Routine group', async () => {
