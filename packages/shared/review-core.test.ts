@@ -1876,6 +1876,19 @@ describe("commit diff mode", () => {
     expect(result.patch).not.toContain("dirty");
   });
 
+  test("Last commit on a one-commit branch shows committed changes only", async () => {
+    const repo = initRepo();
+    const runtime = makeRuntime(repo);
+    const clean = await runGitDiff(runtime, "last-commit", "main");
+    expect(clean.error).toBeUndefined();
+    expect(clean.patch).toContain("new file mode");
+    expect(clean.patch).toContain("+before");
+
+    writeFileSync(join(repo, "tracked.txt"), "later working-tree edit\n");
+    const dirty = await runGitDiff(runtime, "last-commit", "main");
+    expect(dirty.patch).toBe(clean.patch);
+  });
+
   test("a root commit diffs against the empty tree", async () => {
     const repoDir = initRepo();
     const runtime = makeRuntime(repoDir);
