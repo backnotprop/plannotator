@@ -108,7 +108,7 @@ export function createSemDiffClient(options: SemDiffClientOptions): SemDiffClien
     const timedOut = pending.get(id);
     if (!timedOut) return;
     const language = languageForPath(timedOut.request.path) ?? '';
-    if (!warm.has(language)) coldTimedOut.set(language, (coldTimedOut.get(language) ?? 0) + 1);
+    if (!timedOut.request.opinion && !warm.has(language)) coldTimedOut.set(language, (coldTimedOut.get(language) ?? 0) + 1);
     settle(id, null);
     dropWorker();
     for (const other of pending.keys()) post(other);
