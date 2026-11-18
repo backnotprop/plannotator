@@ -75,7 +75,7 @@ Rules the test enforces:
 - **One decision per entry.** `v1` and `rethink` agree. An entry that one row marks `v1` and another `later` or `never` fails. An `undecided` row beside a decided one does not count.
 - **A new entry forces a choice.** You can decide it, or run `bun scripts/mobile/parity.ts --defer`, which gives each new entry an `undecided` row dated today. The owner then decides it.
 - **Built features follow the window.** A `done` row records a fingerprint of its entries: a field's schema, a door route's entry, a flow check's line. When the window changes them, the test fails until `bun scripts/mobile/parity.ts --owed` marks the row `owed` with today's date.
-- **The clock** is a separate test, `tests/mobile-parity-debts.test.ts`. An `undecided` row or an `owed` debt older than 14 days fails. That test reads only the ledger, so it runs when the ledger changes and on main's full run, never on a pull request that only changes the Inbox.
+- **The clock** is a script, `bun scripts/mobile/parity-debts.ts`. An `undecided` row or an `owed` debt older than 14 days fails it. Only `.github/workflows/mobile-ios.yml`'s `ledger` job runs it (ubuntu, seconds), when the ledger or the clock changes and nightly. It is not a test file, so no `bun test` runs it: the Test workflow, main's full run and a release's checks never fail for a mobile debt. Red there holds back only the app's own release. `tests/mobile-parity-debts.test.ts` checks the rule on fixed dates, never the real ledger, and `scripts/ci-affected-map.test.ts` holds all of this.
 
 The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their marks and reasons. Entries were joined to rows by the routes, frames and fields each row names, then corrected by review. Rows whose `source` starts with `seed:` cover the entries no scope row names:
 
@@ -83,7 +83,9 @@ The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their mark
 - `window-door` (the door itself, `v1`), `window-web` (the web window's own files, `never`), `window-mcp` (`never`), `window-ask` (`later`), `window-decisions` (`later`), `window-outbox` (`never`);
 - `window-door-gap`: v1 features whose route the door does not have yet. This is F5a's work list: drafts, a guide marked viewed, the comment draft's delete, agent icons;
 - `window-only-<segment>` (`later`, `L-nodoor`);
-- `health` (`v1`), `agent-session-fields` (`v1`), `setting-switches` (`later`, `L-door`), and `setting-keys` and `capabilities` (`undecided`);
+- `health` (`v1`), `agent-session-fields` (`v1`), `setting-switches` (`later`, `L-door`);
+- the Settings write's other keys, each marked by the SCOPE row for its setting: `setting-keys-look` (`rethink`: theme, text size, notifications, sound, the Mark read warning, rows, voice, the tour), `setting-keys-v1` (the rows' Undo, Show archived, saved emoji), `setting-keys-later` (update checks, the agent tools switch, Tailscale, prompts, the sidebar, diff options and style, chapter diagrams, Experimental, Bro mode, floating drafts), `setting-keys-web` (`never`: the tab icon, the browser's cookie host);
+- `capabilities` (`later`, `L-off`: the Plans library is hidden in the product today);
 - the flows, blocks, frames and door routes left over.
 
 When you fold such an entry into its feature's row, take it out of the seed row.
@@ -127,7 +129,7 @@ Then run `bun scripts/mobile/all.ts`. A row that names an entry the window no lo
 
 A change to the window's components or `packages/inbox/api.ts`, or to the rest of the shared UI, does not select it. `scripts/ci-affected-map.test.ts` checks this.
 
-`tests/mobile-flows.test.ts` checks that each flow check cites files that exist. The cited paths are only known at run time, so the picker runs it on every pull request, as a tree-scanning test. It takes milliseconds.
+`tests/mobile-flows.test.ts` checks that each flow check cites files that exist. The cited paths are only known at run time, so the picker runs it on every pull request, as a tree-scanning test. It takes about 70 ms. It checks the file, never the line, so a change that only moves lines never fails it. A pull request that moves or deletes a cited file must update the citation.
 
 If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 

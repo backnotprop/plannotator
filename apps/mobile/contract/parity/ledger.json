@@ -19709,41 +19709,81 @@
       }
     },
     {
-      "id": "setting-keys",
-      "title": "Other keys the window's Settings write takes",
+      "id": "setting-keys-look",
+      "title": "Settings keys: the look and notifications",
       "surface": [
-        "setting:auto_update",
-        "setting:bro",
-        "setting:chapter_diagrams",
-        "setting:cookie_host",
-        "setting:diff_options",
-        "setting:diff_style",
-        "setting:experimental",
-        "setting:favicon",
-        "setting:float_drafts",
-        "setting:inbox_tool",
-        "setting:mark_read_warning",
-        "setting:notifications",
-        "setting:prompts",
-        "setting:reaction_change",
-        "setting:reactions",
-        "setting:rows",
-        "setting:rows_undo",
-        "setting:show_archived",
-        "setting:sidebar",
-        "setting:sound",
-        "setting:tailscale",
-        "setting:text_size",
         "setting:theme",
-        "setting:tour",
-        "setting:update_check",
-        "setting:voice"
+        "setting:text_size",
+        "setting:notifications",
+        "setting:sound",
+        "setting:mark_read_warning",
+        "setting:rows",
+        "setting:voice",
+        "setting:tour"
       ],
       "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-18",
-      "source": "seed: no SCOPE row names it",
+      "mobile": "rethink",
+      "why": "SCOPE Settings map 1, 2 and 9, rows 159, 163, 166: a native Settings screen for theme, text size, notifications and sound, the rows look, voice and the phone's own first run.",
+      "source": "seed: SCOPE Settings map 1, 2, 9",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "setting-keys-v1",
+      "title": "Settings keys the phone writes as the window does",
+      "surface": [
+        "setting:rows_undo",
+        "setting:show_archived",
+        "setting:reactions",
+        "setting:reaction_change"
+      ],
+      "flows": [],
+      "mobile": "v1",
+      "why": "SCOPE rows 101 (rows change with Undo), 81 and 131 (Show archived), 145 and 146 (saved emoji).",
+      "source": "seed: SCOPE 101, 81, 131, 145, 146",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "setting-keys-later",
+      "title": "Settings keys for managing the computer or not in the phone yet",
+      "surface": [
+        "setting:auto_update",
+        "setting:update_check",
+        "setting:inbox_tool",
+        "setting:tailscale",
+        "setting:prompts",
+        "setting:sidebar",
+        "setting:diff_options",
+        "setting:diff_style",
+        "setting:chapter_diagrams",
+        "setting:experimental",
+        "setting:bro",
+        "setting:float_drafts"
+      ],
+      "flows": [],
+      "mobile": "later",
+      "why": "L-door: update checks, the agent tools switch and Tailscale are slice S9 (SCOPE 64, Settings map 3 and 6); chapter diagrams and the Experimental group are capability switches (SCOPE 178). L-size: prompts (Settings map 5), the sidebar (74), diff options and style (F 130, 132). L-off: Bro mode and floating drafts (115, M 28).",
+      "reason": "L-door",
+      "source": "seed: SCOPE 64, 74, 115, 178, Settings map 3, 5, 6, F 130, 132, M 28",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "setting-keys-web",
+      "title": "Settings keys of a browser",
+      "surface": [
+        "setting:favicon",
+        "setting:cookie_host"
+      ],
+      "flows": [],
+      "mobile": "never",
+      "why": "N-web: the tab icon (SCOPE 165) and the browser's shared-cookie host (Settings map 1, \"This browser\").",
+      "reason": "N-web",
+      "source": "seed: SCOPE 165, Settings map 1",
       "ios": {
         "state": "not-started"
       }
@@ -19755,13 +19795,13 @@
         "capability:plans"
       ],
       "flows": [],
-      "mobile": "undecided",
-      "why": "",
-      "since": "2026-11-18",
-      "source": "seed: no SCOPE row names it",
+      "mobile": "later",
+      "why": "L-off: the Plans library is hidden in the product today (SCOPE: Plans library, off by default).",
+      "source": "seed: SCOPE Plans library",
       "ios": {
         "state": "not-started"
-      }
+      },
+      "reason": "L-off"
     },
     {
       "id": "health",

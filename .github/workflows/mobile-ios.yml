@@ -10,8 +10,17 @@ name: Mobile iOS
 # Checks there.
 #
 # It starts for the iOS app (apps/mobile/ios), the contract's generated Swift
-# (apps/mobile/contract/generated/swift) and this file: not for Android files
-# or the contract's JSON data, which no step here reads.
+# (apps/mobile/contract/generated/swift), the parity ledger
+# (apps/mobile/contract/parity/ledger.json), the ledger's clock
+# (scripts/mobile/parity-debts.ts) and this file: not for Android files or the
+# contract's other JSON data, which no step here reads.
+#
+# `ledger` (ubuntu, seconds, no install) runs the ledger's clock: a decision
+# left `undecided`, or a debt the app `owed`, for more than 14 days fails it
+# (docs/agent-guides/mobile.md). Only this workflow runs the clock: it is a
+# script, not a test file, so no `bun test` (the Test workflow's lanes, main's
+# full run, a release's checks) ever runs it. Red here holds back only the
+# app's own release, never the Inbox's.
 #
 # Concurrency is per job, so the two kinds of run never cancel each other.
 # `ios` runs in a group per branch: a new push cancels only the same pull
@@ -38,6 +47,8 @@ on:
     paths:
       - 'apps/mobile/ios/**'
       - 'apps/mobile/contract/generated/swift/**'
+      - 'apps/mobile/contract/parity/ledger.json'
+      - 'scripts/mobile/parity-debts.ts'
       - '.github/workflows/mobile-ios.yml'
   push:
     branches:
@@ -45,6 +56,8 @@ on:
     paths:
       - 'apps/mobile/ios/**'
       - 'apps/mobile/contract/generated/swift/**'
+      - 'apps/mobile/contract/parity/ledger.json'
+      - 'scripts/mobile/parity-debts.ts'
       - '.github/workflows/mobile-ios.yml'
   schedule:
     - cron: "41 6 * * *"
@@ -85,3 +98,23 @@ jobs:
 
       - name: Build and test the app
         run: bash apps/mobile/ios/ci.sh nightly
+
+  ledger:
+    name: The parity ledger's clock (no decision or debt older than 14 days)
+    concurrency:
+      group: mobile-ledger-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.4
+          no-cache: true
+
+      - name: Check the ledger's dates
+        run: bun scripts/mobile/parity-debts.ts
