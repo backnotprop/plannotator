@@ -108,7 +108,6 @@ packages/inbox/snoozeBackLine.test.tsx
 packages/inbox/launchMenuTailnet.test.tsx
 packages/inbox/remoteLaunchThread.test.tsx
 packages/inbox/composeLaunchPulls.test.tsx
-packages/inbox/composeStartThread.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
@@ -657,6 +656,7 @@ packages/inbox/reviewJump.test.tsx
 packages/inbox/reviewAllFilesTree.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/pulls/pullLaunchpad.test.tsx
+packages/inbox/pulls/pullThreadStart.test.tsx
 packages/inbox/pulls/prPaneFocus.test.tsx
 packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/guideGlobalComment.test.tsx

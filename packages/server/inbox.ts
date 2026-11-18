@@ -5977,8 +5977,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           }
         }
         if (validateOnly) return json({ serverSession, ok: true });
-        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom") throw new InboxError("validation_error", "ask: guide or custom.", { field: "ask" });
-        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | undefined) ?? null, theirs });
+        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom" && body.ask !== "thread") throw new InboxError("validation_error", "ask: guide, custom or thread.", { field: "ask" });
+        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | "thread" | undefined) ?? null, theirs });
         couplePulls(keys as string[], threadId);
         return json({ serverSession, ok: true });
       }

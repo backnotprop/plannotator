@@ -443,18 +443,11 @@ test.skipIf(!hasDom)('the diff card says the approved words with the file count:
   expect(diffWords(0)).toBe('All files with your comments, Viewed and Approve.');
 });
 
-// Start a thread (pulls/startThread.ts; the owner, 2026-11-17: "I should be able to start a thread").
+// Start a thread (the owner, 2026-11-17, mock "V1"): the door's button; the empty thread it opens is pullThreadStart.test.tsx.
 const startThreadDoor = '[data-launch-door="thread"] [data-launch-go="start-thread"]';
-const threadAsked: { body?: string; pulls?: { keys: string[]; projects: string[]; ask_line: string } | null; pickTo?: boolean; threadName?: string; opener: string | null }[] = [];
-const withStartThread: Partial<PullsPageProps> = {
-  onStartThread: (request, opener) => {
-    threadAsked.push({ body: request.body, pulls: request.pulls, pickTo: request.pickTo, threadName: request.threadName, opener: opener.getAttribute('data-launch-go') });
-  },
-};
 
-test.skipIf(!hasDom)('no thread yet: the Review thread door offers Start a thread, a quiet button beside the one primary, and opens New message about this PR with To\'s list open and no guided review asked', async () => {
-  threadAsked.length = 0;
-  mount(single.key, answer(), withStartThread);
+test.skipIf(!hasDom)('no thread yet: the Review thread door offers Start a thread, a quiet button beside the one primary, and it turns the page into an empty thread for the PR', async () => {
+  mount(single.key, answer());
   await settle();
   const button = $<HTMLButtonElement>(startThreadDoor)!;
   expect(!!button).toBe(true);
@@ -464,19 +457,14 @@ test.skipIf(!hasDom)('no thread yet: the Review thread door offers Start a threa
   expect(document.querySelectorAll('.ib-lp .ib-btn.ib-pri')).toHaveLength(1);
   expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('None yet. Start one, or start a guided review.');
   await click(startThreadDoor);
+  expect(!!$('[data-launchpad]')).toBe(false);
+  expect(!!$('[data-pull-thread-start]')).toBe(true);
   expect(went).toEqual([]);
-  expect(threadAsked).toHaveLength(1);
-  const asked = threadAsked[0]!;
-  expect(asked.opener).toBe('start-thread');
-  expect(asked.pickTo).toBe(true);
-  expect(asked.pulls).toEqual({ keys: [single.key], projects: ['prj_web'], ask_line: '' });
-  expect(asked.threadName).toBe('Review #880: PR 880');
-  expect(asked.body!.includes(single.url) && !asked.body!.includes('/review-curate')).toBe(true);
 });
 
 test.skipIf(!hasDom)('Start a thread only while no thread is about the PR: a review thread, an ended one, or one that only named it keep their own Open', async () => {
   for (const link of [live, { ...live, guide: null }, { ...live, guide: null, agent: { ...live.agent!, ended: true } }, { ...live, via: 'url' as const, ask: undefined, guide: null }]) {
-    mount(single.key, answer({ [single.key]: link }), withStartThread);
+    mount(single.key, answer({ [single.key]: link }));
     await settle();
     expect(!!$(startThreadDoor)).toBe(false);
     expect(!!$('[data-launch-door="thread"] [data-launch-go="thread"]')).toBe(true);
@@ -485,11 +473,11 @@ test.skipIf(!hasDom)('Start a thread only while no thread is about the PR: a rev
   }
 });
 
-test.skipIf(!hasDom)('Start a thread on a phone, on a draft and on your own PR; never for a PR in no project, nor where the window does not offer it', async () => {
+test.skipIf(!hasDom)('Start a thread on a phone, on a draft and on your own PR; never for a PR in no project', async () => {
   const draftMine: InboxPullsAnswer = { ...answer(), pulls: [{ ...single, state: 'draft', mine: true }, low, high] };
   const cases: [InboxPullsAnswer, Partial<PullsPageProps>][] = [
-    [answer(), { ...withStartThread, phone: true }],
-    [draftMine, withStartThread],
+    [answer(), { phone: true }],
+    [draftMine, {}],
   ];
   for (const [model, extra] of cases) {
     mount(single.key, model, extra);
@@ -498,52 +486,8 @@ test.skipIf(!hasDom)('Start a thread on a phone, on a draft and on your own PR; 
     act(() => root!.unmount());
     host!.remove();
   }
-  const none: [InboxPullsAnswer, Partial<PullsPageProps>][] = [
-    [{ ...answer(), projects: {} }, withStartThread],
-    [answer(), {}],
-  ];
-  for (const [model, extra] of none) {
-    mount(single.key, model, extra);
-    await settle();
-    expect(!!$(startThreadDoor)).toBe(false);
-    expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('None yet. Starting a guided review starts one.');
-    act(() => root!.unmount());
-    host!.remove();
-  }
-});
-
-test.skipIf(!hasDom)('once Start a thread has sent, before the list reads its link: that thread opens, and nothing offers a second start', async () => {
-  let onSent: ((sent: { threadId: string } | { held: unknown }) => void) | undefined;
-  mount(single.key, answer(), {
-    onStartThread: (request) => {
-      onSent = request.onSent as typeof onSent;
-    },
-  });
-  await settle();
-  await click(startThreadDoor);
-  expect(typeof onSent).toBe('function');
-  // Closed without sending: still offered.
-  expect(!!$(startThreadDoor)).toBe(true);
-  await act(async () => onSent!({ threadId: 'thr_started' }));
+  mount(single.key, { ...answer(), projects: {} });
   await settle();
   expect(!!$(startThreadDoor)).toBe(false);
-  expect(!!$('[data-launch-go="start"]')).toBe(false);
-  await click('[data-launch-door="thread"] [data-launch-go="thread"]');
-  expect(went).toEqual(['thread thr_started']);
-});
-
-test.skipIf(!hasDom)('held for another machine: no second start, and no thread to open yet', async () => {
-  let onSent: ((sent: { threadId: string } | { held: unknown }) => void) | undefined;
-  mount(single.key, answer(), {
-    onStartThread: (request) => {
-      onSent = request.onSent as typeof onSent;
-    },
-  });
-  await settle();
-  await click(startThreadDoor);
-  await act(async () => onSent!({ held: { key: 'k' } }));
-  await settle();
-  expect(!!$(startThreadDoor)).toBe(false);
-  expect(!!$('[data-launch-go="start"]')).toBe(false);
-  expect(!!$('[data-launch-door="thread"] [data-launch-go="thread"]')).toBe(false);
+  expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('None yet. Starting a guided review starts one.');
 });

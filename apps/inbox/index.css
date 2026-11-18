@@ -59,6 +59,8 @@
 @import "../../packages/inbox/floaters/floaters.css";
 /* The Pull requests page and a stack's page (packages/inbox/prs/). */
 @import "../../packages/inbox/prs/prs.css";
+/* A PR's thread: its line, the empty thread before its first message, "Sent with" (packages/inbox/pulls/). */
+@import "../../packages/inbox/pulls/pullThread.css";
 /* Plans (packages/inbox/plans/). */
 @import "../../packages/inbox/plans/plans.css";
 /* A launched session's permission prompt (components/PermissionCard.tsx). */

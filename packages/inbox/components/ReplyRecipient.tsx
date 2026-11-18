@@ -152,8 +152,10 @@ export function ReplyRecipient({
   open: boolean;
   onOpen: (open: boolean) => void;
   onOnly: (row: RecipientRow) => void;
-  onToggle: (row: RecipientRow) => void;
-  onTagAnother: () => void;
+  /** Add a second recipient. Absent (a PR's new thread, `PullThreadStart`): one recipient only, a circle only shows the choice. */
+  onToggle?: (row: RecipientRow) => void;
+  /** The last row, "Tag another agent". Absent: no such row. */
+  onTagAnother?: () => void;
   /** Each session's title, where it has one: the pill and the list show it over the fallback name. */
   labels?: SessionLabels;
   /** The folder a session works in, as the thread knows it. */
@@ -230,20 +232,37 @@ export function ReplyRecipient({
         const on = chosenIds.includes(row.session);
         const { title, agent } = named.get(row.session)!;
         const quiet = QUIET[row.state];
-        if (row.start) {
+        if (row.start || !onToggle) {
           // Picked like a name; its circle only shows the choice (a new session is never a second recipient).
           return (
             <div key={row.session} className="ib-rpick-row" data-recipient-row={row.session} data-recipient-start={row.host ?? ''} data-on={on ? '' : undefined}>
-              <button type="button" className="ib-rpick-name" aria-label={`${row.label} in ${row.start.project}`} onClick={() => onOnly(row)}>
-                <StartTile host={row.host} />
-                <span className="ib-rpick-l" dir="auto">
-                  {row.label}
-                </span>
-                <span className="ib-cp-stin" dir="auto">
-                  in {row.start.project}
-                </span>
-                {row.start.asleep && <span className="ib-rpick-q">starts when it's back</span>}
-              </button>
+              {row.start ? (
+                <button type="button" className="ib-rpick-name" aria-label={`${row.label} in ${row.start.project}`} onClick={() => onOnly(row)}>
+                  <StartTile host={row.host} />
+                  <span className="ib-rpick-l" dir="auto">
+                    {row.label}
+                  </span>
+                  <span className="ib-cp-stin" dir="auto">
+                    in {row.start.project}
+                  </span>
+                  {row.start.asleep && <span className="ib-rpick-q">starts when it's back</span>}
+                </button>
+              ) : (
+                <button type="button" className="ib-rpick-name" disabled={row.alone === false} onClick={() => onOnly(row)}>
+                  <span className="ib-atile">
+                    <HostMark host={row.host} agent={row.session} />
+                  </span>
+                  <span className="ib-rpick-ol">
+                    <span className="ib-rpick-l" dir="auto" title={title ? nameOf(row) : undefined}>
+                      {nameOf(row)}
+                    </span>
+                    <span className="ib-rpick-d" dir="auto">
+                      {agent && `${agent} · `}
+                      {quiet ? <span className="ib-rpick-q">{quiet}</span> : folderOf(row.session)}
+                    </span>
+                  </span>
+                </button>
+              )}
               <button type="button" role="checkbox" aria-checked={on} aria-hidden="true" tabIndex={-1} className="ib-rpick-tick" onClick={() => onOnly(row)}>
                 <span>
                   <Icon name="check" size={12} />
@@ -276,7 +295,7 @@ export function ReplyRecipient({
               className="ib-rpick-tick"
               data-recipient-tick={row.session}
               disabled={!canAddRecipient(row, chosenIds, rows)}
-              onClick={() => onToggle(row)}
+              onClick={() => onToggle!(row)}
             >
               <span>
                 <Icon name="check" size={12} />
@@ -285,9 +304,11 @@ export function ReplyRecipient({
           </div>
         );
       })}
-      <button type="button" className="ib-rpick-more" data-recipient-tag="" onClick={onTagAnother}>
-        Tag another agent
-      </button>
+      {onTagAnother && (
+        <button type="button" className="ib-rpick-more" data-recipient-tag="" onClick={onTagAnother}>
+          Tag another agent
+        </button>
+      )}
     </div>
   ) : null;
 

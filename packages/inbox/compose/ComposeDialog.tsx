@@ -101,7 +101,7 @@ import {
   type MachineLaunchProject,
 } from './model';
 import { newUuid } from '../uuid';
-import { handoffKeys, pullAsksNothing, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
+import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
 import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, reviewToWithChanges, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 import { LaunchTipCard } from './LaunchTipCard';
@@ -463,12 +463,12 @@ export function ComposeDialog(props: ComposeDialogProps) {
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [trustInfoOpen]);
 
-  // New review, and a PR's Start a thread (`pullAsksNothing`), open with To filled in (a plain New message never does); never sent by
-  // itself. `toFilled`: To is the box's own choice, not the person's, so it may move to an agent with changes to review (below).
+  // New review opens with To filled in (a plain New message never does): the choice above it already says what it is for.
+  // `toFilled`: To is the box's own choice, not the person's, so it may move to an agent with changes to review (below).
   const [toFilled, setToFilled] = useState(false);
   useEffect(() => {
-    if (!(box || pullAsksNothing(pulls)) || !model || chosen || startPick) return;
-    const to = reviewDefaultTo(composeTargets(projects), launch, box?.branch?.projectId ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
+    if (!box || !model || chosen || startPick) return;
+    const to = reviewDefaultTo(composeTargets(projects), launch, box.branch?.projectId ?? current?.id ?? null, lastSent, linkScratch && launch?.scratch ? SCRATCH_PICK : undefined);
     if (!to) return;
     setToFilled(true);
     if ('session' in to) setChosen(to.session);
@@ -674,9 +674,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const imeEscape = useRef(-Infinity);
 
   // Nothing written: no words, no files, no typed thread name. An empty compose is never kept as a draft.
-  // A Board card's Create thread starts with the card's title, a PR's Start a thread with its hand-off: left as it was, nothing written either.
-  const cardStart = request.draft ? null : request.card ? `${request.card.title}\n\n` : pullAsksNothing(request.pulls) ? (request.body ?? null) : null;
-  const untouched = cardStart !== null && body === cardStart && files.files.length === 0 && threadName.trim() === (request.card ? '' : (request.threadName ?? '').trim());
+  // A Board card's Create thread starts with the card's title: left as it was, that is nothing written either.
+  const cardStart = request.card && !request.draft ? `${request.card.title}\n\n` : null;
+  const untouched = cardStart !== null && body === cardStart && files.files.length === 0 && threadName.trim() === '';
   const empty = untouched || (body.trim() === '' && files.files.length === 0 && threadName.trim() === '');
   const saved = draftSnapshot(draft);
   const dirty = !untouched && (isDirty({ body, session: chosen, files: uploadIds, threadName, board: boardRequest }, saved, draft !== null) || files.uploading);
@@ -809,8 +809,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
           : boxPull || linkOnly
           ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
           : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body });
-      // Checked first: a PR the Inbox can't keep for that agent is never sent to it (New review, a PR's Start a thread).
-      if ((boxPull || pullAsksNothing(pulls)) && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
+      // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
+      if (boxPull && sendProject) await inboxApi.pullOwnerCheck(pulls!.keys, sendProject);
       const skills = transport ? null : await inboxSkillsBlock([words], INBOX_MESSAGE_SKILL_AUDIENCE);
       const machine = start ? start.machine : targetOn;
       const input: StartThreadInput = {

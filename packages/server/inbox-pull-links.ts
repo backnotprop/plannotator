@@ -5,7 +5,8 @@
  *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding }, posted?: { [pull key]: { at, head } } }
  *
  * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
- * (`custom`); the stack view says it until the review arrives. `theirs`: every PR of that hand-off was a teammate's
+ * (`custom`), or nothing first (`thread`: a PR page's Start a thread, the person's own question); the stack view says
+ * a review's ask until the review arrives. `theirs`: every PR of that hand-off was a teammate's
  * (from the Inbox's own pull list, never the window's word); a thread whose PRs are all theirs takes no verdict.
  *
  * Written whole to a temp file, then renamed over the old one. A file that
@@ -28,7 +29,7 @@ export const INBOX_PULL_LINKS_FILE = "pull-links.json";
 /** At most this many PRs keep an owner: the oldest choices go first. */
 export const INBOX_PULL_LINKS_MAX = 2_000;
 
-export type InboxPullAsk = "guide" | "custom";
+export type InboxPullAsk = "guide" | "custom" | "thread";
 
 export interface InboxPullOwner {
   thread_id: string;
@@ -83,7 +84,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
           links.set(key, {
             thread_id: owner.thread_id,
             at: owner.at,
-            ...(owner.ask === "guide" || owner.ask === "custom" ? { ask: owner.ask } : {}),
+            ...(owner.ask === "guide" || owner.ask === "custom" || owner.ask === "thread" ? { ask: owner.ask } : {}),
             ...(owner.theirs === true ? { theirs: true as const } : {}),
           });
         }

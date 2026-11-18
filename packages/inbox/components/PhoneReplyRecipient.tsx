@@ -49,8 +49,10 @@ export function PhoneReplyRecipient({
   open: boolean;
   onOpen: (open: boolean) => void;
   onOnly: (row: RecipientRow) => void;
-  onToggle: (row: RecipientRow) => void;
-  onTagAnother: () => void;
+  /** Add a second recipient. Absent (a PR's new thread): one recipient only, a row's circle only shows the choice. */
+  onToggle?: (row: RecipientRow) => void;
+  /** The last row, "Tag another agent". Absent: no such row. */
+  onTagAnother?: () => void;
   /** The thread's pane: the sheet is drawn in it. */
   section: HTMLElement | null;
   /** Each session's title, where it has one. */
@@ -127,6 +129,11 @@ export function PhoneReplyRecipient({
                 attrs={{ 'data-recipient-row': row.session }}
                 onClick={() => onOnly(row)}
                 end={
+                  !onToggle ? (
+                    <span role="checkbox" aria-checked={on} aria-hidden="true" className="ib-sheet-tick">
+                      <Icon name="check" size={13} />
+                    </span>
+                  ) : (
                   <button
                     type="button"
                     role="checkbox"
@@ -142,12 +149,17 @@ export function PhoneReplyRecipient({
                   >
                     <Icon name="check" size={13} />
                   </button>
+                  )
                 }
               />
             );
           })}
-          <SheetLine />
-          <SheetRow quiet lead={<AtSign />} title="Tag another agent" attrs={{ 'data-recipient-tag': '' }} onClick={onTagAnother} />
+          {onTagAnother && (
+            <>
+              <SheetLine />
+              <SheetRow quiet lead={<AtSign />} title="Tag another agent" attrs={{ 'data-recipient-tag': '' }} onClick={onTagAnother} />
+            </>
+          )}
         </div>
       </BottomSheet>
     </>

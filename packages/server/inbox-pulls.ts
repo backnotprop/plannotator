@@ -2151,7 +2151,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" | "thread" }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;

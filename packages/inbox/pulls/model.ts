@@ -205,6 +205,9 @@ export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string
 /** A launchpad's Start a thread (pulls/startThread.ts): the PR handed over with nothing asked for first, no guided review. */
 export type PullHandoffThread = { kind: 'thread' };
 
+/** A thread started from a PR's page (Start a thread): its link keeps the `thread` ask, and its row and page open the thread. */
+export const isPullThread = (link: Pick<InboxPullLink, 'via' | 'ask'> | null | undefined): boolean => link?.via === 'owner' && link.ask === 'thread';
+
 /** A stack's guided review, after step 1's `/review-curate` (approval "stack-show-me", q-55141171). */
 const STACK_WALK = 'Walk it layer by layer, in landing order, with what to watch in each.';
 
@@ -544,19 +547,10 @@ function pullSubject(target: PullReviewTarget): string {
  * step 1 (`ask_line`, `pullHandoffAskLine`) as a line of its own, else a custom curation. A line, not a substring: a
  * guided step 1 edited in compose, or one with the person's words after `/review-curate`, is a custom curation.
  */
-export function pullLaunchAsk(body: string, askLine: string): 'guide' | 'custom' | null {
-  if (pullAsksNothing({ ask_line: askLine })) return null;
+export function pullLaunchAsk(body: string, askLine: string): 'guide' | 'custom' {
   const wanted = askLine.trim();
-  return body.split('\n').some((line) => line.trim() === wanted) ? 'guide' : 'custom';
+  return wanted !== '' && body.split('\n').some((line) => line.trim() === wanted) ? 'guide' : 'custom';
 }
-
-/**
- * A PR's thread that asks for nothing first (the launchpad's Start a thread, `pulls/startThread.ts`): its compose
- * `pulls` carry no ask line. To is filled as New review fills it (`reviewDefaultTo`), the PR is checked with To's project
- * (`pulls/owner`, `validate_only`) before the Send, and the thread is kept as the PR's with no ask, so no guided review
- * is said to be on its way.
- */
-export const pullAsksNothing = (pulls: { ask_line: string } | null | undefined): boolean => !!pulls && pulls.ask_line.trim() === '';
 
 /**
  * The person's verdict on a PR layer (or a stack), as the reply into the

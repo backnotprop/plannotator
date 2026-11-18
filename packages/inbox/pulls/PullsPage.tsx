@@ -64,8 +64,8 @@ import { reviewRowLaunchpad, reviewRowProjects, reviewRowsIn } from './reviewsMo
 import { forgeName } from './labels';
 import { answeredClis } from './notices';
 import { PullLaunchpad, PullPaneBack } from './PullLaunchpad';
-import { canStartPullThread, pullThreadRequest } from './startThread';
-import type { ComposeRequest } from '../compose/ComposeDialog';
+import { canStartPullThread, isPullThread } from './startThread';
+import { PullThreadStart } from './PullThreadStart';
 import { usePhoneHeadFit } from '../headFit';
 import { useInboxTextSize } from '../textSize';
 import { filterReviewRows, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
@@ -123,13 +123,12 @@ export interface PullsPageProps {
   onScope: (next: { filter: PullFilter; project: string | null }) => void;
   /** Phase 1's review mode on one layer (`scope` layer), or on the stack up to it (`stack`). */
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
-  onOpenThread: (threadId: string) => void;
+  /** `replace`: in place of the PR's page in history (a PR whose page is its thread, `isPullThread`). */
+  onOpenThread: (threadId: string, replace?: boolean) => void;
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** A PR nobody is reviewing: the New review box, filled in with it. */
   onNewReview: (pick: ReviewBoxPull, opener: HTMLElement) => void;
-  /** A launchpad's Start a thread (`pulls/startThread.ts`): the New message box about the PR. Absent: not offered. */
-  onStartThread?: (request: ComposeRequest, opener: HTMLElement) => void;
   /** Branch reviews' "Branches nobody reported": New review with that branch, in its project. */
   onReviewBranch?: (branch: ReviewBoxBranch, opener: HTMLElement) => void;
   /** The launchpad's Guided review: that message's guide in its thread. Absent: the thread. */
@@ -420,9 +419,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
   const agent = linkAgentName(link);
-  // Start a thread sent (or held for another machine): until the list reads the PR's new link, the door offers that
-  // thread, never a second start (Start a thread, or a guided review's) whose link would replace the first.
-  const [threadStarted, setThreadStarted] = useState<{ threadId: string | null } | null>(null);
+  // Start a thread pressed: the page is an empty thread for the PR (`PullThreadStart`) until it is sent or left.
+  const [drafting, setDrafting] = useState(false);
+  // A PR whose thread was started from its page: that thread is its page from then on (mock "V1"), in place of this one.
+  const threadPage = stack.layers.length === 1 && !!startLayer(stack) && isPullThread(link) ? link!.thread_id : null;
+  useEffect(() => {
+    if (threadPage) props.onOpenThread(threadPage, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadPage]);
   // The Board is optional: a card shows only while the Board is on and one links a layer (the answer has none otherwise).
   const card = stack.layers.map((l) => model.cards?.[l.key]).find((c) => !!c) ?? null;
   const now = useRelativeClock(true);
@@ -521,6 +525,26 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     ) : null;
   // One open PR opens its launchpad; a stack of several keeps this page.
   if (stack.layers.length === 1 && start) {
+    const newReview = (opener: HTMLElement) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener);
+    if (drafting && canStartPullThread(start, link, projects)) {
+      return (
+        <PullThreadStart
+          stack={stack}
+          pr={start}
+          projects={projects}
+          phone={phone}
+          stacked={!phone && !!props.stacked}
+          onClose={props.onClose}
+          onLeave={() => setDrafting(false)}
+          onGuide={canStart ? newReview : null}
+          onDiff={() => props.onReview(stack.id, start.key, 'layer')}
+          onStarted={(threadId) => {
+            props.state.reload();
+            props.onOpenThread(threadId, true);
+          }}
+        />
+      );
+    }
     return (
       <PullLaunchpad
         stack={stack}
@@ -531,20 +555,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         stacked={!phone && !!props.stacked}
         now={now}
         heading={heading}
-        start={canStart && !threadStarted ? { kind: link && !mentioned ? 'again' : 'review', onStart: (opener) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener) } : null}
-        startThread={
-          props.onStartThread && canStartPullThread(start, link, projects)
-            ? threadStarted
-              ? { started: threadStarted.threadId }
-              : {
-                  onStart: (opener) =>
-                    props.onStartThread!(
-                      { ...pullThreadRequest(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects)), onSent: (sent) => setThreadStarted({ threadId: 'held' in sent ? null : sent.threadId }) },
-                      opener,
-                    ),
-                }
-            : null
-        }
+        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: newReview } : null}
+        startThread={canStartPullThread(start, link, projects) ? () => setDrafting(true) : null}
         shapes={props.shapes ?? null}
         system={!!props.system}
         risk={riskLines}

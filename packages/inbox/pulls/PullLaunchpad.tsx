@@ -6,7 +6,7 @@
  * from Workspaces, no button; only while System shows). Shape and System are both off in 0.29, so the page has three
  * doors there. Then the PR's Details (`PullDetails`, laid in the page), and Reply to the agent at the foot. A stack of several PRs keeps the stack page (`PullsPage` `StackView`), which owns
  * the hand-off (the New review box filled in with the PR, one review thread at a time) and passes it in, and the Review
- * thread door's Start a thread (New message about the PR, no guided review asked; `startThread.ts`). No keyboard
+ * thread door's Start a thread (the page becomes an empty thread for the PR, `PullThreadStart.tsx`). No keyboard
  * shortcuts of its own.
  */
 import { useId, useRef, type ReactNode, type RefObject } from 'react';
@@ -95,6 +95,46 @@ export function PullPaneBack({ phone, stacked, onClose }: { phone: boolean; stac
   );
 }
 
+/**
+ * The PR's bar: the way back (a phone, a covering pane), the PR's mark, number and repository, Open on GitHub, Close.
+ * The launchpad's, and an empty thread's for the PR (Start a thread, `PullThreadStart`). A phone's bar gives way as a
+ * thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the PR's number and repository (its
+ * subject) lose their room.
+ */
+export function PullBar({ stack, pr, phone, stacked, onClose }: { stack: InboxPullStack; pr: InboxPull; phone: boolean; stacked: boolean; onClose: () => void }) {
+  const forge = forgeName(stack);
+  const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
+  const bar = useRef<HTMLDivElement>(null);
+  usePhoneHeadFit(bar, phone, [stacked, inboxPullLabel(pr), repo, useInboxTextSize()].join('|'));
+  return (
+    <div ref={bar} className="ib-pr-bar ib-lp-bar">
+      <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
+      <span className="ib-lp-id" data-fit-subject={SUBJECT_FLOOR_PX}>
+        <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
+          <RefMarkIcon kind="pr" state={pr.state} size={15} />
+        </span>
+        <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
+        <Tip cut content={repo}>
+          <span className="ib-lp-repo" dir="auto">
+            {repo}
+          </span>
+        </Tip>
+      </span>
+      <a className="ib-pr-ext" href={pr.url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
+        <Icon name="external" size={15} />
+        {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
+      </a>
+      {!phone && !stacked && (
+        <Tip content="Close">
+          <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
+            <Icon name="x" />
+          </button>
+        </Tip>
+      )}
+    </div>
+  );
+}
+
 export function PullLaunchpad({
   stack,
   pr,
@@ -129,12 +169,10 @@ export function PullLaunchpad({
   heading: RefObject<HTMLHeadingElement | null>;
   start: LaunchpadStart | null;
   /**
-   * Start a thread (`canStartPullThread`): the New message box about this PR, To's list open, no guided review asked
-   * for. Null: none (a thread about the PR already, a closed or merged PR, or no project an agent can take it in).
-   * `started`: one was sent and the list has not read its link yet: Open review thread (that thread; null, held for
-   * another machine: no button), never a second start.
+   * Start a thread (`canStartPullThread`): the page becomes an empty thread for this PR (`PullThreadStart`), no guided
+   * review asked for. Null: none (a thread about the PR already, a closed or merged PR, or no project an agent can take it in).
    */
-  startThread?: { onStart: (opener: HTMLElement) => void } | { started: string | null } | null;
+  startThread?: (() => void) | null;
   /** Shape boards by thread; null while Shape is off (no Shape board door then). */
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
   /** System shows (`systemShown`, the Reviews page's `system`): only then the System door. */
@@ -159,46 +197,17 @@ export function PullLaunchpad({
   // A guided review is there once the agent's arrives (the stack page's rule, `ThreadLine`).
   const guide = link?.guide?.review ? link.guide : null;
   // The person asked for it (the hand-off) and it has not arrived yet.
-  const onItsWay = !!link && !ended && !guide && link.via === 'owner' && !!link.ask;
+  const onItsWay = !!link && !ended && !guide && link.via === 'owner' && (link.ask === 'guide' || link.ask === 'custom');
   const shape = shapes && link ? (shapes.get(link.thread_id) ?? null) : null;
-  const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
   const checks = checksWords(pr);
   // The grid lays itself out by how many doors there are (inbox.css `data-doors`), so no slot is left empty.
   const doors = 3 + (shapes ? 1 : 0) + (system ? 1 : 0);
   const agentMark = <HostMark host={given?.agent?.host ?? null} />;
   // The thread door's thread: the review thread, or the one that only named the PR.
   const named = mentioned ? given : null;
-  // A phone's bar gives way as a thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the
-  // PR's number and repository (its subject) lose their room.
-  const bar = useRef<HTMLDivElement>(null);
-  usePhoneHeadFit(bar, phone, [stacked, inboxPullLabel(pr), repo, useInboxTextSize()].join('|'));
   return (
     <section className="ib-pane ib-prpane ib-lp" aria-labelledby={titleId} data-pulls-stack={stack.id} data-launchpad="">
-      <div ref={bar} className="ib-pr-bar ib-lp-bar">
-        <PullPaneBack phone={phone} stacked={stacked} onClose={onClose} />
-        <span className="ib-lp-id" data-fit-subject={SUBJECT_FLOOR_PX}>
-          <span className="ib-lp-mark ib-bc-mark" data-card-mark={pr.state} data-card-mark-kind="pr" aria-hidden="true">
-            <RefMarkIcon kind="pr" state={pr.state} size={15} />
-          </span>
-          <span className="ib-lp-num">{inboxPullLabel(pr)}</span>
-          <Tip cut content={repo}>
-            <span className="ib-lp-repo" dir="auto">
-              {repo}
-            </span>
-          </Tip>
-        </span>
-        <a className="ib-pr-ext" href={pr.url} target="_blank" rel="noreferrer noopener" data-pulls-open-forge="">
-          <Icon name="external" size={15} />
-          {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
-        </a>
-        {!phone && !stacked && (
-          <Tip content="Close">
-            <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
-              <Icon name="x" />
-            </button>
-          </Tip>
-        )}
-      </div>
+      <PullBar stack={stack} pr={pr} phone={phone} stacked={stacked} onClose={onClose} />
       <div className="ib-pr-body ib-lp-body">
         <div className="ib-lp-wrap">
           <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">
@@ -328,8 +337,6 @@ export function PullLaunchpad({
                       !ended && <>{'\u00a0· '}No answer yet</>
                     )}
                   </>
-                ) : startThread && 'started' in startThread ? (
-                  <>No answer yet</>
                 ) : startThread ? (
                   <>{THREAD_NONE_YET}</>
                 ) : (
@@ -337,17 +344,10 @@ export function PullLaunchpad({
                 )
               }
             >
-              {startThread && !link && !named && 'onStart' in startThread && (
+              {startThread && !link && !named && (
                 <div className="ib-lp-go">
-                  <button type="button" className="ib-btn" onClick={(event) => startThread.onStart(event.currentTarget)} data-launch-go="start-thread">
+                  <button type="button" className="ib-btn" onClick={startThread} data-launch-go="start-thread">
                     {START_THREAD}
-                  </button>
-                </div>
-              )}
-              {startThread && !link && !named && 'started' in startThread && startThread.started && (
-                <div className="ib-lp-go">
-                  <button type="button" className="ib-btn" onClick={() => onThread(startThread.started!)} data-launch-go="thread" data-launch-started="">
-                    Open review thread
                   </button>
                 </div>
               )}

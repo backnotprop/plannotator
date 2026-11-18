@@ -5109,7 +5109,7 @@ function Inbox() {
       ? reviewViewOf(reviewRow, thread, {
           projectName: projectNames.get(reviewRowProject(reviewRow) ?? '') ?? null,
           onWholeThread: () => go({ page: 'inbox', project: null, thread: reviewRow.thread_id }),
-          onOpenStack: (stackId) => go({ page: 'reviews', project: route.reviews?.project ?? null, view: route.reviews?.view, thread: null, stack: stackId }),
+          onOpenStack: (stackId) => go({ page: 'reviews', project: route.reviews?.project ?? null, view: route.reviews?.view, thread: null, stack: stackId }), onOpenDiff: (stackId, layer) => go({ page: 'reviews', project: route.reviews?.project ?? null, view: route.reviews?.view, thread: null, stack: stackId, layer, scope: 'layer' }),
         })
       : null;
   // The Reviews list: on its own page, or beside a thread opened from it (the thread pane is the Inbox's own).
@@ -5148,9 +5148,9 @@ function Inbox() {
             }
           : null
       }
-      onOpenThread={(id) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id })}
+      onOpenThread={(id, replace) => writeRoute({ page: 'inbox', reviews: { project, view }, project: null, thread: id }, { replace: !!replace })}
       onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
-      onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)} onStartThread={openCompose} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
+      onNewReview={(pick, opener) => openCompose({ review: { pick } }, opener)} onReviewBranch={(branch, opener) => openCompose({ review: { branch } }, opener)}
       onOpenGuide={(id, messageId) => go({ page: 'inbox', reviews: { project, view }, project: null, thread: id, guide: messageId })}
       shapes={shapeOn ? shapes.byThread : null}
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
