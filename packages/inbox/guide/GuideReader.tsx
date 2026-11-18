@@ -552,7 +552,7 @@ function Reader({
       // The PR page's flush files draw no row after the last hunk until a file's text is read (flushFiles).
       opensWholeFiles: !!fetchFileContent && !bare,
       // The PR page: files edge to edge, each box exactly its header and code.
-      ...(bare ? { flushFiles: true } : {}),
+      ...(bare ? { flushFiles: true, keepsFileOrder: true } : {}),
       ...(collapseAll ? { collapseAll } : {}),
     }),
     [files, asItIs, getDiffRendererProps, revealFile, phone, hostDiffControls, renderSectionTab, drawOverviewDiagram, drawChapterDiagram, chapterDiagramsFolded, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent, collapseAll, bare],

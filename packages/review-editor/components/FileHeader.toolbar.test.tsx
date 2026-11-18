@@ -46,7 +46,7 @@ describe.if(hasDom)('FileHeader as one toolbar', () => {
     expect(letter.className).not.toContain('#007aff');
   });
 
-  test('one Tab stop per header; arrows, Home and End move between its buttons', async () => {
+  test('one Tab stop per header; arrows move between its buttons and Home and End are left to the page', async () => {
     const el = await mount(
       <FileHeader filePath="src/a.ts" patch={patch} onToggleViewed={() => {}} onFileComment={() => {}} onStage={() => {}} canStage />,
     );
@@ -62,8 +62,11 @@ describe.if(hasDom)('FileHeader as one toolbar', () => {
     expect(document.activeElement).toBe(buttons[1]);
     expect(buttons[1].getAttribute('tabindex')).toBe('0');
     expect(buttons[0].getAttribute('tabindex')).toBe('-1');
-    buttons[1].dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }));
-    expect(document.activeElement).toBe(buttons[buttons.length - 1]);
+    const end = new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true });
+    buttons[1].dispatchEvent(end);
+    expect(end.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(buttons[1]);
+    buttons[buttons.length - 1].focus();
     buttons[buttons.length - 1].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
     expect(document.activeElement).toBe(buttons[0]);
     buttons[0].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }));

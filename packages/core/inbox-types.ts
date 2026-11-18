@@ -1884,6 +1884,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * from an older Inbox.
    */
   pulls?: InboxThreadPullsSummary;
+  /**
+   * The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks'
+   * "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none.
+   * A thread whose open PRs are all hidden is left out of that list (it stays in search and in Reviews' Hidden).
+   */
+  hide_pulls?: string[];
 
   /**
    * Agent messages after the person's last look (a reply of theirs counts as
@@ -3258,7 +3264,7 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
-  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  /** The film or recording's length, when its metadata can be read. */
   duration_ms?: number;
   /** The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload. */
   shown_sha256?: string;

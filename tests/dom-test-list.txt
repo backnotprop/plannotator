@@ -215,6 +215,9 @@ packages/inbox/reactionTray.test.tsx
 packages/inbox/replyHoldTray.test.tsx
 packages/inbox/actionChecklist.test.tsx
 packages/inbox/keyboardKeys.test.tsx
+packages/inbox/keyGuardsPageQueries.test.tsx
+packages/ui/shortcuts/runtime.guardCalls.test.tsx
+packages/inbox/rowSlotRenders.test.tsx
 packages/inbox/actionDraftSend.test.tsx
 packages/inbox/actionNoteRefusal.test.tsx
 packages/inbox/newMessagePicker.test.tsx
@@ -306,6 +309,8 @@ packages/inbox/markupAddsToReply.test.tsx
 packages/inbox/commentSubmitKey.test.tsx
 packages/inbox/skillReferences.test.tsx
 packages/inbox/skillListRoom.test.tsx
+packages/inbox/pickerOpensOnTyping.test.tsx
+packages/inbox/fullScreenComposerRenders.test.tsx
 packages/inbox/messageComments.test.tsx
 packages/inbox/messageDelete.test.tsx
 packages/inbox/messageRedraws.test.tsx
@@ -542,6 +547,7 @@ packages/ui/components/TableOfContents.linkedDoc.test.tsx
 packages/ui/components/MarkdownContentsRail.test.tsx
 packages/ui/components/DeferredMarkdownContentsRail.test.ts
 packages/ui/components/CommentPopover.overlayGutter.test.tsx
+packages/ui/components/ComposerTokenTextarea.perKey.test.tsx
 packages/ui/components/CommentPopover.multiTarget.test.tsx
 packages/ui/aiProviderConfigPersistence.test.tsx
 packages/ui/components/sidebar/SidebarContainer.mobile.test.tsx
@@ -638,6 +644,7 @@ packages/inbox/broRevealApp.test.tsx
 packages/inbox/grillMeTip.test.tsx
 packages/inbox/personalAgentsIntro.test.tsx
 packages/inbox/codeReviewOffer.test.tsx
+packages/inbox/routinesIntro.test.tsx
 packages/inbox/tabIconChoice.test.tsx
 packages/inbox/themeChooser.test.tsx
 packages/review-editor/App.guideGlobalComment.test.tsx
@@ -663,6 +670,8 @@ packages/inbox/pulls/railTree.test.tsx
 packages/inbox/pulls/face.test.tsx
 packages/inbox/pulls/lineThreads.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
+packages/inbox/pulls/hidePulls.test.tsx
+packages/inbox/hidePullsList.test.tsx
 packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullRisk.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
@@ -834,3 +843,4 @@ packages/ui/components/frame/frame.dom.test.tsx
 packages/ui/components/frame/card/card.dom.test.tsx
 packages/ui/hooks/useResizablePanel.resizeTo.dom.test.tsx
 packages/inbox/pulls/branchReviews.test.tsx
+packages/review-editor/App.treePanes.test.tsx

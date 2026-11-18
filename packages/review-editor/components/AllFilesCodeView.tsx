@@ -406,6 +406,9 @@ export interface AllFilesCodeViewProps {
   // mirror the collapsed flag so the header button can drive/reflect it.
   registerCollapseAllToggle?: (toggle: (() => void) | null) => void;
   onAllCollapsedChange?: (collapsed: boolean) => void;
+  /** The person pressed Collapse all / Expand all: `collapsed` is what the
+   *  press did (never called for a reseed or a single file's toggle). */
+  onCollapseAllPressed?: (collapsed: boolean) => void;
   /** Seed every file collapsed (commit diffs open as a folded overview under
    * the commit-description header). The collapse-all toggle still works. */
   defaultCollapsed?: boolean;
@@ -787,7 +790,7 @@ const STUCK_HEADER_LINE_CSS = `
 // Flush files (`flushFiles`): the header's own hairline is the seam, and an unread file's trailing row is not drawn
 // (the viewer gives its room back, the separator's height).
 const FLUSH_FILES_CSS = `
-  :host([data-trailing-unread]) [data-separator][data-separator-last] { display: none; }
+  :host([data-trailing-unread]) [data-separator][data-separator-last] { visibility: hidden; }
 `;
 
 const WARM_UP_REST_MS = 150;
@@ -916,6 +919,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   fileOrder,
   registerCollapseAllToggle,
   onAllCollapsedChange,
+  onCollapseAllPressed,
   defaultCollapsed,
   mountCollapsed,
   initialScrollPosition = 0,
@@ -1732,6 +1736,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const next = !(pendingAllCollapsedRef.current ?? allCollapsed);
       pendingAllCollapsedRef.current = next;
       setAllCollapsed(next);
+      onCollapseAllPressed?.(next);
       return;
     }
     // If anything is open, collapse all; otherwise expand all. Computed from
@@ -1741,6 +1746,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     );
     setAllItemsCollapsed(anyExpanded);
     setAllCollapsed(anyExpanded);
+    onCollapseAllPressed?.(anyExpanded);
   });
 
   // The collapse-all control lives in the dock tab strip, not in this
@@ -3119,8 +3125,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (clickedPath != null) onTokenTarget('click', props, clickedPath);
       }
       if (!onCodeNavRequest || item.type !== 'diff') return;
-      // Alt is an unadvertised alias for the same References-panel path; the
-      // meta/ctrl branch itself is unchanged.
+      // Alt is an unadvertised alias for the same path as Cmd/Ctrl (the host
+      // opens one clear definition at once, else the References panel).
       if (!(event.metaKey || event.ctrlKey || event.altKey)) return;
       const filePath = itemIdToFilePath.get(item.id);
       if (filePath == null) return;

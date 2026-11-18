@@ -11,6 +11,7 @@
  */
 
 import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
+import { hiddenChangedElsewhere, useHiddenInList } from './pulls/useHiddenInList';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfUntilNextFrame } from './perfMarks';
 import { machineOf, selfMachineId } from './inboxUrl';
@@ -223,7 +224,7 @@ import { BoardPage } from './board/BoardPage';
 import { useBoardWrites } from './board/boardWrites';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
-import { usePulls } from './pulls/usePulls';
+import { usePulls, useRowsAfterStore } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
 import { sheetModel, tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
@@ -239,6 +240,8 @@ import { GrillMeTip } from './components/GrillMeTip';
 import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { RulesIntro } from './components/RulesIntro';
+import { useRoutinesReveal } from './components/useRoutinesReveal';
+import { revealFeatureSave } from './revealSaves';
 import { PersonalAgentsIntro, usePersonalAgentsBanner } from './components/PersonalAgentsIntro';
 import { usePriorityReveal } from './components/usePriorityReveal';
 import { rulesSet, wantRulesEditor } from './agentRules';
@@ -289,7 +292,7 @@ import { SIDEBAR_OPEN_COOKIE, HIDE_AWAY_MACHINES_COOKIE, COMPOSE_LAST_COOKIE, DR
 import { shapeFrameListeners, subscribeShapeFrames } from './app/shapeFrames';
 import { readRoute, routeOf, type Route } from './app/route';
 import { hashOf, writeRoute } from './app/writeRoute';
-import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
+import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, settleReviewsAlias } from './app/boot';
 import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
 export { THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS } from './app/constants';
 // The document UI's settings for the window, before the first render.
@@ -1680,6 +1683,11 @@ function Inbox() {
         onAsk: emitAskChange,
         // The sidebar's pins changed (here, in another window, or a deleted thread left them): read `pins` again.
         onPins: () => listAfterEvents(60),
+        // Hidden PRs changed (here, another window, or a read saw one merged): the list, Reviews and the board read again.
+        onPullsHidden: () => {
+          listAfterEvents(60);
+          hiddenChangedElsewhere();
+        },
         // A thread's tags changed (here, in another window): read the list's `tags` again (approval "inbox-thread-tags").
         onTags: () => listAfterEvents(60),
         // A linked machine's cards changed (its Board was read again here): the merged Board is read, as for a card record.
@@ -2540,6 +2548,7 @@ function Inbox() {
     if (fresh.length > 0) setShown((current) => (current ? addOwnThreads(fresh.reduce(replaceHeldRow, current), groups, written) : current));
   };
 
+
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
 
@@ -2649,6 +2658,7 @@ function Inbox() {
     say(toastSpeech(next, isTouchPhone()));
     armToastTimer(ms);
   };
+  const hiddenInList = useHiddenInList(afterWrite, showToast);
   /** A swipe in progress pauses the toast's timer; a spring-back resumes it (at least 1.5 s more, so it never vanishes on release). */
   const holdToast = useCallback((held: boolean) => {
     if (held) {
@@ -3238,6 +3248,7 @@ function Inbox() {
     if (action === 'unsnooze') return void unsnooze(row);
     if (action === 'archive') return archive(row.thread_id, row.thread_id, true);
     if (action === 'unarchive') return archivedHost.unarchive(row);
+    if (action === 'hide-pulls') return hiddenInList.hideRow(row.thread_id);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
     void copyTextToClipboard(text).then((ok) =>
@@ -3347,15 +3358,15 @@ function Inbox() {
   const threadKeyAction = (event: KeyboardEvent, key: 'e' | 'z' | 'archive'): (() => void) | null => {
     if (event.defaultPrevented || isRepeatKey(event) || isComposingKey(event) || !singleKeysLive()) return null;
     if (keysRef.current.soundDialog === 'open' || keysRef.current.agentNoteOpen || keysRef.current.feedbackOpen || routeRef.current.guide) return null;
-    // Under a dialog (Decide opens over the thread it came from) the letters are the dialog's.
-    if (modalOpen()) return null;
-    // Words selected in a message: its toolbar takes the letters (a comment starting with them).
-    if (selectionToolbarShowing()) return null;
     const target = event.target instanceof HTMLElement ? event.target : null;
     if (target) {
       if (isEditableTarget(target)) return null;
       if (target.closest('dialog, [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], iframe, .ib-view, [data-step-guard]')) return null;
     }
+    // Under a dialog (Decide opens over the thread it came from) the letters are the dialog's. After the key's own checks: a page-wide query.
+    if (modalOpen()) return null;
+    // Words selected in a message: its toolbar takes the letters (a comment starting with them).
+    if (selectionToolbarShowing()) return null;
     // With a file open beside the thread, only a key aimed at the thread or the list counts.
     if (routeRef.current.file && !target?.closest('section.ib-pane, .ib-listcol')) return null;
     const { markRead: toggle, toast: current, thread: open } = keysRef.current;
@@ -3702,7 +3713,7 @@ function Inbox() {
 
   const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
-  const scheduledOn = useScheduledOn(settings);
+  const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
 
   const projects = latest?.projects ?? [];
@@ -3716,7 +3727,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
+  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, combining: bulk.combines.waiting,
     tags: {
       listTags,
@@ -3986,6 +3997,9 @@ function Inbox() {
     mayClaim: (pageAge) => lineLatch !== null && !firstRun && pageAge >= REVEAL_TIMES.pageAgeMs,
     holds: () => !rulesSet(settingsRef.current?.prompts?.rules),
   });
+  const openCapabilities = () => void (window.location.hash = '#settings/capabilities');
+  // The Routines intro (components/useRoutinesReveal.tsx): three good days of sends, the line's gap from any other dialog.
+  const { reveal: routinesReveal, dialog: routinesDialog } = useRoutinesReveal({ due: lineLatch?.next === 'routines', revealAt, idle: pageIdle, listLoaded: lineLatch !== null, firstRun, phone, settings: () => settingsRef.current, setSettings, showToast, dismissToast, refreshSettings, openSettings: openCapabilities });
   // Personal agents (core/inbox-personal-agents.ts): the Inbox names it only while none is connected. Its banner is
   // loaded before the claim, so the dialog opens with it or, offline, without it, and never changes while open.
   const personalAgentsDue = lineLatch?.next === 'personal_agents';
@@ -4073,7 +4087,7 @@ function Inbox() {
   // The "Star the repo" ask (approval "star-ask"): beside the line, never in its order (settings `reveal.aside`), at the
   // same calm moment (a thread read and left, 60 s into the page) while no other reveal is showing or claiming; its
   // claim runs the already-starred check, then the corner card shows.
-  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
+  const otherRevealActive = [snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage].some((stage) => stage === 'open' || stage === 'claimed');
   const starReveal = useStarReveal({
     due: lineLatch?.aside.includes('star') === true,
     listLoaded: lineLatch !== null,
@@ -4083,28 +4097,7 @@ function Inbox() {
   });
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
-    void turnOnRevealFeature(feature, close, {
-      save:
-        feature === 'board'
-          ? () => inboxApi.saveBoard(true).then((saved) => saved.board)
-          : feature === 'steps'
-            ? () => inboxApi.saveSteps(true).then((saved) => saved.steps)
-            : feature === 'bro'
-              ? () => inboxApi.saveBro(true).then((saved) => saved.bro)
-              : () =>
-                inboxApi.saveCodeReview(true).then((saved) => {
-                  // As Settings' switch: the "/" list gains the review skills.
-                  reloadSkillCatalog();
-                  return saved.code_review;
-                }),
-      setSettings,
-      showToast,
-      dismissToast,
-      refreshSettings,
-      openSettings: () => {
-        window.location.hash = '#settings/capabilities';
-      },
-    });
+    void turnOnRevealFeature(feature, close, { save: revealFeatureSave(feature), setSettings, showToast, dismissToast, refreshSettings, openSettings: openCapabilities });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;
@@ -4152,6 +4145,7 @@ function Inbox() {
     broReveal.stage !== 'claimed' &&
     agentRulesReveal.stage !== 'open' &&
     agentRulesReveal.stage !== 'claimed' &&
+    routinesReveal.stage !== 'open' && routinesReveal.stage !== 'claimed' &&
     personalAgentsReveal.stage !== 'open' &&
     personalAgentsReveal.stage !== 'claimed' &&
     priorityReveal.stage !== 'open' &&
@@ -4210,17 +4204,7 @@ function Inbox() {
   const pullReviewOf = useMemo(() => (pullsShown ? pullReviewLinks(pulls.model, pulls.reviews) : null), [pullsShown, pulls.model, pulls.reviews]);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
-  const rowsWaitingSince = useRef<number | null>(null);
-  useEffect(() => {
-    if (!pullsShown) return;
-    // A moment after the store settles, but a steady stream of messages never holds it off for long.
-    const since = (rowsWaitingSince.current ??= Date.now());
-    const timer = setTimeout(() => {
-      rowsWaitingSince.current = null;
-      pullsReloadRows();
-    }, Math.min(REVIEWS_AFTER_STORE_MS, Math.max(0, since + REVIEWS_AFTER_STORE_MAX_MS - Date.now())));
-    return () => clearTimeout(timer);
-  }, [shown, thread?.messages.length, pullsShown, pullsReloadRows]);
+  useRowsAfterStore(pullsShown, pullsReloadRows, shown, thread?.messages.length);
   // System in Reviews and in Settings (approval "system-inbox"): only while it shows (System on, Code review on).
   const systemOnHere = systemShown(settings);
   const systemProjects = useSystemProjects(systemOnHere && (route.page === 'reviews' || (route.page === 'settings' && route.section === 'capabilities')));
@@ -4611,7 +4595,7 @@ function Inbox() {
   });
   const offerLinesFree = linesFree && codeReviewOffer.stage !== 'open' && codeReviewOffer.stage !== 'claimed';
   // One of the line's dialogs is claimed or open now: the load arms nothing else meanwhile (`lineLatch`).
-  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
+  const stagesBusy = [voiceIntro.stage, snoozeIntro.stage, boardReveal.stage, stepsReveal.stage, broReveal.stage, agentRulesReveal.stage, routinesReveal.stage, personalAgentsReveal.stage, priorityReveal.stage, grillMeTipReveal.stage, listViewReveal.stage, tabIconChoice.stage, themeChooser.stage, starReveal.stage, codeReviewOffer.stage].some(
     (stage) => stage === 'claimed' || stage === 'open',
   );
   useEffect(() => setLineStagesBusy(stagesBusy), [stagesBusy]);
@@ -5170,6 +5154,7 @@ function Inbox() {
       shapes={shapeOn ? shapes.byThread : null}
       onOpenShape={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       prsSummary={sheetHead}
+      onToast={showToast}
       onPullRequests={() => go({ page: 'prs', project: null, thread: null })}
       prBoard={
         <SheetPage
@@ -5686,7 +5671,7 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            listFilterEmpty ? (
+            listHeld ? null : listFilterEmpty ? (
               <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
               <div className="ib-empty-list" data-tag-empty="">
@@ -6095,6 +6080,7 @@ function Inbox() {
           }}
         />
       )}
+      {routinesDialog}
       {personalAgentsReveal.stage === 'open' && (
         <PersonalAgentsIntro phone={phone} banner={personalAgentsBanner === true} close={personalAgentsReveal.close} />
       )}

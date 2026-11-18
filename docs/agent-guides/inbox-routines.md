@@ -10,6 +10,8 @@ A routine is managed on the computer that made it, and its runs' thread works fr
 
 Settings → Capabilities, config.json `inboxScheduledThreads` (`true`, else off). Not offered on Windows. Off: no timer, no run, no write, no `routine` tool in tools/list, every `/api/inbox/scheduled…` route answers `404 routines_off`, and a tool call from a session that listed it before answers `routines_off` with nothing written. Records on disk are kept. Turning it on starts every routine that is on from the next due time, with no catch-up; so does turning "Start agents" back on. "Start agents from New message" (`inboxLaunch.enabled`) must be on too: a run is a launch.
 
+The one-time Routines intro offers the switch once, after three good days of sends, the queue's gap from any other dialog; its "Turn on" saves this switch and opens `#routines`. Who, when and the dialog: "The Routines intro" under "The schedule of one-time dialogs" in `inbox-window.md`.
+
 On also adds a start-at-login item, removed when it goes off and by `plannotator uninstall` (the file only, on macOS; disabled, not stopped, on Linux: removing it never ends the Inbox it started): on macOS `~/Library/LaunchAgents/ai.plannotator.inbox.plist` (launchd reads it at the next login; it runs `plannotator inbox --no-open` for this data dir, no window); on Linux a systemd user unit `~/.config/systemd/user/plannotator-inbox.service`, enabled, only when `systemctl --user` answers (else none, and the switch reads `login: "unavailable"`).
 
 ### The record and the runs
@@ -21,6 +23,8 @@ The folder is a project (`{ project_id }`), a folder by its real path (`{ path }
 One session per launched root is unchanged for every other thread: the store indexes each routine's newest later run beside the launched roots (`scheduledRunLaunches`; earlier runs have ended), and the launcher's thread reads (run line, row, respawn, attach) follow it. Starting a run lets go of the previous run's session when it is idle. One start at a time per routine: a second (Run now twice, or Run now as the clock fires) answers `409 routine_running`, and its number and thread are read after the launch is ready. A reply to an earlier run (its divider or its session's message) is refused, `409 routine_run_ended`: "Run 3 has ended, so your reply was not sent. Reply to the latest run (Run 4) instead."
 
 A run that didn't start is a divider with `failed` (the launch's reason, without New message's "Nothing was sent."), shown as "The run didn't start." and the reason; a first run that fails, on the clock as on Run now, writes it in its folder's project (a folder by its path that is there), else in the project of the thread an agent made it from, else in a project for the scratch folders' own folder (as a new scratch folder, or a project that is gone, does). A folder that isn't there never becomes a project. So it always has a thread. A run's outcome is read, never stored: `didnt_start` (no launch, or `failed`), `running`, `replied` (its session wrote after the divider), `didnt_finish`.
+
+The list's Filter has a Routine group (Routine threads, Other threads) while Routines are on: "The list's filter" in `inbox-window.md`.
 
 ### The clock
 

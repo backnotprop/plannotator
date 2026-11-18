@@ -22,7 +22,7 @@
  */
 
 import { sameCommit, type InboxBranchReportRow } from "./inbox-branch-reports";
-import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHidden, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
 /** Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them. */
@@ -386,6 +386,8 @@ export interface InboxReviewsAnswer {
   branch_reviews?: true;
   /** A linked machine's reported branches are still being read: the window asks again soon. */
   branches_pending?: true;
+  /** The PRs the person hid (as `InboxPullsAnswer.hidden`): left out of `rows`. Absent from an older Inbox. */
+  hidden?: InboxPullHidden[];
 }
 
 /**

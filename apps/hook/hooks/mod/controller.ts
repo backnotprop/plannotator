@@ -10,6 +10,7 @@
 import { AutoReload } from './auto-reload'
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
+import { isEarlyRunRefusal } from './early-run'
 import { PromptDropped, type Host, type HttpResult } from './host'
 import { inboxAgentProjectEnvValue, InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder, type InboxAgentIdentity, type InboxLaunchReminder, type InboxOwnerAnswer } from './inbox'
 import { isAbsolutePath } from './paths'
@@ -849,7 +850,11 @@ export class PlannotatorMod {
       })
       if (result.exitCode !== 0) return { error: result.stderr.trim() || `launcher exited ${result.exitCode}` }
     } catch (error) {
-      return { error: error instanceof Error ? error.message : String(error) }
+      const message = error instanceof Error ? error.message : String(error)
+      // Claude Code's guard held the start until the call is allowed (early-run.ts): nothing
+      // started, and the call opens again at tool.run in a launch of its own.
+      if (isEarlyRunRefusal(message)) await this.host.run(cleanupArgv(dir), { timeoutMs: 5_000 }).catch(() => undefined)
+      return { error: message }
     }
     const target = extra.target ?? modTargetFor(kind, cliArgv.slice(2), cwd)
     const record: LaunchRecord = {

@@ -68,7 +68,7 @@ function BranchAsk({ note }: { note: NonNullable<ReviewView['branch']> }) {
           <button type="button" className="ib-btn" onClick={() => void rank()} disabled={ranking === 'asking'} data-review-branch-rank-button="">
             {ranking === 'asking' ? 'Ranking…' : 'Rank'}
           </button>
-          {ranking === 'not' && ' It could not start. Check the risk agent in No slop zone rules.'}
+          {ranking === 'not' && ' It could not start. Check the risk agent in Set risk rules.'}
         </p>
       )}
       {ranking === 'started' && (

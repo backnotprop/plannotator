@@ -4,8 +4,10 @@
  * review thread (the same thread the Inbox lists, never a copy) or a listed PR nobody has reviewed. The fold state
  * is remembered. No new keyboard shortcuts.
  */
-import { useMemo, useState } from 'react';
-import { inboxPullRepoKey, inboxReviewGroups, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ContextMenu } from '@base-ui/react/context-menu';
+import { Menu } from '@base-ui/react/menu';
+import { inboxPullIsOpen, inboxPullRepoKey, inboxReviewGroups, type InboxPull, type InboxPullHidden, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack, type InboxReviewMove, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
@@ -23,6 +25,8 @@ import { facesOnce } from './words';
 import { pullAvatarUrl } from './pullUrls';
 import { UnreportedBranches } from './UnreportedBranches';
 import type { InboxUnreportedBranch } from '@plannotator/core/inbox-types';
+import { useContextMenuTrigger } from '../components/useContextMenuTrigger';
+import { focusWhenGone, hiddenInProject, hiddenLabel, hiddenRepo, itemsBy } from './hiddenPulls';
 
 const NO_ROWS: readonly InboxReviewRow[] = [];
 const NO_JUDGMENTS: RiskJudgments = {};
@@ -101,6 +105,7 @@ function ReviewRowItem({
   now,
   judgments,
   riskFailed,
+  menu = false,
   onOpen,
 }: {
   row: InboxReviewRow;
@@ -111,6 +116,8 @@ function ReviewRowItem({
   now: number;
   judgments: RiskJudgments;
   riskFailed: RiskFailures;
+  /** Its right-click menu is open (the muted background the Inbox's rows take then). */
+  menu?: boolean;
   onOpen: () => void;
 }) {
   const stack = row.stacks[0] ?? null;
@@ -134,6 +141,7 @@ function ReviewRowItem({
       data-pulls-row={stack?.id}
       data-pulls-move={row.move}
       data-pulls-layers={stack ? layers : undefined}
+      data-menu={menu ? '' : undefined}
     >
       <div className="ib-l1">
         <span className="ib-from ib-lead">
@@ -220,6 +228,162 @@ function Band({ label, name, rows, draw }: { label: string; name: InboxReviewMov
   );
 }
 
+/** The open PRs a row is about (never a merged or closed layer of its stack): what its menu's Hide hides. */
+export function rowPulls(row: InboxReviewRow): InboxPull[] {
+  const keys = new Set(row.pull_keys);
+  return row.stacks.flatMap((stack) => stack.layers.filter((layer) => keys.has(layer.key) && inboxPullIsOpen(layer)));
+}
+
+/** The links Reviews' rows name their stacks by: the board's, with each reviewed row's own. */
+export function reviewLinksOf(model: InboxPullsAnswer, answer: InboxReviewsAnswer): InboxPullsAnswer['links'] {
+  return { ...model.links, ...Object.fromEntries(answer.rows.flatMap((row) => (row.link ? row.pull_keys.map((key) => [key, row.link!] as const) : []))) };
+}
+
+/** "Hide pull request", "Hide merge request", "Hide 3 pull requests". */
+export function hideWords(pulls: readonly Pick<InboxPull, 'platform'>[]): string {
+  const noun = pulls.every((pull) => pull.platform === 'gitlab') ? 'merge request' : 'pull request';
+  return pulls.length === 1 ? `Hide ${noun}` : `Hide ${formatCount(pulls.length)} ${noun}s`;
+}
+
+/**
+ * The way back for a hidden PR (hiddenPulls.ts): a quiet fold at the end of the list, as Waiting on others is, closed
+ * at first. Each hidden PR: its number, title and repository (its thread when it has one, else a link to the forge),
+ * and Show again. Show again moves focus to the next hidden PR's, else the fold's own button.
+ */
+function HiddenFold({ hidden, onShow, onOpenThread }: { hidden: readonly InboxPullHidden[]; onShow: (hidden: InboxPullHidden) => void; onOpenThread?: (threadId: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const fold = useRef<HTMLDivElement>(null);
+  if (hidden.length === 0) return null;
+  const show = (h: InboxPullHidden) => {
+    const col = fold.current?.closest('.ib-listcol') ?? null;
+    focusWhenGone(itemsBy(() => fold.current, 'data-pulls-show-again'), h.key, () => fold.current?.querySelector<HTMLElement>('[data-pulls-hidden-toggle]') ?? col?.querySelector<HTMLElement>('[data-pulls-heading]') ?? null);
+    onShow(h);
+  };
+  return (
+    <div ref={fold} className="ib-group ib-pr-fold" role="group" aria-label="Hidden" data-pulls-hidden={hidden.length}>
+      <button type="button" className="ib-pr-foldbtn" onClick={() => setOpen((was) => !was)} aria-expanded={open} data-pulls-hidden-toggle="">
+        <Icon name={open ? 'chevD' : 'chevR'} size={14} />
+        Hidden <span className="ib-n">{formatCount(hidden.length)}</span>
+      </button>
+      {open &&
+        hidden.map((h) => {
+          const words = (
+            <>
+              <span className="ib-pr-hid-n">{hiddenLabel(h)}</span>
+              <span className="ib-pr-hid-title" dir="auto">
+                {h.title}
+              </span>
+              <span className="ib-pr-hid-repo" dir="auto">
+                {hiddenRepo(h)}
+              </span>
+            </>
+          );
+          return (
+            <div key={h.key} className="ib-pr-hid" data-pulls-hidden-row={h.key}>
+              {h.thread_id && onOpenThread ? (
+                <button type="button" className="ib-pr-hid-t" onClick={() => onOpenThread(h.thread_id!)} title={h.title} data-pulls-hidden-thread={h.thread_id}>
+                  {words}
+                </button>
+              ) : (
+                <a className="ib-pr-hid-t" href={h.url} target="_blank" rel="noreferrer noopener" title={h.title}>
+                  {words}
+                </a>
+              )}
+              <button type="button" className="ib-pr-hid-show" onClick={() => show(h)} aria-label={`Show again, ${hiddenLabel(h)}`} data-pulls-show-again={h.key}>
+                Show again
+              </button>
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
+/**
+ * Reviews' rows' right-click menu (and the menu key, Shift+F10; a long press on a phone): Hide, on a row about open
+ * PRs. The list's body is its trigger (`className`, `.ib-lbody`), so the bands stay its direct children.
+ */
+export function ReviewsMenu({
+  rows,
+  links,
+  phone,
+  onHide,
+  onTarget,
+  className,
+  busy,
+  children,
+}: {
+  rows: readonly InboxReviewRow[];
+  links: InboxPullsAnswer['links'];
+  phone: boolean;
+  /** Absent: no menu, the browser's own. */
+  onHide?: (pulls: InboxPull[]) => void;
+  onTarget: (id: string | null) => void;
+  className: string;
+  busy?: boolean;
+  children: React.ReactNode;
+}) {
+  const body = useRef<HTMLDivElement>(null);
+  const hideable = new Map(rows.filter((row) => rowPulls(row).length > 0).map((row) => [row.id, row] as const));
+  const buttonFor = (id: string) => body.current?.querySelector<HTMLElement>(`[data-reviews-row="${CSS.escape(id)}"]`) ?? null;
+  const menu = useContextMenuTrigger({
+    itemOf: (target) => {
+      const button = target instanceof Element ? target.closest<HTMLElement>('[data-reviews-row]') : null;
+      return button && hideable.has(button.getAttribute('data-reviews-row') ?? '') ? button : null;
+    },
+    idOf: (button) => button.getAttribute('data-reviews-row'),
+    has: (id) => hideable.has(id),
+    buttonFor,
+    // A hidden row: the row now in its place, else the list's heading.
+    slotOf: () => ({
+      order: [...(body.current?.querySelectorAll<HTMLElement>('[data-reviews-row]') ?? [])].map((b) => b.getAttribute('data-reviews-row')!),
+      fallback: () => body.current?.closest('.ib-listcol')?.querySelector<HTMLElement>('[data-pulls-heading]') ?? null,
+    }),
+    stateOf: (id) => (hideable.has(id) ? 'shown' : ''),
+    onTarget,
+    longPress: phone,
+    disabled: !onHide,
+  });
+  const [portal, setPortal] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => setPortal(body.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  const target = menu.targetId ? (hideable.get(menu.targetId) ?? null) : null;
+  const targetPulls = target ? rowPulls(target) : [];
+  const title = target ? reviewRowTitle(target, (s) => stackTitle(s, links)) : 'Review';
+  return (
+    <ContextMenu.Root {...menu.root}>
+      <ContextMenu.Trigger ref={body} className={className} aria-busy={busy ? true : undefined} {...menu.trigger}>
+        {children}
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal container={portal ?? undefined}>
+        {phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
+        <ContextMenu.Positioner className="ib-pm-pos" data-phone={phone ? '' : undefined}>
+          <ContextMenu.Popup className="ib-pm" aria-label={title} data-reviews-menu={target?.id} {...menu.popup}>
+            {target && onHide && (
+              <>
+                <div className="ib-pm-title" dir="auto" aria-hidden="true">
+                  {title}
+                </div>
+                <Menu.Item
+                  className="ib-pmi"
+                  label={hideWords(targetPulls)}
+                  onClick={() => {
+                    menu.follow(target.id);
+                    onHide(targetPulls);
+                  }}
+                  data-reviews-hide=""
+                >
+                  <Icon name="eyeOff" size={15} />
+                  {hideWords(targetPulls)}
+                </Menu.Item>
+              </>
+            )}
+          </ContextMenu.Popup>
+        </ContextMenu.Positioner>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
+  );
+}
+
 export function ReviewsList({
   answer,
   model,
@@ -237,6 +401,9 @@ export function ReviewsList({
   onOpen,
   onNew,
   onReviewBranch,
+  menuRow = null,
+  onShowAgain,
+  onOpenThread,
 }: {
   answer: InboxReviewsAnswer;
   model: InboxPullsAnswer;
@@ -258,6 +425,12 @@ export function ReviewsList({
   onNew: () => void;
   /** Branch reviews' safety net: New review with that branch. Absent: no safety net. */
   onReviewBranch?: (branch: InboxUnreportedBranch, opener: HTMLElement) => void;
+  /** The row whose menu (ReviewsMenu) is open: its muted background. */
+  menuRow?: string | null;
+  /** The Hidden fold's Show again. Absent: no fold. */
+  onShowAgain?: (hidden: InboxPullHidden) => void;
+  /** A hidden PR's thread, from the Hidden fold. */
+  onOpenThread?: (threadId: string) => void;
 }) {
   const now = useRelativeClock(true);
   const groups = useMemo(() => (risk === 'all' ? inboxReviewGroups(rows) : riskOrder(inboxReviewGroups(rows), judgments)), [rows, risk, judgments]);
@@ -321,10 +494,12 @@ export function ReviewsList({
     const project = id ? projectNames.get(id) : null;
     return project ?? row.review?.source?.repo ?? 'A project';
   };
-  const links = { ...model.links, ...Object.fromEntries(answer.rows.flatMap((row) => (row.link ? row.pull_keys.map((key) => [key, row.link!] as const) : []))) };
+  const links = reviewLinksOf(model, answer);
   const draw = (row: InboxReviewRow) => (
-    <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} onOpen={() => onOpen(row)} />
+    <ReviewRowItem key={row.id} row={row} links={links} place={placeOf(row)} selected={isOpenRow(row)} phone={phone} now={now} judgments={judgments} riskFailed={riskFailed} menu={menuRow === row.id} onOpen={() => onOpen(row)} />
   );
+  // Under a project filter, that project's hidden PRs only, as the rest of the page (its count follows).
+  const hiddenFold = onShowAgain ? <HiddenFold hidden={hiddenInProject(answer.hidden ?? [], project, answer.projects)} onShow={onShowAgain} onOpenThread={onOpenThread} /> : null;
   // High: what it can't place, behind one quiet line in the fold's own shape.
   const notRankedLine =
     notRanked.length > 0 ? (
@@ -352,6 +527,7 @@ export function ReviewsList({
           {notJudgedLine}
         </div>
         {notRankedLine}
+        {hiddenFold}
       </>
     );
   }
@@ -368,6 +544,7 @@ export function ReviewsList({
           {[empty.line, ...notices.map((n) => n.line)].map((line) => (
             <p key={line}>{line}</p>
           ))}
+          {hiddenFold}
         </div>
       );
     }
@@ -384,6 +561,7 @@ export function ReviewsList({
           </button>
         </div>
         {unreported}
+        {hiddenFold}
       </div>
     );
   }
@@ -398,6 +576,7 @@ export function ReviewsList({
       {notJudgedLine}
       {notRankedLine}
       {unreported}
+      {hiddenFold}
     </>
   );
 }
