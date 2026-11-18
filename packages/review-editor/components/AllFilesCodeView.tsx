@@ -2107,6 +2107,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     stale: () => boolean,
     result: SemDiffResult,
     onDropped: () => void,
+    swap = true,
   ) => {
     queueAugmentApply(itemId, () => {
       if (stale()) return;
@@ -2140,7 +2141,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       const plain = previous?.plain ?? (previewAppliedRef.current.has(itemId) ? fullDiffsRef.current.get(itemId) ?? item.fileDiff : item.fileDiff);
       semDiffsRef.current.set(itemId, { plain, semantic });
       semStateRef.current.set(itemId, { status: 'off', summary: result.summary });
-      showSemantic(itemId, semanticEnabledRef.current);
+      if (swap) showSemantic(itemId, semanticEnabledRef.current);
+      else refreshItem(itemId);
     });
   });
 
@@ -2181,6 +2183,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     newText: string | null,
     generation: string,
     signal: AbortSignal,
+    swap = true,
   ) => {
     const client = semClientRef.current;
     if (!client || oldText == null || newText == null || !client.supports(file.path)) return;
@@ -2195,7 +2198,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     void client.diff(file.path, oldText, newText, signal).then((result) => {
       if (stale()) return;
       if (!result) settleEmpty();
-      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty);
+      else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty, swap);
       runPowerUp(itemId);
     });
   });
@@ -2304,7 +2307,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (data?.oldContent == null || data.newContent == null) return none();
         // The file may have moved on since this diff was captured: whole text that no longer fits would break the layout.
         if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) return none();
-        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal);
+        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal, false);
         return {
           oldFile: { name: file.oldPath || file.path, contents: data.oldContent },
           newFile: { name: file.path, contents: data.newContent },

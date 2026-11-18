@@ -76,3 +76,22 @@ test('reads made in the background go two at a time, and an arrow read does not 
   answers.get('e.ts')!({ oldContent: 'e', newContent: 'e' });
   expect(await arrow).toEqual({ oldContent: 'e', newContent: 'e' });
 });
+
+test('a background read that never answers gives up its place in the queue, and the read is told to stop', async () => {
+  const signals: AbortSignal[] = [];
+  const reader = wholeFileReader(
+    (path, readSignal) => {
+      signals.push(readSignal);
+      return path === 'hung.ts' ? new Promise(() => {}) : Promise.resolve({ oldContent: 'x', newContent: 'x' });
+    },
+    new Map(),
+    30,
+  );
+  const file = (path: string): DiffFile => ({ path, patch: `p ${path}`, additions: 1, deletions: 1, status: 'modified' });
+  const hung = [reader(file('hung.ts'), signal, { background: true }), reader(file('hung.ts'), signal, { background: true })];
+  const next = reader(file('next.ts'), signal, { background: true });
+  const settled = await Promise.allSettled(hung);
+  expect(settled.map((one) => (one.status === 'rejected' ? String((one.reason as Error).message) : 'answered'))).toEqual(['Reading hung.ts took too long.', 'Reading hung.ts took too long.']);
+  expect(signals.slice(0, 2).every((stopped) => stopped.aborted)).toBe(true);
+  expect(await next).toEqual({ oldContent: 'x', newContent: 'x' });
+});

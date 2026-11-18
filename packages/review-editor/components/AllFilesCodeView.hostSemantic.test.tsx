@@ -243,7 +243,7 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(asked).toEqual([]);
   });
 
-  test.skipIf(!hasDom)('an arrow opened while the first read is on its way still brings the file its note', async () => {
+  test.skipIf(!hasDom)('an arrow opened while the first read is on its way brings the file its note, offered, with the opened lines left where they are', async () => {
     const { client, asked } = fakeClient(moved);
     const texts = { oldContent: 'old\nsame\n', newContent: 'new\nsame\n' };
     let calls = 0;
@@ -260,7 +260,11 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     });
     expect(calls).toBe(2);
     expect(asked).toEqual(['a.ts']);
-    expect((await headerOf('a.ts')).querySelector('[data-semantic-note="semantic"]')?.textContent).toContain('1 moved');
+    expect([...items.values()][0]!.fileDiff.semanticOperations).toBeUndefined();
+    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
+    expect(offered?.textContent).toContain('1 moved');
+    await act(async () => offered!.click());
+    expect(([...items.values()][0]!.fileDiff.semanticOperations as unknown[] | undefined)?.length).toBe(1);
   });
 
   test.skipIf(!hasDom)('a moved block holding a comment draws open, one with none stays folded, and a comment arriving later opens its fold', async () => {
