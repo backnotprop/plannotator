@@ -10,6 +10,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
+import { DOOR_CONTRACT } from '../../packages/server/inbox-door-version';
 
 export const ROOT = resolve(import.meta.dir, '../..');
 
@@ -27,13 +28,14 @@ export const OUT = {
   ledger: 'apps/mobile/contract/parity/ledger.json',
 } as const;
 
-/** The contract's number (a whole number; it rises only for a breaking wire change: one an app built from the older contract would misread). VERSION is the one contract file that holds it. */
+/**
+ * The contract's number: the door's own (packages/server/inbox-door-version.ts DOOR_CONTRACT), which rises only for
+ * a breaking wire change. door.ts writes it to VERSION; Wire.swift compiles it in as `wireContract`.
+ */
 export const VERSION_FILE = 'apps/mobile/contract/VERSION';
 
 export function contractVersion(): number {
-  const text = readFileSync(join(ROOT, VERSION_FILE), 'utf8').trim();
-  if (!/^[1-9]\d*$/.test(text)) throw new Error(`${VERSION_FILE}: a whole number, not ${JSON.stringify(text)}`);
-  return Number(text);
+  return DOOR_CONTRACT;
 }
 
 /** Write a repository file, by its path from the root (always a path named as a literal by the caller). */
