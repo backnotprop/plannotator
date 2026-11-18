@@ -12,8 +12,11 @@
  *    launchpad again rather than the thread;
  *  - a phone's To not being the box's own agent control and sheet;
  *  - the thread's first message showing the PR's details instead of folding them under "Sent with: this PR's details";
- *  - a thread that started but was not tied being started AGAIN (words edited, To changed, the page left and opened
- *    again): from then on a Send only ties it, and the PR's page offers it;
+ *  - a thread that started but was not tied being started AGAIN (words edited, the page left and opened again, no
+ *    agent left): from then on a Send only ties it, To is not offered, the words it went with show as sent, and the
+ *    PR's page offers it;
+ *  - words a Send did not send lost: typed after that start, or for a PR another thread has (it opens with them in
+ *    its reply box, unsent); a tie over another thread's PR;
  *  - a PR another window gave to a thread first getting a second thread: Send opens that one and says so;
  *  - Send not pale while the box is empty; the words not cleared once sent; a skills block when the words name none;
  *  - the keys: an IME's Enter or Escape acting, Escape leaving while the `/` list is open, focus not back on Start a
@@ -398,7 +401,7 @@ test.skipIf(!hasDom)("the thread's first message shows the person's words, and t
 
 const ties = () => posts.filter((p) => p.path.endsWith('/pulls/owner') && !p.body.validate_only);
 
-test.skipIf(!hasDom)("a thread that started but isn't tied is never started again: edited words, another To, or the page left and opened again only tie it; the words it went with show as sent, and what was typed after reaches the thread's box unsent", async () => {
+test.skipIf(!hasDom)("a thread that started but isn't tied is never started again: edited words, or the page left and opened again only tie it, and To is not offered; the words it went with show as sent, and what was typed after reaches the thread's box unsent", async () => {
   await start();
   await type(ASK);
   tieFails = 3;
@@ -409,12 +412,11 @@ test.skipIf(!hasDom)("a thread that started but isn't tied is never started agai
   expect($('[data-pull-thread-sent] p')!.textContent).toBe(ASK);
   expect(field().value).toBe('');
   expect(field().placeholder).toBe('Anything more you write goes into the thread’s reply box, not sent.');
-  // Edited words: a tie, no start.
+  // To is not offered: a Send now only ties, and goes to no agent.
+  expect(!!$('[data-pull-thread-start] [data-recipient]')).toBe(false);
+  // Edited words, twice: ties, no start.
   await type('And the tests?');
   await click('[data-pull-thread-start] [data-reply-send]');
-  // Another To: a tie, no start.
-  await click('[data-pull-thread-start] [data-recipient]');
-  await click('[data-recipient-list] [data-recipient-row="new:claude-code:prj_web"] .ib-rpick-name');
   await click('[data-pull-thread-start] [data-reply-send]');
   expect(sends()).toHaveLength(1);
   expect(ties().map((p) => p.body.thread_id)).toEqual(['thr_new', 'thr_new', 'thr_new']);

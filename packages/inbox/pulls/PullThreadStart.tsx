@@ -176,7 +176,8 @@ export function PullThreadStart({
   };
 
   const recipient = { rows: options.map((o) => o.row), chosen: chosen ? [chosen.row] : [], open, onOpen: setOpen, onOnly: (row: (typeof options)[number]['row']) => (setPicked(row.session), setOpen(false)), labels, folderOf, noun: 'message' as const };
-  const pill = phone ? <PhoneReplyRecipient {...recipient} section={section} /> : options.length > 0 ? <ReplyRecipient {...recipient} /> : null;
+  // A Send that only ties a thread that already started goes to no agent: To is not offered then.
+  const pill = tieOnly ? null : phone ? <PhoneReplyRecipient {...recipient} section={section} /> : options.length > 0 ? <ReplyRecipient {...recipient} /> : null;
 
   return (
     <section
