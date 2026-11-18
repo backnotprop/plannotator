@@ -117,6 +117,16 @@ test("a git project's origin rides on the thread payload; a folder without git, 
   expect(await known(notesThread)).toBe(true);
 });
 
+test("a fork checkout links refs to the remote `gh repo set-default` picked, not to origin (#3585)", async () => {
+  const root = tempRoot();
+  const fork = gitProject(root, "fork", "git@github.com:me/project.git");
+  Bun.spawnSync(["git", "remote", "add", "upstream", "git@github.com:org/project.git"], { cwd: fork });
+  // Without gh's choice, origin wins.
+  expect(await readInboxProjectRepo(fork)).toEqual({ display: "me/project", host: "github.com" });
+  Bun.spawnSync(["git", "config", "remote.upstream.gh-resolved", "base"], { cwd: fork });
+  expect(await readInboxProjectRepo(fork)).toEqual({ display: "org/project", host: "github.com" });
+});
+
 test("a repo not resolved yet is not known: the payload carries no repo_known until its read lands", async () => {
   let release = () => {};
   const gate = new Promise<void>((resolve) => (release = resolve));

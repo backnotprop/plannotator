@@ -2,7 +2,8 @@
  * Each Inbox project's git remote, so bare `#123` refs in its messages link to
  * the right forge (#1840).
  *
- * The remote is `origin`, parsed by the same `parseRemoteUrl` /
+ * The remote is the one `gh repo set-default` picked (`remote.<name>.gh-resolved
+ * = base`), else `origin`, parsed by the same `parseRemoteUrl` /
  * `parseRemoteHost` plan and code review use for `repoInfo`. It is resolved off
  * the request path: once per project just after the Inbox starts listening and
  * when a project is first seen, then again in the background when a read finds
@@ -25,12 +26,19 @@ export const INBOX_REPO_GIT_TIMEOUT_MS = 3_000;
 /** At most this many `git remote get-url` run at once. */
 export const INBOX_REPO_MAX_CONCURRENT = 4;
 
-/** The repository a project root's `origin` names, or null. Never throws. */
+/** The repository a project root's gh default remote (else `origin`) names, or null. Never throws. */
 export async function readInboxProjectRepo(root: string, timeoutMs = INBOX_REPO_GIT_TIMEOUT_MS): Promise<InboxProjectRepo | null> {
   try {
     // `prepareGitCommand` (inside runGit) keeps color and pagers out; "forbid"
     // also rules out a credential prompt, though get-url never asks for one.
-    const result = await runtime.runGit(["remote", "get-url", "origin"], { cwd: root, timeoutMs, interaction: "forbid" });
+    // A fork checkout points `gh repo set-default` at the canonical remote
+    // (`remote.<name>.gh-resolved = base`); refs mean what `gh issue view` means there (#3585).
+    const resolved = await runtime.runGit(["config", "--get-regexp", "^remote\\..*\\.gh-resolved$"], { cwd: root, timeoutMs, interaction: "forbid" });
+    const key = resolved.exitCode === 0
+      ? resolved.stdout.split("\n").map((line) => line.trim().split(/\s+/)).find(([, value]) => value === "base")?.[0]
+      : undefined;
+    const remote = key ? key.slice("remote.".length, -".gh-resolved".length) : "origin";
+    const result = await runtime.runGit(["remote", "get-url", remote], { cwd: root, timeoutMs, interaction: "forbid" });
     if (result.exitCode !== 0) return null;
     const url = result.stdout.trim();
     const display = parseRemoteUrl(url);
