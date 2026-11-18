@@ -25,31 +25,33 @@ import { doorEntries, generateDoor } from '../scripts/mobile/door';
 import { emit, type Output } from '../scripts/mobile/lib';
 import { generateSchema } from '../scripts/mobile/schema';
 import { generateSurface } from '../scripts/mobile/surface';
+import { generateVectors } from '../scripts/mobile/vectors';
 import { generateSwift } from '../scripts/mobile/swift';
 import { displayP3, generateTokens, linearSrgb, srgbHex } from '../scripts/mobile/tokens';
 import { buildWords, generateWords } from '../scripts/mobile/words';
 import { reaskRowLine, sentRowLine } from '../packages/core/inbox-delivery-line';
 import { INBOX_SECTIONS } from '../packages/core/inbox-types';
 
-const GENERATORS: [string, () => Output[]][] = [
+const GENERATORS: [string, () => Output[] | Promise<Output[]>][] = [
   ['door', generateDoor],
   ['schema', generateSchema],
   ['swift', generateSwift],
   ['tokens', generateTokens],
   ['words', generateWords],
   ['surface', generateSurface],
+  ['vectors', generateVectors],
 ];
 const sample = (path: string) => path.replace(/\{path\}/g, 'a/b.png').replace(/\{card\}/g, 'crd_x').replace(/\{combine\}/g, 'cmb_x').replace(/\{action\}/g, 'a-0123abcd').replace(/\{\w+\}/g, 'x_1');
 
 describe('the contract is up to date', () => {
   for (const [name, generate] of GENERATORS) {
-    test(`${name} is up to date (else: bun scripts/mobile/${name}.ts)`, () => {
-      expect(emit(generate(), true)).toEqual([]);
+    test(`${name} is up to date (else: bun scripts/mobile/${name}.ts)`, async () => {
+      expect(emit(await generate(), true)).toEqual([]);
     }, 10_000);
   }
 
-  test('the same input gives the same bytes', () => {
-    for (const [name, generate] of GENERATORS) expect(generate().map((o) => o.text), name).toEqual(generate().map((o) => o.text));
+  test('the same input gives the same bytes', async () => {
+    for (const [name, generate] of GENERATORS) expect((await generate()).map((o) => o.text), name).toEqual((await generate()).map((o) => o.text));
   }, 10_000);
 
   test('the check finds a stale or a missing file', () => {

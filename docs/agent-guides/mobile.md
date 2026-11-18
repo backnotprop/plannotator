@@ -37,11 +37,41 @@ bun scripts/mobile/swift.ts     # generated/swift/Wire.swift (reads the two abov
 bun scripts/mobile/tokens.ts    # tokens/tokens.json and the color catalog
 bun scripts/mobile/words.ts     # words/words.json and Words.swift
 bun scripts/mobile/surface.ts   # parity/surface.json
+bun scripts/mobile/vectors.ts   # vectors/list, words, time, crypto
+bun scripts/mobile/vectors-stream.ts   # vectors/stream.json
 ```
 
 A word the window shows that is not in `words.json` is written inside a component or a server message. Make it a constant in the product first (that is a product change, in its own pull request), then add its row in `buildWords()`.
 
 Add `--check` to compare with the committed files without writing. The command fails and names the stale files.
+
+## Fixtures and vectors
+
+A fixture (`fixtures/<suite>.json`) is invented input. A vector (`vectors/<suite>.json`) is what the product's own code makes of it, and the app's conformance tests must reach the same result. Never write a vector by hand: run its generator.
+
+| Suite | Fixture | What the vector holds | Made by |
+|---|---|---|---|
+| `list` | `fixtures/list.json`: list rows' facts | Each row's section and bold, every section's thread order, the badge count and label | `inboxSectionOf`, `inboxRowUnread`, `inboxListSections` (`packages/shared/inbox/list.ts`), `inboxTabCount`, `tabBadgeLabel` (`packages/inbox/tabCount.ts`) |
+| `words` | none | Each word template filled with sample parts; the counting words | The word functions in `packages/core` |
+| `time` | `fixtures/time.json`: moments, a "now" and a time zone | `shortTime`, `whenTime`, `dayWords`, `dateTime`, `clockTime`, `fullTime` | `packages/core/inbox-format.ts`, run in its own process with `TZ` set (`scripts/mobile/vectors-time.ts`), because the formatters read the zone when they load |
+| `crypto` | `packages/core/fixtures/inbox-relay-vectors.json` (the existing relay vectors) | The push collapse id per thread. The keys stay in the relay file; the app derives the collapse key itself | `deriveRelayKeys` and the Inbox's HMAC step |
+| `stream` | `fixtures/stream.json`: bytes as the Inbox writes them, and cut points | The frames the window's reader takes | `parseEventStreamText` (`packages/inbox/sharedEvents.ts`), with its own generator, `scripts/mobile/vectors-stream.ts`, and its own test, `tests/mobile-stream-vectors.test.ts` |
+
+Four of the suites that slice S1 needs have no generator yet, because the product has no function to run for them:
+
+- `decode`: needs real list and thread answers.
+- `questions`: the picks and reply bodies are built in the window's client.
+- `push`: the push plaintext is built inline in `packages/server/inbox-relay.ts`.
+- `skew`: needs the door's contract version (brief F1).
+
+Each one needs a product function to export first.
+
+To add a fixture:
+
+1. Write the invented input in `fixtures/`. Do not put real data there: no names, keys or tokens.
+2. Add a function to `scripts/mobile/vectors.ts` that runs the product's function over the input.
+3. Name both paths as literals.
+4. Run `bun scripts/mobile/vectors.ts`.
 
 ## The parity ledger
 
