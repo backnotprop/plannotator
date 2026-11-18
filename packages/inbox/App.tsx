@@ -3704,7 +3704,7 @@ function Inbox() {
 
   const { toggleTool, toggleCookieHost, toggleBoard, toggleBro, toggleFloatDrafts, toggleMarkReadWarning, toggleSteps, toggleCodeReview, toggleSystem, toggleChapterDiagrams, toggleShape, toggleScheduled, toggleExperimental, tailscaleBusy, toggleTailscale, deleteThread, deleteProject } =
     useSettingsSaves({ setSettings, setError: setSettingsError, refresh: refreshSettings, adoptStore, readStore, refreshList });
-  const scheduledOn = useScheduledOn(settings);
+  const scheduledOn = useScheduledOn(settings, settingsReadFailed);
   const plansOn = usePlansOn(settings, showToast);
 
   const projects = latest?.projects ?? [];
@@ -3718,7 +3718,7 @@ function Inbox() {
   useEffect(() => {
     if (combinedHead) writeRoute({ ...route, project: combinedHead }, { replace: true });
   }, [combinedHead]);
-  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
+  const { latestSections, latestGroups, latestRows, pinsOn, pinRows, pinnedIds, listedOpenRow, openThreadRow, listShown, snoozeOn, projectsReadable, projectCounts, latestProjectActivity, filterProject, filterMachine, windowRows, threadAgentContext, filterAgent, projectNames, sidebarMachineCounts, filterList, listFilterPicks, setListFilter, listFilterScoped, filterShown, listFilterRows, listSections, listFilterEmpty, listHeld, listTitle, notice, filterTag, threadTagsHost, sidebarTags, listColours } = useListShown({
     latest, projects, route, thread, threadRow, rowPatches, pinPatches, looking, shown, machines, hideAway, openedHere, heldOpen, heldRead, combining: bulk.combines.waiting,
     tags: {
       listTags,
@@ -5671,7 +5671,7 @@ function Inbox() {
           phone={phone}
           reconnecting={streamDead}
           empty={
-            listFilterEmpty ? (
+            listHeld ? null : listFilterEmpty ? (
               <ListFilterEmpty onClear={() => setListFilter(clearedFrom(listFilterPicks, listFilterScoped, filterTag !== null))} />
             ) : filterTag ? (
               <div className="ib-empty-list" data-tag-empty="">

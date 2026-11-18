@@ -10,7 +10,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { adoptLegacyTailnetDoor, chooseTailnetDoorPort, writeTailnetDoorRecord } from "./inbox-tailnet-door";
+import { createServer } from "node:net";
+import { adoptLegacyTailnetDoor, chooseTailnetDoorPort, loopbackPortRefused, loopbackTargetDead, ownLeftoverTarget, readTailnetDoorRecord, withMadeTargets, writeTailnetDoorRecord } from "./inbox-tailnet-door";
 
 /** `tailscale serve status --json` with these mappings. */
 const status = (mappings: Record<number, string>) =>
@@ -50,6 +51,62 @@ describe("chooseTailnetDoorPort", () => {
     expect(chooseTailnetDoorPort(status({ 8445: THEIRS }), record)).toEqual({ state: "held", port: 8445 });
     // After a take-down (published: false), even the old exact target on that port is someone else's.
     expect(chooseTailnetDoorPort(status({ 8445: DOOR }), { ...record, published: false })).toEqual({ state: "held", port: 8445 });
+  });
+
+  test("a mapping this Inbox made where nothing listens now (a crash, a stop whose take-down read an empty serve status) is its own leftover: re-pointed; any other stays held", () => {
+    const OLD = "http://127.0.0.1:52901";
+    const record = { https_port: 8445, target: DOOR, published: false, made: [OLD, DOOR] };
+    const dead = (target: string) => target === DOOR || target === OLD;
+    // Its last target, after a take-down wrote published: false.
+    expect(chooseTailnetDoorPort(status({ 8445: DOOR }), record, dead)).toEqual({ state: "usable", port: 8445, own: DOOR });
+    // A target it made before that.
+    expect(chooseTailnetDoorPort(status({ 8445: OLD }), record, dead)).toEqual({ state: "usable", port: 8445, own: OLD });
+    // Something listens on its old target now: not dead, so never taken.
+    expect(chooseTailnetDoorPort(status({ 8445: DOOR }), record, () => false)).toEqual({ state: "held", port: 8445 });
+    // Someone else's mapping, dead or not: never the Inbox's.
+    expect(chooseTailnetDoorPort(status({ 8445: THEIRS }), record, () => true)).toEqual({ state: "held", port: 8445 });
+  });
+
+  test("made targets ride the record, each once, the newest kept", () => {
+    const dir = dataDir();
+    const made = withMadeTargets(["http://127.0.0.1:1", "http://127.0.0.1:2"], "http://127.0.0.1:1", null, "http://127.0.0.1:3", "https://example.com");
+    expect(made).toEqual(["http://127.0.0.1:2", "http://127.0.0.1:1", "http://127.0.0.1:3"]);
+    writeTailnetDoorRecord(dir, { https_port: 8443, target: "http://127.0.0.1:3", published: false, made });
+    expect(readTailnetDoorRecord(dir)?.made).toEqual(made);
+    expect(withMadeTargets(Array.from({ length: 20 }, (_, i) => `http://127.0.0.1:${i + 1}`)).length).toBe(8);
+  });
+
+  test("the leftover to probe: a mapping on the record's port to its target or one it made, never its live published one or someone else's", () => {
+    const OLD = "http://127.0.0.1:52901";
+    const record = { https_port: 8445, target: DOOR, published: false, made: [OLD, DOOR] };
+    expect(ownLeftoverTarget(status({ 8445: OLD }), record)).toBe(OLD);
+    expect(ownLeftoverTarget(status({ 8445: DOOR }), record)).toBe(DOOR);
+    expect(ownLeftoverTarget(status({ 8445: DOOR }), { ...record, published: true })).toBeNull();
+    expect(ownLeftoverTarget(status({ 8445: THEIRS }), record)).toBeNull();
+    expect(ownLeftoverTarget("{}", record)).toBeNull();
+    expect(ownLeftoverTarget(status({ 8445: OLD }), null)).toBeNull();
+  });
+
+  test("a port something listens on, on every interface (0.0.0.0, as most servers do), is never dead", async () => {
+    const server = createServer(() => {});
+    await new Promise<void>((resolve) => server.listen(0, "0.0.0.0", resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      expect(await loopbackPortRefused(port)).toBe(false);
+      expect(await loopbackTargetDead(`http://127.0.0.1:${port}`)).toBe(false);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  test("a port nothing listens on is dead: the connect is refused", async () => {
+    const server = createServer(() => {});
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    expect(await loopbackPortRefused(port)).toBe(true);
+    expect(await loopbackTargetDead(`http://127.0.0.1:${port}`)).toBe(true);
+    expect(await loopbackTargetDead("https://example.com:443")).toBe(false);
   });
 
   test("output it cannot read is malformed, never a guess", () => {
