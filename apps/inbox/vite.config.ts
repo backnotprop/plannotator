@@ -90,6 +90,6 @@ export default mergeConfig(
     // The window's sheet keys on page marks, not on :has() anchored on the page (build/inbox-page-marks.ts).
     plugins: [packedInboxApp(), inboxPageMarks()],
     resolve: { alias: { '@pierre/diffs': '@pierre/diffs-sem' } },
-    worker: { plugins: () => [diffsWorkerCatalogs(), webTreeSitterServedWasm()] },
+    worker: { plugins: () => [webTreeSitterServedWasm()] },
   }),
 );
