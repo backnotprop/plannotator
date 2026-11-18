@@ -3,10 +3,13 @@ import { useConfigValue } from '@plannotator/ui/config';
 import { parseSemDiffAdvert } from '@plannotator/review-editor/semDiff/protocol';
 import { createSemDiffClient, type SemDiffClient } from '@plannotator/review-editor/semDiff/semDiffClient';
 import { loadSemDiffWorker } from '@plannotator/review-editor/semDiff/loadSemDiffWorker';
-import { useSemDiffAdvert } from '../semDiffAdvert';
+import { semDiffAdvertNow, useSemDiffAdvert } from '../semDiffAdvert';
 
 export function useSemDiffClient(): SemDiffClient | null {
-  const raw = useSemDiffAdvert();
+  useSemDiffAdvert();
+  const latched = useRef<{ value: unknown } | null>(null);
+  if (!latched.current && semDiffAdvertNow() !== undefined) latched.current = { value: semDiffAdvertNow() };
+  const raw = latched.current?.value ?? null;
   const enabled = useConfigValue('semanticDiffEnabled');
   const on = useConfigValue('diffSemantic');
   const wanted = useRef(false);
