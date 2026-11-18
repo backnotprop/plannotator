@@ -1,6 +1,6 @@
 # The native app's contract kit
 
-The native iPhone app of the Plannotator Inbox lives in `apps/mobile/`. It is built from one source with the window: `apps/mobile/contract/`. That folder holds data only (JSON, Markdown, generated Swift). Generators in `scripts/mobile/` make it from the product's own TypeScript. Two Bun tests fail when the product changes and the contract does not.
+The native iPhone app of the Plannotator Inbox lives in `apps/mobile/`. It is built from one source with the window: `apps/mobile/contract/`. That folder holds data only (JSON, Markdown, generated Swift). Generators in `scripts/mobile/` make it from the product's own TypeScript. Two Bun tests fail when the product changes and the contract does not: `tests/mobile-vectors.test.ts` (a generated file is stale) and `tests/mobile-parity.test.ts` (the window gained something the phone has no decision for).
 
 The Inbox is Bun-only. Nothing here has a Pi twin.
 
@@ -22,6 +22,10 @@ The Inbox is Bun-only. Nothing here has a Pi twin.
 | `tokens/tokens.json`, `generated/swift/Tokens.xcassets/` | `scripts/mobile/tokens.ts` | The default theme, `packages/ui/themes/plannotator.css`, dark and light: every color as its CSS, Display P3 and sRGB hex, the radius in points and the font names. The catalog has one color set per color, light with a dark appearance. The other themes come later. |
 | `words/words.json`, `generated/swift/Words.swift` | `scripts/mobile/words.ts` | The words the product exports as constants or pure functions: section names, agent names, Looks good, Action item, delivery lines and the failed-turn words. A word with a part (a name, a number) is made by calling the product's function with a marker, so `{name}` sits where the window prints the name. |
 
+| `parity/surface.json` | `scripts/mobile/surface.ts` | Everything the window and its server offer, as `<kind>:<name>` entries: door routes, the Inbox endpoints in `server-and-storage.md`'s Inbox table, stream frames, record kinds, wire fields, message blocks, `:::` blocks, Settings sections and flow checks. The door and the wire fields are read live from the product. |
+| `parity/ledger.json` | hand | One row per feature, with the phone's decision for it. See "The parity ledger". |
+| `flows/*.md` | hand | One file per flow: what the person sees and does, then numbered checks such as `[list-04]`. `flows/README.md` holds the rules every flow keeps. |
+
 `scripts/mobile/door-shapes.ts` declares the few door shapes that the product has no TypeScript type for: the pair exchange, the error body, the stream frames, and the bodies of `seen`, `picks` and `reply`. If the product gets a type for one of these, use the product's type in `ROOTS` and remove the shape from `door-shapes.ts`.
 
 ## Commands
@@ -32,11 +36,39 @@ bun scripts/mobile/schema.ts    # schema/wire.schema.json
 bun scripts/mobile/swift.ts     # generated/swift/Wire.swift (reads the two above: run it after them)
 bun scripts/mobile/tokens.ts    # tokens/tokens.json and the color catalog
 bun scripts/mobile/words.ts     # words/words.json and Words.swift
+bun scripts/mobile/surface.ts   # parity/surface.json
 ```
 
 A word the window shows that is not in `words.json` is written inside a component or a server message. Make it a constant in the product first (that is a product change, in its own pull request), then add its row in `buildWords()`.
 
 Add `--check` to compare with the committed files without writing. The command fails and names the stale files.
+
+## The parity ledger
+
+Every entry of `parity/surface.json` needs a row in `parity/ledger.json` that names it in `surface`. A row has:
+
+- `id` and `title`;
+- `surface`: the entries it decides;
+- `flows`: the flow checks that prove it;
+- `mobile`: `v1`, `rethink` (in v1, done the phone's way), `later` or `never`;
+- `why`, which `later` and `never` must fill (SCOPE's reason codes: `L-door`, `L-off`, `L-size`, `L-ipad`, `L-ai`, `L-proxy`, `N-desk`, `N-web`, `N-self`; `L-nodoor` is a window endpoint that is not on the phone's door);
+- `ios.state`: `not-started`, `building`, `done` or `owed`.
+
+`owed` means the window changed something the app had, and the app has not caught up. It needs `owed_since` (a date), and the test fails when that date is more than 14 days old.
+
+The seed (2026-11-18) is the owner's scope inventory: 1,221 rows with their marks and reasons. Entries were joined to rows by the routes, frames and fields each row names. Rows whose `source` starts with `seed:` cover the entries that no scope row names:
+
+- wire fields grouped by type, which `Wire.swift` decodes;
+- the window endpoints with no door route;
+- the door routes, flows, blocks and frames left over.
+
+When you fold such an entry into its feature's row, remove the seed row.
+
+`tests/mobile-parity.test.ts` reads the live surface, not the committed file. It fails with:
+
+> The window gained `<entry>`. Decide for the phone: add it to apps/mobile/contract/parity/ledger.json as v1, later, never or rethink
+
+To fix it, add the entry to the feature's row, or to a new row with a mark. Then run `bun scripts/mobile/surface.ts`. A row that names an entry the window no longer has fails too. The test takes about half a second.
 
 ## When a test fails on your pull request
 

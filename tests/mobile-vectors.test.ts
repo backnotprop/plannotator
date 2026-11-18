@@ -24,6 +24,7 @@ import { doorRouteNames, doorRouteOf } from '../packages/server/inbox-devices';
 import { doorEntries, generateDoor } from '../scripts/mobile/door';
 import { emit, type Output } from '../scripts/mobile/lib';
 import { generateSchema } from '../scripts/mobile/schema';
+import { generateSurface } from '../scripts/mobile/surface';
 import { generateSwift } from '../scripts/mobile/swift';
 import { displayP3, generateTokens, linearSrgb, srgbHex } from '../scripts/mobile/tokens';
 import { buildWords, generateWords } from '../scripts/mobile/words';
@@ -36,6 +37,7 @@ const GENERATORS: [string, () => Output[]][] = [
   ['swift', generateSwift],
   ['tokens', generateTokens],
   ['words', generateWords],
+  ['surface', generateSurface],
 ];
 const sample = (path: string) => path.replace(/\{path\}/g, 'a/b.png').replace(/\{card\}/g, 'crd_x').replace(/\{combine\}/g, 'cmb_x').replace(/\{action\}/g, 'a-0123abcd').replace(/\{\w+\}/g, 'x_1');
 
