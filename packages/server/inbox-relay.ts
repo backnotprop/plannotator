@@ -252,6 +252,8 @@ interface CommandPlaintext {
   method: string;
   path: string;
   body?: unknown;
+  /** The app's `X-Plannotator-App` words (inbox-door-version.ts); absent from an older app. */
+  app?: unknown;
 }
 
 export interface InboxAgentCommandPlaintext {
@@ -274,7 +276,7 @@ export interface InboxRelayContext {
   /** A store line as the event stream's `record` event writes it (`eventPayload` in inbox.ts). */
   payload: (line: InboxLine) => unknown;
   /** Apply a command as a device, in-process through the device door (inbox-devices.ts `asDevice`). */
-  apply: (deviceId: string, command: { method: string; path: string; body?: unknown }) => Promise<Response>;
+  apply: (deviceId: string, command: { method: string; path: string; body?: unknown; app?: unknown }) => Promise<Response>;
   /** Where a new mailbox is made. Default: `relayUrl()`. */
   url?: string;
   /** One line per event, ids and status codes only (the Inbox's log). */
@@ -556,7 +558,7 @@ export function createInboxRelay(context: InboxRelayContext) {
     const command = opened && opened.id === frame.id ? opened : null;
     if (opened && !command) log(`command ${frame.device_id} refused: its sealed id is not the frame's`);
     if (keys && command) {
-      const answer = await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body });
+      const answer = await context.apply(frame.device_id, { method: command.method, path: command.path, body: command.body, app: command.app });
       log(`command ${frame.device_id} ${command.method} ${answer.status}`);
       if (devices.get(frame.device_id)?.carriage) {
         const item = await resultFrame(frame.device_id, command.id, answer, keys.key);

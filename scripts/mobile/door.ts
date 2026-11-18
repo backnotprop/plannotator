@@ -1,27 +1,23 @@
 /**
- * door.json: every route of the Inbox's device door (/api/inbox/device/), read
- * from the door's own code (packages/server/inbox-devices.ts: doorRouteNames,
- * doorRouteOf, doorWriteRoutes) and the outbox's write kinds
- * (packages/server/inbox-outbox.ts: DOOR_WRITES).
+ * door.json and VERSION (the door's contract number, DOOR_CONTRACT). door.json: every route of the Inbox's device door (/api/inbox/device/), read
+ * from the door's own table (packages/server/inbox-devices.ts:
+ * doorRouteTable, the one source `health.door.routes` also reads) and the
+ * outbox's write kinds (packages/server/inbox-outbox.ts: DOOR_WRITES).
  *
- *   bun scripts/mobile/door.ts [--check]
+ *   bun scripts/mobile/all.ts [--check]
  *
- * One entry per route a client can call, alternations written out
- * (`POST threads/:id/(read|unread|mark-unread)` is three). For each: the
- * method, the path with named parameters, the window route it reaches, who may
- * call it (`grant`), what a write is (`kind`), where its idempotency key goes,
- * and whether the relay carries it. swift.ts builds the app's route table from
- * this file, so the app cannot call a route the door does not have.
+ * One entry per row of the door's table. For each: its name (what
+ * `health.door.routes` lists), the path with named parameters, the window
+ * route it reaches, who may call it (`grant`), what a write is (`kind`),
+ * where its idempotency key goes, and whether the relay carries it. swift.ts
+ * builds the app's route table from this file, so the app cannot call a route
+ * the door does not have.
  */
-import { doorRouteNames, doorRouteOf, doorWriteRoutes } from '../../packages/server/inbox-devices';
+import { doorRouteOf, doorRouteTable } from '../../packages/server/inbox-devices';
 import { DOOR_WRITES } from '../../packages/server/inbox-outbox';
-import { OUT, cli, jsonText, type Output } from './lib';
+import { OUT, VERSION_FILE, cli, contractVersion, jsonText, type Output } from './lib';
 
-/** A route's parameter: its name, and a value the door's own pattern accepts (to ask the door which entry it is). */
-type Param = { name: string; sample: string };
-type Segment = { text: string } | { param: Param };
-
-/** The word a collection segment gives the route's name, and the name of the id that follows it. */
+/** The name a collection's id takes in a path (`threads/:id` -> `{thread}`), and its word in a call's name. */
 const COLLECTIONS: Record<string, { word: string; param: string }> = {
   threads: { word: 'thread', param: 'thread' },
   messages: { word: 'message', param: 'message' },
@@ -38,15 +34,6 @@ const COLLECTIONS: Record<string, { word: string; param: string }> = {
   actions: { word: 'action', param: 'action' },
 };
 
-/** A parameter group of the door's patterns, by its source: a value it accepts. */
-const PARAM_GROUPS: Record<string, string> = {
-  ':id': 'id_SAMPLE',
-  '(crd_[^/]+)': 'crd_SAMPLE',
-  '(cmb_[^/]+)': 'cmb_SAMPLE',
-  '(a-[0-9a-f]{8}(?:-\\d{1,3})?)': 'a-0123abcd',
-  '(.+)': 'path_SAMPLE',
-};
-
 /**
  * The GET routes that answer bytes (a picture, a file, a download), and those
  * that honour `Range`. Every other GET answers JSON, but `events`, a stream.
@@ -60,10 +47,8 @@ const RANGE = new Set(['GET attachments/:id/video', 'GET attachments/:id/audio',
 const STREAM = new Set(['GET events']);
 
 export type DoorEntry = {
-  /** `GET threads/:id`: the route in the door's words, one alternative. */
+  /** `GET threads/:id`: what `health.door.routes` lists for it. */
   name: string;
-  /** The door's own name for its entry (`doorRouteNames()`), alternations and all: what `health.door.routes` lists. */
-  door_name: string;
   method: 'GET' | 'POST';
   /** Relative to /api/inbox/device/, parameters in braces: `threads/{thread}/seen`. */
   path: string;
@@ -89,92 +74,11 @@ export type DoorEntry = {
   answer: 'json' | 'bytes' | 'stream';
   /** The GET honours `Range` and `If-Range`. */
   range: boolean;
-  /** The relay carries it as a sealed command. */
+  /** The sealed relay path carries it (the door's own `relay`). */
   relay: boolean;
 };
 
-/** `GET attachments/:id/(image|video)` -> one list of segments per alternative. */
-function expand(name: string): { method: 'GET' | 'POST'; alternatives: Segment[][] } {
-  const [method, path] = name.split(' ') as ['GET' | 'POST', string];
-  // Split at slashes outside groups.
-  const parts: string[] = [];
-  let depth = 0;
-  let cur = '';
-  for (const c of path) {
-    if (c === '(') depth++;
-    if (c === ')') depth--;
-    if (c === '/' && depth === 0) { parts.push(cur); cur = ''; } else cur += c;
-  }
-  parts.push(cur);
-  let alternatives: Segment[][] = [[]];
-  let prev = '';
-  for (const part of parts) {
-    const sample = PARAM_GROUPS[part];
-    let options: Segment[][];
-    if (sample !== undefined) {
-      const pname = part === "(.+)" ? "path" : COLLECTIONS[prev]?.param;
-      if (!pname) throw new Error(`door.ts: no parameter name for ${part} after "${prev}" in ${name}`);
-      options = [[{ param: { name: pname, sample } }]];
-    } else if (/^\([a-z/|-]+\)$/.test(part)) {
-      options = part.slice(1, -1).split('|').map((word) => word.split('/').map((text) => ({ text })));
-    } else if (/^[a-z][a-z-]*$/.test(part)) {
-      options = [[{ text: part }]];
-    } else {
-      throw new Error(`door.ts: a part of ${name} it cannot read: ${part}`);
-    }
-    alternatives = alternatives.flatMap((head) => options.map((tail) => [...head, ...tail]));
-    prev = part;
-  }
-  return { method, alternatives };
-}
-
 const camel = (words: string[]) => words.map((w, i) => (i === 0 ? w : w[0]!.toUpperCase() + w.slice(1))).join('');
-const wordsOf = (text: string) => text.split('-');
-
-/** `POST threads/{thread}/seen` -> `postThreadSeen`. */
-function callName(method: string, segments: Segment[]): string {
-  const words: string[] = [method.toLowerCase()];
-  segments.forEach((seg, i) => {
-    if ('param' in seg) return;
-    const next = segments[i + 1];
-    const collection = COLLECTIONS[seg.text];
-    words.push(...(next && 'param' in next && collection ? [collection.word] : wordsOf(seg.text)));
-  });
-  return camel(words);
-}
-
-function entryOf(doorName: string, method: 'GET' | 'POST', segments: Segment[], rawRoutes: Set<string>): DoorEntry {
-  const params = segments.flatMap((s) => ('param' in s ? [s.param.name] : []));
-  const path = segments.map((s) => ('param' in s ? `{${s.param.name}}` : s.text)).join('/');
-  const sample = segments.map((s) => ('param' in s ? s.param.sample : s.text)).join('/');
-  const name = `${method} ${segments.map((s) => ('param' in s ? (s.param.name === 'path' ? ':path' : ':id') : s.text)).join('/')}`;
-  const own = ['GET accounts', 'POST link-back', 'POST unlink', 'POST update'].includes(doorName);
-  // Ask the door which entry the path reaches, as a phone and as a linked computer.
-  const phone = own ? null : doorRouteOf(method, sample, false);
-  const machine = own ? null : doorRouteOf(method, sample, true);
-  if (!own && !machine) throw new Error(`door.ts: the door does not answer ${method} ${sample} (from ${doorName})`);
-  const unsample = (text: string) => segments.reduce((t, s) => ('param' in s ? t.replace(s.param.sample, `{${s.param.name}}`) : t), text);
-  const raw = method === 'POST' && rawRoutes.has(`^${sample.replaceAll('/', '\\/')}$`);
-  const write = method === 'POST' ? writeKind(sample) : null;
-  if (method === 'POST' && !write) throw new Error(`door.ts: ${name} has no DOOR_WRITES kind`);
-  return {
-    name,
-    door_name: doorName,
-    method,
-    path,
-    params,
-    call: callName(method, segments),
-    window: machine ? unsample(machine.windowPath) : null,
-    grant: phone ? 'phone' : 'machine',
-    auth: 'token',
-    kind: method === 'GET' ? 'read' : write === 'file' ? 'bytes' : write === 'append' || write === 'set' ? 'hold' : 'now',
-    write,
-    key: method === 'GET' ? null : raw ? 'query' : 'body',
-    answer: STREAM.has(name) ? 'stream' : BYTES.has(name) ? 'bytes' : 'json',
-    range: RANGE.has(name),
-    relay: !STREAM.has(name) && !raw,
-  };
-}
 
 /** The outbox's kind for a write to this concrete path (DOOR_WRITES, `local` included). */
 function writeKind(path: string): string | null {
@@ -185,25 +89,53 @@ function writeKind(path: string): string | null {
   return null;
 }
 
-/** The door's two routes of its own, outside the allowlist: pairing (no token) and a phone removing itself. */
-const OWN: DoorEntry[] = [
-  {
-    name: 'POST pair', door_name: 'POST pair', method: 'POST', path: 'pair', params: [], call: 'postPair', window: null,
-    grant: 'phone', auth: 'none', kind: 'now', write: null, key: null, answer: 'json', range: false, relay: false,
-  },
-  {
-    name: 'POST revoke', door_name: 'POST revoke', method: 'POST', path: 'revoke', params: [], call: 'postRevoke', window: null,
-    grant: 'phone', auth: 'token', kind: 'now', write: null, key: null, answer: 'json', range: false, relay: true,
-  },
-];
+/** A sample a parameter accepts, from the door's own pattern: asks the door which window route a path reaches. */
+const SAMPLES = ['id_SAMPLE', 'crd_SAMPLE', 'cmb_SAMPLE', 'a-0123abcd', 'path/SAMPLE'];
 
 export function doorEntries(): DoorEntry[] {
-  const rawRoutes = new Set(doorWriteRoutes().filter((r) => r.raw).map((r) => r.route));
-  const entries = [...OWN];
-  for (const doorName of doorRouteNames()) {
-    const { method, alternatives } = expand(doorName);
-    for (const segments of alternatives) entries.push(entryOf(doorName, method, segments, rawRoutes));
-  }
+  const entries = doorRouteTable().map((row): DoorEntry => {
+    const parts = row.route.split('/');
+    const params: string[] = [];
+    const words: string[] = [row.method.toLowerCase()];
+    const segments = parts.map((part, i) => {
+      if (part === ':path') return (params.push('path'), '{path}');
+      if (part === ':id') {
+        const name = COLLECTIONS[parts[i - 1]!]?.param;
+        if (!name) throw new Error(`door.ts: no parameter name after "${parts[i - 1]}" in ${row.name}`);
+        params.push(name);
+        return `{${name}}`;
+      }
+      const next = parts[i + 1];
+      words.push(...(next === ':id' && COLLECTIONS[part] ? [COLLECTIONS[part]!.word] : part.split('-')));
+      return part;
+    });
+    const path = segments.join('/');
+    const pattern = new RegExp(row.pattern);
+    const sample = SAMPLES.find((x) => pattern.test(parts.map((p) => (p.startsWith(':') ? x : p)).join('/')));
+    if (sample === undefined) throw new Error(`door.ts: no sample fits ${row.name} (${row.pattern})`);
+    const concrete = parts.map((p) => (p.startsWith(':') ? sample : p)).join('/');
+    const found = doorRouteOf(row.method, concrete, true);
+    const window = found ? params.reduce((t, name) => t.replace(sample, `{${name}}`), found.windowPath) : null;
+    // The outbox's kind (DOOR_WRITES) names the door's own writes too (a linked computer holds them); pair and revoke have none.
+    const write = row.method === 'POST' ? writeKind(concrete) : null;
+    if (row.method === 'POST' && window && !write) throw new Error(`door.ts: ${row.name} has no DOOR_WRITES kind`);
+    return {
+      name: row.name,
+      method: row.method,
+      path,
+      params,
+      call: camel(words),
+      window,
+      grant: row.grant,
+      auth: row.name === 'POST pair' ? 'none' : 'token',
+      kind: row.method === 'GET' ? 'read' : row.raw ? 'bytes' : write === 'append' || write === 'set' ? 'hold' : 'now',
+      write,
+      key: row.method === 'GET' || !write ? null : row.raw ? 'query' : 'body',
+      answer: STREAM.has(row.name) ? 'stream' : BYTES.has(row.name) ? 'bytes' : 'json',
+      range: RANGE.has(row.name),
+      relay: row.relay,
+    };
+  });
   const seen = new Set<string>();
   for (const e of entries) {
     for (const key of [e.name, e.call]) {
@@ -216,10 +148,10 @@ export function doorEntries(): DoorEntry[] {
 }
 
 export function generateDoor(): Output[] {
-  return [{
+  return [{ path: VERSION_FILE, text: `${contractVersion()}\n` }, {
     path: OUT.door,
     text: jsonText({
-      about: 'GENERATED by scripts/mobile/door.ts from packages/server/inbox-devices.ts and inbox-outbox.ts. Do not edit.',
+      about: 'GENERATED by scripts/mobile/door.ts from packages/server/inbox-devices.ts (doorRouteTable) and inbox-outbox.ts. Do not edit.',
       prefix: '/api/inbox/device/',
       routes: doorEntries(),
     }),
