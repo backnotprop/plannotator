@@ -57,6 +57,7 @@ export function PullThreadStart({
   phone,
   stacked = false,
   onClose,
+  onHide,
   onLeave,
   onGuide,
   onDiff,
@@ -70,6 +71,8 @@ export function PullThreadStart({
   stacked?: boolean;
   /** The pane's Close (or `‹ Reviews`): leaves nothing behind. */
   onClose: () => void;
+  /** The bar's Hide, as on the PR's page: leaves nothing behind either. */
+  onHide?: () => void;
   /** Escape, or the bin: back to the PR's page. */
   onLeave: () => void;
   /** Guided review: New review filled in with this PR (the launchpad's Start a guided review). Null: not offered. */
@@ -164,7 +167,7 @@ export function PullThreadStart({
       data-pulls-stack={stack.id}
       data-pull-thread-start=""
     >
-      <PullBar stack={stack} pr={pr} phone={phone} stacked={stacked} onClose={onClose} />
+      <PullBar stack={stack} pr={pr} phone={phone} stacked={stacked} onClose={onClose} onHide={onHide} />
       <div className="ib-pbody ib-pth-body">
         <h2 id={labelId} className="ib-sr">
           New thread about {pr.title}

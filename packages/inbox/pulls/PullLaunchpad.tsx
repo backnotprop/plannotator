@@ -101,7 +101,7 @@ export function PullPaneBack({ phone, stacked, onClose }: { phone: boolean; stac
  * thread's header does (headFit.ts): `‹ Reviews` shows its chevron alone before the PR's number and repository (its
  * subject) lose their room.
  */
-export function PullBar({ stack, pr, phone, stacked, onClose }: { stack: InboxPullStack; pr: InboxPull; phone: boolean; stacked: boolean; onClose: () => void }) {
+export function PullBar({ stack, pr, phone, stacked, onClose, onHide }: { stack: InboxPullStack; pr: InboxPull; phone: boolean; stacked: boolean; onClose: () => void; onHide?: () => void }) {
   const forge = forgeName(stack);
   const repo = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
   const bar = useRef<HTMLDivElement>(null);
@@ -124,6 +124,14 @@ export function PullBar({ stack, pr, phone, stacked, onClose }: { stack: InboxPu
         <Icon name="external" size={15} />
         {phone ? <span className="ib-sr">Open on {forge}</span> : `Open on ${forge}`}
       </a>
+      {onHide && (
+        <Tip content={`Hide from your lists. It stays open on ${forge}.`}>
+          <button type="button" className="ib-pr-ext" onClick={onHide} data-pulls-hide="">
+            <Icon name="eyeOff" size={15} />
+            {phone ? <span className="ib-sr">Hide</span> : 'Hide'}
+          </button>
+        </Tip>
+      )}
       {!phone && !stacked && (
         <Tip content="Close">
           <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close">
@@ -154,6 +162,7 @@ export function PullLaunchpad({
   onThread,
   onGuide,
   onShape,
+  onHide,
   foot,
 }: {
   stack: InboxPullStack;
@@ -184,6 +193,8 @@ export function PullLaunchpad({
   onThread: (threadId: string) => void;
   onGuide: (threadId: string, messageId: string) => void;
   onShape: (shape: InboxShapeSummary) => void;
+  /** Hide the PR from the lists (hiddenPulls.ts); nothing changes on the forge. Absent: no Hide. */
+  onHide?: () => void;
   foot: ReactNode;
 }) {
   const forge = forgeName(stack);
@@ -207,7 +218,7 @@ export function PullLaunchpad({
   const named = mentioned ? given : null;
   return (
     <section className="ib-pane ib-prpane ib-lp" aria-labelledby={titleId} data-pulls-stack={stack.id} data-launchpad="">
-      <PullBar stack={stack} pr={pr} phone={phone} stacked={stacked} onClose={onClose} />
+      <PullBar stack={stack} pr={pr} phone={phone} stacked={stacked} onClose={onClose} onHide={onHide} />
       <div className="ib-pr-body ib-lp-body">
         <div className="ib-lp-wrap">
           <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">

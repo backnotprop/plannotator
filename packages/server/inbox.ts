@@ -331,6 +331,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createInboxPullLooked, pullLookedSeenOf } from "./inbox-pull-looked";
+import { createInboxPullHidden, pullHiddenBodyOf, reviewRowsShown, threadPullsHidden, threadStaysHidden, type PullToHide } from "./inbox-pull-hidden";
 import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { pullMediaResponse, pullMediaSizesResponse } from "./inbox-pull-media";
@@ -348,7 +349,7 @@ import { createInboxTagsRoute } from "./inbox-tags";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
-import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
+import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
@@ -573,6 +574,8 @@ export interface InboxServerOptions {
   tailscale?: TailscaleRunner;
   /** Tests: the clock of "Over your tailnet"'s publish-again retry (inbox-tailscale.ts). Default: unref'd timers. */
   tailscaleTimers?: InboxTailscaleTimers;
+  /** Tests: the tailnet door's look-again clock (`INBOX_DOOR_REPUBLISH` in inbox-devices.ts). */
+  doorTimers?: InboxDoorTimers;
   cloudflareAccess?: Pick<InboxCfAccessContext, "fetchKeys" | "now" | "tunnel" | "sessionAlive" | "log">;
   cloudflareAccessRoutes?: CfAccessRouteHooks;
   /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
@@ -1290,6 +1293,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
   const pinListeners = new Set<() => void>();
+  /** Hidden PRs changed (inbox-pull-hidden.ts): the windows' streams say `event: pulls-hidden` and read the lists again. */
+  const pullHiddenListeners = new Set<() => void>();
   /** The person's Priority changed (inbox-priority.ts): the windows' streams say `event: priority`. */
   const priorityListeners = new Set<() => void>();
   /** The pinned artifacts changed (inbox-artifact-pins.ts): the windows' streams say `event: artifact-pins`. */
@@ -1433,6 +1438,127 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
   const pullLooked = createInboxPullLooked(dataDir);
+  // PRs the person hid from Reviews, the PR board and the Inbox list (inbox-pull-hidden.ts): nothing is done on the forge.
+  const pullHidden = createInboxPullHidden(dataDir);
+  const pullHiddenChanged = () => {
+    for (const listener of pullHiddenListeners) listener();
+  };
+  // The thread each open PR's review or hand-off links it to, as the lists last read it (`linkInboxPulls`): with the
+  // threads' own PR lists, how the Inbox list knows a thread whose PRs are all hidden. In memory; a hidden PR keeps
+  // its thread in its record. `pullThreadsRead`: a pulls or reviews read filled it since this Inbox started.
+  const pullThreads = new Map<string, { thread_id: string; title: string; url: string }>();
+  let pullThreadsRead = false;
+  const notePullThreads = (listed: readonly InboxPull[], links: Readonly<Record<string, { thread_id: string }>>) => {
+    let touched = !pullThreadsRead && pullHidden.list().length > 0;
+    pullThreadsRead = true;
+    for (const pull of listed) {
+      const thread = inboxPullIsOpen(pull) ? links[pull.key]?.thread_id : undefined;
+      const was = pullThreads.get(pull.key)?.thread_id;
+      if (thread) pullThreads.set(pull.key, { thread_id: thread, title: pull.title, url: pull.url });
+      else pullThreads.delete(pull.key);
+      if (was !== thread && pullHidden.has(pull.key)) touched = true;
+    }
+    if (touched) pullHiddenChanged();
+  };
+  /** The thread a PR belongs to now (its review's or hand-off's, else a thread whose own PR list has it): built once per call. */
+  const pullThreadLookup = (): ((key: string) => string | null) => {
+    const owners = pullOwners.all();
+    const coupled = new Map<string, string>();
+    for (const record of store.allThreadPulls()) if (!coupled.has(record.pull)) coupled.set(record.pull, record.thread_id);
+    return (key) => pullThreads.get(key)?.thread_id ?? owners.get(key)?.thread_id ?? coupled.get(key) ?? null;
+  };
+  /** The hidden PRs, each with its thread (as hidden, else as now). */
+  const hiddenList = () => {
+    const list = pullHidden.list();
+    const threadOf = list.some((hidden) => !hidden.thread_id) ? pullThreadLookup() : null;
+    return list.map((hidden) => {
+      const thread = hidden.thread_id ?? threadOf?.(hidden.key);
+      return thread && !hidden.thread_id ? { ...hidden, thread_id: thread } : hidden;
+    });
+  };
+  /**
+   * Each thread's PRs still in play, for the Inbox list's Hide: its own PR list's (not merged or closed), its review's
+   * and hand-off's open PRs, and the hidden PRs that belong to it. A thread PR seen merged or closed forgets its hide.
+   * Until a pulls or reviews read has filled the links since start, its own PR list alone: a thread is never left out
+   * on what is not known yet.
+   */
+  const threadPullsInPlay = (records: readonly InboxThreadPull[]) => {
+    if (pullHidden.settle(records.map((record) => ({ key: record.pull, state: record.state === "unknown" ? "open" : record.state })))) pullHiddenChanged();
+    const out = new Map<string, Map<string, PullToHide>>();
+    const add = (threadId: string, pull: PullToHide) => {
+      let pulls = out.get(threadId);
+      if (!pulls) out.set(threadId, (pulls = new Map()));
+      if (!pulls.has(pull.key)) pulls.set(pull.key, pull);
+    };
+    for (const record of records) {
+      if (record.state !== "merged" && record.state !== "closed") add(record.thread_id, { key: record.pull, title: record.title ?? record.url, url: record.url, thread_id: record.thread_id });
+    }
+    if (!pullThreadsRead) return out;
+    for (const [key, link] of pullThreads) add(link.thread_id, { key, ...link });
+    for (const owner of pullOwners.all()) {
+      const pull = pulls.find(owner[0]);
+      if (pull && inboxPullIsOpen(pull)) add(owner[1].thread_id, { key: pull.key, title: pull.title, url: pull.url, thread_id: owner[1].thread_id });
+    }
+    for (const hidden of pullHidden.list()) if (hidden.thread_id) add(hidden.thread_id, hidden);
+    return out;
+  };
+  /**
+   * The Inbox list's Hide now (inbox-pull-hidden.ts), or null while Code review is off (nothing left out, no Hide
+   * offered): each thread's PRs to hide, and whether a thread stays out (`threadStaysHidden`: never pinned or snoozed,
+   * and only until something newer than its newest hide happens in it). `rows` are as the list draws them (a snooze
+   * already applied). A thread that came back is kept back (`markBack`, on `keep`).
+   */
+  const listHiding = (records: readonly InboxThreadPull[], now: Date) => {
+    if (!codeReviewOn()) return null;
+    const inPlay = threadPullsInPlay(records);
+    const { gone, hideable } = threadPullsHidden(inPlay, (key) => pullHidden.atOf(key));
+    const pinned = new Set(store.pins().map((pin) => pin.thread_id));
+    const attention = gone.size > 0 ? launch.attentionSince() : () => null;
+    const back: { thread_id: string; at: string }[] = [];
+    /** Its newest hide: its PRs' newest, or its own re-hide when later. */
+    const hiddenAtOf = (threadId: string) => {
+      const at = gone.get(threadId);
+      if (at === undefined) return undefined;
+      const again = pullHidden.rehidOf(threadId);
+      return again && again > at ? again : at;
+    };
+    /**
+     * The row menu's and the picks' Hide: the PRs not hidden yet; for a thread whose PRs are all hidden and that is
+     * listed (it came back, or began after they were hidden), its hidden ones, so it can be hidden again.
+     */
+    const offer = (row: InboxListRow): string[] | undefined => {
+      const left = hideable.get(row.thread_id);
+      if (left) return left.map((pull) => pull.key);
+      if (!gone.has(row.thread_id) || pinned.has(row.thread_id) || inboxRowSnoozed(row, now)) return undefined;
+      return [...(inPlay.get(row.thread_id)?.keys() ?? [])];
+    };
+    const out = (row: InboxListRow): boolean => {
+      const hiddenAt = hiddenAtOf(row.thread_id);
+      if (hiddenAt === undefined) return false;
+      const activity = [row.last_at, row.snooze_back, attention(row.thread_id), pullHidden.backOf(row.thread_id)];
+      const stays = threadStaysHidden(hiddenAt, { pinned: pinned.has(row.thread_id), snoozed: inboxRowSnoozed(row, now), activity });
+      if (!stays && !pinned.has(row.thread_id) && !inboxRowSnoozed(row, now)) {
+        const newest = activity.reduce<string>((max, at) => (at && at > max ? at : max), "");
+        if (newest > hiddenAt) back.push({ thread_id: row.thread_id, at: newest });
+      }
+      return stays;
+    };
+    return { out, offer, inPlay, keep: () => back.length > 0 && pullHidden.markBack(back) };
+  };
+  /** The threads (not archived) the Inbox list leaves out for their hidden PRs now, by id: a Hide's toast counts the change. */
+  const threadsHiddenNow = (): Set<string> => {
+    const hiding = listHiding(store.allThreadPulls(), new Date());
+    if (!hiding) return new Set();
+    const byThread = snoozesById();
+    const now = new Date();
+    return new Set(
+      store
+        .listRows()
+        .map((row) => withSnooze(row, byThread, now))
+        .filter((row) => !inboxRowArchived(row) && hiding.out(row))
+        .map((row) => row.thread_id),
+    );
+  };
   // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
   const pullRisk = createPullRisk({ dataDir, pulls, roots: (key) => pullRoots(key), isOn: () => codeReviewOn(), branchesOn: () => branchReviewsOn(), ...options.pullRisk });
   // Branch reviews (inbox-branch-service.ts): agents report a branch ready for review; nothing in it runs by itself.
@@ -1809,7 +1935,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * machine): every linked machine's rows join this Inbox's, each row with
    * its `machine`, plus the `machines` block. Without it, this Inbox's own.
    */
-  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include") => {
+  /**
+   * `hidePulls` (the window's and the phone's reads, never a linked machine's; only while Code review is on): a thread
+   * whose PRs still in play are all hidden (inbox-pull-hidden.ts) is left out, from the sections, the folders' counts
+   * and the agents' counts alike, until something newer than its newest hide happens in it; never a pinned or a
+   * snoozed one (`listHiding`). Each row carries `hide_pulls`, its open PRs not hidden. Nothing is written to the thread.
+   */
+  const listModel = (projectFilter: string | null, archived: "include" | "exclude", merged = false, snoozedMode: "include" | "exclude" = "include", hidePulls = false) => {
     // One pass over the store feeds both the folders' counts and the sections.
     // `pinned_at`, `snoozed` and `priority` (additive) on the window's and the phone's rows only: never on anything an agent reads.
     const pinnedAt = new Map(store.pins().map((pin) => [pin.thread_id, pin.pinned_at]));
@@ -1837,7 +1969,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // mark without a read. The threads not archived have their PRs still in play read now, off the request path:
     // a changed state lands as a `thread_pull` line and the window reads the list again.
     const pullsByThread = new Map<string, InboxThreadPull[]>();
-    for (const pull of store.allThreadPulls()) {
+    const threadPulls = store.allThreadPulls();
+    const hiddenPulls = hidePulls ? listHiding(threadPulls, now) : null;
+    const withHidePulls = (row: InboxListRow): InboxListRow => {
+      const keys = hiddenPulls?.offer(row);
+      return keys && keys.length > 0 ? { ...row, hide_pulls: keys } : row;
+    };
+    for (const pull of threadPulls) {
       const list = pullsByThread.get(pull.thread_id);
       if (list) list.push(pull);
       else pullsByThread.set(pull.thread_id, [pull]);
@@ -1853,11 +1991,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const tags = tagsOf.get(row.thread_id);
       return tags ? { ...row, tags } : row;
     };
-    const own = store
+    const allOwn = store
       .listRows()
-      .map((row) => withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now)))));
+      .map((row) => withHidePulls(withTags(withPriority(withPulls(withSnooze(withStepsWaiting(decorate(pinnedAt.has(row.thread_id) ? { ...row, pinned_at: pinnedAt.get(row.thread_id)! } : row)), byThread, now))))));
+    const own = hiddenPulls ? allOwn.filter((row) => !hiddenPulls.out(row)) : allOwn;
+    hiddenPulls?.keep();
     if (pullsByThread.size > 0) {
-      const onView = own.filter((row) => row.pulls && !inboxRowArchived(row)).flatMap((row) => pullsByThread.get(row.thread_id) ?? []);
+      // A thread left out for its hidden PRs is read too: a merge or close seen there brings it back.
+      const onView = allOwn.filter((row) => row.pulls && !inboxRowArchived(row)).flatMap((row) => pullsByThread.get(row.thread_id) ?? []);
       if (onView.length > 0) void threadPullStates.refresh(onView);
     }
     // A linked machine never lists an id this store holds (archived and pinned included): its row is dropped, never merged.
@@ -1891,7 +2032,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const unarchived = archived === "exclude" ? scoped.filter((row) => !inboxRowArchived(row)) : scoped;
     const listed = snoozedMode === "exclude" ? inboxSplitSnoozed(unarchived, now) : null;
     // The sidebar's Agents (inbox-agents-list.ts): this machine's from its own rows, every linked machine's from its list.
-    const ownAgents = agentsOf(own, now);
+    // Its rows before the Hide's filter (the archived set), but a thread left out for its hidden PRs is no wait: a
+    // running agent stays listed in its own state, and its waiting count, "Waiting on you" and rank come from the
+    // threads still listed.
+    const ownAgents = agentsOf(allOwn, now, own.length === allOwn.length ? undefined : new Set(own.map((row) => row.thread_id)));
     return {
       serverSession,
       version,
@@ -1950,7 +2094,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /** This Inbox's agents for the list model (inbox-agents-list.ts), from its own rows (decorated) and the live sessions. */
-  const agentsOf = (own: InboxListRow[], now: Date): InboxAgentsGroup => {
+  const agentsOf = (own: InboxListRow[], now: Date, listed?: ReadonlySet<string>): InboxAgentsGroup => {
     const projectById = (id: string) => {
       const project = store.project(store.canonicalProjectId(id));
       return project ? { id: project.id, name: project.name } : null;
@@ -1966,7 +2110,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if ((row.section !== "stopped" && row.section !== "holding" && row.section !== "waiting") || inboxRowSnoozed(row, now)) continue;
       const owner = store.threadOwner(row.thread_id);
-      if (owner) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
+      // A thread left out for its hidden PRs is no wait: no count, no "Waiting on you", no rank, and it lists no agent
+      // that is not running (an ended one shows ended, with nothing waiting).
+      if (owner && (!listed || listed.has(row.thread_id))) waits.push({ thread_id: row.thread_id, session: owner.session, host: owner.host, project: row.project, at: row.last_agent_at ?? row.last_at });
     }
     return inboxAgentsGroup({
       sessions: live.agentSessions(inboxStartOfDay(live.clock())),
@@ -3955,6 +4101,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Windows, and a linked machine that asks (`pins=1`: a star writes no record, inbox-peer-link.ts).
         const onPins = () => send(`event: pins\ndata: {}\n\n`);
         if (windowId || url.searchParams.get("pins") === "1") pinListeners.add(onPins);
+        // Hidden PRs changed (inbox-pull-hidden.ts; this window's Hide, another's, or a read that saw one merged): the
+        // list, Reviews and the board read again. Windows only: a linked machine's lists hide by its own records.
+        const onPullsHidden = () => send(`event: pulls-hidden\ndata: {}\n\n`);
+        if (windowId) pullHiddenListeners.add(onPullsHidden);
         // The person's Priority changed (any window's, a phone's, a linked machine's, an archive, or a deletion): the list
         // is read again. Windows, and a linked machine that asks (`priority=1`, as `pins=1`).
         const onPriority = () => send(`event: priority\ndata: {}\n\n`);
@@ -4049,6 +4199,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           draftListeners.delete(onDraft);
           askListeners.delete(onAsk);
           pinListeners.delete(onPins);
+          pullHiddenListeners.delete(onPullsHidden);
           priorityListeners.delete(onPriority);
           threadTagListeners.delete(onThreadTags);
           artifactPinListeners.delete(onArtifactPins);
@@ -5558,7 +5709,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const archivedMode = archivedModeOf(url);
         const merged = url.searchParams.get("machines") === "1";
         const snoozedMode = snoozedModeOf(url);
-        const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
+        // A linked machine's read lists every thread: its own window hides by its own records (inbox-pull-hidden.ts).
+        const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode, fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM));
         const labels = merged ? { ...machines.sessionNames().labels, ...live.labels() } : live.labels();
         const titles = { ...(merged ? machines.sessionNames().titles : {}), ...live.titles() };
         // A linked machine's read carries this Inbox's agent faces and given names in its group: they live here
@@ -5680,6 +5832,43 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ serverSession, looked: pullLooked.mark(pullLookedSeenOf(body, Date.now())) });
       }
+      // Hide a PR from Reviews, the PR board, the Inbox list and their counts, or show it again (inbox-pull-hidden.ts).
+      // `threads`: the Inbox list's Hide, every open PR of those threads not hidden yet. Kept on this machine only, never
+      // sent to the forge; same guards as the list. Answers the hidden list and `hid`, the keys this write hid (Undo
+      // shows exactly those). Inbox-only (Bun).
+      if (path === "/api/inbox/pulls/hidden") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const input = pullHiddenBodyOf(body);
+        const inPlay = input.threads.length > 0 ? threadPullsInPlay(store.allThreadPulls()) : null;
+        const threadIds = [...new Set(input.threads.map((id) => store.message(id)?.thread_id ?? id))];
+        const fromThreads = threadIds.flatMap((id) => [...(inPlay?.get(id)?.values() ?? [])]);
+        const threadOf = input.hide.length > 0 ? pullThreadLookup() : () => null;
+        const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].filter((pull, i, all) => !pullHidden.has(pull.key) && all.findIndex((other) => other.key === pull.key) === i);
+        // A thread whose PRs were all hidden already (it came back, or began after they were hidden): hidden again as
+        // a thread (`rehid`), newer than what brought it back. Undo (`show_threads`) takes that off; its PRs stay hidden.
+        const rehid = threadIds.filter((id) => {
+          const pulls = inPlay?.get(id);
+          return !!pulls && pulls.size > 0 && [...pulls.keys()].every((key) => pullHidden.has(key));
+        });
+        // `threads_left`: the threads this write takes out of the Inbox list (the toast says so; Undo brings them back).
+        // `threads_back`: the ones it brings back (Undo, Show again): the window puts them back in place at once, as
+        // its own write, never behind "N new".
+        const before = threadsHiddenNow();
+        const at = new Date();
+        pullHidden.change({ hide, show: input.show }, at);
+        if (rehid.length > 0 || input.show_threads.length > 0) pullHidden.rehide({ hide: rehid, show: input.show_threads }, at);
+        const after = threadsHiddenNow();
+        const left = [...after].filter((id) => !before.has(id));
+        const back = [...before].filter((id) => !after.has(id));
+        pullHiddenChanged();
+        return json({ serverSession, hidden: hiddenList(), hid: hide.map((pull) => pull.key), rehid, threads_left: left, threads_back: back });
+      }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -5790,9 +5979,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, new Map([...(await branchService.owners(listed.pulls, projectsByRepo)), ...pullOwnersNow()]));
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
+        // Hidden PRs leave the window's lists (a linked machine reading this board gets them all: its window hides by its own).
+        // A record goes only when a read sees its PR merged or closed: a PR this read does not list is kept.
+        const byWindow = fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM;
+        let settled = pullHidden.settle(listed.pulls);
+        notePullThreads(listed.pulls, links);
         const own = { ...listed, pulls: pullLooked.on(listed.pulls), links, projects: Object.fromEntries(projectsByRepo), cards };
         const farBoards = far ? far() : [];
-        return json({ serverSession, ...(farBoards.length > 0 ? mergePullBoards(own, farBoards) : own) });
+        const board = farBoards.length > 0 ? mergePullBoards(own, farBoards) : own;
+        if (farBoards.length > 0) settled = pullHidden.settle(board.pulls) || settled;
+        if (settled) pullHiddenChanged();
+        return json({ serverSession, ...board, ...(byWindow ? { pulls: pullHidden.shown(board.pulls), hidden: hiddenList() } : {}) });
       }
       // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
       // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
@@ -5817,7 +6014,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const branchOwners = await branchService.owners(listed.pulls, projectsByRepo);
         const owners = new Map([...branchOwners, ...pullOwnersNow()]);
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, owners);
-        const stacks = inboxPullStacks(listed.pulls);
+        // Hidden PRs (inbox-pull-hidden.ts) are left out of the rows, never out of the records below; a linked machine's read gets them all.
+        const byWindow = fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM;
+        if (!cached && pullHidden.settle(listed.pulls)) pullHiddenChanged();
+        if (!cached) notePullThreads(listed.pulls, links);
+        const shownPulls = byWindow ? pullHidden.shown(listed.pulls) : listed.pulls;
+        const hiddenKeys = byWindow ? listed.pulls.filter((pull) => pullHidden.has(pull.key)).map((pull) => pull.key) : [];
+        const stacks = inboxPullStacks(shownPulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
         const threads = reviewIndex.threads();
         const changes = inboxReviewLandingChanges({ threads, pulls: listed.pulls, links, landed: pullOwners.landings() });
@@ -5831,13 +6034,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const row = store.listRow(threadId);
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
-        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: new Map([...branchOwners, ...pullOwners.all()]), posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
+        const allOwners = new Map([...branchOwners, ...pullOwners.all()]);
+        const rows = reviewRowsShown(
+          inboxReviewRows({ threads, stacks, links, pulls: shownPulls, pullReasons, landed: pullOwners.landings(), owners: allOwners, posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true }),
+          hiddenKeys,
+          (key) => links[key]?.thread_id ?? allOwners.get(key)?.thread_id ?? null,
+        );
         // Branch reviews: the branches agents reported on each linked machine, as last read (never waited for). A
         // linked machine reading this list gets this machine's own rows only.
         const branchesOn = branchReviewsOn();
         const farBranches = branchesOn && fromDeviceDoor.get(req)?.platform !== MACHINE_PLATFORM ? machines.branchLists()() : null;
         if (farBranches) rows.push(...farBranches.rows.map(inboxFarBranchReviewRow));
-        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}) });
+        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo), ...(branchesOn ? { branch_reviews: true } : {}), ...(farBranches?.pending ? { branches_pending: true } : {}), ...(byWindow ? { hidden: hiddenList() } : {}) });
       }
       // New review's Pull request link: what a pasted link is. One read of that one PR, unless the list already has it.
       if (path === "/api/inbox/reviews/link") {
@@ -7642,6 +7850,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         read: () => updates.machineRead(),
         start: () => updates.machineStart(),
       },
+      doorTimers: options.doorTimers,
+      // The door published again by itself (Tailscale came back): the windows' machines block loses its reason.
+      // Linked machines dial again on their own (their back-off is 30 s at most).
+      onDoorRepublished: () => machines?.machinesChanged(),
     });
     phones = devices;
     machines = createInboxMachines({
