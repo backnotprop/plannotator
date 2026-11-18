@@ -2202,7 +2202,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       refreshItem(itemId);
     };
     void client.diff(file.path, oldText, newText, signal).then((result) => {
-      if (stale()) return;
+      if (stale()) {
+        if (semTextsRef.current.get(itemId)?.signal === signal && semStateRef.current.get(itemId)?.status === 'working') settleEmpty();
+        return;
+      }
       if (!result) settleEmpty();
       else applySemanticResult(itemId, file, oldText, newText, generation, stale, result, settleEmpty, swap);
       runPowerUp(itemId);
@@ -2313,7 +2316,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (data?.oldContent == null || data.newContent == null) return none();
         // The file may have moved on since this diff was captured: whole text that no longer fits would break the layout.
         if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) return none();
-        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, controller.signal, false);
+        if (semTextsRef.current.get(itemId)?.generation !== generation) runSemantic(itemId, file, data.oldContent, data.newContent, generation, new AbortController().signal, false);
         return {
           oldFile: { name: file.oldPath || file.path, contents: data.oldContent },
           newFile: { name: file.path, contents: data.newContent },
