@@ -23,6 +23,8 @@ import { Tip } from '../components/Tip';
 import { VoiceMicButton, VoiceStatusLine } from '../components/VoiceMic';
 import { useComposeSessions } from '../compose/useComposeSessions';
 import { Icon } from '../icons';
+import { useShortcutAria } from '../shortcuts/hint';
+import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { inboxSkillFilter } from '../skills';
 import { newUuid } from '../uuid';
 import { useVoiceSession } from '../voice';
@@ -96,6 +98,8 @@ export function PullThreadStart({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const voice = useVoiceSession();
+  // The reply box's own Send keys (the thread's registry), named for screen readers as every Send names them.
+  const sendAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // One key per press series: the same words to the same agent replay the same Send.
   const key = useRef(newUuid());
   const keyFor = useRef('');
@@ -218,7 +222,7 @@ export function PullThreadStart({
             onFold={() => {}}
             fitKey=""
             send={
-              <button type="button" className="ib-btn ib-pri ib-rsend" data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts="Meta+Enter Control+Enter">
+              <button type="button" className="ib-btn ib-pri ib-rsend" data-reply-send="" onClick={() => void send()} disabled={sending || voice.busy} aria-keyshortcuts={sendAria}>
                 {sending && <span className="ib-spin" aria-hidden="true" />}
                 {phone && <Icon name="arrowUp" size={20} className="ib-rsend-i" />}
                 <span className="ib-rsend-w">Send</span>
