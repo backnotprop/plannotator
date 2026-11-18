@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { basename, join, resolve } from "node:path";
-import { openCodeSessionModel, parseOpenCodeModels } from "@plannotator/core/inbox-launch-choice";
+import { inboxLaunchTokenOk, openCodeSessionModel, parseOpenCodeAgents, parseOpenCodeModels } from "@plannotator/core/inbox-launch-choice";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { OPENCODE_LAUNCH_ENV, OPENCODE_LAUNCH_SESSION_ENV, openCodeSessionIdOk } from "@plannotator/shared/inbox/opencode-launch";
@@ -329,13 +329,27 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
     const e = await ctx.environment();
     const path = binOf(e);
     if (!path) return null;
-    const listed = await e.run([path, "--standalone", "api", "GET", "/api/model"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir });
+    // The models, and OpenCode's own agents (build, plan, …) a session can start as: an agent list that can't be
+    // read leaves no Agent column, never the models.
+    const [listed, agents] = await Promise.all([
+      e.run([path, "--standalone", "api", "GET", "/api/model"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir }),
+      e.run([path, "--standalone", "api", "GET", "/api/agent"], { timeoutMs: LAUNCH_CHOICES_RUN_MS, cwd: ctx.homeDir }).catch(() => null),
+    ]);
     if (listed.exitCode !== 0 || listed.timedOut) return null;
+    let models: ReturnType<typeof parseOpenCodeModels>;
     try {
-      return parseOpenCodeModels(JSON.parse(listed.stdout));
+      models = parseOpenCodeModels(JSON.parse(listed.stdout));
     } catch {
       return null;
     }
+    if (!models) return null;
+    let primary: string[] | null = null;
+    try {
+      primary = agents && agents.exitCode === 0 && !agents.timedOut ? parseOpenCodeAgents(JSON.parse(agents.stdout)) : null;
+    } catch {
+      primary = null;
+    }
+    return primary && primary.length > 0 ? { ...models, primary_agents: primary } : models;
   });
 
   return {
@@ -375,7 +389,14 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       };
       const model = await sessionModel(s, launch);
       if (launch.model && !model) return failed("OpenCode takes a model as provider/model, such as opencode/big-pickle");
-      const created = await json<{ data?: { id?: unknown } }>(s, "POST", "/api/session", { location: { directory: launch.folder }, title: input.name.trim() || "Inbox", ...(model ? { model } : {}) }).catch((error: unknown) => {
+      // OpenCode's own agent (build, plan, …) as picked beside the model; absent, OpenCode's default.
+      const agent = inboxLaunchTokenOk(launch.primary_agent) ? launch.primary_agent : null;
+      const created = await json<{ data?: { id?: unknown } }>(s, "POST", "/api/session", {
+        location: { directory: launch.folder },
+        title: input.name.trim() || "Inbox",
+        ...(model ? { model } : {}),
+        ...(agent ? { agent } : {}),
+      }).catch((error: unknown) => {
         ctx.startLog(launch.id, `POST /api/session: ${error instanceof Error ? error.message : String(error)}`);
         return null;
       });
@@ -383,7 +404,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       if (!openCodeSessionIdOk(session)) return failed("OpenCode did not make a session");
       s.session = session;
       procs.set(session, s);
-      ctx.startLog(launch.id, `session ${session}${model ? ` on ${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}` : ""}`);
+      ctx.startLog(launch.id, `session ${session}${model ? ` on ${model.providerID}/${model.id}${model.variant ? `#${model.variant}` : ""}` : ""}${agent ? `, agent ${agent}` : ""}`);
       return { ok: true as const, session, ref: session };
     },
 

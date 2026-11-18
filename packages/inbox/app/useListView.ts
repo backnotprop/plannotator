@@ -18,7 +18,7 @@ import { routineHold, useRoutineThreads } from '../listFilterRoutines';
 import { useThreadTagsHost } from '../useThreadTagsHost';
 import { projectsWithReadable, shownProjects } from '../projectMenu';
 import { projectActivity } from '../projectSort';
-import type { Route } from './route';
+import { listProjectOf, type Route } from './route';
 import type { RowWrites } from '../data/actions/rows';
 import type { ListModel, ProjectFolder } from '../api';
 import type { MachinesModel } from '../machines';
@@ -92,15 +92,16 @@ export function useListShown({ latest, projects, route, thread, threadRow, rowPa
   );
   /** The sidebar's Machines counts: rows waiting on the person per machine, as Projects counts them. */
   const sidebarMachineCounts = useMemo(() => machineCounts(latestSections, machines), [latestSections, machines]);
+  const listProject = listProjectOf(route);
   const filterList = useCallback(
     (sections: readonly InboxListSection[]) =>
-      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
-    [route.project, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
+      filterTagRows(filterAgentRows(filterMachineRows(filterSections(sections, listProject), machines, filterMachine?.id ?? null, hideAway), filterAgent, machines.self), shownTagId, tagsOfRow),
+    [listProject, machines, filterMachine, filterAgent, hideAway, shownTagId, tagsOfRow],
   );
   // The list's filter (listFilter.ts): this browser's picks; on a project's page its Project picks step aside, on a
   // tag's list its Tag picks. The day is in the keys so Today and the last N days move on at midnight.
   const [listFilterPicks, setListFilter] = useListFilter();
-  const listFilterScoped = route.project !== null;
+  const listFilterScoped = listProject !== null;
   const listFilterDay = localDay(Date.now());
   // Until the list is read its tags are not known: the Tag picks hold (no moment of unfiltered rows).
   const listTags = latest ? tags.listTags : undefined;

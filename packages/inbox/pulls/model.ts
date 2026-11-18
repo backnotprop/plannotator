@@ -58,12 +58,23 @@ export function pullViewOf(pull: Pick<InboxPull, 'mine' | 'requested' | 'assigne
 }
 
 /**
+ * Reviews' project rule, the board's too (`reviewRowsIn`, `pullGroups`, `boardInProject`): a PR is in a project when
+ * its repository is a clone of the project (the repository-to-project map; two clones of one origin are two projects),
+ * when its head is (a fork-based project: the clone is the person's fork, the PR goes to upstream), or when its thread
+ * (its review, hand-off or report: `threadProject`) is in the project.
+ */
+export function pullInProject(pull: Pick<InboxPull, 'host' | 'repo' | 'head_repo'>, project: string, projects: Readonly<Record<string, readonly string[]>>, threadProject?: string | null): boolean {
+  if (threadProject === project) return true;
+  if ((projects[`${pull.host}/${pull.repo}`.toLowerCase()] ?? []).includes(project)) return true;
+  return !!pull.head_repo && (projects[`${pull.host}/${pull.head_repo}`.toLowerCase()] ?? []).includes(project);
+}
+
+/**
  * The answer as the page shows it: the rows by whose move it is, only the chosen project's when one is, and only the
  * chosen view's. A stack stays whole: it is built from every PR, then kept when any open layer is in the view.
  */
 export function pullGroups(answer: InboxPullsAnswer, project: string | null, filter: PullFilter = 'all'): InboxPullGroups {
-  const projectsOf = (pull: InboxPull) => answer.projects[`${pull.host}/${pull.repo}`.toLowerCase()] ?? [];
-  const pulls = project ? answer.pulls.filter((p) => projectsOf(p).includes(project)) : answer.pulls;
+  const pulls = project ? answer.pulls.filter((p) => pullInProject(p, project, answer.projects, answer.links[p.key]?.project_id)) : answer.pulls;
   const stacks = inboxPullStacks(pulls).filter((stack) => filter === 'all' || stack.layers.some((l) => isOpenPull(l) && pullViewOf(l) === filter));
   return inboxPullGroups(inboxPullItems(stacks, (pull) => !!answer.links[pull.key]));
 }
