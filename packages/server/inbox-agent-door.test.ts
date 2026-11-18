@@ -276,7 +276,7 @@ describe("the agent door", () => {
     expect(canvas.personSave(threadId, { base: canvas.meta(threadId).rev, elements: elements.map((e) => (e.id === "title" ? { ...e, x: 60 } : e)), files: {} }).ok).toBe(true);
     const line = canvasChangedLine(threadId);
 
-    const local = (await w.mcp.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses-pi", agent_host: "pi" } })) as { content: { text: string }[] };
+    const local = (await w.mcp.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: "ses-local-reader" } })) as { content: { text: string }[] };
     expect(local.content.map((c) => c.text).join("\n")).toContain(line);
     const read = await w.door(pairing.token, "read_thread", { thread_id: threadId });
     expect(read.error).toBeNull();
