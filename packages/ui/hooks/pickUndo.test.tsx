@@ -79,7 +79,14 @@ class FakeEditing {
       else return false;
       return true;
     };
+    // Chromium's editing: the engine the edit path is for (utils/undoableEdit.ts `chromiumEditing`).
+    const nav = navigator as Navigator & { userAgentData?: unknown };
+    const hadBrands = Object.prototype.hasOwnProperty.call(nav, 'userAgentData');
+    const brands = nav.userAgentData;
+    Object.defineProperty(nav, 'userAgentData', { configurable: true, writable: true, value: { brands: [{ brand: 'Chromium', version: '150' }] } });
     this.restore.push(() => {
+      if (hadBrands) Object.defineProperty(nav, 'userAgentData', { configurable: true, writable: true, value: brands });
+      else delete (nav as { userAgentData?: unknown }).userAgentData;
       Object.defineProperty(proto, 'value', value);
       proto.setSelectionRange = setSelectionRange;
       if (hadExec) doc.execCommand = exec;
@@ -315,6 +322,15 @@ describe.if(hasDom)('a pick from the list is its own undo step', () => {
     expect(field.value).toBe('kept draft /deploy-preview ');
     expect(await walk(field, 'undo', 3)).toEqual(['kept draft /dep', 'kept draft ', 'kept draft ']);
     expect(editing.outOfBand).toBe(0);
+  });
+
+  test('another engine (WebKit, Firefox) takes the pick as before: the words are written, not edited', async () => {
+    const field = await mount();
+    (navigator as Navigator & { userAgentData?: unknown }).userAgentData = undefined;
+    await step(() => editing.type(field, 'Run /dep'));
+    await step(() => api!.skills.select(0));
+    expect(field.value).toBe('Run /deploy-preview ');
+    expect(editing.outOfBand).toBe(1);
   });
 
   test('a field without focus still takes the pick (written as before, no editing to go through)', async () => {

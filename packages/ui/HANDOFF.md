@@ -3299,6 +3299,7 @@ On the inline path the guard is placed without scanning the page, so no script o
 ## A pick from the `/`, `$` or `@` list is the browser's own edit (every host, no opt-in, no API change)
 
 - **`useSkillReferenceAutocomplete`** and **`useMentionAutocomplete`**: `select` writes the pick (and a command row's removal of its typed trigger) into the focused field with `execCommand('insertText')` over the replaced range, the typing run ended before and after, so it is one ⌘Z step of its own and the field's `input` event runs the host's onChange as typing does. Before, the words went through `setText` as a value write, outside the browser's undo stack, and Chrome then replayed older steps onto the new words (⌘Z after select all, Backspace, `Run /dep` and a pick read `Run /deploy-preview alpha beta gamma`). With the field not focused, or no `execCommand`, `setText` writes them as before. A host's `setText` is then called from its onChange, with the same words.
+- **Chromium only** (`chromiumEditing(navigator)`, `utils/undoableEdit`): in WebKit the `execCommand` pick merged with the typing before it and lost the earlier undo steps (one ⌘Z emptied the box), so WebKit and Firefox write the pick with `setText` as before.
 - **`replaceUndoably(field, from, to, insert)`** (new, `utils/undoableEdit`): the same for a host's own insertions into a field the person is typing in; false when it could not, and the host writes the words itself.
 
 Pinned by `packages/ui/hooks/pickUndo.test.tsx` and the reply-box case in `tests/e2e/inbox-compose-skill-picker.spec.ts`.
