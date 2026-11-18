@@ -2482,6 +2482,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     };
   }, [scrollEl, opensWholeFiles]);
 
+  useEffect(() => {
+    if (!semanticEnabled) return;
+    for (const itemId of itemNodeRef.current.keys()) if (!semDiffsRef.current.has(itemId)) prefetchWholeFile(itemId);
+  }, [semanticEnabled, prefetchWholeFile]);
+
   const handlePostRender = useStableCallback(
     (
       node: HTMLElement,
