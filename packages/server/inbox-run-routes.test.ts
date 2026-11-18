@@ -707,6 +707,7 @@ describe("the kept login env", () => {
       expect(await lostRunStillRunning(pgid, spawnedAt - 120_000, process.platform, processStartedAt, spawnedAt - 60_000)).toBeNull();
     } finally {
       try {
+        // inbox-guard: own child (the sleep group this test spawned, never an Inbox)
         process.kill(-pgid, "SIGKILL");
       } catch {}
     }
