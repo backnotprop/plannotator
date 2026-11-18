@@ -715,8 +715,7 @@ function Inbox() {
   const notifications = useInboxNotifications({
     settings: settings?.notifications ?? null,
     onArrival: sound.arrived,
-    // The bell owns a question's sound when it is on and armed and no other Inbox tab is in front (notify.ts adds: this tab away).
-    bellCovers: () => sound.settings.enabled && sound.armed && !sound.otherTabInFront(),
+    bellCovers: sound.covers,
     // Another Inbox tab in front raises what arrives; this one stays quiet.
     otherTabInFront: () => sound.otherTabInFront(),
     // A question in the thread the person has open and visible raises nothing (the tab in front is notify.ts's check).

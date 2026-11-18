@@ -12,7 +12,16 @@ function audioContextCtor(): AudioContextCtor | null {
   return w.AudioContext ?? w.webkitAudioContext ?? null;
 }
 
-/** One AudioContext for the page, made on the first gesture (or the first Play). */
+function autoplayPolicy(): string | null {
+  if (typeof navigator === 'undefined') return null;
+  const nav = navigator as Navigator & { getAutoplayPolicy?: (type: 'audiocontext') => string };
+  try {
+    return nav.getAutoplayPolicy?.('audiocontext') ?? null;
+  } catch {
+    return null;
+  }
+}
+
 class InboxAudio {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
@@ -21,6 +30,14 @@ class InboxAudio {
   arm(): void {
     const ctx = this.ensure();
     if (ctx && ctx.state === 'suspended') void ctx.resume().catch(() => {});
+  }
+
+  unlock(): boolean {
+    const ctx = this.ensure();
+    if (!ctx) return false;
+    const allowed = autoplayPolicy() === 'allowed';
+    if (allowed && ctx.state === 'suspended') void ctx.resume().catch(() => {});
+    return allowed || ctx.state === 'running';
   }
 
   play(volume: number, kind: InboxSoundKind, options: { create: boolean }): boolean {
@@ -131,8 +148,8 @@ async function withRingLock(kind: InboxSoundKind, ring: () => void): Promise<boo
 export interface InboxSound {
   /** The saved choice (on, at 60, until the Inbox says otherwise). */
   settings: InboxSoundSettings;
-  /** The tab has had a click or key press, so a ring can play. */
   armed: boolean;
+  covers: () => boolean;
   /** A preview is playing ("Playing…"). */
   playing: boolean;
   /** Play: always plays, tab in front or not, at `volume` (default: the saved one). */
@@ -202,6 +219,7 @@ export function useInboxSound(options: {
     const arm = () => {
       if (!userActivated()) return;
       audio.current?.arm();
+      armedRef.current = true;
       setArmed(true);
     };
     for (const type of ARMING_EVENTS) window.addEventListener(type, arm, { capture: true });
@@ -300,8 +318,12 @@ export function useInboxSound(options: {
     const now = Date.now();
     const decided = decideRing(gate.current, { now, kind, enabled: settingsRef.current.enabled, inFront: pageInFront(), otherTabInFront: otherTabInFront() });
     gate.current = decided.gate;
-    // Before the first click Chrome keeps the context suspended: the ring would be lost, so none is tried.
-    if (!decided.ring || !armedRef.current) return;
+    if (!decided.ring) return;
+    if (!armedRef.current) {
+      if (!audio.current?.unlock()) return;
+      armedRef.current = true;
+      setArmed(true);
+    }
     void withRingLock(kind, () => {
       audio.current?.play(settingsRef.current.volume, kind, { create: true });
       try {
@@ -311,6 +333,8 @@ export function useInboxSound(options: {
       }
     });
   }, [otherTabInFront]);
+
+  const covers = useCallback(() => settingsRef.current.enabled && armedRef.current && !otherTabInFront(), [otherTabInFront]);
 
   const preview = useCallback((volume?: number) => {
     // Play is a click: it arms the sound too.
@@ -337,5 +361,5 @@ export function useInboxSound(options: {
   const setEnabled = useCallback((next: boolean) => save({ enabled: next }), [save]);
   const setVolume = useCallback((next: number) => save({ volume: next }), [save]);
 
-  return { settings, armed, playing, preview, arrived, otherTabInFront, setEnabled, setVolume };
+  return { settings, armed, covers, playing, preview, arrived, otherTabInFront, setEnabled, setVolume };
 }

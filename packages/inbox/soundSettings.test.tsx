@@ -68,6 +68,7 @@ function fakeSound(over: Partial<InboxSound> = {}) {
     playing: false,
     preview: (volume) => void seen.push(`preview:${volume ?? 'saved'}`),
     arrived: () => {},
+    covers: () => true,
     otherTabInFront: () => false,
     setEnabled: async (next) => (seen.push(`enabled:${next}`), true),
     setVolume: async (next) => (seen.push(`volume:${next}`), true),
@@ -243,6 +244,44 @@ describe.if(hasDom)('useInboxSound', () => {
     act(() => api.arrived('question'));
     act(() => api.arrived('question'));
     expect(rings()).toBe(1);
+  });
+
+  test('locked after a reload: nothing rings and the bell does not cover the notice, so the system sound plays; the first click unlocks both', () => {
+    mount(<Probe />);
+    front = { visible: false, focused: false };
+    act(() => api.arrived('question'));
+    expect(rings()).toBe(0);
+    expect(api.covers()).toBe(false);
+    act(() => {
+      window.dispatchEvent(new Event('pointerdown'));
+    });
+    expect(api.covers()).toBe(true);
+  });
+
+  test('a browser that still lets the page play after a reload (no click yet): the question rings and the bell covers the notice', () => {
+    recorder.autoplay = true;
+    const el = mount(<Probe />);
+    front = { visible: false, focused: false };
+    act(() => api.arrived('question'));
+    expect(rings()).toBe(1);
+    expect(api.covers()).toBe(true);
+    expect(el.querySelector('[data-armed]')?.getAttribute('data-armed')).toBe('yes');
+  });
+
+  test('sound off: nothing rings for a question or a new thread, and the bell covers nothing', () => {
+    function Off() {
+      api = useInboxSound({ settings: { enabled: false, volume: 60, dialog_shown_for: null }, onSettings: () => {} });
+      return null;
+    }
+    mount(<Off />);
+    act(() => {
+      window.dispatchEvent(new Event('pointerdown'));
+    });
+    front = { visible: false, focused: false };
+    act(() => api.arrived('question'));
+    act(() => api.arrived('thread'));
+    expect(recorder.freqs).toEqual([]);
+    expect(api.covers()).toBe(false);
   });
 
   test('a key press the browser does not count as an activation (Escape) does not arm; the next click that does, arms', () => {
