@@ -307,16 +307,6 @@ function isHookPromptMessage(entry: RolloutEntry): boolean {
   return !!messageText?.includes("<hook_prompt");
 }
 
-function findLastHookPromptIndex(
-  entries: RolloutEntry[],
-  startIndex: number
-): number {
-  for (let i = entries.length - 1; i >= Math.max(startIndex, 0); i--) {
-    if (isHookPromptMessage(entries[i])) return i;
-  }
-  return -1;
-}
-
 /**
  * The pre-`<hook_prompt>` shape of the same boundary.
  *
@@ -342,14 +332,21 @@ function isDeveloperMessage(entry: RolloutEntry): boolean {
   return entry.payload?.role === "developer";
 }
 
-function findLastDeveloperMessageIndex(
+/** Feedback messages have no turn id of their own. Follow the rollout's turn markers. */
+function findLastTurnMessageIndex(
   entries: RolloutEntry[],
-  startIndex: number
+  startIndex: number,
+  turnId: string,
+  predicate: (entry: RolloutEntry) => boolean,
 ): number {
-  for (let i = entries.length - 1; i >= Math.max(startIndex, 0); i--) {
-    if (isDeveloperMessage(entries[i])) return i;
+  let activeTurnId = turnId;
+  let found = -1;
+  for (let i = startIndex; i < entries.length; i++) {
+    const entry = entries[i];
+    if (isTurnMarker(entry)) activeTurnId = getTurnId(entry) ?? activeTurnId;
+    if (activeTurnId === turnId && predicate(entry)) found = i;
   }
-  return -1;
+  return found;
 }
 
 function getPlanItemText(
@@ -681,7 +678,7 @@ function findPlanInTurn(
     return toPlanResult(pickLatestPreferredPlan(candidates));
   }
 
-  const lastHookPromptIndex = findLastHookPromptIndex(entries, turnStartIndex);
+  const lastHookPromptIndex = findLastTurnMessageIndex(entries, turnStartIndex, turnId, isHookPromptMessage);
   if (lastHookPromptIndex !== -1) {
     return planChangedAcrossBoundary(candidates, lastHookPromptIndex);
   }
@@ -693,7 +690,7 @@ function findPlanInTurn(
   // denied plan the model did not revise gets re-served for review on every
   // Stop of that turn.
   const lastDeveloperIndex = options.allowDeveloperBoundary
-    ? findLastDeveloperMessageIndex(entries, turnStartIndex)
+    ? findLastTurnMessageIndex(entries, turnStartIndex, turnId, isDeveloperMessage)
     : -1;
   if (lastDeveloperIndex !== -1) {
     return planChangedAcrossBoundary(candidates, lastDeveloperIndex);
