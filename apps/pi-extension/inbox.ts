@@ -5,8 +5,10 @@
  * `generated/inbox/`); this file is the Pi side of it.
  *
  * Found or not, decided once at extension load: only where the inbox tool
- * switch allows it for Pi (`PLANNOTATOR_INBOX_TOOL` / `inboxTool`, off by
- * default here: Pi sends every tool's full definition with each request) AND
+ * switch allows it for Pi (`PLANNOTATOR_INBOX_TOOL` / `inboxTool.pi`, off by
+ * default on Pi, which sends every tool's full definition with each request;
+ * on by default in Oh My Pi, which lists it as one `xd://` line:
+ * `resolvePiInboxTool`) AND
  * `inbox/inbox.json` exists (the person ran the Inbox once). Otherwise nothing
  * is registered, nothing polls, and nothing is said; only the session claim
  * (`claimPiSessions`) is kept wherever `inbox/inbox.json` exists.
@@ -40,7 +42,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolveInboxTool } from "./generated/config.ts";
+import { loadConfig, resolveInboxReminder, resolveInboxReminderText, resolvePiInboxTool } from "./generated/config.ts";
 import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
 	discoverInboxTools,
@@ -157,11 +159,13 @@ export function setupPiInbox(pi: InboxPi, options: PiInboxOptions): Promise<void
 	// With the Inbox tool on or off: the Inbox must never start a second Pi on a session this one runs.
 	claimPiSessions(pi, dataDir);
 	const config = loadConfig();
-	if (!resolveInboxTool(config, process.env, "pi")) return undefined;
+	// On by default in Oh My Pi, off on Pi (resolvePiInboxTool): without the tool nothing polls, so no reply wakes the session.
+	const toolOn = resolvePiInboxTool(config, process.env, detectPiHost(pi));
+	if (!toolOn) return undefined;
 	// Decided with the tool, once per extension instance (each session, /reload):
 	// the line (the person's own from config.json prompts.inbox, else
 	// INBOX_REMINDER_TEXT), or null when the reminder is off.
-	const reminder = resolveInboxReminder(config, process.env, "pi") ? resolveInboxReminderText(config, "pi") : null;
+	const reminder = resolveInboxReminder(config, process.env, "pi", toolOn) ? resolveInboxReminderText(config, "pi") : null;
 	return discoverInboxTools(dataDir).then((tools) => {
 		if (!tools) return;
 		registerPiInbox(
@@ -337,10 +341,16 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 				endWaiting(new Error("the message did not reach the session"));
 			};
 			waiting = { id: command.id, resolve, reject, timer: setTimeout(watchdog, DELIVERY_WATCHDOG_MS) };
+			const failed = (error: unknown) => {
+				if (waiting?.id === command.id) endWaiting(error instanceof Error ? error : new Error(String(error)));
+			};
 			try {
-				pi.sendUserMessage(text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs }));
+				// Oh My Pi (18.18.2+) returns a promise that rejects when it drops the message before a turn
+				// starts: the reply then waits again, as after a throw, instead of an unhandled rejection.
+				const sent = pi.sendUserMessage(text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs })) as unknown;
+				if (sent && typeof (sent as PromiseLike<void>).then === "function") (sent as PromiseLike<void>).then(undefined, failed);
 			} catch (error) {
-				endWaiting(error instanceof Error ? error : new Error(String(error)));
+				failed(error);
 			}
 		});
 

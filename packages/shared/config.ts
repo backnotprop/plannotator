@@ -2142,7 +2142,8 @@ export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.Process
 /**
  * The hosts that register the Inbox's `plannotator_inbox` tool. The Pi
  * extension registers it as `pi` in Oh My Pi too: OMP has no Inbox host key
- * of its own (yet), so `inboxTool.pi` and the Pi default decide there.
+ * of its own (yet), so `inboxTool.pi` decides there, with OMP's own default
+ * (on: resolvePiInboxTool).
  * `dsh` is the DeepSeek Harness plugin (`@plannotator/dsh`), `cline` the
  * Cline plugin (`@plannotator/cline`).
  */
@@ -2252,8 +2253,27 @@ export function resolveInboxReminder(
   config: PlannotatorConfig,
   env: NodeJS.ProcessEnv,
   host: InboxToolHost,
+  toolOn: boolean = resolveInboxTool(config, env, host),
 ): boolean {
-  return INBOX_REMINDER_HOSTS.includes(host) && resolveInboxTool(config, env, host) && (configuredInboxReminder(config, host) ?? true);
+  return INBOX_REMINDER_HOSTS.includes(host) && toolOn && (configuredInboxReminder(config, host) ?? true);
+}
+
+/**
+ * Whether the Pi extension registers the Inbox tool, and so polls for the
+ * person's replies (the wake), in Pi or in Oh My Pi. Both read `inboxTool.pi`
+ * and PLANNOTATOR_INBOX_TOOL exactly as resolveInboxTool does; only the
+ * default differs, as the `plannotator` agent tool's does
+ * (AGENT_TOOL_DEFAULTS): off on Pi, on in Oh My Pi, which lists an extension
+ * tool as one short `xd://` line and loads its schema only when the model
+ * reads it. Nothing else turns it on for OMP: the Inbox's connect step finds
+ * the extension only in Pi's own settings.json.
+ */
+export function resolvePiInboxTool(
+  config: PlannotatorConfig,
+  env: NodeJS.ProcessEnv,
+  piHost: "pi" | "oh-my-pi",
+): boolean {
+  return parseInboxToolEnv(env) ?? configuredInboxTool(config, "pi") ?? (piHost === "oh-my-pi" ? AGENT_TOOL_DEFAULTS["oh-my-pi"] : INBOX_TOOL_DEFAULTS.pi);
 }
 
 /**

@@ -26,7 +26,10 @@
  * reply into that thread (packages/server/inbox-codex-wake.ts). A Qwen Code
  * session is read at every call (`inboxCallHostSession`): Qwen's registry
  * record for the shim's parent process, since `/clear` and `/resume` change
- * the id the shim was started with. A T3 Code thread is its thread id
+ * the id the shim was started with. A Pi or Oh My Pi session that started
+ * the shim as its MCP server is read the same way, from the claim the Pi
+ * extension writes for its process (`inboxPiParentSession`), so a send over
+ * MCP is that session's and its reply wakes it through the extension. A T3 Code thread is its thread id
  * (`T3CODE_THREAD_ID`, which T3 sets for the Claude it runs through the Agent
  * SDK), sent as `agent_host: "t3"`, so the Inbox can put the person's reply
  * into that thread (packages/server/inbox-t3-wake.ts). An Antigravity
@@ -76,6 +79,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { inboxEnsureFailedWords, inboxStatus, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
+import { piSessionClaimOfPid } from "@plannotator/shared/inbox/pi-session-claim";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -289,6 +293,22 @@ export function inboxCallHostSession(
   return other ?? qwenHostSession(fromEnv!);
 }
 
+/**
+ * The Pi or Oh My Pi session whose process started this shim as its MCP
+ * server, read at each call, or null. Plannotator's Pi extension says which
+ * session its process runs (`inbox/pi-sessions/<session>.<pid>.json`,
+ * pi-session-claim.ts) and says it again on `/new`, `/resume` and an OMP
+ * session switch. Oh My Pi starts the MCP servers it finds (its own and other
+ * agents' configs) beside the extension and gives them no session variable,
+ * so before this the shim sent as a fresh `ses_` id: the person's reply could
+ * never wake that session, though the extension polls for it. A claim for the
+ * parent wins over every inherited variable: that process is a Pi session.
+ */
+export function inboxPiParentSession(dataDir: string, parentPid: number): InboxHostSession | null {
+  const session = piSessionClaimOfPid(dataDir, parentPid);
+  return session && isInboxSessionId(session) ? { host: "pi", session, name: INBOX_SESSION_HOST_NAMES.pi! } : null;
+}
+
 /** The MCP client name Claude Code gives in `initialize` (`clientInfo.name`). */
 export const INBOX_CLAUDE_MCP_CLIENT = "claude-code";
 
@@ -340,6 +360,8 @@ export interface InboxMcpShimOptions {
   claude?: InboxHostSession | null;
   /** Where a Qwen Code session is read at each call (`inboxQwenShimContext`); absent: Qwen only through `hostSession`. */
   qwen?: InboxQwenShimContext | null;
+  /** The Pi or Oh My Pi session of the process that started the shim, read at each call (`inboxPiParentSession`); absent: none. */
+  piParent?: () => InboxHostSession | null;
   /** The host session's own project folder (`inboxSessionProjectFromEnv`): a call filed as that session files there, not in `cwd`. */
   sessionProject?: InboxSessionProject | null;
   /**
@@ -529,9 +551,11 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
       const name = (message.params?.clientInfo as { name?: unknown } | undefined)?.name;
       if (typeof name === "string") clientName = name;
     }
-    // Qwen's session is read again for each call: /clear and /resume change it under the same Qwen process.
+    // Qwen's session and a Pi parent's are read again for each call: /clear, /new and /resume change them under the same process.
     const callHost =
-      message?.method === "tools/call" ? inboxClaudeCallSession(inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName), options.claude, clientName) : hostSession;
+      message?.method === "tools/call"
+        ? (options.piParent?.() ?? inboxClaudeCallSession(inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName), options.claude, clientName))
+        : hostSession;
     const outgoing = fillInboxToolArguments(message, options.cwd, own, callHost, clientName, options.sessionProject);
     let target: InboxRegistryEntry;
     try {
