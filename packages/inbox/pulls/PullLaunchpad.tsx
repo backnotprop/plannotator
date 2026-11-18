@@ -131,8 +131,10 @@ export function PullLaunchpad({
   /**
    * Start a thread (`canStartPullThread`): the New message box about this PR, To's list open, no guided review asked
    * for. Null: none (a thread about the PR already, a closed or merged PR, or no project an agent can take it in).
+   * `started`: one was sent and the list has not read its link yet: Open review thread (that thread; null, held for
+   * another machine: no button), never a second start.
    */
-  startThread?: { onStart: (opener: HTMLElement) => void } | null;
+  startThread?: { onStart: (opener: HTMLElement) => void } | { started: string | null } | null;
   /** Shape boards by thread; null while Shape is off (no Shape board door then). */
   shapes: ReadonlyMap<string, InboxShapeSummary> | null;
   /** System shows (`systemShown`, the Reviews page's `system`): only then the System door. */
@@ -326,6 +328,8 @@ export function PullLaunchpad({
                       !ended && <>{'\u00a0· '}No answer yet</>
                     )}
                   </>
+                ) : startThread && 'started' in startThread ? (
+                  <>No answer yet</>
                 ) : startThread ? (
                   <>{THREAD_NONE_YET}</>
                 ) : (
@@ -333,10 +337,17 @@ export function PullLaunchpad({
                 )
               }
             >
-              {startThread && !link && !named && (
+              {startThread && !link && !named && 'onStart' in startThread && (
                 <div className="ib-lp-go">
                   <button type="button" className="ib-btn" onClick={(event) => startThread.onStart(event.currentTarget)} data-launch-go="start-thread">
                     {START_THREAD}
+                  </button>
+                </div>
+              )}
+              {startThread && !link && !named && 'started' in startThread && startThread.started && (
+                <div className="ib-lp-go">
+                  <button type="button" className="ib-btn" onClick={() => onThread(startThread.started!)} data-launch-go="thread" data-launch-started="">
+                    Open review thread
                   </button>
                 </div>
               )}

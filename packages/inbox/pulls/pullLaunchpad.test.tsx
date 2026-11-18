@@ -511,3 +511,39 @@ test.skipIf(!hasDom)('Start a thread on a phone, on a draft and on your own PR; 
     host!.remove();
   }
 });
+
+test.skipIf(!hasDom)('once Start a thread has sent, before the list reads its link: that thread opens, and nothing offers a second start', async () => {
+  let onSent: ((sent: { threadId: string } | { held: unknown }) => void) | undefined;
+  mount(single.key, answer(), {
+    onStartThread: (request) => {
+      onSent = request.onSent as typeof onSent;
+    },
+  });
+  await settle();
+  await click(startThreadDoor);
+  expect(typeof onSent).toBe('function');
+  // Closed without sending: still offered.
+  expect(!!$(startThreadDoor)).toBe(true);
+  await act(async () => onSent!({ threadId: 'thr_started' }));
+  await settle();
+  expect(!!$(startThreadDoor)).toBe(false);
+  expect(!!$('[data-launch-go="start"]')).toBe(false);
+  await click('[data-launch-door="thread"] [data-launch-go="thread"]');
+  expect(went).toEqual(['thread thr_started']);
+});
+
+test.skipIf(!hasDom)('held for another machine: no second start, and no thread to open yet', async () => {
+  let onSent: ((sent: { threadId: string } | { held: unknown }) => void) | undefined;
+  mount(single.key, answer(), {
+    onStartThread: (request) => {
+      onSent = request.onSent as typeof onSent;
+    },
+  });
+  await settle();
+  await click(startThreadDoor);
+  await act(async () => onSent!({ held: { key: 'k' } }));
+  await settle();
+  expect(!!$(startThreadDoor)).toBe(false);
+  expect(!!$('[data-launch-go="start"]')).toBe(false);
+  expect(!!$('[data-launch-door="thread"] [data-launch-go="thread"]')).toBe(false);
+});

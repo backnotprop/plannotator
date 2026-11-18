@@ -420,6 +420,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
   const agent = linkAgentName(link);
+  // Start a thread sent (or held for another machine): until the list reads the PR's new link, the door offers that
+  // thread, never a second start (Start a thread, or a guided review's) whose link would replace the first.
+  const [threadStarted, setThreadStarted] = useState<{ threadId: string | null } | null>(null);
   // The Board is optional: a card shows only while the Board is on and one links a layer (the answer has none otherwise).
   const card = stack.layers.map((l) => model.cards?.[l.key]).find((c) => !!c) ?? null;
   const now = useRelativeClock(true);
@@ -528,8 +531,20 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         stacked={!phone && !!props.stacked}
         now={now}
         heading={heading}
-        start={canStart ? { kind: link && !mentioned ? 'again' : 'review', onStart: (opener) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener) } : null}
-        startThread={props.onStartThread && canStartPullThread(start, link, projects) ? { onStart: (opener) => props.onStartThread!(pullThreadRequest(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects)), opener) } : null}
+        start={canStart && !threadStarted ? { kind: link && !mentioned ? 'again' : 'review', onStart: (opener) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), opener) } : null}
+        startThread={
+          props.onStartThread && canStartPullThread(start, link, projects)
+            ? threadStarted
+              ? { started: threadStarted.threadId }
+              : {
+                  onStart: (opener) =>
+                    props.onStartThread!(
+                      { ...pullThreadRequest(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects)), onSent: (sent) => setThreadStarted({ threadId: 'held' in sent ? null : sent.threadId }) },
+                      opener,
+                    ),
+                }
+            : null
+        }
         shapes={props.shapes ?? null}
         system={!!props.system}
         risk={riskLines}
