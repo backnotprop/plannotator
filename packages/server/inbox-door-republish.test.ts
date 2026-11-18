@@ -15,7 +15,7 @@ import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxDevices, INBOX_DOOR_REPUBLISH, type InboxDoorTimers } from "./inbox-devices";
-import { readTailnetDoorRecord, writeTailnetDoorRecord } from "./inbox-tailnet-door";
+import { loopbackTargetDead, readTailnetDoorRecord, writeTailnetDoorRecord } from "./inbox-tailnet-door";
 
 const MAGIC = "mini.example.ts.net";
 const DOOR = 8443;
@@ -109,7 +109,8 @@ function fakeTailscale() {
 }
 
 /** The devices module of an Inbox with Phones off, one machine linked, and the door switch kept on from its last run. */
-function door(dataDir: string, run: TailscaleRunner, clock: ReturnType<typeof fakeClock>, linked = true) {
+function door(dataDir: string, run: TailscaleRunner, clock: ReturnType<typeof fakeClock>, linked: boolean | { now: boolean } = true, phones = false) {
+  const links = typeof linked === "boolean" ? { now: linked } : linked;
   const registry: InboxRegistryEntry = {
     v: 1,
     pid: process.pid,
@@ -130,14 +131,14 @@ function door(dataDir: string, run: TailscaleRunner, clock: ReturnType<typeof fa
     readBody: async (req) => (await req.json()) as Record<string, unknown>,
     dispatch: async () => new Response("ok"),
     tailscale: run,
-    phones: false,
-    machines: () => ({ hasLinks: () => linked, linkBack: async () => new Response(null), unlinkedBy: () => new Response(null) }),
+    phones,
+    machines: () => ({ hasLinks: () => links.now, linkBack: async () => new Response(null), unlinkedBy: () => new Response(null) }),
     doorTimers: clock.timers,
     onDoorRepublished: () => void republished.push(Date.now()),
   });
   stops.push(() => devices.stopTailnet());
   const view = () => ({ address: devices.machineDoor.tailnetAddress(), error: devices.machineDoor.tailnetError() });
-  return { devices, republished, view };
+  return { devices, republished, view, registry };
 }
 
 describe("the tailnet door publishes again by itself", () => {
@@ -276,6 +277,71 @@ describe("the tailnet door publishes again by itself", () => {
     next.devices.startTailnet();
     expect(next.view()).toEqual({ address: `${MAGIC}:${DOOR}`, error: null });
     expect(readTailnetDoorRecord(dataDir)).toMatchObject({ published: true, target: ts.serve.get(DOOR) });
+  });
+
+  test("the door switched off while Tailscale is stopped: off at once, its listener closed, the record kept; the mapping is taken down once Tailscale runs, by a status-only look", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.running = true;
+    const clock = fakeClock();
+    // Phones on: the person's own switch in Settings.
+    const { devices, view, registry } = door(dataDir, ts.run, clock, false, true);
+    devices.startTailnet();
+    const target = ts.serve.get(DOOR)!;
+    expect(view().address).toBe(`${MAGIC}:${DOOR}`);
+    ts.tailscale.running = false;
+    const off = await devices.windowRoute(
+      new Request("http://127.0.0.1:1/api/inbox/tailnet", { method: "POST", body: JSON.stringify({ on: false, serverSession: registry.serverSession }) }),
+      new URL("http://127.0.0.1:1/api/inbox/tailnet"),
+    );
+    expect(off!.status).toBe(200);
+    expect(((await off!.json()) as { tailnet: { on: boolean } }).tailnet.on).toBe(false);
+    expect(registry.tailnet).toBeUndefined();
+    expect(view().address).toBeNull();
+    expect(await loopbackTargetDead(target)).toBe(true);
+    expect(readTailnetDoorRecord(dataDir)).toMatchObject({ https_port: DOOR, target, published: true });
+    expect(clock.waits()).toEqual([WAIT[0]!]);
+    ts.calls.length = 0;
+    await clock.fire();
+    expect(ts.calls).toEqual([["status", "--json"]]);
+    expect(clock.waits()).toEqual([WAIT[1]!]);
+
+    ts.tailscale.running = true;
+    await clock.fire();
+    expect(ts.serve.has(DOOR)).toBe(false);
+    expect(readTailnetDoorRecord(dataDir)).toBeNull();
+    expect(clock.waits()).toEqual([]);
+  });
+
+  test("the last machine unlinked while Tailscale is stopped: the door closes and the switch clears; the mapping comes down once Tailscale runs", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.running = true;
+    const clock = fakeClock();
+    const links = { now: true };
+    const { devices, view, registry } = door(dataDir, ts.run, clock, links);
+    devices.startTailnet();
+    const target = ts.serve.get(DOOR)!;
+    ts.tailscale.running = false;
+    links.now = false;
+    devices.machineDoor.closeTailnetIfUnused();
+    expect(registry.tailnet).toBeUndefined();
+    expect(view().address).toBeNull();
+    expect(await loopbackTargetDead(target)).toBe(true);
+    expect(clock.waits()).toEqual([WAIT[0]!]);
+
+    // A restart meanwhile: the switch is off, the take-down still owed; the start looks without blocking.
+    const next = door(dataDir, ts.run, fakeClock(), false);
+    next.registry.tailnet = undefined;
+    ts.calls.length = 0;
+    next.devices.startTailnet();
+    expect(ts.calls).toEqual([]);
+
+    ts.tailscale.running = true;
+    await clock.fire();
+    expect(ts.serve.has(DOOR)).toBe(false);
+    expect(readTailnetDoorRecord(dataDir)).toBeNull();
+    expect(clock.waits()).toEqual([]);
   });
 
   test("Tailscale runs but serve refuses (Serve off for the tailnet): no 5-minute loop; looked at again after 10, then 30 minutes", async () => {

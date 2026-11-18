@@ -377,10 +377,10 @@ describe("a take-down never believes an empty serve status while Tailscale is no
     return { calls, answer: runTailscaleSteps(takeDownOwnServeSteps(8443, ["http://127.0.0.1:4321"]), runner) };
   };
 
-  test("stopped (or starting, signed out): the mapping may come back with Tailscale, so it is not \"none\"", () => {
+  test("stopped (or starting, signed out): the mapping may come back with Tailscale, so it is \"later\", never \"none\"", () => {
     for (const backend of ["Stopped", "Starting", "NeedsLogin"]) {
       const { calls, answer } = run(backend);
-      expect(answer).toBe("failed");
+      expect(answer).toBe("later");
       expect(calls).toEqual([
         ["serve", "status", "--json"],
         ["status", "--json"],

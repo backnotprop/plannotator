@@ -92,6 +92,7 @@ import {
   type TailscaleRunnerAsync,
   type TailscaleStep,
   type TailscaleSteps,
+  type TakeDownAnswer,
 } from "./tailscale-serve";
 import { parseTailscaleBackend, runTailscaleQuietly } from "./inbox-pairing-checks";
 import { syncSection } from "./inbox-perf";
@@ -291,9 +292,15 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     if (port === null) return true;
     relayKept = port;
     const result = yield* takeDownOwnServeSteps(port, [`http://127.0.0.1:${port}`]);
-    if (result === "failed") return false;
+    if (result === "failed" || result === "later") return false;
     saveRelay(null);
     return true;
+  };
+
+  /** A take-down still owed (Tailscale was not running): the record keeps its ports, and no words of its own. */
+  const keepOwed = () => {
+    const kept = record();
+    save({ url: null, error: null, ...(kept?.https_port ? { https_port: kept.https_port, proxy_port: kept.proxy_port } : {}) });
   };
 
   /** The record with its ports kept (a mapping may exist), and why. */
@@ -478,7 +485,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   const timers = context.timers ?? defaultTimers;
   let retryTimer: unknown = null;
   /** "wait": Tailscale was not ready at the last try, so only its status is read. "stuck": it was, and the publish failed anyway. */
-  let retryMode: "wait" | "stuck" = "wait";
+  let retryMode: "wait" | "stuck" | "owed" = "wait";
   let retryStep = 0;
   /** A publish found another mapping on the port that may be a dead one of this Inbox's own: look at once. */
   let probeSoon = false;
@@ -544,6 +551,9 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     const kept = record();
     if (!kept?.https_port || !kept.proxy_port || kept.proxy_port === listener?.port) return true;
     const result = yield* takeDownOwnServeSteps(kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]);
+    // Tailscale not running: nothing to take down yet. The record stays as it is, without words of its own; the
+    // publish that follows says why it could not publish, as it always has, and the take-down runs once Tailscale does.
+    if (result === "later") return true;
     if (result === "failed") {
       state.error = `Could not remove the tailnet address an earlier run left; it is retried at the next start. Or run "tailscale serve --https=${kept.https_port} off".`;
       keepRecord(state.error);
@@ -591,14 +601,18 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       guardProcess(false);
       // The mapping may have been made before the failure (no URL in serve's answer): take it down, or keep the record.
       const taken = record()?.https_port ? yield* takeDownOwnServeSteps(port, targets) : "none";
-      if (taken === "failed") keepRecord(state.error);
+      if (taken === "failed" || taken === "later") keepRecord(state.error);
       else save({ url: null, error: state.error });
       return false;
     }
   };
 
-  /** Take this Inbox's own mapping down (never someone else's). "failed" leaves the listener up and the record kept. */
-  const unpublish = function* (later = false): TailscaleSteps<"removed" | "none" | "failed"> {
+  /**
+   * Take this Inbox's own mapping down (never someone else's). "failed" leaves the listener up and the record kept.
+   * "later" (Tailscale not running) closes the listener (a mapping Tailscale brings back answers 502); the caller keeps
+   * the record as a take-down still owed (`owedTakeDown`).
+   */
+  const unpublish = function* (later = false): TailscaleSteps<TakeDownAnswer> {
     // The relay goes with the window's address; a failure keeps its record for the next start.
     if (relayListener || relayKept !== null) yield* takeDownRelay();
     const port = httpsPort ?? record()?.https_port ?? null;
@@ -622,6 +636,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       (function* () {
         if (!(yield* reconcile())) return;
         if (resolve().on) yield* publish();
+        else if (owedTakeDown()) keepOwed();
         else if (record()) save(undefined);
       })(),
       run,
@@ -635,6 +650,16 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   };
   /** Worth looking again: on, not published, not stopping, and a `tailscale` to ask. */
   const retryWanted = () => !stopped && !state.url && !cliMissing && resolve().on;
+  /**
+   * A mapping of this Inbox's own may still exist (the record keeps a port that is not this run's listener, or the
+   * relay's), from a switch-off, stop or start while Tailscale was not running.
+   */
+  const owedTakeDown = () => {
+    const kept = record();
+    return !!kept && ((!!kept.https_port && !!kept.proxy_port && kept.proxy_port !== listener?.port) || !!kept.relay_port);
+  };
+  /** The switch is off and a take-down is owed: a status-only look until Tailscale runs, then the take-down. */
+  const owedWanted = () => !stopped && !cliMissing && !resolve().on && owedTakeDown();
   const arm = (ms: number) => {
     cancelRetry();
     retryTimer = timers.set(() => {
@@ -647,7 +672,14 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     cancelRetry();
     const soon = probeSoon;
     probeSoon = false;
-    if (!retryWanted()) return;
+    if (!retryWanted()) {
+      if (owedWanted()) {
+        retryMode = "owed";
+        retryStep = 0;
+        arm(INBOX_TAILSCALE_REPUBLISH.waitMs[0]!);
+      }
+      return;
+    }
     if (soon) {
       // Once, at once: the look probes the mapping on the port, then publishes.
       retryMode = "stuck";
@@ -663,6 +695,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   };
   /** One look, one at a time with the switch's changes. Quiet while Tailscale is not ready: nothing saved, nothing printed. */
   const retry = async () => {
+    if (retryMode === "owed") return owedLook();
     if (!retryWanted()) return;
     if (retryMode === "wait") {
       let status: TailscaleRunResult;
@@ -692,6 +725,32 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
       afterAttempt();
     }
     if (published) context.onRepublished?.();
+  };
+
+  /** One look for a take-down still owed: only the status while Tailscale is not running, then the take-down. */
+  const owedLook = async () => {
+    if (!owedWanted()) return;
+    let status: TailscaleRunResult;
+    try {
+      status = await runAsync(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+    } catch (error) {
+      status = { status: null, stdout: "", stderr: "", error: error instanceof Error ? error : new Error(String(error)) };
+    }
+    cliMissing = (status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT";
+    if (!owedWanted()) return;
+    const waits = INBOX_TAILSCALE_REPUBLISH.waitMs;
+    if (!ready(status)) {
+      retryStep = Math.min(retryStep + 1, waits.length - 1);
+      return arm(waits[retryStep]!);
+    }
+    await runTailscaleStepsAsync(reconcile(), runAsync);
+    if (resolve().on) return afterAttempt();
+    if (!owedTakeDown()) {
+      if (record()) save(undefined);
+      return;
+    }
+    // Still owed with Tailscale running: the take-down failed (its words are kept); the slow look.
+    if (owedWanted()) arm(INBOX_TAILSCALE_REPUBLISH.stuckMs);
   };
 
   // ── The request paths' changes, one at a time ──
@@ -731,7 +790,13 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
   const stopNow = (): { failedPort: number | null } => {
     if (httpsPort === null && !listener && !record()) return { failedPort: null };
     const port = httpsPort ?? record()?.https_port ?? null;
-    if (runTailscaleSteps(unpublish(), run) === "failed") {
+    const result = runTailscaleSteps(unpublish(), run);
+    // Tailscale not running: the record keeps its ports, and the next start (or its look) takes the mapping down.
+    if (result === "later") {
+      keepOwed();
+      return { failedPort: null };
+    }
+    if (result === "failed") {
       keepRecord(`Could not take the tailnet address down; run "tailscale serve --https=${port} off".`);
       closeListener();
       httpsPort = null;
@@ -757,8 +822,12 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     if (env !== undefined) {
       throw new InboxError("tailscale_env_decides", `PLANNOTATOR_INBOX_TAILSCALE is set in this Inbox's environment, so it stays ${env ? "on" : "off"}.`);
     }
+    let owed = false;
     if (!on) {
-      if ((yield* unpublish(options.via === "tailnet")) === "failed") {
+      const result = yield* unpublish(options.via === "tailnet");
+      // Tailscale not running: the switch turns off all the same; the take-down is owed (`owedLook`).
+      owed = result === "later";
+      if (result === "failed") {
         throw new InboxError(
           "tailscale_unavailable",
           `Tailscale could not take the Inbox's tailnet address down. Try again, or run "tailscale serve --https=${context.port()} off".`,
@@ -783,6 +852,7 @@ export function createInboxTailscale(context: InboxTailscaleContext) {
     // The saved switch decides from now on, not this run's flag.
     runFlag = false;
     if (on) yield* publish();
+    else if (owed) keepOwed();
     else save(undefined);
     return snapshot();
   };
@@ -883,6 +953,7 @@ export function takeDownInboxTailscale(dataDir: string, run: TailscaleRunner = r
   // The prototype relay's mapping too (its target is the loopback listener on the same port number).
   const relay = kept?.relay_port ? takeDownOwnServeMapping(run, kept.relay_port, [`http://127.0.0.1:${kept.relay_port}`]) : "none";
   const window = kept?.https_port && kept.proxy_port ? takeDownOwnServeMapping(run, kept.https_port, [`http://127.0.0.1:${kept.proxy_port}`]) : "none";
-  if (relay === "failed" || window === "failed") return "failed";
+  // Tailscale not running: the uninstall cannot wait for it, so it says as for a failure.
+  if (relay === "failed" || window === "failed" || relay === "later" || window === "later") return "failed";
   return relay === "removed" || window === "removed" ? "removed" : "none";
 }

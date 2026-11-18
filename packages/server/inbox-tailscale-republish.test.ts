@@ -383,6 +383,80 @@ describe("Over your tailnet publishes by itself once Tailscale is back", () => {
     expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${next.module.listenerPort()}`);
   });
 
+  test("switched off while Tailscale is stopped: the switch turns off and the listener closes; the mapping Tailscale keeps is taken down once it runs, by a status-only look", async () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const clock = fakeClock();
+    const { module, registry } = create(dataDir, ts.run, clock);
+    module.start();
+    const listener = module.listenerPort()!;
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${listener}`);
+    ts.tailscale.backend = "Stopped";
+
+    const state = await module.set(false);
+    expect(state).toMatchObject({ on: false, url: null, error: null });
+    expect(module.listenerPort()).toBeNull();
+    // The record keeps the ports: a take-down still owed.
+    expect(registry.tailscale).toMatchObject({ https_port: PORT, proxy_port: listener, error: null });
+    expect(ts.serve.get(PORT)).toBe(`http://127.0.0.1:${listener}`);
+    expect(clock.waits()).toEqual([WAIT[0]!]);
+    ts.calls.length = 0;
+    await clock.fire();
+    expect(ts.calls).toEqual([["status", "--json"]]);
+    expect(clock.waits()).toEqual([WAIT[1]!]);
+
+    ts.tailscale.backend = "Running";
+    await clock.fire();
+    expect(ts.serve.has(PORT)).toBe(false);
+    expect(registry.tailscale).toBeUndefined();
+    expect(clock.waits()).toEqual([]);
+  });
+
+  test("restarted while Tailscale is stopped after a stop that kept the record: the usual words of a publish that could not happen, never \"Could not remove…\"", () => {
+    const dataDir = world();
+    const ts = fakeTailscale();
+    ts.tailscale.backend = "Running";
+    const first = create(dataDir, ts.run, fakeClock());
+    first.module.start();
+    ts.tailscale.backend = "Stopped";
+    first.module.stop();
+    const kept = first.registry.tailscale!;
+    expect(kept.error).toBeNull();
+
+    const next = create(dataDir, ts.run, fakeClock(), kept);
+    next.module.start();
+    const before = create(world(), ts.run, fakeClock());
+    before.module.start();
+    // The same words as a start with no record at all while Tailscale is stopped.
+    expect(next.module.state().error).toBe(before.module.state().error);
+    expect(next.module.state().error).not.toContain("Could not remove");
+    expect(next.registry.tailscale).toMatchObject({ https_port: PORT, proxy_port: kept.proxy_port });
+  });
+
+  test("started with the switch off and a take-down owed: the record stays and a look waits; with nothing owed, nothing runs", async () => {
+    const dataDir = world({ inboxTailscale: false });
+    const ts = fakeTailscale();
+    const owedPort = await freePort();
+    ts.serve.set(PORT, `http://127.0.0.1:${owedPort}`);
+    const clock = fakeClock();
+    const { module, registry } = create(dataDir, ts.run, clock, { url: null, error: null, https_port: PORT, proxy_port: owedPort });
+    module.start();
+    expect(registry.tailscale).toMatchObject({ https_port: PORT, proxy_port: owedPort });
+    expect(clock.waits()).toEqual([WAIT[0]!]);
+    ts.tailscale.backend = "Running";
+    await clock.fire();
+    expect(ts.serve.has(PORT)).toBe(false);
+    expect(registry.tailscale).toBeUndefined();
+    expect(clock.waits()).toEqual([]);
+
+    const quiet = fakeTailscale();
+    const quietClock = fakeClock();
+    create(world({ inboxTailscale: false }), quiet.run, quietClock).module.start();
+    expect(quiet.calls).toEqual([]);
+    expect(quietClock.waits()).toEqual([]);
+  });
+
   test("published at start: no timer; off: no timer; no `tailscale` CLI at all: no timer, as before", async () => {
     {
       const dataDir = world();

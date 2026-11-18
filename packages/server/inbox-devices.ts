@@ -78,7 +78,7 @@ import {
 } from "./inbox-pairing-checks";
 import { syncSection } from "./inbox-perf";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
-import { enableTailscaleServe, TailscaleServeError, takeDownOwnServeMapping } from "./tailscale-serve";
+import { enableTailscaleServe, runTailscaleStepsAsync, TailscaleServeError, takeDownOwnServeMapping, takeDownOwnServeSteps, type TakeDownAnswer } from "./tailscale-serve";
 import {
   adoptLegacyTailnetDoor,
   chooseTailnetDoorPort,
@@ -632,7 +632,7 @@ function bearer(req: Request): string | null {
  * older build's inbox.json `tailnet` is read as one, once
  * (`adoptLegacyTailnetDoor`). The record keeps the port and says the mapping
  * is gone once it is down or found gone; it is unchanged when Tailscale could
- * not say or could not remove it. Nothing is spawned when there is nothing
+ * not say or could not remove it, or is not running ("later"). Nothing is spawned when there is nothing
  * recorded. Also `uninstall --purge`, with the Inbox stopped (`legacy`: that
  * data dir's inbox.json `tailnet`).
  */
@@ -640,7 +640,7 @@ export function takeDownInboxTailnet(
   dataDir: string,
   run: TailscaleRunner = runTailscale,
   legacy: InboxRegistryEntry["tailnet"] = readInboxRegistry(dataDir)?.tailnet,
-): "removed" | "none" | "failed" {
+): TakeDownAnswer {
   let record = readTailnetDoorRecord(dataDir);
   if (!record && !hasTailnetDoorRecord(dataDir)) {
     if (!legacy?.door_port) return "none";
@@ -650,7 +650,7 @@ export function takeDownInboxTailnet(
   }
   if (!record?.published) return "none";
   const result = takeDownOwnServeMapping(run, record.https_port, [record.target]);
-  if (result !== "failed") writeTailnetDoorRecord(dataDir, { ...record, published: false });
+  if (result === "removed" || result === "none") writeTailnetDoorRecord(dataDir, { ...record, published: false });
   return result;
 }
 
@@ -1202,7 +1202,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
   const doorPortIn = (serveStatus: string) => chooseTailnetDoorPort(serveStatus, recordFor(serveStatus));
 
   /** The switch: inbox.json's `tailnet`. Off also forgets the door's port, so the next first publish chooses again. */
-  const saveSwitch = (on: boolean) => {
+  /** `owed`: switched off while Tailscale was not running: the record stays, a take-down still owed (`doorOwed`). */
+  const saveSwitch = (on: boolean, owed = false) => {
     const value = on && doorServer ? { https_port: doorHttpsPort ?? INBOX_TAILNET_HTTPS_PORT, door_port: doorServer.port as number } : undefined;
     const apply = (target: InboxRegistryEntry) => {
       if (value) target.tailnet = { ...value };
@@ -1211,7 +1212,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
     // Never another Inbox's entry, never into a removed data folder.
     updateOwnInboxRegistry(context.dataDir, context.registry().serverSession, apply);
     apply(context.registry());
-    if (!on) clearTailnetDoorRecord(context.dataDir);
+    if (!on && !owed) clearTailnetDoorRecord(context.dataDir);
   };
 
   /** Who reaches the door on its port, for the words of a refusal. */
@@ -1333,8 +1334,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
     if (on) process.once("SIGHUP", onHangup);
   };
 
-  /** Take this Inbox's own mapping down (the recorded one, never someone else's); the listener closes unless the take-down failed. */
-  const unpublish = (): "removed" | "none" | "failed" => {
+  /**
+   * Take this Inbox's own mapping down (the recorded one, never someone else's); the listener closes unless the
+   * take-down failed. "later" (Tailscale not running) closes it too: a mapping Tailscale brings back points at a closed
+   * port (502), and the record stays for the take-down still owed (`doorOwed`).
+   */
+  const unpublish = (): TakeDownAnswer => {
     const result = takeDownInboxTailnet(context.dataDir, tailscale, context.registry().tailnet);
     if (result === "failed") return result;
     closeDoorListener();
@@ -1409,10 +1414,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
   const closeTailnetIfUnused = () => {
     if (phonesOn || openMachineOffers().length > 0 || context.machines?.()?.hasLinks() || owesRefusal()) return;
     if (tailnet.address === null && !doorServer && !context.registry().tailnet) return;
-    if (unpublish() === "failed") return;
+    const result = unpublish();
+    if (result === "failed") return;
     tailnet.on = false;
     tailnet.error = null;
-    saveSwitch(false);
+    saveSwitch(false, result === "later");
+    if (result === "later") afterDoorAttempt("wait");
   };
 
   /**
@@ -1429,8 +1436,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
     // Nothing is owed now, so every refusal still recorded has lapsed.
     const lapsed = devices.owedRefusals(Number.NEGATIVE_INFINITY);
     if (lapsed.length === 0 || !readTailnetDoorRecord(context.dataDir)?.published) return;
-    if (takeDownInboxTailnet(context.dataDir, tailscale, kept) === "failed") return;
-    saveSwitch(false);
+    const result = takeDownInboxTailnet(context.dataDir, tailscale, kept);
+    if (result === "failed") return;
+    saveSwitch(false, result === "later");
+    if (result === "later") afterDoorAttempt("wait");
     for (const device of lapsed) devices.oweRefusal(device.id, null, now().toISOString());
   };
 
@@ -1448,7 +1457,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
     doorStopped = false;
     watchOwed();
     const kept = context.registry().tailnet;
-    if (!kept) return;
+    // Switched off while Tailscale was not running: the take-down still owed, by a look that never blocks.
+    if (!kept) return afterDoorAttempt("soon");
     // Phones off: the door is published only for linked machines, and for one unlinked while it could not be told.
     if (!phonesOn && !context.machines?.()?.hasLinks() && !owesRefusal()) {
       settleLapsedRefusals(kept);
@@ -1479,6 +1489,12 @@ export function createInboxDevices(context: InboxDevicesContext) {
   let doorLooking = false;
   /** The door should be up: the switch on, and Phones on, a machine linked, or a refusal owed. */
   const doorWanted = () => !doorStopped && tailnet.on && (phonesOn || !!context.machines?.()?.hasLinks() || owesRefusal());
+  /**
+   * A take-down still owed: the switch is off (saved), yet the record says a mapping of this Inbox's may exist (it was
+   * switched off while Tailscale was not running). Looked at on the same waits until Tailscale runs, then taken down.
+   */
+  const doorOwed = () =>
+    !doorStopped && !tailnet.on && !doorServer && !context.registry().tailnet && readTailnetDoorRecord(context.dataDir)?.published === true;
   const cancelDoorLook = () => {
     if (doorTimer !== null) doorTimers.clear(doorTimer);
     doorTimer = null;
@@ -1497,7 +1513,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
    */
   const afterDoorAttempt = (next: "published" | "wait" | "stuck" | "soon") => {
     cancelDoorLook();
-    if (!doorWanted()) return;
+    if (!doorWanted() && !doorOwed()) return;
     if (next !== "wait") doorWait = 0;
     if (next !== "stuck") doorStuck = 0;
     if (next === "published") armDoorLook(INBOX_DOOR_REPUBLISH.checkMs);
@@ -1512,25 +1528,42 @@ export function createInboxDevices(context: InboxDevicesContext) {
       doorStuck++;
     }
   };
-  /** One look; see the block's note. */
-  const doorLook = async () => {
-    if (!doorWanted() || doorLooking) return;
+  const readTailscale = async (args: string[], ms: number): Promise<TailscaleRunResult> => {
+    try {
+      return await runAsync(args, ms);
+    } catch (error) {
+      return { status: null, stdout: "", stderr: "", error: error instanceof Error ? error : new Error(String(error)) };
+    }
+  };
+  /** A take-down still owed (`doorOwed`): only the status while Tailscale is not running, then the take-down, without blocking. */
+  const owedLook = async () => {
     doorLooking = true;
     try {
-      const read = async (args: string[], ms: number): Promise<TailscaleRunResult> => {
-        try {
-          return await runAsync(args, ms);
-        } catch (error) {
-          return { status: null, stdout: "", stderr: "", error: error instanceof Error ? error : new Error(String(error)) };
-        }
-      };
-      const status = await read(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+      const status = await readTailscale(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
+      if ((status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT" || !doorOwed()) return;
+      if (status.error || status.status !== 0 || parseTailscaleBackend(status.stdout).state !== "running") return afterDoorAttempt("wait");
+      const record = readTailnetDoorRecord(context.dataDir)!;
+      const result = await runTailscaleStepsAsync(takeDownOwnServeSteps(record.https_port, [record.target]), runAsync);
+      if (!doorOwed()) return;
+      if (result === "removed" || result === "none") return clearTailnetDoorRecord(context.dataDir);
+      afterDoorAttempt(result === "later" ? "wait" : "stuck");
+    } finally {
+      doorLooking = false;
+    }
+  };
+  /** One look; see the block's note. */
+  const doorLook = async () => {
+    if (doorLooking) return;
+    if (!doorWanted()) return doorOwed() ? owedLook() : undefined;
+    doorLooking = true;
+    try {
+      const status = await readTailscale(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
       if (!doorWanted()) return;
       // No `tailscale` at all: nothing to wait for.
       if ((status.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") return;
       // Not running: a published door keeps its listener (the mapping Tailscale keeps comes back with it).
       if (status.error || status.status !== 0 || parseTailscaleBackend(status.stdout).state !== "running") return afterDoorAttempt("wait");
-      const serve = await read(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
+      const serve = await readTailscale(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
       if (!doorWanted()) return;
       if (serve.error || serve.status !== 0) return afterDoorAttempt("stuck");
       if (tailnet.address && doorServer && doorHttpsPort !== null) {
@@ -1596,13 +1629,16 @@ export function createInboxDevices(context: InboxDevicesContext) {
       return json({ tailnet });
     }
     // A take-down that failed changes nothing: the switch stays on, the record is kept, and the window says why.
+    // Tailscale not running ("later"): the switch turns off all the same, and the take-down is owed (`doorOwed`).
     const port = readTailnetDoorRecord(context.dataDir)?.https_port ?? INBOX_TAILNET_HTTPS_PORT;
-    if (unpublish() === "failed") {
+    const result = unpublish();
+    if (result === "failed") {
       return refuse(409, "tailnet_unavailable", `Tailscale could not take the Inbox's address down. Try again, or run "tailscale serve --https=${port} off".`);
     }
     tailnet.on = false;
     tailnet.error = null;
-    saveSwitch(false);
+    saveSwitch(false, result === "later");
+    afterDoorAttempt(result === "later" ? "wait" : "published");
     // The person turned the tailnet off: no door is kept for an unlinked machine after this.
     for (const device of devices.owedRefusals(Number.NEGATIVE_INFINITY)) devices.oweRefusal(device.id, null, now().toISOString());
     watchOwed();

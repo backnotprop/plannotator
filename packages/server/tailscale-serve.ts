@@ -291,13 +291,14 @@ export function removeTailscaleServe(httpsPort: number, run: TailscaleRunner = r
  * Take down the mapping on `httpsPort` only when it points at one of
  * `targets` (proxy targets this caller made): someone else's mapping on that
  * port is never touched. "none" when there is no such mapping, "failed" when
- * Tailscale could not say or could not remove it.
+ * Tailscale could not say or could not remove it, "later" when Tailscale is
+ * not running (see `takeDownOwnServeSteps`).
  */
 export function takeDownOwnServeMapping(
   run: TailscaleRunner,
   httpsPort: number,
   targets: readonly string[],
-): "removed" | "none" | "failed" {
+): TakeDownAnswer {
   return runTailscaleSteps(takeDownOwnServeSteps(httpsPort, targets), run);
 }
 
@@ -317,16 +318,22 @@ function saysNotRunning(status: TailscaleRunResult): boolean {
 }
 
 /**
- * `takeDownOwnServeMapping`'s calls. Nothing on the port while Tailscale is not running is not "none": the mapping
- * may come back with Tailscale, so it answers "failed" (it may still exist) and a caller keeps its record.
+ * A take-down's answer. "later": Tailscale is not running, so nothing could be taken down and nothing can be read;
+ * the mapping may come back with Tailscale. A caller keeps its record as a take-down still owed, and need not refuse.
  */
-export function* takeDownOwnServeSteps(httpsPort: number, targets: readonly string[]): TailscaleSteps<"removed" | "none" | "failed"> {
+export type TakeDownAnswer = "removed" | "none" | "failed" | "later";
+
+/**
+ * `takeDownOwnServeMapping`'s calls. Nothing on the port while Tailscale is not running is not "none": the mapping
+ * may come back with Tailscale, so it answers "later" and a caller keeps its record.
+ */
+export function* takeDownOwnServeSteps(httpsPort: number, targets: readonly string[]): TailscaleSteps<TakeDownAnswer> {
   if (targets.length === 0) return "none";
   const status = yield step(["serve", "status", "--json"], TAILSCALE_SERVE_TIMEOUT_MS);
   if (status.error || status.status !== 0) return "failed";
   const existing = serveStatusProxy(status.stdout, httpsPort);
   if (existing.state === "malformed") return "failed";
-  if (existing.state === "free" && saysNotRunning(yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS))) return "failed";
+  if (existing.state === "free" && saysNotRunning(yield step(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS))) return "later";
   if (existing.state !== "mapped" || !targets.includes(existing.proxy)) return "none";
   return (yield* serveOffSteps(httpsPort)) ? "removed" : "failed";
 }
