@@ -63,6 +63,7 @@ import {
   INBOX_ASK_POLL_FIELD,
   INBOX_AUTO_RELOAD_POLL_FIELD,
   INBOX_CONTINUES_POLL_FIELD,
+  INBOX_PLACE_POLL_FIELD,
   INBOX_TITLE_POLL_FIELD,
   INBOX_FIRST_STARTED_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
@@ -91,6 +92,7 @@ import {
   parseInboxReloadOffer,
   parseInboxRegistry,
   parseInboxToolList,
+  type InboxPlace,
   type InboxRegistryView,
   type InboxReloadOffer,
   type InboxReplyCommand,
@@ -1138,6 +1140,12 @@ export interface InboxLinkOptions {
    * Set by the host, never by the model. Absent, empty or a rejection: nothing sent.
    */
   continues?: () => Promise<readonly string[]>
+  /**
+   * Where the session lives (`inboxPlaceFromEnv`: a Rex pane's ids), read for every poll and sent as
+   * INBOX_PLACE_POLL_FIELD when there is one. Set by the host, never by the model. Absent, null or a rejection:
+   * nothing sent.
+   */
+  place?: () => Promise<InboxPlace | null>
   /** Names this process in the lease and the claims. */
   instanceId: string
   /** Who the session is in the Inbox (a T3 Code thread); absent: the Claude Code session `sessionId`. */
@@ -1732,6 +1740,7 @@ export class InboxLink {
     const label = await this.labelNow()
     const title = this.options.title ? await Promise.resolve().then(this.options.title).catch(() => '') : null
     const continues = this.options.continues ? await this.options.continues().catch(() => [] as readonly string[]) : []
+    const place = this.options.place ? await this.options.place().catch(() => null) : null
     if (this.startedAt && !this.firstStartedAt && this.options.firstStart) {
       const started = this.startedAt
       this.firstStartedAt = await this.options.firstStart(started).catch(() => started)
@@ -1740,6 +1749,8 @@ export class InboxLink {
       waitMs,
       // The session this conversation was branched from: the Inbox hands this one what waits for it once it is gone.
       ...(continues.length > 0 ? { [INBOX_CONTINUES_POLL_FIELD]: [...continues] } : {}),
+      // Where it lives (a Rex pane's ids): a hint the Inbox checks against Rex before it shows anything.
+      ...(place ? { [INBOX_PLACE_POLL_FIELD]: place } : {}),
       ...(project ? { project_path: project } : {}),
       // The session's title (additive): the To picker's name for it; empty clears it.
       ...(label === null ? {} : { label }),

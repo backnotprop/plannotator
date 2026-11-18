@@ -28,7 +28,7 @@ export const ROOTS: Record<string, string[]> = {
   ],
   'packages/core/question-block.ts': ['QuestionAnswer'],
   'packages/shared/inbox/devices.ts': ['InboxDevicePublic'],
-  'packages/inbox/api.ts': ['ListModel', 'ThreadModel', 'ReplyResult', 'ArchivedModel'],
+  'packages/core/inbox-wire-models.ts': ['ListModel', 'ThreadModel', 'ReplyResult', 'ArchivedModel'],
   'scripts/mobile/door-shapes.ts': [
     'DoorError', 'DoorPairRequest', 'DoorPairAnswer', 'DoorRevokeAnswer', 'DoorHelloFrame', 'DoorRecordFrame', 'DoorSeenBody',
     'DoorPicksBody', 'DoorPicksAnswer', 'DoorReplyBody',
