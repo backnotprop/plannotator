@@ -68,6 +68,7 @@ import { MACHINE_WINDOW_HEADER } from "./inbox-outbox";
 import { formatInboxAppHeader } from "@plannotator/core/inbox-door-version";
 import { APP_HEADER, APP_UPGRADE, appBelowFloor, parseAppHeader, type DoorDeviceApp } from "./inbox-door-version";
 import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
+import { commandTimeRefusal, NOT_AFTER_HEADER } from "./inbox-not-after";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
   PAIRING_CHECKS_DEADLINE_MS,
@@ -1147,6 +1148,10 @@ export function createInboxDevices(context: InboxDevicesContext) {
     const belowFloor = appBelowFloor(app, route);
     if (belowFloor) return json(belowFloor, 426, { Upgrade: APP_UPGRADE });
     if (route === "revoke" && req.method === "POST") return json({ device: publicDevice(revoke(device)) });
+    // A "now" write the app queued (section 4, "not_after"), sent straight here: past its time, refused and never
+    // applied, as through the relay. Like the door's other refusals before the window is asked, not kept under its key.
+    const late = req.method === "POST" ? commandTimeRefusal(req.headers.get(NOT_AFTER_HEADER) ?? undefined, now().getTime()) : null;
+    if (late) return json(late.body, late.status);
     if (device.platform === MACHINE_PLATFORM) {
       // A machine reads this Inbox's own threads only (PLAN rule 3): never the merged view, so links both ways cannot echo.
       if (url.searchParams.has("machines")) return refuse(403, "machines_view_refused", "A linked machine reads this Inbox's own threads only.");
