@@ -610,15 +610,20 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
   });
 
   /** A thread handed #412, then hidden from the Inbox list by its row's Hide. */
+  const agentSessions = async (base: string) =>
+    ((await (await fetch(`${base}/api/inbox/threads`)).json()) as { agents: { agents: { session: string }[] }[] }).agents.flatMap((group) => group.agents.map((agent) => agent.session)).sort();
   const handedAndHidden = async () => {
     const w = await world({ codeReview: true, answer: everywhere() });
     const handed = await w.send("Ready for review.", "handed");
     await w.pulls();
     expect((await w.own([KEY], handed)).status).toBe(200);
+    const agents = await agentSessions(w.base);
     const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; threads_left: string[] };
     // The toast's "with its thread": this write took it out of the list.
     expect(res.threads_left).toEqual([handed]);
     expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    // Only the row leaves: its agent stays in the sidebar's Agents.
+    expect(await agentSessions(w.base)).toEqual(agents);
     return { w, handed };
   };
 
@@ -645,8 +650,10 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
     const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; rehid: string[]; threads_left: string[] };
     expect(res).toMatchObject({ hid: [], rehid: [handed], threads_left: [handed] });
     expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
-    // Undo: the thread is back; its PR stays hidden.
-    expect((await call(w.base, { show_threads: [handed] })).status).toBe(200);
+    // Undo: the thread is back (the window puts it back in place: `threads_back`); its PR stays hidden.
+    const undone = await call(w.base, { show_threads: [handed] });
+    expect(undone.status).toBe(200);
+    expect(((await undone.json()) as { threads_back: string[] }).threads_back).toEqual([handed]);
     expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
     expect((await reviews(w.base)).hidden?.map((h) => h.key)).toContain(KEY);
   });

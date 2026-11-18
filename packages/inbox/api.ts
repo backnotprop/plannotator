@@ -2016,7 +2016,7 @@ export const inboxApi = {
   pullClose: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close', undefined, machine), { key }),
   /** Hide PRs from Reviews, the board and their counts, or show them again (`POST /api/inbox/pulls/hidden`): kept on this machine, nothing goes to the forge. */
   pullsHidden: (change: { hide?: readonly { key: string; title: string; url: string }[]; threads?: readonly string[]; show?: readonly string[]; show_threads?: readonly string[] }) =>
-    post<{ hidden: InboxPullHidden[]; hid?: string[]; rehid?: string[]; threads_left?: string[] }>(inboxUrl('/pulls/hidden'), {
+    post<{ hidden: InboxPullHidden[]; hid?: string[]; rehid?: string[]; threads_left?: string[]; threads_back?: string[] }>(inboxUrl('/pulls/hidden'), {
       hide: [...(change.hide ?? [])],
       threads: [...(change.threads ?? [])],
       show: [...(change.show ?? [])],

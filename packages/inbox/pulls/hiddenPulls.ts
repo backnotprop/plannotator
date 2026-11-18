@@ -12,7 +12,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { inboxPullLabel, type InboxPull, type InboxPullHidden, type InboxPullsAnswer, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
-import { formatCount } from '@plannotator/core/inbox-format';
+import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { inboxApi } from '../api';
 import type { InboxToastModel } from '../components/Toast';
 import { forgeName } from './labels';
@@ -57,6 +57,22 @@ export function onHiddenWritten(reload: () => void): () => void {
   reloaders.add(reload);
   return () => void reloaders.delete(reload);
 }
+
+const backListeners = new Set<(threadIds: readonly string[]) => void>();
+
+/**
+ * Inbox threads a write made here brought back into the Inbox list (Undo of a Hide, Show again): the window puts them
+ * back in place at once, as its own write, never behind "N new" (App's `afterWrite`).
+ */
+export function onThreadsBack(listener: (threadIds: readonly string[]) => void): () => void {
+  backListeners.add(listener);
+  return () => void backListeners.delete(listener);
+}
+
+const threadsBack = (ids: readonly string[]) => {
+  if (ids.length === 0) return;
+  for (const listener of backListeners) listener(ids);
+};
 
 /**
  * How long a change made here holds, whatever an answer says: both lists read again in that time, so one that hears
@@ -181,13 +197,15 @@ export async function hidePulls(pulls: readonly HidePick[], now = new Date()): P
 export async function showPulls(keys: readonly string[]): Promise<void> {
   if (keys.length === 0) return;
   const was = change(keys, () => ({ hide: false, since: Date.now() }));
+  const back: string[] = [];
   try {
-    for (const part of inParts(keys)) await inboxApi.pullsHidden({ show: part });
+    for (const part of inParts(keys)) back.push(...((await inboxApi.pullsHidden({ show: part })).threads_back ?? []));
   } catch (cause) {
     putBack(keys, was);
     throw cause;
   }
   written();
+  threadsBack(back);
 }
 
 /**
@@ -214,13 +232,28 @@ export async function hideThreadPulls(threadIds: readonly string[], now = new Da
 /** Undo of the Inbox list's Hide: its PRs shown again, and the threads it hid again (`rehid`) let back. */
 async function undoThreadHide(hid: readonly string[], rehid: readonly string[]): Promise<void> {
   await showPulls(hid);
-  for (const part of inParts(rehid)) await inboxApi.pullsHidden({ show_threads: part });
+  const back: string[] = [];
+  for (const part of inParts(rehid)) back.push(...((await inboxApi.pullsHidden({ show_threads: part })).threads_back ?? []));
   if (rehid.length > 0) written();
+  threadsBack(back);
 }
 
-/** A Hide's lead: "Hid #12", and the threads it took out of the Inbox list with it ("Hid #12, with its thread"). */
-export function hidLead(what: string, threads: number): string {
-  return threads === 0 ? what : threads === 1 ? `${what}, with its thread` : `${what}, with ${formatCount(threads)} threads`;
+/**
+ * A Hide's lead: "Hid #12", and the threads it took out of the Inbox list with it: "with its thread" for one PR,
+ * "with their thread" for several, "with 2 threads".
+ */
+export function hidLead(what: string, threads: number, pulls = 1): string {
+  if (threads === 0) return what;
+  return threads === 1 ? `${what}, with ${pulls === 1 ? 'its' : 'their'} thread` : `${what}, with ${plural(threads, 'thread')}`;
+}
+
+/**
+ * The hidden PRs Reviews' Hidden fold lists under its project filter: those of a repository that is a clone of the
+ * project (`projects`, the answer's repository-to-project map; a key is `host/owner/repo#n`). No filter: all of them.
+ */
+export function hiddenInProject<T extends Pick<InboxPullHidden, 'key'>>(hidden: readonly T[], project: string | null, projects: Readonly<Record<string, readonly string[]>>): T[] {
+  if (!project) return [...hidden];
+  return hidden.filter((h) => (projects[h.key.replace(/#\d+(?::[a-z]+)?$/, '').toLowerCase()] ?? []).includes(project));
 }
 
 /** "Hid #12" for one, "Hid 3 pull requests" for several. */
@@ -273,7 +306,7 @@ export async function hideWithUndo(pulls: readonly InboxPull[], toast: Toast | u
   toast?.(
     {
       icon: 'check',
-      lead: hidLead(hidToast(pulls), threads),
+      lead: hidLead(hidToast(pulls), threads, pulls.length),
       detail: `Still open on ${new Set(pulls.map((pull) => pull.platform)).size === 1 ? forgeName(pulls[0]!) : 'GitHub and GitLab'}`,
       onUndo: () => void showWithToast(keys, labels, toast),
       noKey: true,
@@ -312,7 +345,7 @@ export async function hideThreadsWithUndo(threadIds: readonly string[], toast: T
   // Only threads hidden again (their PRs were hidden already): the toast names the threads.
   const lead =
     hid.length > 0
-      ? hidLead(hid.length === 1 ? `Hid ${labels[0]}` : `Hid ${formatCount(hid.length)} pull requests`, threads)
+      ? hidLead(hid.length === 1 ? `Hid ${labels[0]}` : `Hid ${formatCount(hid.length)} pull requests`, threads, hid.length)
       : rehid.length === 1
         ? 'Hid the thread again'
         : `Hid ${formatCount(rehid.length)} threads again`;

@@ -143,6 +143,7 @@ import { isScratchDataDir, refuseRealDataDir } from "./real-data-dir";
 import { seedTagWorld, TAG_SESSIONS } from "./inbox-tag-world";
 import { seedLeakedSubjects } from "./inbox-leaked-subject";
 import { InboxStore } from "../../packages/shared/inbox/store";
+import { parseInboxThreadPullRefs } from "../../packages/core/inbox-thread-pulls";
 import { markTourDecided } from "./tour-decided";
 
 const [dataDir, projectsDir, countArg, extra] = process.argv.slice(2);
@@ -263,6 +264,18 @@ if (whatsNewMode) {
 }
 const openInMode = extra === "open-in";
 const decisionsMode = extra === "decisions";
+/**
+ * With a fourth argument `pulls`: Code review is on, and each world's `waiting` thread lists one open PR of its own
+ * (`acme/web#<100 + i>`, the thread's own PR list), so its row offers Hide pull request. No forge is read: the test puts
+ * a `gh` that always fails first on PATH.
+ */
+const pullsMode = extra === "pulls";
+if (pullsMode) {
+  mkdirSync(dataDir, { recursive: true });
+  const file = join(dataDir, "config.json");
+  const config = existsSync(file) ? (JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>) : {};
+  writeFileSync(file, JSON.stringify({ ...config, inboxCodeReview: true }));
+}
 // Decision mode is experimental and off by default: this mode turns it on in the scratch config.json.
 if (decisionsMode) {
   mkdirSync(dataDir, { recursive: true });
@@ -504,6 +517,11 @@ for (let i = 0; i < (firstRunMode ? 0 : count); i++) {
   }
   const stopped = store.sendMessage({ project_id: project.id, author, body: STOPPED }).message;
   const waiting = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_b${i}` }, body: WAITING }).message;
+  if (pullsMode) {
+    const parsed = parseInboxThreadPullRefs([`acme/web#${100 + i}`], "add");
+    if ("error" in parsed) throw new Error(parsed.error);
+    store.changeThreadPulls({ thread_id: waiting.id, add: parsed.refs, by: { kind: "agent", host: "claude-code", session: `ses_b${i}`, name: "Claude Code" } });
+  }
   // One thread two sessions write in: A asks, then B posts a later update in it.
   const asking = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_m${i}` }, body: WAITING.replace("docs site", "admin site") }).message;
   const update = store.sendMessage({ project_id: project.id, author: { ...author, session: `ses_n${i}`, name: "Codex", host: "codex" }, body: "Update: the admin index builds now.", reply_to: asking.id }).message;

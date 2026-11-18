@@ -11,7 +11,7 @@
  */
 
 import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
-import { hiddenChangedElsewhere, hideThreadsWithUndo } from './pulls/hiddenPulls';
+import { hiddenChangedElsewhere, hideThreadsWithUndo, onThreadsBack } from './pulls/hiddenPulls';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfUntilNextFrame } from './perfMarks';
 import { machineOf, selfMachineId } from './inboxUrl';
@@ -2545,6 +2545,12 @@ function Inbox() {
     const fresh = written.flatMap((id) => rows.get(id) ?? []);
     if (fresh.length > 0) setShown((current) => (current ? addOwnThreads(fresh.reduce(replaceHeldRow, current), groups, written) : current));
   };
+
+  // Threads an Undo or a Show again made here brought back (pulls/hiddenPulls.ts): the person's own write, so they go
+  // back in place at once, never behind "N new". A thread back on an agent's new activity is news as any other.
+  const afterWriteRef = useRef(afterWrite);
+  afterWriteRef.current = afterWrite;
+  useEffect(() => onThreadsBack((ids) => void afterWriteRef.current(ids)), []);
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
