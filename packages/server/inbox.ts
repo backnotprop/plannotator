@@ -891,6 +891,8 @@ const ERROR_STATUS: Record<string, number> = {
   launch_not_found: 404,
   launch_off: 404,
   open_unavailable: 409,
+  // Stop: the app hosting the session (a launch bridge) refused it; the session still runs.
+  stop_unavailable: 409,
   // Trust folder: the agent's own config could not be changed; nothing was, and the message stays kept.
   trust_failed: 409,
   // Trust folder: the folder's warning is no longer the one the person read; nothing was saved.
