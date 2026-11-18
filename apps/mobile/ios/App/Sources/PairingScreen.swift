@@ -1,0 +1,254 @@
+import AVFoundation
+import InboxCore
+import SwiftUI
+
+/// First run: the camera, to scan the code on the computer (FLOWS 2, mock 1).
+struct PairingScreen: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.openURL) private var openURL
+  @State private var typing = false
+  @State private var camera = AVCaptureDevice.authorizationStatus(for: .video)
+
+  var body: some View {
+    NavigationStack {
+      ScrollView {
+        VStack(alignment: .leading, spacing: 20) {
+          VStack(alignment: .leading, spacing: 10) {
+            Text(PhoneWords.pairTitle)
+              .font(.largeTitle.bold())
+              .foregroundStyle(Token.foreground)
+              .accessibilityAddTraits(.isHeader)
+            Text(PhoneWords.pairWhere)
+              .font(.body)
+              .foregroundStyle(Token.mutedForeground)
+          }
+          viewfinder
+          failure
+          VStack(spacing: 0) {
+            way(PhoneWords.pairTypeInstead) { typing = true }
+            Divider().overlay(Token.border)
+            way(PhoneWords.pairTryDemo) { Task { await model.startDemo() } }
+          }
+          Text(PhoneWords.pairPromise)
+            .font(.footnote)
+            .foregroundStyle(Token.mutedForeground)
+        }
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 24)
+      }
+      .scrollBounceBehavior(.basedOnSize)
+      .background(Token.background.ignoresSafeArea())
+      .sheet(isPresented: $typing) { TypeAddressSheet().environment(model) }
+    }
+    .task {
+      if camera == .notDetermined {
+        // The camera permission is asked here, with the reason (Info.plist).
+        camera = await AVCaptureDevice.requestAccess(for: .video) ? .authorized : .denied
+      }
+    }
+  }
+
+  private var viewfinder: some View {
+    ZStack {
+      RoundedRectangle(cornerRadius: 28, style: .continuous).fill(Color.black)
+      if camera == .authorized, QRScanner.hasCamera {
+        QRScanner { text in Task { await model.open(link: text) } }
+          .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
+          .accessibilityLabel(PhoneWords.pairTitle)
+      } else if camera == .denied || camera == .restricted {
+        VStack(spacing: 14) {
+          Text(PhoneWords.pairCameraOff)
+            .font(.callout)
+            .multilineTextAlignment(.center)
+            .foregroundStyle(.white)
+          Button(PhoneWords.pairOpenSettings) {
+            if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
+          }
+          .buttonStyle(.borderedProminent)
+        }
+        .padding(28)
+      }
+      ViewfinderCorners()
+        .stroke(.white.opacity(0.92), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
+        .padding(72)
+        .accessibilityHidden(true)
+      if model.pairing == .working {
+        ProgressView().controlSize(.large).tint(.white)
+      }
+    }
+    .aspectRatio(1.06, contentMode: .fit)
+  }
+
+  @ViewBuilder private var failure: some View {
+    if case .failed(let lines) = model.pairing, !lines.isEmpty {
+      VStack(alignment: .leading, spacing: 4) {
+        ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+          Text(line)
+            .font(index == 0 ? .callout.weight(.semibold) : .callout)
+            .foregroundStyle(index == 0 ? Token.destructive : Token.mutedForeground)
+        }
+      }
+      .frame(maxWidth: .infinity, alignment: .leading)
+      .accessibilityElement(children: .combine)
+    }
+  }
+
+  private func way(_ title: String, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack {
+        Text(title).font(.body).multilineTextAlignment(.leading)
+        Spacer(minLength: 12)
+        Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).accessibilityHidden(true)
+      }
+      .foregroundStyle(Token.primary)
+      .frame(minHeight: 52)
+      .contentShape(Rectangle())
+    }
+    .buttonStyle(.plain)
+  }
+}
+
+/// The four corners of the viewfinder.
+struct ViewfinderCorners: Shape {
+  func path(in rect: CGRect) -> Path {
+    let arm = min(rect.width, rect.height) * 0.16
+    let radius = arm * 0.5
+    var path = Path()
+    for (x, y, dx, dy) in [(rect.minX, rect.minY, 1.0, 1.0), (rect.maxX, rect.minY, -1.0, 1.0), (rect.maxX, rect.maxY, -1.0, -1.0), (rect.minX, rect.maxY, 1.0, -1.0)] {
+      path.move(to: CGPoint(x: x, y: y + dy * arm))
+      path.addLine(to: CGPoint(x: x, y: y + dy * radius))
+      path.addQuadCurve(to: CGPoint(x: x + dx * radius, y: y), control: CGPoint(x: x, y: y))
+      path.addLine(to: CGPoint(x: x + dx * arm, y: y))
+    }
+    return path
+  }
+}
+
+/// "Type the address and six digits": the tailnet only, as the window says.
+struct TypeAddressSheet: View {
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+  @State private var address = ""
+  @State private var digits = ""
+  @FocusState private var focus: Field?
+  enum Field { case address, digits }
+
+  private var ready: Bool { !address.trimmingCharacters(in: .whitespaces).isEmpty && digits.count == 6 }
+
+  var body: some View {
+    NavigationStack {
+      Form {
+        Section {
+          TextField(PhoneWords.pairAddress, text: $address, prompt: Text(PhoneWords.pairAddressHint))
+            .textContentType(.URL)
+            .keyboardType(.URL)
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .focused($focus, equals: .address)
+            .submitLabel(.next)
+            .onSubmit { focus = .digits }
+            .accessibilityLabel(PhoneWords.pairAddress)
+          TextField(PhoneWords.pairDigits, text: $digits)
+            .keyboardType(.numberPad)
+            .textContentType(.oneTimeCode)
+            .font(.body.monospacedDigit())
+            .focused($focus, equals: .digits)
+            .onChange(of: digits) { _, now in digits = String(now.filter(\.isNumber).prefix(6)) }
+            .accessibilityLabel(PhoneWords.pairDigits)
+        } footer: {
+          VStack(alignment: .leading, spacing: 6) {
+            Text(PhoneWords.pairTailnetOnly)
+            if case .failed(let lines) = model.pairing {
+              ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                Text(line).foregroundStyle(index == 0 ? Token.destructive : Token.mutedForeground)
+              }
+            }
+          }
+        }
+      }
+      .navigationTitle(PhoneWords.pairTypeInstead)
+      .navigationBarTitleDisplayMode(.inline)
+      .toolbar {
+        ToolbarItem(placement: .cancellationAction) { Button(PhoneWords.cancel) { dismiss() } }
+        ToolbarItem(placement: .confirmationAction) {
+          if model.pairing == .working {
+            ProgressView()
+          } else {
+            Button(PhoneWords.pairAction) { Task { await model.pair(address: address, code: digits) } }
+              .disabled(!ready)
+          }
+        }
+      }
+      .onAppear {
+        model.clearPairingFailure()
+        focus = .address
+      }
+      .onDisappear { model.clearPairingFailure() }
+    }
+    .presentationDetents([.medium, .large])
+  }
+}
+
+/// The camera, reading QR codes. Each code is handed on once.
+struct QRScanner: UIViewRepresentable {
+  static var hasCamera: Bool { AVCaptureDevice.default(for: .video) != nil }
+  let found: (String) -> Void
+
+  func makeCoordinator() -> Coordinator { Coordinator(found: found) }
+
+  func makeUIView(context: Context) -> Preview {
+    let view = Preview()
+    view.layer.videoGravity = .resizeAspectFill
+    context.coordinator.start(on: view.layer)
+    return view
+  }
+
+  func updateUIView(_ view: Preview, context: Context) {}
+
+  static func dismantleUIView(_ view: Preview, coordinator: Coordinator) { coordinator.stop() }
+
+  final class Preview: UIView {
+    override class var layerClass: AnyClass { AVCaptureVideoPreviewLayer.self }
+    override var layer: AVCaptureVideoPreviewLayer { super.layer as! AVCaptureVideoPreviewLayer }
+  }
+
+  final class Coordinator: NSObject, AVCaptureMetadataOutputObjectsDelegate, @unchecked Sendable {
+    private let session = AVCaptureSession()
+    private let queue = DispatchQueue(label: "ai.plannotator.inbox.camera")
+    private let found: (String) -> Void
+    private var last: String?
+    private var lastAt = Date.distantPast
+
+    init(found: @escaping (String) -> Void) { self.found = found }
+
+    @MainActor
+    func start(on layer: AVCaptureVideoPreviewLayer) {
+      layer.session = session
+      queue.async { [self] in
+        guard let device = AVCaptureDevice.default(for: .video), let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) else { return }
+        session.beginConfiguration()
+        session.addInput(input)
+        let output = AVCaptureMetadataOutput()
+        if session.canAddOutput(output) {
+          session.addOutput(output)
+          output.setMetadataObjectsDelegate(self, queue: .main)
+          if output.availableMetadataObjectTypes.contains(.qr) { output.metadataObjectTypes = [.qr] }
+        }
+        session.commitConfiguration()
+        session.startRunning()
+      }
+    }
+
+    func stop() { queue.async { [self] in if session.isRunning { session.stopRunning() } } }
+
+    func metadataOutput(_ output: AVCaptureMetadataOutput, didOutput objects: [AVMetadataObject], from connection: AVCaptureConnection) {
+      guard let text = (objects.first as? AVMetadataMachineReadableCodeObject)?.stringValue else { return }
+      // The same code stays in view for seconds: hand it on once, and again only after a pause.
+      if text == last, Date().timeIntervalSince(lastAt) < 4 { return }
+      last = text
+      lastAt = Date()
+      found(text)
+    }
+  }
+}
