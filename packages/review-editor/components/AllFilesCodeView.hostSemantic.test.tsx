@@ -372,3 +372,102 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
     expect(reads).toEqual([]);
   });
 });
+
+describe('AllFilesCodeView semantic notes that land after the person started reading', () => {
+  const box = (top: number, height: number) => ({ x: 0, y: top, left: 0, right: 800, width: 800, top, bottom: top + height, height, toJSON: () => ({}) }) as DOMRect;
+  const tops = new Map<Element, number>();
+  let pageHeight = 10_000;
+  const realRect = Element.prototype.getBoundingClientRect;
+  const sizes = ['scrollHeight', 'clientHeight'] as const;
+  const realSizes = sizes.map((name) => Object.getOwnPropertyDescriptor(HTMLElement.prototype, name));
+  afterEach(() => {
+    Element.prototype.getBoundingClientRect = realRect;
+    sizes.forEach((name, index) => {
+      if (realSizes[index]) Object.defineProperty(HTMLElement.prototype, name, realSizes[index]);
+      else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+    });
+    tops.clear();
+    pageHeight = 10_000;
+  });
+
+  async function reading(files: string[], at: Record<string, number>) {
+    Element.prototype.getBoundingClientRect = function (this: Element) {
+      return box(tops.get(this) ?? 0, tops.has(this) ? 400 : 700);
+    };
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => pageHeight });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 700 });
+    const gates: (() => void)[] = [];
+    const client: SemDiffClient = {
+      supports: (path) => path.endsWith('.ts'),
+      diff: () => new Promise((resolve) => gates.push(() => resolve(moved))),
+      attempt: async () => ({ result: moved, failed: false }),
+      dispose: () => {},
+    };
+    const { read } = hostReader();
+    await mount(files.map(changed), { semDiffClient: client, fetchFileContent: read });
+    const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
+    const nodes = new Map<string, HTMLElement>();
+    await act(async () => {
+      for (const item of items.values()) {
+        const node = document.createElement('div');
+        document.body.appendChild(node);
+        const path = files.find((file) => item.id.includes(file))!;
+        nodes.set(path, node);
+        tops.set(node, at[path]!);
+        options.onPostRender(node, {}, 'mount', { item });
+      }
+    });
+    const land = async () => {
+      await act(async () => {
+        for (const open of gates.splice(0)) open();
+        await new Promise((resolve) => setTimeout(resolve, 260));
+      });
+    };
+    const swapped = (path: string) => ([...items.values()].find((item) => item.id.includes(path))!.fileDiff.semanticOperations as unknown[] | undefined)?.length === 1;
+    const move = (path: string, top: number) => void tops.set(nodes.get(path)!, top);
+    return { land, swapped, move };
+  }
+
+  test.skipIf(!hasDom)('after a scroll, a file on screen is offered its note and one wholly below swaps by itself; before any, both swap', async () => {
+    const quiet = await reading(['a.ts', 'b.ts'], { 'a.ts': 100, 'b.ts': 3000 });
+    await quiet.land();
+    expect([quiet.swapped('a.ts'), quiet.swapped('b.ts')]).toEqual([true, true]);
+    await act(async () => root?.unmount());
+    root = null;
+
+    const engaged = await reading(['a.ts', 'b.ts'], { 'a.ts': 100, 'b.ts': 3000 });
+    document.dispatchEvent(new Event('wheel'));
+    await engaged.land();
+    expect([engaged.swapped('a.ts'), engaged.swapped('b.ts')]).toEqual([false, true]);
+    const offered = (await headerOf('a.ts')).querySelector<HTMLButtonElement>('[data-semantic-note="off"]');
+    expect(offered?.textContent).toContain('1 moved');
+    await act(async () => offered!.click());
+    expect(engaged.swapped('a.ts')).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('where the file is when its note lands decides, and near the end of the page even a file below is offered', async () => {
+    const page = await reading(['a.ts', 'b.ts', 'c.ts'], { 'a.ts': -3000, 'b.ts': 3000, 'c.ts': 3000 });
+    document.dispatchEvent(new Event('pointerdown'));
+    page.move('b.ts', 200);
+    await page.land();
+    expect([page.swapped('a.ts'), page.swapped('b.ts'), page.swapped('c.ts')]).toEqual([false, false, true]);
+    await act(async () => root?.unmount());
+    root = null;
+
+    pageHeight = 1_200;
+    const end = await reading(['a.ts'], { 'a.ts': 3000 });
+    document.dispatchEvent(new Event('keydown'));
+    await end.land();
+    expect(end.swapped('a.ts')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('turning the semantic switch on by hand shows the note in every file, on screen or not', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
+    document.dispatchEvent(new Event('touchstart'));
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+    await act(async () => configStore.set('diffSemantic', false));
+    await act(async () => configStore.set('diffSemantic', true));
+    expect(page.swapped('a.ts')).toBe(true);
+  });
+});
