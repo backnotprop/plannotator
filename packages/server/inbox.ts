@@ -356,6 +356,7 @@ import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWa
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
 import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
+import { doorHealth } from "./inbox-door-version";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
@@ -5848,7 +5849,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const answer = await cfRoutes?.handle(req, path);
         if (answer) return answer;
       }
-      if (path === "/api/inbox/health" && req.method === "GET") return json(health());
+      if (path === "/api/inbox/health" && req.method === "GET") {
+        // Through the device door only (section 14): the contract, and the routes this caller's token reaches.
+        const caller = fromDeviceDoor.get(req);
+        return json(caller && phones ? { ...health(), door: doorHealth(phones.doorReach(caller.platform)) } : health());
+      }
       if (path === "/api/inbox/threads" && req.method === "GET") {
         const projectFilter = projectFilterOf(url);
         const archivedMode = archivedModeOf(url);
