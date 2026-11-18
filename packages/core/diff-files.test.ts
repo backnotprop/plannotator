@@ -39,6 +39,20 @@ describe("colorized patches", () => {
 });
 
 describe("parseDiffToFiles", () => {
+  it("counts lines beginning with patch-marker text inside a hunk", () => {
+    const [file] = parseDiffToFiles([
+      "diff --git a/notes.txt b/notes.txt",
+      "--- a/notes.txt",
+      "+++ b/notes.txt",
+      "@@ -1,2 +1,2 @@",
+      "---- old section",
+      " plain context",
+      "++++ new section",
+      "",
+    ].join("\n"));
+    expect({ additions: file.additions, deletions: file.deletions }).toEqual({ additions: 1, deletions: 1 });
+  });
+
   it("uses file header lines so paths containing separator text stay intact", () => {
     const files = parseDiffToFiles([
       'diff --git "a/api/foo b/bar.ts" "b/api/foo b/bar.ts"',
