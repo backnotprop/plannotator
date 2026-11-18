@@ -45,21 +45,30 @@ export function RailScopeSwitch({ scope, changed, onSelect }: { scope: TreeScope
   );
 }
 
+const SCOPE_FOCUS_WAIT_MS = 3000;
+
 export function focusScopeWhenLost(rail: HTMLElement | null, scope: TreeScope): void {
   if (!rail) return;
   const from = document.activeElement;
+  const selector = `[data-tree-scope="${scope}"]`;
+  const stale = rail.querySelector(selector);
   const observer = new MutationObserver(() => {
     const active = document.activeElement;
-    if (modalOpen() || !rail.isConnected) return observer.disconnect();
+    const button = rail.querySelector<HTMLElement>(selector);
+    if (modalOpen() || !rail.isConnected) return stop();
     if (active && active !== document.body && active.isConnected) {
-      if (active !== from) observer.disconnect();
+      if (active !== from || (button && button !== stale)) stop();
       return;
     }
-    const button = rail.querySelector<HTMLElement>(`[data-tree-scope="${scope}"]`);
     if (!button) return;
-    observer.disconnect();
+    stop();
     button.focus({ preventScroll: true });
   });
+  const timer = setTimeout(() => observer.disconnect(), SCOPE_FOCUS_WAIT_MS);
+  const stop = () => {
+    clearTimeout(timer);
+    observer.disconnect();
+  };
   observer.observe(rail, { childList: true, subtree: true });
 }
 

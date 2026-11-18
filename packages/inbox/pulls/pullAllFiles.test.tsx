@@ -286,6 +286,25 @@ test.skipIf(!hasDom)('the first switch to All files: focus waits for the All fil
   }
 });
 
+test.skipIf(!hasDom)('a switch that never lost focus lets go: focus lost later for another reason stays where the page puts it', async () => {
+  const rail = railWithSwitch();
+  rail.insertAdjacentHTML('beforeend', '<button data-row="">src/app.ts</button>');
+  try {
+    rail.querySelector<HTMLElement>('[data-row]')!.focus();
+    focusScopeWhenLost(rail, 'all');
+    rail.querySelector('[data-old]')!.remove();
+    rail.insertAdjacentHTML('afterbegin', '<div data-pull-all-files=""><button data-tree-scope="all">All files</button></div>');
+    await later(0);
+    expect(document.activeElement === rail.querySelector('[data-row]')).toBe(true);
+    await later(50);
+    rail.querySelector('[data-row]')!.remove();
+    await later(0);
+    expect(document.activeElement === document.body).toBe(true);
+  } finally {
+    rail.remove();
+  }
+});
+
 test.skipIf(!hasDom)('a dialog open while All files mounts keeps the focus it has', async () => {
   const rail = railWithSwitch();
   const dialog = document.createElement('dialog');
