@@ -112,14 +112,42 @@ const RECONNECT_FIRST_MS = 1_000;
 const RECONNECT_LAST_MS = 60_000;
 
 /**
- * The socket's liveness check: a ping after `intervalMs`, and a reconnect when
- * its pong is `timeoutMs` late. A ping leaves after every byte already sent,
- * and a result frame can be about 17.8 MiB, so the pong is not expected until
- * those bytes could have left at `uplinkBytesPerMs` (about 256 kbit/s, a slow
- * uplink), and Bun's send buffer still shrinking counts as an answer. Without
- * that, a slow upload would be cut off mid-frame and its command sent again.
+ * The socket's liveness check: a ping after `intervalMs`, then a look every
+ * `timeoutMs` until its pong comes back (`heartbeatLook`). A ping leaves after
+ * every byte already sent, and a result frame can be about 17.8 MiB, so a slow
+ * upload must not count as a dead socket: it would be cut off mid-frame and
+ * its command sent again. The pong is due `timeoutMs` after the frames sent
+ * before the ping could have left at `uplinkBytesPerMs` (about 256 kbit/s, a
+ * slow uplink). Bun (from 1.4) reports its send queue, which empties in steps
+ * of hundreds of KB as the kernel takes them: bytes waiting there that have
+ * not moved for as long as `queueStepBytes` takes at that rate mean the path
+ * is dead, sooner than the allowance; a queue still moving keeps the socket
+ * past it.
  */
-const RELAY_HEARTBEAT = { intervalMs: 30_000, timeoutMs: 10_000, uplinkBytesPerMs: 32 };
+const RELAY_HEARTBEAT = { intervalMs: 30_000, timeoutMs: 10_000, uplinkBytesPerMs: 32, queueStepBytes: 2 * 1024 * 1024 };
+
+export type RelayHeartbeat = typeof RELAY_HEARTBEAT;
+
+/**
+ * One look for a pong: `left` is Bun's send queue now, `queued` what it held
+ * at the last look plus what frames sent since added, `movedAt` when it last
+ * shrank (or the ping), `due` when the pong is late once the queue is empty.
+ */
+export function heartbeatLook(
+  look: { now: number; left: number; queued: number; movedAt: number; due: number },
+  heartbeat: RelayHeartbeat,
+): { drop: true } | { drop: false; ms: number; movedAt: number } {
+  const moved = look.left < look.queued;
+  const movedAt = moved ? look.now : look.movedAt;
+  if (look.left > 0) {
+    const stuckMs = Math.max(heartbeat.timeoutMs, heartbeat.queueStepBytes / heartbeat.uplinkBytesPerMs);
+    return look.now - movedAt >= stuckMs ? { drop: true } : { drop: false, ms: heartbeat.timeoutMs, movedAt };
+  }
+  // The queue is empty (or this Bun does not report it): one more look for bytes that just left it, else the allowance.
+  if (moved) return { drop: false, ms: heartbeat.timeoutMs, movedAt };
+  if (look.now >= look.due) return { drop: true };
+  return { drop: false, ms: Math.min(heartbeat.timeoutMs, look.due - look.now), movedAt };
+}
 
 type RelaySocket = WebSocket & Pick<Bun.WebSocket, "ping" | "terminate">;
 
@@ -272,6 +300,8 @@ export function createInboxRelay(context: InboxRelayContext) {
   const heartbeat = { ...RELAY_HEARTBEAT, ...context.heartbeat };
   /** When every frame sent on this socket could have left at the heartbeat's slowest uplink. */
   let drainedAt = 0;
+  /** Bun's send queue at the heartbeat's last look, plus what frames sent since added to it. */
+  let queued = 0;
   let delay = RECONNECT_FIRST_MS;
   let stopped = false;
   let reachable: boolean | null = null;
@@ -370,7 +400,10 @@ export function createInboxRelay(context: InboxRelayContext) {
   /** Sends one frame on the open socket, and counts its bytes toward when the heartbeat may expect a pong. */
   const transmit = (frame: string): boolean => {
     if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    const before = socket.bufferedAmount;
     socket.send(frame);
+    // A frame sent now must not read as the queue failing to shrink.
+    queued += socket.bufferedAmount - before;
     // Frames are JSON around base64 text, so their length is their byte count.
     drainedAt = Math.max(drainedAt, Date.now()) + frame.length / heartbeat.uplinkBytesPerMs;
     return true;
@@ -575,8 +608,6 @@ export function createInboxRelay(context: InboxRelayContext) {
     socket = ws;
     drainedAt = 0;
     let awaiting: Buffer | null = null;
-    /** Bun's send buffer when the pong was last looked for. */
-    let buffered = 0;
     const dropped = (reason?: string) => {
       if (socket !== ws) return;
       clearHeartbeat();
@@ -594,16 +625,14 @@ export function createInboxRelay(context: InboxRelayContext) {
       }, delay);
       delay = Math.min(delay * 2, RECONNECT_LAST_MS);
     };
-    const awaitPong = (ms: number) => {
+    const awaitPong = (due: number, movedAt: number, ms: number) => {
       heartbeatTimer = setTimeout(() => {
         if (socket !== ws) return;
-        // Bun's send buffer shrank since the last look: an upload is still leaving, slower than allowed for, so the socket is alive.
-        if (ws.bufferedAmount < buffered) {
-          buffered = ws.bufferedAmount;
-          awaitPong(heartbeat.timeoutMs);
-          return;
-        }
-        dropped("socket heartbeat timed out");
+        const left = ws.bufferedAmount;
+        const next = heartbeatLook({ now: Date.now(), left, queued, movedAt, due }, heartbeat);
+        queued = left;
+        if (next.drop) dropped("socket heartbeat timed out");
+        else awaitPong(due, next.movedAt, next.ms);
       }, ms);
     };
     const schedulePing = () => {
@@ -612,9 +641,10 @@ export function createInboxRelay(context: InboxRelayContext) {
         // Cloudflare answers protocol pings without waking the mailbox or changing its wire format.
         awaiting = randomBytes(8);
         ws.ping(awaiting);
-        buffered = ws.bufferedAmount;
+        queued = ws.bufferedAmount;
         // The ping waits behind every frame already sent: its pong is due once those could have left.
-        awaitPong(Math.max(0, drainedAt - Date.now()) + heartbeat.timeoutMs);
+        const now = Date.now();
+        awaitPong(Math.max(now, drainedAt) + heartbeat.timeoutMs, now, heartbeat.timeoutMs);
       }, heartbeat.intervalMs);
     };
     ws.onopen = () => {
