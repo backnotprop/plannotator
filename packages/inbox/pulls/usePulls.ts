@@ -3,6 +3,7 @@ import type { InboxPullsAnswer, InboxReviewsAnswer } from '@plannotator/core/inb
 import { inboxApi } from '../api';
 import { rememberFarBranches } from './branchReviews';
 import { onHiddenWritten, pullsShown, reviewsShown, settleHidden, useHiddenChanges } from './hiddenPulls';
+import { REVIEWS_AFTER_STORE_MAX_MS, REVIEWS_AFTER_STORE_MS } from '../app/boot';
 
 /** The window got its focus back: the list is read again, at most this often. */
 export const PULLS_FOCUS_MS = 20_000;
@@ -169,4 +170,23 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
   const shownModel = useMemo(() => pullsShown(model, changes), [model, changes]);
   const shownReviews = useMemo(() => reviewsShown(reviews, changes), [reviews, changes]);
   return { model: shownModel, reviews: shownReviews, error, loading, refresh, reload, reloadRows };
+}
+
+/**
+ * A review arrived, a verdict went: Reviews' rows and the sidebar's count follow the store, a moment after it changed
+ * (`moved`: what changes with it, the list and the open thread's messages), but a steady stream of messages never
+ * holds it off for long.
+ */
+export function useRowsAfterStore(on: boolean, reloadRows: () => void, ...moved: unknown[]): void {
+  const waitingSince = useRef<number | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    const since = (waitingSince.current ??= Date.now());
+    const timer = setTimeout(() => {
+      waitingSince.current = null;
+      reloadRows();
+    }, Math.min(REVIEWS_AFTER_STORE_MS, Math.max(0, since + REVIEWS_AFTER_STORE_MAX_MS - Date.now())));
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [on, reloadRows, ...moved]);
 }
