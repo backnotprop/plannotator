@@ -1190,10 +1190,10 @@ export function InboxList(props: InboxListProps) {
   // ↑ ↓ Home End move focus between the rows (listKeys.ts), only while a row or the Quiet band has it.
   const listKey = (move: ListMove) => ({
     when: (event: KeyboardEvent) => {
-      if (event.defaultPrevented || isComposingKey(event) || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || modalOpen()) return false;
+      if (event.defaultPrevented || isComposingKey(event) || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey) return false;
       const target = keyTarget(event);
       const body = bodyRef.current;
-      return !!(target && body?.contains(target) && target.matches(LIST_STOPS));
+      return !!(target && body?.contains(target) && target.matches(LIST_STOPS)) && !modalOpen();
     },
     handle: (event: KeyboardEvent) => {
       const body = bodyRef.current;
