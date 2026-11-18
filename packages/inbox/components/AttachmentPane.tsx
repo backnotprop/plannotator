@@ -2357,7 +2357,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             if (pinchTucks) setPinchShown(true);
             if (!pinchTucks || toolbar === 'tucked') setToolbar(next);
           }}
-          draft={hasComposer && !!props.composer && (props.composer.reply.value.trim() !== '' || props.composer.reply.files.length > 0)}
+          draft={hasComposer && !!props.composer && ((props.composer.reply.hasWords ?? props.composer.reply.value.trim() !== '') || props.composer.reply.files.length > 0)}
           commentDraft={commentWaits}
           restoreTarget={restoreTarget}
           announce={announce}
