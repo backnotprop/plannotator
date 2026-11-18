@@ -146,7 +146,7 @@ import {
   withSessionStart,
   withSessionTitles,
 } from './inbox'
-import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
+import { inboxAgentTool, inboxPlaceFromEnv, inboxReminderFor, type InboxPlace, type InboxToolInfo } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, privateDirArgv, resolveDataDir, waitArgv } from './launch'
 import { isAbsolutePath } from './paths'
@@ -677,6 +677,7 @@ async function currentMod($: Engine, options: { healed?: boolean } = {}): Promis
       title: () => title.generatedTitle() ?? '',
       firstStart: (startedAt) => sessionFirstStartOf($, String(sessionId), startedAt),
       continues: async () => [...new Set([...(await forkedFrom.read()), ...(await continuedIn.read())])],
+      place: () => placeOf($),
       ...(inboxTools ? { inboxTools } : {}),
       ...(settings.t3Thread ? { inboxAs: inboxT3Agent(settings.t3Thread), inboxOwner: () => t3ThreadOwnHere($) } : {}),
       ...(settings.wake ? {} : { inboxWake: false }),
@@ -781,6 +782,22 @@ async function homeOf($: Engine): Promise<string | undefined> {
   const windows = (await $.env.get('OS')) === 'Windows_NT'
   const home = (windows && profile) || (await $.env.get('HOME')) || profile
   return typeof home === 'string' && home ? home : undefined
+}
+
+/**
+ * Where this session lives (INBOX_PLACE_POLL_FIELD): a Rex pane's ids, from the environment Claude Code started
+ * with, only when Rex's own terminal runs it (`inboxPlaceFromEnv`). Each variable named as a literal
+ * (env-get-literal.test.ts).
+ */
+async function placeOf($: Engine): Promise<InboxPlace | null> {
+  const text = (value: unknown) => (typeof value === 'string' ? value : undefined)
+  return inboxPlaceFromEnv({
+    TERM_PROGRAM: text(await $.env.get('TERM_PROGRAM')),
+    REX_SESSION: text(await $.env.get('REX_SESSION')),
+    REX_BLOCK: text(await $.env.get('REX_BLOCK')),
+    NODE_ENV: text(await $.env.get('NODE_ENV')),
+    PLANNOTATOR_TEST_SANDBOX: text(await $.env.get('PLANNOTATOR_TEST_SANDBOX')),
+  })
 }
 
 /**

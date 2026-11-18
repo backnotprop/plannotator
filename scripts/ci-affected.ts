@@ -88,17 +88,24 @@ const KNOWN_EXT = new Set([
   'css', 'html', 'astro', 'svg', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'ico', 'icns', 'woff', 'woff2', 'mp4', 'webm',
   'sh', 'ps1', 'cmd', 'py', 'sql', 'qnt', 'patch', 'xml', 'lock', 'bin', 'tgz',
 ]);
-const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
+// Package.resolved: a Swift lockfile (the native app's), data no Bun test reads; it plans like any data file.
+const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|Package\.resolved|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
 
 /**
- * The native app (apps/mobile/ios, apps/mobile/android): Swift, Xcode and
- * Gradle files that no Bun test reads. Only .github/workflows/mobile-ios.yml
- * builds them, on its own path filter, so the picker drops them from a plan:
- * a PR that changes only these runs no test lane and no Checks. Code kinds
- * (.ts, .js) and a package.json there keep the ordinary rules.
+ * The native app's own file kinds (apps/mobile/ios, apps/mobile/android):
+ * Swift, Xcode project, settings and asset files, Kotlin, Java and Gradle
+ * files that no Bun test reads. Only .github/workflows/mobile-ios.yml builds
+ * them, on its own path filter, so the picker drops them from a plan: a PR
+ * that changes only these runs no test lane and no Checks. The kinds are
+ * listed, because skipping is the risky direction: anything else there (a
+ * shell script, a tsconfig, a lockfile such as Package.resolved, .ts or
+ * package.json) keeps the ordinary rules.
  */
+const NATIVE_IOS = /^apps\/mobile\/ios\/(([^/]+\/)*[^/]+\.(swift|pbxproj|plist|xcconfig|entitlements|xcstrings|strings|storyboard|xib|xcscheme|xcworkspacedata|xcsettings|xctestplan|md|png|jpe?g|pdf|svg)|([^/]+\/)*[^/]+\.xcassets\/([^/]+\/)*Contents\.json)$/;
+const NATIVE_ANDROID = /^apps\/mobile\/android\/(([^/]+\/)*[^/]+\.(kt|kts|java|gradle|pro|md|png|webp|jpe?g|svg)|([^/]+\/)*res\/([^/]+\/)*[^/]+\.xml|([^/]+\/)*AndroidManifest\.xml|gradle\.properties|gradle\/wrapper\/gradle-wrapper\.(jar|properties))$/;
+
 export function nativeAppFile(path: string): boolean {
-  return /^apps\/mobile\/(ios|android)\//.test(path) && !CODE_RE.test(path) && !/(^|\/)package\.json$/.test(path);
+  return NATIVE_IOS.test(path) || NATIVE_ANDROID.test(path);
 }
 
 /**
