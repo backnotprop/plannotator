@@ -1426,6 +1426,25 @@ describe("review-core", () => {
     expect(result.patch).toContain("+first");
   });
 
+  test.each(["since-base", "uncommitted"] as const)("%s reviews staged and untracked files before the first commit", async (mode) => {
+    const repo = makeTempDir("plannotator-review-core-unborn-index-");
+    git(repo, ["init"]);
+    const runtime = makeRuntime(repo);
+    writeFileSync(join(repo, "first.txt"), "staged content\n");
+    git(repo, ["add", "first.txt"]);
+    writeFileSync(join(repo, "draft.txt"), "untracked content\n");
+
+    const before = await getGitDiffFingerprint(runtime, mode, "main", repo);
+    expect(before).not.toBeNull();
+    writeFileSync(join(repo, "first.txt"), "current content\n");
+
+    const review = await runGitDiff(runtime, mode, "main", repo);
+    expect(review.error).toBeUndefined();
+    expect(review.patch).toContain("+current content");
+    expect(review.patch).toContain("+untracked content");
+    expect(await getGitDiffFingerprint(runtime, mode, "main", repo)).not.toBe(before);
+  });
+
   test("uncommitted diff includes untracked files with C-quoted (unicode) names", async () => {
     // git ls-files C-quotes unusual paths ("caf\303\251.txt"); without
     // unquoting, the --no-index diff can't access the literal quoted name

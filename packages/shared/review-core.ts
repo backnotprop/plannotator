@@ -1828,49 +1828,28 @@ export async function runGitDiff(
         const hasHead =
           (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd }))
             .exitCode === 0;
-        let trackedPatch = "";
+        let base: string;
         if (hasHead) {
-          // Resolve the merge-base with the requested base. When the base
-          // doesn't exist (repo with no main/master/origin — e.g. a `trunk`
-          // default and no remote) merge-base fails; degrade to HEAD so the
-          // reviewer still sees their working-tree changes instead of a raw
-          // git error. The sections sidecar degrades the same way.
+          // Fall back to HEAD when the requested branch cannot be resolved.
           const mergeBaseResult = await runtime.runGit(
             ["merge-base", "--end-of-options", defaultBranch, "HEAD"],
             { cwd },
           );
-          const mergeBase = mergeBaseResult.exitCode === 0
-            ? mergeBaseResult.stdout.trim()
-            : "HEAD";
-          trackedPatch = await getWorkingTreeDiffFromBase(runtime, mergeBase, cwd, options, "best-effort", fileIdentities);
-        }
-        if (hasHead) {
-          patch = trackedPatch;
+          base = mergeBaseResult.exitCode === 0 ? mergeBaseResult.stdout.trim() : "HEAD";
         } else {
-          const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options, "best-effort", false, fileIdentities);
-          patch = untracked.diff;
+          base = await getEmptyTreeSha(runtime, cwd);
         }
+        patch = await getWorkingTreeDiffFromBase(runtime, base, cwd, options, "best-effort", fileIdentities);
         label = `All changes since ${displayRef(defaultBranch)}`;
         break;
       }
 
       case "uncommitted": {
-        const trackedDiffArgs = [
-          "diff",
-          "--no-ext-diff",
-          ...wFlag,
-          "--src-prefix=a/",
-          "--dst-prefix=b/",
-          "HEAD",
-        ];
         const hasHead =
           (await runtime.runGit(["rev-parse", "--verify", "HEAD"], { cwd }))
             .exitCode === 0;
-        const trackedPatch = hasHead
-          ? await runBoundedTrackedDiff(runtime, trackedDiffArgs, cwd, fileIdentities)
-          : "";
-        const untracked = await getUntrackedFileDiffs(runtime, "a/", "b/", cwd, options, "best-effort", false, fileIdentities);
-        patch = removeTrackedDeletions(trackedPatch, new Set(untracked.paths)) + untracked.diff;
+        const base = hasHead ? "HEAD" : await getEmptyTreeSha(runtime, cwd);
+        patch = await getWorkingTreeDiffFromBase(runtime, base, cwd, options, "best-effort", fileIdentities);
         label = "Uncommitted changes";
         break;
       }
@@ -2231,12 +2210,13 @@ export async function getGitDiffFingerprint(
           const mergeBase = mb.exitCode === 0 ? mb.stdout.trim() : "HEAD";
           parts.push(mergeBase);
           if (!(await hashDiffOutput(["--end-of-options", mergeBase]))) return null;
-        }
+        } else if (!(await hashDiffOutput([await getEmptyTreeSha(runtime, cwd)]))) return null;
         if (!(await hashUntracked())) return null;
         break;
       }
       case "uncommitted": {
-        if (headSha !== "no-head" && !(await hashDiffOutput(["HEAD"]))) return null;
+        const base = headSha === "no-head" ? await getEmptyTreeSha(runtime, cwd) : "HEAD";
+        if (!(await hashDiffOutput([base]))) return null;
         if (!(await hashUntracked())) return null;
         break;
       }
