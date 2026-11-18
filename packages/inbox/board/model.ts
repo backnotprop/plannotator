@@ -531,6 +531,9 @@ export function historyWords(
       return { before: 'Renamed by ', bold: null, after: by, quote: `“${entry.title}”` };
     case 'notes':
       return { before: `Notes edited by ${by}`, bold: null, after: '', quote: null };
+    default:
+      // A kind this window does not know (a newer linked machine's card): a plain line, never a broken panel.
+      return { before: `Changed by ${by}`, bold: null, after: '', quote: null };
   }
 }
 
