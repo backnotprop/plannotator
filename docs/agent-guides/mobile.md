@@ -76,4 +76,6 @@ If it fails with "is up to date (else: bun scripts/mobile/all.ts)":
 - `health.door` is not in the schema until brief F1 lands and its type joins `ROOTS`. After F1, match `health.door.routes` against `DoorRoute.name`.
 - Decode list rows one by one, so one bad row does not blank the list.
 - Seqs, cursors and revisions are `Int64`. Other numbers are `Double`.
+- Only the words in `words.json` (about 30) are generated. Any other window word needs a product constant first, in its own pull request.
+- `tokens.json` names the fonts Inter and Geist Mono. Bundling them in the app needs their OFL notices.
 - `DoorPicksBody` in `door-shapes.ts` does not have `confirm_full` yet. Until it is made from the product's `inboxPickBody`, build picks the way `inboxPickBody` does.
