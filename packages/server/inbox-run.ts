@@ -17,6 +17,7 @@
  * - When it ends, its `onEnd` hears it once (the result goes to the agent).
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { redactSecrets } from "./inbox-secrets";
@@ -100,7 +101,7 @@ export function cleanRunLine(raw: string, secrets: readonly string[]): string {
 export function killRunTree(pid: number | undefined, signal: "SIGTERM" | "SIGKILL", platform: NodeJS.Platform = process.platform): void {
   if (!pid) return;
   if (platform === "win32") {
-    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore" });
+    spawnSync("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore", env: childEnv() });
     return;
   }
   try {

@@ -138,6 +138,7 @@ import {
   type PlannotatorConfig,
   type ThemeConfig,
 } from "@plannotator/shared/config";
+import { childPath } from "@plannotator/shared/child-env";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { decodePathSegment } from "@plannotator/shared/path-segment";
 import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/update-check";
@@ -5370,7 +5371,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // secret's value goes to this computer's keychain (a sandboxed test Inbox: a file in its own folder, never a keychain).
   const runVault = process.env.PLANNOTATOR_TEST_SANDBOX
     ? fileVault(join(dataDir, "inbox", "secrets"))
-    : systemSecretVault({ platform: process.platform, dir: join(dataDir, "inbox", "secrets"), run: spawnVaultRun, env: process.env, which: (cmd) => Bun.which(cmd) });
+    : systemSecretVault({ platform: process.platform, dir: join(dataDir, "inbox", "secrets"), run: spawnVaultRun, env: process.env, which: (cmd) => Bun.which(cmd, { PATH: childPath() }) });
   const runRoutes = createInboxRunRoutes({
     store,
     serverSession,

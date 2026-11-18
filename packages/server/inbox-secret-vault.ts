@@ -16,6 +16,7 @@
  * `security`, `secret-tool` or PowerShell. Error text never carries the value.
  */
 
+import { childEnv } from "@plannotator/shared/child-env";
 import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -232,7 +233,8 @@ export const spawnVaultRun: VaultRun = async (argv, options) => {
     stdin: options.stdin !== undefined ? new TextEncoder().encode(options.stdin) : "ignore",
     stdout: "pipe",
     stderr: "pipe",
-    ...(options.env ? { env: options.env } : {}),
+    env: options.env ?? childEnv(),
+    windowsHide: true,
   });
   const timer = setTimeout(() => child.kill(), 15_000);
   try {
