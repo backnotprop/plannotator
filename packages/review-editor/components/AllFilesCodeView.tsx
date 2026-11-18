@@ -39,6 +39,7 @@ import { SemanticFileNote, type SemanticFileState } from '../semDiff/SemanticFil
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { keepArrowClicks } from '../utils/keepArrowClicks';
 import { holdPlacePastItem } from '../utils/anchorPastItem';
 import { scrollWithPage, type PageScroll } from '../utils/scrollWithPage';
 import { newLineOf } from '../utils/newLineOf';
@@ -2470,13 +2471,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       if (rendered?.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) return;
       rendered.instance.expandHunk(0, 'up', 0);
     };
+    const stopKeepingClicks = keepArrowClicks(scrollEl);
     scrollEl.addEventListener('pointermove', readAheadOfExpand, { passive: true });
-    scrollEl.addEventListener('pointerdown', readAheadOfExpand, { passive: true, capture: true });
     scrollEl.addEventListener('touchstart', readAheadOfExpand, { passive: true, capture: true });
     scrollEl.addEventListener('focusin', readAheadOfExpand);
     return () => {
+      stopKeepingClicks();
       scrollEl.removeEventListener('pointermove', readAheadOfExpand);
-      scrollEl.removeEventListener('pointerdown', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('touchstart', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('focusin', readAheadOfExpand);
     };
