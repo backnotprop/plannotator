@@ -238,21 +238,19 @@ export function hidLead(what: string, threads: number): string {
 }
 
 /**
- * Hide a repository (the board's Hide repository): every PR in it leaves the lists at once, new ones too; a refused
- * write puts it back and throws. Resolves how many Inbox threads left the list with it.
+ * Hide a repository (the board's Hide repository): every PR in it leaves the board and Reviews at once, new ones too.
+ * It never takes a thread out of the Inbox list. A refused write puts it back and throws.
  */
-export async function hideRepo(repo: Pick<InboxRepoHidden, 'key' | 'label'>, now = new Date()): Promise<number> {
+export async function hideRepo(repo: Pick<InboxRepoHidden, 'key' | 'label'>, now = new Date()): Promise<void> {
   const key = repoChangeKey(repo.key);
   const was = change([key], () => ({ hide: true, repo: { key: repo.key, label: repo.label, at: now.toISOString() }, since: now.getTime() }));
-  let left: number;
   try {
-    left = (await inboxApi.pullsHidden({ hide_repos: [{ key: repo.key, label: repo.label }] })).threads_left?.length ?? 0;
+    await inboxApi.pullsHidden({ hide_repos: [{ key: repo.key, label: repo.label }] });
   } catch (cause) {
     putBack([key], was);
     throw cause;
   }
   written();
-  return left;
 }
 
 /** Show a repository again: its PRs are back on the next read. A refused write puts it back in Hidden and throws. */
@@ -424,9 +422,8 @@ export function itemsBy(root: () => ParentNode | null, attr: string): () => { id
  * repository again. Resolves true when it was hidden.
  */
 export async function hideRepoWithUndo(repo: Pick<InboxRepoHidden, 'key' | 'label'> & Pick<InboxPull, 'platform'>, toast: Toast | undefined): Promise<boolean> {
-  let threads: number;
   try {
-    threads = await hideRepo({ key: repo.key, label: repo.label });
+    await hideRepo({ key: repo.key, label: repo.label });
   } catch (cause) {
     toast?.({ icon: 'warn', lead: 'Couldn’t hide', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS);
     return false;
@@ -434,7 +431,7 @@ export async function hideRepoWithUndo(repo: Pick<InboxRepoHidden, 'key' | 'labe
   toast?.(
     {
       icon: 'check',
-      lead: hidLead(`Hid ${repo.label}`, threads),
+      lead: `Hid ${repo.label}`,
       detail: `New pull requests there stay hidden too · Still open on ${forgeName(repo)}`,
       onUndo: () => void showRepoWithToast({ key: repo.key, label: repo.label }, toast),
       noKey: true,

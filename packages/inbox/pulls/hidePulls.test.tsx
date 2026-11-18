@@ -230,11 +230,12 @@ test("Hide repository, from a Grid section's header and from a Table group's hea
     expect($('[data-pr-repo="github.com/northwind/web"]')).not.toBeNull();
     expect($('[data-pr-summary]')!.textContent).toContain('1 open in 1 repository');
     expect(sent.map((s) => [new URL(s.url, 'http://x').pathname, s.body.hide_repos])).toEqual([['/api/inbox/pulls/hidden', [{ key: 'github.com/northwind/ledger', label: 'ledger' }]]]);
-    sent[0]!.answer(200, { hidden: [], hid: [], threads_left: ['thr_a'] });
+    sent[0]!.answer(200, { hidden: [], hid: [], threads_left: [] });
     await settle();
     expect(toasts).toHaveLength(1);
+    // It names the repository only: a repository's hide takes no thread out of the Inbox list.
     expect(toasts[0]!.toast.lead).toContain('ledger');
-    expect(toasts[0]!.toast.lead).toContain('thread');
+    expect(toasts[0]!.toast.lead).not.toContain('thread');
     act(() => toasts[0]!.toast.onUndo!());
     expect(sent[1]!.body).toMatchObject({ show_repos: ['github.com/northwind/ledger'] });
     sent[1]!.answer(200, { hidden: [] });
