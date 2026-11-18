@@ -334,6 +334,21 @@ test("the Inbox list's Hide with nothing left to hide says so; one that takes th
   expect(toasts[1]!.toast.onUndo).toBeDefined();
 });
 
+test("the Inbox list's Hide on a thread that came back hides the thread again; its Undo lets that thread back and shows no PR", async () => {
+  if (!hasDom) return;
+  const again = hidden.hideThreadsWithUndo(['thr_a'], (toast, ms) => toasts.push({ toast, ms }));
+  await settle();
+  sent[0]!.answer(200, { hidden: [], hid: [], rehid: ['thr_a'], threads_left: ['thr_a'] });
+  expect(await again).toBe(true);
+  expect(toasts).toHaveLength(1);
+  act(() => toasts[0]!.toast.onUndo!());
+  await settle();
+  expect(sent.slice(1).map((s) => s.body)).toEqual([{ hide: [], threads: [], show: [], show_threads: ['thr_a'] }]);
+  sent[1]!.answer(200, { hidden: [] });
+  await settle();
+  expect(toasts.at(-1)!.toast.icon).toBe('check');
+});
+
 test("a hidden PR keeps its review thread in a thread's PR list", () => {
   if (!hasDom) return;
   const model = { ...MODEL, pulls: MODEL.pulls.filter((p) => p.key !== key(7)), hidden: [{ key: key(7), title: 'Change 7', url: pull(7).url, at: '2026-11-17T12:00:00.000Z', thread_id: 'thr_review' }] };

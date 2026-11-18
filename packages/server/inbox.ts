@@ -1507,12 +1507,30 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const listHiding = (records: readonly InboxThreadPull[], now: Date) => {
     if (!codeReviewOn()) return null;
-    const { gone, hideable } = threadPullsHidden(threadPullsInPlay(records), (key) => pullHidden.atOf(key));
+    const inPlay = threadPullsInPlay(records);
+    const { gone, hideable } = threadPullsHidden(inPlay, (key) => pullHidden.atOf(key));
     const pinned = new Set(store.pins().map((pin) => pin.thread_id));
     const attention = gone.size > 0 ? launch.attentionSince() : () => null;
     const back: { thread_id: string; at: string }[] = [];
+    /** Its newest hide: its PRs' newest, or its own re-hide when later. */
+    const hiddenAtOf = (threadId: string) => {
+      const at = gone.get(threadId);
+      if (at === undefined) return undefined;
+      const again = pullHidden.rehidOf(threadId);
+      return again && again > at ? again : at;
+    };
+    /**
+     * The row menu's and the picks' Hide: the PRs not hidden yet; for a thread whose PRs are all hidden and that is
+     * listed (it came back, or began after they were hidden), its hidden ones, so it can be hidden again.
+     */
+    const offer = (row: InboxListRow): string[] | undefined => {
+      const left = hideable.get(row.thread_id);
+      if (left) return left.map((pull) => pull.key);
+      if (!gone.has(row.thread_id) || pinned.has(row.thread_id) || inboxRowSnoozed(row, now)) return undefined;
+      return [...(inPlay.get(row.thread_id)?.keys() ?? [])];
+    };
     const out = (row: InboxListRow): boolean => {
-      const hiddenAt = gone.get(row.thread_id);
+      const hiddenAt = hiddenAtOf(row.thread_id);
       if (hiddenAt === undefined) return false;
       const activity = [row.last_at, row.snooze_back, attention(row.thread_id), pullHidden.backOf(row.thread_id)];
       const stays = threadStaysHidden(hiddenAt, { pinned: pinned.has(row.thread_id), snoozed: inboxRowSnoozed(row, now), activity });
@@ -1522,7 +1540,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       return stays;
     };
-    return { out, hideable, keep: () => back.length > 0 && pullHidden.markBack(back) };
+    return { out, offer, inPlay, keep: () => back.length > 0 && pullHidden.markBack(back) };
   };
   /** The threads (not archived) the Inbox list leaves out for their hidden PRs now, by id: a Hide's toast counts the change. */
   const threadsHiddenNow = (): Set<string> => {
@@ -1951,8 +1969,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const threadPulls = store.allThreadPulls();
     const hiddenPulls = hidePulls ? listHiding(threadPulls, now) : null;
     const withHidePulls = (row: InboxListRow): InboxListRow => {
-      const left = hiddenPulls?.hideable.get(row.thread_id);
-      return left ? { ...row, hide_pulls: left.map((pull) => pull.key) } : row;
+      const keys = hiddenPulls?.offer(row);
+      return keys && keys.length > 0 ? { ...row, hide_pulls: keys } : row;
     };
     for (const pull of threadPulls) {
       const list = pullsByThread.get(pull.thread_id);
@@ -5790,15 +5808,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const input = pullHiddenBodyOf(body);
         const inPlay = input.threads.length > 0 ? threadPullsInPlay(store.allThreadPulls()) : null;
-        const fromThreads = input.threads.flatMap((id) => [...(inPlay?.get(store.message(id)?.thread_id ?? id)?.values() ?? [])]);
+        const threadIds = [...new Set(input.threads.map((id) => store.message(id)?.thread_id ?? id))];
+        const fromThreads = threadIds.flatMap((id) => [...(inPlay?.get(id)?.values() ?? [])]);
         const threadOf = input.hide.length > 0 ? pullThreadLookup() : () => null;
         const hide = [...input.hide.map((pull) => ({ ...pull, thread_id: threadOf(pull.key) })), ...fromThreads].filter((pull, i, all) => !pullHidden.has(pull.key) && all.findIndex((other) => other.key === pull.key) === i);
+        // A thread whose PRs were all hidden already (it came back, or began after they were hidden): hidden again as
+        // a thread (`rehid`), newer than what brought it back. Undo (`show_threads`) takes that off; its PRs stay hidden.
+        const rehid = threadIds.filter((id) => {
+          const pulls = inPlay?.get(id);
+          return !!pulls && pulls.size > 0 && [...pulls.keys()].every((key) => pullHidden.has(key));
+        });
         // `threads_left`: the threads this write takes out of the Inbox list (the toast says so; Undo brings them back).
-        const before = hide.length > 0 ? threadsHiddenNow() : new Set<string>();
-        pullHidden.change({ hide, show: input.show }, new Date());
-        const left = hide.length > 0 ? [...threadsHiddenNow()].filter((id) => !before.has(id)) : [];
+        const hides = hide.length > 0 || rehid.length > 0;
+        const before = hides ? threadsHiddenNow() : new Set<string>();
+        const at = new Date();
+        pullHidden.change({ hide, show: input.show }, at);
+        if (rehid.length > 0 || input.show_threads.length > 0) pullHidden.rehide({ hide: rehid, show: input.show_threads }, at);
+        const left = hides ? [...threadsHiddenNow()].filter((id) => !before.has(id)) : [];
         pullHiddenChanged();
-        return json({ serverSession, hidden: hiddenList(), hid: hide.map((pull) => pull.key), threads_left: left });
+        return json({ serverSession, hidden: hiddenList(), hid: hide.map((pull) => pull.key), rehid, threads_left: left });
       }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file" || path === "/api/inbox/pulls/media" || path === "/api/inbox/pulls/media/sizes") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);

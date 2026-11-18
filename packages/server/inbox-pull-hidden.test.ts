@@ -97,8 +97,8 @@ describe("the PRs a machine keeps hidden", () => {
   });
 
   test("a write names PRs by key, with their title and web link, or threads by id; anything else is refused", () => {
-    expect(pullHiddenBodyOf({ hide: [hide(7)], show: [pull(8).key] })).toEqual({ hide: [hide(7)], threads: [], show: [pull(8).key] });
-    expect(pullHiddenBodyOf({ threads: ["thr_a"] })).toEqual({ hide: [], threads: ["thr_a"], show: [] });
+    expect(pullHiddenBodyOf({ hide: [hide(7)], show: [pull(8).key] })).toMatchObject({ hide: [hide(7)], threads: [], show: [pull(8).key] });
+    expect(pullHiddenBodyOf({ threads: ["thr_a"] })).toMatchObject({ hide: [], threads: ["thr_a"], show: [] });
     // A self-hosted forge on plain http, as a linked machine's list may carry.
     const plain = { key: "git.lan/team/app#4:pull", title: "MR 4", url: "http://git.lan/team/app/-/merge_requests/4" };
     expect(pullHiddenBodyOf({ hide: [plain] }).hide).toEqual([plain]);
@@ -148,6 +148,8 @@ describe("the Inbox list's threads with hidden PRs", () => {
     expect(threadStaysHidden(T1, { ...quiet, activity: ["2026-11-17T09:00:00.000Z", "2026-11-17T10:00:01.000Z"] })).toBe(false);
     // A newer hide takes it out again.
     expect(threadStaysHidden(T2, { ...quiet, activity: ["2026-11-17T10:00:01.000Z"] })).toBe(true);
+    // The same millisecond as the hide counts as newer: it shows.
+    expect(threadStaysHidden(T1, { ...quiet, activity: [T1] })).toBe(false);
     expect(threadStaysHidden(T1, { ...quiet, pinned: true })).toBe(false);
     expect(threadStaysHidden(T1, { ...quiet, snoozed: true })).toBe(false);
   });
@@ -162,5 +164,16 @@ describe("the Inbox list's threads with hidden PRs", () => {
     expect(again.backOf("thr_a")).toBe(T2);
     expect(again.atOf(pull(7).key)).toBe(T1);
     expect(again.atOf(pull(8).key)).toBeNull();
+  });
+
+  test("a thread hidden again is kept across a restart, and Undo takes that off", () => {
+    const dataDir = scratch();
+    const hidden = createInboxPullHidden(dataDir);
+    hidden.rehide({ hide: ["thr_a", "thr_b"], show: [] }, new Date(T2));
+    expect(createInboxPullHidden(dataDir).rehidOf("thr_a")).toBe(T2);
+    createInboxPullHidden(dataDir).rehide({ hide: [], show: ["thr_a"] }, new Date());
+    const after = createInboxPullHidden(dataDir);
+    expect(after.rehidOf("thr_a")).toBeNull();
+    expect(after.rehidOf("thr_b")).toBe(T2);
   });
 });

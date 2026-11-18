@@ -635,6 +635,36 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
     expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
   });
 
+  test("the Inbox list: a thread that came back offers Hide again; that hides the thread, not its PRs again, and Undo brings it back", async () => {
+    const { w, handed } = await handedAndHidden();
+    await Bun.sleep(5);
+    await w.send("I pushed a fix; have another look?", "handed");
+    const back = (await threadRows(w.base)).find((row) => row.thread_id === handed)!;
+    expect(back.hide_pulls).toEqual([KEY]);
+    await Bun.sleep(5);
+    const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; rehid: string[]; threads_left: string[] };
+    expect(res).toMatchObject({ hid: [], rehid: [handed], threads_left: [handed] });
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    // Undo: the thread is back; its PR stays hidden.
+    expect((await call(w.base, { show_threads: [handed] })).status).toBe(200);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(true);
+    expect((await reviews(w.base)).hidden?.map((h) => h.key)).toContain(KEY);
+  });
+
+  test("the Inbox list: a thread begun after its PR was hidden offers Hide, and it hides", async () => {
+    const w = await world({ codeReview: true, answer: everywhere() });
+    const pr = (await listed(w)).pulls.find((p) => p.key === KEY)!;
+    expect((await call(w.base, { hide: [{ key: KEY, title: pr.title, url: pr.url }] })).status).toBe(200);
+    await Bun.sleep(5);
+    const later = await w.send("Picking up #412.", "later");
+    expect((await w.own([KEY], later)).status).toBe(200);
+    await w.pulls();
+    expect((await threadRows(w.base)).find((row) => row.thread_id === later)?.hide_pulls).toEqual([KEY]);
+    await Bun.sleep(5);
+    expect(((await (await call(w.base, { threads: [later] })).json()) as { rehid: string[] }).rehid).toEqual([later]);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === later)).toBe(false);
+  });
+
   test("the Inbox list: Code review off leaves nothing out and offers no Hide", async () => {
     const { w, handed } = await handedAndHidden();
     expect((await w.setCodeReview(false)).status).toBe(200);

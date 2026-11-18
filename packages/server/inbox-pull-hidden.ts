@@ -6,11 +6,13 @@
  * machine asleep, a search cut short, another account), so absence forgets nothing. New activity on it does not bring
  * it back.
  *
- *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id? } }, back?: { [thread id]: at } }
+ *   inbox/pull-hidden.json   { v: 1, hidden: { [pull key]: { title, url, at, thread_id? } }, back?: { [thread id]: at }, rehid?: { [thread id]: at } }
  *
  * `back`: a thread the Inbox list left out for its hidden PRs and that came back on new activity after the hide (an
  * agent message, a question, a prompt, a stop or failure, the person's own send, a snooze coming due), with that
  * activity's time, so it stays back once that activity is read or over; a newer hide takes it out again.
+ * `rehid`: a thread whose PRs were all hidden already (it came back, or began after they were hidden) that the person
+ * hid again from the Inbox list: it counts as a hide of its own, newer than that activity. Undo takes it off.
  *
  * Kept on the machine whose window hid it (a window's lists are filtered by its own machine's records, a linked
  * machine's PRs included). The newest `PULL_HIDDEN_KEPT` are kept. Written whole to a temp file, then renamed, 0600; a
@@ -52,14 +54,15 @@ const keptOf = (value: Kept): Kept => ({ title: value.title, url: value.url, at:
  * PRs to hide (the Inbox list's row menu and picks); `show`, keys to show again. At least one of them, each at most
  * `PULL_HIDDEN_MAX`; a URL is the forge's http(s) link.
  */
-export function pullHiddenBodyOf(body: Record<string, unknown>): { hide: { key: string; title: string; url: string }[]; threads: string[]; show: string[] } {
+export function pullHiddenBodyOf(body: Record<string, unknown>): { hide: { key: string; title: string; url: string }[]; threads: string[]; show: string[]; show_threads: string[] } {
   const hide = body.hide ?? [];
   const threads = body.threads ?? [];
   const show = body.show ?? [];
-  if (!Array.isArray(hide) || !Array.isArray(threads) || !Array.isArray(show) || hide.length + threads.length + show.length === 0) {
-    throw new InboxError("validation_error", "hide: PRs to hide, each { key, title, url }; threads: thread ids whose PRs to hide; show: keys to show again.", { field: "hide" });
+  const showThreads = body.show_threads ?? [];
+  if (!Array.isArray(hide) || !Array.isArray(threads) || !Array.isArray(show) || !Array.isArray(showThreads) || hide.length + threads.length + show.length + showThreads.length === 0) {
+    throw new InboxError("validation_error", "hide: PRs to hide, each { key, title, url }; threads: thread ids whose PRs to hide; show: keys to show again; show_threads: threads hidden again to show.", { field: "hide" });
   }
-  if (hide.length > PULL_HIDDEN_MAX || threads.length > PULL_HIDDEN_MAX || show.length > PULL_HIDDEN_MAX) {
+  if (hide.length > PULL_HIDDEN_MAX || threads.length > PULL_HIDDEN_MAX || show.length > PULL_HIDDEN_MAX || showThreads.length > PULL_HIDDEN_MAX) {
     throw new InboxError("validation_error", `That is more than ${PULL_HIDDEN_MAX} at once. Hide or show fewer, then the rest.`, { field: "hide" });
   }
   const key = (value: unknown): value is string => typeof value === "string" && value.length > 0 && value.length <= 600;
@@ -79,6 +82,10 @@ export function pullHiddenBodyOf(body: Record<string, unknown>): { hide: { key: 
       if (!key(k)) throw new InboxError("validation_error", "show: each a PR's key.", { field: "show" });
       return k;
     }),
+    show_threads: showThreads.map((id) => {
+      if (!key(id)) throw new InboxError("validation_error", "show_threads: each a thread's id.", { field: "show_threads" });
+      return id;
+    }),
   };
 }
 
@@ -92,6 +99,10 @@ export interface InboxPullHiddenStore {
   backOf(threadId: string): string | null;
   /** Threads that came back, each with its activity's time (a later time replaces an earlier one). */
   markBack(back: readonly { thread_id: string; at: string }[]): void;
+  /** When a thread that came back was hidden again from the Inbox list (its PRs were hidden already), or null. */
+  rehidOf(threadId: string): string | null;
+  /** Hide threads again (`rehid`); `show` takes those marks off (Undo). */
+  rehide(input: { hide: readonly string[]; show: readonly string[] }, now: Date): void;
   /** Hides and shows again; answers the list now. Hiding a hidden PR keeps its first time. */
   change(input: { hide: readonly PullToHide[]; show: readonly string[] }, now: Date): InboxPullHidden[];
   /**
@@ -108,16 +119,18 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
   const file = join(dir, INBOX_PULL_HIDDEN_FILE);
   let hidden: Map<string, Kept> | null = null;
   const back = new Map<string, string>();
+  const rehid = new Map<string, string>();
 
   const load = (): Map<string, Kept> => {
     if (hidden) return hidden;
     hidden = new Map();
     if (!existsSync(file)) return hidden;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; hidden?: Record<string, unknown>; back?: Record<string, unknown> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; hidden?: Record<string, unknown>; back?: Record<string, unknown>; rehid?: Record<string, unknown> };
       if (parsed.v !== 1 || !parsed.hidden || typeof parsed.hidden !== "object") throw new Error("not a pull hidden file");
       for (const [key, value] of Object.entries(parsed.hidden)) if (isKept(value)) hidden.set(key, keptOf(value));
       for (const [thread, at] of Object.entries(parsed.back && typeof parsed.back === "object" ? parsed.back : {})) if (typeof at === "string" && Number.isFinite(Date.parse(at))) back.set(thread, at);
+      for (const [thread, at] of Object.entries(parsed.rehid && typeof parsed.rehid === "object" ? parsed.rehid : {})) if (typeof at === "string" && Number.isFinite(Date.parse(at))) rehid.set(thread, at);
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -126,6 +139,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
       }
       hidden = new Map();
       back.clear();
+      rehid.clear();
     }
     return hidden;
   };
@@ -134,7 +148,7 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
     try {
       mkdirSync(dir, { recursive: true });
       const temp = `${file}.${process.pid}.tmp`;
-      writeFileSync(temp, `${JSON.stringify({ v: 1, hidden: Object.fromEntries(map), ...(back.size > 0 ? { back: Object.fromEntries(back) } : {}) })}\n`, { mode: 0o600 });
+      writeFileSync(temp, `${JSON.stringify({ v: 1, hidden: Object.fromEntries(map), ...(back.size > 0 ? { back: Object.fromEntries(back) } : {}), ...(rehid.size > 0 ? { rehid: Object.fromEntries(rehid) } : {}) })}\n`, { mode: 0o600 });
       renameSync(temp, file);
     } catch {
       // A read-only folder: the records stay in memory.
@@ -165,6 +179,23 @@ export function createInboxPullHidden(dataDir: string): InboxPullHiddenStore {
         for (const [thread] of [...back].sort((a, b) => (a[1] < b[1] ? -1 : 1)).slice(0, back.size - PULL_HIDDEN_KEPT)) back.delete(thread);
       }
       save(map);
+    },
+    rehidOf: (threadId) => {
+      load();
+      return rehid.get(threadId) ?? null;
+    },
+    rehide({ hide, show }, now) {
+      const map = load();
+      let changed = false;
+      for (const thread of show) changed = rehid.delete(thread) || changed;
+      for (const thread of hide) {
+        rehid.set(thread, now.toISOString());
+        changed = true;
+      }
+      if (rehid.size > PULL_HIDDEN_KEPT) {
+        for (const [thread] of [...rehid].sort((a, b) => (a[1] < b[1] ? -1 : 1)).slice(0, rehid.size - PULL_HIDDEN_KEPT)) rehid.delete(thread);
+      }
+      if (changed) save(map);
     },
     change({ hide, show }, now) {
       const map = load();
@@ -232,7 +263,8 @@ export function threadPullsHidden(inPlay: ReadonlyMap<string, ReadonlyMap<string
  */
 export function threadStaysHidden(hiddenAt: string, thread: { pinned: boolean; snoozed: boolean; activity: readonly (string | null | undefined)[] }): boolean {
   if (thread.pinned || thread.snoozed) return false;
-  return thread.activity.every((at) => !at || at <= hiddenAt);
+  // An activity in the same millisecond as the hide counts as newer: showing errs on the safe side.
+  return thread.activity.every((at) => !at || at < hiddenAt);
 }
 
 /**
