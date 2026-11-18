@@ -188,7 +188,8 @@ The door answers in the window's shape, `{ error, code, ...details }`, with thes
 | 401 | `device_token_invalid` | no device has that token |
 | 401 | `device_revoked` | the device was removed; the phone shows its source as removed |
 | 403 | `origin_not_allowed` | an `Origin` header on a door request |
-| 404 | `device_route_not_found` | a door path outside the allowlist, and any path outside the door on the tailnet's door listener |
+| 404 | `device_route_not_found` | a door path outside the allowlist, and any path outside the door on the tailnet's door listener; not kept under the key (section 14) |
+| 426 | `app_needs_update` | the app's `X-Plannotator-App` (or a relay command's `app`) names a contract below `min_app_contract`, on any route but `health`, `pair` and `revoke`, with `min_app_contract` and `Upgrade: plannotator-app/<min_app_contract>`; not kept under the key (section 14) |
 | 410 | `offer_expired` | redemption with no open offer matching |
 | 401 | `pairing_code_wrong` | a wrong six-digit code, with `tries_left` |
 | 409 | `idempotency_key_reused` | a key this device already used on another route (section 6) |
@@ -301,7 +302,7 @@ Files have no item of their own (written in by R2): a file is the result of a GE
 
 Files do not go up either (written in 2026-10-15 with 7.48 and 7.49). A command's `body` is JSON, so a file would ride base64 inside the sealed envelope, about 16/9 of its size, and Cloudflare's 32 MiB message would cap a relayed upload near 18 MiB, under the window's 100 MB. In v1 the Inbox answers an up command for `uploads` or `markups` with `413 { "code": "relay_upload_unavailable" }` without running the window's route, beside `pair` and `events` as the door routes the relay does not carry. The phone uploads over the Wi-Fi or the tailnet (as section 11.5 does for video) and may then send the message naming the `upl_` id through the relay. Every other row added 2026-10-15 (7.39 to 7.47, 7.53) is an ordinary command: a GET with a fresh random `id`, a POST with its `idempotency_key` as `id`.
 
-Up command plaintext: `{ "v": 1, "id", "method", "path", "body" }`, sealed under the up key `U`, where `path` is a door path (`/api/inbox/device/...`, with its query string when the route takes one, `?version=sent` or `?project=prj_...`) and `body` is the JSON body the phone would have sent directly (a POST only). The Inbox applies it in-process through the door as that device (never as a loopback HTTP call), so the allowlist, the revocation check and the idempotency rule are the same on every path: every POST goes through the door's idempotency log per device and key, so a command the relay hands over again, or replays later, answers the stored result and writes nothing. A GET through the relay (the list after a long absence, an attachment's view, an HTML asset) is a command whose `id` is a fresh random id; a POST's `id` is its `idempotency_key` (section 6). Two door routes are not carried, and answer a result of `404 device_route_not_found`: `pair` (pairing through the relay is not in v1) and `events` (the down items are the relay's event stream; an endless answer cannot be one result).
+Up command plaintext: `{ "v": 1, "id", "method", "path", "body", "app" }`, sealed under the up key `U`, where `path` is a door path (`/api/inbox/device/...`, with its query string when the route takes one, `?version=sent` or `?project=prj_...`) and `body` is the JSON body the phone would have sent directly (a POST only), and `app` (added 2026-11-18, optional) is the app in `X-Plannotator-App`'s words (section 14). The Inbox applies it in-process through the door as that device (never as a loopback HTTP call), so the allowlist, the revocation check and the idempotency rule are the same on every path: every POST goes through the door's idempotency log per device and key, so a command the relay hands over again, or replays later, answers the stored result and writes nothing. A GET through the relay (the list after a long absence, an attachment's view, an HTML asset) is a command whose `id` is a fresh random id; a POST's `id` is its `idempotency_key` (section 6). Two door routes are not carried, and answer a result of `404 device_route_not_found`: `pair` (pairing through the relay is not in v1) and `events` (the down items are the relay's event stream; an endless answer cannot be one result).
 
 ### Push
 
@@ -432,7 +433,7 @@ Every command a phone sends carries one key: `idempotency_key` in the request bo
 | Reuse a file | `POST uploads/reuse` | body `idempotency_key` (the door's log; a replay gets the same upload) |
 | Drawing | `POST markups` | query `idempotency_key` (the body is the image; its name is its SHA-256, so a replay writes nothing new anyway) |
 
-- **The door** keeps `inbox/device-commands.jsonl`, one line per applied command: `{ v: 1, at, device_id, key, method, path, status, body }`, with the answer's status and JSON body. It is read at start. A key seen before for that device on the same method and path answers the recorded status and body, adds `Idempotent-Replayed: true`, and writes nothing. Only the method and the door path are compared, never the query or the body: a raw route's replay answers the first file's upload or drawing whatever bytes or `name` came with it. That header is the replay signal: a replayed Send answers its recorded body, whose `replayed` field reads as it did the first time. The log keeps every answer body, reply bodies included, for as long as the store lives. The same key on another route is `409 idempotency_key_reused`. A 5xx is not recorded, so a retry runs again.
+- **The door** keeps `inbox/device-commands.jsonl`, one line per applied command: `{ v: 1, at, device_id, key, method, path, status, body }`, with the answer's status and JSON body. It is read at start. A key seen before for that device on the same method and path answers the recorded status and body, adds `Idempotent-Replayed: true`, and writes nothing. Only the method and the door path are compared, never the query or the body: a raw route's replay answers the first file's upload or drawing whatever bytes or `name` came with it. That header is the replay signal: a replayed Send answers its recorded body, whose `replayed` field reads as it did the first time. The log keeps every answer body, reply bodies included, for as long as the store lives. The same key on another route is `409 idempotency_key_reused`. A 5xx is not recorded, so a retry runs again. A refusal the door makes before the window is asked is not recorded either: a door path off the allowlist (`404 device_route_not_found`) or an app below the floor (`426 app_needs_update`, section 14). A write the window answers, `404 device_route_not_found` included, is final under its key: send the intent again under a new key.
 - **The relay path** carries the key as the up command's `id`. The relay holds one command per `id`, and the Inbox applies it through the door, so a command posted twice, or re-sent after the Inbox applied it but before the relay heard, writes once.
 - **The lock-screen answer** is one Send with the pick inside it (7.11): `{ idempotency_key, questions: [{ key, revision, answer: { v: 1, key, kind: "single", prompt, selected: [label] } }] }`. It tries the direct path first, then the relay, with the same key.
 
@@ -501,6 +502,8 @@ curl -sS "$INBOX/api/inbox/device/health" -H "Authorization: Bearer $TOKEN"
 ```json
 { "ok": true, "app": "plannotator-inbox", "version": "0.28.8", "serverSession": "00000000000000000000000000000001", "pid": 4242, "update": null }
 ```
+
+Since 2026-11-18 the answer also carries `door: { contract, routes, not_by_relay, grants, min_app_contract }`, through the door only (section 14).
 
 Without the header: `401 { "error": "This request needs the phone's token.", "code": "device_token_missing" }`. With an Origin: `403 { "error": "Browser requests are not accepted here.", "code": "origin_not_allowed" }`. A revoked token: `401 { "error": "This phone was removed from the Inbox. Pair it again.", "code": "device_revoked" }`.
 
@@ -986,7 +989,7 @@ curl -sS -X PUT "$RELAY/v1/mailboxes/mbx_AAAAAAAAAAAAAAAAAAAAAA/devices/dev_01K7
 curl -sS http://127.0.0.1:52817/api/inbox/devices
 ```
 
-`{ "devices": [ { "id": "dev_01K70000000000000000000001", "name": "iPhone", "platform": "ios", "created_at": "2026-10-08T10:03:12.000Z", "last_seen_at": "2026-10-08T10:55:01.000Z", "revoked_at": null, "carriage": true } ] }`.
+`{ "devices": [ { "id": "dev_01K70000000000000000000001", "name": "iPhone", "platform": "ios", "created_at": "2026-10-08T10:03:12.000Z", "last_seen_at": "2026-10-08T10:55:01.000Z", "revoked_at": null, "carriage": true, "app": { "app_version": "1.4.0", "contract": 1, "seen_at": "2026-10-08T10:55:01.000Z" } } ] }`. `app` (added 2026-11-18, section 14) is the app the device last named since this Inbox started, or `null`.
 
 ### 7.37 The window removes a device
 
@@ -1513,3 +1516,67 @@ As before the door: the person's New message to the agent, a reply to its messag
 ### Not yet
 
 Files from the Inbox to the agent, and guided reviews (`get_guide_brief`, `submit_guide`). The relay itself is owner-deployed; until it is, pairing gives a version 1 string. `PLANNOTATOR_PAIRING_DOOR` (`http://127.0.0.1:<port>`) still sends `plannotator inbox call` to the door on this computer instead of the relay, for tests and a local stand-in routine.
+
+## 14. Versions (2026-11-18)
+
+The app will lag or lead the person's Inbox. The door says what it can do, so neither side probes for a `404`.
+
+### The contract number
+
+`contract` is a whole number, and there is one: `DOOR_CONTRACT` in `packages/server/inbox-door-version.ts` is the source, and the contract kit's `apps/mobile/contract/VERSION` is generated from it. It rises only for a breaking change to the wire a phone reads: a field or route removed or renamed, or a changed meaning. An added optional field or route never raises it: an app finds a new route in `health.door.routes` and decodes unknown fields tolerantly. 0 is reserved for "before the handshake" (an Inbox whose `health` has no `door`); the first Inbox and the first app are contract 1. `min_app_contract` (`MIN_APP_CONTRACT`, 1) is raised only when the Inbox stops serving an older contract's meaning. A rule that changes meaning gets a new field name, never a new meaning for an old one.
+
+### The app names itself
+
+Every door request may carry `X-Plannotator-App: <platform> <app version> contract <n>`, for example `ios 1.4.0 contract 1`. The form, after trimming: `^[a-z][a-z0-9-]{0,31} [0-9A-Za-z][0-9A-Za-z.+-]{0,31} contract (0|[1-9][0-9]{0,5})$`. A sealed relay command carries the same words as `app` beside `v` (section 4). The door never hands the header to the window's handler. It keeps the last one per device in memory with its time, and the window's device list shows it as `app` (7.36); a removed device's is forgotten. A request without it, or with a value not in that form (a relay command's `app` included, whatever its characters), is served as before: an app from before this section is never refused. A well-formed `contract 0` is below the floor by design.
+
+### health
+
+Through the door only, `health` adds `door` (7.4); the window's own `health` has none:
+
+```json
+"door": { "contract": 1, "routes": ["GET health", "GET threads", "POST messages/:id/reply", "…"], "not_by_relay": ["GET events", "POST markups", "POST pair", "POST uploads"], "grants": [], "min_app_contract": 1 }
+```
+
+- `routes`: every route this caller's token reaches on this Inbox now, as `<method> <route>`, with each alternation written out and `:id` for one path segment (`:path` for the rest of a path). A phone's list differs from a linked computer's. It includes the door's own `POST pair` and `POST revoke`, and a linked computer's own routes only while this Inbox answers them. The list comes from the door's route table (`doorRouteTable()` in `packages/server/inbox-devices.ts`, beside the allowlist, with `method`, `route`, `name`, `pattern`, `grant`, `raw` and `relay` per row).
+- `not_by_relay`: those of `routes` the sealed relay path refuses (`pair` and `events` with `404 device_route_not_found`, `uploads` and `markups` with `413 relay_upload_unavailable`). A byte route through the relay answers the whole file with no Range, or `413 result_too_large`.
+- `grants`: the grant groups this token holds. Empty until the grant lands.
+- `min_app_contract`: the floor below.
+
+### What each side does
+
+- **App newer than the Inbox.** The app offers only what `routes` and `grants` name, on the path it would use (`not_by_relay`), and never calls a route that is not listed. Missing fields read as "not there". An Inbox whose `health` has no `door` is from before this section: contract 0, and the app offers the routes it knew then. Nothing is said to the person.
+- **App older than the Inbox.** Unknown routes in `routes` are ignored, unknown record kinds and frames are skipped, unknown fields are kept and ignored.
+- **Floors.** An app whose header names a contract below `min_app_contract` gets `426 { "error": "Update Plannotator on your phone.", "code": "app_needs_update", "min_app_contract": 1 }` with `Upgrade: plannotator-app/1`, on every route but `health`, `pair` and `revoke`, on the door and through the relay. The 426 is not kept under the key. The app has its own `min_inbox_contract`: below it, that computer's threads are not listed and the app says the computer needs an update.
+
+`readInboxDoorHealth` and `inboxDoorOffers` in `packages/core/inbox-door-version.ts` are that reading as functions: `ok` with the routes, `not_by_relay` and grants to offer, `inbox_needs_update`, or `app_needs_update`.
+
+### A route that is not there
+
+A door path off this caller's list answers `404 device_route_not_found` before the window is asked, and nothing is kept under its key (section 6). A write refused with `404 device_route_not_found` is final under that key: the app keeps the person's words, says the computer needs an update, and after the computer has updated sends the intent again under a new key. (A write that went on through a linked machine's outbox keeps that outbox's refusal under the old key for days, so the old key never runs.)
+
+### For clients
+
+What the contract kit, the device event stream, the grant and the app must know (from the review of PR 3678):
+
+- **The contract kit (F2).**
+  - Generate `door.json` from `doorRouteTable()`, not `doorRouteNames()`. The latter keeps `(a|b)` groups.
+  - Join the write kinds (`hold`, `now`, `bytes`) by `pattern`.
+  - Carry the `relay` column.
+  - Generate `apps/mobile/contract/VERSION` from `DOOR_CONTRACT`: one contract number.
+  - Read `doorRouteTable()` whole: it has the door's own routes (`GET update` among a linked machine's) and the `relay` flag.
+  - Add `skew` vectors for: no `door`; a malformed `door`; a contract above 2^53 or below 0 (read as no `door`); bad `grants` (read as `[]`) against bad `routes` (the whole `door` dropped); a floor above the app; an Inbox newer than the app.
+  - Add a header-form vector, including a rejected `iOS`, a rejected leading zero, and `contract 0` as below the floor.
+  - Set `routes_before_door` to the phone rows before this section, if older Inboxes must be served.
+- **The device event stream (F3).** `GET events:device` is not a path. Add it as a row the door answers (extend the door's own routes and the table test) or as a separate `door.features` list. It is an addition, so `DOOR_CONTRACT` stays.
+- **The grant (F5a).**
+  - `doorRouteTable`, `doorRouteOf` and `doorReachOf` read `machineOnly` today. Replacing it with `grant` changes them together.
+  - `health` passes no grants yet: pass the token's groups.
+  - Keep the table test that a phone row resolves through `doorRouteOf(..., false)`.
+  - An opened route is an addition: it appears in `routes`, and `DOOR_CONTRACT` stays.
+- **The app (S1).**
+  - Send the header on every door request, and `app` in every sealed command, exactly in the form. A typo is ignored silently: no floor and no Settings line.
+  - On a 426, pause that computer's queue, keep its rows, and re-read `health` on foreground or with backoff. Never loop. A relay 426 result does not drop the row.
+  - Stamp each outbox row with the contract it was made under. After an update, do not send blindly a row stamped below the Inbox's `min_app_contract`: re-encode it, or put its words back in the draft.
+  - Treat `404 device_route_not_found` on a write as final for that write. Show that the computer needs an update, with the words kept. After the computer updates, send the intent again under a new key.
+  - Offer a route only when `inboxDoorOffers` allows it on the path in use.
+- **The relay (F6a).** No change is needed for `app`. Keep it inside the seal; if relay 1.1 adds `headers`, do not move `app` there.

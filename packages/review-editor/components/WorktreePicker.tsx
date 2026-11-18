@@ -75,7 +75,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
       >
           <span className="truncate flex-1 text-left">{activeLabel}</span>
           {isCustom && (
-            <span className="text-[10px] uppercase tracking-wide opacity-60 flex-shrink-0">
+            <span className="text-xs opacity-60 flex-shrink-0">
               worktree
             </span>
           )}
@@ -130,7 +130,7 @@ export const WorktreePicker: React.FC<WorktreePickerProps> = ({
                 {mainMatchesQuery && (
                   <div className="h-px bg-border/50 mx-2 my-1" />
                 )}
-                <div className="px-3 pb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                <div className="px-3 pb-1 text-xs text-muted-foreground">
                   Worktrees
                 </div>
                 {filtered.map((wt) => (
@@ -183,7 +183,7 @@ const WorktreeRow: React.FC<WorktreeRowProps> = ({ label, sublabel, isSelected, 
     <div className="min-w-0 flex-1">
       <div className="truncate" title={label}>{label}</div>
       {sublabel && (
-        <div className="truncate text-[10px] text-muted-foreground" title={sublabel}>{sublabel}</div>
+        <div className="truncate text-xs text-muted-foreground" title={sublabel}>{sublabel}</div>
       )}
     </div>
   </button>

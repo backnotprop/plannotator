@@ -5,9 +5,9 @@
 import {
   inboxActionInDraft,
   inboxPullIsOpen,
-  inboxPullRepoKey,
   type InboxMessageWire,
   type InboxPull,
+  type InboxPullLink,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
@@ -15,7 +15,7 @@ import {
 import { plural } from '@plannotator/core/inbox-format';
 import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
-import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, requestedParts, type PullFilter } from './model';
+import { checksWords, inboxPullLabel, isPullThread, linkAgentName, openLayers, pullInProject, pullViewOf, requestedParts, type PullFilter } from './model';
 import { person, wordsText, type Words } from './words';
 import { startLayer } from './topology';
 import { hostLabel } from '../compose/model';
@@ -25,8 +25,9 @@ import { branchContextWords, branchNoteOf, branchReportOf, branchRowLead, type B
 export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null, filter: PullFilter): InboxReviewRow[] {
   const inProject = (row: InboxReviewRow) => {
     if (!project) return true;
-    if (reviewRowProject(row) === project) return true;
-    return row.stacks.some((stack) => (answer.projects[inboxPullRepoKey(stack.host, stack.repo)] ?? []).includes(project));
+    const own = reviewRowProject(row);
+    if (own === project) return true;
+    return row.stacks.some((stack) => stack.layers.some((pull) => pullInProject(pull, project, answer.projects, own)));
   };
   const inView = (row: InboxReviewRow) => {
     if (filter === 'all') return true;
@@ -54,7 +55,8 @@ export function reviewRowProjects(answer: InboxReviewsAnswer): Set<string> {
  * of several its stack page).
  */
 export function reviewRowLaunchpad(row: InboxReviewRow): string | null {
-  if (row.stacks.length !== 1) return null;
+  // A thread started from the PR's page (Start a thread) is that PR's page from then on: the row opens it.
+  if (row.stacks.length !== 1 || (row.reviewed && row.thread_id && isPullThread(row.link))) return null;
   const stack = row.stacks[0]!;
   return stack.layers.length === 1 && startLayer(stack) ? stack.id : null;
 }
@@ -235,6 +237,12 @@ export interface ReviewView {
   /** A landed PR, on its forge. */
   pullUrl: string | null;
   /**
+   * A thread started from the PR's page (Start a thread): the PR's line over the messages (`PullContextLine`) in place of
+   * the context line, with Guided review (asked for in this thread, `usePullThreadGuide`, or opened once it is in), The
+   * diff (`onDiff`) and the PR on its forge. `link`: the PR's, this thread's. Null otherwise.
+   */
+  pullLine?: { pull: InboxPull; stack: InboxPullStack; link: InboxPullLink; onDiff: () => void; onAsked: () => void } | null;
+  /**
    * A reported branch with no review yet (Branch reviews): what the agent reported, and the message a review request
    * replies to, so the review stays in this thread. Null for every other thread, and once a review is in.
    */
@@ -300,12 +308,13 @@ export function reviewOpenPlan(input: {
 export function reviewViewOf(
   row: InboxReviewRow,
   thread: { messages: readonly { id: string }[]; subject: string | null; thread_name?: string | null },
-  options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void },
+  options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void; onOpenDiff?: (stackId: string, layerKey: string) => void; onAsked?: () => void },
 ): ReviewView {
   const line = reviewRowLine(row);
   const started = row.link?.via === 'owner' || !!row.started;
   // A reported branch's first message is the agent's report, no New review request.
-  const ask = row.started?.kind === 'branch' ? null : (row.started?.ask ?? (row.link?.via === 'owner' ? row.link.ask : null));
+  const pullThread = isPullThread(row.link);
+  const ask = row.started?.kind === 'branch' || pullThread ? null : (row.started?.ask ?? (row.link?.via === 'owner' ? row.link.ask : null));
   const first = row.review?.first_review_id ?? null;
   const earlier = first ? thread.messages.findIndex((message) => message.id === first) : -1;
   const folds = !started && first !== null && earlier > 0;
@@ -325,6 +334,10 @@ export function reviewViewOf(
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,
     pullUrl: reviewRowLanding(row)?.url ?? null,
+    pullLine:
+      pullThread && stack && startLayer(stack) && row.link?.thread_id === row.thread_id && options.onOpenDiff
+        ? { pull: startLayer(stack)!, stack, link: row.link, onDiff: () => options.onOpenDiff!(stack.id, startLayer(stack)!.key), onAsked: options.onAsked ?? (() => {}) }
+        : null,
   };
 }
 

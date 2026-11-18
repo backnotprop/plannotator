@@ -59,3 +59,37 @@ test.skipIf(!hasDom)('a long model list filters as you type; Enter picks the bes
   key('Escape');
   expect(closed).toBe(1);
 });
+
+test.skipIf(!hasDom)("OpenCode's own agents get an Agent column beside the variant: a pick keeps the model, Default takes it off; none listed, no column", async () => {
+  const { initialLaunchChoice, launchChoiceButton, launchChoiceSend, pickLaunchModel } = await import('./compose/launchChoice');
+  const short: InboxLaunchChoices = { models: ['opencode/big-pickle', 'opencode/flint'], efforts: ['low', 'high'], effort_word: 'Variant', primary_agents: ['build', 'plan'] };
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  const picks: InboxLaunchChoice[] = [];
+  const render = (choice: InboxLaunchChoice, lists: InboxLaunchChoices) =>
+    act(() => root!.render(<LaunchChoiceMenu choice={choice} choices={lists} phone={false} onChoice={(next) => picks.push(next)} onClose={() => {}} />));
+  render({ model: 'opencode/big-pickle' }, short);
+  const column = host.querySelector<HTMLElement>('[data-compose-choice-menu="primary_agent"]')!;
+  expect(column.getAttribute('aria-label')).toBe('Agent');
+  expect([...column.querySelectorAll<HTMLElement>('[data-compose-choice-value]')].map((row) => row.textContent)).toEqual(['Default', 'build', 'plan']);
+  expect(host.querySelector('[data-compose-choices]')!.getAttribute('aria-label')).toBe('Model, variant and agent');
+  act(() => column.querySelector<HTMLButtonElement>('[data-compose-choice-value="plan"]')!.click());
+  expect(picks.at(-1)).toEqual({ model: 'opencode/big-pickle', primary_agent: 'plan' });
+
+  render({ model: 'opencode/big-pickle', primary_agent: 'plan' }, short);
+  act(() => host!.querySelector<HTMLButtonElement>('[data-compose-choice-menu="primary_agent"] [data-compose-choice-value="default"]')!.click());
+  expect(picks.at(-1)).toEqual({ model: 'opencode/big-pickle' });
+  // Another model keeps the agent; the button and the Send carry it.
+  expect(pickLaunchModel({ model: 'opencode/big-pickle', primary_agent: 'plan' }, short, 'opencode/flint')).toEqual({ model: 'opencode/flint', primary_agent: 'plan' });
+  expect(launchChoiceButton({ primary_agent: 'plan' }, short)).toBe('Default model · plan');
+  expect(launchChoiceSend({ model: 'opencode/flint', primary_agent: 'plan' })).toEqual({ model: 'opencode/flint', primary_agent: 'plan' });
+  // The last start's agent comes back while OpenCode still lists it.
+  expect(initialLaunchChoice({ ...short, last: { primary_agent: 'plan' } })).toEqual({ primary_agent: 'plan' });
+  expect(initialLaunchChoice({ ...short, last: { primary_agent: 'gone' } })).toEqual({});
+
+  const { primary_agents: _none, ...noModes } = short;
+  render({}, noModes);
+  expect(host.querySelector('[data-compose-choice-menu="primary_agent"]')).toBeNull();
+  expect(host.querySelector('[data-compose-choices]')!.getAttribute('aria-label')).toBe('Model and variant');
+});
