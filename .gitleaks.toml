@@ -49,3 +49,18 @@ regexes = [
   '''^4jMsHMODebuTRvS6-J6tQjH7ocO29bfO7muGjK59dj8$''',
   '''^2dd0e6dc8b7e933117fe89ad28217652c08ce3389c29b81fa212bc31d9e7b43a$''',
 ]
+
+[[allowlists]]
+# Disposition: invented, non-secret sample data; reviewed 2026-11-18.
+# The native app's contract (apps/mobile/contract, docs/agent-guides/mobile.md):
+# its fixtures are made-up Inbox answers, records and pushes with plainly fake
+# tokens, keys and ids, and its vectors are what the product's own code computes
+# from them (as the relay vectors above). Limited to the generic rule and to
+# those two folders, so a provider-shaped key there still trips its own rule.
+# Owner: Plannotator maintainers. Re-review by 2027-11-18 or when the folders move.
+description = "Native app contract fixtures and vectors (invented sample data)"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^apps/mobile/contract/fixtures/''',
+  '''^apps/mobile/contract/vectors/''',
+]

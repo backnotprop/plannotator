@@ -1,7 +1,8 @@
 /**
  * Guard for the docs-only rule (scripts/ci-docs-only.sh): a PR that changes
- * only root docs, LICENSE-*, .github/assets, adr/ or docs/ outside
- * docs/agent-guides runs no test, build or scan but Gitleaks and the pickers
+ * only root docs, LICENSE-*, .github/assets, adr/, docs/ outside
+ * docs/agent-guides, or the iPhone app's Swift and Xcode files under
+ * apps/mobile/ios runs no test, build or scan but Gitleaks and the pickers
  * (scripts/ci-affected.ts reads the script's verdict).
  *
  * What can regress, and the test that says so:
@@ -70,6 +71,15 @@ describe('which lanes a change runs', () => {
     ['a .js under .github/assets', ['.github/assets/x.js'], EVERYTHING],
     ['a shell script under adr/', ['adr/x.sh'], EVERYTHING],
     ['a .ts under adr/', ['adr/research/x.ts'], EVERYTHING],
+    // The iPhone app: only mobile-ios.yml builds its Swift and Xcode files.
+    ['the iPhone app\'s Swift, Xcode and asset files', ['apps/mobile/ios/App/InboxApp.swift', 'apps/mobile/ios/Inbox.xcodeproj/project.pbxproj', 'apps/mobile/ios/App/Info.plist', 'apps/mobile/ios/App/Assets.xcassets/AppIcon.appiconset/Contents.json', 'apps/mobile/ios/Local.example.xcconfig', 'apps/mobile/ios/App/Inbox.entitlements'], CHEAP],
+    // Semgrep scans shell; `bun test` finds *.test.ts anywhere; the package walk finds package.json; tests read the contract.
+    ['the iPhone app\'s CI script', ['apps/mobile/ios/ci.sh'], EVERYTHING],
+    ['a test file under apps/mobile/ios', ['apps/mobile/ios/x.test.ts'], EVERYTHING],
+    ['a package.json under apps/mobile/ios', ['apps/mobile/ios/package.json'], EVERYTHING],
+    ['JSON outside an asset catalog under apps/mobile/ios', ['apps/mobile/ios/fixture.json'], EVERYTHING],
+    ['the app contract', ['apps/mobile/contract/door.json', 'apps/mobile/contract/generated/swift/Wire.swift'], EVERYTHING],
+    ['Swift plus one .ts file', ['apps/mobile/ios/App/InboxApp.swift', 'packages/ui/utils/x.ts'], EVERYTHING],
   ];
   for (const [name, paths, expected] of rows) test(name, () => expect(lanes(paths)).toBe(expected));
 

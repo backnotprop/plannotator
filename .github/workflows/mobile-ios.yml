@@ -1,0 +1,70 @@
+name: Mobile iOS
+
+# The native iPhone app (apps/mobile/), kept apart from the Inbox's CI. It
+# starts only when a file under apps/mobile/ or this file changes, on GitHub's
+# own macOS runners (never TEST_RUNNER or E2E_RUNNER), and it is never a
+# required check: red here never blocks a pull request. No other workflow
+# builds Swift, and scripts/ci-affected.ts leaves apps/mobile/ios and
+# apps/mobile/android out of the Test workflow's plan (nativeAppFile), so an
+# app-only pull request runs no test lane and no Checks there.
+#
+# One group for the whole workflow: at most one macOS job in the repository at
+# any time, and a newer push replaces a queued or running one.
+#
+# The repository variable MOBILE_CI=nightly stops the per-push job (`ios`);
+# the nightly and manual runs (`ios-nightly`) carry on. Any other value, or
+# none, runs both.
+#
+# apps/mobile/ios/ci.sh does the work. It exits 0 while there is no Xcode
+# project to build.
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-ios.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'apps/mobile/**'
+      - '.github/workflows/mobile-ios.yml'
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mobile-ios
+  cancel-in-progress: true
+
+jobs:
+  ios:
+    name: iOS (build and swift test)
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && vars.MOBILE_CI != 'nightly' }}
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test the app
+        run: bash apps/mobile/ios/ci.sh pr
+
+  ios-nightly:
+    name: iOS nightly (simulator UI suite)
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Build and test the app, with the simulator suite
+        run: bash apps/mobile/ios/ci.sh nightly

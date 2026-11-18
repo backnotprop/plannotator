@@ -27,7 +27,8 @@
  * plan() for the list; a picker error, a run that is not a pull_request, or the
  * repo variable CI_AFFECTED=off also give `all`. A docs-only change (the
  * allowlist of scripts/ci-docs-only.sh) gives `docs`: only the plan job and
- * Gitleaks run.
+ * Gitleaks run. The native app's files (apps/mobile/ios, apps/mobile/android:
+ * nativeAppFile) are left out of every plan: only mobile-ios.yml builds them.
  *
  * scripts/ci-affected-map.test.ts holds the workflows to this map: every job has
  * an entry, every gated job reads its gate so that a failed gate runs it, and
@@ -89,9 +90,28 @@ const KNOWN_EXT = new Set([
 ]);
 const KNOWN_BARE = /^(LICENSE[-\w]*|NOTICE|README|Dockerfile|_headers|xdg-open|open-in-vscode|\.gitignore|\.gitattributes|\.vscodeignore|\.semgrepignore|\.npmignore|\.adr-dir)$/;
 
+/**
+ * The native app (apps/mobile/ios, apps/mobile/android): Swift, Xcode and
+ * Gradle files that no Bun test reads. Only .github/workflows/mobile-ios.yml
+ * builds them, on its own path filter, so the picker drops them from a plan:
+ * a PR that changes only these runs no test lane and no Checks. Code kinds
+ * (.ts, .js) and a package.json there keep the ordinary rules.
+ */
+export function nativeAppFile(path: string): boolean {
+  return /^apps\/mobile\/(ios|android)\//.test(path) && !CODE_RE.test(path) && !/(^|\/)package\.json$/.test(path);
+}
+
+/**
+ * The app contract's generated native sources (apps/mobile/contract/generated):
+ * data the contract tests read by name and check for staleness, so a change
+ * reaches those tests like any data file.
+ */
+const CONTRACT_GENERATED = /^apps\/mobile\/contract\/generated\/([^/]+\/)*[^/]+\.(swift|kt|xcstrings|strings)$/;
+
 export function knownKind(path: string): boolean {
   const base = path.split('/').pop()!;
   if (KNOWN_BARE.test(base)) return true;
+  if (CONTRACT_GENERATED.test(path)) return true;
   const ext = extname(base).slice(1).toLowerCase();
   return ext !== '' && KNOWN_EXT.has(ext);
 }
@@ -236,7 +256,8 @@ export const GATE_JOB: Record<string, string> = { 'test.yml': 'plan', 'browser-s
  *  - `paths`: the workflow's own `pull_request.paths` (a heavy suite);
  *  - `slice`: the browser slice (e2e-slice.yml, its own picker);
  *  - `label`: the full browser suite, on a PR only with `ci:e2e` / `ci:e2e-all`;
- *  - `tag`: release tags only; `no-pr`: the workflow never runs on a PR.
+ *  - `tag`: release tags only; `no-pr`: the job never runs on a PR (the
+ *    workflow has no pull_request trigger, or the job's `if` names only other events).
  */
 export const JOB_MAP: Record<string, Record<string, string>> = {
   'test.yml': {
@@ -258,6 +279,7 @@ export const JOB_MAP: Record<string, Record<string, string>> = {
   'inbox-pi.yml': { 'inbox-pi': 'paths' },
   'inbox-claude-code.yml': { 'inbox-claude-code': 'paths' },
   'relay.yml': { relay: 'paths' },
+  'mobile-ios.yml': { ios: 'paths', 'ios-nightly': 'no-pr' },
   'e2e-slice.yml': { plan: 'slice', slice: 'slice' },
   'inbox-e2e.yml': { head: 'label', build: 'label', plan: 'label', 'inbox-window-e2e': 'label', blame: 'label', 'full-ci': 'label' },
   'dast.yml': { 'passive-baseline': 'no-pr' },
@@ -736,6 +758,7 @@ const allLanes = () => ({
 export function pathReasons(changes: Change[]): string[] {
   const reasons: string[] = [];
   for (const c of changes) {
+    if (nativeAppFile(c.path)) continue;
     const top = c.path.split('/')[0]!;
     const all = runAllReason(c.path);
     if (all) reasons.push(`${c.path}: ${all.why}`);
@@ -768,12 +791,13 @@ export type PlanInput = {
 };
 
 export function plan(g: Graph, input: PlanInput): Plan {
-  const { changes } = input;
   const all = testFiles(g);
   const notes: string[] = [];
   const reasons: string[] = input.forceAll ? [input.forceAll] : [];
-  if (!input.forceAll && !changes.length) reasons.push('the diff is empty');
-  const docs = !reasons.length && input.docsOnly;
+  if (!input.forceAll && !input.changes.length) reasons.push('the diff is empty');
+  // The native app's files reach no Bun test: the rest of the change is planned alone.
+  const changes = input.changes.filter((c) => !nativeAppFile(c.path));
+  const docs = !reasons.length && (input.docsOnly || !changes.length);
   if (!reasons.length && !docs) {
     reasons.push(...pathReasons(changes));
     for (const c of changes) {
@@ -866,7 +890,7 @@ export function plan(g: Graph, input: PlanInput): Plan {
   const affected = new Set(tests.filter((t) => t.why !== 'scanner').map((t) => t.path));
   return {
     mode, reasons, notes, tests, total: all.length,
-    changed: changes.map((c) => `${c.status}\t${c.path}`),
+    changed: input.changes.map((c) => `${c.status}\t${c.path}`),
     unit, dom,
     gates: decideGates('test.yml', mode, reasons, changes, affected, g),
     semgrep: semgrepPlan(mode, changes),
