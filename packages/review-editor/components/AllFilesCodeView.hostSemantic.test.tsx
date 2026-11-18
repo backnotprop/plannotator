@@ -181,7 +181,7 @@ async function headerOf(path: string): Promise<HTMLElement> {
 
 const touchAt = (type: string, x: number) => Object.assign(new Event(type, { bubbles: true, composed: true }), { changedTouches: [{ clientX: x, clientY: 0 }] });
 
-async function pressArrow(gesture: string | Event[] = 'pointerdown', marker = 'data-expand-button') {
+async function pressArrow(gesture: string | Event[] = 'click', marker = 'data-expand-button') {
   const options = lastCodeViewProps?.options as { onPostRender: (node: HTMLElement, instance: unknown, phase: string, context: unknown) => void };
   const container = document.createElement('diffs-container');
   const arrow = document.createElement('div');
@@ -386,7 +386,8 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
 
   for (const [gesture, shown] of [
     ['pointermove', 'semantic'],
-    ['pointerdown', 'off'],
+    ['pointerdown', 'semantic'],
+    ['click', 'off'],
     ['Enter', 'off'],
     ['touch that scrolls', 'semantic'],
     ['tap', 'off'],

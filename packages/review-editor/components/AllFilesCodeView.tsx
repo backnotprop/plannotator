@@ -2484,13 +2484,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         if (tapStart?.itemId === itemId && touch && Math.hypot(touch.clientX - tapStart.x, touch.clientY - tapStart.y) < 10) markExpanded(itemId);
         tapStart = null;
         return;
-      } else if ((event.type === 'pointerdown' && !(event instanceof PointerEvent && event.pointerType === 'touch')) || (event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' '))) markExpanded(itemId);
+      } else if (event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ')) markExpanded(itemId);
       const rendered = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId);
       if (rendered?.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) return;
       rendered.instance.expandHunk(0, 'up', 0);
     };
     scrollEl.addEventListener('pointermove', readAheadOfExpand, { passive: true });
-    scrollEl.addEventListener('pointerdown', readAheadOfExpand, { passive: true, capture: true });
     scrollEl.addEventListener('touchstart', readAheadOfExpand, { passive: true, capture: true });
     scrollEl.addEventListener('focusin', readAheadOfExpand);
     scrollEl.addEventListener('keydown', readAheadOfExpand, { capture: true });
@@ -2498,7 +2497,6 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     scrollEl.addEventListener('click', readAheadOfExpand, { capture: true });
     return () => {
       scrollEl.removeEventListener('pointermove', readAheadOfExpand);
-      scrollEl.removeEventListener('pointerdown', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('touchstart', readAheadOfExpand, { capture: true });
       scrollEl.removeEventListener('focusin', readAheadOfExpand);
       scrollEl.removeEventListener('keydown', readAheadOfExpand, { capture: true });
