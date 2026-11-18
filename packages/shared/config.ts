@@ -2258,12 +2258,15 @@ export function resolveInboxReminder(
   return INBOX_REMINDER_HOSTS.includes(host) && toolOn && (configuredInboxReminder(config, host) ?? true);
 }
 
+/** The Inbox tool's default in Oh My Pi (resolvePiInboxTool): on. Its own value, not the agent tool's, so either can change alone. */
+export const INBOX_TOOL_OMP_DEFAULT = true;
+
 /**
  * Whether the Pi extension registers the Inbox tool, and so polls for the
  * person's replies (the wake), in Pi or in Oh My Pi. Both read `inboxTool.pi`
  * and PLANNOTATOR_INBOX_TOOL exactly as resolveInboxTool does; only the
- * default differs, as the `plannotator` agent tool's does
- * (AGENT_TOOL_DEFAULTS): off on Pi, on in Oh My Pi, which lists an extension
+ * default differs, as the `plannotator` agent tool's does: off on Pi, on in
+ * Oh My Pi (INBOX_TOOL_OMP_DEFAULT), which lists an extension
  * tool as one short `xd://` line and loads its schema only when the model
  * reads it. Nothing else turns it on for OMP: the Inbox's connect step finds
  * the extension only in Pi's own settings.json.
@@ -2273,7 +2276,7 @@ export function resolvePiInboxTool(
   env: NodeJS.ProcessEnv,
   piHost: "pi" | "oh-my-pi",
 ): boolean {
-  return parseInboxToolEnv(env) ?? configuredInboxTool(config, "pi") ?? (piHost === "oh-my-pi" ? AGENT_TOOL_DEFAULTS["oh-my-pi"] : INBOX_TOOL_DEFAULTS.pi);
+  return parseInboxToolEnv(env) ?? configuredInboxTool(config, "pi") ?? (piHost === "oh-my-pi" ? INBOX_TOOL_OMP_DEFAULT : INBOX_TOOL_DEFAULTS.pi);
 }
 
 /**

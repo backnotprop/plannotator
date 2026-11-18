@@ -1494,6 +1494,131 @@ function Update-PiExtensionIfPresent {
     }
 }
 
+# Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). With omp on
+# PATH this installs it, or updates the install it has, with OMP's own plugin
+# commands: `omp plugin install <npm name>` and `omp plugin upgrade <name>`
+# (can1357/oh-my-pi packages/coding-agent/src/cli/plugin-cli.ts, 7f38fc6;
+# neither prompts). Installed means the package is in OMP's plugin manifest,
+# <plugins>\package.json (<plugins>: $env:XDG_DATA_HOME\omp\plugins when OMP
+# set it up, else ~\.omp\plugins). Time-bounded, stdin closed, run in the home
+# folder; a failure never fails the install and prints the command. A pinned
+# run installs that version fresh and leaves an existing install as it is.
+# Same logic in install.sh and install.cmd's :UpdateOmpExtension.
+$ompExtensionPackage = "@plannotator/pi-extension"
+# none | installed | updated | current | pinned | failed
+$script:ompExtensionState = "none"
+
+# The extension's version as OMP installed it: "" when OMP's manifest does not
+# list it, "unknown" when it does but the package can't be read.
+function Get-OmpExtensionVersion {
+    $dirs = @()
+    if ($env:XDG_DATA_HOME) {
+        $xdg = Join-Path (Join-Path $env:XDG_DATA_HOME "omp") "plugins"
+        if (Test-Path -LiteralPath $xdg -PathType Container) { $dirs += $xdg }
+    }
+    $dirs += (Join-Path (Join-Path $env:USERPROFILE ".omp") "plugins")
+    foreach ($dir in $dirs) {
+        $text = ""
+        try { $text = [string](Get-Content -LiteralPath (Join-Path $dir "package.json") -Raw -ErrorAction Stop) } catch { continue }
+        if ($text -notmatch '"@plannotator/pi-extension"\s*:') { continue }
+        $version = ""
+        $pkg = Join-Path (Join-Path (Join-Path (Join-Path $dir "node_modules") "@plannotator") "pi-extension") "package.json"
+        try { $version = [string](Get-Content -LiteralPath $pkg -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop).version } catch { }
+        if (-not $version) { $version = "unknown" }
+        return $version
+    }
+    return ""
+}
+
+# Run omp with arguments and a time limit, from the home folder, stdin closed.
+# Returns "" on success, else why it failed.
+function Invoke-OmpWithTimeLimit {
+    param([string]$OmpPath, [string[]]$Arguments, [int]$Seconds)
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    if ($OmpPath -match '[.](cmd|bat)$') {
+        $info.FileName = $env:ComSpec
+        $info.Arguments = '/d /s /c ""' + $OmpPath + '" ' + ($Arguments -join " ") + '"'
+    } else {
+        $info.FileName = $OmpPath
+        $info.Arguments = ($Arguments -join " ")
+    }
+    $info.WorkingDirectory = $env:USERPROFILE
+    $info.UseShellExecute = $false
+    $info.RedirectStandardInput = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.CreateNoWindow = $true
+    try {
+        $p = [System.Diagnostics.Process]::Start($info)
+    } catch {
+        return "could not run omp: $($_.Exception.Message)"
+    }
+    try { $p.StandardInput.Close() } catch { }
+    $outTask = $p.StandardOutput.ReadToEndAsync()
+    $errTask = $p.StandardError.ReadToEndAsync()
+    if (-not $p.WaitForExit($Seconds * 1000)) {
+        try { $p.Kill($true) } catch { try { $null = & taskkill /T /F /PID $p.Id 2>$null } catch { }; try { $p.Kill() } catch { } }
+        return "it did not finish within ${Seconds}s"
+    }
+    $p.WaitForExit()
+    if ($p.ExitCode -eq 0) { return "" }
+    $last = $null
+    foreach ($task in @($errTask, $outTask)) {
+        $text = ""
+        try { if ($task.Wait(5000)) { $text = [string]$task.Result } } catch { }
+        $last = @($text -split "\r?\n") | ForEach-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() } | Where-Object { $_ } | Select-Object -Last 1
+        if ($last) { break }
+    }
+    if ($last -and $last.Length -gt 200) { $last = $last.Substring(0, 200) }
+    if ($last) { return "omp exited $($p.ExitCode): $last" }
+    return "omp exited $($p.ExitCode)"
+}
+
+function Update-OmpExtensionIfPresent {
+    $omp = Get-Command omp -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $omp) { return }
+    $local:ErrorActionPreference = 'Continue'
+    $secs = 300
+    $n = 0
+    if ([int]::TryParse([string]$env:PLANNOTATOR_OMP_PLUGIN_TIMEOUT, [ref]$n) -and $n -gt 0) { $secs = $n }
+    $pinned = ($Version -ne "latest") -and ($env:PLANNOTATOR_UPDATE_VERSION -ne $latestTag)
+    $before = Get-OmpExtensionVersion
+    if ($before -and $pinned) {
+        $script:ompExtensionState = "pinned"
+        Write-Host "Oh My Pi: the Plannotator extension was not updated: pinned to $latestTag; updating would install the newest extension."
+        return
+    }
+    if ($before) {
+        Write-Host "Updating the Plannotator extension in Oh My Pi..."
+        $why = Invoke-OmpWithTimeLimit -OmpPath $omp.Source -Arguments @("plugin", "upgrade", $ompExtensionPackage) -Seconds $secs
+    } else {
+        $spec = $ompExtensionPackage
+        if ($pinned) { $spec = "$ompExtensionPackage@$($latestTag.TrimStart('v'))" }
+        Write-Host "Installing the Plannotator extension in Oh My Pi..."
+        $why = Invoke-OmpWithTimeLimit -OmpPath $omp.Source -Arguments @("plugin", "install", $spec) -Seconds $secs
+    }
+    $after = Get-OmpExtensionVersion
+    if (-not $why -and -not $after) { $why = "OMP's plugin list does not show it" }
+    if ($why) {
+        $script:ompExtensionState = "failed"
+        Write-Host "Oh My Pi: could not install the Plannotator extension ($why). Run this, then restart OMP:"
+        Write-Host "  omp plugin install $ompExtensionPackage"
+        return
+    }
+    $shown = ""
+    if ($after -ne "unknown") { $shown = " ($after)" }
+    if (-not $before) {
+        $script:ompExtensionState = "installed"
+        Write-Host "Oh My Pi: Plannotator extension installed$shown. Restart OMP to load it."
+    } elseif ($before -eq $after) {
+        $script:ompExtensionState = "current"
+        Write-Host "Oh My Pi: Plannotator extension already up to date$shown."
+    } else {
+        $script:ompExtensionState = "updated"
+        Write-Host "Oh My Pi: Plannotator extension updated$shown. Restart OMP to load it."
+    }
+}
+
 # Aggressive cleanup of stale install locations from prior versions.
 # Echo each removal and ignore anything that is already gone.
 
@@ -2385,6 +2510,10 @@ if ((-not $skipSkillsResolved) -and $invocableChoice -and ($invocableChoice -ne 
 # the plannotator_submit_plan tool; it no longer bundles skills.
 Update-PiExtensionIfPresent
 
+# Install or update the extension in Oh My Pi if omp is installed (see
+# Update-OmpExtensionIfPresent).
+Update-OmpExtensionIfPresent
+
 # --- Gemini CLI support (only if Gemini is installed) ---
 $geminiDir = "$env:USERPROFILE\.gemini"
 if ((Test-Path $geminiDir) -and $skipGeminiResolved) {
@@ -2517,9 +2646,8 @@ if ($piDetected) {
     Write-Host ""
     Write-Host "  pi update npm:@plannotator/pi-extension"
 }
-# Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). This run
-# installs nothing into OMP: the section says how, because "Ask this session"
-# in OMP comes only from the extension, never from the CLI run in OMP's shell.
+# Oh My Pi (OMP): the step above installed or updated the extension; the
+# section says what it did, and the command only when it could not.
 $ompDetected = [bool](Get-Command omp -ErrorAction SilentlyContinue)
 if ($ompDetected) {
     Write-Host ""
@@ -2527,12 +2655,22 @@ if ($ompDetected) {
     Write-Host "  OH MY PI (OMP) USERS"
     Write-Host "=========================================="
     Write-Host ""
-    Write-Host "Install or update the Plannotator extension in OMP:"
+    if ($script:ompExtensionState -in @("installed", "updated")) {
+        Write-Host "The Plannotator extension is installed in OMP. Restart OMP (/restart in each open"
+        Write-Host "session) to load it."
+    } elseif ($script:ompExtensionState -in @("current", "pinned")) {
+        Write-Host "The Plannotator extension is installed in OMP."
+    } else {
+        Write-Host "Install the Plannotator extension in OMP:"
+        Write-Host ""
+        Write-Host "  omp plugin install @plannotator/pi-extension"
+        Write-Host ""
+        Write-Host "Then restart OMP."
+    }
     Write-Host ""
-    Write-Host "  omp plugin install @plannotator/pi-extension"
-    Write-Host ""
-    Write-Host "Then restart OMP and open reviews with /plannotator-review, /plannotator-annotate and"
-    Write-Host "/plannotator-last. Reviews opened that way can use Ask this session."
+    Write-Host "Open reviews with /plannotator-review, /plannotator-annotate and /plannotator-last."
+    Write-Host "Reviews opened that way can use Ask this session, and replies in the Plannotator"
+    Write-Host "Inbox start a turn in the session that asked."
 }
 if ($kiroAvailable) {
     Write-Host ""

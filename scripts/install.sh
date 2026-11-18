@@ -2298,6 +2298,112 @@ update_pi_extension_if_present() {
     fi
 }
 
+# Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). With `omp` on
+# PATH this installs it, or updates the install it has, with OMP's own plugin
+# commands: `omp plugin install <npm name>` and `omp plugin upgrade <name>`
+# (which moves an npm plugin to the newest version). Both are OMP's CLI
+# (can1357/oh-my-pi packages/coding-agent/src/cli/plugin-cli.ts, 7f38fc6) and
+# neither prompts. Installed means the package is in OMP's plugin manifest:
+# `<plugins>/package.json` dependencies, `<plugins>` being
+# $XDG_DATA_HOME/omp/plugins when OMP set that folder up, else ~/.omp/plugins
+# (docs/plugin-manager-installer-plumbing.md). Each call is time-bounded, with
+# stdin from /dev/null, run in the home folder (never a project's plugin
+# scope); a failure or a hang never fails the install: it prints the command
+# to run. A pinned run (--version naming an older tag) installs that version
+# fresh and leaves an existing install as it is, as the Claude Code plugin
+# step does. Skipped by --minimal (it exits before this), like the Pi step,
+# which has no opt-out of its own either. install.ps1 and install.cmd's
+# :UpdateOmpExtension carry the same step.
+OMP_EXTENSION_PACKAGE="@plannotator/pi-extension"
+# none (no omp) | installed | updated | current | pinned | failed
+omp_extension_state="none"
+
+# OMP's plugin folders, the one it uses first.
+omp_plugin_dirs() {
+    if [ -n "${XDG_DATA_HOME:-}" ] && [ -d "$XDG_DATA_HOME/omp/plugins" ]; then
+        printf '%s\n' "$XDG_DATA_HOME/omp/plugins"
+    fi
+    printf '%s\n' "$HOME/.omp/plugins"
+}
+
+# The extension's version as OMP installed it: "" when OMP's manifest does not
+# list it, "unknown" when it does but the package can't be read.
+omp_extension_version() {
+    omp_plugin_dirs | while IFS= read -r _omp_dir; do
+        if [ -f "$_omp_dir/package.json" ] && grep -q '"@plannotator/pi-extension"[[:space:]]*:' "$_omp_dir/package.json" 2>/dev/null; then
+            _omp_v=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$_omp_dir/node_modules/@plannotator/pi-extension/package.json" 2>/dev/null | head -n 1)
+            printf '%s\n' "${_omp_v:-unknown}"
+            break
+        fi
+    done
+}
+
+print_omp_extension_manual() {
+    echo "  omp plugin install ${OMP_EXTENSION_PACKAGE}"
+}
+
+update_omp_extension_if_present() {
+    command -v omp >/dev/null 2>&1 || return 0
+    _omp_secs="${PLANNOTATOR_OMP_PLUGIN_TIMEOUT:-300}"
+    case "$_omp_secs" in ''|*[!0-9]*|0) _omp_secs=300 ;; esac
+    _omp_before=$(omp_extension_version)
+    _omp_pinned=0
+    if [ "$VERSION_EXPLICIT" -eq 1 ] && [ "${PLANNOTATOR_UPDATE_VERSION:-}" != "$latest_tag" ]; then
+        _omp_pinned=1
+    fi
+    if [ -n "$_omp_before" ] && [ "$_omp_pinned" -eq 1 ]; then
+        omp_extension_state="pinned"
+        echo "Oh My Pi: the Plannotator extension was not updated: pinned to ${latest_tag}; updating would install the newest extension."
+        return 0
+    fi
+    _omp_tmp=$(mktemp -d "${TMPDIR:-/tmp}/plannotator-omp.XXXXXX" 2>/dev/null) || _omp_tmp=""
+    if [ -z "$_omp_tmp" ]; then
+        omp_extension_state="failed"
+        echo "Oh My Pi: could not install the Plannotator extension (no temporary folder). Run this, then restart OMP:"
+        print_omp_extension_manual
+        return 0
+    fi
+    _omp_rc=0
+    if [ -n "$_omp_before" ]; then
+        echo "Updating the Plannotator extension in Oh My Pi..."
+        (cd "$HOME" && run_with_time_limit "$_omp_secs" "$_omp_tmp/timed-out" omp plugin upgrade "$OMP_EXTENSION_PACKAGE") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
+    else
+        _omp_spec="$OMP_EXTENSION_PACKAGE"
+        if [ "$_omp_pinned" -eq 1 ]; then _omp_spec="${OMP_EXTENSION_PACKAGE}@${latest_tag#v}"; fi
+        echo "Installing the Plannotator extension in Oh My Pi..."
+        (cd "$HOME" && run_with_time_limit "$_omp_secs" "$_omp_tmp/timed-out" omp plugin install "$_omp_spec") >"$_omp_tmp/out" 2>&1 || _omp_rc=$?
+    fi
+    _omp_after=$(omp_extension_version)
+    if [ "$_omp_rc" -ne 0 ] || [ -z "$_omp_after" ]; then
+        if [ "$_omp_rc" -eq 124 ]; then
+            _omp_why="it did not finish within ${_omp_secs}s"
+        elif [ "$_omp_rc" -ne 0 ]; then
+            _omp_last=$(tr -cd '\11\12\15\40-\176' < "$_omp_tmp/out" 2>/dev/null | sed 's/[[:space:]]*$//' | grep -v '^[[:space:]]*$' | tail -n 1 | cut -c1-200)
+            _omp_why="omp exited ${_omp_rc}${_omp_last:+: ${_omp_last}}"
+        else
+            _omp_why="OMP's plugin list does not show it"
+        fi
+        rm -rf "$_omp_tmp"
+        omp_extension_state="failed"
+        echo "Oh My Pi: could not install the Plannotator extension (${_omp_why}). Run this, then restart OMP:"
+        print_omp_extension_manual
+        return 0
+    fi
+    rm -rf "$_omp_tmp"
+    _omp_shown=""
+    [ "$_omp_after" = "unknown" ] || _omp_shown=" (${_omp_after})"
+    if [ -z "$_omp_before" ]; then
+        omp_extension_state="installed"
+        echo "Oh My Pi: Plannotator extension installed${_omp_shown}. Restart OMP to load it."
+    elif [ "$_omp_before" = "$_omp_after" ]; then
+        omp_extension_state="current"
+        echo "Oh My Pi: Plannotator extension already up to date${_omp_shown}."
+    else
+        omp_extension_state="updated"
+        echo "Oh My Pi: Plannotator extension updated${_omp_shown}. Restart OMP to load it."
+    fi
+}
+
 # --- Aggressive cleanup of skills/commands we no longer manage ---
 # Echo each removal; ignore missing entries.
 
@@ -3155,6 +3261,10 @@ fi
 # anyone on an older extension that declared the skill in its manifest.
 update_pi_extension_if_present
 
+# Install or update the extension in Oh My Pi if omp is installed (see
+# update_omp_extension_if_present).
+update_omp_extension_if_present
+
 # --- Gemini CLI support (only if Gemini is installed) ---
 if [ -d "$HOME/.gemini" ] && [ "$skip_gemini" -eq 1 ]; then
     # HONEST three-state reporting (#1178): detected-but-skipped is its own
@@ -3355,21 +3465,31 @@ if [ "$pi_detected" -eq 1 ]; then
     echo ""
     echo "  pi update npm:@plannotator/pi-extension"
 fi
-# Oh My Pi (OMP) loads the Pi extension as an OMP plugin (#1814). This run
-# installs nothing into OMP: the section says how, because "Ask this session"
-# in OMP comes only from the extension, never from the CLI run in OMP's shell.
+# Oh My Pi (OMP): the step above installed or updated the extension; the
+# section says what it did, and the command only when it could not.
 if command -v omp >/dev/null 2>&1; then
     echo ""
     echo "=========================================="
     echo "  OH MY PI (OMP) USERS"
     echo "=========================================="
     echo ""
-    echo "Install or update the Plannotator extension in OMP:"
+    case "$omp_extension_state" in
+        installed|updated)
+            echo "The Plannotator extension is installed in OMP. Restart OMP (/restart in each open"
+            echo "session) to load it." ;;
+        current|pinned)
+            echo "The Plannotator extension is installed in OMP." ;;
+        *)
+            echo "Install the Plannotator extension in OMP:"
+            echo ""
+            print_omp_extension_manual
+            echo ""
+            echo "Then restart OMP." ;;
+    esac
     echo ""
-    echo "  omp plugin install @plannotator/pi-extension"
-    echo ""
-    echo "Then restart OMP and open reviews with /plannotator-review, /plannotator-annotate and"
-    echo "/plannotator-last. Reviews opened that way can use Ask this session."
+    echo "Open reviews with /plannotator-review, /plannotator-annotate and /plannotator-last."
+    echo "Reviews opened that way can use Ask this session, and replies in the Plannotator"
+    echo "Inbox start a turn in the session that asked."
 fi
 if [ -d "$HOME/.gemini" ]; then
     echo ""

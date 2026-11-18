@@ -47,6 +47,7 @@ import { getPlannotatorDataDir } from "./generated/data-dir.ts";
 import {
 	discoverInboxTools,
 	InboxAgentConnection,
+	InboxDeliverLater,
 	inboxRegistryFileOf,
 	InboxWake,
 } from "./generated/inbox/agent-link.ts";
@@ -78,6 +79,8 @@ export { PI_INBOX_REMINDER_CUSTOM_TYPE };
 
 export const PI_INBOX_HOST = "pi";
 export const PI_INBOX_AGENT_NAME = "Pi";
+/** How many times one reply Oh My Pi dropped before a turn is sent again before it is reported. */
+const DELIVER_LATER_TRIES = 3;
 /** A wake that has not entered the session after this long, while the session is idle, did not reach it. */
 const DELIVERY_WATCHDOG_MS = 15_000;
 
@@ -303,6 +306,8 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 	/** Pi emits `agent_settled` (0.80.4+): a run counts as over only when it settled. */
 	let settleEvents = false;
 	let runOpen = false;
+	/** How many times Oh My Pi dropped each reply's message before a turn (`dropped` in `send`). */
+	const laterTries = new Map<string, number>();
 	/** The wake waiting to show up as a user message in the session. */
 	let waiting: { id: string; resolve: () => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> } | null = null;
 
@@ -344,11 +349,19 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 			const failed = (error: unknown) => {
 				if (waiting?.id === command.id) endWaiting(error instanceof Error ? error : new Error(String(error)));
 			};
+			// Oh My Pi (18.18.2+) returns a promise that rejects when it drops the message before a turn starts
+			// (a turn began between the idle check and the send). That passes: the claim is given back and the
+			// next idle tick sends the reply again (InboxDeliverLater), up to DELIVER_LATER_TRIES times for one
+			// reply; after that it is reported, as a throw is at once.
+			const dropped = (error: unknown) => {
+				const tries = (laterTries.get(command.id) ?? 0) + 1;
+				laterTries.set(command.id, tries);
+				if (tries > DELIVER_LATER_TRIES) return failed(error);
+				failed(new InboxDeliverLater(`Oh My Pi did not start the message (${error instanceof Error ? error.message : String(error)})`));
+			};
 			try {
-				// Oh My Pi (18.18.2+) returns a promise that rejects when it drops the message before a turn
-				// starts: the reply then waits again, as after a throw, instead of an unhandled rejection.
 				const sent = pi.sendUserMessage(text, resolveIdleDeliveryOptions(current ?? undefined, { deliverAs })) as unknown;
-				if (sent && typeof (sent as PromiseLike<void>).then === "function") (sent as PromiseLike<void>).then(undefined, failed);
+				if (sent && typeof (sent as PromiseLike<void>).then === "function") (sent as PromiseLike<void>).then(undefined, dropped);
 			} catch (error) {
 				failed(error);
 			}
@@ -504,6 +517,9 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		const message = event?.message as { role?: string; content?: unknown } | undefined;
 		if (message?.role !== "user" || !waiting) return;
 		const firstLine = userText(message).split("\n", 1)[0] ?? "";
-		if (firstLine.startsWith("Plannotator Inbox: ") && firstLine.endsWith(`(${waiting.id})`)) endWaiting();
+		if (firstLine.startsWith("Plannotator Inbox: ") && firstLine.endsWith(`(${waiting.id})`)) {
+			laterTries.delete(waiting.id);
+			endWaiting();
+		}
 	});
 }

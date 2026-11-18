@@ -251,3 +251,19 @@ test('a Connect step for an MCP agent says it is not woken (Codex 0.149+ is: the
   expect(plan.next?.id).toBe('gemini');
   expect(stepText(plan.next!).text).toBe("Adds the Inbox's MCP server to Gemini CLI. Gemini CLI sees your replies when it checks the Inbox; it can't be woken.");
 });
+
+test("Oh My Pi without Plannotator's extension is a one-click Connect that installs it; with it, a ready extension", () => {
+  const notInstalled = { detected: true, reach: { kind: 'tool' as const, on: false, state: 'not_connected' as const, path: null, locked: false, reason: 'Turning this on runs omp plugin install @plannotator/pi-extension' } };
+  const plan = connectPlan(agentsModel({ 'oh-my-pi': notInstalled }));
+  expect(plan.next?.id).toBe('oh-my-pi');
+  expect(plan.next?.state).toBe('connect');
+  expect(stepTitle(plan.next!)).toBe('Connect Oh My Pi');
+  expect(stepText(plan.next!).text).toBe("Installs Plannotator's extension in Oh My Pi with its own plugin command. Restart Oh My Pi once; then your replies arrive as a new turn on their own.");
+  const done = connectPlan(agentsModel({ 'oh-my-pi': { detected: true, reach: { kind: 'tool', on: true, state: 'connected', path: null, locked: false, reason: null } } }));
+  expect(ids(done.done)).toEqual(['oh-my-pi']);
+  expect(doneNote(done.done[0]!, { live: false, turnedOn: false })).toBe('extension');
+  // Its tool turned off (not by name): a step with no measured cost, never a crash on a missing one.
+  const off = connectPlan(agentsModel({ 'oh-my-pi': { detected: true, reach: { kind: 'tool', on: false, state: 'off', path: null, locked: false, reason: null } } }));
+  expect(off.next?.state).toBe('tool-off');
+  expect(stepText(off.next!).cost).toBeUndefined();
+});

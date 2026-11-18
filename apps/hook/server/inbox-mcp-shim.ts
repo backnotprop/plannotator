@@ -81,7 +81,8 @@ import { inboxEnsureFailedWords, inboxStatus, type InboxRegistryEntry } from "@p
 import { qwenHome, qwenSessionOfProcess } from "@plannotator/shared/inbox/qwen-sessions";
 import { piSessionClaimOfPid } from "@plannotator/shared/inbox/pi-session-claim";
 import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotator/shared/inbox/connection";
-import { statSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card", "steps", "thread_pulls", "routine"]);
@@ -301,12 +302,56 @@ export function inboxCallHostSession(
  * session switch. Oh My Pi starts the MCP servers it finds (its own and other
  * agents' configs) beside the extension and gives them no session variable,
  * so before this the shim sent as a fresh `ses_` id: the person's reply could
- * never wake that session, though the extension polls for it. A claim for the
- * parent wins over every inherited variable: that process is a Pi session.
+ * never wake that session, though the extension polls for it.
+ *
+ * `parentStartedMs`: when the parent process started (`processStartedAtMs`),
+ * so a claim a killed Pi left under a pid the parent now reuses is not taken
+ * for it. Null (Windows, or unreadable): any claim for the pid counts.
  */
-export function inboxPiParentSession(dataDir: string, parentPid: number): InboxHostSession | null {
-  const session = piSessionClaimOfPid(dataDir, parentPid);
+export function inboxPiParentSession(dataDir: string, parentPid: number, parentStartedMs: number | null = null): InboxHostSession | null {
+  const session = piSessionClaimOfPid(dataDir, parentPid, parentStartedMs);
   return session && isInboxSessionId(session) ? { host: "pi", session, name: INBOX_SESSION_HOST_NAMES.pi! } : null;
+}
+
+/**
+ * When process `pid` started, in ms since the epoch, or null when it cannot be
+ * read. Linux: `/proc/<pid>/stat` (start in clock ticks since boot, USER_HZ
+ * 100) plus `/proc/stat`'s boot time; macOS and other Unix: `ps -o lstart=`
+ * under the C locale. Both are a little early, never late (whole seconds), the
+ * side that accepts a live claim. Windows: null.
+ */
+export function processStartedAtMs(pid: number, platform: NodeJS.Platform = process.platform): number | null {
+  if (!Number.isInteger(pid) || pid <= 1 || platform === "win32") return null;
+  try {
+    if (platform === "linux") {
+      const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+      // The command name (field 2) may hold spaces and parentheses: the fields after it start past the last ")".
+      const fields = stat.slice(stat.lastIndexOf(")") + 2).split(" ");
+      const ticks = Number(fields[19]);
+      const boot = /^btime (\d+)$/m.exec(readFileSync("/proc/stat", "utf8"));
+      if (!Number.isFinite(ticks) || !boot) return null;
+      return Number(boot[1]) * 1000 + Math.floor((ticks / 100) * 1000);
+    }
+    const ran = spawnSync("ps", ["-o", "lstart=", "-p", String(pid)], { encoding: "utf8", timeout: 2000, env: { ...process.env, LC_ALL: "C", LANG: "C" } });
+    const at = Date.parse((ran.stdout ?? "").trim());
+    return ran.status === 0 && Number.isFinite(at) ? at : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The host session a tool call is filed as. An identity a client confirms
+ * comes first: Claude Code's own MCP session, Qwen Code's registry, a T3 Code
+ * thread (`confirmed`, the old rule's answer). Only when none did, the Pi or
+ * OMP session the parent process claims, over a variable the shim merely
+ * inherited (an OMP started from a Claude Code shell carries that session's
+ * tag); then the inherited identity, as before.
+ */
+export function inboxShimCallSession(hostSession: InboxHostSession | null, confirmed: InboxHostSession | null, piParent: (() => InboxHostSession | null) | undefined): InboxHostSession | null {
+  const clientSaid = confirmed !== hostSession || hostSession?.host === INBOX_T3_HOST;
+  if (clientSaid) return confirmed;
+  return piParent?.() ?? confirmed;
 }
 
 /** The MCP client name Claude Code gives in `initialize` (`clientInfo.name`). */
@@ -554,7 +599,7 @@ export async function runInboxMcpShim(options: InboxMcpShimOptions): Promise<voi
     // Qwen's session and a Pi parent's are read again for each call: /clear, /new and /resume change them under the same process.
     const callHost =
       message?.method === "tools/call"
-        ? (options.piParent?.() ?? inboxClaudeCallSession(inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName), options.claude, clientName))
+        ? inboxShimCallSession(hostSession, inboxClaudeCallSession(inboxCallHostSession(hostSession, options.qwen, message.params?._meta, clientName), options.claude, clientName), options.piParent)
         : hostSession;
     const outgoing = fillInboxToolArguments(message, options.cwd, own, callHost, clientName, options.sessionProject);
     let target: InboxRegistryEntry;

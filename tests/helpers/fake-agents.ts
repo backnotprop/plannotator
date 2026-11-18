@@ -26,7 +26,7 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-export const FAKE_AGENT_BINS = ["codex", "gemini", "qwen", "devin", "amp", "cline", "pi", "opencode", "dsh", "openclaw", "hermes", "cursor-agent", "kiro-cli", "muse"] as const;
+export const FAKE_AGENT_BINS = ["codex", "gemini", "qwen", "devin", "amp", "cline", "pi", "opencode", "dsh", "openclaw", "hermes", "cursor-agent", "kiro-cli", "muse", "omp"] as const;
 export type FakeAgentBin = (typeof FAKE_AGENT_BINS)[number];
 
 export interface FakeAgents {
@@ -177,6 +177,21 @@ function main() {
       save();
       process.stdout.write("Removed controller.\n");
     }
+    process.exit(0);
+  }
+  // omp plugin install|upgrade <npm name> (Oh My Pi): kept in ~/.omp/plugins as OMP does, the package in its manifest's
+  // dependencies and under node_modules, at FAKE_OMP_LATEST (default 9.9.9); "name@1.2.3" installs that version.
+  if (name === "omp" && args[0] === "plugin" && (args[1] === "install" || args[1] === "upgrade")) {
+    const spec = args[2] || "";
+    const at = spec.lastIndexOf("@");
+    const pkg = at > 0 ? spec.slice(0, at) : spec;
+    const version = at > 0 ? spec.slice(at + 1) : process.env.FAKE_OMP_LATEST || "9.9.9";
+    const dir = path.join(fakeHome, ".omp", "plugins");
+    const manifest = readJson(path.join(dir, "package.json"));
+    manifest.dependencies = Object.assign({}, manifest.dependencies, { [pkg]: "^" + version });
+    writeJson(path.join(dir, "package.json"), manifest);
+    writeJson(path.join(dir, "node_modules", ...pkg.split("/"), "package.json"), { name: pkg, version });
+    process.stdout.write((args[1] === "install" ? "Installed " : "Upgraded ") + pkg + "@" + version + "\n");
     process.exit(0);
   }
   if (args[0] !== "mcp") process.exit(0);

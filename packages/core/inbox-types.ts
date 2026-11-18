@@ -2581,6 +2581,7 @@ export type InboxAgentId =
   | "cline"
   | "kiro"
   | "pi"
+  | "oh-my-pi"
   | "opencode"
   | "dsh"
   | "muse"
@@ -2600,6 +2601,7 @@ export const INBOX_AGENT_IDS: readonly InboxAgentId[] = [
   "cline",
   "kiro",
   "pi",
+  "oh-my-pi",
   "opencode",
   "dsh",
   "muse",
@@ -2620,6 +2622,7 @@ export const INBOX_AGENT_LABELS: Readonly<Record<InboxAgentId, string>> = {
   cline: "Cline",
   kiro: "Kiro",
   pi: "Pi",
+  "oh-my-pi": "Oh My Pi",
   opencode: "OpenCode",
   dsh: "DeepSeek Harness",
   muse: "Muse Code",

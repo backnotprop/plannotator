@@ -10,11 +10,11 @@
  * The Inbox is a fake that records what reached it.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { releasePiSessionClaim, writePiSessionClaim } from "@plannotator/shared/inbox/pi-session-claim";
-import { inboxHostSessionFromEnv, inboxPiParentSession, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxClaudeMcpSessionFromEnv, inboxHostSessionFromEnv, inboxPiParentSession, processStartedAtMs, runInboxMcpShim } from "./inbox-mcp-shim";
 
 const cleanups: (() => void)[] = [];
 afterEach(() => {
@@ -33,7 +33,12 @@ function dataDirFor(): string {
  * One shim process whose parent is `parentPid`: `initialize`, then each call; `between(i)` runs before call i,
  * as the Pi session changes under the running server. The arguments each call reached the Inbox with.
  */
-async function shimSends(dataDir: string, parentPid: number, calls: Args[], options: { env?: Record<string, string>; between?: (index: number) => void } = {}): Promise<Args[]> {
+async function shimSends(
+  dataDir: string,
+  parentPid: number,
+  calls: Args[],
+  options: { env?: Record<string, string>; between?: (index: number) => void; client?: string; parentStartedMs?: number | null } = {},
+): Promise<Args[]> {
   const reached: Args[] = [];
   const fake = Bun.serve({
     hostname: "127.0.0.1",
@@ -47,7 +52,7 @@ async function shimSends(dataDir: string, parentPid: number, calls: Args[], opti
   });
   cleanups.push(() => fake.stop(true));
   const lines = [
-    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "omp", version: "18.22.2" } } },
+    { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: options.client ?? "omp", version: "18.22.2" } } },
     { jsonrpc: "2.0", method: "notifications/initialized" },
   ];
   const input = new ReadableStream<Uint8Array>({
@@ -71,7 +76,8 @@ async function shimSends(dataDir: string, parentPid: number, calls: Args[], opti
     cwd: "/work/app",
     ensureRunning: async () => ({ v: 1, pid: process.pid, port: fake.port, url: "", version: "test", token: "t", serverSession: "s", startedAt: "" }) as never,
     hostSession: inboxHostSessionFromEnv(options.env ?? {}),
-    piParent: () => inboxPiParentSession(dataDir, parentPid),
+    claude: inboxClaudeMcpSessionFromEnv(options.env ?? {}),
+    piParent: () => inboxPiParentSession(dataDir, parentPid, options.parentStartedMs ?? null),
     input,
     write: () => {},
   });
@@ -102,6 +108,9 @@ describe("plannotator inbox mcp under a Pi or Oh My Pi session with the extensio
     expect(sent.map(author)).toEqual([piAuthor("omp-session-a"), piAuthor("omp-session-b")]);
   });
 
+  // Deliberate: the parent's live claim beats a tag the shim only inherited (an OMP started from a Claude Code shell
+  // carries that session's PLANNOTATOR_SESSION_TAG, which names the wrong agent here). An identity a client confirms
+  // still wins over the claim: the Claude Code test below.
   test("the parent's claim wins over a variable the shim inherited from whatever started that Pi", async () => {
     const dataDir = dataDirFor();
     claim(dataDir, "omp-session-a");
@@ -123,6 +132,35 @@ describe("plannotator inbox mcp under a Pi or Oh My Pi session with the extensio
       expect(sent!.agent_session).toMatch(/^ses_/);
       expect(sent!.agent_host).toBeUndefined();
     }
+  });
+
+  test("an identity a client confirms wins over a claim for the parent: Claude Code's own MCP session", async () => {
+    const dataDir = dataDirFor();
+    claim(dataDir, "omp-session-a");
+    const session = "3f2b8c1e-7a4d-4e9b-9c2a-5d6e7f8a9b0c";
+    const sent = await shimSends(dataDir, process.pid, [{ body: "a", reply_to: "msg_01" }], {
+      env: { CLAUDECODE: "1", CLAUDE_CODE_SESSION_ID: session },
+      client: "claude-code",
+    });
+    expect(author(sent[0]!)).toEqual({ host: "claude-code", session, name: "Claude Code" });
+  });
+
+  test.skipIf(process.platform === "win32")("a claim a killed process left under a pid the parent now reuses is ignored", async () => {
+    const dataDir = dataDirFor();
+    claim(dataDir, "dead-session");
+    // Written before the process now running as this pid started: a dead process's, never released.
+    const started = processStartedAtMs(process.pid);
+    expect(started).not.toBeNull();
+    const dir = join(dataDir, "inbox", "pi-sessions");
+    const before = new Date(started! - 60_000);
+    for (const name of readdirSync(dir)) utimesSync(join(dir, name), before, before);
+    const stale = await shimSends(dataDir, process.pid, [{ body: "a", reply_to: "msg_01" }], { parentStartedMs: started });
+    expect(stale[0]!.agent_session).toMatch(/^ses_/);
+    expect(stale[0]!.agent_host).toBeUndefined();
+    // The live process claims its session again (a session start, /new): taken at once.
+    claim(dataDir, "live-session");
+    const live = await shimSends(dataDir, process.pid, [{ body: "b", reply_to: "msg_01" }], { parentStartedMs: started });
+    expect(author(live[0]!)).toEqual(piAuthor("live-session"));
   });
 
   test("the agent's own session or another host it names still wins", async () => {

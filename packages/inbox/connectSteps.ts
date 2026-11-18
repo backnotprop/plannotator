@@ -22,6 +22,11 @@ export function isPluginHost(id: string): id is PluginHost {
 /** What the plugin is called on each host. */
 export const PLUGIN_WORD: Readonly<Record<PluginHost, 'plugin' | 'extension'>> = { 'claude-code': 'plugin', pi: 'extension', opencode: 'plugin' };
 
+/** What Plannotator's own connection is called for an agent: Oh My Pi loads the Pi extension. */
+function wordOf(id: InboxAgentId): 'plugin' | 'extension' {
+  return isPluginHost(id) ? PLUGIN_WORD[id] : id === 'oh-my-pi' ? 'extension' : 'plugin';
+}
+
 /**
  * How one agent stands:
  *  - ready: Plannotator's plugin is installed and its Inbox tool is on.
@@ -81,6 +86,8 @@ export function connectRowOf(row: InboxAgentRow, live = false): ConnectRow | nul
     return { ...base, state: 'missing' };
   }
   if (!row.detected) return null;
+  // Oh My Pi without Plannotator's extension: the window installs it in one click (`omp plugin install`).
+  if (row.reach.kind === 'tool' && row.reach.state === 'not_connected') return live ? { ...base, state: 'ready' } : { ...base, state: 'connect' };
   // DeepSeek Harness: Plannotator's plugin, reached through its tool, but not on the first-run screen's host cards.
   if (row.reach.kind === 'tool') {
     if (live || row.reach.on) return { ...base, state: 'ready' };
@@ -162,7 +169,7 @@ export function stepEyebrow(plan: ConnectPlan): { label: string; count: string }
 
 /** The next step's title. */
 export function stepTitle(row: ConnectRow): string {
-  const word = isPluginHost(row.id) ? PLUGIN_WORD[row.id] : 'plugin';
+  const word = wordOf(row.id);
   switch (row.state) {
     case 'tool-off':
       return `Turn on ${row.label}'s Inbox tool`;
@@ -181,10 +188,12 @@ export function stepTitle(row: ConnectRow): string {
 
 /** The next step's sentence, in parts so the cost can be bold. */
 export function stepText(row: ConnectRow): { text: string; cost?: string } {
-  const word = isPluginHost(row.id) ? PLUGIN_WORD[row.id] : 'plugin';
+  const word = wordOf(row.id);
   switch (row.state) {
     case 'tool-off':
       if (row.id === 'claude-code') return { text: 'Turn it on so Claude Code can send you messages and get your replies in the session.' };
+      // Oh My Pi's request shape is not measured, so no cost is named.
+      if (row.id === 'oh-my-pi') return { text: `Plannotator's extension is installed. Turn its Inbox tool on so ${row.label} can send you messages and get your replies in the session.` };
       return {
         text: `Plannotator's ${word} is installed. Turn its Inbox tool on so ${row.label} can send you messages and get your replies in the session. It adds the tool to every ${row.label} request: `,
         cost: inboxToolCostText(row.id as 'pi' | 'opencode'),
@@ -199,6 +208,9 @@ export function stepText(row: ConnectRow): { text: string; cost?: string } {
       if (row.id === 'opencode') return { text: "Plannotator's plugin connects it: on OpenCode 2 your replies arrive as a new turn on their own." };
       return { text: `Plannotator's ${word} connects it.` };
     case 'connect':
+      if (row.id === 'oh-my-pi') {
+        return { text: `Installs Plannotator's extension in ${row.label} with its own plugin command. Restart ${row.label} once; then your replies arrive as a new turn on their own.` };
+      }
       // Codex: the Inbox wakes it itself through `codex queue` (INBOX_MCP_WAKING_HOSTS), from the version that has it.
       if (INBOX_MCP_WAKING_HOSTS.includes(row.id)) {
         return { text: `Adds the Inbox's MCP server to ${row.label}. ${mcpWakeName(row.id)}: your replies arrive as a new turn on their own.` };
@@ -300,7 +312,7 @@ export function mcpFoldHint(label: string): string {
 export function doneNote(row: ConnectRow, opts: { live: boolean; turnedOn: boolean }): string {
   if (row.state === 'ready') {
     if (opts.turnedOn) return row.id === 'dsh' ? 'when DeepSeek Harness next starts' : row.id === 'openclaw' ? 'next message' : 'next session';
-    const word = isPluginHost(row.id) ? PLUGIN_WORD[row.id] : 'plugin';
+    const word = wordOf(row.id);
     return opts.live ? `${word} · running now` : word;
   }
   // Codex over MCP, with a Codex the Inbox can wake: the reply arrives as a turn.

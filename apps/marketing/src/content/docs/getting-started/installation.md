@@ -469,13 +469,13 @@ See [Plannotator Meets Pi](/blog/plannotator-meets-pi) for the full walkthrough.
 
 ### Oh My Pi (OMP)
 
-[Oh My Pi](https://omp.sh) loads the Pi extension as an OMP plugin. Install it, then restart OMP:
+[Oh My Pi](https://omp.sh) loads the Pi extension as an OMP plugin. The installer above installs it in OMP when it finds `omp` on your `PATH`, and updates it each time you update Plannotator; `plannotator inbox` installs it too if it is still missing. Restart OMP (`/restart` in each open session) to load it. To do the same by hand:
 
 ```bash
 omp plugin install @plannotator/pi-extension
 ```
 
-To update it later, run `omp plugin upgrade @plannotator/pi-extension`.
+To update it by hand, run `omp plugin upgrade @plannotator/pi-extension`. A run with `--version` pinned to an older release installs that version in a fresh OMP and leaves an installed one as it is.
 
 Open reviews with the extension's commands: `/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`, and `/plannotator-plan-mode` for plan mode. Reviews opened this way can use **Ask this session**: Ask AI sends your question to the OMP session, and the answer streams back from it. Ask AI labels it "Ask this session · Pi".
 

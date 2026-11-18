@@ -244,7 +244,7 @@ function Switch({ on, label, disabled, busy, onClick }: { on: boolean; label: st
 
 /** How an agent reaches the Inbox, beside its name. */
 function viaOf(row: InboxAgentRow): string {
-  if (row.reach.kind === 'tool') return row.id === 'pi' ? "Plannotator's extension" : "Plannotator's plugin";
+  if (row.reach.kind === 'tool') return row.id === 'pi' || row.id === 'oh-my-pi' ? "Plannotator's extension" : "Plannotator's plugin";
   if (row.reach.kind === 'mcp') return 'MCP server';
   return 'connected yourself';
 }
@@ -523,7 +523,8 @@ function AgentGroup({
         v={reachValue}
         // Connected under another QWEN_HOME still reaches the Inbox from there: its value says where, so no off line.
         off={reachSwitchable && !reach.on && reach.state !== 'elsewhere' ? offLine('reach', offWords.reach(row.label)) : null}
-        sub={modOff && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null}
+        // Oh My Pi without Plannotator's extension: turning it on runs `omp plugin install` (the reason names it).
+        sub={(modOff || reach.state === 'not_connected') && reach.kind === 'tool' ? reach.reason : reach.kind === 'tool' ? cost : null}
         warn={modOff && reach.kind === 'tool'}
         r={
           reachSwitchable ? (

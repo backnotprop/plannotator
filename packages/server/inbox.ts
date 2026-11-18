@@ -2490,7 +2490,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               chosen_off: toolEnv === undefined && configuredInboxTool(config, host) === false,
               ...(modOff ? { mod_off: true } : {}),
             }
-          : null;
+          : id === "oh-my-pi" && detected
+            ? // Oh My Pi, found: its own state (the Pi extension's tool, on by default there), never Pi's switch.
+              { on: reach.on, locked: toolEnv !== undefined, chosen_off: toolEnv === undefined && configuredInboxTool(config, "pi") === false }
+            : null;
         // No tool (the inboxTool switch, or Claude Code's mod off): no reminder.
         const reminder = host && INBOX_REMINDER_HOSTS.includes(host)
           ? { on: !modOff && resolveInboxReminder(config, env, host), locked: toolEnv !== undefined, needs_tool: modOff || !resolveInboxTool(config, env, host) }

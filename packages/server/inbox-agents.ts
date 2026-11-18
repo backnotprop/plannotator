@@ -61,8 +61,10 @@ import {
   parseInboxToolEnv,
   resolveClaudeCodeMod,
   resolveInboxTool,
+  resolvePiInboxTool,
   saveConfig,
   type InboxToolHost,
+  type PlannotatorConfig,
 } from "@plannotator/shared/config";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { qwenHome, qwenHomeIsRelative } from "@plannotator/shared/inbox/qwen-sessions";
@@ -634,8 +636,12 @@ type ConnectWay =
   | { kind: "cli"; bin: string; add: (command: readonly string[]) => string[]; remove: string[] }
   /** One key in a JSON file (`json`: how it is edited). */
   | { kind: "json"; keys: readonly string[]; json?: JsonFileRules; entry?: (command: readonly string[]) => Record<string, unknown> }
-  /** `inboxTool` on for Plannotator's own extension/plugin; `then`: the agent's own command that finishes connecting it. */
-  | { kind: "tool"; host: InboxToolHost; then?: ToolConnectStep }
+  /**
+   * `inboxTool` on for Plannotator's own extension/plugin; `then`: the agent's own command that finishes connecting it.
+   * `piHost: "oh-my-pi"`: Plannotator's Pi extension inside Oh My Pi, whose tool is on with nothing configured
+   * (resolvePiInboxTool), so connecting it writes no `inboxTool` key (that key is Pi's too).
+   */
+  | { kind: "tool"; host: InboxToolHost; then?: ToolConnectStep; piHost?: "oh-my-pi" }
   /** Only a person can connect it; `why` says how. */
   | { kind: "manual"; why: string }
   /** Nothing to do (Claude Code). */
@@ -686,6 +692,83 @@ export function piExtensionInstalled(e: AgentEnvironment): boolean {
   } catch {
     return false;
   }
+}
+
+/** The npm package Oh My Pi installs as Plannotator's extension (`omp plugin install`). */
+export const OMP_EXTENSION_PACKAGE = "@plannotator/pi-extension";
+/**
+ * The first extension whose `plannotator_inbox` tool is on in Oh My Pi with nothing configured. An older one
+ * (0.29.0) keeps it off, so the connect step moves it on (`omp plugin upgrade`).
+ */
+export const OMP_EXTENSION_TOOL_ON_SINCE = "0.29.1";
+
+/**
+ * Oh My Pi's plugin folders, the one it uses first: `$XDG_DATA_HOME/omp/plugins` when OMP set that folder up,
+ * else `~/.omp/plugins` (can1357/oh-my-pi docs/plugin-manager-installer-plumbing.md).
+ */
+export function ompPluginDirs(e: AgentEnvironment): string[] {
+  const xdg = envDir(e, "XDG_DATA_HOME");
+  const dirs = xdg && isDir(join(xdg, "omp", "plugins")) ? [join(xdg, "omp", "plugins")] : [];
+  return [...dirs, join(e.homeDir, ".omp", "plugins")];
+}
+
+/**
+ * The version of Plannotator's extension Oh My Pi installed: null when OMP's plugin manifest
+ * (`<plugins>/package.json` dependencies) does not list it, "" when it does but its package can't be read. Read only.
+ */
+export function ompExtensionVersion(e: AgentEnvironment): string | null {
+  for (const dir of ompPluginDirs(e)) {
+    const manifest = readAgentFile(join(dir, "package.json"));
+    if (manifest.kind !== "file") continue;
+    try {
+      const deps = (JSON.parse(manifest.text) as { dependencies?: unknown }).dependencies;
+      if (!deps || typeof deps !== "object" || !(OMP_EXTENSION_PACKAGE in deps)) continue;
+    } catch {
+      continue;
+    }
+    const pkg = readAgentFile(join(dir, "node_modules", ...OMP_EXTENSION_PACKAGE.split("/"), "package.json"));
+    if (pkg.kind !== "file") return "";
+    try {
+      const version = (JSON.parse(pkg.text) as { version?: unknown }).version;
+      return typeof version === "string" ? version : "";
+    } catch {
+      return "";
+    }
+  }
+  return null;
+}
+
+function versionAtLeast(version: string, min: string): boolean {
+  const a = version.replace(/^v/, "").split(/[.+-]/).map(Number);
+  const b = min.split(".").map(Number);
+  for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0);
+  return true;
+}
+
+/** Whether Oh My Pi has an extension whose Inbox tool is on by default (installed, and new enough). */
+export function ompExtensionCurrent(e: AgentEnvironment): boolean {
+  const version = ompExtensionVersion(e);
+  return version !== null && version !== "" && versionAtLeast(version, OMP_EXTENSION_TOOL_ON_SINCE);
+}
+
+/** How long `omp plugin install` may take (it downloads the package); a run's own total limit still applies. */
+export const OMP_INSTALL_TIMEOUT_MS = 120_000;
+
+/**
+ * Oh My Pi's way: Plannotator's Pi extension and its tool. The connect step installs the extension with OMP's own
+ * command when it is not there, or moves one too old to have the tool on (`omp plugin upgrade`). A version that
+ * can't be read is left as it is.
+ */
+function ompWay(e: AgentEnvironment): ConnectWay {
+  const version = ompExtensionVersion(e);
+  // Not listed, or listed with no readable package (an install cut short): install (OMP reinstalls a listed one).
+  const args = !version ? ["plugin", "install", OMP_EXTENSION_PACKAGE] : !versionAtLeast(version, OMP_EXTENSION_TOOL_ON_SINCE) ? ["plugin", "upgrade", OMP_EXTENSION_PACKAGE] : null;
+  return { kind: "tool", host: "pi", piHost: "oh-my-pi", ...(args ? { then: { bin: "omp", args, done: ompExtensionCurrent, cwd: e.homeDir, timeoutMs: OMP_INSTALL_TIMEOUT_MS } } : {}) };
+}
+
+/** Whether a tool way's Inbox tool is on: Oh My Pi's own default, else the host's. */
+function toolWayOn(way: Extract<ConnectWay, { kind: "tool" }>, config: PlannotatorConfig, env: NodeJS.ProcessEnv): boolean {
+  return way.piHost ? resolvePiInboxTool(config, env, way.piHost) : resolveInboxTool(config, env, way.host);
 }
 
 /**
@@ -1302,6 +1385,15 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
     remove: { bin: "pi", args: ["mcp", "remove", NAME] },
   },
   {
+    // Oh My Pi: Plannotator's Pi extension, installed as an OMP plugin. Its own agent, apart from Pi (another
+    // command, another plugin folder, the tool on by default). Its sessions still reach the Inbox as Pi's.
+    id: "oh-my-pi",
+    detect: (e) => !!e.which("omp") || ompExtensionVersion(e) !== null,
+    way: async (e) => ompWay(e),
+    file: () => null,
+    raw: () => null,
+  },
+  {
     id: "opencode",
     detect: (e) => openCodePluginInstalled(e) || !!e.which("opencode") || !!e.which("opencode2"),
     // Without the plugin: opencode.json may be JSONC and per project, so a person adds it.
@@ -1599,12 +1691,19 @@ export function formatSeconds(ms: number): string {
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} s`;
 }
 
+/**
+ * The agent's own command that finishes connecting its tool. With `setting` and `undo`, it turns on a setting of the
+ * agent's (Hermes' wake), said once; without them, it installs Plannotator's extension (Oh My Pi), which the person's
+ * switch in Settings runs too. `cwd`: the folder it runs in. `timeoutMs`: its own time limit.
+ */
 interface ToolConnectStep {
   bin: string;
   args: readonly string[];
   done: (e: AgentEnvironment) => boolean;
-  setting: string;
-  undo: string;
+  setting?: string;
+  undo?: string;
+  cwd?: string;
+  timeoutMs?: number;
 }
 
 type ToolGrant = { setting: string; undo: string };
@@ -1641,20 +1740,22 @@ async function connectOne(spec: AgentSpec, options: ConnectOptions, at: string):
   if (way.kind === "tool") {
     // The env var decides (and locks the switch): nothing to write.
     if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) {
-      return resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host) ? { kind: "already", record: null } : { kind: "none" };
+      if (!toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv)) return { kind: "none" };
+      if (!way.then || way.then.setting || way.then.done(e)) return { kind: "already", record: null };
     }
-    const configured = configuredInboxTool(loadConfig(), way.host);
+    const configured = parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined ? true : configuredInboxTool(loadConfig(), way.host);
     if (configured === false) return { kind: "off", record: { state: "off", reach: "tool", path: null, at } };
-    if (configured !== true) {
+    // Oh My Pi's tool is on with nothing configured: nothing to write (the `pi` key would turn Pi's on too).
+    if (configured !== true && !way.piHost) {
       saveConfig({ inboxTool: inboxToolWith(loadConfig().inboxTool, { [way.host]: true }) });
       if (configuredInboxTool(loadConfig(), way.host) !== true) {
         return { kind: "failed", reason: "Plannotator's config.json can't be written", path: null };
       }
     }
     const step = way.then && !way.then.done(e) ? way.then : null;
-    const unfinished = step ? await finishToolConnect(e, step, timeoutMs) : null;
+    const unfinished = step ? await finishToolConnect(e, step, options.agentTimeoutMs ?? step.timeoutMs ?? timeoutMs) : null;
     if (unfinished) return { kind: "failed", reason: unfinished, path: null };
-    const granted = step ? { granted: { setting: step.setting, undo: step.undo } } : {};
+    const granted = step?.setting && step.undo ? { granted: { setting: step.setting, undo: step.undo } } : {};
     return configured === true ? { kind: "already", record: { state: "found", reach: "tool", path: null, at }, ...granted } : { kind: "added", record: { state: "added", reach: "tool", path: null, at }, ...granted };
   }
   const before = classify(spec.raw(e) ?? { kind: "absent" }, ourCommands(options), true);
@@ -1689,12 +1790,14 @@ async function finishToolConnect(e: AgentEnvironment, then: ToolConnectStep, tim
   const line = [then.bin, ...then.args].join(" ");
   const bin = e.which(then.bin);
   if (!bin) return `${then.bin} is not on PATH, so run ${line} yourself`;
-  const ran = await e.run([bin, ...then.args], { timeoutMs });
+  const ran = await e.run([bin, ...then.args], { timeoutMs, ...(then.cwd ? { cwd: then.cwd } : {}) });
   if (ran.timedOut) return `${line} did not finish within ${formatSeconds(timeoutMs)}`;
   if (ran.exitCode !== 0) {
     const why = firstLine(ran.stderr) || firstLine(ran.stdout);
     return `${line} exited with code ${ran.exitCode}${why ? ` (${why})` : ""}`;
   }
+  // An install that exits 0 counts only once the agent's own files show it (Oh My Pi's plugin manifest).
+  if (!then.setting && !then.done(e)) return `${line} ran, but the extension is not there`;
   return null;
 }
 
@@ -1751,7 +1854,7 @@ export async function connectInboxAgents(options: ConnectOptions): Promise<Inbox
     const record = file.agents[spec.id];
     if (record?.reach !== "mcp" || record.state !== "added" || record.removed_outside_at) continue;
     const way = await spec.way(e);
-    if (way.kind !== "tool" || !resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host)) continue;
+    if (way.kind !== "tool" || !toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv)) continue;
     if ((await removeOurMcpEntry(spec.id, options, record)) === null) file.agents[spec.id] = { state: "found", reach: "tool", path: null, at };
   }
   const toConnect = pending.filter((spec) => !file.agents[spec.id]);
@@ -2177,7 +2280,12 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
     const locked = parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined;
     // Claude Code's tool comes from the plugin's mod: with the mod off it has none, whatever inboxTool says.
     const modOff = way.host === "claude-code" && !claudeCodeModOn(e);
-    const on = !modOff && resolveInboxTool(loadConfig(), e.env as NodeJS.ProcessEnv, way.host);
+    // Oh My Pi without Plannotator's extension (or with one too old to have the tool on): not connected yet; turning
+    // it on installs it. One the person turned off by name stays off.
+    if (way.then && !way.then.setting && configuredInboxTool(loadConfig(), way.host) !== false && toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv) !== false) {
+      return { kind: "tool", on: false, state: "not_connected", path: null, locked: false, reason: `Turning this on runs ${[way.then.bin, ...way.then.args].join(" ")}` };
+    }
+    const on = !modOff && toolWayOn(way, loadConfig(), e.env as NodeJS.ProcessEnv) && (!way.then || way.then.setting !== undefined || way.then.done(e));
     return { kind: "tool", on, state: on ? "connected" : "off", path: null, locked, reason: modOff ? CLAUDE_CODE_MOD_OFF_REASON : null };
   }
   if (way.kind === "manual") return { kind: "manual", on: false, state: "manual", path, locked: false, reason: way.why };
@@ -2193,6 +2301,15 @@ export async function inboxAgentReach(id: InboxAgentId, options: ConnectOptions)
   if (record?.state === "off") return { kind: "mcp", on: false, state: "off", path, locked: false, reason: null };
   if (record && (record.state === "added" || record.state === "found")) return { kind: "mcp", on: false, state: "removed", path, locked: false, reason: null };
   return { kind: "mcp", on: false, state: "not_connected", path, locked: false, reason: null };
+}
+
+/** Take a host's `inboxTool` key out of config.json, so its default decides again. Returns an error reason, or null. */
+function clearInboxTool(host: InboxToolHost, e: AgentEnvironment): string | null {
+  if (parseInboxToolEnv(e.env as NodeJS.ProcessEnv) !== undefined) return "PLANNOTATOR_INBOX_TOOL decides this";
+  const next = inboxToolWith(loadConfig().inboxTool, {});
+  delete next[host];
+  saveConfig({ inboxTool: next });
+  return configuredInboxTool(loadConfig(), host) === undefined ? null : "Plannotator's config.json can't be written";
 }
 
 /** Turn a host's `plannotator_inbox` tool on or off in config.json (the old Settings switch). Returns an error reason, or null. */
@@ -2283,8 +2400,14 @@ export async function setInboxAgentReach(id: InboxAgentId, on: boolean, options:
       const removed = await removeOurMcpEntry(id, options, file.agents[id]);
       if (removed) return `Plannotator's earlier MCP entry for ${INBOX_AGENT_LABELS[id]} could not be removed, so its Inbox tool stays off: ${removed}`;
     }
-    const problem = setInboxTool(way.host, on, e);
+    // Oh My Pi: on clears a `pi: false` (its own default is on, Pi's stays off) and installs the extension when it
+    // is not there; off writes `pi: false`, the key the extension reads in both.
+    const problem = way.piHost && on ? (configuredInboxTool(loadConfig(), way.host) === false ? clearInboxTool(way.host, e) : parseInboxToolEnv(e.env as NodeJS.ProcessEnv) === false ? "PLANNOTATOR_INBOX_TOOL decides this" : null) : setInboxTool(way.host, on, e);
     if (problem) return problem;
+    if (on && way.then && !way.then.setting && !way.then.done(e)) {
+      const unfinished = await finishToolConnect(e, way.then, options.agentTimeoutMs ?? way.then.timeoutMs ?? INBOX_CONNECT_AGENT_TIMEOUT_MS);
+      if (unfinished) return unfinished;
+    }
     file.agents[id] = { state: on ? "added" : "off", reach: "tool", path: null, at };
   } else if (on) {
     const previous = file.agents[id];

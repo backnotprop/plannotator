@@ -70,7 +70,10 @@ also detects and removes the extension through Pi.
 ## Oh My Pi (OMP)
 
 [Oh My Pi](https://omp.sh) loads Pi extensions as OMP plugins, so this
-extension runs in OMP too. Install it, then restart OMP:
+extension runs in OMP too. The Plannotator installer installs it in OMP when
+it finds `omp`, and updates it on each update; `plannotator inbox` does too if
+it is still missing. Type `/restart` in each open OMP session to load it. By
+hand, the same is:
 
 ```bash
 omp plugin install @plannotator/pi-extension
@@ -104,7 +107,8 @@ reply there wake the session, is also **on by default in OMP** (off on Pi). It
 reads the same switch as Pi: `PLANNOTATOR_INBOX_TOOL=0` or
 `{ "inboxTool": { "pi": false } }` keeps it out. An Inbox MCP server OMP
 loads beside the extension sends as the same session, so its replies wake the
-session too.
+session too. A subagent OMP runs in the same process can take over that
+session's identity for a moment, so its messages may read as its parent's.
 
 Start plan mode with `omp --plan` or `/plannotator-plan-mode`. With the
 extension loaded, `--plan` starts Plannotator's plan mode instead of choosing a
