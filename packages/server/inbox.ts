@@ -349,7 +349,7 @@ import { createInboxTagsRoute } from "./inbox-tags";
 import { createThreadPullStates, createThreadPullsRoute, threadPullsChangedForWake, type ThreadPullFixture } from "./inbox-thread-pulls";
 import { createInboxStepsRoute, inboxStepsStale, inboxStepsWaitOnPerson as stepsListWaitsOnPerson } from "./inbox-steps";
 import { createInboxDebugLog } from "./inbox-debug-log";
-import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller } from "./inbox-devices";
+import { createInboxDevices, DOOR_PREFIX, MACHINE_PLATFORM, type InboxDoorCaller, type InboxDoorTimers } from "./inbox-devices";
 import { createInboxMachines, type InboxMachines, type MachineFrame, type MachineLinkTimings } from "./inbox-machines";
 import { archivedAskOf, farRowTags, mergeArchived } from "./inbox-archived-merged";
 import { createShowArchived, type InboxShowArchived } from "./inbox-show-archived";
@@ -575,6 +575,8 @@ export interface InboxServerOptions {
   tailscale?: TailscaleRunner;
   /** Tests: the clock of "Over your tailnet"'s publish-again retry (inbox-tailscale.ts). Default: unref'd timers. */
   tailscaleTimers?: InboxTailscaleTimers;
+  /** Tests: the tailnet door's look-again clock (`INBOX_DOOR_REPUBLISH` in inbox-devices.ts). */
+  doorTimers?: InboxDoorTimers;
   cloudflareAccess?: Pick<InboxCfAccessContext, "fetchKeys" | "now" | "tunnel" | "sessionAlive" | "log">;
   cloudflareAccessRoutes?: CfAccessRouteHooks;
   /** Tests: more agents beside Claude Code (`createInboxLaunch`'s `hosts`), for a sandbox with no CLI to start. */
@@ -7656,6 +7658,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         read: () => updates.machineRead(),
         start: () => updates.machineStart(),
       },
+      doorTimers: options.doorTimers,
+      // The door published again by itself (Tailscale came back): the windows' machines block loses its reason.
+      // Linked machines dial again on their own (their back-off is 30 s at most).
+      onDoorRepublished: () => machines?.machinesChanged(),
     });
     phones = devices;
     machines = createInboxMachines({

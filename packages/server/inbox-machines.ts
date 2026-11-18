@@ -1328,6 +1328,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     /** Whether any link exists (the tailnet door then publishes at start even with Phones off). */
     hasLinks: () => links.list().length > 0,
     machinesView,
+    /** This Inbox's door changed by itself (published again once Tailscale ran): the windows hear the machines block. */
+    machinesChanged,
     rows,
     projects,
     agents,
