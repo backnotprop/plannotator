@@ -3,6 +3,8 @@ import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { PULLS_FOCUS_MS, PULLS_PENDING_MS, PULLS_TICK_MS } from '../pulls/usePulls';
 import { onHiddenWritten, pullsShown, settleHidden, useHiddenChanges } from '../pulls/hiddenPulls';
+import type { Route } from '../app/route';
+import { boardInProject, sheetModel } from './sheetModel';
 
 export interface SheetPullsState {
   model: InboxPullsAnswer | null;
@@ -99,4 +101,15 @@ export function useSheetPulls(enabled: boolean): SheetPullsState {
   // What was hidden here leaves at once, before the server's next answer says so.
   const changes = useHiddenChanges();
   return { model: useMemo(() => pullsShown(model, changes), [model, changes]), error, loading, refresh };
+}
+
+/**
+ * The board as the window shows it: it follows Reviews' project filter, in Reviews' pane, on its own page (a phone's)
+ * and beside a thread opened from Reviews (`project`), and its head (the sidebar's summary) counts that project's.
+ */
+export function useBoardInProject(model: InboxPullsAnswer | null, route: Pick<Route, 'page' | 'project' | 'reviews'>) {
+  const project = route.page === 'reviews' || route.page === 'prs' ? (route.project ?? null) : (route.reviews?.project ?? null);
+  const board = useMemo(() => (model ? boardInProject(model, project) : null), [model, project]);
+  const head = useMemo(() => (board ? sheetModel(board, Date.now(), {}).head : null), [board]);
+  return { project, board, head };
 }

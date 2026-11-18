@@ -74,7 +74,7 @@ import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 export { dispatchInboxFrame, INBOX_EVENT_FRAMES, openInboxEventFrames, subscribeInboxEvents, type InboxEventFrame, type InboxEventFrameName, type InboxEventHandlers, type InboxEventWindow, type MachineRecordFrame } from './eventFrames';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
-import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullHidden, InboxRepoHidden, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
+import type { InboxFileContents, InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullRiskAnswer, InboxPullRiskModels, InboxPullsAnswer, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewLinkAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun, InboxActivityModel } from '@plannotator/core/inbox-types';
 import { InboxApiError, readJson } from './apiError';
 import { cardUrl, learnCards, type CardsModel } from './cardsWire';
 export type { CardsModel } from './cardsWire';
@@ -2014,16 +2014,6 @@ export const inboxApi = {
   pullMerge: (key: string, headSha: string, machine = pullMachine(key)) => post<{ ok: true; key: string; method: 'merge' | 'squash' | 'rebase' | null; url: string }>(inboxUrl('/pulls/merge', undefined, machine), { key, head_sha: headSha, confirmed: true }),
   /** The board's Close (approval "inbox-pr-board-bulk"): the host is asked first; a refusal throws its words. `machine`: the one whose list has it. */
   pullClose: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/close', undefined, machine), { key }),
-  /** Hide PRs from Reviews, the board and their counts, or show them again (`POST /api/inbox/pulls/hidden`): kept on this machine, nothing goes to the forge. */
-  pullsHidden: (change: { hide?: readonly { key: string; title: string; url: string }[]; threads?: readonly string[]; show?: readonly string[]; show_threads?: readonly string[]; hide_repos?: readonly { key: string; label: string }[]; show_repos?: readonly string[] }) =>
-    post<{ hidden: InboxPullHidden[]; hidden_repos?: InboxRepoHidden[]; hid?: string[]; rehid?: string[]; threads_left?: string[]; threads_back?: string[] }>(inboxUrl('/pulls/hidden'), {
-      hide: [...(change.hide ?? [])],
-      threads: [...(change.threads ?? [])],
-      show: [...(change.show ?? [])],
-      ...(change.show_threads ? { show_threads: [...change.show_threads] } : {}),
-      ...(change.hide_repos ? { hide_repos: [...change.hide_repos] } : {}),
-      ...(change.show_repos ? { show_repos: [...change.show_repos] } : {}),
-    }),
   /** Close's Undo: taken only on the machine that closed it, in the last few minutes, so it goes to the same `machine`. */
   pullReopen: (key: string, machine = pullMachine(key)) => post<{ ok: true; key: string; url: string }>(inboxUrl('/pulls/reopen', undefined, machine), { key }),
   pullOwnerCheck: (keys: readonly string[], projectId: string, machine: string | null = null) => post<{ ok: true }>(inboxUrl('/pulls/owner', undefined, machine), { keys: [...keys], project_id: projectId, validate_only: true }),

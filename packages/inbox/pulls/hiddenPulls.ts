@@ -14,7 +14,8 @@ import { useSyncExternalStore } from 'react';
 import { inboxPullLabel, inboxPullRepoOfKey, type InboxPull, type InboxPullHidden, type InboxPullsAnswer, type InboxRepoHidden, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { pullInProject } from './model';
-import { inboxApi } from '../api';
+import { post } from '../api';
+import { inboxUrl } from '../inboxUrl';
 import type { InboxToastModel } from '../components/Toast';
 import { forgeName } from './labels';
 import { rowInSlot } from '../settle';
@@ -197,7 +198,7 @@ export async function hidePulls(pulls: readonly HidePick[], now = new Date()): P
   const left = new Set<string>();
   try {
     for (const part of inParts(pulls)) {
-      const answer = await inboxApi.pullsHidden({ hide: part.map(({ key, title, url }) => ({ key, title, url })) });
+      const answer = await writeHidden({ hide: part.map(({ key, title, url }) => ({ key, title, url })) });
       for (const id of answer.threads_left ?? []) left.add(id);
     }
   } catch (cause) {
@@ -214,7 +215,7 @@ export async function showPulls(keys: readonly string[]): Promise<void> {
   const was = change(keys, () => ({ hide: false, since: Date.now() }));
   const back: string[] = [];
   try {
-    for (const part of inParts(keys)) back.push(...((await inboxApi.pullsHidden({ show: part })).threads_back ?? []));
+    for (const part of inParts(keys)) back.push(...((await writeHidden({ show: part })).threads_back ?? []));
   } catch (cause) {
     putBack(keys, was);
     throw cause;
@@ -233,7 +234,7 @@ export async function hideThreadPulls(threadIds: readonly string[], now = new Da
   const left = new Set<string>();
   const records = new Map<string, InboxPullHidden>();
   for (const part of inParts(threadIds)) {
-    const answer = await inboxApi.pullsHidden({ threads: part });
+    const answer = await writeHidden({ threads: part });
     hid.push(...(answer.hid ?? []));
     rehid.push(...(answer.rehid ?? []));
     for (const id of answer.threads_left ?? []) left.add(id);
@@ -248,7 +249,7 @@ export async function hideThreadPulls(threadIds: readonly string[], now = new Da
 async function undoThreadHide(hid: readonly string[], rehid: readonly string[]): Promise<void> {
   await showPulls(hid);
   const back: string[] = [];
-  for (const part of inParts(rehid)) back.push(...((await inboxApi.pullsHidden({ show_threads: part })).threads_back ?? []));
+  for (const part of inParts(rehid)) back.push(...((await writeHidden({ show_threads: part })).threads_back ?? []));
   if (rehid.length > 0) written();
   threadsBack(back);
 }
@@ -285,7 +286,7 @@ export async function hideRepo(repo: Pick<InboxRepoHidden, 'key' | 'label'>, now
   const key = repoChangeKey(repo.key);
   const was = change([key], () => ({ hide: true, repo: { key: repo.key, label: repo.label, at: now.toISOString() }, since: now.getTime() }));
   try {
-    await inboxApi.pullsHidden({ hide_repos: [{ key: repo.key, label: repo.label }] });
+    await writeHidden({ hide_repos: [{ key: repo.key, label: repo.label }] });
   } catch (cause) {
     putBack([key], was);
     throw cause;
@@ -298,7 +299,7 @@ export async function showRepo(repoKey: string): Promise<void> {
   const key = repoChangeKey(repoKey);
   const was = change([key], () => ({ hide: false, since: Date.now() }));
   try {
-    await inboxApi.pullsHidden({ show_repos: [repoKey] });
+    await writeHidden({ show_repos: [repoKey] });
   } catch (cause) {
     putBack([key], was);
     throw cause;
@@ -334,7 +335,18 @@ export function hiddenRepo(hidden: Pick<InboxPullHidden, 'key'>): string {
   return path.startsWith('github.com/') ? path.slice('github.com/'.length) : path;
 }
 
-type Toast = (toast: Omit<InboxToastModel, 'id'>, ms: number) => void;
+/** Hide PRs from Reviews, the board and their counts, or show them again (`POST /api/inbox/pulls/hidden`): kept on this machine, nothing goes to the forge. */
+const writeHidden = (change: { hide?: readonly { key: string; title: string; url: string }[]; threads?: readonly string[]; show?: readonly string[]; show_threads?: readonly string[]; hide_repos?: readonly { key: string; label: string }[]; show_repos?: readonly string[] }) =>
+  post<{ hidden: InboxPullHidden[]; hidden_repos?: InboxRepoHidden[]; hid?: string[]; rehid?: string[]; threads_left?: string[]; threads_back?: string[] }>(inboxUrl('/pulls/hidden'), {
+    hide: [...(change.hide ?? [])],
+    threads: [...(change.threads ?? [])],
+    show: [...(change.show ?? [])],
+    ...(change.show_threads ? { show_threads: [...change.show_threads] } : {}),
+    ...(change.hide_repos ? { hide_repos: [...change.hide_repos] } : {}),
+    ...(change.show_repos ? { show_repos: [...change.show_repos] } : {}),
+  });
+
+export type Toast = (toast: Omit<InboxToastModel, 'id'>, ms: number) => void;
 
 /** How long the toast, and so its Undo, stays: the board's Close's. */
 export const HIDE_UNDO_MS = 8_000;

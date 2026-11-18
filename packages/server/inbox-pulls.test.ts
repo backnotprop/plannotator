@@ -612,24 +612,36 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
   /** A thread handed #412, then hidden from the Inbox list by its row's Hide. */
   type Agent = { session: string; state: string; waiting: number };
   const agentsNow = async (base: string) => ((await (await fetch(`${base}/api/inbox/threads`)).json()) as { agents: { agents: Agent[] }[] }).agents.flatMap((group) => group.agents);
-  const handedAndHidden = async () => {
-    const w = await world({ codeReview: true, answer: everywhere() });
+  /** `switchable`: Code review on through Settings (config.json), not fixed by the server's options, so it can be turned off. */
+  const handedAndHidden = async (switchable = false) => {
+    const w = await world(switchable ? { answer: everywhere() } : { codeReview: true, answer: everywhere() });
     const handed = await w.send("Ready for review.", "handed");
+    if (switchable) expect((await w.setCodeReview(true)).status).toBe(200);
     await w.pulls();
     expect((await w.own([KEY], handed)).status).toBe(200);
-    // Its agent waits on the person for this thread before the Hide.
-    expect((await agentsNow(w.base)).find((agent) => agent.session === "ses_handed")).toMatchObject({ state: "waiting", waiting: 1 });
     const res = (await (await call(w.base, { threads: [handed] })).json()) as { hid: string[]; threads_left: string[] };
     // The toast's "with its thread": this write took it out of the list.
     expect(res.threads_left).toEqual([handed]);
     expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
-    // A hidden thread is no wait: its agent waits on nothing, and is listed only in its own state (an ended one,
-    // with nothing waiting, is not listed at all).
-    const after = (await agentsNow(w.base)).find((agent) => agent.session === "ses_handed");
-    expect(after?.waiting ?? 0).toBe(0);
-    expect(after?.state).not.toBe("waiting");
     return { w, handed };
   };
+
+  test("the Inbox list: a hidden thread is no wait; its agent waits on nothing and shows only its own state", async () => {
+    const asks = ["Ready for review.", "", ":::question", "Merge it now or after the release?", "", "- [ ] Now", "- [ ] After the release", ":::"].join("\n");
+    const waitsOn = async (base: string) => (await agentsNow(base)).find((agent) => agent.session === "ses_handed");
+    const w = await world({ codeReview: true, answer: everywhere() });
+    const handed = await w.send(asks, "handed");
+    await w.pulls();
+    expect((await w.own([KEY], handed)).status).toBe(200);
+    // Before the Hide, its agent waits on the person for it.
+    expect(await waitsOn(w.base)).toMatchObject({ state: "waiting", waiting: 1 });
+    expect((await call(w.base, { threads: [handed] })).status).toBe(200);
+    expect((await threadRows(w.base)).some((row) => row.thread_id === handed)).toBe(false);
+    // After: no count, no "Waiting on you"; an ended agent with nothing waiting is not listed at all.
+    const after = await waitsOn(w.base);
+    expect(after?.waiting ?? 0).toBe(0);
+    expect(after?.state).not.toBe("waiting");
+  });
 
   test("the Inbox list: a new agent message brings the thread back; the PR stays hidden", async () => {
     const { w, handed } = await handedAndHidden();
@@ -664,6 +676,8 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
 
   test("the Inbox list: a thread begun after its PR was hidden offers Hide, and it hides", async () => {
     const w = await world({ codeReview: true, answer: everywhere() });
+    // A first thread makes the project, so the list reads its repository.
+    await w.send("Starting on the billing service.", "first");
     const pr = (await listed(w)).pulls.find((p) => p.key === KEY)!;
     expect((await call(w.base, { hide: [{ key: KEY, title: pr.title, url: pr.url }] })).status).toBe(200);
     await Bun.sleep(5);
@@ -677,7 +691,7 @@ describe("hide (Reviews' and the board's Hide; inbox-pull-hidden.ts)", () => {
   });
 
   test("the Inbox list: Code review off leaves nothing out and offers no Hide", async () => {
-    const { w, handed } = await handedAndHidden();
+    const { w, handed } = await handedAndHidden(true);
     expect((await w.setCodeReview(false)).status).toBe(200);
     const row = (await threadRows(w.base)).find((r) => r.thread_id === handed);
     expect(row).toBeDefined();

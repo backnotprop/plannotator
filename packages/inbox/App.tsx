@@ -11,7 +11,7 @@
  */
 
 import { pullReviewLinks, threadPullsBus } from './threadPulls/model';
-import { hiddenChangedElsewhere, hideThreadsWithUndo, onThreadsBack } from './pulls/hiddenPulls';
+import { hiddenChangedElsewhere, useHiddenInList } from './pulls/useHiddenInList';
 import { markInboxPage } from './pageMarks';
 import { perfFirstList, perfStart, perfUntilNextFrame } from './perfMarks';
 import { machineOf, selfMachineId } from './inboxUrl';
@@ -224,11 +224,11 @@ import { BoardPage } from './board/BoardPage';
 import { useBoardWrites } from './board/boardWrites';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
-import { usePulls } from './pulls/usePulls';
+import { usePulls, useRowsAfterStore } from './pulls/usePulls';
 import { SheetPage, type SheetView } from './prs/SheetPage';
-import { boardInProject, sheetModel, tileOpens } from './prs/sheetModel';
+import { tileOpens } from './prs/sheetModel';
 import { StackPage } from './prs/StackPage';
-import { useSheetPulls } from './prs/useSheetPulls';
+import { useBoardInProject, useSheetPulls } from './prs/useSheetPulls';
 import { type SheetLayout } from './prs/tableModel';
 import { repoLabels } from './pulls/labels';
 import { pullFilterOf, type PullFilter } from './pulls/model';
@@ -290,7 +290,7 @@ import { SIDEBAR_OPEN_COOKIE, HIDE_AWAY_MACHINES_COOKIE, COMPOSE_LAST_COOKIE, DR
 import { shapeFrameListeners, subscribeShapeFrames } from './app/shapeFrames';
 import { readRoute, routeOf, type Route } from './app/route';
 import { hashOf, writeRoute } from './app/writeRoute';
-import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, REVIEWS_AFTER_STORE_MS, REVIEWS_AFTER_STORE_MAX_MS, settleReviewsAlias } from './app/boot';
+import { TOUR_ENDED_STATE, settleTourEntry, settleOldExperimental, settleMovedSettings, stripStrayMsg, stripClickSignal, settleReviewsAlias } from './app/boot';
 import { closeTo, covering, listCovered, rowElement, tourPageInFront, focusAfterOpen, SETTINGS_LATE_MS, FIRST_RUN_AGENTS_REFRESH_MS, FIRST_RUN_AGENTS_MIN_GAP_MS, platformOf, replyInProgress, listIntroHeldBack } from './app/focus';
 export { THREAD_READ_RETRY_MS, THREAD_READ_TIMEOUT_MS } from './app/constants';
 // The document UI's settings for the window, before the first render.
@@ -2546,11 +2546,6 @@ function Inbox() {
     if (fresh.length > 0) setShown((current) => (current ? addOwnThreads(fresh.reduce(replaceHeldRow, current), groups, written) : current));
   };
 
-  // Threads an Undo or a Show again made here brought back (pulls/hiddenPulls.ts): the person's own write, so they go
-  // back in place at once, never behind "N new". A thread back on an agent's new activity is news as any other.
-  const afterWriteRef = useRef(afterWrite);
-  afterWriteRef.current = afterWrite;
-  useEffect(() => onThreadsBack((ids) => void afterWriteRef.current(ids)), []);
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
     (latestRef.current ? listGroups(latestRef.current) : []).flatMap((section) => section.threads).find((row) => row.thread_id === threadId);
@@ -2661,6 +2656,7 @@ function Inbox() {
     say(toastSpeech(next, isTouchPhone()));
     armToastTimer(ms);
   };
+  const hiddenInList = useHiddenInList(afterWrite, showToast);
   /** A swipe in progress pauses the toast's timer; a spring-back resumes it (at least 1.5 s more, so it never vanishes on release). */
   const holdToast = useCallback((held: boolean) => {
     if (held) {
@@ -3250,10 +3246,7 @@ function Inbox() {
     if (action === 'unsnooze') return void unsnooze(row);
     if (action === 'archive') return archive(row.thread_id, row.thread_id, true);
     if (action === 'unarchive') return archivedHost.unarchive(row);
-    // Its open PRs hidden (pulls/hiddenPulls.ts): the thread leaves the list until one is shown again, merged or closed.
-    if (action === 'hide-pulls') return void hideThreadsWithUndo([row.thread_id], showToast).then((hid) => {
-      if (hid) void afterWrite([row.thread_id]);
-    });
+    if (action === 'hide-pulls') return hiddenInList.hideRow(row.thread_id);
     if (action === 'copy-thread') return void copyThreadOf(row);
     const text = action === 'copy-link' ? threadLink(row.thread_id, settings, window.location.origin) : row.thread_id;
     void copyTextToClipboard(text).then((ok) =>
@@ -4216,10 +4209,7 @@ function Inbox() {
   // The board in Reviews' pane: Open or Merged, Grid or Table, kept while the Inbox is open (Reviews' address has no room for them).
   const [paneView, setPaneView] = useState<SheetView>('open');
   const [paneLayout, setPaneLayout] = useState<SheetLayout>('grid');
-  // The board follows Reviews' project filter: in Reviews' pane, on its own page (a phone's), beside a thread from Reviews.
-  const boardProject = route.page === 'reviews' || route.page === 'prs' ? (route.project ?? null) : (route.reviews?.project ?? null);
-  const boardModel = useMemo(() => (sheetPulls.model ? boardInProject(sheetPulls.model, boardProject) : null), [sheetPulls.model, boardProject]);
-  const sheetHead = useMemo(() => (boardModel ? sheetModel(boardModel, Date.now(), {}).head : null), [boardModel]);
+  const { project: boardProject, board: boardModel, head: sheetHead } = useBoardInProject(sheetPulls.model, route);
   // What the board shares in Reviews' pane and on its own page; a review thread opens beside Reviews.
   const sheetShared = { model: boardModel, project: boardProject, projectName: boardProject ? (projectNames.get(boardProject) ?? null) : null, error: sheetPulls.error, loading: sheetPulls.loading, phone, onMerged: sheetPulls.refresh, onToast: showToast, machineName: (id: string) => machineViews?.find((m) => m.id === id)?.name ?? null, onOpenThread: (id: string) => go({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id }) };
   // The list a thread from the box opens beside: the one the box opened over.
@@ -4229,17 +4219,7 @@ function Inbox() {
   const pullReviewOf = useMemo(() => (pullsShown ? pullReviewLinks(pulls.model, pulls.reviews) : null), [pullsShown, pulls.model, pulls.reviews]);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
-  const rowsWaitingSince = useRef<number | null>(null);
-  useEffect(() => {
-    if (!pullsShown) return;
-    // A moment after the store settles, but a steady stream of messages never holds it off for long.
-    const since = (rowsWaitingSince.current ??= Date.now());
-    const timer = setTimeout(() => {
-      rowsWaitingSince.current = null;
-      pullsReloadRows();
-    }, Math.min(REVIEWS_AFTER_STORE_MS, Math.max(0, since + REVIEWS_AFTER_STORE_MAX_MS - Date.now())));
-    return () => clearTimeout(timer);
-  }, [shown, thread?.messages.length, pullsShown, pullsReloadRows]);
+  useRowsAfterStore(pullsShown, pullsReloadRows, shown, thread?.messages.length);
   // System in Reviews and in Settings (approval "system-inbox"): only while it shows (System on, Code review on).
   const systemOnHere = systemShown(settings);
   const systemProjects = useSystemProjects(systemOnHere && (route.page === 'reviews' || (route.page === 'settings' && route.section === 'capabilities')));
