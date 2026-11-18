@@ -42,9 +42,12 @@ import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ScheduledNav } from '../scheduled/ScheduledNav';
+import { PlansNav } from '../plans/PlansNav';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'reviews' | 'shapes' | 'prs' | 'artifacts' | 'scheduled' | 'plans';
+  /** Plans: the row second under Inbox, only while Plans is on (config.json `inboxPlans`); no row, menu item or Customize entry while off. */
+  onPlans?: () => void;
   /**
    * Artifacts (approval "inbox-artifact-stars"): the row in the top group (before Reviews; Customize can hide it), drawn with `onArtifacts`, that opens
    * the Artifacts wall on All. No count.
@@ -433,6 +436,7 @@ export function Sidebar(props: SidebarProps) {
     );
   const drawn = drawnSidebarItems({
     board: Boolean(props.onBoard),
+    plans: Boolean(props.onPlans),
     scheduled: Boolean(props.onScheduled),
     reviews: Boolean(props.onPulls),
     shape: Boolean(props.onShape),
@@ -559,6 +563,8 @@ export function Sidebar(props: SidebarProps) {
           Board
         </button>
         );
+      case 'plans':
+        return <PlansNav on={props.page === 'plans' && !props.projectId} onClick={pick(() => props.onPlans?.())} pick={pick} phone={phone} />;
       case 'scheduled':
         return <ScheduledNav on={props.page === 'scheduled'} onClick={pick(() => props.onScheduled?.())} />;
       case 'shape':
@@ -857,7 +863,7 @@ export function Sidebar(props: SidebarProps) {
           ) : (
             shown.map((project) => {
               const n = props.projectCounts.get(project.id) ?? 0;
-              const on = props.page === 'inbox' && props.projectId === project.id;
+              const on = (props.page === 'inbox' || props.page === 'plans') && props.projectId === project.id;
               if (projectsClosed && !on) return null;
               if (!props.onProjectAction) {
                 return (

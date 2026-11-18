@@ -28,8 +28,8 @@ function everyStoredLook(): string[][] {
 describe('Settings → Rows control model', () => {
   test('every stored look reads into the controls and writes back the identical list', () => {
     const looks = everyStoredLook();
-    // 23 options; the independent machine-name option doubles the previous number of looks.
-    expect(looks.length).toBe(1_548_288);
+    // The independent machine-name option doubles the upstream 1,161,216 looks.
+    expect(looks.length).toBe(2_322_432);
     let bad: { stored: string[]; back: string[] } | null = null;
     for (const stored of looks) {
       const back = rowsFromLook(lookFromControlValues(rowsControlValues(lookFromRows(stored))));

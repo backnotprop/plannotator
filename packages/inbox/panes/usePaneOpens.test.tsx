@@ -4,7 +4,8 @@
  *
  * What regresses: Try again not reading again; a Try again taking back what the thread opened with; a pane closed
  * or removed mid-read still drawing, or keeping its thread in memory; the window's unmount leaving reads out; a thread
- * opened beside the active pane marked seen (the opening look) before the person is in that pane.
+ * opened beside the active pane marked seen (the opening look) before the person is in that pane; a pane the person
+ * goes back into never looking at what reached it while they were in another, so its thread stays new for good.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -186,5 +187,27 @@ describe.skipIf(!hasDom)('each pane opens its thread', () => {
     w.draw(twoPanes());
     w.draw(focusPane(twoPanes(), 'p2'));
     expect(w.opened).toEqual(['thr_a', 'thr_b']);
+  });
+
+  test('going back into a pane looks at what reached it while the person was in another, as an open does; nothing new, no look', async () => {
+    const w = mount(twoPanes());
+    await w.land(() => w.take('thr_b').answer(threadOf('thr_b', [2])));
+    await w.land(() => w.take('thr_a').answer(threadOf('thr_a', [2])));
+    w.draw(focusPane(twoPanes(), 'p2'));
+    expect(w.opened).toEqual(['thr_a', 'thr_b']);
+    // While the person is in p2, an agent's message reaches thr_a (the event stream reads it again): not seen yet.
+    const reread = w.reads().refreshThread('thr_a');
+    await w.land(() => w.take('thr_a').answer(threadOf('thr_a', [2, 4])));
+    await reread;
+    expect(w.opened).toEqual(['thr_a', 'thr_b']);
+    expect(w.reads().view('main').look?.through).toBe(2);
+    // Back in the left pane: looked at, through the new message.
+    w.draw(twoPanes());
+    expect(w.opened).toEqual(['thr_a', 'thr_b', 'thr_a']);
+    expect(w.reads().view('main').look?.through).toBe(4);
+    // Back and forth with nothing new since: no look.
+    w.draw(focusPane(twoPanes(), 'p2'));
+    w.draw(twoPanes());
+    expect(w.opened).toEqual(['thr_a', 'thr_b', 'thr_a']);
   });
 });

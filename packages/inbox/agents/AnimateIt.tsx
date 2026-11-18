@@ -61,7 +61,7 @@ export function animateSource(face: AgentFace, ours: FaceSources | null): { icon
     const { set, icon } = setFaceParts(face);
     return { icon: face, src: setIconSrc(set, icon) };
   }
-  if (face === 'agent' || face === 'transparent') return null;
+  if (face === 'agent' || face === 'transparent' || face === 'mark' || face === 'project') return null;
   const src = ours?.[face];
   return typeof src === 'string' ? { icon: face, src } : null;
 }

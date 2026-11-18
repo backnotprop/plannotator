@@ -169,7 +169,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
  * check boxes anyways. They don't look right as icons"). The box sits where Tidy's and Refresh's icons sit, so every
  * label starts at one edge. A tick leaves the menu open, so the next can be tried, unless `closeOnClick`.
  */
-function MenuCheckbox({
+export function MenuCheckbox({
   label,
   checked,
   onChange,

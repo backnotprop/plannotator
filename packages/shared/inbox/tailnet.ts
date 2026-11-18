@@ -94,7 +94,10 @@ export function isServedTailnetHost(hostHeader: string | null, servedHostname: s
  *    loads its data same-origin);
  *  - GETs of the attachment HTML asset route, which an attached page drawn
  *    in a sandboxed srcdoc frame (an opaque origin) loads cross-site by
- *    construction, behind its unguessable per-folder token.
+ *    construction, behind its unguessable per-folder token; and the same
+ *    route of a linked machine through the forward
+ *    (`isForwardedHtmlAssetPath`), for its attached page, behind that
+ *    machine's token.
  * Absent header (a non-browser client, or an older browser): allowed; the
  * state-changing routes still check Origin.
  */
@@ -103,6 +106,19 @@ export function tailnetFetchSiteAllowed(method: string, path: string, headers: H
   if (site !== "cross-site" && site !== "same-site") return true;
   const read = method === "GET" || method === "HEAD";
   if (read && headers.get("sec-fetch-mode")?.trim().toLowerCase() === "navigate" && path === "/") return true;
-  if (read && path.startsWith("/api/html-assets/")) return true;
+  if (read && (path.startsWith("/api/html-assets/") || isForwardedHtmlAssetPath(path))) return true;
   return false;
+}
+
+/** The forward's HTML asset route: `/api/inbox/m/<machine id>/html-assets/…`, nothing else under the forward. */
+const FORWARDED_HTML_ASSET = /^\/api\/inbox\/m\/ibx_[0-9A-HJKMNP-TV-Z]{26}\/html-assets\//;
+
+/**
+ * Whether `path` is a linked machine's HTML asset route through this Inbox's forward. An attached page from that
+ * machine (in its own tab, or the viewer's frame) is a sandboxed document with an opaque origin, so it loads its
+ * folder cross-site by construction, as a local page loads `/api/html-assets/`; the far machine's unguessable
+ * per-folder token guards it the same way.
+ */
+export function isForwardedHtmlAssetPath(path: string): boolean {
+  return FORWARDED_HTML_ASSET.test(path);
 }

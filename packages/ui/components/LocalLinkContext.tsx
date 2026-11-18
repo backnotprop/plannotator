@@ -40,6 +40,18 @@ export type LocalLinkResolver = (href: string) => LocalLinkResolution | null;
 export const LocalLinkContext = createContext<LocalLinkResolver | null>(null);
 
 /**
+ * Opt-in: which link targets the resolver above is asked about. Absent, local paths only (`isLocalLinkTarget`), as
+ * always; a host that must keep every non-web link from doing anything (a `mailto:`, an editor scheme) gives a wider
+ * test and answers those as `unavailable`. External http(s) links are best left out: they open in a new tab.
+ */
+export const LocalLinkMatchContext = createContext<((href: string) => boolean) | null>(null);
+
+/** The test a renderer applies before asking the resolver: the host's, else `isLocalLinkTarget`. */
+export function useLocalLinkMatch(): (href: string) => boolean {
+  return useContext(LocalLinkMatchContext) ?? isLocalLinkTarget;
+}
+
+/**
  * A host's own wrap for an inline code span that names a code file (`src/a.ts:12`): `text` is the span's words, `code`
  * the span as it is drawn without a host. With no provider, nothing changes.
  */

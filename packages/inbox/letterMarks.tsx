@@ -32,11 +32,13 @@ export function showsProjects(what: MarksWhat): boolean {
 export interface RowMarksLook {
   marks: MarksChoice;
   hideAgents: boolean;
+  /** Agent icons "From the project name": an agent with no face picked draws its project's tile (agents/projectFace.tsx). */
+  projectIcons: boolean;
   /** False: project marks are letters only, nothing asked of the Inbox (Settings → Rows' sample projects). */
   pictures: boolean;
 }
 
-const MARKS_OFF: RowMarksLook = { marks: lookMarks({ marksThreads: false, marksProjects: false, markInline: false, markDot: false, repoLogo: false, githubPictures: false }), hideAgents: false, pictures: false };
+const MARKS_OFF: RowMarksLook = { marks: lookMarks({ marksThreads: false, marksProjects: false, markInline: false, markDot: false, repoLogo: false, githubPictures: false }), hideAgents: false, projectIcons: false, pictures: false };
 
 /**
  * A look given from above: a list drawn with its own look (Settings → Rows' pictures, the onboarding tour's list and
@@ -45,7 +47,7 @@ const MARKS_OFF: RowMarksLook = { marks: lookMarks({ marksThreads: false, marksP
 const RowMarksContext = createContext<RowMarksLook | null>(null);
 
 export function rowMarksOf(look: ListLook, pictures = true): RowMarksLook {
-  return { marks: lookMarks(look), hideAgents: look.hideAgents, pictures };
+  return { marks: lookMarks(look), hideAgents: look.hideAgents, projectIcons: look.agentProjectIcons && !look.hideAgents, pictures };
 }
 
 /** Draw `children` with the marks of `look` (null: no marks at all, as the onboarding tour). */
@@ -76,18 +78,61 @@ export interface Letters {
   count: 1 | 2;
 }
 
+const graphemesOf = (text: string) => Array.from(graphemes.segment(text), (s) => s.segment);
+
+/** No letters: the first emoji, else nothing (`none`, drawn as `none` says). */
+function noLetters(parts: readonly string[], none: string): Letters {
+  const emoji = parts.find((g) => PICTO.test(g));
+  return emoji ? { text: emoji, kind: 'emoji', count: 1 } : { text: none, kind: 'none', count: 1 };
+}
+
+/**
+ * One letter's capital, the same in every locale; the letter itself when its capital is more than one ("ß" is "SS",
+ * "ﬁ" is "FI"), so a mark never draws more letters than it took.
+ */
+function capitalOf(letter: string): string {
+  const upper = letter.toLocaleUpperCase('en-US');
+  return graphemesOf(upper).length === 1 ? upper : letter;
+}
+
+/** Two letters as one mark: both when both read as a pair, else the first alone. */
+function pairOf(first: string, second: string | null | undefined): Letters {
+  if (!second || !PAIRS.test(first) || !PAIRS.test(second)) return { text: capitalOf(first), kind: 'letters', count: 1 };
+  return { text: capitalOf(first) + capitalOf(second), kind: 'letters', count: 2 };
+}
+
 /** First and last letter of the name (the owner's rule), letters and digits only: emoji and punctuation are skipped. */
 export function markLetters(name: string): Letters {
-  const parts = Array.from(graphemes.segment(name.normalize('NFC').trim()), (s) => s.segment);
+  const parts = graphemesOf(name.normalize('NFC').trim());
   const letters = parts.filter((g) => LETTER.test(g));
-  if (letters.length === 0) {
-    const emoji = parts.find((g) => PICTO.test(g));
-    return emoji ? { text: emoji, kind: 'emoji', count: 1 } : { text: '·', kind: 'none', count: 1 };
-  }
-  const first = letters[0]!;
-  const last = letters[letters.length - 1]!;
-  if (letters.length === 1 || !PAIRS.test(first) || !PAIRS.test(last)) return { text: first.toLocaleUpperCase(), kind: 'letters', count: 1 };
-  return { text: (first + last).toLocaleUpperCase(), kind: 'letters', count: 2 };
+  if (letters.length === 0) return noLetters(parts, '·');
+  return pairOf(letters[0]!, letters.length > 1 ? letters[letters.length - 1] : null);
+}
+
+/**
+ * The letters of an agent's project tile (approval "inbox-generated-agent-icons", agents/projectFace.tsx), from the
+ * project's label as the window names it, "api · work" read as "api". Words: an npm scope dropped, camel humps split,
+ * anything not a letter, digit or mark between them. Two or more words: the first letter of the first and of the last;
+ * one word: its first letter and its first digit, else its last letter. By grapheme, one glyph for the scripts
+ * `markLetters` draws alone, an emoji only when there are no letters, and `none` (empty text) with neither: the tile
+ * is then the agent's own mark.
+ */
+export function projectLetters(label: string): Letters {
+  const clean = label.normalize('NFC').trim().replace(/\s+/g, ' ');
+  const at = clean.indexOf(' · ');
+  const base = at < 0 ? clean : clean.slice(0, at);
+  const split = base
+    .replace(/^@[^/\s]+\//, '')
+    .replace(/(\p{Ll})(\p{Lu})/gu, '$1 $2')
+    .replace(/(\p{Lu})(\p{Lu}\p{Ll})/gu, '$1 $2');
+  const words = split
+    .split(/[^\p{L}\p{N}\p{M}]+/u)
+    .map((word) => graphemesOf(word).filter((g) => LETTER.test(g)))
+    .filter((word) => word.length > 0);
+  if (words.length === 0) return noLetters(graphemesOf(base), '');
+  const one = words[0]!;
+  if (words.length > 1) return pairOf(one[0]!, words[words.length - 1]![0]);
+  return pairOf(one[0]!, one.slice(1).find((g) => /\p{N}/u.test(g)) ?? (one.length > 1 ? one[one.length - 1] : null));
 }
 
 // ── colour: one of eight hues, turned from the theme's --primary (inbox.css .ib-lm[data-hue]) ──
@@ -113,16 +158,20 @@ export function hueOf(seed: string): number {
 
 export type MarkSize = 12 | 14 | 16 | 20 | 24 | 30;
 
-/** A thread's or project's letters on a tinted (or solid) tile. Decorative: the name is always in text beside it. */
-export function LetterMark({ name, seed, size, solid = false, className, picture }: { name: string; seed: string; size: MarkSize; solid?: boolean; className?: string; picture?: string | null }) {
-  const letters = markLetters(name);
+/**
+ * A thread's or project's letters on a tinted (or solid) tile. Decorative: the name is always in text beside it.
+ * `letters` and `hue`: these in place of the name's and the seed's (an agent's project tile, agents/projectFace.tsx,
+ * which sizes itself: no `size`).
+ */
+export function LetterMark({ name, seed, size, solid = false, className, picture, letters: given, hue, split = false }: { name: string; seed: string; size?: MarkSize; solid?: boolean; className?: string; picture?: string | null; letters?: Letters; hue?: number; split?: boolean }) {
+  const letters = given ?? markLetters(name);
   // The picture covers the letters once it has loaded; until then, and when there is none (a 404), the letters show.
   const [loaded, setLoaded] = useState<string | null>(null);
   const shown = !!picture && loaded === picture;
   return (
     <span
       className={`ib-lm${className ? ` ${className}` : ''}`}
-      data-hue={hueOf(seed)}
+      data-hue={hue ?? hueOf(seed)}
       data-size={size}
       data-solid={solid ? '' : undefined}
       data-kind={letters.kind}
@@ -130,9 +179,23 @@ export function LetterMark({ name, seed, size, solid = false, className, picture
       data-pic={shown ? '' : undefined}
       aria-hidden="true"
     >
-      {letters.text}
+      {split && letters.count === 2 ? <SplitLetters text={letters.text} /> : letters.text}
       {picture && <img src={picture} alt="" decoding="async" onLoad={() => setLoaded(picture)} onError={() => setLoaded(null)} />}
     </span>
+  );
+}
+
+/**
+ * Two letters, the second in its own span (`.ib-lm-2`): a box too small for two (an agent's project tile under 20 px,
+ * agents.css) hides it and shows the first alone.
+ */
+function SplitLetters({ text }: { text: string }) {
+  const [first, ...rest] = graphemesOf(text);
+  return (
+    <>
+      {first}
+      <span className="ib-lm-2">{rest.join('')}</span>
+    </>
   );
 }
 

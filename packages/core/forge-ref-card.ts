@@ -11,6 +11,7 @@
  */
 
 import { classifyForgeHost, FORGE_SPECS, gitlabHostsSnapshot, normalizeForgeHost, type ForgePlatform } from "./forge-refs";
+import type { Problem } from "./problem";
 
 export type { ForgePlatform } from "./forge-refs";
 
@@ -213,7 +214,11 @@ export type ForgeRefCardError =
 
 export type ForgeRefCardResult =
   | { ok: true; data: ForgeRefCardData; fetchedAt: number }
-  | { ok: false; error: ForgeRefCardError; fetchedAt: number };
+  /**
+   * `problem` (newer servers): the tool's state in the one table's words (problem-words.ts); `error` stays the older
+   * code every window reads.
+   */
+  | { ok: false; error: ForgeRefCardError; problem?: Problem; fetchedAt: number };
 
 export const FORGE_REF_BODY_MAX = 4000;
 export const FORGE_REF_COMMENT_MAX = 600;
@@ -281,4 +286,14 @@ export function forgePullRefText(ref: Pick<ForgeRef, "platform" | "host" | "owne
   if (ref.platform === "github" && ref.host === "github.com") return `${ref.owner}/${ref.repo}#${ref.number}`;
   if (ref.platform === "gitlab" && ref.host === "gitlab.com") return `${ref.owner}/${ref.repo}!${ref.number}`;
   return forgePullUrl(ref);
+}
+
+/**
+ * A PR as a person reads it on screen: `owner/repo#12`, `group/project!45`, with the host in front only off
+ * github.com and gitlab.com (`gitlab.example.dev/group/project!45`). Never the URL: that is `forgePullRefText`'s, for
+ * what an agent writes back.
+ */
+export function forgePullRefShort(ref: Pick<ForgeRef, "platform" | "host" | "owner" | "repo" | "number">): string {
+  const text = `${ref.owner}/${ref.repo}${ref.platform === "gitlab" ? "!" : "#"}${ref.number}`;
+  return ref.host === (ref.platform === "gitlab" ? "gitlab.com" : "github.com") ? text : `${ref.host}/${text}`;
 }

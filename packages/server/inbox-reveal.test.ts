@@ -99,6 +99,10 @@ interface Options {
    * dialog (after Snooze in the line) without marking an earlier Inbox the way config.json `inboxTool` would. Default true.
    */
   personalAgent?: boolean;
+  /** The person's own sends (replies to the first agent message), each at its local time. */
+  sends?: readonly Date[];
+  /** A routine was made here and deleted again (inbox/scheduled.jsonl keeps its record). */
+  routineMade?: boolean;
 }
 
 /** A cloud agent of `preset` in the data dir's inbox/cloud-agents.json, as Settings → Cloud agents pairs one. */
@@ -141,11 +145,40 @@ async function world(options: Options = {}) {
   writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   if (options.personalAgent !== false) writeCloudAgent(dataDir, "hermes");
   const then = new Date(Date.now() - days * DAY);
-  const store = InboxStore.open(dataDir, { now: () => then });
+  let clock = then;
+  const store = InboxStore.open(dataDir, { now: () => clock });
   const project = options.fresh ? null : store.ensureProject({ name: "docs", root: join(root, "docs") });
   // Each message starts its own thread.
+  let firstAsked: string | null = null;
   for (let i = 0; i < (options.fresh ? 0 : (options.threads ?? 6)); i++) {
-    store.sendMessage({ project_id: project!.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` });
+    const asked = store.sendMessage({ project_id: project!.id, author: { kind: "agent", host: "claude-code", session: `ses_${i}`, name: "Claude Code" }, body: `Question ${i}?` }).message;
+    firstAsked ??= asked?.id ?? null;
+  }
+  (options.sends ?? []).forEach((sentAt, i) => {
+    clock = sentAt;
+    store.sendReply(firstAsked!, { words: `Reply ${i}.`, idempotency_key: `send-${i}` });
+  });
+  clock = then;
+  if (options.routineMade) {
+    const madeAt = then.toISOString();
+    store.putScheduledThread({
+      id: "sch_seeded",
+      name: "Morning check",
+      enabled: false,
+      approved_at: null,
+      prompt: "Check the build.",
+      schedule: { kind: "cron", cron: "0 9 * * 1-5", tz: "UTC" },
+      if_missed: "skip",
+      runs_on: "this_computer",
+      folder: { scratch: true },
+      agent: "claude-code",
+      attachments: [],
+      thread_id: null,
+      handled_through: null,
+      created_at: madeAt,
+      updated_at: madeAt,
+      deleted_at: madeAt,
+    } as unknown as Parameters<typeof store.putScheduledThread>[0]);
   }
   let launchedThread: string | null = null;
   if (options.launched) {
@@ -668,6 +701,96 @@ describe("Priority: after personal agents, only while the person never added a t
       const w = await world(options);
       expect(await w.next()).not.toBe("priority");
       expect((await w.claim("priority")).show).toBe(false);
+    });
+  }
+});
+
+describe("Routines: after three good days of sends, once, opt-in", () => {
+  const decided = { inboxBoard: false, inboxSteps: false, inboxBro: false, inboxCodeReview: false, inboxReveals: { list_view: { shownAt: new Date(Date.now() - 3 * DAY).toISOString() } } };
+  /**
+   * The process (and the in-process Inbox) in a fixed-offset zone where it is about noon now (restored after the test),
+   * so these cases never depend on the time of day: "earlier today, past the 40-minute gap" always exists.
+   */
+  const middayZone = () => {
+    const east = 12 - new Date().getUTCHours();
+    setEnv("TZ", east === 0 ? "Etc/GMT" : `Etc/GMT${east > 0 ? "-" : "+"}${Math.abs(east)}`);
+    expect([12, 13]).toContain(new Date().getHours());
+  };
+  /** Local 10:00 and 11:00, `d` days ago (in the zone the test set). */
+  const twoOn = (d: number) => {
+    const now = new Date();
+    return [new Date(now.getFullYear(), now.getMonth(), now.getDate() - d, 10), new Date(now.getFullYear(), now.getMonth(), now.getDate() - d, 11)];
+  };
+  const goodDays = () => [...twoOn(3), ...twoOn(2), ...twoOn(1)];
+  /** Two hours ago: earlier today (it is about noon), past the 40-minute gap. */
+  const earlierToday = () => new Date(Date.now() - 2 * HOUR).toISOString();
+
+  test("three local days with two sends each: next, shown once (another key gets no), nothing turned on; No thanks is final", async () => {
+    middayZone();
+    const w = await world({ config: decided, sends: goodDays() });
+    expect(await w.next()).toBe("routines");
+    expect((await w.claim("routines", "rt-key-1")).show).toBe(true);
+    expect(w.saved().inboxReveals.routines.shownAt).toMatch(/^\d{4}-/);
+    expect(w.saved().inboxScheduledThreads).toBeUndefined();
+    expect((await w.claim("routines", "rt-key-1")).show).toBe(true);
+    expect((await w.claim("routines", "rt-key-2")).show).toBe(false);
+    expect((await w.post("/api/inbox/reveal", { id: "routines", answer: "not_now" })).status).toBe(200);
+    expect(w.saved().inboxScheduledThreads).toBeUndefined();
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("routines", "rt-key-3")).show).toBe(false);
+  });
+
+  test("Turn on: the Settings switch's own save turns Routines on; it is never offered again", async () => {
+    middayZone();
+    const w = await world({ config: decided, sends: goodDays() });
+    expect((await w.claim("routines", "rt-key-1")).show).toBe(true);
+    const saved = (await (await w.post("/api/inbox/settings", { scheduled_threads: { on: true } })).json()) as Json;
+    expect(saved.scheduled_threads.on).toBe(true);
+    expect(w.saved().inboxScheduledThreads).toBe(true);
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("routines", "rt-key-2")).show).toBe(false);
+  });
+
+  // The owner, 2026-11-17, on the day of its own it first had: "Feel like this shouldn't be huge blocker, just separate
+  // them 20min or so". Only the line's gap (40 minutes), both ways.
+  /** Ten minutes ago: inside the 40-minute gap. */
+  const insideGap = () => new Date(Date.now() - HOUR / 6).toISOString();
+
+  test("shown inside the gap: the Checklist behind it waits; shown earlier today, past the gap: the Checklist goes today", async () => {
+    middayZone();
+    const at = (shown: string) => ({ ...decided.inboxReveals, lastShownAt: shown, dayShownAt: shown, routines: { shownAt: shown } });
+    const w = await world({ config: { ...decided, inboxSteps: undefined, inboxReveals: at(insideGap()) }, days: 6 });
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("steps")).show).toBe(false);
+    const later = await world({ config: { ...decided, inboxSteps: undefined, inboxReveals: at(earlierToday()) }, days: 6 });
+    expect(await later.next()).toBe("steps");
+  });
+
+  test("something else shown inside the gap: not Routines yet; shown earlier today, past the gap: Routines goes today", async () => {
+    middayZone();
+    const w = await world({ config: { ...decided, inboxReveals: { ...decided.inboxReveals, lastShownAt: insideGap() } }, sends: goodDays() });
+    expect(await w.next()).toBeNull();
+    expect((await w.claim("routines")).show).toBe(false);
+    expect(w.saved().inboxReveals?.routines).toBeUndefined();
+    const later = await world({ config: { ...decided, inboxReveals: { ...decided.inboxReveals, lastShownAt: earlierToday() } }, sends: goodDays() });
+    expect(await later.next()).toBe("routines");
+    expect((await later.claim("routines", "rt-key-1")).show).toBe(true);
+  });
+
+  for (const [name, options] of [
+    ["only two good days", () => ({ config: decided, sends: [twoOn(3)[0]!, ...twoOn(2), ...twoOn(1)] })],
+    ["the person's agents only, never their own sends", () => ({ config: decided })],
+    ["Routines turned on", () => ({ config: { ...decided, inboxScheduledThreads: true }, sends: goodDays() })],
+    ["Routines turned off in Settings", () => ({ config: { ...decided, inboxScheduledThreads: false }, sends: goodDays() })],
+    ["a routine made (and deleted) here", () => ({ config: decided, sends: goodDays(), routineMade: true })],
+    ["Start agents from New message off", () => ({ config: { ...decided, inboxLaunch: { enabled: false } }, sends: goodDays() })],
+  ] as const) {
+    test(`never for ${name}`, async () => {
+      middayZone();
+      const w = await world(options());
+      expect(await w.next()).not.toBe("routines");
+      expect((await w.claim("routines")).show).toBe(false);
+      expect(w.saved().inboxReveals?.routines).toBeUndefined();
     });
   }
 });

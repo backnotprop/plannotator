@@ -269,5 +269,7 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};
-  return { machine, agents, total: count(raw.total, agents.length), ended_today: count(raw.ended_today, 0), ...faces };
+  // Whether it keeps a tile choice (approval "inbox-generated-agent-icons"): only when it says so, never assumed.
+  const tiles = raw.faces !== undefined && raw.face_tiles === true ? { face_tiles: true as const } : {};
+  return { machine, agents, total: count(raw.total, agents.length), ended_today: count(raw.ended_today, 0), ...faces, ...tiles };
 }

@@ -673,6 +673,7 @@ describe.if(hasDom)('the rows in each mode', () => {
     expect([...stop.querySelector('.ib-l2 > .ib-lend')!.children].map((c) => c.className.split(' ')[0])).toEqual(['ib-att', 'ib-pinmark', 'ib-zwhen', 'ib-badge']);
     // The pin's and the badge's words still reach a screen reader.
     expect(stop.querySelector(':scope > .ib-sr')!.textContent).toBe(', starred');
+    // Its description is the badge's words (no row actions here, so no drag help: listDrops.tsx).
     expect(document.getElementById(stop.getAttribute('aria-describedby')!)!.textContent).toBeTruthy();
 
     const phone = remount('phone', opts);

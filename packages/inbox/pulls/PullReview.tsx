@@ -919,7 +919,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope: asked, onLay
             }
             onSelect={pickFile}
             onOpen={openRepoFile}
-            onToggleViewed={toggleViewed}
           />
         </PanePart>
       ) : (

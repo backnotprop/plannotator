@@ -8,11 +8,16 @@ import { rowMenuActions, type RowMenuAction } from '../rowMenu';
 import { useThreadTags } from '../threadTags';
 import { AddTagItem, AddTagList } from './AddTagMenu';
 import { useContextMenuTrigger } from './useContextMenuTrigger';
+import { OpenBesideItem } from '../panes/OpenBesideItem';
 import { BulkItems, WorkItems, runBulk } from './PickBar';
 import { BulkTagList } from './BulkTags';
 import type { MenuPicks } from './useListPicks';
 import { bulkTargets } from '../rowPicks';
 import { formatCount } from '@plannotator/core/inbox-format';
+import { MentionMenuItem } from './MentionMenuItem';
+import { useThreadRowDrag } from './useThreadRowDrag';
+import { ListDrops, RowDragHelp, THREAD_DRAG_HELP_ID, useRowsDraggable } from './listDrops';
+export { useRowDragA11y } from './listDrops';
 
 export interface ThreadRowMenuProps {
   className: string;
@@ -39,7 +44,8 @@ export interface ThreadRowMenuProps {
   pinnedOf?: (row: InboxListRow) => boolean | null;
   /** Whether Add to Priority or Remove from Priority is offered on a row whose machine is another one. Absent: every row. */
   prioritizesOf?: (row: InboxListRow) => boolean;
-  onAction: (row: InboxListRow, action: RowMenuAction) => void;
+  /** A Mark read resolves false when its set-aside warning was cancelled (App.tsx `rowAction`; a drop on Quiet reads it). */
+  onAction: (row: InboxListRow, action: RowMenuAction) => unknown;
   /** The row whose menu is open (its muted background), or null when it closes. */
   onTarget: (threadId: string | null) => void;
   /** No menu (the host gave no actions): the browser's own. */
@@ -124,6 +130,11 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
     longPress: true,
   });
   const target = menu.targetId ? props.rowOf(menu.targetId) : null;
+  // A row pressed with a mouse and moved is dragged (threadDrag.ts): into the reply box, a mention; to the list's top or
+  // bottom edge or held on another row, the places ListDrops draws while it is carried.
+  const draggable = useRowsDraggable();
+  const dragOff = props.disabled === true || props.phone === true || !draggable;
+  const pressRow = useThreadRowDrag({ body, rowOf: props.rowOf, picks: props.picks, off: dragOff });
   const actions = target ? rowMenuActions(target, props.canMarkRead, props.pinnedOf ? props.pinnedOf(target) : null, props.sectionOf?.(target.thread_id) ?? null, props.onSnooze !== undefined && ((props.snoozesOf?.(target) ?? true) || !!props.snoozeBlockedOf?.(target)), props.prioritizesOf?.(target) ?? true) : [];
   const snoozeBlocked = target ? (props.snoozeBlockedOf?.(target) ?? null) : null;
   // A picked row: the menu is the picks' (acting on every picked row).
@@ -206,9 +217,13 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
   return (
     <ContextMenu.Root {...menu.root}>
       {/* Buttons and the empty list's link keep the platform's own long-press callout (the hook's `style`). */}
-      <ContextMenu.Trigger ref={body} className={props.className} {...menu.trigger}>
-        {props.children}
+      <ContextMenu.Trigger ref={body} className={props.className} {...menu.trigger} onPointerDown={(event) => {
+          menu.trigger.onPointerDown?.(event);
+          pressRow(event);
+        }}>
+        <RowDragHelp.Provider value={dragOff ? null : THREAD_DRAG_HELP_ID}>{props.children}</RowDragHelp.Provider>
       </ContextMenu.Trigger>
+      <ListDrops body={body} rowOf={props.rowOf} sectionOf={props.sectionOf} canMarkRead={props.canMarkRead} prioritizesOf={props.prioritizesOf} onAction={props.onAction} picks={props.picks} follow={menu.follow} off={dragOff} />
       <ContextMenu.Portal container={portal ?? undefined}>
         {props.phone && <ContextMenu.Backdrop className="ib-pm-scrim" />}
         <ContextMenu.Positioner className="ib-pm-pos" data-phone={props.phone ? '' : undefined}>
@@ -271,6 +286,7 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
               />
             ) : (
               <>
+                {target && <OpenBesideItem threadId={target.thread_id} />}
                 {/* Select first, alone (approval "inbox-multi-select", 1B): picking starts with this row picked. */}
                 {target && props.picks?.takes(target.thread_id) && (
                   <>
@@ -306,7 +322,10 @@ export const ThreadRowMenu = forwardRef<HTMLDivElement, ThreadRowMenuProps>(func
                   </Menu.Item>
                 )}
                 {(pinning.length > 0 || (target && tags?.can(target.thread_id))) && <Menu.Separator className="ib-pm-sep" />}
+                {/* Mention in reply (approval "inbox-drag-threads"): first in the group on a phone's sheet, last on a computer. */}
+                {props.phone && target && <MentionMenuItem rows={[target]} phone />}
                 {copies.map(item)}
+                {!props.phone && target && <MentionMenuItem rows={[target]} phone={false} />}
                 {writes.length > 0 && <Menu.Separator className="ib-pm-sep" />}
                 {writes.map(item)}
               </>

@@ -10,7 +10,9 @@ import { describe, expect, test } from 'bun:test';
 import { GRILL_ME_NOTE_TEXT } from '@plannotator/core/grill-me';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE, splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
 import type { SkillCatalogEntry, SkillExportContent } from '@plannotator/ui/utils/skillReferences';
-import { composeInboxSkillsBlock, inboxSkillReferences, inboxSkillsBlock, INBOX_SKILL_INSTRUCTIONS_BUDGET, withSkillsBlock } from './skills';
+import { CREATE_ROUTINE_SKILL } from '@plannotator/core/create-routine-skill';
+import { INBOX_BUILTIN_SKILL_ROOT } from '@plannotator/core/inbox-review';
+import { builtinSkillContent, composeInboxSkillsBlock, inboxSkillReferences, inboxSkillsBlock, INBOX_SKILL_INSTRUCTIONS_BUDGET, withSkillsBlock } from './skills';
 import { replyWords } from './folding';
 import { attachmentFeedback, guideCommentSections } from './attachments';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -292,5 +294,29 @@ describe('the grill-me note rides a grill-me skill picked in the Inbox', () => {
     const ok = `${head}--- BEGIN PLANNOTATOR NOTE: write-better ---\nx\n--- END PLANNOTATOR NOTE: write-better ---`;
     expect(splitInboxSkillsBlock(`Hi.\n\n${ok}`)?.before).toBe('Hi.');
     expect(splitInboxSkillsBlock(`Hi.\n\n${ok}\n\n--- BEGIN PLANNOTATOR NOTE: write-better ---\ny\n--- END PLANNOTATOR NOTE: write-better ---`)).toBeNull();
+  });
+});
+
+describe('/create-routine, the built-in the Inbox lists while Routines are on', () => {
+  const entry: SkillCatalogEntry = { name: CREATE_ROUTINE_SKILL.name, root: INBOX_BUILTIN_SKILL_ROOT, humanOnly: true, description: CREATE_ROUTINE_SKILL.description };
+  // Its text is the window's own: a content source that answers would be a folder read, which a built-in never is.
+  const routineSources = { catalog: async () => [entry, ...CATALOG], content: async () => READBACK };
+
+  test('picked in New message or a reply, its whole text rides the message for the agent, and the window still folds it', async () => {
+    for (const audience of [INBOX_MESSAGE_SKILL_AUDIENCE, INBOX_REPLY_SKILL_AUDIENCE]) {
+      const words = '/create-routine every weekday at 9 check for outdated dependencies';
+      const block = await inboxSkillsBlock([words], audience, routineSources);
+      expect(block).toContain('--- BEGIN SKILL INSTRUCTIONS: create-routine ---\n');
+      expect(block).toEndWith(`${CREATE_ROUTINE_SKILL.body.trim()}\n\n--- END SKILL INSTRUCTIONS: create-routine ---`);
+      expect(block).not.toContain(READBACK.content);
+      const split = splitInboxSkillsBlock(withSkillsBlock(words, block))!;
+      expect(split.before).toBe(words);
+      expect(split.skills.map((s) => s.name)).toEqual(['create-routine']);
+    }
+  });
+
+  test('the text is the window\'s own, not a folder read', () => {
+    expect(builtinSkillContent(entry)).toEqual({ content: CREATE_ROUTINE_SKILL.body, truncated: false, dir: '', path: '' });
+    expect(builtinSkillContent({ ...entry, root: 'claude' })).toBeUndefined();
   });
 });

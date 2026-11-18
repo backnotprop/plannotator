@@ -10,6 +10,10 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isWindowRequest, INBOX_WINDOW_ONLY_BODY } from "./inbox-cross-site";
 import type { InboxLoginItem } from "./inbox-scheduled-login";
 import type { InboxScheduled } from "./inbox-scheduled";
+import { createOnce } from "./inbox-scheduled-once";
+
+/** Each Inbox's window creates under way, by `idempotency_key` (inbox-scheduled-once.ts). */
+const creating = new WeakMap<InboxScheduled, Map<string, Promise<unknown>>>();
 
 /** The switch: three readings like the Board's (unset, true, false). Not offered where launch is not (Windows). */
 export function scheduledSwitch(deps: {
@@ -93,7 +97,16 @@ export async function scheduledRoute(
   // Every write is the person's, from their window: an agent uses the routine tool.
   if (!isWindowRequest(req, body, deps.serverSession)) return json({ ...INBOX_WINDOW_ONLY_BODY, error: "A routine is changed in the Inbox window; an agent uses the routine tool." }, 403);
   const person = { kind: "person" } as const;
-  if (parts.length === 0) return json({ scheduled: scheduled.rowOf((await scheduled.create(body, person)).record) }, 201);
+  if (parts.length === 0) {
+    if (!creating.has(scheduled)) creating.set(scheduled, new Map());
+    const once = createOnce<Parameters<InboxScheduled["rowOf"]>[0], ReturnType<InboxScheduled["rowOf"]>>(creating.get(scheduled)!);
+    const find = (key: string) => {
+      const record = scheduled.withCreateKey(key);
+      return record ? scheduled.rowOf(record) : null;
+    };
+    const row = await once(body.idempotency_key, async (key) => (await scheduled.create(body, person, key)).record, find, scheduled.rowOf);
+    return json({ scheduled: row }, 201);
+  }
   const [id, action] = parts as [string, string | undefined];
   switch (action) {
     case undefined:
