@@ -286,9 +286,10 @@ describe("Settings → Agents: Start new agents in", () => {
     const { launch, asked } = setup({ startIn: "inbox" });
     // The routines' clock and the window's settings model: whether Launch is on, no Rex.
     expect(launch.enabled()).toBe(true);
-    expect(launch.settingsState()).toMatchObject({ enabled: true, rex_here: false });
+    expect(launch.settingsState().enabled).toBe(true);
+    expect("rex_here" in launch.settingsState()).toBe(false);
     const read = (via: string) => launch.route(new Request("http://127.0.0.1/api/inbox/launch/settings", { headers: { Host: "127.0.0.1" } }), "/api/inbox/launch/settings", via);
-    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(false);
+    expect(((await (await read("tailnet"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBeUndefined();
     expect(asked.attached).toBe(0);
     expect(((await (await read("local"))!.json()) as { launch: Record<string, unknown> }).launch.rex_here).toBe(true);
     expect(asked.attached).toBe(1);

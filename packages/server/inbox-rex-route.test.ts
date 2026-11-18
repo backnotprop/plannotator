@@ -189,7 +189,7 @@ describe("the Agents list and Rex", () => {
     // Routines are on with Launch: their clock asks whether Launch is on, never Rex.
     const far = w.tailnet();
     const settings = (await (await fetch(`${far.at}/api/inbox/launch/settings`, { headers: far.headers })).json()) as { launch: Record<string, unknown> };
-    expect(settings.launch.rex_here).toBe(false);
+    expect(settings.launch.rex_here).toBeUndefined();
     expect(w.fake.calls).toEqual([]);
     expect(w.fake.connections().opened).toBe(0);
   });

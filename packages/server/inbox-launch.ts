@@ -1283,7 +1283,7 @@ ${result.text}`);
           // computer (the row's Rex choice shows then, or while it is the choice); `rex_agents` the ones that can.
           // Rex is asked only for this computer's own settings answer (`rexHere`): never for a routine's tick or another reader.
           start_in: config().startIn,
-          rex_here: rexHere && options.rex?.appAttached() === true,
+          ...(rexHere ? { rex_here: options.rex?.appAttached() === true } : {}),
           rex_agents: hostList.filter((host) => host.rexCommand).map((host) => host.agent),
         }
       : { enabled: false, full_permissions: false }),

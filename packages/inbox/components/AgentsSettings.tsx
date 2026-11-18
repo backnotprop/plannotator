@@ -651,7 +651,8 @@ export function AgentsSettings({
 }) {
   const [launchState, setLaunchState] = useState(launch ?? null);
   const [launchBusy, setLaunchBusy] = useState(false);
-  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
+  // `rex_here` comes only from this pane's own read (the window's settings model never asks Rex): kept across the model's changes.
+  useEffect(() => setLaunchState((was) => (launch ? { ...launch, rex_here: was?.rex_here } : null)), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir, launch?.settings_file]);
   // Shown: the switches as they stand now (full permissions never set: it follows the login shell, read again here).
   useEffect(() => {
     if (!launch) return;
@@ -719,7 +720,7 @@ export function AgentsSettings({
           <>
             In Rex, each new agent runs in its own tab of a Rex session for its project, and keeps running there after the Inbox closes. {listWords(rexNames)} can start in Rex
             {notRexNames.length > 0 ? `; ${listWords(notRexNames)} always ${notRexNames.length === 1 ? 'starts' : 'start'} in the background.` : '.'}
-            {inRex && !launchState.rex_here && (
+            {inRex && launchState.rex_here === false && (
               <span className="block" data-launch-rex-away="">
                 Rex isn't open on this computer now, so new agents start in the background until it is.
               </span>
