@@ -2485,6 +2485,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         tapStart = null;
         return;
       } else if (event instanceof KeyboardEvent && (event.key === 'Enter' || event.key === ' ')) markExpanded(itemId);
+      if (fetchFileContentRef.current && !semanticEnabledRef.current) return;
       const rendered = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId);
       if (rendered?.type !== 'diff' || rendered.item.fileDiff.isPartial !== true) return;
       rendered.instance.expandHunk(0, 'up', 0);

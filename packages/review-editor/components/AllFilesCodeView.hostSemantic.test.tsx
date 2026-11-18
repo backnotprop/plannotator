@@ -37,6 +37,8 @@ mock.module('@pierre/diffs', () => ({
   processFile: (patch: string) => ({ name: 'whole', type: 'change', hunks: [], splitLineCount: 2, unifiedLineCount: 2, isPartial: false, deletionLines: [], additionLines: [], patch }),
 }));
 
+let renderedItems: unknown[] = [];
+
 mock.module('@pierre/diffs/react', () => ({
   CodeView: React.forwardRef(function MockCodeView(
     props: { initialItems?: Array<{ id: string; type: string; fileDiff: Record<string, unknown> }>; className?: string; containerRef?: React.Ref<HTMLDivElement> },
@@ -61,7 +63,7 @@ mock.module('@pierre/diffs/react', () => ({
       getSelectedLines: () => null,
       clearSelectedLines: () => {},
       getInstance: () => ({
-        getRenderedItems: () => [],
+        getRenderedItems: () => renderedItems,
         getScrollTop: () => 0,
         getScrollHeight: () => 0,
         getHeight: () => 0,
@@ -204,6 +206,7 @@ afterEach(async () => {
   document.body.innerHTML = '';
   lastCodeViewProps = null;
   items = new Map();
+  renderedItems = [];
 });
 
 afterAll(() => {
@@ -533,6 +536,22 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
       expect((await headerOf('a.ts')).querySelector<HTMLElement>('[data-semantic-note]')?.dataset.semanticNote).toBe(shown);
     });
   }
+
+  test.skipIf(!hasDom)('with the switch off, the pointer over an arrow or its label reads nothing', async () => {
+    configStore.set('diffSemantic', false);
+    const { client } = fakeClient(moved);
+    const { read, reads } = hostReader();
+    await mount([changed('a.ts')], { semDiffClient: client, fetchFileContent: read }, 40);
+    const options = lastCodeViewProps?.options as { loadDiffFiles: (fileDiff: { name: string }) => Promise<unknown> };
+    const [item] = [...items.values()];
+    renderedItems = [{ id: item!.id, type: 'diff', item: { fileDiff: { ...item!.fileDiff, isPartial: true } }, instance: { expandHunk: () => void options.loadDiffFiles({ name: 'a.ts' }) } }];
+    await pressArrow('pointermove');
+    await pressArrow('pointermove', 'data-unmodified-lines');
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+    expect(reads).toEqual([]);
+  });
 
   test.skipIf(!hasDom)('a host that passes no client reads nothing on mount', async () => {
     const { read, reads } = hostReader();
