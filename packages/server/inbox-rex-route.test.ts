@@ -62,7 +62,15 @@ function scriptedTailscale(): TailscaleRunner {
   };
 }
 
+/**
+ * The Inbox's sessions clock. A fresh Inbox counts every session as there for its first minute, so it moves on ten
+ * minutes after the start (as inbox-reply-launch-route.test.ts): the asker a launch answers has ended, as a real one has.
+ */
+const clock = { ahead: 0 };
+const sessionsNow = () => Date.now() + clock.ahead;
+
 async function world(options: { remote: boolean }) {
+  clock.ahead = 0;
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-rex-")));
   roots.push(root);
   const dataDir = join(root, "data");
@@ -84,10 +92,12 @@ async function world(options: { remote: boolean }) {
     phones: false,
     tailscale: scriptedTailscale(),
     readProjectRepo: async () => null,
+    sessionsNow,
     launchHosts: () => [launchHost.host],
     rex: createInboxRex({ socketPath: fake.socketPath, readTimeoutMs: 1_000 }),
   });
   servers.push(server);
+  clock.ahead = 10 * 60_000;
   const client = new Client({ name: "inbox-rex-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
   clients.push(client);
@@ -116,7 +126,7 @@ async function world(options: { remote: boolean }) {
       headers: { Origin: base, "Content-Type": "application/json" },
       body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k1", words: "This one.", questions: [], to: { launch: { agent: FAKE, project_id: folder.id } } }),
     });
-    expect(sent.status).toBe(200);
+    expect({ status: sent.status, body: sent.status === 200 ? null : await sent.text() }).toEqual({ status: 200, body: null });
     const id = ((await sent.json()) as { reply: { id: string } }).reply.id;
     let session: string | null = null;
     for (let i = 0; i < 400 && !session; i++) {
