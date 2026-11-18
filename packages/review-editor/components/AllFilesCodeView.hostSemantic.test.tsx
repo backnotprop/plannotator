@@ -389,10 +389,10 @@ describe('AllFilesCodeView semantic diffs through a host reader', () => {
 
   for (const [gesture, shown] of [
     ['pointermove', 'semantic'],
-    ['pointerdown', 'semantic'],
+    ['pointerdown', 'off'],
     ['click', 'off'],
     ['Enter', 'off'],
-    ['touch that scrolls', 'semantic'],
+    ['touch that scrolls', 'off'],
     ['tap', 'off'],
   ] as const) {
     test.skipIf(!hasDom)(`an arrow met by ${gesture} before the note arrives: the note ends ${shown === 'semantic' ? 'shown by itself' : 'offered, the opened lines left alone'}`, async () => {

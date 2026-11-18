@@ -851,7 +851,6 @@ const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const EMPTY_CONTEXT_NOTES: readonly ContextNoteAnchor[] = [];
 const noopAIMarkerClick = () => {};
 
-
 function stickyHeaderHeight(node: HTMLElement | undefined): number {
   return node?.shadowRoot?.querySelector('[data-diffs-header]')?.getBoundingClientRect().height || FILE_HEADER_HEIGHT;
 }
@@ -2130,9 +2129,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   );
 
   const semanticWasEnabledRef = useRef(semanticEnabled);
-  const semanticAskedForRef = useRef<string | null>(null);
+  const semanticAskedForRef = useRef(new Set<string>());
   useEffect(() => {
-    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = fileSetKeyRef.current;
+    if (semanticEnabled && !semanticWasEnabledRef.current) semanticAskedForRef.current = new Set([...itemNodeRef.current.keys()].map((itemId) => `${fileSetKeyRef.current}::${itemId}`));
     semanticWasEnabledRef.current = semanticEnabled;
     for (const itemId of semDiffsRef.current.keys()) showSemantic(itemId, semanticEnabled);
     for (const itemId of semStateRef.current.keys()) if (!semDiffsRef.current.has(itemId) || itemId === editSession.editingItemIdRef.current) refreshItem(itemId);
@@ -2155,7 +2154,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   });
 
   const swapsUnseen = useStableCallback((itemId: string) => {
-    if (!engagedRef.current || semanticAskedForRef.current === fileSetKeyRef.current) return true;
+    if (!engagedRef.current || semanticAskedForRef.current.has(`${fileSetKeyRef.current}::${itemId}`)) return true;
     const scroller = scrollRef.current;
     if (!scroller) return false;
     const page = scrollsWithPageRef.current ? pageScrollRef.current?.page ?? null : scroller;
