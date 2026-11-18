@@ -27,6 +27,7 @@ import { inboxHasUnsent, inboxRowArchived } from '@plannotator/core/inbox-types'
 import { rowLabel, ScheduledBadge, scheduledLook, scheduledOf, ScheduledTile, useScheduled } from '../scheduled/rowLook';
 import { HeldNoticeLine, HeldNoticeSaid } from './HeldNoticeLine';
 import { listBarShows } from '../listNewState';
+import { useShowHold } from '../holdView';
 import { DraftLabel, rowUnsent, unsentWords } from './DraftLabel';
 import { ThreadRowMenu, useRowDragA11y } from './RowMenu';
 import type { RowMenuAction } from '../rowMenu';
@@ -1347,10 +1348,10 @@ export function InboxList(props: InboxListProps) {
     return () => fonts.removeEventListener('loadingdone', refit);
   }, [listRef]);
   const lit = (row: InboxListRow) => props.lit?.has(row.thread_id) === true;
-  // The list's two signs of news (listNewState.ts): the bar while threads are held, the pill (ListNewPill) only after Show.
   const heldBar = listBarShows(props.notice?.count ?? 0);
-  /** Show, from the "N new" line. */
+  const holdShow = useShowHold(bodyRef); // Show never moves the reader (holdView.ts).
   const showNew = () => {
+    holdShow();
     // The groups the rows land in open with the press (the owner, 2026-11-08), in the same render as the
     // rows: closed, they would come in out of sight and Show would seem to do nothing.
     const lands = props.notice?.lands;
@@ -1672,7 +1673,6 @@ export function InboxList(props: InboxListProps) {
           </LazyRowTips.Provider>
         </ThreadRowMenu>
       {pick.sheet}
-      {/* The bar's words for a screen reader, once per count (HeldNoticeLine.tsx): never on a scroll. */}
       <HeldNoticeSaid count={heldBar ? props.notice!.count : 0} project={props.notice?.project ?? null} place={`${props.scope ?? ''}\n${props.title}`} />
       {props.reconnecting && (
         <p className="ib-relink" data-inbox-reconnecting="">
