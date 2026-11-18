@@ -18,6 +18,7 @@ import { FileRefCodeSpans } from '../../components/FileRefSpan';
 import { InlineReuseLayer } from '../../reuse';
 import { SentAnswers, ReplyActions } from '../../components/ReplyAnswers';
 import { SkillsLine } from '../../components/SkillsLine';
+import { PullDetailsLine } from '../../pulls/PullDetailsLine';
 import { HostMark } from '../../icons';
 import type { MessageBodyProps } from './types';
 import { NO_ANNOTATIONS, noop } from '../../thread/helpers';
@@ -58,7 +59,7 @@ export function MessageBody({
   contextNotes,
   onTryPrototype,
 }: MessageBodyProps) {
-  const { skills, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
+  const { skills, pullDetails, actionsSent, replyParts, ownReply, replyFileList, shown, noteBlocks, noteAtLine, notesRef, restShown, feedbackShown, blocks, restBlocks, feedbackBlocks } = useBodyText({ message, sentActions, sentAnswers, replyFiles, projectRoot, contextNotes });
   const refRepo = useRefRepo(repo);
   // The body's pictures are drawn whole in a box; a very long one shows its top with "Show all"
   // (images.ts fitMessageImage, inbox.css). A click on a picture still opens it in the viewer.
@@ -200,6 +201,7 @@ export function MessageBody({
       {actionsSent && <ReplyActions actions={sentActions!} sent onJump={onJumpQuestion} />}
       {replyParts && restShown && <div data-sent-rest="">{readOnlyViewer(restBlocks, restShown)}</div>}
       {feedbackShown && <div data-reply-feedback="">{readOnlyViewer(feedbackBlocks, feedbackShown)}</div>}
+      {pullDetails && <PullDetailsLine details={pullDetails} />}
       {skills && <SkillsLine split={skills} />}
       {tagLabels && (
         <div className="ib-tg-marks" ref={tagLayerRef} aria-hidden="true" data-tag-marks="">

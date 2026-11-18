@@ -586,7 +586,7 @@ test('the guided review\'s bar holds one Split / Unified button and the Diff dis
   // The gear: code review's popover without the two rows that need the repository; Wrap reaches config.json.
   await controls.getByRole('button', { name: 'Diff display options' }).click();
   const popup = page.locator('[data-diff-display-popup]');
-  await expect(popup.getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds']);
+  await expect(popup.getByRole('switch')).toHaveText(['Wrap long lines', 'Line numbers', 'Backgrounds', 'Show moved & renamed code']);
   await popup.getByRole('switch', { name: 'Wrap long lines' }).click();
   await expect.poll(() => optionsOnDisk().overflow).toBe('wrap');
   await shot('4.4-guide-diff-display-popover');
@@ -728,10 +728,10 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
 test('a guided review whose blobs are nowhere: the first click takes the arrows away, and nothing logged', async () => {
   const { page, claude } = world;
   const patch = [
-    'diff --git a/src/gone.ts b/src/gone.ts',
+    'diff --git a/src/gone.txt b/src/gone.txt',
     `index ${'1'.repeat(10)}..${'2'.repeat(10)} 100644`,
-    '--- a/src/gone.ts',
-    '+++ b/src/gone.ts',
+    '--- a/src/gone.txt',
+    '+++ b/src/gone.txt',
     '@@ -10,3 +10,3 @@',
     ' keep',
     '-old',
@@ -745,10 +745,10 @@ test('a guided review whose blobs are nowhere: the first click takes the arrows 
     subject: 'Gone blobs',
     patch,
     body: 'A file whose blobs this clone does not have.',
-    guide: { title: 'Gone', intent: 'Gone.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/gone.ts', summary: 'One edit.' }] }] },
+    guide: { title: 'Gone', intent: 'Gone.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/gone.txt', summary: 'One edit.' }] }] },
   } as never);
   await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
-  const shell = page.locator('[data-guide-file-shell="src/gone.ts"]');
+  const shell = page.locator('[data-guide-file-shell="src/gone.txt"]');
   await expect(shell.locator('[data-column-number]').first()).toBeVisible({ timeout: 30_000 });
   // Whether a blob is there is known only by asking, and nobody asks before an arrow is opened.
   const answered = page.waitForResponse((response) => response.url().includes('/guide/file'));

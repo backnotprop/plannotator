@@ -19,6 +19,7 @@ import { errorToast } from './toastError';
 import type { InboxToastModel } from './components/Toast';
 import type { BulkAction } from './rowPicks';
 import type { CombinesTracker } from './components/useCombines';
+import { hideThreadsWithUndo } from './pulls/hiddenPulls';
 
 /** How many threads' writes are on their way at once. */
 const AT_ONCE = 6;
@@ -76,6 +77,7 @@ const WORDS: Record<BulkAction, (n: string) => string> = {
   unstar: (n) => `Unstarred ${n}`,
   'priority-add': (n) => `Added ${n} to Priority`,
   'priority-remove': (n) => `Removed ${n} from Priority`,
+  'hide-pulls': (n) => `Hid the pull requests of ${n}`,
 };
 
 /**
@@ -259,8 +261,17 @@ export function bulkWrites(host: BulkHost) {
     );
   };
 
+  /**
+   * Hide the picked threads' open PRs (pulls/hiddenPulls.ts): one write, one toast with Undo (which shows exactly those
+   * PRs again); the threads leave the list once it reads again.
+   */
+  const hidePulls = async (rows: readonly InboxListRow[]) => {
+    const ids = rows.map((row) => row.thread_id);
+    if (await hideThreadsWithUndo(ids, (toast) => showToast(toast))) await afterWrite(ids);
+  };
+
   // The window's toasts, live region and writes for the picks' other actions (Combine's tracker, useCombines.ts).
-  return { archive, snooze, markRead, markUnread, star, priority, host };
+  return { archive, snooze, markRead, markUnread, star, priority, hidePulls, host };
 }
 
 /** With the Combines the window follows (useCombines.ts), which the picks' Combine… starts. */

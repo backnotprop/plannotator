@@ -41,6 +41,7 @@ import {
 import { inboxFileQuestionTwin } from "@plannotator/core/inbox-file-question-twin";
 import { inboxTwinChoicesRefusal } from "@plannotator/core/inbox-choice-twins";
 import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
+import type { InboxReviewAnchor, InboxReviewBatch, InboxReviewLive } from "@plannotator/core/review-threads";
 import { inboxRowPreview, inboxRowPreviewWords } from "@plannotator/core/inbox-folding";
 import {
   checkInboxActionResult,
@@ -109,7 +110,7 @@ import {
   type InboxRowDelivery,
 } from "@plannotator/core/inbox-types";
 import { INBOX_COMMENT_PICTURES_MAX, inboxCommentPicture, inboxCommentPictureUploads } from "@plannotator/core/inbox-types";
-import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
+import { inboxListSections, inboxRowDraftOnly, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxActivity, type InboxActivitySource } from "./activity";
 import { inboxAckLine, inboxStopNoticeId, inboxStopNoticeReply, type InboxWakeContext } from "./connection";
@@ -350,6 +351,8 @@ export interface InboxAnswerEntry {
 
 export interface InboxReplyInput {
   words?: string;
+  review_anchor?: InboxReviewAnchor;
+  review_batch?: InboxReviewBatch;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
@@ -2503,7 +2506,7 @@ export class InboxStore {
     // (New), not Sent; `sent` stays on the row for its delivery tick.
     const section = inboxSectionOf(isInboxActionReport(lastReal) && unseen > 0 ? { ...facts, sent: null } : facts);
     // In New only for the person's own unsent words or comments: not bold.
-    const draftOnly = section === "new" && unseen === 0 && !facts.answered_not_sent && inboxHasUnsent(unsent);
+    const draftOnly = inboxRowDraftOnly(section, unseen, facts.answered_not_sent, unsent);
     return { ...facts, ...(sessionEnded && section !== "quiet" ? { session_ended: true } : {}), section, unread: inboxRowUnread(section, unseen, draftOnly) };
   }
 
@@ -5161,6 +5164,8 @@ export class InboxStore {
       ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
       ...(quoted ? { quote: quoted.quote } : {}),
+      ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
+      ...(input.review_batch ? { review_batch: input.review_batch } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer
@@ -6663,6 +6668,7 @@ export class InboxStore {
     const tag = owner ? null : tagOf(message, session);
     if (tag) return !tag.delivery && options.tags !== false;
     if (message.delivery || !owner) return false;
+    if (message.review_batch && !message.review_batch.lead) return false;
     // A Tidy note in a thread other than the one carrying the session's wake is never delivered.
     if (message.tidy && !message.tidy.wake) return false;
     // A 👍 taken back before it went is never delivered.
@@ -7237,6 +7243,9 @@ export class InboxStore {
     rows_ask?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
+    review_live?: InboxReviewLive;
+    review_anchor?: InboxReviewAnchor;
+    review_batch?: InboxReviewBatch;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
@@ -7278,6 +7287,9 @@ export class InboxStore {
       ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.rows_ask === true ? { rows_ask: true as const } : {}),
       ...(input.launch ? { launch: input.launch } : {}),
+      ...(input.review_live ? { review_live: input.review_live } : {}),
+      ...(input.review_anchor ? { review_anchor: input.review_anchor } : {}),
+      ...(input.review_batch ? { review_batch: input.review_batch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };
@@ -7329,6 +7341,42 @@ export class InboxStore {
   }
 
   /** The thread the person started with this idempotency key, for a replayed Send. */
+  reviewLiveThread(projectId: string, key: string): InboxMessage | null {
+    let found: InboxMessage | null = null;
+    for (const message of this.messages.values()) {
+      if (message.project_id !== projectId || message.thread_id !== message.id || message.review_live?.key !== key) continue;
+      if (message.resolved_at) continue;
+      if (!found || message.created_at > found.created_at) found = message;
+    }
+    return found;
+  }
+
+  reviewAnchorAbove(message: InboxMessage): InboxReviewAnchor | null {
+    let at = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    for (let hops = 0; at && hops < 200; hops++) {
+      if (at.review_anchor) return at.review_anchor;
+      if (at.review_batch?.lead) return null;
+      at = at.reply_to ? this.messages.get(at.reply_to) : undefined;
+    }
+    return null;
+  }
+
+  reviewBatchOf(message: InboxMessage): InboxMessage[] {
+    const batch = message.review_batch;
+    if (!batch?.lead) return [];
+    return this.threadMessages(message.thread_id).filter((m) => m.review_batch?.id === batch.id && !m.review_batch.lead && m.review_anchor);
+  }
+
+  setReviewResolved(messageId: string, resolved: boolean): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message || !message.review_anchor) throw new InboxError("message_not_found", `No review comment ${messageId}.`);
+    if (!!message.review_resolved === resolved) return message;
+    const at = this.stamp();
+    const next: InboxMessage = { ...message, review_resolved: resolved ? { at } : null };
+    this.appendMessage(next, at);
+    return next;
+  }
+
   personThreadByKey(key: string): InboxMessage | null {
     for (const message of this.messages.values()) if (message.started_by_person && message.idempotency_key === key) return message;
     return null;
@@ -7457,7 +7505,7 @@ export class InboxStore {
    */
   settleLaunch(
     messageId: string,
-    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
+    outcome: { to: InboxAddressee; session_ref: string; rex?: InboxLaunchRecord["rex"] } | { error: InboxLaunchError | null; rex?: InboxLaunchRecord["rex"] } | { deleted_at: string } | { clone: InboxLaunchClone; made_inode?: string | null },
   ): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
@@ -7468,9 +7516,9 @@ export class InboxStore {
       "clone" in outcome
         ? { ...message, launch: { ...(outcome.made_inode === null ? unmade : message.launch), clone: outcome.clone, ...(outcome.made_inode ? { made_folder: true as const, made_inode: outcome.made_inode } : {}) } }
         : "to" in outcome
-        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null } }
+        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null, ...(outcome.rex ? { rex: outcome.rex } : {}) } }
         : "error" in outcome
-          ? { ...message, launch: { ...message.launch, error: outcome.error } }
+          ? { ...message, launch: { ...message.launch, error: outcome.error, ...(outcome.rex ? { rex: outcome.rex } : {}) } }
           : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };
     this.appendMessage(next, this.stamp());
     return next;
@@ -7512,6 +7560,11 @@ export class InboxStore {
   scheduledThread(id: string): InboxScheduledThread | null {
     const record = this.scheduledById.get(id);
     return record && !record.deleted_at ? record : null;
+  }
+
+  /** A routine was ever made here, deleted ones included (the Routines intro is for someone who never met them). */
+  scheduledEverMade(): boolean {
+    return this.scheduledById.size > 0;
   }
 
   /** A deleted routine, which the window's Undo brings back. */
@@ -8882,6 +8935,25 @@ export class InboxStore {
     const added = threads.filter((thread) => !card.threads.includes(thread));
     const tagged = added.length > 0 && this.cardWire(next).initiative === null ? this.threadTaggedInitiative(added) : null;
     if (tagged) return this.setCardInitiative(id, tagged, { kind: "person" });
+    return next;
+  }
+
+  /**
+   * The person took a link off a card (the opened card's Remove): the ref with
+   * that `url`. Its PRs are read again from what is left (`prs`, for an older
+   * Inbox). A link already gone changes nothing, so a retry after a lost
+   * answer writes no second line. The history says "Removed …".
+   */
+  unlinkCardRef(id: string, url: unknown): InboxCard {
+    const card = this.cards.get(id);
+    if (!card) throw new InboxError("card_not_found", `No card ${id}.`);
+    if (typeof url !== "string" || !url.trim()) throw new InboxError("validation_error", "url: the address of the link to remove.", { field: "url" });
+    const refs = inboxCardRefsOf(card);
+    const kept = refs.filter((ref) => ref.url !== url.trim());
+    if (kept.length === refs.length) return card;
+    const at = this.stamp();
+    const next: InboxCard = { ...card, refs: kept, prs: this.prsOf(kept), heard_at: at, heard_by: { kind: "person" } };
+    this.appendCard(next, at);
     return next;
   }
 

@@ -49,7 +49,7 @@ function fixture() {
   git(target, "checkout", "-qb", "selected-branch");
   git(target, "remote", "add", "origin", "https://github.com/example/selected.git");
   mkdirSync(dataDir);
-  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ reviewAnalysis: { semanticDiff: false, callFlow: false } }));
+  writeFileSync(join(dataDir, "config.json"), JSON.stringify({ reviewAnalysis: { callFlow: false } }));
   return { root, caller, target, dataDir };
 }
 

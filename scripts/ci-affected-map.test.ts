@@ -31,7 +31,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   CORE_GUARDS, GATES, GATE_JOB, HEAVY_FAIL_SAFE, JOB_MAP, KNOWN_TOP, RUN_ALL, SMOKE_ROOTS, buildGraph, builtPathRefs, ciChanges, decideGates, gatePaths,
-  knownKind, listsCheckout, plan, preloadClosure, repoRoot, semgrepPlan, type Change, type Graph, type Node, type PathRead,
+  knownKind, listsCheckout, nativeAppFile, pathReasons, plan, preloadClosure, repoRoot, semgrepPlan, type Change, type Graph, type Node, type PathRead,
 } from './ci-affected';
 import { HEAVY_LANES, domList, laneNames } from './ci-test-lane';
 
@@ -78,7 +78,8 @@ describe('every job', () => {
           expect(paths, `${file} has a PR path list`).toContain(`.github/workflows/${file}`);
           expect(cond, id).not.toContain('labels');
         } else if (kind === 'no-pr') {
-          expect(wf.on.pull_request, file).toBeUndefined();
+          // No PR trigger, or a job whose `if` names only events that are not a PR.
+          if (wf.on.pull_request !== undefined) expect(cond, id).toMatch(/^\$\{\{ github\.event_name == '(schedule|workflow_dispatch)'( \|\| github\.event_name == '(schedule|workflow_dispatch)')* \}\}$/);
         } else if (kind === 'tag') {
           expect(cond, id).toContain("startsWith(github.ref, 'refs/tags/v')");
         }
@@ -157,16 +158,18 @@ describe('rules', () => {
   test('every rule glob matches a tracked file', () => {
     const globs = new Set([
       ...RUN_ALL.map((r) => r.glob), ...HEAVY_FAIL_SAFE, ...Object.values(GATES).flat().flatMap(gatePaths),
-      ...['release.yml', 'inbox-pi.yml', 'inbox-claude-code.yml', 'relay.yml'].flatMap((f) => workflow(f).on.pull_request?.paths ?? []),
+      ...['release.yml', 'inbox-pi.yml', 'inbox-claude-code.yml', 'relay.yml', 'mobile-ios.yml'].flatMap((f) => workflow(f).on.pull_request?.paths ?? []),
     ]);
     const dead = [...globs].filter((g) => !tracked.some((f) => new Bun.Glob(g).match(f)));
-    // The picker is in the tree once this lands; until then the guard runs from a branch.
-    expect(dead.filter((g) => g !== 'scripts/ci-affected.ts')).toEqual([]);
+    // The picker is in the tree once this lands; until then the guard runs from a branch. The app contract's
+    // generated Swift arrives with the contract kit (docs/agent-guides/mobile.md); mobile-ios.yml names it already.
+    expect(dead.filter((g) => g !== 'scripts/ci-affected.ts' && g !== 'apps/mobile/contract/generated/swift/**')).toEqual([]);
   });
 
   test('every tracked top-level entry and every tracked file kind is known to the picker', () => {
     expect([...new Set(tracked.map((f) => f.split('/')[0]!))].filter((t) => !KNOWN_TOP.includes(t))).toEqual([]);
-    expect(tracked.filter((f) => !knownKind(f))).toEqual([]);
+    // The native app's files are left out of every plan instead (nativeAppFile).
+    expect(tracked.filter((f) => !knownKind(f) && !nativeAppFile(f))).toEqual([]);
   });
 
   test('the test-file gates name files the workflow runs', () => {
@@ -315,6 +318,77 @@ describe('plan', () => {
   });
 });
 
+describe('the native app (apps/mobile)', () => {
+  const lanesOf = (p: ReturnType<typeof plan>) => ({ mode: p.mode, tests: p.tests, unit: p.unit, dom: p.dom, gates: p.gates, semgrep: p.semgrep });
+
+  test('a PR that changes only the app\'s Swift, Xcode or Gradle files plans no lane, no Checks and no gated job', () => {
+    for (const paths of [['apps/mobile/ios/App.swift'], ['apps/mobile/ios/Inbox.xcodeproj/project.pbxproj', 'apps/mobile/ios/App/Assets.xcassets/AppIcon.appiconset/Contents.json', 'apps/mobile/android/app/build.gradle.kts', 'apps/mobile/android/app/src/main/res/values/strings.xml']]) {
+      // docsOnly false: the picker decides this alone, whatever scripts/ci-docs-only.sh says.
+      const p = run(paths.map((f) => ch(f, 'A')));
+      expect(p.mode, paths[0]).toBe('docs');
+      expect(p.tests).toEqual([]);
+      expect([...p.unit.lanes, ...p.dom.lanes]).toEqual([]);
+      expect(p.gates.some((d) => d.run)).toBe(false);
+      expect(pathReasons(paths.map((f) => ch(f))), 'the other workflows\' gates').toEqual([]);
+    }
+    expect(Object.values(Object.fromEntries(decideGates('security.yml', 'subset', [], [ch('apps/mobile/ios/App.swift')]).map((d) => [d.key, d.run])))).toEqual([false, false]);
+    expect(semgrepPlan('subset', [ch('apps/mobile/ios/App.swift'), ch('apps/mobile/ios/ci.sh')]), 'Semgrep still scans its shell').toMatchObject({ mode: 'files', files: ['apps/mobile/ios/ci.sh'] });
+  });
+
+  test('the app\'s files add nothing to an ordinary change, and its code files keep the ordinary rules', () => {
+    expect(lanesOf(run([ch('packages/a/src.ts'), ch('apps/mobile/ios/App.swift')]))).toEqual(lanesOf(run([ch('packages/a/src.ts')])));
+    for (const f of ['apps/mobile/ios/tool.ts', 'apps/mobile/ios/x.test.ts', 'apps/mobile/ios/package.json', 'apps/mobile/ios/ci.sh', 'apps/mobile/ios/tsconfig.json', 'apps/mobile/ios/bunfig.toml', 'apps/mobile/ios/tool.py', 'apps/mobile/ios/x.yml', 'apps/mobile/ios/InboxCore/Package.resolved', 'apps/mobile/android/build.sh', 'apps/mobile/android/x.json']) {
+      expect(nativeAppFile(f), f).toBe(false);
+    }
+  });
+
+  test('a file of another kind under the app keeps the ordinary rules: skipping is the risky direction', () => {
+    expect(run([ch('apps/mobile/ios/x.sh', 'A')]).mode, 'a shell script alone').not.toBe('docs');
+    expect(run([ch('apps/mobile/ios/App.swift', 'A')]).mode, 'a Swift file alone').toBe('docs');
+    expect(run([ch('apps/mobile/ios/tsconfig.json')]).mode, 'a tsconfig under ios/').toBe(run([ch('packages/x/tsconfig.json')]).mode);
+    expect(run([ch('apps/mobile/ios/InboxCore/Package.resolved')]).mode, 'a Swift lockfile: data, not skipped and not everything').toBe('subset');
+    expect(run([ch('apps/mobile/other/Thing.swift')]).mode, 'Swift outside ios/ and the contract').toBe('all');
+  });
+
+  test('a contract file reaches only the tests that name it; generated Swift and the contract number are data', () => {
+    const g = graph();
+    const data = ['apps/mobile/contract/vectors/x.json', 'apps/mobile/contract/generated/swift/Wire.swift', 'apps/mobile/contract/VERSION'];
+    g.graph['tests/mobile-x.test.ts'] = N([], { refs: data });
+    g.files.push('tests/mobile-x.test.ts', ...data);
+    for (const f of data) {
+      const p = plan(g, { changes: [ch(f)], docsOnly: false });
+      expect(p.mode, f).toBe('subset');
+      expect(p.tests.filter((t) => t.why !== 'scanner').map((t) => t.path), f).toEqual(['tests/mobile-x.test.ts']);
+    }
+  });
+
+  test('no Bun code reads the app\'s ios/ or android/ files, so dropping them from a plan skips no test', () => {
+    const r = Bun.spawnSync(['git', 'grep', '-l', '-E', 'apps/mobile/(ios|android)', '--', '*.ts', '*.tsx', '*.js', '*.mjs', '*.cjs', ':!scripts/ci-affected*', ':!scripts/ci-docs-only*'], { cwd: repoRoot });
+    expect(r.stdout.toString().split('\n').filter(Boolean)).toEqual([]);
+  });
+
+  test('mobile-ios.yml stays apart: its own paths, a group per job, a pinned macOS, and no other workflow builds the app', () => {
+    const wf = workflow('mobile-ios.yml') as Workflow & { concurrency?: unknown; on: Record<string, { paths?: string[]; branches?: string[] } | null> };
+    const paths = ['apps/mobile/ios/**', 'apps/mobile/contract/generated/swift/**', '.github/workflows/mobile-ios.yml'];
+    expect(wf.on.pull_request).toEqual({ branches: ['main'], paths });
+    expect(wf.on.push).toEqual({ branches: ['main'], paths });
+    // No workflow-wide group: a pull request's run (its job skipped or not) never cancels the nightly.
+    expect(wf.concurrency).toBeUndefined();
+    const jobs = wf.jobs as Record<string, Job & { 'timeout-minutes'?: number; concurrency?: unknown }>;
+    expect(jobs.ios!.concurrency, 'a push cancels only its own branch\'s older run').toEqual({ group: 'mobile-ios-${{ github.ref }}', 'cancel-in-progress': true });
+    expect(jobs['ios-nightly']!.concurrency, 'the nightly never cancels and is never cancelled').toEqual({ group: 'mobile-ios-nightly', 'cancel-in-progress': false });
+    expect(Object.values(jobs).map((j) => j['runs-on'])).toEqual(['macos-15', 'macos-15']);
+    expect(jobs.ios!['timeout-minutes']).toBe(20);
+    expect(jobs['ios-nightly']!['timeout-minutes']).toBe(60);
+    expect(jobs.ios!.if).toContain("vars.MOBILE_CI != 'nightly'");
+    for (const file of files.filter((f) => f !== 'mobile-ios.yml')) {
+      const text = readFileSync(join(WF_DIR, file), 'utf8');
+      expect(text, file).not.toContain('apps/mobile');
+      expect(text, file).not.toMatch(/xcodebuild|swift (build|test)/);
+    }
+  });
+});
+
 describe('paths built from parts', () => {
   const repo = '/r';
   const files = new Set(['packages/review-editor/App.tsx', 'packages/shared/inbox/connection.ts', 'packages/ui/themes/dark.css', 'packages/ui/themes/light.css', 'packages/x/a/package.json', 'packages/x/b/package.json', 'tests/fixtures/x.ts']);
@@ -447,6 +521,23 @@ describe('the real graph', () => {
     const smoke = (path: string) => decideGates('browser-smoke.yml', 'subset', [], [ch(path)], undefined, g)[0]!.run;
     expect(smoke('apps/hook/server/cli.ts')).toBe(true);
     expect(smoke('apps/marketing/src/pages/index.astro')).toBe(false);
+  });
+
+  test('an ordinary Inbox change plans exactly as before beside an app change; an app change alone plans nothing', () => {
+    const keep = (p: ReturnType<typeof plan>) => ({ mode: p.mode, tests: p.tests, unit: p.unit, dom: p.dom, gates: p.gates });
+    const inbox = plan(g, { changes: [ch('packages/core/inbox-types.ts')], docsOnly: false });
+    expect(inbox.mode).toBe('subset');
+    expect(keep(plan(g, { changes: [ch('packages/core/inbox-types.ts'), ch('apps/mobile/ios/App.swift', 'A')], docsOnly: false }))).toEqual(keep(inbox));
+    const app = plan(g, { changes: [ch('apps/mobile/ios/App.swift', 'A')], docsOnly: false });
+    expect([app.mode, app.tests.length, app.unit.lanes.length, app.dom.lanes.length]).toEqual(['docs', 0, 0, 0]);
+  });
+
+  test("the app contract's check runs for a wire change, not for the window's or the shared UI's code", () => {
+    // Picked at all (a tree-scanning pick would run it on every pull request).
+    const picks = (path: string) => plan(g, { changes: [ch(path)], docsOnly: false }).tests.some((t) => t.path === 'tests/mobile-vectors.test.ts');
+    // A file the schema reaches only by `import type` too (scripts/mobile/schema.ts SCHEMA_SOURCES).
+    for (const wire of ['packages/core/inbox-wire-models.ts', 'packages/core/inbox-types.ts', 'packages/core/inbox-scheduled-types.ts']) expect(picks(wire), wire).toBe(true);
+    for (const window of ['packages/inbox/api.ts', 'packages/inbox/components/Thread.tsx', 'packages/ui/components/Viewer.tsx']) expect(picks(window), window).toBe(false);
   });
 
   test('the tree-scanning set includes the guards that read the whole tree', () => {

@@ -47,6 +47,22 @@ export function sessionsByProject(groups: readonly InboxAgentsGroup[] | null): {
   return { live, agents, heirs };
 }
 
+/**
+ * Whether two readings name the same sessions for the rows: the "several" projects, the heirs, and each project's
+ * agents by `session` and `label`, in order (all a row's slot reads, RowSlot.tsx). An agent's last poll moves on every
+ * read, and a row does not show it.
+ */
+function sameForRows(a: RowSessions, b: RowSessions): boolean {
+  if (a.several.size !== b.several.size || [...b.several].some((key) => !a.several.has(key))) return false;
+  if (a.heirs.size !== b.heirs.size || [...b.heirs].some(([key, heir]) => a.heirs.get(key) !== heir)) return false;
+  if (a.agents.size !== b.agents.size) return false;
+  for (const [key, list] of b.agents) {
+    const old = a.agents.get(key);
+    if (!old || old.length !== list.length || old.some((agent, i) => agent.session !== list[i]!.session || agent.label !== list[i]!.label)) return false;
+  }
+  return true;
+}
+
 let held = new Map<string, number>();
 let current: RowSessions = { several: new Set(), agents: new Map(), heirs: new Map() };
 let loaded = false;
@@ -58,7 +74,10 @@ function recompute(unseen: boolean): void {
   const { live, agents, heirs } = sessionsByProject(groups);
   held = nextSeveral(held, live, Date.now(), unseen || !loaded);
   loaded = true;
-  current = { several: new Set(held.keys()), agents, heirs };
+  const next: RowSessions = { several: new Set(held.keys()), agents, heirs };
+  // Nothing a row shows changed: the same object, so no row's slot draws again (every agent message reads the list).
+  if (sameForRows(current, next)) return;
+  current = next;
   for (const listener of listeners) listener();
 }
 

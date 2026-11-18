@@ -60,6 +60,8 @@ export interface InboxAgentLaunch {
   scratch: string | null;
   /** A routine's run (its root is a run divider). */
   scheduled?: boolean;
+  /** It runs in a Rex tab whose pane the Inbox never learned, so it offers no Stop. */
+  rex?: boolean;
 }
 
 /** One thread waiting on the person, by the session that owns it. */
@@ -186,13 +188,14 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       continue;
     }
     const run = launch.run;
-    const working = run === "starting" || run === "working" || run === "cloning" || known?.state === "working";
+    // Stopped by the person: its last polls may still say working for a while, which it no longer is.
+    const working = run === "starting" || run === "working" || run === "cloning" || (run !== "stopped" && known?.state === "working");
     const ended = !known?.live && (run === "failed" || run === "missing" || run === "clone_failed" || run === "clone_cancelled");
     bySession.set(session, {
       ...(known ?? { host: launch.host, project: evidence.projectById(launch.project_id), started_at: launch.started_at, last_seen_at: null }),
       id: launch.launch_id,
       session,
-      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch },
+      launch: { id: launch.launch_id, thread_id: launch.thread_id, started: launch.started, run, scratch: launch.scratch, ...(launch.rex ? { rex: true as const } : {}) },
       host: known?.host ?? launch.host,
       state: working ? "working" : ended ? "ended" : "idle",
       waiting: 0,
@@ -265,7 +268,9 @@ export function inboxPeerAgentsGroup(value: unknown, machine: string, cap = INBO
   const group = Array.isArray(value) ? value[0] : null;
   if (!group || typeof group !== "object" || !Array.isArray((group as InboxAgentsGroup).agents)) return null;
   const raw = group as Partial<InboxAgentsGroup>;
-  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map(inboxAgentNamesChecked);
+  // Where it lives in that machine's Rex, its pane's status and mark, as that machine's Inbox read them (checked as
+  // sent): never Show in Rex, which moves that machine's screen.
+  const agents = raw.agents!.filter((agent): agent is InboxAgent => !!agent && typeof agent === "object" && typeof agent.id === "string" && typeof agent.session === "string" && STATES.has(agent.state)).slice(0, cap).map((agent) => inboxAgentNamesChecked(agent));
   const count = (n: unknown, floor: number) => (typeof n === "number" && Number.isSafeInteger(n) && n >= floor ? n : floor);
   // Its agents' faces and given names live there (inbox-linked-marks): passed through as that machine sent them.
   const faces = raw.faces !== undefined ? { faces: Object.fromEntries(Object.entries(readInboxAgentFaces(raw.faces)).slice(-INBOX_AGENT_FACES_KEPT)), faces_rev: count(raw.faces_rev, 0) } : {};

@@ -33,6 +33,15 @@ describe("launchSpawnEnv", () => {
     const shell = { ...login, [CLAUDE_SKIP_PERMISSIONS_ENV]: "1" };
     expect(launchSpawnEnv(shell)[CLAUDE_SKIP_PERMISSIONS_ENV]).toBeUndefined();
   });
+
+  test("an Inbox started from a Rex pane never hands that pane to a background agent (it would wear the person's place and marks)", () => {
+    const pane = { REX_SESSION: "session:11111111-2222-4333-8444-555555555555", REX_BLOCK: "block:11111111-2222-4333-8444-666666666666", REX_SERVER: "/tmp/rex.sock" };
+    const fromRex = launchSpawnEnv({ ...login, ...pane, TERM_PROGRAM: "rex", TERM_PROGRAM_VERSION: "1.0" });
+    for (const name of ["REX_SESSION", "REX_BLOCK", "REX_SERVER", "TERM_PROGRAM", "TERM_PROGRAM_VERSION"]) expect(fromRex[name]).toBeUndefined();
+    expect(fromRex).toMatchObject({ PATH: "/usr/bin:/bin", HOME: "/Users/me" });
+    // Another terminal's own name stays.
+    expect(launchSpawnEnv({ ...login, TERM_PROGRAM: "Apple_Terminal", TERM_PROGRAM_VERSION: "455" })).toMatchObject({ TERM_PROGRAM: "Apple_Terminal", TERM_PROGRAM_VERSION: "455" });
+  });
 });
 
 describe("the person's Plannotator switches (LAUNCH_SHELL_SWITCHES)", () => {

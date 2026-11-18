@@ -86,6 +86,12 @@ type InboxPi = Pick<ExtensionAPI, "registerTool" | "sendUserMessage" | "getActiv
 	on(event: string, handler: (event: any, ctx?: any) => unknown): unknown;
 };
 
+/** OMP keeps the extension instance and emits a switch when it replaces the session. */
+function onInboxSessionChange(pi: InboxPi, update: (event: unknown, ctx: ExtensionContext) => void): void {
+	pi.on("session_start", update);
+	if (detectPiHost(pi) === "oh-my-pi") pi.on("session_switch", update);
+}
+
 export interface PiInboxOptions {
 	/** An "Ask this session" question is running (the session bridge hub). */
 	isAskActive: () => boolean;
@@ -198,7 +204,7 @@ function claimPiSessions(pi: InboxPi, dataDir: string): void {
 		if (claimed) releasePiSessionClaim(dataDir, claimed, process.pid, owner);
 		claimed = null;
 	};
-	pi.on("session_start", (_event, startCtx: ExtensionContext) => {
+	onInboxSessionChange(pi, (_event, startCtx) => {
 		let session: string;
 		try {
 			session = startCtx.sessionManager.getSessionId();
@@ -421,7 +427,7 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		if (event?.toolName === "bash") exportPiSessionProject(process.env, callCtx);
 	});
 
-	pi.on("session_start", (_event, startCtx: ExtensionContext) => {
+	onInboxSessionChange(pi, (_event, startCtx) => {
 		ctx = startCtx;
 		if (!activationSettled) {
 			activationSettled = true;
@@ -436,6 +442,8 @@ function registerPiInbox(pi: InboxPi, connection: InboxAgentConnection, options:
 		if (wake && wake.sessionId !== sessionId) {
 			wake.dispose();
 			wake = null;
+			runOpen = false;
+			endWaiting(new Error("the session changed"));
 		}
 		if (!wake && startCtx.hasUI) {
 			wake = new InboxWake(connection, sessionId, target);

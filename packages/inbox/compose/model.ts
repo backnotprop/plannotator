@@ -79,7 +79,7 @@ export function filterGroups(groups: readonly ComposeGroup[], query: string, mac
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) return [...groups];
   const matches = (target: ComposeTarget) => {
-    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', machine].join(' ').toLowerCase();
+    const hay = [hostLabel(target.host), target.host, target.label ?? '', target.project.name, target.project.root, target.last_thread?.subject ?? '', target.place?.line ?? '', machine].join(' ').toLowerCase();
     return words.every((word) => hay.includes(word));
   };
   return groups.map((group) => ({ ...group, sessions: group.sessions.filter(matches) })).filter((group) => group.sessions.length > 0);

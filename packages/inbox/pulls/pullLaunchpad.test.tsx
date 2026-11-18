@@ -442,3 +442,52 @@ test.skipIf(!hasDom)('the diff card says the approved words with the file count:
   expect(diffWords(1)).toBe('The one file with your comments, Viewed and Approve.');
   expect(diffWords(0)).toBe('All files with your comments, Viewed and Approve.');
 });
+
+// Start a thread (the owner, 2026-11-17, mock "V1"): the door's button; the empty thread it opens is pullThreadStart.test.tsx.
+const startThreadDoor = '[data-launch-door="thread"] [data-launch-go="start-thread"]';
+
+test.skipIf(!hasDom)('no thread yet: the Review thread door offers Start a thread, a quiet button beside the one primary, and it turns the page into an empty thread for the PR', async () => {
+  mount(single.key, answer());
+  await settle();
+  const button = $<HTMLButtonElement>(startThreadDoor)!;
+  expect(!!button).toBe(true);
+  expect(button.textContent).toBe('Start a thread');
+  // A plain button (reachable with Tab), not a second primary: the guided review stays the one.
+  expect(button.tagName === 'BUTTON' && !button.classList.contains('ib-pri') && button.tabIndex === 0).toBe(true);
+  expect(document.querySelectorAll('.ib-lp .ib-btn.ib-pri')).toHaveLength(1);
+  expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('None yet. Start one, or start a guided review.');
+  await click(startThreadDoor);
+  expect(!!$('[data-launchpad]')).toBe(false);
+  expect(!!$('[data-pull-thread-start]')).toBe(true);
+  expect(went).toEqual([]);
+});
+
+test.skipIf(!hasDom)('Start a thread only while no thread is about the PR: a review thread, an ended one, or one that only named it keep their own Open', async () => {
+  for (const link of [live, { ...live, guide: null }, { ...live, guide: null, agent: { ...live.agent!, ended: true } }, { ...live, via: 'url' as const, ask: undefined, guide: null }]) {
+    mount(single.key, answer({ [single.key]: link }));
+    await settle();
+    expect(!!$(startThreadDoor)).toBe(false);
+    expect(!!$('[data-launch-door="thread"] [data-launch-go="thread"]')).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+  }
+});
+
+test.skipIf(!hasDom)('Start a thread on a phone, on a draft and on your own PR; never for a PR in no project', async () => {
+  const draftMine: InboxPullsAnswer = { ...answer(), pulls: [{ ...single, state: 'draft', mine: true }, low, high] };
+  const cases: [InboxPullsAnswer, Partial<PullsPageProps>][] = [
+    [answer(), { phone: true }],
+    [draftMine, {}],
+  ];
+  for (const [model, extra] of cases) {
+    mount(single.key, model, extra);
+    await settle();
+    expect(!!$(startThreadDoor)).toBe(true);
+    act(() => root!.unmount());
+    host!.remove();
+  }
+  mount(single.key, { ...answer(), projects: {} });
+  await settle();
+  expect(!!$(startThreadDoor)).toBe(false);
+  expect($('[data-launch-door="thread"] .ib-lp-sub')!.textContent).toBe('None yet. Starting a guided review starts one.');
+});
