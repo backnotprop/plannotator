@@ -170,6 +170,27 @@ export interface InboxRexOptions {
   sessionsFile?: string | null;
   /** A background read changed what the list would show (a place line, the app attached or gone). */
   onChange?: () => void;
+  /** Bring Rex's app (its process id) to the front after Show went to its pane. Default: `inboxRaiseApp`. */
+  raiseApp?: (pid: number) => void;
+}
+
+/**
+ * Bring a Mac app to the front by its process id: the `.app` that holds its executable, opened with `open -a` (which
+ * only activates an app that runs). Best effort and in the background; nothing on other systems.
+ */
+export function inboxRaiseApp(pid: number, platform: NodeJS.Platform = process.platform): void {
+  if (platform !== "darwin") return;
+  void (async () => {
+    try {
+      const ps = Bun.spawn(["/bin/ps", "-o", "comm=", "-p", String(pid)], { stdout: "pipe", stderr: "ignore", stdin: "ignore" });
+      const executable = (await new Response(ps.stdout).text()).trim();
+      const app = /^(\/.+?\.app)\/Contents\/MacOS\//.exec(executable)?.[1];
+      if (!app) return;
+      Bun.spawn(["/usr/bin/open", "-a", app], { stdout: "ignore", stderr: "ignore", stdin: "ignore" });
+    } catch {
+      // Shown all the same: the app went to the pane.
+    }
+  })();
 }
 
 /**
@@ -194,7 +215,8 @@ export function createInboxRex(options: InboxRexOptions) {
   const openTimeout = options.openTimeoutMs ?? INBOX_REX_OPEN_TIMEOUT_MS;
   const showTimeout = options.showTimeoutMs ?? INBOX_REX_SHOW_TIMEOUT_MS;
   const showRefused = options.showRefusedMs ?? INBOX_REX_SHOW_REFUSED_MS;
-  const kept = sessionsKept(options.sessionsFile ?? null);
+  const raiseApp = options.raiseApp ?? ((pid: number) => inboxRaiseApp(pid));
+  const kept =sessionsKept(options.sessionsFile ?? null);
   const socketPath = () => (options.socketPath && inboxRexSocketOk(options.socketPath, uid) ? options.socketPath : null);
 
   /** No asking before this (a Rex that did not answer in time). */
@@ -353,7 +375,9 @@ export function createInboxRex(options: InboxRexOptions) {
    * Rex's app attached here: its client id. Exactly one Mac app, connected over this computer's own socket as this
    * user (`principal`: peer, unix, this uid). An app on another computer (a tailnet connection) is never one.
    */
-  const appOf = async (rex: RexConnection): Promise<string | null> => {
+  const appOf = async (rex: RexConnection): Promise<string | null> => (await appClient(rex))?.id ?? null;
+  /** `appOf` with the app's process id (its connection's `principal.pid`), when Rex says it. */
+  const appClient = async (rex: RexConnection): Promise<{ id: string; pid: number | null } | null> => {
     const answer = await rex.call("client.list", { kinds: ["app"] });
     const clients = (Array.isArray(answer.clients) ? answer.clients : []) as Record<string, unknown>[];
     const here = clients.filter((c) => {
@@ -370,7 +394,9 @@ export function createInboxRex(options: InboxRexOptions) {
         (uid === null || principal.uid === uid)
       );
     });
-    return here.length === 1 ? (here[0]!.client_id as string) : null;
+    if (here.length !== 1) return null;
+    const pid = ((here[0]!.principal ?? {}) as Record<string, unknown>).pid;
+    return { id: here[0]!.client_id as string, pid: typeof pid === "number" && Number.isInteger(pid) && pid > 1 ? pid : null };
   };
 
   /** Where `place`'s block is now: its window, when it sits in one of that session's windows; null otherwise. */
@@ -687,7 +713,8 @@ export function createInboxRex(options: InboxRexOptions) {
     async show(place: InboxPlace): Promise<{ shown: boolean; refused?: true }> {
       const outcome = await act(showTimeout, async (rex) => {
         const window = await within(showTimeout, windowOf(rex, place));
-        const appId = window ? await within(showTimeout, appOf(rex)) : null;
+        const here = window ? await within(showTimeout, appClient(rex)) : null;
+        const appId = here?.id ?? null;
         if (!window || !appId) return { shown: false, app: null as string | null };
         let answer: Record<string, unknown> | null = null;
         try {
@@ -696,6 +723,9 @@ export function createInboxRex(options: InboxRexOptions) {
           answer = null;
         }
         if (!answer || answer.performed_by !== appId) return { shown: false, app: appId };
+        // Rex's app went to the session but stays behind the person's browser: bring it to the front (Rex has no
+        // action that only shows it; its toggle would hide it when it is in front already).
+        if (here?.pid != null) raiseApp(here.pid);
         // The pane itself, in a tab of several: best effort, the app already went there.
         try {
           await within(1_500, rex.call("session.attach", { session_id: place.session }));

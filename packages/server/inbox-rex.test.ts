@@ -293,6 +293,17 @@ describe("Show in Rex", () => {
     expect(fake.calls.find((c) => c.method === "session.focus_block")?.payload).toEqual({ session_id: ids.session, block_id: ids.block });
   });
 
+  test("Rex's app comes to the front once it went to the pane (by its process id); never when it did not go there", async () => {
+    const raised: number[] = [];
+    const { fake, rex } = setup({ remote: true, appPid: 4321 }, { raiseApp: (pid) => raised.push(pid) });
+    const ids = fake.addSession("p", "t");
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: true });
+    expect(raised).toEqual([4321]);
+    fake.setRemote(false);
+    expect(await rex.show(placeOf(ids))).toEqual({ shown: false, refused: true });
+    expect(raised).toEqual([4321]);
+  });
+
   test("an agent the person started by hand in a session of their own: the app goes to its tab and the pane gets the focus too", async () => {
     const { fake, rex } = setup({ remote: true });
     const theirs = fake.addSession("their work", "shell");

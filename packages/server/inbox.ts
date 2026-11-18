@@ -4983,20 +4983,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const inRex = launch.rexPanes();
     if (!every && (!inRex || inRex.size === 0)) return hints;
     const background = launch.backgroundSessions();
+    const unconnected = launch.rexUnconnected();
     for (const session of sessions) {
       if (background.has(session)) continue;
       if (!every && !inRex!.has(session) && !live.continuesOf(session).some((old) => inRex!.has(old))) continue;
-      const place = rexPlaceOf(session, inRex);
+      const place = rexPlaceOf(session, inRex, unconnected);
       if (place) hints.set(session, place);
     }
     return hints;
   };
   /**
-   * Where a live session runs in Rex: the place its connection reports (Claude Code's), else, for one the Inbox
-   * started in Rex, the pane Rex made for it (Pi and OpenCode report none).
+   * Where a session runs in Rex: the place its connection reports (Claude Code's), else, for one the Inbox started in
+   * Rex, the pane Rex made for it (Pi and OpenCode report none): while it is live, or before it connected (a prompt
+   * in its tab, such as the agent's own trust question, shows then too; Rex confirms the pane is still there).
    */
-  const rexPlaceOf = (session: string, inRex: ReadonlyMap<string, InboxPlace | null> | null): InboxPlace | null =>
-    live.placeOf(session) ?? (live.isSessionLive(session) ? (inRex?.get(session) ?? null) : null);
+  const rexPlaceOf = (session: string, inRex: ReadonlyMap<string, InboxPlace | null> | null, unconnected: ReadonlySet<string>): InboxPlace | null =>
+    live.placeOf(session) ?? (live.isSessionLive(session) || unconnected.has(session) ? (inRex?.get(session) ?? null) : null);
   /**
    * This Inbox's agents with where they live (inbox-rex.ts), for every window (a phone, the tailnet and a linked
    * machine too): each place Rex last confirmed, as one line, and what that pane says the agent is doing
@@ -5035,7 +5037,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Only a session the Inbox started in Rex (`rexPanes` reads no runs: no loop).
     const inRex = launch.rexPanes();
     if (!inRex?.has(session)) return null;
-    const place = rexPlaceOf(session, inRex);
+    const place = rexPlaceOf(session, inRex, launch.rexUnconnected());
     return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
   };
   const launch = createInboxLaunch({

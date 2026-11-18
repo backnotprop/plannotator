@@ -121,6 +121,16 @@ describe("who is listed, and how", () => {
     expect(byId("lch_starting")).toMatchObject({ session: "launch:lch_starting", launch: { started: false, run: "starting", scratch: "palette-helper" }, project: { id: "prj_ledger", name: "ledger" } });
   });
 
+  test("a launch the person stopped reads idle at once, though its session's last poll still said busy", () => {
+    const launch = (id: string, run: InboxAgentsEvidence["launches"][number]["run"]) => ({ launch_id: id, session: `ses-${id}`, thread_id: `msg_${id}`, host: "claude-code", project_id: "prj_ledger", started_at: "2026-11-09T08:00:00.000Z", started: true, run, scratch: null });
+    const busy = (session: string) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live: true, busy: true, label: null });
+    const group = inboxAgentsGroup(evidence({ sessions: [busy("ses-lch_stopped"), busy("ses-lch_running")], launches: [launch("lch_stopped", "stopped"), launch("lch_running", null)] }));
+    expect(group.agents.map((agent) => [agent.id, agent.state]).sort()).toEqual([
+      ["lch_running", "working"],
+      ["lch_stopped", "idle"],
+    ]);
+  });
+
   test("a routine is one agent, its newest run's; an earlier run's session only while it is live; other launches as before", () => {
     const run = (id: string, day: number, session: string, thread = "msg_digest") => ({ launch_id: id, session, thread_id: thread, host: "claude-code", project_id: "prj_ledger", started_at: `2026-11-0${day}T07:16:00.000Z`, started: true, run: "stopped" as const, scratch: null, scheduled: true });
     const ended = (session: string, live = false) => ({ session, host: "claude-code", root: "/work/ledger", startedAt: 1, lastSeen: 2, live, busy: null, label: null });

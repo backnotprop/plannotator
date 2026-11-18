@@ -173,6 +173,10 @@ interface Memo {
    * (inbox-rex-resume.ts), `pending` while it reads; `held` is what the line says meanwhile.
    */
   rexCheck?: { at: number; held: InboxRexHeld | null; pending: boolean };
+  /** In Rex, a reply waiting on a session that still reads live: the last look at whether its own pane closed. */
+  paneCheck?: { at: number; pending: boolean };
+  /** Rex said its own pane closed since the latest start: no start grace to wait out (its program ended with it). */
+  paneClosed?: boolean;
   /**
    * After Stop or a respawn, the session's earlier polls keep it "live" for a
    * while: it counts as live again only once it starts a poll past this count.
@@ -893,6 +897,8 @@ export function createInboxLaunch(options: {
     memo.respawn = null;
     memo.busySeen = false;
     memo.heldReply = null;
+    memo.paneClosed = false;
+    memo.paneCheck = undefined;
     starting.add(launch.id);
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
@@ -1118,6 +1124,8 @@ ${result.text}`);
     memo.respawn = { for: forReply, connected: false, failed: null };
     memo.busySeen = false;
     memo.heldReply = null;
+    memo.paneClosed = false;
+    memo.paneCheck = undefined;
     const attempt = memo.respawn;
     options.onChange();
     // One that runs in Rex starts again in a new Rex tab, as the same session.
@@ -1274,10 +1282,34 @@ ${result.text}`);
         options.onChange();
       }
     };
-    if (liveOf(host, root, memo)) return waiting();
-    if (now() - memo.startedAt < INBOX_RUN_START_GRACE_MS) return;
+    const live = liveOf(host, root, memo);
     // The person's reply starts it again: from this computer or over the tailnet.
     const newest = store.pendingReplies(root.to.session, { tags: true }).at(-1);
+    const early = now() - memo.startedAt < INBOX_RUN_START_GRACE_MS;
+    if (live || (early && !memo.paneClosed)) {
+      // In Rex, its own pane closed (by the person, or Rex's API): the program went with it, while its last polls
+      // still read live, or its start's grace runs, for up to a minute. A reply waiting on it asks Rex every few
+      // seconds, so it starts again at once.
+      const own = inboxLaunchInRex(launch) ? ownPaneOf(launch) : null;
+      const check = memo.paneCheck;
+      if (own && options.rex && newest && memo.respawn?.for !== newest.id && memo.heldReply !== newest.id && !check?.pending && (!check || now() - check.at >= REX_HELD_RECHECK_MS)) {
+        const polls = live?.polls ?? null;
+        memo.paneCheck = { at: now(), pending: true };
+        void options.rex
+          .paneGone(own)
+          .catch(() => null)
+          .then((gone) => {
+            memo.paneCheck = { at: now(), pending: false };
+            if (gone !== true || stopping.has(launch.id)) return;
+            memo.paneClosed = true;
+            // From now it counts as live only once it polls anew (as after a Stop).
+            if (polls !== null && memo.quietPolls === null) memo.quietPolls = polls;
+            options.onChange();
+            maybeRespawn(store.message(root.id) ?? root);
+          });
+      }
+      return live ? waiting() : undefined;
+    }
     // Once per reply: one that did not take waits for Try again or the person's next reply.
     if (!newest || memo.respawn?.for === newest.id || memo.heldReply === newest.id) return waiting();
     // In Rex: never a second process on the session. Not before its connection could have come back since this Inbox
@@ -2438,6 +2470,25 @@ ${result.text}`);
      */
     rexPanes(): ReadonlyMap<string, InboxPlace | null> | null {
       return rexPanesNow();
+    },
+
+    /**
+     * The sessions started in Rex that have not connected since their latest start (a first message not taken yet, or
+     * a reply's restart): their own pane is where they are (a pane closes with its program), so its status shows before
+     * they connect (a trust or permission prompt in the tab, which no connection reports).
+     */
+    rexUnconnected(): ReadonlySet<string> {
+      const out = new Set<string>();
+      if (!enabled()) return out;
+      for (const root of roots()) {
+        const launch = root.launch!;
+        const session = inboxLaunchedSession(root);
+        if (launch.deleted_at || launch.error || !session || !inboxLaunchInRex(launch) || !ownPaneOf(launch)) continue;
+        const memo = memos.get(launch.id);
+        if (memo?.stoppedAt != null) continue;
+        if (!root.delivery || (memo?.respawn && !memo.respawn.connected)) out.add(session);
+      }
+      return out;
     },
 
     /**

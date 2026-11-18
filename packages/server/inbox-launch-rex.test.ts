@@ -420,6 +420,45 @@ describe("Start in Rex", () => {
     await until(() => store.message(root.id)!.launch!.rex?.block === "block:new");
   });
 
+  test("a session started in Rex counts as not connected (its tab is where it is) until it takes its first message; stopped: no longer", async () => {
+    const { clock, fake, store, launch, send } = setup();
+    const { root } = await send();
+    expect([...launch.rexUnconnected()]).toEqual(["session-r1"]);
+    fake.poll("session-r1", true, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
+    expect([...launch.rexUnconnected()]).toEqual([]);
+    const again = setup();
+    const started = await again.send();
+    expect([...again.launch.rexUnconnected()]).toEqual(["session-r1"]);
+    expect((await again.post(started.id, "stop")).status).toBe(200);
+    expect([...again.launch.rexUnconnected()]).toEqual([]);
+  });
+
+  test("its pane closed while it reads live and its start's grace runs: a reply starts it again in a new tab at once; its pane still there: the running agent takes the reply", async () => {
+    const { clock, fake, store, opens, panes, send } = setup({ answer: async () => (opens.length > 1 ? { ...opened, block: "block:new" } : opened) });
+    const { root } = await send();
+    fake.poll("session-r1", false, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-r1" });
+    const answer = store.sendMessage({ project_id: root.project_id, author: { kind: "agent", host: FAKE, session: "session-r1", name: "Fake Agent" }, body: "Done.", reply_to: root.id, idempotency_key: "answer-closed" }).message;
+    clock.now += 5_000;
+    // Its pane is there: the live agent takes the reply itself, no second tab.
+    panes.gone = false;
+    store.sendReply(answer.id, { words: "And then?", idempotency_key: "reply-closed-1" });
+    await until(() => panes.asked.length === 1);
+    await Bun.sleep(20);
+    expect(opens).toHaveLength(1);
+    // The person closed its pane (its last poll still reads live, its start a few seconds ago): the next reply opens
+    // the one new tab at once, never after the polls go stale or the grace runs out.
+    clock.now += 6_000;
+    panes.gone = true;
+    store.sendReply(answer.id, { words: "Still there?", idempotency_key: "reply-closed-2" });
+    await until(() => opens.length === 2);
+    expect(opens[1]!.command).toContain("session-r1");
+    await until(() => store.message(root.id)!.launch!.rex?.block === "block:new");
+    await Bun.sleep(20);
+    expect(opens).toHaveLength(2);
+  });
+
   test("Try again right after an Inbox restart: refused, as the tab's agent may still be running", async () => {
     const { clock, send, post } = setup();
     const { id } = await send();

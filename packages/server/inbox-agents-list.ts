@@ -188,7 +188,8 @@ export function inboxAgentsGroup(evidence: InboxAgentsEvidence, cap = INBOX_AGEN
       continue;
     }
     const run = launch.run;
-    const working = run === "starting" || run === "working" || run === "cloning" || known?.state === "working";
+    // Stopped by the person: its last polls may still say working for a while, which it no longer is.
+    const working = run === "starting" || run === "working" || run === "cloning" || (run !== "stopped" && known?.state === "working");
     const ended = !known?.live && (run === "failed" || run === "missing" || run === "clone_failed" || run === "clone_cancelled");
     bySession.set(session, {
       ...(known ?? { host: launch.host, project: evidence.projectById(launch.project_id), started_at: launch.started_at, last_seen_at: null }),

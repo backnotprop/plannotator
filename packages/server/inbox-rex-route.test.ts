@@ -303,6 +303,19 @@ describe("the Agents list and Rex", () => {
     expect(await (await w.show(session)).json()).toEqual({ shown: true });
   });
 
+  test("started in Rex and not connected yet, its tab blocked on a prompt (the agent's own trust question): the line says it waits on you in Rex, and its icon has the mark", async () => {
+    const w = await world({ remote: true, startIn: "rex" });
+    const session = await w.launched();
+    const made = w.fake.sessions.find((s) => s.label === "my-app")!;
+    w.fake.setStatus(made.windows[0]!.blocks[0]!, [{ state: "blocked", kind: "permission", app: "claude-code" }]);
+    const root = w.server.store.launchedRoots().find((m) => m.launch?.session === session)!;
+    const runOf = async () => ((await (await fetch(`${w.base}/api/inbox/threads/${root.thread_id}`, { headers: { "Sec-Fetch-Site": "same-origin", Origin: w.base } })).json()) as { run: { state: string; rex?: { waiting?: string } } | null }).run;
+    await until(async () => (await runOf())?.state === "waiting_terminal");
+    expect((await runOf())?.rex?.waiting).toBe("permission");
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_mark !== undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)).toMatchObject({ place: { kind: "rex", line: "Rex · my-app / Fake Agent" }, rex_mark: { state: "blocked", kind: "permission" } });
+  }, 20_000);
+
   test("Rex chosen: a Send from the tailnet or a paired phone starts in Rex too, as one from this window does", async () => {
     const w = await world({ remote: false, startIn: "rex", phones: true });
     const far = w.tailnet();

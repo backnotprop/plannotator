@@ -54,6 +54,8 @@ export interface FakeRexOptions {
   appTransport?: "unix" | "tailscale";
   /** The app connection's uid (default this process's). */
   appUid?: number;
+  /** The app's process id in its connection's `principal` (Rex 0.1 says it); none by default. */
+  appPid?: number;
   /** The server's API revision: 18 (default, Rex 0.1) or 7 (the older server: no `session.attach_all`, no attach for a block's methods). */
   revision?: 7 | 18;
 }
@@ -160,7 +162,7 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
                     info: { kind: "app", platform: "macos", name: "Rex.app", version: "0.1.0", label: "this-mac" },
                     principal:
                       appTransport === "unix"
-                        ? { kind: "peer", transport: "unix", display: `uid ${appUid}`, uid: appUid, gid: 20 }
+                        ? { kind: "peer", transport: "unix", display: `uid ${appUid}`, uid: appUid, gid: 20, ...(options.appPid !== undefined ? { pid: options.appPid } : {}) }
                         : { kind: "tailscale", transport: "tailscale", display: "someone@example.com", user_id: "u1", node: "other-mac" },
                     connected_at: "2026-11-17T08:00:00Z",
                     connection_state: "connected",
