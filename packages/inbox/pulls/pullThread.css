@@ -15,7 +15,7 @@
 /* The empty thread: its messages' column, with one calm line in the middle of what is left. */
 .ib-pth-body { display: flex; flex-direction: column; }
 .ib-pth-empty { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 120px; }
-.ib-pth-empty p { margin: 0; max-width: 46ch; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); text-align: center; text-wrap: balance; }
+.ib-pth-empty p { margin: 0; max-width: 64ch; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); text-align: center; text-wrap: balance; }
 .ib-pth-err { color: var(--destructive); }
 
 /* "Sent with: this PR's details": one quiet line; open, the exact text the agent got, as plain text. */

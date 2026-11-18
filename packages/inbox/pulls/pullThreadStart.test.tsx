@@ -310,6 +310,8 @@ test.skipIf(!hasDom)("a phone: the same empty thread, To as the box's agent cont
   expect(control.getAttribute('data-recipient-chosen')).toBe('ses_web');
   await click('[data-pull-thread-start] [data-recipient]');
   expect([...document.querySelectorAll('[data-recipient-list] [data-recipient-row]')].map((row) => row.getAttribute('data-recipient-row'))).toEqual(['ses_web', 'new:claude-code:prj_web']);
+  // The sheet names a new thread's first message, not a reply.
+  expect(document.body.textContent!.includes('Who gets this message') && !document.body.textContent!.includes('Who gets this reply')).toBe(true);
   expect(posts).toEqual([]);
 });
 

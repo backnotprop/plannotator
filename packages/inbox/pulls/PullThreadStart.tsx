@@ -37,6 +37,8 @@ export const PULL_THREAD_EMPTY = 'Ask anything about this pull request. Your fir
 export const PULL_THREAD_PLACEHOLDER = 'Ask about this pull request. Type / for a skill';
 /** The thread started but the PR could not be kept as its own: said with the reason; Send again ties it. */
 export const PULL_THREAD_UNTIED = 'The thread started, but it isn’t tied to this pull request yet. Press Send again to tie it.';
+/** To's list: who gets the first message. */
+export const PULL_THREAD_TO = 'Who gets this message';
 /** Send with nothing that can take the thread. */
 export const PULL_THREAD_NO_AGENT = 'Nothing sent: no agent is running in this project, and none can start here.';
 
@@ -146,9 +148,9 @@ export function PullThreadStart({
   };
 
   const pill = phone ? (
-    <PhoneReplyRecipient rows={options.map((o) => o.row)} chosen={chosen ? [chosen.row] : []} open={open} onOpen={setOpen} onOnly={(row) => (setPicked(row.session), setOpen(false))} section={section} labels={labels} folderOf={folderOf} />
+    <PhoneReplyRecipient rows={options.map((o) => o.row)} chosen={chosen ? [chosen.row] : []} open={open} onOpen={setOpen} onOnly={(row) => (setPicked(row.session), setOpen(false))} section={section} labels={labels} folderOf={folderOf} title={PULL_THREAD_TO} />
   ) : options.length > 0 ? (
-    <ReplyRecipient rows={options.map((o) => o.row)} chosen={chosen ? [chosen.row] : []} open={open} onOpen={setOpen} onOnly={(row) => (setPicked(row.session), setOpen(false))} labels={labels} folderOf={folderOf} />
+    <ReplyRecipient rows={options.map((o) => o.row)} chosen={chosen ? [chosen.row] : []} open={open} onOpen={setOpen} onOnly={(row) => (setPicked(row.session), setOpen(false))} labels={labels} folderOf={folderOf} title={PULL_THREAD_TO} />
   ) : null;
 
   return (

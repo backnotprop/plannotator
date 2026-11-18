@@ -41,6 +41,7 @@ export function PhoneReplyRecipient({
   section,
   labels,
   folderOf,
+  title = TITLE,
 }: {
   /** Every agent the sheet offers, live first, ended last. */
   rows: readonly RecipientRow[];
@@ -59,6 +60,8 @@ export function PhoneReplyRecipient({
   labels: SessionLabels;
   /** The folder a session works in, as the thread knows it. */
   folderOf: (session: string) => string;
+  /** The sheet's title (a PR's new thread: "Who gets this message"). */
+  title?: string;
 }) {
   const titleOf = (row: RecipientRow) => labelOf(labels, row.session);
   const names = recipientNames(rows, labels, folderOf);
@@ -83,8 +86,8 @@ export function PhoneReplyRecipient({
       ) : (
         <AgentMark {...control} host={first.host} agent={first.session} count={chosen.length} />
       )}
-      <BottomSheet open={open} onClose={() => onOpen(false)} title={TITLE} host={section} attrs={{ 'data-recipient-list': '' }}>
-        <div className="ib-sheet-list" role="listbox" aria-label={TITLE} aria-multiselectable>
+      <BottomSheet open={open} onClose={() => onOpen(false)} title={title} host={section} attrs={{ 'data-recipient-list': '' }}>
+        <div className="ib-sheet-list" role="listbox" aria-label={title} aria-multiselectable>
           {rows.map((row) => {
             const on = chosenIds.includes(row.session);
             if (row.start) {
