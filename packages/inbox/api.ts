@@ -337,7 +337,7 @@ export interface SettingsModel {
   notifications: NotificationSettings;
   /** Whether a notification can reach the person now (open windows, how many may notify). Absent from an older Inbox. */
   notify_reach?: InboxNotifyReach;
-  /** The question sound (config.json inboxSound). Absent from an Inbox that predates it. */
+  /** The Inbox's sound (config.json inboxSound). Absent from an Inbox that predates it. */
   sound?: InboxSoundSettings;
   /** The one-time list options dialog waits to be claimed (POST /api/inbox/list-intro). Absent from an older Inbox. */
   list_intro?: { due: boolean };

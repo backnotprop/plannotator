@@ -1323,6 +1323,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const threadPullLiveListeners = new Set<(threadIds: readonly string[]) => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => void>();
+  /** The sound's settings were saved (config.json `inboxSound`): the windows' streams say `event: sound`, so a window in the background rings by the new choice at once. */
+  const soundListeners = new Set<(sound: unknown) => void>();
   /** The sidebar's layout was saved (config.json `inboxSidebar`): the windows' streams say `event: sidebar`. */
   const sidebarListeners = new Set<(sidebar: InboxSidebarLayout, rev: number) => void>();
   /** An agent icon's face was saved (inbox/agent-faces.json): the windows' streams say `event: agent-faces`. */
@@ -2750,7 +2752,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (kept?.enabled !== next.enabled || kept?.volume !== next.volume || kept?.when !== next.when) {
       throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     }
-    return soundState();
+    const state = soundState();
+    for (const listener of soundListeners) listener(state);
+    return state;
   };
 
   /**
@@ -3920,7 +3924,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     notifications: notificationsState(),
     /** Whether a notification can reach the person now: the windows open and how many may notify. */
     notify_reach: windows.reach(notificationsState().enabled),
-    /** The question sound: the Settings row, and whether the one-time dialog was shown. */
+    /** The Inbox's sound: the Settings row, and whether the one-time dialog was shown. */
     sound: soundState(),
     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
     list_intro: listIntroState(),
@@ -4169,6 +4173,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // How the rows look was saved (any window's, a phone's too): every window takes it at once. Windows only.
         const onRows = (rows: readonly InboxRowsOption[], rev: number, last: { prev: readonly InboxRowsOption[] | null; by: InboxRowsBy | null }) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev, prev: last.prev, by: last.by })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
+        // The sound's switch, volume or choice was saved (any window's, a phone's too): every window rings by it at once. Windows only.
+        const onSound = (sound: unknown) => send(`event: sound\ndata: ${JSON.stringify({ sound })}\n\n`);
+        if (windowId) soundListeners.add(onSound);
         // "Show archived" was saved here or taken from a linked machine: every window, and a linked machine that asks
         // (`show-archived=1`: a switch writes no record, inbox-peer-link.ts).
         const stopShowArchived =
@@ -4246,6 +4253,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           threadPullLiveListeners.delete(onThreadPullsLive);
           rowsListeners.delete(onRows);
+          soundListeners.delete(onSound);
           stopShowArchived();
           sidebarListeners.delete(onSidebar);
           agentFaceListeners.delete(onAgentFaces);

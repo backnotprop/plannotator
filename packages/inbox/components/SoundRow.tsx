@@ -42,7 +42,7 @@ export function SoundRow({ sound }: { sound: InboxSound }) {
           <span className="ib-l" id="ib-sound-label">
             Play a sound
           </span>
-          <span className="ib-seg ib-sound-when" role="radiogroup" aria-label="When to play a sound" data-sound-when={when}>
+          <span className="ib-seg ib-sound-when" role="radiogroup" aria-label="When to play a sound" aria-describedby="ib-sound-when-desc" data-sound-when={when}>
             {SOUND_WHEN_CHOICES.map((choice) => (
               <label key={choice.id} className="ib-seg-o" data-on={when === choice.id ? '' : undefined} data-sound-when-o={choice.id}>
                 <input type="radio" name="ib-sound-when" value={choice.id} checked={when === choice.id} onChange={() => void sound.setWhen(choice.id)} />
@@ -50,7 +50,9 @@ export function SoundRow({ sound }: { sound: InboxSound }) {
               </label>
             ))}
           </span>
-          <span className="ib-desc">{chosen.desc}</span>
+          <span className="ib-desc" id="ib-sound-when-desc">
+            {chosen.desc}
+          </span>
         </span>
         <span className="ib-ctl">
           <input

@@ -681,6 +681,12 @@ export interface InboxMessage {
    */
   turn_error?: true;
   /**
+   * One of the Inbox's own notes from a launched session in its thread (`writeLaunchNote`: a failed turn, a dialog
+   * answered Cancel, a session file gone), written only by the Inbox itself. The sound never rings for one, except a
+   * failed turn's (`turn_error`), which notifies. Absent otherwise. Additive.
+   */
+  launch_note?: true;
+  /**
    * A guided review this message carries (submit_guide, PLAN step 5): the
    * snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on
    * every other message and on records older than step 5.
@@ -2302,7 +2308,7 @@ export function isInboxHealth(value: unknown): value is InboxHealth {
 }
 
 /**
- * The question sound (config.json `inboxSound`, through GET and POST
+ * The Inbox's sound (config.json `inboxSound`, through GET and POST
  * /api/inbox/settings): on unless turned off, one volume for every device.
  */
 export interface InboxSoundSettings {

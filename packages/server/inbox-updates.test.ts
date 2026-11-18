@@ -610,7 +610,7 @@ describe("What's new for a version installed outside the Inbox (no notes saved)"
   });
 });
 
-describe("the question sound (config.json inboxSound)", () => {
+describe("the sound (config.json inboxSound)", () => {
   const settingsOf = async (server: InboxServer) => (await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/settings`)).json()).sound;
   // These tests restart servers; never reuse a socket from a stopped instance.
   const postJson = (server: InboxServer, path: string, body: unknown) =>
@@ -657,6 +657,45 @@ describe("the question sound (config.json inboxSound)", () => {
     // Nothing is written for it: the default is read, never stored.
     expect(loadConfig().inboxSound).toMatchObject({ enabled: false, volume: 40 });
     expect(loadConfig().inboxSound?.when).toBeUndefined();
+  });
+
+  test("a save reaches every other open window at once (event: sound): the choice, the switch and the volume", async () => {
+    writeUpdateState({ inboxVersion: "0.28.9" }, dataDir);
+    const server = await start();
+    // Two other windows listening (another tab, another browser).
+    const listen = async (window: string) => {
+      const controller = new AbortController();
+      const stream = await fetch(`http://127.0.0.1:${server.port}/api/inbox/events?cursor=${server.store.cursor()}&window=${window}&permission=granted`, { signal: controller.signal });
+      const reader = stream.body!.getReader();
+      const decoder = new TextDecoder();
+      const seen = { text: "" };
+      while (!seen.text.includes("event: hello")) seen.text += decoder.decode((await reader.read()).value);
+      const until = async (frames: number) => {
+        const deadline = Date.now() + 3000;
+        while (seen.text.split("event: sound\n").length - 1 < frames && Date.now() < deadline) {
+          const chunk = await Promise.race([reader.read(), new Promise<null>((resolve) => setTimeout(() => resolve(null), 200))]);
+          if (chunk && chunk.value) seen.text += decoder.decode(chunk.value);
+        }
+        return seen.text.split("event: sound\ndata: ").slice(1).map((frame) => JSON.parse(frame.split("\n")[0]!).sound);
+      };
+      return { until, stop: () => controller.abort() };
+    };
+    const a = await listen("window-sound-a");
+    const b = await listen("window-sound-b");
+    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { when: "asks" } });
+    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { enabled: false } });
+    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { volume: 30 } });
+    // A refused save tells no one.
+    await postJson(server, "/api/inbox/settings", { serverSession: server.serverSession, sound: { when: "always" } });
+    const expected = [
+      { enabled: true, volume: 60, when: "asks", dialog_shown_for: null, dialog_due: true },
+      { enabled: false, volume: 60, when: "asks", dialog_shown_for: null, dialog_due: true },
+      { enabled: false, volume: 30, when: "asks", dialog_shown_for: null, dialog_due: true },
+    ];
+    expect(await a.until(3)).toEqual(expected);
+    expect(await b.until(4)).toEqual(expected);
+    a.stop();
+    b.stop();
   });
 
   test("after an update the dialog is claimed once: of two tabs asking together one shows it, and a reload never does", async () => {

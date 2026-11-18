@@ -404,7 +404,7 @@ export interface PlannotatorConfig {
     allowedOrigin?: string | null;
   };
   /**
-   * The Plannotator Inbox's question sound ("Ding-dong"), set from the Inbox
+   * The Plannotator Inbox's sound ("Ding-dong"), set from the Inbox
    * page (its Settings row and its one-time dialog), kept here for the same
    * reason as `inboxNotifications`: the Inbox's port, and so its origin, can
    * change. `enabled`: ring at all (unset: on). `volume`: 10 to 100 (unset:
@@ -568,7 +568,7 @@ export interface PlannotatorConfig {
   /**
    * The warning before a Mark read that sets questions aside (the owner's ask, 2026-11-10). On unless false: false
    * once the person ticked "Don't show this again" in it. Written by the warning and by Settings → General → When an
-   * agent asks you (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
+   * agent sends you something (`POST /api/inbox/settings` `{ mark_read_warning: { on } }`), read on every request.
    */
   inboxMarkReadWarning?: boolean;
   /**

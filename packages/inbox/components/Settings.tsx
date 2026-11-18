@@ -109,7 +109,7 @@ export interface SettingsPageProps {
   onToggleBro?: (next: boolean) => void;
   /** Settings → Capabilities → Experimental → "Float reply drafts" (approval "inbox-reply-floaters", off by default). Absent (or an Inbox without it): no row. */
   onToggleFloatDrafts?: (next: boolean) => void;
-  /** Settings → General → When an agent asks you → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
+  /** Settings → General → When an agent sends you something → the Mark read warning (the owner's ask, 2026-11-10). Absent (or an Inbox without it): no row. */
   onToggleMarkReadWarning?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
@@ -141,7 +141,7 @@ export interface SettingsPageProps {
    * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none.
    */
   updateRow?: ReactNode;
-  /** The question sound's row, under the notifications switch (sound.ts). */
+  /** The sound's row, under the notifications switch (sound.ts). */
   sound?: InboxSound;
   /** Settings → Archived: the archived threads (components/Archived.tsx). */
   archived?: ReactNode;
@@ -389,7 +389,7 @@ function GeneralSection({
       </section>
       <KeyboardSettings />
       <section className="ib-sgroup" data-settings-notifications="" aria-labelledby="ib-g-attention">
-        <h2 id="ib-g-attention">When an agent asks you</h2>
+        <h2 id="ib-g-attention">When an agent sends you something</h2>
         <div className="ib-card">
           <div className="ib-prow">
             <span className="ib-txt">

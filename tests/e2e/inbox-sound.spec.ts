@@ -1,5 +1,5 @@
 /**
- * The Inbox's question sound ("Ding-dong") and its one-time dialog, proved in
+ * The Inbox's sound ("Ding-dong") and its one-time dialog, proved in
  * a real Chromium against a compiled binary. The spec compiles its own binary
  * with a release version (0.29.0; the shared e2e binary is 0.0.0-dev, and a
  * dev build never reports an update), into a temp dir, from the built apps
@@ -16,6 +16,7 @@
  * Proves: a question while the tab is hidden rings once; a burst of three
  * rings once; a visible tab rings nothing; a plain reply rings under the
  * default ("for every agent message") and not under "when an agent asks you";
+ * a question right after agent chatter still rings;
  * the sound off rings nothing (and notifications stop being silent); two tabs
  * ring once; a fresh install never shows the dialog; after an update the
  * dialog shows once, in one of two tabs, and not again on reload.
@@ -31,6 +32,10 @@ import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { E2E_LAUNCH_OFF, inboxScratch, launchOff, removeInboxScratch } from './inbox-scratch';
 import { savedConfig } from '../helpers/saved-config';
+import { RING_LOCK_MS } from '../../packages/inbox/soundRing';
+
+/** "Rings nothing": a ring, if any, plays within RING_LOCK_MS of the list read (every tab has handled the event by then). */
+const quietFor = (page: Page) => page.waitForTimeout(RING_LOCK_MS + 500);
 
 const repo = resolve(__dirname, '../..');
 const shots = resolve(process.env.PLANNOTATOR_SOUND_SHOTS ?? join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo, '.local/proof')), 'sound'));
@@ -284,7 +289,7 @@ test('a burst of three questions rings once', async () => {
   const b = await opencode.send({ project_path: fresh.project, body: question('Rotate the webhook secret?') });
   const c = await codex.send({ project_path: fresh.project, body: question('And cap the retries?') });
   for (const sent of [a, b, c]) await settled(page, sent.thread_id);
-  await page.waitForTimeout(800);
+  await quietFor(page);
   expect(await rings(page)).toBe(before + 1);
 });
 
@@ -296,7 +301,7 @@ test('with the tab visible and focused nothing rings', async () => {
   expect(await rings(page)).toBe(before);
 });
 
-test('by default a plain reply rings once; a question right after it is in the same burst', async () => {
+test('by default a plain reply rings once; a question right after it still rings (chatter never swallows a question)', async () => {
   await awayAgain(page);
   const before = await rings(page);
   const started = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Starting the migration now.' });
@@ -307,10 +312,20 @@ test('by default a plain reply rings once; a question right after it is in the s
   const reply = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'The migration finished. Nothing needed from you.', reply_to: started.thread_id as string });
   await settled(page, reply.thread_id);
   await expect.poll(() => rings(page)).toBe(before + 2);
-  const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Delete the backup now?') });
-  await settled(page, asked.thread_id);
-  await page.waitForTimeout(800);
+  // Another plain reply seconds later: within the burst, quiet.
+  const more = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Indexes rebuilt too.', reply_to: started.thread_id as string });
+  await settled(page, more.thread_id);
+  await quietFor(page);
   expect(await rings(page)).toBe(before + 2);
+  // Another agent asks, still within 30 s of that chatter: the question rings, and its notification is the bell's (silent).
+  const notices = await page.evaluate(() => window.__notified.length);
+  const asked = await fresh.agents[1]!.send({ project_path: fresh.project, body: question('Delete the backup now?') });
+  await settled(page, asked.thread_id);
+  await expect.poll(() => rings(page)).toBe(before + 3);
+  await quietFor(page);
+  expect(await rings(page)).toBe(before + 3);
+  await expect.poll(() => page.evaluate(() => window.__notified.length)).toBeGreaterThan(notices);
+  expect(await page.evaluate(() => window.__notified.at(-1)?.silent)).toBe(true);
 });
 
 test('two Inbox tabs ring once between them; any tab in front keeps both quiet', async () => {
@@ -325,7 +340,7 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   const sent = await fresh.agents[1]!.send({ project_path: fresh.project, body: question('Pause the nightly import?') });
   await settled(page, sent.thread_id);
   await settled(second, sent.thread_id);
-  await page.waitForTimeout(800);
+  await quietFor(page);
   expect((await rings(page)) + (await rings(second))).toBe(before + 1);
 
   // The second tab comes to the front: the first, hidden, stays quiet too.
@@ -334,7 +349,7 @@ test('two Inbox tabs ring once between them; any tab in front keeps both quiet',
   const quiet = (await rings(page)) + (await rings(second));
   const more = await fresh.agents[1]!.send({ project_path: fresh.project, body: question('Then resume it at noon?') });
   await settled(page, more.thread_id);
-  await page.waitForTimeout(800);
+  await quietFor(page);
   expect((await rings(page)) + (await rings(second))).toBe(quiet);
   // It goes to the back before it closes, as a tab does when the person moves on: a tab still
   // "in front" (the page's last word, if its goodbye is lost in a headless close) keeps the other
@@ -367,7 +382,7 @@ test('Settings: the row, Play always plays, "when an agent asks you" quiets a pl
   const asks = await rings(page);
   const plain = await fresh.agents[0]!.send({ project_path: fresh.project, body: 'Backups rotated. Nothing needed from you.' });
   await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${plain.thread_id}`)).status()).toBe(200);
-  await page.waitForTimeout(1200);
+  await quietFor(page);
   expect(await rings(page)).toBe(asks);
   const asked = await fresh.agents[0]!.send({ project_path: fresh.project, body: question('Keep last week’s backup too?') });
   await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${asked.thread_id}`)).status()).toBe(200);
@@ -385,7 +400,7 @@ test('Settings: the row, Play always plays, "when an agent asks you" quiets a pl
   const off = await rings(page);
   const sent = await fresh.agents[2]!.send({ project_path: fresh.project, body: question('Archive last year’s invoices?') });
   await expect.poll(async () => (await page.request.get(`${fresh.url}api/inbox/threads/${sent.thread_id}`)).status()).toBe(200);
-  await page.waitForTimeout(1200);
+  await quietFor(page);
   expect(await rings(page)).toBe(off);
   await expect.poll(() => page.evaluate(() => window.__notified.at(-1)?.title)).toContain('Codex');
   expect(await page.evaluate(() => window.__notified.at(-1)?.silent)).toBe(false);

@@ -68,8 +68,8 @@ function fakeSound(over: Partial<InboxSound> = {}) {
     armed: true,
     playing: false,
     preview: (volume) => void seen.push(`preview:${volume ?? 'saved'}`),
-    arrived: () => {},
-    covers: () => false,
+    arrived: () => ({ asks: false, plain: false }),
+    hear: () => {},
     otherTabInFront: () => false,
     setEnabled: async (next) => (seen.push(`enabled:${next}`), true),
     setVolume: async (next) => (seen.push(`volume:${next}`), true),
@@ -121,8 +121,12 @@ describe.if(hasDom)('Settings: the sound row', () => {
     expect(row.getAttribute('data-settings-sound')).toBe('on');
     // The label, then the owner's two choices in their order, "for every agent message" chosen, then what it rings for.
     expect(row.querySelector('#ib-sound-label')?.textContent).toBe('Play a sound');
+    // The section it sits in (the owner, 2026-11-18): named for what reaches the person now, not only questions.
+    expect(document.getElementById('ib-g-attention')?.textContent).toBe('When an agent sends you something');
     const group = row.querySelector('[role="radiogroup"]') as HTMLElement;
     expect(group.getAttribute('aria-label')).toBe('When to play a sound');
+    // The description says what the chosen one rings for, and screen readers hear it with the choice.
+    expect(document.getElementById(group.getAttribute('aria-describedby')!)?.textContent).toBe('A reply, a new thread or a question, while no Inbox tab is in front');
     const radios = [...group.querySelectorAll('input[type="radio"]')] as HTMLInputElement[];
     expect(radios.map((r) => r.parentElement!.textContent)).toEqual(['when an agent asks you', 'for every agent message']);
     expect(radios.map((r) => r.checked)).toEqual([false, true]);
@@ -262,18 +266,21 @@ const rings = () => recorder.oscillators / 4;
 let api: InboxSound;
 /** As the Inbox sends it: no `when` is how an update finds everyone who had the sound and never chose. */
 let probeSettings: InboxSoundSettings = { enabled: true, volume: 60, dialog_shown_for: null };
+/** What the hook last handed the page to keep (a save's answer, or another window's `event: sound`). */
+let kept: InboxSoundSettings | null = null;
 function Probe() {
-  api = useInboxSound({ settings: probeSettings, onSettings: () => {} });
+  api = useInboxSound({ settings: probeSettings, onSettings: (next) => void (kept = next) });
   return <span data-armed={api.armed ? 'yes' : 'no'} />;
 }
 
-const QUESTION = { asks: true };
-const REPLY = { asks: false };
+const QUESTION = { asks: true, plain: false };
+const REPLY = { asks: false, plain: true };
 
 describe.if(hasDom)('useInboxSound', () => {
   beforeEach(() => {
     front = { visible: true, focused: true };
     probeSettings = { enabled: true, volume: 60, dialog_shown_for: null };
+    kept = null;
     installStubs();
   });
   afterEach(() => restoreStubs());
@@ -347,16 +354,29 @@ describe.if(hasDom)('useInboxSound', () => {
     front = { visible: false, focused: false };
   }
 
+  /** Runs `body` with Date.now reading `clock.t` (the ring lock and the bursts count time with it). */
+  function onClock(body: (clock: { t: number }) => void) {
+    const real = Date.now;
+    const clock = { t: 1_000_000 };
+    Date.now = () => clock.t;
+    try {
+      body(clock);
+    } finally {
+      Date.now = real;
+    }
+  }
+
   test('nothing chosen (an update): "for every agent message"; a plain reply away rings, five agents at once ring once, in front nothing', () => {
     mount(<Probe />);
     expect(api.settings.when).toBe('messages');
     armedAndAway();
-    act(() => api.arrived(REPLY));
+    let rang = api.arrived(REPLY);
     expect(rings()).toBe(1);
-    // Five agents posting at once: one burst, one ring.
-    for (let i = 0; i < 5; i++) act(() => api.arrived(i % 2 ? QUESTION : REPLY));
+    expect(rang).toEqual({ asks: false, plain: true });
+    // Five agents posting at once: one burst, one ring, and their notices keep the system's sound.
+    for (let i = 0; i < 5; i++) act(() => void (rang = api.arrived(REPLY)));
     expect(rings()).toBe(1);
-    expect(api.covers(false)).toBe(true);
+    expect(rang).toEqual({ asks: false, plain: false });
     // The tab in front: nothing rings, and the burst ends.
     front = { visible: true, focused: true };
     act(() => {
@@ -366,26 +386,103 @@ describe.if(hasDom)('useInboxSound', () => {
     expect(rings()).toBe(1);
   });
 
+  test('agent chatter never swallows a question: A replies at 0 s (rings) and 20 s (quiet), B asks at 40 s and it rings', () => {
+    onClock((clock) => {
+      mount(<Probe />);
+      armedAndAway();
+      act(() => api.arrived(REPLY));
+      clock.t += 20_000;
+      act(() => api.arrived(REPLY));
+      expect(rings()).toBe(1);
+      clock.t += 20_000;
+      let rang = api.arrived(QUESTION);
+      expect(rings()).toBe(2);
+      // The bell rang for the question, so its notice is silent; a question in that question burst rings nothing and its notice keeps the system's sound.
+      expect(rang).toEqual({ asks: true, plain: false });
+      clock.t += 5_000;
+      act(() => void (rang = api.arrived(QUESTION)));
+      expect(rings()).toBe(2);
+      expect(rang).toEqual({ asks: false, plain: false });
+    });
+  });
+
+  test('a question two seconds after a reply rang still rings (this tab holds the ring lock, so it rings it itself)', async () => {
+    mount(<Probe />);
+    armedAndAway();
+    act(() => api.arrived(REPLY));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(rings()).toBe(1);
+    const real = Date.now;
+    const at = real();
+    Date.now = () => at + 2_000;
+    try {
+      let rang = api.arrived(QUESTION);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(rings()).toBe(2);
+      expect(rang).toEqual({ asks: true, plain: false });
+    } finally {
+      Date.now = real;
+    }
+  });
+
   test('"when an agent asks you": a plain reply rings nothing and starts no burst; a question then rings', () => {
     probeSettings = { enabled: true, volume: 60, when: 'asks', dialog_shown_for: null };
     mount(<Probe />);
     armedAndAway();
-    act(() => api.arrived(REPLY));
+    let rang = api.arrived(REPLY);
     expect(rings()).toBe(0);
-    expect(api.covers(false)).toBe(false);
-    expect(api.covers(true)).toBe(true);
-    act(() => api.arrived(QUESTION));
+    expect(rang).toEqual({ asks: false, plain: false });
+    act(() => void (rang = api.arrived(QUESTION)));
     expect(rings()).toBe(1);
+    expect(rang).toEqual({ asks: true, plain: false });
   });
 
-  test('the sound turned off before the choice existed stays off: nothing rings for any news, and the bell covers nothing', () => {
+  test("another window's save (event: sound) reaches this one at once: it rings by the new choice; a frame that is not settings is ignored", () => {
+    mount(<Probe />);
+    armedAndAway();
+    act(() => api.hear({ nonsense: true }));
+    expect(kept).toBeNull();
+    act(() => api.hear({ enabled: true, volume: 40, when: 'asks', dialog_shown_for: '0.29.0' }));
+    expect(kept).toEqual({ enabled: true, volume: 40, when: 'asks', dialog_shown_for: '0.29.0' });
+    // The page keeps it (App's setSettings): this window now stays quiet for a plain reply.
+    probeSettings = kept!;
+    act(() => root!.render(<Probe />));
+    act(() => api.arrived(REPLY));
+    expect(rings()).toBe(0);
+    // And the switch turned off elsewhere silences a question here too.
+    act(() => api.hear({ enabled: false, volume: 40, when: 'messages', dialog_shown_for: null }));
+    probeSettings = kept!;
+    act(() => root!.render(<Probe />));
+    act(() => api.arrived(QUESTION));
+    expect(rings()).toBe(0);
+  });
+
+  test('the sound turned off before the choice existed stays off: nothing rings for any news, and no notice is made silent', () => {
     probeSettings = { enabled: false, volume: 60, dialog_shown_for: null };
     mount(<Probe />);
     armedAndAway();
-    act(() => api.arrived(REPLY));
-    act(() => api.arrived(QUESTION));
+    const rang = [api.arrived(REPLY), api.arrived(QUESTION)];
     expect(rings()).toBe(0);
     expect(api.settings.enabled).toBe(false);
-    expect([api.covers(false), api.covers(true)]).toEqual([false, false]);
+    expect(rang).toEqual([{ asks: false, plain: false }, { asks: false, plain: false }]);
+  });
+
+  test('before the first click nothing rings, so no notice is made silent', () => {
+    const activation = { isActive: false, hasBeenActive: false };
+    const before = Object.getOwnPropertyDescriptor(navigator, 'userActivation');
+    Object.defineProperty(navigator, 'userActivation', { configurable: true, get: () => activation });
+    try {
+      mount(<Probe />);
+      front = { visible: false, focused: false };
+      expect(api.arrived(QUESTION)).toEqual({ asks: false, plain: false });
+      expect(rings()).toBe(0);
+    } finally {
+      if (before) Object.defineProperty(navigator, 'userActivation', before);
+      else delete (navigator as unknown as Record<string, unknown>).userActivation;
+    }
   });
 });

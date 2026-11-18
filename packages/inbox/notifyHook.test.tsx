@@ -25,6 +25,7 @@ import type { InboxAuthor, InboxListRow, InboxMessage, InboxQuestion, InboxSecti
 import type { InboxEvent, ListModel } from './api';
 import type { InboxNotifications } from './notify';
 import { FROZEN_NOTICE_MS, NOTICE_CLAIMS_KEY, TEST_NOTIFICATION_TAG } from './notify';
+import { decideRing, QUIET_GATE, type RingGate } from './soundRing';
 
 const hasDom = typeof document !== 'undefined';
 const { useInboxNotifications } = (hasDom ? await import('./notify') : {}) as typeof import('./notify');
@@ -85,10 +86,14 @@ const tabs: InboxNotifications[] = [];
 let onScreen: string | null = null;
 /** What the sound heard, one entry per list read with agent news: whether a question was among it. */
 let heard: boolean[] = [];
-/** The bell on and armed. */
+/** The bell on and armed: the probe's sound decides with the real rules (soundRing.ts) on `clock`. */
 let bell = false;
 /** Its choice is "for every agent message" (else "when an agent asks you"). */
 let bellEvery = false;
+let clock = 0;
+let ringGate: RingGate = QUIET_GATE;
+/** How many times the probe's bell rang. */
+let bellRings = 0;
 let otherTabInFront = false;
 /** Settings → General's notifications switch. */
 let enabled = true;
@@ -104,8 +109,12 @@ function Probe({ index }: { index: number }) {
     openList: () => onOpenList(),
     onAgentNews: (news) => {
       heard.push(news.asks);
+      const inFront = front.visible && front.focused;
+      const decided = decideRing(ringGate, { now: clock, enabled: bell, inFront, otherTabInFront, when: bellEvery ? 'messages' : 'asks', ...news });
+      ringGate = decided.gate;
+      if (decided.ring) bellRings++;
+      return decided.rangFor;
     },
-    bellCovers: (asks) => bell && (asks || bellEvery),
     otherTabInFront: () => otherTabInFront,
     threadOnScreen: (threadId) => threadId === onScreen,
   });
@@ -208,6 +217,9 @@ describe.if(hasDom)('useInboxNotifications', () => {
     heard = [];
     bell = false;
     bellEvery = false;
+    clock = 0;
+    ringGate = QUIET_GATE;
+    bellRings = 0;
     otherTabInFront = false;
     enabled = true;
     onOpenThread = () => {};
@@ -279,6 +291,8 @@ describe.if(hasDom)('useInboxNotifications', () => {
     await batch([message('p1', 'old', { author: { kind: 'person' } })], known);
     // An agent's routine change line: a note of what it did, not words to the person.
     await batch([message('r1', 'old', { scheduled_change: { scheduled_id: 'sch_1', name: 'Nightly', op: 'paused' } as unknown as InboxMessage['scheduled_change'] })], known);
+    // The Inbox's own launch note (a dialog answered Cancel, a session file gone): not the agent's words.
+    await batch([message('l1', 'old', { launch_note: true, body: 'Codex was told No.' })], known);
     // A reply in a snoozed thread: nothing an agent writes rings it.
     await batch([message('m2', 'old')], { ...list([]), snoozed: [{ thread_id: 'old' } as unknown as InboxListRow] } as ListModel);
     expect(heard).toEqual([false]);
@@ -333,7 +347,7 @@ describe.if(hasDom)('useInboxNotifications', () => {
     expect(raised[1]!.body).toBe('Subject t2');
   });
 
-  test('silent only when the bell owns the sound: this tab away, the bell on, and it rings for that news', async () => {
+  test('silent only when the bell really rang for that news: this tab away, the bell on, and it rang', async () => {
     bell = true;
     // In front: the bell never rings here, so the notice keeps the system's sound.
     await batch([message('m1', 'old'), question('m1', 'q-1')], list([{ id: 'old', section: 'waiting' }]));
@@ -348,11 +362,48 @@ describe.if(hasDom)('useInboxNotifications', () => {
     // "For every agent message": the bell rings for a new thread that asks nothing too, so its notice is silent.
     bell = true;
     bellEvery = true;
+    clock += 60_000;
     back();
     away();
     await batch([message('t4', 't4')], list([{ id: 't4', section: 'new' }]));
     expect(raised.map((r) => r.silent)).toEqual([false, false, true, false, true]);
   });
+
+  test('the bell stayed quiet (a reply rang 10 s before): the new thread\'s notice keeps the system\'s sound; a minute later it is the bell\'s', async () => {
+    bell = true;
+    bellEvery = true;
+    away();
+    await batch([message('r1', 'old')], list([{ id: 'old', section: 'new' }]));
+    expect(bellRings).toBe(1);
+    clock = 10_000;
+    await batch([message('t5', 't5')], list([{ id: 'old', section: 'new' }, { id: 't5', section: 'new' }]));
+    clock = 70_000;
+    await batch([message('t6', 't6')], list([{ id: 'old', section: 'new' }, { id: 't5', section: 'new' }, { id: 't6', section: 'new' }]));
+    expect(bellRings).toBe(2);
+    expect(raised.map((r) => r.silent)).toEqual([false, true]);
+  });
+
+  for (const notificationsOn of [true, false]) {
+    test(`agent chatter never swallows a question (notifications ${notificationsOn ? 'on' : 'off'}): A replies at 0 s and 20 s, B asks at 40 s and the bell rings`, async () => {
+      bell = true;
+      bellEvery = true;
+      if (!notificationsOn) {
+        enabled = false;
+        act(() => root!.render(<Probe index={0} />));
+      }
+      away();
+      const known = list([{ id: 'old', section: 'new' }]);
+      await batch([message('a1', 'old')], known);
+      clock = 20_000;
+      await batch([message('a2', 'old')], known);
+      expect(bellRings).toBe(1);
+      clock = 40_000;
+      await batch([message('b1', 'b1', { author: { ...claude, session: 'ses_b' } }), question('b1', 'q-1')], list([{ id: 'old', section: 'new' }, { id: 'b1', section: 'waiting' }]));
+      expect(bellRings).toBe(2);
+      // Its notice is the bell's (silent: one sound), or there is none with notifications off.
+      expect(raised.map((r) => r.silent)).toEqual(notificationsOn ? [true] : []);
+    });
+  }
 
   test('two tabs raise each item once; a tab away defers to another tab in front', async () => {
     act(() => root?.unmount());
@@ -579,7 +630,8 @@ describe.if(hasDom)('useInboxNotifications', () => {
       { kind: 'agent', host: 'codex', session: 'ses_x', name: 'Codex' },
       { kind: 'agent', host: 'pi', session: 'ses_p', name: 'Pi' },
     ];
-    const failedNote = (id: string, author: InboxAuthor, first = true) => message(id, 'old', { author, turn_error: true, body: "Its turn ended with an error: 429" }, first);
+    // As the Inbox writes it: one of its launch notes, a failed turn's (which the sound does hear).
+    const failedNote = (id: string, author: InboxAuthor, first = true) => message(id, 'old', { author, turn_error: true, launch_note: true, body: "Its turn ended with an error: 429" }, first);
 
     test('notifies once per failed turn for each agent, in the shape of a thread notice', async () => {
       for (const [i, author] of agents.entries()) {

@@ -714,10 +714,8 @@ function Inbox() {
   const [openThreadCovered, setOpenThreadCovered] = useState(false);
   const notifications = useInboxNotifications({
     settings: settings?.notifications ?? null,
-    // New agent messages ring the doorbell on its own rules and the person's choice (sound.ts), whatever notifications say.
+    // Agent news rings the doorbell by its rules and the person's choice (sound.ts); notices it rang for are silent.
     onAgentNews: sound.arrived,
-    // The bell owns the sound of news it rings for, while on and armed and no other Inbox tab is in front (notify.ts adds: this tab away).
-    bellCovers: sound.covers,
     // Another Inbox tab in front raises what arrives; this one stays quiet.
     otherTabInFront: () => sound.otherTabInFront(),
     // A question in the thread the person has open and visible raises nothing (the tab in front is notify.ts's check).
@@ -1726,6 +1724,8 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev, last) => hearRowsEvent(rows, rev, () => void refreshSettings(), last),
+        // The sound's switch, volume or choice was saved in any window: this one rings by it at once.
+        onSound: sound.hear,
         onSidebar: (sidebar, rev) => hearSidebarEvent(sidebar, rev, () => void refreshSettings()),
         onShowArchived: adoptShowArchived,
         // An agent icon's face was saved (here, another window, a phone): every icon of that agent redraws at once.
