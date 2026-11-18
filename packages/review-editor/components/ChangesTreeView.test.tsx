@@ -235,6 +235,20 @@ describe.skipIf(!hasDom)('The Changes tree on Pierre trees', () => {
     }
   });
 
+  test('Escape clears the search and keeps the box; Escape on the empty box lands on the current row, not the page', async () => {
+    const el = await mount(<Tree files={[file('src/a.ts'), file('src/b.ts')]} activeFileIndex={1} />);
+    const host = el.querySelector('[data-changes-tree]')!;
+    await typeInSearch(host, 'b');
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    expect(searchInput(host).value).toBe('');
+    expect(shadow(el).activeElement).toBe(searchInput(host));
+    await act(async () => key(searchInput(host), 'Escape'));
+    await settle();
+    expect(document.activeElement === host).toBe(true);
+    expect(shadow(el).activeElement?.getAttribute('data-item-path')).toEndWith('b.ts');
+  });
+
   test('after a search is cleared, a click on a row moves focus to it and arrows walk the tree', async () => {
     const el = await mount(<Tree files={[file('src/alpha.ts'), file('src/beta.ts'), file('src/gamma.ts')]} activeFileIndex={0} />);
     const host = el.querySelector('[data-changes-tree]')!;
