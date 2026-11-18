@@ -67,10 +67,10 @@ export function emit(outputs: Output[], check: boolean, root = ROOT): string[] {
   return stale;
 }
 
-/** A generator's command line: `bun scripts/mobile/<name>.ts [--check]`. */
-export function cli(name: string, generate: () => Output[]): void {
+/** A generator's command line: `bun scripts/mobile/<name>.ts [--check]`. A generator may be async. */
+export async function cli(name: string, generate: () => Output[] | Promise<Output[]>): Promise<void> {
   const check = process.argv.includes('--check');
-  const outputs = generate();
+  const outputs = await generate();
   const stale = emit(outputs, check);
   if (check && stale.length) {
     console.error(`${name}: stale, run \`bun scripts/mobile/${name}.ts\` and commit:\n${stale.map((p) => `  ${p}`).join('\n')}`);
