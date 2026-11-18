@@ -299,7 +299,7 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     const stored = readMailbox(relay, kept.mailbox_id);
     expect(stored.mailbox).toEqual({ secret_sha256: sha256(kept.secret) });
     expect(stored.devices).toEqual([
-      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number), fcm_token: null, agent: 0, signal_sha256: null, signal: null },
+      { id: phone.id, secret_sha256: sha256(phone.relaySecret), carriage: 1, cursor: expect.any(Number), apns_token: null, apns_environment: null, next_n: expect.any(Number), fcm_token: null, agent: 0, signal_sha256: null, signal: null, apns_topic: null, live_token: null, live_environment: null },
     ]);
     expect((await device(phone.id)).carriage).toBe(true);
   });
@@ -391,10 +391,18 @@ describe("the relay with an Inbox, under wrangler dev", () => {
           { label: "No", recommended: false },
         ],
       },
+      // Push version 2 (section 4, "Push"): sealed like the rest.
+      kind: "question",
+      badge: expect.any(Number),
+      time_sensitive: false,
+      actions: [
+        { id: "choice.0", label: "Yes" },
+        { id: "choice.1", label: "No" },
+      ],
     });
   });
 
-  test("one message is one push however many questions it carries; news is none; a guided review is one", async () => {
+  test("one message is one push however many questions it carries; news in a thread is none; a guided review is one; a new thread is one", async () => {
     apple.pushes.length = 0;
     const two = await agent.send({
       project_path: w.project,
@@ -405,12 +413,18 @@ describe("the relay with an Inbox, under wrangler dev", () => {
     expect(JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[0]!.body).e, phone.key)).question).toBeNull();
     expect(apple.pushes[0]!.headers["apns-collapse-id"]).toBe(collapseOf(two.thread_id));
 
-    await agent.send({ project_path: w.project, thread: "news", body: "The migration finished. Nothing to answer." });
+    await agent.send({ project_path: w.project, reply_to: two.thread_id, body: "The migration finished. Nothing to answer." });
     const guided = await agent.submitGuide({ ...GUIDE_BRIEF_EXAMPLE, project_path: w.project, thread: "token-refresh", idempotency_key: "guide-relay-1" });
     await until(() => apple.pushes.length, (n) => n === 2, "one push for the guided review");
     await sleep(1000);
     expect(apple.pushes.length).toBe(2);
-    expect(JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[1]!.body).e, phone.key)).thread_id).toBe(guided.thread_id);
+    const review = JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[1]!.body).e, phone.key));
+    expect(review).toMatchObject({ thread_id: guided.thread_id, kind: "review" });
+
+    // Push version 2: an agent's new thread pushes even when it asks nothing, as the window notifies for it.
+    const fresh = await agent.send({ project_path: w.project, thread: "news", body: "The migration finished. Nothing to answer." });
+    await until(() => apple.pushes.length, (n) => n === 3, "one push for the new thread");
+    expect(JSON.parse(await decryptWithKey(JSON.parse(apple.pushes[2]!.body).e, phone.key))).toMatchObject({ thread_id: fresh.thread_id, kind: "new_thread", question: null });
   });
 
   test("Apple's 4096 bytes: a question whose context would pass them goes without its context", async () => {

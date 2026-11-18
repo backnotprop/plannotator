@@ -3,6 +3,9 @@
  * message that supersedes questions always pushes, even when it asks nothing
  * new (a withdrawal: `question: null`, no lock-screen answers), to replace the
  * older notification; and the summary only ever offers an open question.
+ * Push version 2: the kinds the window notifies for (a new thread, a
+ * permission prompt, a failed turn), the badge, `time_sensitive`, the
+ * actions, no push for a snoozed thread, and the size ladder.
  * A local fake relay records each `POST …/push`; the envelope is opened with
  * the phone's own key, as the phone does. No network beyond loopback.
  */
@@ -12,9 +15,11 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { decryptWithKey, deriveRelayKeys } from "@plannotator/core/crypto";
+import { readFileSync } from "node:fs";
 import { InboxDevices } from "@plannotator/shared/inbox/devices";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxRelay } from "./inbox-relay";
+import { apnsBody, sizedPushEnvelope, type InboxPushPlaintext } from "./inbox-relay-push";
 
 const cleanup: (() => void)[] = [];
 afterEach(() => {
@@ -70,8 +75,164 @@ async function world() {
     return { collapse_id: push.collapse_id, summary: JSON.parse(await decryptWithKey(push.ciphertext, keys.key)) as Record<string, any> };
   };
   const collapseOf = (threadId: string) => createHmac("sha256", Buffer.from(keys.collapseKey, "base64url")).update(threadId).digest("hex");
-  return { store, project, pushes, nextPush, collapseOf };
+  /** Every push sent so far, opened. */
+  const opened = async () => Promise.all(pushes.map(async (push) => JSON.parse(await decryptWithKey(push.ciphertext, keys.key)) as Record<string, any>));
+  return { store, project, pushes, nextPush, collapseOf, opened, keys };
 }
+
+const PERM_AUTHOR = { kind: "agent" as const, host: "claude-code", session: "perm:ses_a", name: null };
+const PERMISSION = [
+  "in `/work/billing-svc`",
+  "",
+  ":::question",
+  "Claude Code wants to run `rm -rf build`",
+  "",
+  "- [ ] Allow once",
+  "- [ ] Deny",
+  "- [ ] Allow and switch to Auto mode",
+  "- [ ] Allow and switch to Full permissions",
+  "- [ ] Approve in Terminal",
+  ":::",
+].join("\n");
+
+test("push 2: a new thread that asks nothing, a failed turn and a permission prompt each push with their kind; plain news does not", async () => {
+  const w = await world();
+  const root = w.store.sendMessage({ project_id: w.project.id, author: AGENT, subject: "Migrated the ledger", body: "Done, nothing to decide." }).message;
+  const fresh = await w.nextPush(0);
+  expect(fresh.summary).toMatchObject({ kind: "new_thread", thread_id: root.id, question: null, time_sensitive: false });
+  expect(fresh.summary.actions).toBeUndefined();
+
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "A plain note.", reply_to: root.id });
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "The turn failed: rate limited.", reply_to: root.id, turn_error: true });
+  const failed = await w.nextPush(1);
+  expect(w.pushes.length).toBe(2);
+  expect(failed.summary).toMatchObject({ kind: "turn_error", thread_id: root.id, question: null });
+
+  const perm = w.store.sendMessage({ project_id: w.project.id, author: PERM_AUTHOR, permission: true, body: PERMISSION, reply_to: root.id }).message;
+  const asked = await w.nextPush(2);
+  expect(asked.summary.kind).toBe("permission");
+  expect(asked.summary.message_id).toBe(perm.id);
+  expect(asked.summary.time_sensitive).toBe(true);
+  // Only what one tap can answer: no mode switch (Full asks to confirm first), no hand-off to Terminal.
+  expect(asked.summary.question.choices.map((c: { label: string }) => c.label)).toEqual(["Allow once", "Deny"]);
+  expect(asked.summary.actions).toEqual([
+    { id: "choice.0", label: "Allow once" },
+    { id: "choice.1", label: "Deny" },
+  ]);
+  expect(asked.collapse_id).toBe(w.collapseOf(root.id));
+});
+
+test("push 2: actions name each choice by its index, recommended first; an action item gets none; a held-up thread is time sensitive", async () => {
+  const w = await world();
+  const body = [":::question", "Which retry policy?", "", "Stopped: the deploy waits on this", "", "Recommended: Exponential", "", "- [ ] Fixed", "- [ ] Exponential", ":::"].join("\n");
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body });
+  const asked = await w.nextPush(0);
+  expect(asked.summary.kind).toBe("question");
+  expect(asked.summary.time_sensitive).toBe(true);
+  expect(asked.summary.actions).toEqual([
+    { id: "choice.1", label: "Exponential" },
+    { id: "choice.0", label: "Fixed" },
+  ]);
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: ":::action\nRotate the staging key\n:::" });
+  const item = await w.nextPush(1);
+  expect(item.summary.kind).toBe("question");
+  expect(item.summary.question).toBeNull();
+  expect(item.summary.actions).toBeUndefined();
+});
+
+test("push 2: the badge counts the rows waiting on the person, a snoozed thread neither pushes nor counts, and pushes again once back", async () => {
+  const w = await world();
+  const first = w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Retry a 409?") }).message;
+  expect((await w.nextPush(0)).summary.badge).toBe(1);
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Bump the SDK?") });
+  expect((await w.nextPush(1)).summary.badge).toBe(2);
+
+  w.store.setSnooze(first.thread_id, new Date(Date.now() + 3_600_000).toISOString());
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("And a 429?"), reply_to: first.id });
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: "The turn failed.", reply_to: first.id, turn_error: true });
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Pin the Node version?") });
+  const third = await w.nextPush(2);
+  // The snoozed thread's question and failed turn sent nothing, and it is not in the count.
+  expect(w.pushes.length).toBe(3);
+  expect(third.summary.question.prompt).toBe("Pin the Node version?");
+  expect(third.summary.badge).toBe(2);
+
+  w.store.endSnooze(first.thread_id);
+  w.store.sendMessage({ project_id: w.project.id, author: AGENT, body: QUESTION("Still retry a 409?"), reply_to: first.id });
+  const back = await w.nextPush(3);
+  expect(back.summary.thread_id).toBe(first.thread_id);
+  expect(back.summary.badge).toBe(3);
+});
+
+const LADDER_BASE: InboxPushPlaintext = {
+  v: 1,
+  type: "push",
+  thread_id: "msg_01K70000000000000000000010",
+  message_id: "msg_01K70000000000000000000010",
+  subject: "Run the retry tests?",
+  project: "billing-svc",
+  agent: "Claude Code",
+  kind: "question",
+  badge: 3,
+  time_sensitive: true,
+  question: { key: "q-1", revision: 0, prompt: "Run them?", context: "Four minutes.", choices: [{ label: "Yes", recommended: true }, { label: "No", recommended: false }] },
+  actions: [{ id: "choice.0", label: "Yes" }, { id: "choice.1", label: "No" }],
+};
+
+const fits = (envelope: string) => Buffer.byteLength(apnsBody(envelope)) <= 4096;
+
+test("push 2's ladder keeps Apple's 4096 bytes: action labels go first, then the context, then the question, then all but the ids, kind and badge", async () => {
+  const key = Buffer.alloc(32, 7).toString("base64url");
+  const open = async (summary: InboxPushPlaintext) => {
+    const envelope = await sizedPushEnvelope(summary, key);
+    expect(fits(envelope)).toBe(true);
+    return JSON.parse(await decryptWithKey(envelope, key)) as InboxPushPlaintext;
+  };
+  expect(await open(LADDER_BASE)).toEqual(LADDER_BASE);
+
+  // Long labels: the actions lose their labels, the question keeps its choices.
+  const long = "L".repeat(800);
+  const labelled: InboxPushPlaintext = { ...LADDER_BASE, question: { ...LADDER_BASE.question!, choices: [{ label: long, recommended: true }, { label: `${long}2`, recommended: false }] }, actions: [{ id: "choice.0", label: long }, { id: "choice.1", label: `${long}2` }] };
+  const noLabels = await open(labelled);
+  expect(noLabels.actions).toEqual([{ id: "choice.0" }, { id: "choice.1" }]);
+  expect(noLabels.question?.context).toBe("Four minutes.");
+
+  const wordy: InboxPushPlaintext = { ...labelled, question: { ...labelled.question!, context: "C".repeat(1200) } };
+  const noContext = await open(wordy);
+  expect(noContext.question?.context).toBeNull();
+  expect(noContext.actions).toEqual([{ id: "choice.0" }, { id: "choice.1" }]);
+
+  const huge: InboxPushPlaintext = { ...wordy, question: { ...wordy.question!, prompt: "P".repeat(3000) } };
+  const noQuestion = await open(huge);
+  expect(noQuestion.question).toBeNull();
+  expect(noQuestion.actions).toBeUndefined();
+  expect(noQuestion.subject).toBe("Run the retry tests?");
+
+  const idsOnly = await open({ ...huge, subject: "S".repeat(4000) });
+  expect(idsOnly).toEqual({ v: 1, type: "push", thread_id: LADDER_BASE.thread_id, message_id: LADDER_BASE.message_id, kind: "question", badge: 3, time_sensitive: true });
+});
+
+// The vectors F2's generated phone types and the app's tests read (packages/core/fixtures/inbox-relay-push-v2-vectors.json):
+// each envelope opens under the all-zero pairing's device key to its plaintext, and every plaintext is a shape this Inbox writes.
+test("the push 2 vectors open under the device key and hold only fields this Inbox writes", async () => {
+  const vectors = JSON.parse(readFileSync(new URL("../core/fixtures/inbox-relay-push-v2-vectors.json", import.meta.url), "utf8")) as {
+    pairing_secret: string;
+    device_id: string;
+    key: string;
+    pushes: { name: string; plaintext: InboxPushPlaintext; envelope: string }[];
+  };
+  const keys = await deriveRelayKeys(vectors.pairing_secret, vectors.device_id);
+  expect(vectors.key).toBe(keys.key);
+  const written = new Set(Object.keys(LADDER_BASE));
+  const kinds = new Set<string>();
+  for (const vector of vectors.pushes) {
+    expect(JSON.parse(await decryptWithKey(vector.envelope, keys.key))).toEqual(vector.plaintext);
+    expect(fits(vector.envelope)).toBe(true);
+    for (const field of Object.keys(vector.plaintext)) expect(written.has(field)).toBe(true);
+    kinds.add(vector.plaintext.kind!);
+  }
+  expect([...kinds].sort()).toEqual(["new_thread", "permission", "question", "replaced", "review", "turn_error"]);
+});
 
 test("a withdrawal that asks nothing pushes on the thread's collapse id with no question; plain news still does not", async () => {
   const w = await world();
@@ -86,6 +247,7 @@ test("a withdrawal that asks nothing pushes on the thread's collapse id with no 
   expect(withdrawn.collapse_id).toBe(asked.collapse_id);
   expect(withdrawn.collapse_id).toBe(w.collapseOf(first.thread_id));
   expect(withdrawn.summary.type).toBe("push");
+  expect(withdrawn.summary.kind).toBe("replaced");
   expect(withdrawn.summary.thread_id).toBe(first.thread_id);
   expect(withdrawn.summary.question).toBeNull();
 });

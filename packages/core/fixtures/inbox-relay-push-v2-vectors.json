@@ -1,0 +1,255 @@
+{
+  "about": "Push version 2 vectors for the Inbox relay (adr/implementation/inbox-mobile.md, section 4, \"Push\"), sealed under the device key of the all-zero pairing in inbox-relay-vectors.json. packages/server/inbox-relay-push.test.ts opens each and checks its fields are ones the Inbox writes; the phone's generated types and its notification tests read the same file. Sample data is invented. Public by design: nothing here protects anything.",
+  "pairing_secret": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+  "device_id": "dev_00000000000000000000000000",
+  "key": "EWmqHqbdwPC6kxOAZoGZpQiyudtOsYa_Vf1fUDAn-Wk",
+  "pushes": [
+    {
+      "name": "question",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": {
+          "key": "q-1a2b3c4d",
+          "revision": 0,
+          "prompt": "Run the retry tests against the Stripe test clock?",
+          "context": "They take about four minutes against the test key.",
+          "choices": [
+            {
+              "label": "Yes",
+              "recommended": true
+            },
+            {
+              "label": "No",
+              "recommended": false
+            }
+          ]
+        },
+        "kind": "question",
+        "badge": 2,
+        "time_sensitive": false,
+        "actions": [
+          {
+            "id": "choice.0",
+            "label": "Yes"
+          },
+          {
+            "id": "choice.1",
+            "label": "No"
+          }
+        ]
+      },
+      "envelope": "Xhco6xyhDD9gHfBV05xS6DUwvGTIwXKLWjYc8yTkFz-_gJMeoTJEjy1vo-nTSnMLbBu4pn5OCOj4Q1P7kDS4d3DtMXNowkRwwT59nrtKbC7dyr26a2VQhA_Eo1LuysCp8VoVIOjnDXltb0sFi-YaWrNbAkzlUIdl4xgu_qIdlff2Oa2MNK78OwkxrT4ZqY_PElfO8huqc74Ck27KNOUBmU7_-MMU00P0uGCS_AnGujk3EEUa2DHyBLUfdBk6eO40-2nl7HMes2NZhxsaMIA24Fgrsq6xRc0VJ2VyWGec-G7iUmZxj6X4PS_s8tpKdw7LB_GZjG4b100mKoPXNTEDyL8DSRyY0rsIJZ8ooHbZk_Lo5jcYZcnIy8IMouytC_JtMtzJvo-CNohNtKVFKXc8-RIZfaHuGNLS774ewG6Fd1v7EdT6W57q38IGLst9oj5LhtXGq1zqh9Q-7i3J4AaPDaSwcTJ_ssxd9YCES0tEOy4to_CG2XXt-jBg3-oNNGO2Uiz3wV7GIUF14ynWlWpzwVqedefJiiRVxpcZHLaq6oAS5uc_ToCW3qniIv1yrnnImubrkftyTmYLGdSZby2UM58L7Tsw1Gp3Hdru7j5YkjHj1Z79-WyiJBo5K70SG3DhnhRVCZipd0G7AH-TimAtwZmR1NzM0lSv8XQrb804LV9szDlpoxK9IwxYiKe7np1DKkepc5Ad_H3SmH4T5NyBb7vNCecJHeD_J_dGu-t4lBu--lDdMV95K4eviXrjd6rNvOVBPMnuZxv1mbSqv_7Xr0tSRtOSYkEM8o27vifWGk3sUgTciNtz7afb_DGKi9QNVDTi"
+    },
+    {
+      "name": "question, recommended second (actions drawn recommended first)",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": {
+          "key": "q-5e6f7a8b",
+          "revision": 1,
+          "prompt": "Which retry policy?",
+          "context": null,
+          "choices": [
+            {
+              "label": "Fixed",
+              "recommended": false
+            },
+            {
+              "label": "Exponential",
+              "recommended": true
+            }
+          ]
+        },
+        "kind": "question",
+        "badge": 2,
+        "time_sensitive": true,
+        "actions": [
+          {
+            "id": "choice.1",
+            "label": "Exponential"
+          },
+          {
+            "id": "choice.0",
+            "label": "Fixed"
+          }
+        ]
+      },
+      "envelope": "R17nx4kvDY9YLFwwZ4BaQfz1tJBGmo7GgawxS-cEWfMRFHjbagwkxaWlOTw215WFYQp-1EjVndfe_VY-3DEk1fJQcDGvFDgo3s_SCzkMFUeC0znXu2caIaTR8GEM17cTCE6pd-r1-QXLKw-GLNn0O7Eg3hOcK7KH6HHD8LqZK2E18KvnmGrfwIThzUAHGYD2qSgw9RLwSrlkTVJJT8FIaPAzhmS3KBieOht86AAdvQDRBIRF_ONDWzbDOOMr_Z7MkGxCGlwQlzRnC5eGjgQKHKR6FoUYACjqo8GcM-OwjKn-JBsKGJy3I3ugyb7Sys6o7DyyEL9tEhbO5Itw-dWwf9DGZ8fZwUOBTwF6oy3T78wbv8sqrE6l7x52mlZT-1lbf6HMCSSfpSLufGauJ03KOOIXq2YeeqaD67cXXXAWv5Qac9DyyRx-o_1iiyBUOlHVkDaXsVdVYZOeImjG1xkD7vTBegTRB_2DB5FX99wM7BeBZCLj-Q2pAJnIsdE0ewAd_C0lNIbjPRt1QozVlutCBTsfYBFrBBzd5F71LoHA_EFU8OxKHvZsYMILM1JMVUM-_YXRczxJdup8nxtGVgXYlZ8gQhMjPx3NTMWLGPsPYHKj3KscNFZXlgrSzIhACoBTrrOU4p8KHKv4sB_vKIlg1QC0EwvcMgbSvIohldx4YRtzQ2YU1Vc6t5vuyVacPqLFQ2vCaRuCu3CSEG2T1cvuoQ4RZG_4bg2vC_nfm1NU4N5shUG0JocBwRw"
+    },
+    {
+      "name": "question, action labels dropped by the ladder",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": {
+          "key": "q-1a2b3c4d",
+          "revision": 0,
+          "prompt": "Run the retry tests against the Stripe test clock?",
+          "context": null,
+          "choices": [
+            {
+              "label": "Yes",
+              "recommended": true
+            },
+            {
+              "label": "No",
+              "recommended": false
+            }
+          ]
+        },
+        "kind": "question",
+        "badge": 2,
+        "time_sensitive": false,
+        "actions": [
+          {
+            "id": "choice.0"
+          },
+          {
+            "id": "choice.1"
+          }
+        ]
+      },
+      "envelope": "EJFThACDnq1UTP-ya4UVZ__0LtiY7qEd4i5Go0UYM8zFpM91Y5z14ktsLBDsAqmYh5PN5T7pd-8gO_BFBvUyv0UUAHBLwRd_hoF0eInroXrPqaNVSzqPwJs__Od_cTp4tO0nXw8J7IVjB3pFkZfGaAqm7UFtqOdShE73r4f8FWSdZdhnu8F5UkRKV7FEGYPN8P3DDgBAkcleUrg90xep9hHbxLduQBGPa5DzfX29sHXEXFJKfI2rwtQIhoe0qlt-4Ub2kWfZc_X1yOJb3ZwJozpquH3u4i8yVEPcocoJw4ShF7R2nQAusOP8VUO8yY3eQqYVlyFM8LCfGRWyXgUhZfa_bzBYxKGyNSEgwXeIm7QHVrSG2wT-KqNKqYySk4i5-gy4EeN3WVQy0jRxEOG3X_JBGNJowX2OPysl0ujLfIukAdwhm7_LgHiCKFIAoTvc3dQBz29SYyoDVSQtyrJO8jfxpJuCpk20sFcvo4Wti8E_ff7Bz7BVrGcl-d32siIMPGE2N_-1CF0FzXoE8XMLrRtIBrK2vJG0XSCK31qsRpbk49z0NZeTvxi_cwLZl6TEnd2B-GQtsPKoSFmq3OCQm7cf89VDGQCFYYOoZm7ElnZcEtr1g7AgYdbt_Gx_WrL4fRH6OWkHeoyAAVUe5y_QvCoL7gGxC8NOi7IiH7mFM68z_AjkaXpIQ8ppCPmpnNPLRij6iz9OBS3ckGiE54huLxvw2F0IJ0lN"
+    },
+    {
+      "name": "permission",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000014",
+        "subject": "Migrate the ledger",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": {
+          "key": "perm-req_0001",
+          "revision": 0,
+          "prompt": "Claude Code wants to run `bun run migrate`",
+          "context": null,
+          "choices": [
+            {
+              "label": "Allow once",
+              "recommended": false
+            },
+            {
+              "label": "Deny",
+              "recommended": false
+            }
+          ]
+        },
+        "kind": "permission",
+        "badge": 1,
+        "time_sensitive": true,
+        "actions": [
+          {
+            "id": "choice.0",
+            "label": "Allow once"
+          },
+          {
+            "id": "choice.1",
+            "label": "Deny"
+          }
+        ]
+      },
+      "envelope": "ROzZpf3bsZTjURQwS_JMfe1Ne2-LW8CflzK9JYipbA-sqAuPKPFjm3J76pqxg-W7bae3qPZhnF373kJNiphfkykPMKr_FqwcaPerN2Wpwu4DZ-DnWsCYgu_rlqfA_wT__Lr-IFylp_C8KsTIGZvbfVbAjhX5AP2UasXQIF0vRJCCxgDo1fg1Ghks8lXEnOEASlrRk4hs28KlBz0k0CzQDcXF26Zq4OYIbTF3wxaJ1Y8xa02f6H_kifJhnHjGl7LaMJzumapNb78eSMOuCg8xfOsWhpKc0KdLa7LpRkNVlTfCgm29YWXGEjQrYFRPVcZfMe_iC3OABCKdr7yX6VcaOs-WaSixHIkJ27D6OUuRcH1Q9DXx1tcBhjqR_f1WlY90RAinu3a3GfpoAzXqrJs2VQonSe8ZHrR1-xsjjvRJJSylSx9c27DIQ9LO-RzsTEQuxjQ-4iqw3lAwTU50Fj4WZXnpW2Kc-FXrGGJN7GKZARupNlcelEY-TzpfpiL-0qeFSqwvmhPOHjJWUmairhRcul3Ujv3GYWvFxtfFLD19G0Kn8lKZAmQn93wJ2EbNpEtFp7DlzrssgkcUD8m1VPYXXVxTIY7EBNUf-sKx8WzOkKXcn3JW4TFAx9-QDAffsAXW39xWr8FHHqO02wKEy5CykMamGkiZ2loTLgUUuFPnRNI8howAZVucQIdmootVympBWngE_UD1J5CSsPH1ht0fFaq00jVSdyaTW3r6ZJKulwPm7g"
+    },
+    {
+      "name": "new_thread",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000010",
+        "subject": "Migrated the ledger to the new schema",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": null,
+        "kind": "new_thread",
+        "badge": 1,
+        "time_sensitive": false
+      },
+      "envelope": "E6MQAIxyqyqVguc4sdBNA-fEiUty09xicMS_xckuCavNLIA40afF2IkAWxmcG2IRtadISYl0F2ba6LamlvbYB6rnB0pQD7XbgmYeZyeMm6k0ukpAQ8HhvJKWYugPPg-OYxl4AxsGt996GtWQmeaS1VnOIsK9jW_rylU8wilnZYMRp2sPZXb7hnGIouly6bSWXmQveHJg2gLHlOeRaTXDfO-StlSdzDxZBs9-7mLZQ2l4oYLzH194wmXseM7CO3vlUhMNefr3CQIzIM63ce2EqJkfR2KFZqexpHlS2Oqpv3cfuLk7BhBlYsOOJeB6UGS7KvTSlzKFRHjEuoNTNzMk1uiXXfOJZiInTGI0TqSQl_0qXMGHEEAwORydE8LEwXmtCG4-WnGrmHMCT9R4hRHWV9g"
+    },
+    {
+      "name": "turn_error",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000014",
+        "subject": "Migrate the ledger",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": null,
+        "kind": "turn_error",
+        "badge": 1,
+        "time_sensitive": false
+      },
+      "envelope": "uKMlIYBf1iBgmNSAe517mUHJtVJ2k5fr1WfghpLbile0ZU08nEqWuzeHyjL_mYZP3ahq1-YnIwWW2vqm0jS59CmuLvMyIqTJWlqXxr6r16eltZGjHVwzthZB8emfd652HCZPmMtBPgGqXTeKcnjm5gXQoWjo7otxnWDtNDpytUAAt7xXMvpjnPzCv4lmR9yceOuoR2dj3kiwovOFPWI14fadj6JeHo0d6u-IOS1zNUbJEgdzhHr99AvRqv4BUeXBxguflLDcJJH-ZRfXMXWFHVhR6vp_OcFOTxcBS_Lwz-G34yuUKC-f-yYHre_D6abVkY-8p9Rn7CwbmtG9bdPQyd8ZP7NajFRo2_ZOUobr3j5UioZdlb09zAEgZHTy2Q"
+    },
+    {
+      "name": "review",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000014",
+        "subject": "Review: retry policy for webhooks",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": null,
+        "kind": "review",
+        "badge": 3,
+        "time_sensitive": false
+      },
+      "envelope": "GyaIinAN9DcU4CxJQyDm-N3hD2OlOnyRoE5EiSRluiIx4On0PtkvWdF4p-by20yrODGWMOPHkmXVqQCRE9sA6K9Y4aLXncQLll3kpPQcKUa21UiRO2f2wjeFgZX6aD8uOI9L1Yfo5ynHyl-NOc0CraQ36g_wCNAJHSfLAUp1h-p61bT6R1iOdhubN7kucxKlkPPFEHX0VbZvmMk2T5jlNn6gdJyvNPWatZjMsRJWrHY2T1QcLEbgc8KuH_1FUxSDiUSfHiIoJGFnDpfch5z09CTfGYzqCBkjN9kCmR74GYtk-y38tWLpA0yOKFiENU07DtVGhLKV8cNAl5dNeE6cmlVmwRfrg2rpqu0PeKRRJhsRv1Lqwo5pjj5VF9wovk2VmZNJibLtxtC5"
+    },
+    {
+      "name": "replaced",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000014",
+        "subject": "Run the retry tests against the Stripe test clock?",
+        "project": "billing-svc",
+        "agent": "Claude Code",
+        "question": null,
+        "kind": "replaced",
+        "badge": 0,
+        "time_sensitive": false
+      },
+      "envelope": "ZOT6mCTyzO1HYHA3O7aI5kCkqKBJkf7sLFt72SArDRAevBFASsvfMDyLupVg20a9jY1KK_6ITlls-RoF50lvrm6W4a3MhkeNbA776zXQwG6qJ_Z9lrAXK1KG12yF6vOvX_NBLNTzzoyH-h_tJ0I3EN1oQ91YMDBlm79t4aSIJUyQT-I2igC8mH5EZ63xbduKFWd8yi9gmvw2ZyYoepz7jNQy21_3_gUGoldtubA16Lh_jwFksHBOa4lpDhEhvcAA6hhun-H4lvYjepuRimoqCLd1gRyZHo1r8O7FvqUxrKIUiNkF0AOdxZRLiYqgpocWZwvCA9zm5xVxxTfGGwF74QtP32EILH7R23dLrYaNsCNLO4eFw-O2lN8WvrqeRvrqlWZRuyE5WxJabakdyU2SIornmgLSNEHW2EiuGA"
+    },
+    {
+      "name": "ids only (the ladder's last rung)",
+      "plaintext": {
+        "v": 1,
+        "type": "push",
+        "thread_id": "msg_01K70000000000000000000010",
+        "message_id": "msg_01K70000000000000000000014",
+        "kind": "question",
+        "badge": 4,
+        "time_sensitive": true
+      },
+      "envelope": "HarCOZmbxuz8B8ZFNnbYFb4boNEWixTzWsrh9FvGzoQgovDXyE6Gp0P7ZeSbHyJfCdx6s9XIIAJaH7Pm5BIgYWJWpaDtijmZlkZphiz6jNcmVkx3VlmonzImg6SpNG6vEYvSeyE8CZ5sVpjpWMh87hlVxKRXnrFb_Pv7cc94R96pIbDPh4NR-5sO38ICDdQzpQszh__XaIOH4izDG8yaLxSgZbGELIQY4TQG9p-ThHq9Vj7ccUegzf2Fud2Ldw"
+    }
+  ]
+}
