@@ -16,7 +16,9 @@ enum PhoneWords {
   static let pairTitle = "Scan the code on your computer"
   static let pairWhere = "On your computer, open the Inbox, then Settings, Remote devices, Pair a phone."
   static let pairTypeInstead = "Type the address and six digits"
-  static let pairPromise = "Your messages stay on your computer. The phone keeps a locked copy so you can read and answer when the computer is asleep."
+  /// Mock 1 says "a locked copy". The copy is encrypted by the phone and readable once the phone has been unlocked
+  /// after a restart, so the words say that and no more.
+  static let pairPromise = "Your messages stay on your computer. The phone keeps an encrypted copy so you can read, and answer, when the computer is away."
   /// Brief S1, "Demo mode".
   static let pairTryDemo = "Try it without a computer"
   static let pairAddress = "Address"
@@ -34,6 +36,14 @@ enum PhoneWords {
   static let pairNeedsWifi = "Over Wi-Fi: this phone must be on the same Wi-Fi as the computer, with Local Network allowed."
   static let pairNeedsTailnet = "Over the tailnet: Tailscale must be signed in on this phone."
   static let cancel = "Cancel"
+  static let pairNoCamera = "No camera on this device."
+  static let pairNotSaved = "This phone could not keep the pairing. Try again."
+  /// A pairing link opened from outside the app (a web page, another app, the Camera app): one sheet, two equal actions.
+  static func pairAsk(_ name: String) -> String { name.isEmpty ? "Pair with this computer?" : "Pair with \(name)?" }
+  static func pairAskDetail(_ address: String) -> String { "This phone will read and answer the Inbox at \(address)." }
+  /// FLOWS 13.
+  static let pairAnother = "Pair another"
+  static let demoMark = "Demo"
 
   // MARK: Versions (SPEC 1.9)
   /// The door's own words for `426 app_needs_update` (packages/server/inbox-door-version.ts, `appBelowFloor`).
@@ -58,7 +68,10 @@ enum PhoneWords {
   /// FLOWS 3, the row's tag.
   static let willSend = "Will send"
   static let stateHere = "Connected"
-  static let stateAway = "Not reachable"
+  /// The window's words for a path that does not answer (packages/inbox/components/Devices.tsx:336).
+  static let stateAway = "Not reachable yet"
+  static let stateNeedsUpdate = "Needs an update"
+  static let stateRemoved = "Removed"
   static let stateConnecting = "Connecting"
   static let unreadMark = "Unread"
 
@@ -74,6 +87,17 @@ enum PhoneWords {
   static let send = "Send"
   /// Mock 4.
   static let noteOrSend = "Add a note, or just send"
+  static let replyOnComputer = "Reply to this one on your computer"
+  static let wordsBack = "Your words are back in the box."
+  /// Why something the person did was not taken: the Inbox's own words when it gave any.
+  static func notice(_ notice: InboxSession.Notice, computer: String) -> String {
+    switch notice {
+    case .refused(let words): return words
+    case .unreadable(let status): return "\(computer) did not take this (\(status))."
+    case .notOffered: return "Plannotator on \(computer) cannot do this yet."
+    case .appNeedsUpdate: return updatePhone
+    }
+  }
 
   // MARK: Answering (FLOWS 5, mock 4; contract flow checks answer-01 to answer-14)
   /// FLOWS 5: the kind, above the prompt.
@@ -90,16 +114,23 @@ enum PhoneWords {
   static let recommended = "Recommended"
   /// The window's own word (packages/ui/components/blocks/QuestionBlock.tsx:34, flow check answer-03).
   static let other = "Other…"
-  static let otherHint = "Your own answer"
+  static let otherHint = "Your own words"
+  static let answerHint = "Your answer"
   /// Flow check answer-01: the card's footer.
   static let addNote = "Add note"
+  /// packages/ui/components/blocks/QuestionBlock.tsx:1275.
+  static let hideNote = "Hide note"
+  static let note = "Note"
   static let noteHint = "A note for this answer"
   static let skip = "Skip"
   static let skipped = "Skipped"
-  static let undoSkip = "Answer it"
+  /// packages/ui/components/blocks/QuestionBlock.tsx:1290.
+  static let undoSkip = "Unskip"
   /// Flow check answer-07 (packages/inbox/components/Thread.tsx:2658): "Picked <time> · in your draft".
   static func picked(at time: String) -> String { time.isEmpty ? "Picked · in your draft" : "Picked \(time) · in your draft" }
-  static let sent = "Sent"
+  static func sent(at time: String) -> String { time.isEmpty ? "Sent" : "Sent \(time)" }
+  /// A pick the computer does not have yet.
+  static let pickedOnPhone = "Picked · on this phone"
   /// Flow check answer-12.
   static let replaced = "Replaced"
   /// Flow check answer-10.

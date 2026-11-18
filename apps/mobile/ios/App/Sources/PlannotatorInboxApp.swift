@@ -12,8 +12,8 @@ struct PlannotatorInboxApp: App {
         .environment(model)
         .tint(Token.primary)
         .task { await model.boot() }
-        // The link the computer shows also opens the app from the Camera app.
-        .onOpenURL { url in Task { await model.open(link: url.absoluteString) } }
+        // A pairing link from outside the app is shown, never redeemed, until the person says Pair.
+        .onOpenURL { url in model.offer(link: url.absoluteString) }
         .onChange(of: phase) { _, now in
           // Back to the front: read again.
           if now == .active, model.booted, let session = model.session { Task { await session.refresh() } }
@@ -38,5 +38,6 @@ struct RootView: View {
     }
     .background(Token.background.ignoresSafeArea())
     .animation(.default, value: model.session?.computer.id)
+    .sheet(item: Bindable(model).offered) { link in OfferedPairingSheet(link: link).environment(model) }
   }
 }

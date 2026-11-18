@@ -40,11 +40,27 @@ final class FirstSliceTests: XCTestCase {
 
     // Send posts the saved pick: the card reads Sent and the person's message is in the thread.
     app.buttons["Send"].tap()
-    XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 5))
+    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH %@", "Sent ")).firstMatch.waitForExistence(timeout: 5))
     XCTAssertTrue(app.staticTexts["You"].exists)
 
     // Back in the list the thread has moved to Sent.
     app.navigationBars.buttons.firstMatch.tap()
     XCTAssertTrue(app.staticTexts["Sent"].waitForExistence(timeout: 5))
+  }
+
+  /// A pairing link from outside the app is shown and waits: nothing is paired until the person says Pair.
+  @MainActor
+  func testAPairingLinkFromOutsideAsksBeforeAnythingIsPaired() {
+    let app = XCUIApplication()
+    app.launchArguments = ["-standIn", "YES", "-AppleLanguages", "(en)", "-pairLink", "plannotator://pair?v=1&name=Studio%20Mac&tailnet=studio-mac.example.ts.net%3A8443&secret=abc&code=123456"]
+    app.launch()
+    XCTAssertTrue(app.staticTexts["Pair with Studio Mac?"].waitForExistence(timeout: 10))
+    XCTAssertTrue(app.staticTexts.containing(NSPredicate(format: "label CONTAINS %@", "studio-mac.example.ts.net:8443")).firstMatch.exists)
+    XCTAssertTrue(app.buttons["Pair"].exists)
+    app.buttons["Cancel"].tap()
+    // Still on the computer it was on, and the demo says it is a demo.
+    XCTAssertTrue(app.navigationBars["Inbox"].waitForExistence(timeout: 5))
+    XCTAssertFalse(app.staticTexts["Pair with Studio Mac?"].exists)
+    XCTAssertTrue(app.buttons.containing(NSPredicate(format: "label CONTAINS %@", "Work Mac, Demo")).firstMatch.exists)
   }
 }

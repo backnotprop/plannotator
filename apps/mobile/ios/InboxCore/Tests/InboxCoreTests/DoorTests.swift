@@ -46,7 +46,7 @@ final class DoorTests: XCTestCase {
     let sections = try XCTUnwrap(session.list?.sections)
     XCTAssertEqual(sections.map(\.id), [.stopped, .holding, .waiting, .new, .sent, .quiet])
     XCTAssertEqual(sections.map(\.label), ["Stopped on you", "Holding up work", "Waiting on you", "New since you looked", "Sent", "Quiet"])
-    XCTAssertEqual(sections.map(\.threads.count), [1, 1, 1, 1, 1, 1])
+    XCTAssertEqual(sections.map(\.threads.count), [1, 1, 2, 1, 1, 1])
     // Every request named the app and carried the token; none carried an Origin.
     for call in await door.calls {
       XCTAssertEqual(call.headers[AppIdentity.headerName], testApp.headerValue)
@@ -65,7 +65,7 @@ final class DoorTests: XCTestCase {
     root["sections"] = sections
     let read = try DoorClient.readList(JSONSerialization.data(withJSONObject: root))
     XCTAssertEqual(read.unreadableRows, 1)
-    XCTAssertEqual(read.model.sections.map(\.threads.count), [1, 1, 1, 1, 1, 1])
+    XCTAssertEqual(read.model.sections.map(\.threads.count), [1, 1, 2, 1, 1, 1])
   }
 
   // proves: answer-04, answer-06, answer-07, answer-08

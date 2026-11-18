@@ -22,20 +22,36 @@ enum Token {
   static let radius: CGFloat = 10
 }
 
-/// An agent's mark: its first letter on a quiet tile, until the door carries the agents' own pictures.
+/// An agent's mark: the product's own icon for it (AgentMarks.xcassets, copied from the product's icon files by
+/// scripts/mobile/agent-marks.ts), else its letter. The faces a person chooses for their agents arrive with the
+/// door's agent-faces routes (slice S6).
 struct AgentMark: View {
-  let name: String
+  let author: InboxAuthor
   var size: CGFloat = 36
   @ScaledMetric(relativeTo: .body) private var scale: CGFloat = 1
 
+  /// The agent ids that have a mark in the catalog.
+  static let known: Set<String> = ["claude-code", "codex", "gemini", "amp", "kiro", "opencode", "pi"]
+
   var body: some View {
     let side = min(size * scale, size * 1.5)
-    Text(String(name.trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
-      .font(.system(size: side * 0.44, weight: .semibold, design: .rounded))
-      .foregroundStyle(Token.foreground)
-      .frame(width: side, height: side)
-      .background(Token.muted, in: RoundedRectangle(cornerRadius: side * 0.26, style: .continuous))
-      .accessibilityHidden(true)
+    let shape = RoundedRectangle(cornerRadius: side * 0.26, style: .continuous)
+    Group {
+      if let host = author.host, Self.known.contains(host) {
+        Image("agent-\(host)")
+          .resizable()
+          .scaledToFit()
+          .padding(side * 0.18)
+      } else {
+        Text(String(Names.agent(author).trimmingCharacters(in: .whitespaces).prefix(1)).uppercased())
+          .font(.system(size: side * 0.44, weight: .semibold, design: .rounded))
+          .foregroundStyle(Token.foreground)
+      }
+    }
+    .frame(width: side, height: side)
+    .background(Token.muted, in: shape)
+    .clipShape(shape)
+    .accessibilityHidden(true)
   }
 }
 

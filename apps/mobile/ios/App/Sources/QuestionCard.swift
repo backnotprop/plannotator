@@ -1,21 +1,40 @@
 import InboxCore
 import InboxWire
+import Observation
 import SwiftUI
 
-/// A question, answered in place (FLOWS 5, mock 4). A tap saves the pick to the computer at once; nothing is sent
-/// to the agent until Send. The answers are built by the product's own rules (InboxCore's QuestionAnswers).
+/// What the person has typed on one card and not yet saved. A reference, so Send can save it before it posts.
+@MainActor
+@Observable
+final class CardDraft {
+  var other = ""
+  var text = ""
+  var note = ""
+  var otherOpen = false
+  var noteOpen = false
+}
+
+/// The cards of a thread that hold typed words: Send saves them all first, so what is on screen is what is sent.
+@MainActor
+final class ThreadDrafts {
+  private var savers: [String: () -> Void] = [:]
+  func register(_ id: String, _ save: @escaping () -> Void) { savers[id] = save }
+  func remove(_ id: String) { savers[id] = nil }
+  func saveAll() { for save in savers.values { save() } }
+}
+
+/// A question, answered in place (FLOWS 5, mock 4). A touch saves the pick to the computer at once; nothing is
+/// sent to the agent until Send. The answers follow the window's card (InboxCore's CardAnswers).
 struct QuestionCard: View {
   let session: InboxSession
   let thread: ThreadID
   let message: MessageID
   let question: InboxQuestion
+  /// When the reply that sent this answer was written.
+  var sentAt: String?
+  let drafts: ThreadDrafts
 
-  @State private var otherOpen = false
-  @State private var otherText = ""
-  @State private var noteOpen = false
-  @State private var noteText = ""
-  @State private var freeText = ""
-  @State private var busy = false
+  @State private var draft = CardDraft()
   @FocusState private var focus: Field?
   enum Field { case other, note, text }
 
@@ -23,8 +42,10 @@ struct QuestionCard: View {
   private var live: Bool { question.state == .openValue || question.state == .picked }
   /// Only single, multi and text are answerable; a kind this app does not know is answered on the computer.
   private var known: Bool { [.single, .multi, .text].contains(question.kind) }
-  private var enabled: Bool { live && known && session.canAnswer() && !busy }
+  private var enabled: Bool { live && known && session.canAnswer() }
   private var skipped: Bool { answer?.skipped == true }
+  private var id: String { "\(message.rawValue)/\(question.key)" }
+  private var picked: [String] { CardAnswers.selected(question) }
 
   var body: some View {
     VStack(alignment: .leading, spacing: 12) {
@@ -50,19 +71,34 @@ struct QuestionCard: View {
     .padding(16)
     .background(Token.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     .overlay(RoundedRectangle(cornerRadius: 22, style: .continuous).strokeBorder(Token.border.opacity(0.6)))
-    .opacity(live ? 1 : 0.72)
-    .onAppear(perform: adopt)
+    .accessibilityElement(children: .contain)
+    .onAppear {
+      adopt()
+      let (session, thread, message, key, draft) = (session, thread, message, question.key, draft)
+      drafts.register(id) { CardSaver.save(session: session, thread: thread, message: message, key: key, draft: draft) }
+    }
+    .onDisappear { drafts.remove(id) }
     .onChange(of: question.revision) { _, _ in adopt() }
+    // Typed words save themselves after a pause of half a second, as in the window, and when the field is left.
+    .task(id: [draft.other, draft.text, draft.note]) {
+      try? await Task.sleep(for: .milliseconds(500))
+      if !Task.isCancelled { save() }
+    }
+    .onChange(of: focus) { before, now in if before != nil, now != before { save() } }
   }
 
-  /// Take the saved answer's words into the fields, so what the computer holds is what is shown.
+  /// Take the saved answer's words into the fields that are not being typed in.
   private func adopt() {
-    if focus != .other { otherText = answer?.other ?? "" }
-    if focus != .note { noteText = answer?.note ?? noteText }
-    if focus != .text { freeText = answer?.text ?? "" }
-    otherOpen = otherOpen || answer?.other != nil
-    noteOpen = noteOpen || answer?.note != nil
+    if focus != .other { draft.other = answer?.other ?? "" }
+    if focus != .note { draft.note = answer?.note ?? "" }
+    if focus != .text { draft.text = answer?.text ?? "" }
+    draft.otherOpen = draft.otherOpen || answer?.other != nil
+    draft.noteOpen = draft.noteOpen || answer?.note != nil
   }
+
+  private func save() { CardSaver.save(session: session, thread: thread, message: message, key: question.key, draft: draft) }
+
+  private func apply(_ edit: CardAnswers.Edit) { CardSaver.apply(edit, session: session, thread: thread, message: message, question: question) }
 
   private var header: some View {
     ViewThatFits(in: .horizontal) {
@@ -97,17 +133,17 @@ struct QuestionCard: View {
     VStack(spacing: 0) {
       ForEach(Array(question.choices.enumerated()), id: \.element.label) { index, choice in
         if index > 0 { Divider().overlay(Token.border) }
-        ChoiceRow(
-          label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: answer?.selected.contains(choice.label) == true, enabled: enabled
-        ) { tap(choice.label) }
+        ChoiceRow(label: choice.label, detail: choice.description, recommended: choice.recommended, multi: question.kind == .multi, selected: picked.contains(choice.label), enabled: enabled) {
+          apply(CardAnswers.tap(question, label: choice.label))
+        }
       }
       Divider().overlay(Token.border)
-      ChoiceRow(label: PhoneWords.other, detail: nil, recommended: false, multi: question.kind == .multi, selected: answer?.other != nil, enabled: enabled) {
-        otherOpen = true
+      ChoiceRow(label: PhoneWords.other, detail: nil, recommended: false, multi: question.kind == .multi, selected: !(answer?.other ?? "").isEmpty, enabled: enabled, value: answer?.other) {
+        draft.otherOpen = true
         focus = .other
       }
-      if otherOpen, live || answer?.other != nil {
-        field(PhoneWords.otherHint, text: $otherText, focus: .other) { commitOther() }
+      if draft.otherOpen, live || answer?.other != nil {
+        field(PhoneWords.otherHint, text: Bindable(draft).other, focus: .other)
           .padding(.leading, 40)
           .padding(.bottom, 4)
       }
@@ -115,15 +151,21 @@ struct QuestionCard: View {
   }
 
   private var textAnswer: some View {
-    field(question.suggestedText ?? PhoneWords.otherHint, text: $freeText, focus: .text) { commitText() }
+    VStack(alignment: .leading, spacing: 8) {
+      // The agent's suggestion is said as one, never drawn as if it were already typed.
+      if let suggested = question.suggestedText, !suggested.isEmpty {
+        Text("\(PhoneWords.recommended): \(suggested)").font(.subheadline).foregroundStyle(Token.mutedForeground)
+      }
+      field(PhoneWords.answerHint, text: Bindable(draft).text, focus: .text)
+    }
   }
 
-  private func field(_ hint: String, text: Binding<String>, focus which: Field, commit: @escaping () -> Void) -> some View {
+  private func field(_ hint: String, text: Binding<String>, focus which: Field) -> some View {
     TextField(hint, text: text, axis: .vertical)
       .lineLimit(1...5)
       .font(.body)
       .focused($focus, equals: which)
-      .disabled(!live || !session.canAnswer())
+      .disabled(!enabled)
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
       .frame(minHeight: 44)
@@ -136,28 +178,30 @@ struct QuestionCard: View {
           }
         }
       }
-      // Leaving the field saves what is in it: the same write a tap on a choice makes.
-      .onChange(of: focus) { before, now in if before == which, now != which { commit() } }
       .accessibilityLabel(hint)
   }
 
   // MARK: Note, Skip
 
   private var footer: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      if noteOpen {
-        field(PhoneWords.noteHint, text: $noteText, focus: .note) { commitNote() }
+    VStack(alignment: .leading, spacing: 6) {
+      if draft.noteOpen {
+        Text(PhoneWords.note).font(.footnote.weight(.semibold)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
+        field(PhoneWords.noteHint, text: Bindable(draft).note, focus: .note)
       }
       if live {
         HStack {
-          if !noteOpen {
-            Button(PhoneWords.addNote) {
-              noteOpen = true
-              focus = .note
-            }
+          Button(draft.noteOpen ? PhoneWords.hideNote : PhoneWords.addNote) {
+            draft.noteOpen.toggle()
+            focus = draft.noteOpen ? .note : nil
           }
           Spacer()
-          Button(skipped ? PhoneWords.undoSkip : PhoneWords.skip) { skipped ? save(nil) : save(QuestionAnswers.skip(question, note: noteText)) }
+          Button(skipped ? PhoneWords.undoSkip : PhoneWords.skip) {
+            save()
+            if let now = CardSaver.current(session: session, thread: thread, message: message, key: question.key) {
+              CardSaver.apply(CardAnswers.toggleSkip(now), session: session, thread: thread, message: message, question: now)
+            }
+          }
         }
         .font(.subheadline.weight(.medium))
         .buttonStyle(.borderless)
@@ -168,10 +212,21 @@ struct QuestionCard: View {
   }
 
   @ViewBuilder private var status: some View {
+    if let refusal = session.refusal(message: message, key: question.key) {
+      // The Inbox's own words for why the pick was not taken; it stays until the person acts on this question.
+      Label(PhoneWords.notice(refusal, computer: session.computer.name), systemImage: "exclamationmark.circle")
+        .font(.footnote)
+        .foregroundStyle(Token.destructive)
+    }
     let line: String? = {
+      let held = session.isHeldPick(message: message, key: question.key)
       switch question.state {
-      case .picked: return skipped ? "\(PhoneWords.skipped) · \(PhoneWords.picked(at: pickedTime))" : PhoneWords.picked(at: pickedTime)
-      case .sent: return skipped ? "\(PhoneWords.skipped) · \(PhoneWords.sent)" : PhoneWords.sent
+      case .picked:
+        let words = held ? PhoneWords.pickedOnPhone : PhoneWords.picked(at: question.pickedAt.map { TimeWords().when($0) } ?? "")
+        return skipped ? "\(PhoneWords.skipped) · \(words)" : words
+      case .sent:
+        let words = PhoneWords.sent(at: sentAt.map { TimeWords().when($0) } ?? "")
+        return skipped ? "\(PhoneWords.skipped) · \(words)" : words
       case .superseded: return PhoneWords.replaced
       default: return nil
       }
@@ -180,62 +235,34 @@ struct QuestionCard: View {
       Text(line).font(.footnote).foregroundStyle(Token.mutedForeground)
     }
   }
+}
 
-  private var pickedTime: String { question.pickedAt.map { TimeWords().when($0) } ?? "" }
-
-  // MARK: The writes
-
-  private func save(_ answer: QuestionAnswer?) {
-    guard live, session.canAnswer(), !busy else { return }
-    busy = true
-    Task {
-      await session.pick(thread: thread, message: message, question: question, answer: answer)
-      busy = false
-    }
+/// Saving a card's typed words: the same writes a touch makes, built from what the computer (and the outbox)
+/// hold at the moment of saving.
+@MainActor
+enum CardSaver {
+  static func current(session: InboxSession, thread: ThreadID, message: MessageID, key: String) -> InboxQuestion? {
+    session.thread(thread)?.thread.messages.first { $0.id == message }?.questions?.first { $0.key == key }
   }
 
-  private func tap(_ label: String) {
-    let current = answer?.selected ?? []
-    var next: [String]
-    if question.kind == .multi {
-      // Keep the picks in the order the agent listed the choices.
-      let chosen = current.contains(label) ? current.filter { $0 != label } : current + [label]
-      next = question.choices.map(\.label).filter(chosen.contains)
-    } else {
-      // A tap on another row moves the pick; a tap on the picked row takes it back.
-      next = current == [label] ? [] : [label]
-    }
-    if next.isEmpty { save(nil) } else { save(QuestionAnswers.choice(question, selected: next, note: noteText)) }
+  static func apply(_ edit: CardAnswers.Edit, session: InboxSession, thread: ThreadID, message: MessageID, question: InboxQuestion) {
+    guard case .save(let answer) = edit, question.state == .openValue || question.state == .picked else { return }
+    // In the outbox before anything else runs, then on its way.
+    guard session.hold(pick: answer, thread: thread, message: message, question: question) else { return }
+    Task { await session.deliverHeld(thread: thread) }
   }
 
-  private func commitOther() {
-    let words = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
-    if words.isEmpty {
-      if answer?.other != nil { save(nil) }
-      otherOpen = false
-    } else if words != answer?.other {
-      save(QuestionAnswers.other(question, other: words, note: noteText))
+  static func save(session: InboxSession, thread: ThreadID, message: MessageID, key: String, draft: CardDraft) {
+    let trim = { (text: String) in text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    guard let question = current(session: session, thread: thread, message: message, key: key) else { return }
+    if question.kind == .text {
+      if trim(draft.text) != trim(question.answer?.text ?? "") { apply(CardAnswers.text(question, words: trim(draft.text)), session: session, thread: thread, message: message, question: question) }
+    } else if draft.otherOpen, trim(draft.other) != trim(question.answer?.other ?? "") {
+      apply(CardAnswers.other(question, words: trim(draft.other)), session: session, thread: thread, message: message, question: question)
     }
-  }
-
-  private func commitText() {
-    let words = freeText.trimmingCharacters(in: .whitespacesAndNewlines)
-    if words.isEmpty {
-      if answer?.text != nil { save(nil) }
-    } else if words != answer?.text {
-      save(QuestionAnswers.text(question, text: words, note: noteText))
-    }
-  }
-
-  /// A note rides the answer it is for: saved with it now when there is one, else with the next pick.
-  private func commitNote() {
-    let note = noteText.trimmingCharacters(in: .whitespacesAndNewlines)
-    if note.isEmpty, answer?.note == nil { noteOpen = false }
-    guard let answer, note != (answer.note ?? "") else { return }
-    if answer.skipped == true { save(QuestionAnswers.skip(question, note: note)) }
-    else if let other = answer.other { save(QuestionAnswers.other(question, other: other, note: note)) }
-    else if let text = answer.text { save(QuestionAnswers.text(question, text: text, note: note)) }
-    else { save(QuestionAnswers.choice(question, selected: answer.selected, note: note)) }
+    // The note is read against the answer as it stands after the words above.
+    guard let now = current(session: session, thread: thread, message: message, key: key) else { return }
+    if trim(draft.note) != trim(now.answer?.note ?? "") { apply(CardAnswers.note(now, words: trim(draft.note)), session: session, thread: thread, message: message, question: now) }
   }
 }
 
@@ -247,6 +274,8 @@ struct ChoiceRow: View {
   let multi: Bool
   let selected: Bool
   let enabled: Bool
+  /// What VoiceOver reads as the row's value (the words typed under "Other…").
+  var value: String?
   let action: () -> Void
 
   private var symbol: String {
@@ -283,10 +312,12 @@ struct ChoiceRow: View {
       .frame(minHeight: 44)
       .contentShape(Rectangle())
     }
-    .buttonStyle(.plain)
-    .disabled(!enabled)
+    // A settled card keeps its words at full contrast: only the touch is off.
+    .buttonStyle(ChoiceStyle())
+    .allowsHitTesting(enabled)
     .accessibilityElement(children: .combine)
     .accessibilityLabel([label, recommended ? PhoneWords.recommended : nil, detail].compactMap { $0 }.joined(separator: ", "))
+    .accessibilityValue(value ?? "")
     .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
   }
 
@@ -296,5 +327,11 @@ struct ChoiceRow: View {
 
   @ViewBuilder private var badge: some View {
     if recommended { Text(PhoneWords.recommended).font(.footnote.weight(.semibold)).foregroundStyle(Token.success) }
+  }
+}
+
+struct ChoiceStyle: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label.opacity(configuration.isPressed ? 0.6 : 1)
   }
 }

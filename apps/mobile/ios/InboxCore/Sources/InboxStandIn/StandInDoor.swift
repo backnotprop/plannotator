@@ -235,21 +235,23 @@ public actor StandInDoor {
       if question.revision != pick.revision { return refuse(409, "question_revision_conflict", "This question changed. Read it again.") }
       sends.append((m, q))
     }
+    seq += 1
+    counter += 1
+    let replyID = MessageID("msg_STANDINREPLY\(counter)")
     var answered: [String] = []
     for send in sends {
       guard var question = threads[at.thread].messages[send.message].questions?[send.question] else { continue }
       if let pick = (request.questions ?? []).first(where: { $0.key == question.key }), let answer = pick.answer { question.answer = answer }
       question.state = .sent
       question.sentRevision = question.revision
+      question.sentReplyId = replyID.rawValue
       threads[at.thread].messages[send.message].questions?[send.question] = question
       if let answer = question.answer { answered.append(StandInData.words(of: answer)) }
     }
-    seq += 1
-    counter += 1
     let words = request.words ?? ""
     let now = StandInData.iso(Date())
     let written = InboxMessageWire(
-      seq: seq, id: MessageID("msg_STANDINREPLY\(counter)"), projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
+      seq: seq, id: replyID, projectId: asked.projectId, threadId: asked.threadId, replyTo: message.rawValue, author: InboxAuthor(kind: .person),
       body: words.isEmpty && !answered.isEmpty ? "Answered: \(answered.joined(separator: "; "))" : words, createdAt: now,
       delivery: InboxDelivery(state: "queued", host: asked.author.host ?? "", session: asked.author.session ?? "", at: now))
     threads[at.thread].messages.append(written)

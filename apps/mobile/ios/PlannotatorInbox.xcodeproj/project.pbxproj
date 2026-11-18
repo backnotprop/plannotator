@@ -10,6 +10,7 @@
 		59B32D5A7D0500B807B8DEB0 /* InboxStandIn in Frameworks */ = {isa = PBXBuildFile; productRef = 72C0A51338AA2D82D5F3BE79 /* InboxStandIn */; };
 		ECC136CB43A28A82797CB1D8 /* Tokens.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CBF3B2284232045A83451CD0 /* Tokens.xcassets */; };
 		ED3AB375310A0BAE2DAEDB48 /* InboxCore in Frameworks */ = {isa = PBXBuildFile; productRef = 657D8B55611F94C2AB78856C /* InboxCore */; };
+		FC1982707B140D25EF181709 /* AgentMarks.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0D3BBB2971A094387C2A6BFB /* AgentMarks.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -23,6 +24,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0D3BBB2971A094387C2A6BFB /* AgentMarks.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = AgentMarks.xcassets; sourceTree = "<group>"; };
 		3A5587B5F75C971D6F775EB3 /* InboxCore */ = {isa = PBXFileReference; lastKnownFileType = folder; name = InboxCore; path = InboxCore; sourceTree = SOURCE_ROOT; };
 		CBF3B2284232045A83451CD0 /* Tokens.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; name = Tokens.xcassets; path = ../contract/generated/swift/Tokens.xcassets; sourceTree = "<group>"; };
 		D7D02B77C209F07F462237F8 /* PlannotatorInboxUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlannotatorInboxUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -76,6 +78,7 @@
 		2F9222A57E68C56F41C7DFA5 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				0D3BBB2971A094387C2A6BFB /* AgentMarks.xcassets */,
 				F1E5676A666ED074A2B710FC /* Sources */,
 			);
 			path = App;
@@ -214,6 +217,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FC1982707B140D25EF181709 /* AgentMarks.xcassets in Resources */,
 				ECC136CB43A28A82797CB1D8 /* Tokens.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

@@ -13,6 +13,7 @@ enum MessageBody {
   }
 
   static func blocks(_ body: String, hasCards: Bool) -> [Block] {
+    var open: [String] = []
     var out: [Block] = []
     var paragraph: [String] = []
     var code: [String]?
@@ -38,6 +39,9 @@ enum MessageBody {
           let drawnAsCard = hasCards && (name.hasPrefix("question") || name.hasPrefix("action"))
           if !drawnAsCard, out.last != .elsewhere { out.append(.elsewhere) }
           directive = nil
+          open = []
+        } else {
+          open.append(line)
         }
         continue
       }
@@ -59,6 +63,11 @@ enum MessageBody {
       }
     }
     if let code { out.append(.code(code.joined(separator: "\n"))) }
+    // A block that never closes hides nothing: its lines are the message's words.
+    if directive != nil {
+      let rest = open.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+      if !rest.isEmpty { paragraph.append(rest) }
+    }
     flush()
     return out
   }
@@ -88,14 +97,7 @@ struct MessageBodyView: View {
             .foregroundStyle(Token.foreground)
             .accessibilityAddTraits(.isHeader)
         case .code(let code):
-          ScrollView(.horizontal, showsIndicators: false) {
-            Text(code)
-              .font(.system(.callout, design: .monospaced))
-              .foregroundStyle(Token.foreground)
-              .textSelection(.enabled)
-              .padding(14)
-          }
-          .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+          CodeBlock(code: code)
         case .elsewhere:
           Label(PhoneWords.moreOnComputer, systemImage: "desktopcomputer")
             .font(.subheadline)
@@ -104,4 +106,29 @@ struct MessageBodyView: View {
       }
     }
   }
+}
+
+/// Code, scrolling sideways when a line is longer than the page. The fading right edge says there is more.
+struct CodeBlock: View {
+  let code: String
+  var body: some View {
+    ScrollView(.horizontal) {
+      Text(code)
+        .font(.system(.callout, design: .monospaced))
+        .foregroundStyle(Token.foreground)
+        .textSelection(.enabled)
+        .padding(14)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
+    }
+    .scrollIndicators(.visible)
+    .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
+    .mask {
+      LinearGradient(stops: [.init(color: .black, location: 0), .init(color: .black, location: overflows ? 0.88 : 1), .init(color: .black.opacity(overflows ? 0.15 : 1), location: 1)], startPoint: .leading, endPoint: .trailing)
+    }
+    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+  }
+
+  @State private var textWidth: CGFloat = 0
+  @State private var boxWidth: CGFloat = 0
+  private var overflows: Bool { textWidth > boxWidth + 1 }
 }

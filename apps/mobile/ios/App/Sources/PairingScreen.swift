@@ -4,7 +4,10 @@ import SwiftUI
 
 /// First run: the camera, to scan the code on the computer (FLOWS 2, mock 1).
 struct PairingScreen: View {
+  /// True when another computer is already paired and this screen came up as a sheet.
+  var another = false
   @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
   @Environment(\.openURL) private var openURL
   @State private var typing = false
   @State private var camera = AVCaptureDevice.authorizationStatus(for: .video)
@@ -26,8 +29,10 @@ struct PairingScreen: View {
           failure
           VStack(spacing: 0) {
             way(PhoneWords.pairTypeInstead) { typing = true }
-            Divider().overlay(Token.border)
-            way(PhoneWords.pairTryDemo) { Task { await model.startDemo() } }
+            if !another {
+              Divider().overlay(Token.border)
+              way(PhoneWords.pairTryDemo) { Task { await model.startDemo() } }
+            }
           }
           Text(PhoneWords.pairPromise)
             .font(.footnote)
@@ -40,6 +45,11 @@ struct PairingScreen: View {
       .scrollBounceBehavior(.basedOnSize)
       .background(Token.background.ignoresSafeArea())
       .sheet(isPresented: $typing) { TypeAddressSheet().environment(model) }
+      .toolbar {
+        if another { ToolbarItem(placement: .cancellationAction) { Button(PhoneWords.cancel) { dismiss() } } }
+      }
+      .onChange(of: model.session?.computer.id) { _, _ in if another { dismiss() } }
+      .onAppear { model.clearPairingFailure() }
     }
     .task {
       if camera == .notDetermined {
@@ -53,7 +63,7 @@ struct PairingScreen: View {
     ZStack {
       RoundedRectangle(cornerRadius: 28, style: .continuous).fill(Color.black)
       if camera == .authorized, QRScanner.hasCamera {
-        QRScanner { text in Task { await model.open(link: text) } }
+        QRScanner { text in Task { await model.scanned(text) } }
           .clipShape(RoundedRectangle(cornerRadius: 28, style: .continuous))
           .accessibilityLabel(PhoneWords.pairTitle)
       } else if camera == .denied || camera == .restricted {
@@ -68,6 +78,10 @@ struct PairingScreen: View {
           .buttonStyle(.borderedProminent)
         }
         .padding(28)
+      } else if !QRScanner.hasCamera {
+        Text(PhoneWords.pairNoCamera)
+          .font(.callout)
+          .foregroundStyle(.white.opacity(0.8))
       }
       ViewfinderCorners()
         .stroke(.white.opacity(0.92), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
@@ -107,6 +121,54 @@ struct PairingScreen: View {
     }
     .buttonStyle(.plain)
   }
+}
+
+/// A pairing link opened from outside the app: who it is, and two equal actions. Nothing was asked of that
+/// computer before this sheet, and nothing is unless the person says Pair.
+struct OfferedPairingSheet: View {
+  let link: PairLink
+  @Environment(AppModel.self) private var model
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    VStack(spacing: 20) {
+      Image(systemName: "desktopcomputer").font(.system(size: 44)).foregroundStyle(Token.mutedForeground).accessibilityHidden(true)
+      VStack(spacing: 8) {
+        Text(PhoneWords.pairAsk(link.name)).font(.title2.bold()).multilineTextAlignment(.center).foregroundStyle(Token.foreground)
+        Text(PhoneWords.pairAskDetail(link.addresses.map(\.hostPort).joined(separator: ", ")))
+          .font(.callout)
+          .multilineTextAlignment(.center)
+          .foregroundStyle(Token.mutedForeground)
+      }
+      HStack(spacing: 12) {
+        Button(PhoneWords.cancel) {
+          model.offered = nil
+          dismiss()
+        }
+        Button(PhoneWords.pairAction) { Task { await model.acceptOffered() } }
+      }
+      .buttonStyle(EqualChoice())
+    }
+    .padding(24)
+    .frame(maxWidth: .infinity)
+    .presentationDetents([.height(340)])
+    .presentationBackground(Token.background)
+  }
+}
+
+/// Two actions of equal weight: neither is the default.
+struct EqualChoice: ButtonStyle {
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .font(.body.weight(.semibold))
+      .foregroundStyle(Token.foreground)
+      .frame(maxWidth: .infinity, minHeight: 50)
+      .background(Token.muted.opacity(configuration.isPressed ? 0.6 : 1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+  }
+}
+
+extension PairLink: @retroactive Identifiable {
+  public var id: String { secret }
 }
 
 /// The four corners of the viewfinder.

@@ -33,11 +33,6 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 	<key>NSCameraUsageDescription</key>
 	<string>To scan the pairing code on your computer.</string>
 	<key>NSLocalNetworkUsageDescription</key>

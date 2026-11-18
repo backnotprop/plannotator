@@ -10,6 +10,7 @@ public enum StandInData {
   public static let docs = ThreadID("msg_STANDIN0000000000000004")
   public static let upload = ThreadID("msg_STANDIN0000000000000005")
   public static let bumps = ThreadID("msg_STANDIN0000000000000006")
+  public static let onboarding = ThreadID("msg_STANDIN0000000000000007")
   public static let unread: Set<ThreadID> = [billing, checkout, docs]
 
   public static func iso(_ date: Date) -> String {
@@ -164,7 +165,30 @@ public enum StandInData {
         message(bumps.rawValue, bumps, "api-server", claude, minutesAgo: 4400, "Six packages bumped, all minor. Tests pass and the lockfile is committed.")
       ])
 
-    return [billingThread, checkoutThread, retryThread, docsThread, uploadThread, bumpsThread]
+    let onboardingAsk = MessageID(onboarding.rawValue)
+    var onboardingMessage = message(
+      onboarding.rawValue, onboarding, "storefront", agent("gemini", "ses_copy"), minutesAgo: 75,
+      """
+      The onboarding screens are drafted. One thing only you can do, and one choice.
+
+      :::action
+      Add the production analytics key to the team vault
+      :::
+
+      :::question
+      Which tone for the first screen?
+
+      - [ ] Plain — says what the app does
+      - [ ] Warm — greets the person first
+      :::
+      """,
+      questions: [question("q_tone", .single, "Which tone for the first screen?", choices: [choice("Plain", "says what the app does"), choice("Warm", "greets the person first")], message: onboardingAsk)])
+    var todo = question("a_key", .action, "Add the production analytics key to the team vault", position: 1, message: onboardingAsk)
+    todo.orphaned = false
+    onboardingMessage.actions = [todo]
+    let onboardingThread = InboxThread(threadId: onboarding, project: project("storefront"), threadName: "Onboarding copy", messages: [onboardingMessage])
+
+    return [billingThread, checkoutThread, retryThread, docsThread, uploadThread, bumpsThread, onboardingThread]
   }
 
   // MARK: The stand-in's own, simple reading of a thread as a row
@@ -198,6 +222,7 @@ public enum StandInData {
     let open: [InboxQuestion] = live.filter { $0.state == .openValue }
     let picked: [InboxQuestion] = live.filter { $0.state == .picked }
     let holdsUp: [String] = live.flatMap { $0.holdsUp }
+    let todos: Int = messages.flatMap { $0.actions ?? [] }.filter { $0.state == .openValue }.count
     let lastIsPerson = last?.author.kind == .person
     let section: InboxSectionId
     if live.contains(where: { $0.stopped != nil }) { section = .stopped }
@@ -217,7 +242,8 @@ public enum StandInData {
       answeredNotSent: !picked.isEmpty, unsent: picked.isEmpty ? nil : InboxRowUnsent(picks: Double(picked.count), comments: 0), unseen: unread ? 1 : 0, guide: false, threadId: thread.threadId,
       projectId: ProjectID(thread.project.id), subject: thread.subject, author: lastAgent?.author ?? InboxAuthor(kind: .person), createdAt: messages.first?.createdAt ?? "", lastAt: last?.createdAt ?? "",
       lastAuthor: lastIsPerson ? .person : .agent, messageCount: Int64(messages.count),
-      questions: InboxQuestionSummary(openValue: Double(open.count), picked: Double(picked.count), stopped: live.contains { $0.stopped != nil }, holdsUp: holdsUp, prompt: live.first?.prompt),
+      questions: InboxQuestionSummary(
+        openValue: Double(open.count + todos), picked: Double(picked.count), stopped: live.contains { $0.stopped != nil }, holdsUp: holdsUp, prompt: live.first?.prompt, actions: todos == 0 ? nil : Double(todos)),
       waitingOnPerson: !live.isEmpty)
   }
 
