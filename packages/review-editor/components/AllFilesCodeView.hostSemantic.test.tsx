@@ -671,9 +671,16 @@ describe('AllFilesCodeView semantic notes that land after the person started rea
     expect((await headerOf('a.ts')).querySelector('[data-semantic-note]')?.getAttribute('aria-pressed')).toBe('true');
   });
 
-  test.skipIf(!hasDom)('a view that is hidden (zero size) draws its notes: nothing in it can be seen to move', async () => {
+  test.skipIf(!hasDom)('a view hidden after the person started reading it keeps its notes as offers, so nothing has moved when it is shown again', async () => {
     const page = await reading(['a.ts'], { 'a.ts': 100 });
     document.dispatchEvent(new Event('wheel'));
+    hidden = true;
+    await page.land();
+    expect(page.swapped('a.ts')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('a hidden view nobody has read yet draws its notes as they land', async () => {
+    const page = await reading(['a.ts'], { 'a.ts': 100 });
     hidden = true;
     await page.land();
     expect(page.swapped('a.ts')).toBe(true);

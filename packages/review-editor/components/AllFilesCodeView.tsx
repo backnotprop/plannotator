@@ -2201,7 +2201,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const viewTop = Math.max(0, pageBox.top);
     const viewBottom = Math.min(window.innerHeight, pageBox.bottom);
     const ownBox = scroller.getBoundingClientRect();
-    if (viewBottom <= viewTop || ownBox.width === 0 || ownBox.height === 0) return true;
+    if (viewBottom <= viewTop || ownBox.width === 0 || ownBox.height === 0) return false;
     if (page.scrollHeight - page.scrollTop - page.clientHeight <= viewBottom - viewTop) return false;
     const node = itemNodeRef.current.get(itemId);
     const anyNode = node?.isConnected ? node : [...itemNodeRef.current.values()].find((candidate) => candidate.isConnected);
