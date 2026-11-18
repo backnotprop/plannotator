@@ -38,7 +38,7 @@ import { homedir } from "node:os";
 import { basename } from "node:path";
 import { INBOX_AUTO_SEND_AFTER_MS, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASK_POLL_FIELD, INBOX_AUTO_RELOAD_POLL_FIELD, INBOX_CONTINUES_POLL_FIELD, INBOX_PLACE_POLL_FIELD, parseInboxPlace, type InboxPlace, INBOX_FIRST_STARTED_POLL_FIELD, INBOX_HELD_POLL_FIELD, INBOX_RELOAD_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD, INBOX_TITLE_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -193,6 +193,11 @@ interface SeenSession {
   plugin: LoadedPlugin | null;
   /** Claude Code's version (`engine`); null when it sent none. */
   engine: string | null;
+  /**
+   * Where its latest poll said it lives (INBOX_PLACE_POLL_FIELD: a Rex pane's ids). A hint, never shown as it is:
+   * inbox-rex.ts asks Rex before anything is drawn. Ids only. Absent: none said.
+   */
+  place?: InboxPlace | null;
   /**
    * A session the Inbox wakes itself, with no connection that polls (Codex:
    * `codex queue`; packages/server/inbox-codex-wake.ts): seen from its MCP
@@ -557,6 +562,8 @@ export function createInboxLiveSessions(options: {
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     setHeld(entry, body[INBOX_HELD_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
+    // Sent on every poll, so the latest stands: a poll without it (an older connection, or no longer in Rex) says none.
+    entry.place = parseInboxPlace(body[INBOX_PLACE_POLL_FIELD]);
     // Sent on every poll, so the latest stands: a poll without it withdraws the claim.
     const continues = parseInboxContinues(body[INBOX_CONTINUES_POLL_FIELD], session);
     continuations.claim(session, continues);
@@ -1400,10 +1407,21 @@ export function createInboxLiveSessions(options: {
     return !!entry && entry.wakeOnly === undefined && !isLive(entry);
   };
 
+  /** Where a live session said it lives (its latest poll's place hint); null when it said none or is not live. */
+  const placeOf = (session: string): InboxPlace | null => {
+    const entry = sessions.get(session);
+    return entry && isLive(entry) ? (entry.place ?? null) : null;
+  };
+
+  /** The live sessions that said where they live (a Rex pane): what the delivery watch keeps Rex's read fresh for. */
+  const placedSessions = (): string[] => [...sessions].flatMap(([session, entry]) => (entry.place && isLive(entry) ? [session] : []));
+
   return {
     lastHeardOf,
     endedOf,
     pollStarted,
+    placeOf,
+    placedSessions,
     stateChanged,
     seenWakeOnly,
     pinCloud,
