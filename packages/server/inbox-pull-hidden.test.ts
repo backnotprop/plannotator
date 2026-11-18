@@ -148,6 +148,8 @@ describe("the Inbox list's threads with hidden PRs", () => {
     expect(threadStaysHidden(T1, { ...quiet, activity: ["2026-11-17T09:00:00.000Z", "2026-11-17T10:00:01.000Z"] })).toBe(false);
     // A newer hide takes it out again.
     expect(threadStaysHidden(T2, { ...quiet, activity: ["2026-11-17T10:00:01.000Z"] })).toBe(true);
+    // The same millisecond as the hide counts as newer: it shows.
+    expect(threadStaysHidden(T1, { ...quiet, activity: [T1] })).toBe(false);
     expect(threadStaysHidden(T1, { ...quiet, pinned: true })).toBe(false);
     expect(threadStaysHidden(T1, { ...quiet, snoozed: true })).toBe(false);
   });
@@ -163,6 +165,17 @@ describe("the Inbox list's threads with hidden PRs", () => {
     expect(again.atOf(pull(7).key)).toBe(T1);
     expect(again.atOf(pull(8).key)).toBeNull();
   });
+
+  test("a thread hidden again is kept across a restart, and Undo takes that off", () => {
+    const dataDir = scratch();
+    const hidden = createInboxPullHidden(dataDir);
+    hidden.rehide({ hide: ["thr_a", "thr_b"], show: [] }, new Date(T2));
+    expect(createInboxPullHidden(dataDir).rehidOf("thr_a")).toBe(T2);
+    createInboxPullHidden(dataDir).rehide({ hide: [], show: ["thr_a"] }, new Date());
+    const after = createInboxPullHidden(dataDir);
+    expect(after.rehidOf("thr_a")).toBeNull();
+    expect(after.rehidOf("thr_b")).toBe(T2);
+  });
 });
 
 describe("the repositories a machine keeps hidden", () => {
@@ -177,7 +190,6 @@ describe("the repositories a machine keeps hidden", () => {
     // #900 was never seen before the hide: new PRs there stay hidden too.
     expect(again.shown([pull(7), pull(900), other(8)]).map((p) => p.key)).toEqual([other(8).key]);
     expect(again.has(pull(900).key)).toBe(true);
-    expect(again.atOf(pull(900).key)).toBe("2026-11-17T10:00:00.000Z");
     expect(again.repos()).toEqual([{ key: REPO, label: "api", at: "2026-11-17T10:00:00.000Z" }]);
     // The hidden PRs' list stays the PRs hidden one by one.
     expect(again.list()).toEqual([]);
@@ -185,13 +197,23 @@ describe("the repositories a machine keeps hidden", () => {
     expect(createInboxPullHidden(dataDir).shown([pull(7), other(8)])).toHaveLength(2);
   });
 
-  test("a thread whose PRs are all in a hidden repository leaves the Inbox list as one whose PRs were hidden", () => {
+  test("a hidden repository never takes a thread out of the Inbox list: only PRs hidden one by one do", () => {
     const hidden = createInboxPullHidden(scratch());
     hidden.change({ hide: [], show: [], hide_repos: [{ key: REPO, label: "api" }] }, new Date("2026-11-17T10:00:00Z"));
-    const inPlay = new Map([["thr_a", new Map([[pull(7).key, { ...hide(7), thread_id: "thr_a" }]])], ["thr_b", new Map([[other(8).key, { key: other(8).key, title: "x", url: other(8).url, thread_id: "thr_b" }]])]]);
-    const { gone, hideable } = threadPullsHidden(inPlay, (key) => hidden.atOf(key));
-    expect([...gone.keys()]).toEqual(["thr_a"]);
-    expect(hideable.has("thr_b")).toBe(true);
+    expect(hidden.atOf(pull(7).key)).toBeNull();
+    const inPlay = new Map([["thr_a", new Map([[pull(7).key, { ...hide(7), thread_id: "thr_a" }]])]]);
+    expect(threadPullsHidden(inPlay, (key) => hidden.atOf(key)).gone.size).toBe(0);
+    hidden.change({ hide: [hide(7)], show: [] }, new Date("2026-11-17T11:00:00Z"));
+    expect([...threadPullsHidden(inPlay, (key) => hidden.atOf(key)).gone.keys()]).toEqual(["thr_a"]);
+  });
+
+  test("the newest 500 hidden repositories are kept", () => {
+    const hidden = createInboxPullHidden(scratch());
+    const many = Array.from({ length: PULL_HIDDEN_KEPT + 1 }, (_, i) => ({ key: `github.com/o/r${i}`, label: `r${i}` }));
+    for (const [i, repo] of many.entries()) hidden.change({ hide: [], show: [], hide_repos: [repo] }, new Date(Date.parse("2026-11-17T10:00:00Z") + i * 1000));
+    expect(hidden.repos()).toHaveLength(PULL_HIDDEN_KEPT);
+    expect(hidden.has("github.com/o/r0#1")).toBe(false);
+    expect(hidden.has(`github.com/o/r${PULL_HIDDEN_KEPT}#1`)).toBe(true);
   });
 
   test("a write's repositories: host/owner/repo, lowercased; a PR's key is refused", () => {

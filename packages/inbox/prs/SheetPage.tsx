@@ -94,6 +94,8 @@ export interface SheetPageProps {
   onOpenThread?: (threadId: string) => void;
   /** Reviews' project filter's name, when one is on: `model` is already that project's (`boardInProject`). */
   projectName?: string | null;
+  /** Reviews' project filter (its id): picks the board no longer holds are dropped when it changes. */
+  project?: string | null;
 }
 
 /** The popover: the PR it is of, the tile it hangs from, and whether Enter or a tap pinned it (its actions take focus). */
@@ -199,6 +201,13 @@ export function SheetPage(props: SheetPageProps) {
     const open = new Set(model?.pulls.filter(inboxPullIsOpen).map((p) => p.key));
     return new Set([...picked].filter((key) => open.has(key)));
   }, [model, picked]);
+  // Another project filter: picks it no longer shows are let go, so none comes back unseen when the filter is cleared.
+  const modelRef = useRef(model);
+  modelRef.current = model;
+  useEffect(() => {
+    const keys = new Set(modelRef.current?.pulls.map((p) => p.key));
+    setPicked((was) => (was.size === 0 || [...was].every((key) => keys.has(key)) ? was : new Set([...was].filter((key) => keys.has(key)))));
+  }, [props.project]);
   // Bulk Merge: the confirm and the report hold the picks they were for; another pick drops them.
   const [bulk, setBulk] = useState<BulkPhase>({ at: 'idle' });
   const chosenKey = [...chosen].sort().join('\n');
@@ -555,7 +564,7 @@ export function SheetPage(props: SheetPageProps) {
   });
   const actions = selectOn && (chosen.size > 0 || live.at !== 'idle');
   // Hide repository (hiddenPulls.ts): every PR in it leaves the board, Reviews and the counts, new ones too; nothing
-  // changes on the forge. Revealed with its header on a desktop (prs.css); not while picking. Undo is the toast's.
+  // changes on the forge. Always shown, quiet (prs.css); not while picking. Undo is the toast's.
   const repoHide = (section: { key: string; label: string; platform: InboxPull['platform'] }) =>
     selectOn ? null : (
       <button

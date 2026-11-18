@@ -208,19 +208,28 @@ export async function showPulls(keys: readonly string[]): Promise<void> {
  * Hide the open PRs of these Inbox threads (the list's row menu and picks): the server names them (`hid`), and the
  * lists drop them at once. Resolves the keys it hid; a refused write throws.
  */
-export async function hideThreadPulls(threadIds: readonly string[], now = new Date()): Promise<{ hid: string[]; left: number }> {
+export async function hideThreadPulls(threadIds: readonly string[], now = new Date()): Promise<{ hid: string[]; rehid: string[]; left: number }> {
   const hid: string[] = [];
+  const rehid: string[] = [];
   const left = new Set<string>();
   const records = new Map<string, InboxPullHidden>();
   for (const part of inParts(threadIds)) {
     const answer = await inboxApi.pullsHidden({ threads: part });
     hid.push(...(answer.hid ?? []));
+    rehid.push(...(answer.rehid ?? []));
     for (const id of answer.threads_left ?? []) left.add(id);
     for (const record of answer.hidden) records.set(record.key, record);
   }
   if (hid.length > 0) change(hid, (key) => ({ hide: true, record: records.get(key) ?? { key, title: key, url: '', at: now.toISOString() }, since: now.getTime() }));
   written();
-  return { hid, left: left.size };
+  return { hid, rehid, left: left.size };
+}
+
+/** Undo of the Inbox list's Hide: its PRs shown again, and the threads it hid again (`rehid`) let back. */
+async function undoThreadHide(hid: readonly string[], rehid: readonly string[]): Promise<void> {
+  await showPulls(hid);
+  for (const part of inParts(rehid)) await inboxApi.pullsHidden({ show_threads: part });
+  if (rehid.length > 0) written();
 }
 
 /** A Hide's lead: "Hid #12", and the threads it took out of the Inbox list with it ("Hid #12, with its thread"). */
@@ -331,25 +340,37 @@ function stillOpenOn(keys: readonly string[]): string {
  */
 export async function hideThreadsWithUndo(threadIds: readonly string[], toast: Toast | undefined): Promise<boolean> {
   let hid: string[];
+  let rehid: string[];
   let threads: number;
   try {
-    ({ hid, left: threads } = await hideThreadPulls(threadIds));
+    ({ hid, rehid, left: threads } = await hideThreadPulls(threadIds));
   } catch (cause) {
     toast?.({ icon: 'warn', lead: 'Couldn’t hide', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS);
     return false;
   }
-  if (hid.length === 0) {
+  if (hid.length === 0 && rehid.length === 0) {
     // Hidden elsewhere meanwhile (another window, a phone): say so, rather than nothing at all.
     toast?.({ icon: 'check', lead: 'Already hidden', detail: 'Its pull requests were hidden already.' }, HIDE_UNDO_MS);
     return false;
   }
   const labels = hid.map((key) => hiddenLabel({ key }));
+  // Only threads hidden again (their PRs were hidden already): the toast names the threads.
+  const lead =
+    hid.length > 0
+      ? hidLead(hid.length === 1 ? `Hid ${labels[0]}` : `Hid ${formatCount(hid.length)} pull requests`, threads)
+      : rehid.length === 1
+        ? 'Hid the thread again'
+        : `Hid ${formatCount(rehid.length)} threads again`;
   toast?.(
     {
       icon: 'check',
-      lead: hidLead(hid.length === 1 ? `Hid ${labels[0]}` : `Hid ${formatCount(hid.length)} pull requests`, threads),
-      detail: `Still open on ${stillOpenOn(hid)}`,
-      onUndo: () => void showWithToast(hid, labels, toast),
+      lead,
+      detail: hid.length > 0 ? `Still open on ${stillOpenOn(hid)}` : 'Its pull requests were hidden already',
+      onUndo: () =>
+        void undoThreadHide(hid, rehid).then(
+          () => toast?.({ icon: 'check', lead: hid.length > 0 ? shownToast(labels) : rehid.length === 1 ? 'The thread is back' : `${formatCount(rehid.length)} threads are back` }, HIDE_UNDO_MS),
+          (cause: unknown) => toast?.({ icon: 'warn', lead: 'Couldn’t show it again', detail: cause instanceof Error ? cause.message : undefined, wrap: true }, HIDE_UNDO_MS),
+        ),
       noKey: true,
     },
     HIDE_UNDO_MS,

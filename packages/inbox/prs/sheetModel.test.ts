@@ -4,7 +4,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull } from '@plannotator/core/inbox-types';
-import { routeOf } from '../app/route';
+import { listProjectOf, routeOf } from '../app/route';
 import { hashOf } from '../app/writeRoute';
 import { boardInProject, FOLD_OVER, foldsToStrip, matchesQuery, mergeOffered, mergedModel, needsYou, orderUnits, sheetModel, statusParts, statusWords, tileOpens, topFirst } from './sheetModel';
 
@@ -224,6 +224,20 @@ describe('the board in a Reviews project filter (boardInProject)', () => {
     expect(sheetModel(boardInProject(answer, null), NOW).head).toMatchObject({ open: 4, repos: 3 });
   });
 
+  test("Reviews' own rule: a PR whose thread is in the project, or whose head is the project's fork, is in it too", () => {
+    const handed = pr({ repo: 'outside/tool' });
+    const fork = pr({ repo: 'upstream/lib', head_repo: 'dana/lib' });
+    const withLinks = {
+      ...answer,
+      pulls: [...answer.pulls, handed, fork],
+      projects: { ...answer.projects, 'github.com/dana/lib': ['prj_lib'] },
+      links: { [handed.key]: { via: 'owner' as const, thread_id: 'thr_1', thread_subject: null, project_id: 'prj_ledger', agent: null, last: null, guide: null } },
+    };
+    expect(boardInProject(withLinks, 'prj_ledger').pulls).toContain(handed);
+    expect(boardInProject(withLinks, 'prj_lib').pulls).toEqual([fork]);
+    expect(boardInProject(withLinks, 'prj_web').pulls).not.toContain(handed);
+  });
+
   test('a project with no repository on the board shows nothing, rather than everything', () => {
     expect(sheetModel(boardInProject(answer, 'prj_gone'), NOW).sections).toEqual([]);
   });
@@ -234,4 +248,8 @@ test("the board's own page (a phone's) keeps Reviews' project filter in its addr
   expect(route).toMatchObject({ page: 'prs', project: 'prj_ledger', prsView: 'merged' });
   expect(routeOf(hashOf(route))).toMatchObject({ page: 'prs', project: 'prj_ledger', prsView: 'merged' });
   expect(routeOf('#prs').project).toBeNull();
+  // It is the board's filter, never the Inbox list's.
+  expect(listProjectOf(route)).toBeNull();
+  expect(listProjectOf(routeOf('#reviews&project=prj_ledger'))).toBeNull();
+  expect(listProjectOf(routeOf('#project=prj_ledger'))).toBe('prj_ledger');
 });

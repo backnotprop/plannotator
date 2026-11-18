@@ -15,7 +15,8 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. No gh: the window's fetch is stubbed.
  */
 import { afterEach, beforeEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, useState } from 'react';
+import { boardInProject } from '../prs/sheetModel';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullHidden, InboxPullsAnswer, InboxReviewRow } from '@plannotator/core/inbox-types';
 import type { InboxToastModel } from '../components/Toast';
@@ -217,7 +218,7 @@ test("a tile's popover hides that PR only (a phone's sheet)", async () => {
   expect(tile(key(7))).not.toBeNull();
 });
 
-test("Hide repository: the repository leaves the board and its head line at once, in one write naming it; Undo shows it again", async () => {
+test("Hide repository, from a Grid section's header and from a Table group's header: the repository leaves the board and its head line at once, in one write naming it; Undo shows it again", async () => {
   if (!hasDom) return;
   for (const layout of ['grid', 'table'] as const) {
     sent.length = 0;
@@ -243,6 +244,28 @@ test("Hide repository: the repository leaves the board and its head line at once
     host?.remove();
     hidden.forgetHiddenChanges();
   }
+});
+
+test("Reviews' project filter: picks the board no longer shows are let go, and do not come back when the filter is cleared", () => {
+  if (!hasDom) return;
+  let setProject: (project: string | null) => void = () => {};
+  function Filtered() {
+    const [project, set] = useState<string | null>(null);
+    setProject = set;
+    const changes = hidden.useHiddenChanges();
+    return <Board project={project} model={boardInProject(hidden.pullsShown(MODEL, changes)!, project)} />;
+  }
+  mount(<Filtered />);
+  click($('[data-pr-select="select"]')!);
+  for (const k of [key(7), WEB20]) click(tile(k)!);
+  expect($('[data-pr-hide]')!.textContent).toContain('2');
+  act(() => setProject('prj_web'));
+  expect(tile(key(7))).toBeNull();
+  expect($('[data-pr-hide]')!.textContent).toContain('1');
+  act(() => setProject(null));
+  expect(tile(key(7))).not.toBeNull();
+  expect($('[data-pr-hide]')!.textContent).toContain('1');
+  expect(tile(key(7))!.getAttribute('aria-checked')).toBe('false');
 });
 
 test("Reviews' Hidden lists a hidden repository, and its Show again shows that repository", () => {
@@ -376,6 +399,21 @@ test("the Inbox list's Hide with nothing left to hide says so; one that takes th
   expect(toasts[1]!.toast.lead).not.toBe(toasts[0]!.toast.lead);
   expect(toasts[1]!.toast.lead).toContain('2 threads');
   expect(toasts[1]!.toast.onUndo).toBeDefined();
+});
+
+test("the Inbox list's Hide on a thread that came back hides the thread again; its Undo lets that thread back and shows no PR", async () => {
+  if (!hasDom) return;
+  const again = hidden.hideThreadsWithUndo(['thr_a'], (toast, ms) => toasts.push({ toast, ms }));
+  await settle();
+  sent[0]!.answer(200, { hidden: [], hid: [], rehid: ['thr_a'], threads_left: ['thr_a'] });
+  expect(await again).toBe(true);
+  expect(toasts).toHaveLength(1);
+  act(() => toasts[0]!.toast.onUndo!());
+  await settle();
+  expect(sent.slice(1).map((s) => s.body)).toEqual([{ hide: [], threads: [], show: [], show_threads: ['thr_a'] }]);
+  sent[1]!.answer(200, { hidden: [] });
+  await settle();
+  expect(toasts.at(-1)!.toast.icon).toBe('check');
 });
 
 test("a hidden PR keeps its review thread in a thread's PR list", () => {
