@@ -43,7 +43,7 @@ const offBecause = (threadId: string | undefined, forAnother: boolean, session: 
         : ` No /create-routine request from the person in thread ${threadId} that this Inbox still holds (one lasts an hour and makes one routine, and an Inbox restart forgets it), so it is off until the person turns it on in Routines in the Inbox.`;
 
 /** What a change result says when no line reached the person, so the agent tells them itself. */
-export const NO_CHANGE_LINE = " There was no thread to post a line for the person in, so none was posted. Pass thread_id (--thread from a shell) to post it in your thread.";
+export const NO_CHANGE_LINE = " There was no thread to post a line for the person in, so none was posted. Tell the person yourself; next time pass thread_id (--thread from a shell).";
 
 const rowLine = (row: InboxScheduledRow) =>
   `${row.id} "${row.name}": ${row.state}, ${row.schedule ? row.schedule_words : "runs only when run"}${row.tz_short ? ` (${row.tz_short})` : ""}, ${row.agent} in ${row.folder_shown}${row.next_run ? `, next ${row.next_run}` : ""}${row.approved_at ? "" : ", not yet turned on by the person"}${row.thread_id ? `, thread ${row.thread_id}` : ""}.`;

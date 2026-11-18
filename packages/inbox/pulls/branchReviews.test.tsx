@@ -8,6 +8,7 @@
  *    can't be opened;
  *  - the ask sent twice: a double click, the button back once the ask is the thread's last message, or offered again
  *    when the thread opens again after it was asked;
+ *  - a retry after a send that failed on the way back going out as a second request (a new idempotency key);
  *  - a cloud agent's remote drawn as a link, or with anything but its host and repository;
  *  - Rank offered for a branch that can't be ranked, or going anywhere but the rank route with its thread.
  *
@@ -215,6 +216,26 @@ test.skipIf(!hasDom)('the ask is sent once: a double click sends one reply, and 
   // Another word from the person, or an ask before a newer report (a new head), leaves it to ask.
   expect(reviewViewOf(row, { messages: [agentReport, { ...ask, body: 'Thanks.' }], subject: null }, options).branch?.asked).toBe(false);
   expect(reviewViewOf(row, { messages: [{ ...ask, created_at: at(-1) }, agentReport], subject: null }, options).branch?.asked).toBe(false);
+});
+
+test.skipIf(!hasDom)('a retry after a failed send of the ask uses the same idempotency key, so the Inbox takes it as one request', async () => {
+  fetches({});
+  const keys: string[] = [];
+  const restore = spyOn(inboxApi, 'reply').mockImplementation((async (_id: string, input: { idempotency_key: string }) => {
+    keys.push(input.idempotency_key);
+    if (keys.length === 1) throw new Error('The connection dropped.');
+    return { reply: null, questions: [], replayed: true };
+  }) as never);
+  restores.push(() => restore.mockRestore());
+  await mount(<ReviewViewNote view={view({ report: report(), reach: null, canAsk: true, canRank: false, projectName: 'billing', replyTo: 'msg_01JD0000000000000000000009' })} />);
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!.click());
+  await settle();
+  expect(document.querySelector('[data-review-branch-error]')?.textContent).toBe('The connection dropped.');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-review-branch-ask]')!.click());
+  await settle();
+  expect(keys).toHaveLength(2);
+  expect(keys[1]).toBe(keys[0]!);
+  expect(document.querySelector('[data-review-branch-asked]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('Rank is offered only for a branch that can be ranked, and asks the rank route for its thread', async () => {

@@ -33,6 +33,9 @@ function BranchAsk({ note }: { note: NonNullable<ReviewView['branch']> }) {
   const asked = note.asked === true || state.asked === reportKey;
   // A second press before the first one's render (a double click) sends nothing.
   const sendingRef = useRef(false);
+  // One idempotency key per report until a send succeeds: a retry after a send that reached the Inbox but failed on
+  // the way back is the same request, never a second ask.
+  const keyRef = useRef<{ report: string; key: string } | null>(null);
   const rank = async () => {
     if (ranking === 'asking') return;
     setRanking('asking');
@@ -49,7 +52,9 @@ function BranchAsk({ note }: { note: NonNullable<ReviewView['branch']> }) {
     try {
       const words = branchAskWords(report, note.projectName);
       const skills = await inboxSkillsBlock([words], INBOX_REPLY_SKILL_AUDIENCE);
-      await inboxApi.reply(replyTo, { idempotency_key: newKey(), words: withSkillsBlock(words, skills), questions: [] });
+      if (keyRef.current?.report !== reportKey) keyRef.current = { report: reportKey, key: newKey() };
+      await inboxApi.reply(replyTo, { idempotency_key: keyRef.current.key, words: withSkillsBlock(words, skills), questions: [] });
+      keyRef.current = null;
       setState({ asked: reportKey, sending: false, error: null });
     } catch (cause) {
       setState({ asked: null, sending: false, error: cause instanceof Error ? cause.message : 'The request could not be sent.' });
