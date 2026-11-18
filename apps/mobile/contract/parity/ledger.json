@@ -15824,7 +15824,7 @@
       "flows": [],
       "mobile": "v1",
       "why": "native audio player with moment comments",
-      "source": "SCOPE 4. Voice; `packages/inbox/components/AudioPlayer.tsx`; `adr/implementation/inbox-mobile.md` section 12",
+      "source": "SCOPE 4. Voice; `packages/inbox/components/AudioPlayer.tsx`; the mobile ADR (inbox-mobile), section 12",
       "ios": {
         "state": "not-started"
       }
