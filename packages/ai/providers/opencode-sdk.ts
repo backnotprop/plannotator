@@ -77,8 +77,9 @@ export class OpenCodeProvider implements AIProvider {
 	/** Spawn this process's OpenCode server if it is not already running. */
 	async ensureServer(): Promise<void> {
 		if (this.client) return;
+		const epoch = this.startEpoch;
 		this.startPromise ??= this.doStart().catch((err) => {
-			this.startPromise = null;
+			if (epoch === this.startEpoch) this.startPromise = null;
 			throw err;
 		});
 		return this.startPromise;
