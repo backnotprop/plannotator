@@ -1,6 +1,8 @@
 # The flows
 
-One file per flow: what the person sees, what they can do and what happens, then numbered checks (`[list-04]`). A test or a UI test names the check it proves (`// proves: list-04`). A flow changes by changing its file first. `scripts/mobile/surface.ts` lists every check in `parity/surface.json`, so a new check needs a ledger row. A new flow file is added to `FLOW_FILES` in `scripts/mobile/surface.ts`.
+One file per flow: what the person sees, what they can do and what happens, then numbered checks (`[list-04]`). A test or a UI test names the check it proves (`// proves: list-04`). A flow changes by changing its file first. `scripts/mobile/surface.ts` lists every check in `parity/surface.json`, so a new check needs a ledger row. A new flow file is added to `FLOW_FILES` in `scripts/mobile/flows.ts`.
+
+The window is the truth. Every behaviour here is taken from the product's code, and each check ends with where: ` (path:line)`, or several joined by `; `, repo-relative. `tests/mobile-flows.test.ts` fails when a check has no citation or cites a file or line that does not exist. Where the phone deliberately does something else, the check says `phone differs: <what>, because <reason>`; a check with no window counterpart at all ends with `(phone only)` instead of a path. Never let a check disagree with the window silently. When the window changes, correct the check and its citation.
 
 Three rules hold in every flow:
 
@@ -24,5 +26,8 @@ Words used below: the **window** is the Inbox in a desktop browser; the **comput
 | Notifications with actions; answers from the lock screen | The window can only notify while a page is open |
 | Reading and answering while the computer is asleep | A page cannot keep a copy or hold a write |
 | No Open in Terminal, no free layout, no hover, no keyboard shortcuts | They need the computer's screen, pointer or keys |
+| Starred threads always as pills above the list | The window's default place for them, the sidebar's Starred section, needs a sidebar |
+| A diagram in a sandboxed web view | The app has no diagram renderer of its own; the window draws it into the page |
+| Share in a message's ⋯ | The share sheet is how things move between apps on a phone |
 
 Everything else is meant to be the same, and the contract keeps that true.

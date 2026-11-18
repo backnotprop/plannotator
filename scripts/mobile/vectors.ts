@@ -18,7 +18,7 @@ import { formatCount, plural, questionCount, waitCount } from '../../packages/co
 import { inboxHasUnsent, type InboxListRow } from '../../packages/core/inbox-types';
 import { tabBadgeLabel, inboxTabCount } from '../../packages/inbox/tabCount';
 import { inboxListSections, inboxRowUnread, inboxSectionOf, type InboxSectionFacts } from '../../packages/shared/inbox/list';
-import { ROOT, cli, contractVersion, jsonText, readRepoText, type Output } from './lib';
+import { ROOT, cli, jsonText, readRepoText, type Output } from './lib';
 import { buildWords } from './words';
 
 export const FIXTURES = {
@@ -55,7 +55,6 @@ export function listVectors(): unknown {
   const count = inboxTabCount(sections);
   return {
     about: about('Each row: its section and whether it is bold. Then every section in order with its thread ids, and the badge (the window\'s tab count).', FIXTURES.list),
-    contract: contractVersion(),
     rows: rows.map(({ row, section, unread }) => ({ thread_id: row.thread_id, note: row.note, section, unread })),
     sections: sections.map((s) => ({ id: s.id, label: s.label, threads: s.threads.map((t) => t.thread_id) })),
     badge: { count, label: tabBadgeLabel(count) },
@@ -73,7 +72,6 @@ export function wordVectors(): unknown {
   };
   return {
     about: about('Each template filled with sample parts, as the window prints it; then the counting words.', 'the product\'s word functions'),
-    contract: contractVersion(),
     filled: [
       filled('delivery.sent_queued', sentRowLine(name, true), { name }),
       filled('delivery.sent_saved', sentRowLine(name, false), { name }),
@@ -98,10 +96,19 @@ export function timeVectors(): unknown {
   const fixture = JSON.parse(readRepoText(FIXTURES.time)) as { time_zone: string };
   const run = Bun.spawnSync([process.execPath, TIME_SCRIPT], { cwd: ROOT, env: { ...process.env, TZ: fixture.time_zone }, stdout: 'pipe', stderr: 'pipe' });
   if (run.exitCode !== 0) throw new Error(`vectors.ts: ${TIME_SCRIPT} failed: ${run.stderr.toString()}`);
+  const made = JSON.parse(run.stdout.toString()) as { cases: Record<string, string>[] };
+  // iOS's en_US time format puts U+202F (narrow no-break space) before AM and PM; the window prints U+0020.
+  const ios = (text: string) => text.replace(/ (AM|PM)\b/g, '\u202f$1');
+  const examples = [...new Set(made.cases.flatMap((c) => Object.entries(c).filter(([k]) => k !== 'iso').map(([, v]) => v)).filter((v) => / (AM|PM)\b/.test(v)))]
+    .sort()
+    .map((window) => ({ ios: ios(window), window }));
   return {
     about: about('In the fixture\'s time zone; the app formats in the same zone and must give the same words.', FIXTURES.time),
-    contract: contractVersion(),
-    ...(JSON.parse(run.stdout.toString()) as object),
+    normalise: {
+      rule: 'Before comparing, replace U+202F (narrow no-break space) and U+00A0 (no-break space) with U+0020. iOS formats en_US times with U+202F before AM and PM; the window prints U+0020.',
+      examples,
+    },
+    ...made,
   };
 }
 
@@ -129,7 +136,6 @@ export async function cryptoVectors(): Promise<unknown> {
   const threads = [...new Set([...relay.envelopes.map((e) => threadOf(e.plaintext)).filter((t): t is string => t !== null), 'msg_A00000000000000000000001'])];
   return {
     about: about('The keys, envelopes and inputs are in the relay vectors file named in "relay_vectors"; this adds the push collapse id.', FIXTURES.relay),
-    contract: contractVersion(),
     relay_vectors: FIXTURES.relay,
     collapse: {
       hkdf_info: 'plannotator-inbox relay collapse v1',

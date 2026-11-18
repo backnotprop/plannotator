@@ -131,27 +131,23 @@ public struct UploadID: RawRepresentable, Codable, Hashable, Sendable, CustomStr
 
 // MARK: - Wire types (apps/mobile/contract/schema/wire.schema.json)
 
-/// GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time.
 /// From `packages/core/inbox-wire-models.ts`.
 public struct ArchivedModel: Codable, Hashable, Sendable {
   public var serverSession: String
-  public var cursor: Double
+  public var cursor: Int64
   public var project: String?
-  /// Every project with archived threads, and how many, for the block's project filter.
   public var projects: [ArchivedModelProjectsItem]
-  /// Archived threads in the filtered scope, beyond this page too.
-  public var total: Double
-  /// `machines=1`: each linked machine asked, `away` when its rows are the ones it last gave.
+  public var total: Int64
   public var machines: [String: ArchivedModelMachinesValue]?
-  public var offset: Double
-  public var limit: Double
+  public var offset: Int64
+  public var limit: Int64
   public var threads: [InboxListRow]
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["serverSession", "cursor", "project", "projects", "total", "machines", "offset", "limit", "threads"]
 
-  public init(serverSession: String, cursor: Double, project: String? = nil, projects: [ArchivedModelProjectsItem], total: Double, machines: [String: ArchivedModelMachinesValue]? = nil, offset: Double, limit: Double, threads: [InboxListRow], unknownFields: [String: JSONValue] = [:]) {
+  public init(serverSession: String, cursor: Int64, project: String? = nil, projects: [ArchivedModelProjectsItem], total: Int64, machines: [String: ArchivedModelMachinesValue]? = nil, offset: Int64, limit: Int64, threads: [InboxListRow], unknownFields: [String: JSONValue] = [:]) {
     self.serverSession = serverSession
     self.cursor = cursor
     self.project = project
@@ -167,13 +163,13 @@ public struct ArchivedModel: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.serverSession = try c.decode(String.self, forKey: WireKey("serverSession"))
-    self.cursor = try c.decode(Double.self, forKey: WireKey("cursor"))
+    self.cursor = try c.decode(Int64.self, forKey: WireKey("cursor"))
     self.project = try c.decodeIfPresent(String.self, forKey: WireKey("project"))
     self.projects = try c.decode([ArchivedModelProjectsItem].self, forKey: WireKey("projects"))
-    self.total = try c.decode(Double.self, forKey: WireKey("total"))
+    self.total = try c.decode(Int64.self, forKey: WireKey("total"))
     self.machines = try c.decodeIfPresent([String: ArchivedModelMachinesValue].self, forKey: WireKey("machines"))
-    self.offset = try c.decode(Double.self, forKey: WireKey("offset"))
-    self.limit = try c.decode(Double.self, forKey: WireKey("limit"))
+    self.offset = try c.decode(Int64.self, forKey: WireKey("offset"))
+    self.limit = try c.decode(Int64.self, forKey: WireKey("limit"))
     self.threads = try c.decode([InboxListRow].self, forKey: WireKey("threads"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -251,25 +247,20 @@ public struct ArchivedModelProjectsItem: Codable, Hashable, Sendable {
   }
 }
 
-/// Every refusal: `{ error, code, ...details }`. Act on `code`, never the words (packages/server/inbox-devices.ts `refuse`).
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorError: Codable, Hashable, Sendable {
   public var error: String
   public var code: String
-  /// The body field at fault, on `422 validation_error`.
   public var field: String?
-  /// `401 pairing_code_wrong`: tries left before the offer closes.
   public var triesLeft: Double?
-  /// `413 upload_too_large`, `413 markup_too_large`.
-  public var maxBytes: Double?
-  /// `409 question_already_sent`: the question's key.
+  public var maxBytes: Int64?
   public var key: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["error", "code", "field", "tries_left", "max_bytes", "key"]
 
-  public init(error: String, code: String, field: String? = nil, triesLeft: Double? = nil, maxBytes: Double? = nil, key: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(error: String, code: String, field: String? = nil, triesLeft: Double? = nil, maxBytes: Int64? = nil, key: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.error = error
     self.code = code
     self.field = field
@@ -285,7 +276,7 @@ public struct DoorError: Codable, Hashable, Sendable {
     self.code = try c.decode(String.self, forKey: WireKey("code"))
     self.field = try c.decodeIfPresent(String.self, forKey: WireKey("field"))
     self.triesLeft = try c.decodeIfPresent(Double.self, forKey: WireKey("tries_left"))
-    self.maxBytes = try c.decodeIfPresent(Double.self, forKey: WireKey("max_bytes"))
+    self.maxBytes = try c.decodeIfPresent(Int64.self, forKey: WireKey("max_bytes"))
     self.key = try c.decodeIfPresent(String.self, forKey: WireKey("key"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -302,18 +293,16 @@ public struct DoorError: Codable, Hashable, Sendable {
   }
 }
 
-/// The stream's first frame, `event: hello` (packages/server/inbox.ts, the events handler).
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorHelloFrame: Codable, Hashable, Sendable {
   public var serverSession: String
-  /// The store's highest seq now.
-  public var cursor: Double
+  public var cursor: Int64
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["serverSession", "cursor"]
 
-  public init(serverSession: String, cursor: Double, unknownFields: [String: JSONValue] = [:]) {
+  public init(serverSession: String, cursor: Int64, unknownFields: [String: JSONValue] = [:]) {
     self.serverSession = serverSession
     self.cursor = cursor
     self.unknownFields = unknownFields
@@ -322,7 +311,7 @@ public struct DoorHelloFrame: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.serverSession = try c.decode(String.self, forKey: WireKey("serverSession"))
-    self.cursor = try c.decode(Double.self, forKey: WireKey("cursor"))
+    self.cursor = try c.decode(Int64.self, forKey: WireKey("cursor"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -334,17 +323,13 @@ public struct DoorHelloFrame: Codable, Hashable, Sendable {
   }
 }
 
-/// `201` to `POST pair` (inbox-devices.ts: `json({ device, token, secret, computer, addresses, relay }, 201)`).
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorPairAnswer: Codable, Hashable, Sendable {
   public var device: InboxDevicePublic
-  /// `tok_` and 43 characters; returned once.
   public var token: String
-  /// The pairing secret, also when paired by the digits.
   public var secret: String
   public var computer: DoorPairAnswerComputer
   public var addresses: DoorPairAnswerAddresses
-  /// Null when the relay could not be reached at pairing.
   public var relay: DoorPairAnswerRelay?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -471,13 +456,11 @@ public struct DoorPairAnswerRelay: Codable, Hashable, Sendable {
   }
 }
 
-/// `POST pair`: by the QR's secret, or by the six digits typed (inbox-devices.ts, the pair handler).
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorPairRequest: Codable, Hashable, Sendable {
   public var secret: String?
   public var code: String?
   public var name: String
-  /// `ios` or `android`.
   public var platform: String
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -511,7 +494,6 @@ public struct DoorPairRequest: Codable, Hashable, Sendable {
   }
 }
 
-/// `POST messages/:id/picks` answers.
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorPicksAnswer: Codable, Hashable, Sendable {
   public var messageId: MessageID
@@ -546,12 +528,10 @@ public struct DoorPicksAnswer: Codable, Hashable, Sendable {
   }
 }
 
-/// `POST messages/:id/picks`.
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorPicksBody: Codable, Hashable, Sendable {
   public var idempotencyKey: String
   public var questions: [DoorQuestionPick]
-  /// Refuse a question a reply already sent (`409 question_already_sent`).
   public var unsentOnly: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -582,21 +562,18 @@ public struct DoorPicksBody: Codable, Hashable, Sendable {
   }
 }
 
-/// One question in a pick or a reply.
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorQuestionPick: Codable, Hashable, Sendable {
-  /// Another message of the same thread and session (a reply only).
   public var messageId: MessageID?
   public var key: String
-  public var revision: Double
-  /// Null takes the pick back (a pick only).
+  public var revision: Int64
   public var answer: QuestionAnswer?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["message_id", "key", "revision", "answer"]
 
-  public init(messageId: MessageID? = nil, key: String, revision: Double, answer: QuestionAnswer? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(messageId: MessageID? = nil, key: String, revision: Int64, answer: QuestionAnswer? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.messageId = messageId
     self.key = key
     self.revision = revision
@@ -608,7 +585,7 @@ public struct DoorQuestionPick: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.messageId = try c.decodeIfPresent(MessageID.self, forKey: WireKey("message_id"))
     self.key = try c.decode(String.self, forKey: WireKey("key"))
-    self.revision = try c.decode(Double.self, forKey: WireKey("revision"))
+    self.revision = try c.decode(Int64.self, forKey: WireKey("revision"))
     self.answer = try c.decodeIfPresent(QuestionAnswer.self, forKey: WireKey("answer"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -623,16 +600,13 @@ public struct DoorQuestionPick: Codable, Hashable, Sendable {
   }
 }
 
-/// `event: record`, with `id: <seq>` (packages/server/inbox.ts `eventPayload`). Kinds are added over time: skip one you do not know.
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorRecordFrame: Codable, Hashable, Sendable {
-  public var seq: Double
-  public var kind: String
+  public var seq: Int64
+  public var kind: InboxRecordKind
   public var id: String
-  /// `message`: true on the message's first line.
   public var first: Bool?
   public var message: InboxMessageWire?
-  /// `question`, `steps`, `thread_pull`.
   public var threadId: ThreadID?
   public var question: InboxQuestion?
   /// Fields this app does not know: kept, and written back when encoded.
@@ -640,7 +614,7 @@ public struct DoorRecordFrame: Codable, Hashable, Sendable {
 
   static let knownKeys: Set<String> = ["seq", "kind", "id", "first", "message", "thread_id", "question"]
 
-  public init(seq: Double, kind: String, id: String, first: Bool? = nil, message: InboxMessageWire? = nil, threadId: ThreadID? = nil, question: InboxQuestion? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(seq: Int64, kind: InboxRecordKind, id: String, first: Bool? = nil, message: InboxMessageWire? = nil, threadId: ThreadID? = nil, question: InboxQuestion? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.seq = seq
     self.kind = kind
     self.id = id
@@ -653,8 +627,8 @@ public struct DoorRecordFrame: Codable, Hashable, Sendable {
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
-    self.seq = try c.decode(Double.self, forKey: WireKey("seq"))
-    self.kind = try c.decode(String.self, forKey: WireKey("kind"))
+    self.seq = try c.decode(Int64.self, forKey: WireKey("seq"))
+    self.kind = try c.decode(InboxRecordKind.self, forKey: WireKey("kind"))
     self.id = try c.decode(String.self, forKey: WireKey("id"))
     self.first = try c.decodeIfPresent(Bool.self, forKey: WireKey("first"))
     self.message = try c.decodeIfPresent(InboxMessageWire.self, forKey: WireKey("message"))
@@ -676,34 +650,28 @@ public struct DoorRecordFrame: Codable, Hashable, Sendable {
   }
 }
 
-/// `POST messages/:id/reply` (docs/agent-guides/server-and-storage.md, the reply row).
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorReplyBody: Codable, Hashable, Sendable {
   public var idempotencyKey: String
   public var words: String?
   public var questions: [DoorQuestionPick]?
-  /// Only questions the person chose to skip.
   public var skip: [DoorReplyBodySkipItem]?
   public var actions: [DoorReplyBodyActionsItem]?
   public var feedback: String?
   public var annotationIds: [String]?
-  /// `upl_` ids.
   public var uploads: [String]?
   public var tags: [DoorReplyBodyTagsItem]?
   public var to: DoorReplyBodyTo?
   public var quote: DoorReplyBodyQuote?
-  /// The reply draft's `updated_at`, only for words prefilled from that draft.
   public var clearDraft: String?
-  /// Add `thread_read` to the answer.
   public var withThread: Bool?
-  /// The `cursor` of the thread read the person saw (`409 thread_moved_on` when an agent wrote after it).
-  public var seenThroughSeq: Double?
+  public var seenThroughSeq: Int64?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["idempotency_key", "words", "questions", "skip", "actions", "feedback", "annotation_ids", "uploads", "tags", "to", "quote", "clear_draft", "with_thread", "seen_through_seq"]
 
-  public init(idempotencyKey: String, words: String? = nil, questions: [DoorQuestionPick]? = nil, skip: [DoorReplyBodySkipItem]? = nil, actions: [DoorReplyBodyActionsItem]? = nil, feedback: String? = nil, annotationIds: [String]? = nil, uploads: [String]? = nil, tags: [DoorReplyBodyTagsItem]? = nil, to: DoorReplyBodyTo? = nil, quote: DoorReplyBodyQuote? = nil, clearDraft: String? = nil, withThread: Bool? = nil, seenThroughSeq: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(idempotencyKey: String, words: String? = nil, questions: [DoorQuestionPick]? = nil, skip: [DoorReplyBodySkipItem]? = nil, actions: [DoorReplyBodyActionsItem]? = nil, feedback: String? = nil, annotationIds: [String]? = nil, uploads: [String]? = nil, tags: [DoorReplyBodyTagsItem]? = nil, to: DoorReplyBodyTo? = nil, quote: DoorReplyBodyQuote? = nil, clearDraft: String? = nil, withThread: Bool? = nil, seenThroughSeq: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.idempotencyKey = idempotencyKey
     self.words = words
     self.questions = questions
@@ -736,7 +704,7 @@ public struct DoorReplyBody: Codable, Hashable, Sendable {
     self.quote = try c.decodeIfPresent(DoorReplyBodyQuote.self, forKey: WireKey("quote"))
     self.clearDraft = try c.decodeIfPresent(String.self, forKey: WireKey("clear_draft"))
     self.withThread = try c.decodeIfPresent(Bool.self, forKey: WireKey("with_thread"))
-    self.seenThroughSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("seen_through_seq"))
+    self.seenThroughSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("seen_through_seq"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -966,7 +934,6 @@ public struct DoorReplyBodyTo: Codable, Hashable, Sendable {
   }
 }
 
-/// `POST revoke`: the device, with `revoked_at` set.
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorRevokeAnswer: Codable, Hashable, Sendable {
   public var device: InboxDevicePublic
@@ -993,18 +960,16 @@ public struct DoorRevokeAnswer: Codable, Hashable, Sendable {
   }
 }
 
-/// `POST threads/:id/seen`.
 /// From `scripts/mobile/door-shapes.ts`.
 public struct DoorSeenBody: Codable, Hashable, Sendable {
   public var idempotencyKey: String
-  /// The seq of the newest message the phone showed; absent: every agent message so far.
-  public var throughSeq: Double?
+  public var throughSeq: Int64?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["idempotency_key", "through_seq"]
 
-  public init(idempotencyKey: String, throughSeq: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(idempotencyKey: String, throughSeq: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.idempotencyKey = idempotencyKey
     self.throughSeq = throughSeq
     self.unknownFields = unknownFields
@@ -1013,7 +978,7 @@ public struct DoorSeenBody: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.idempotencyKey = try c.decode(String.self, forKey: WireKey("idempotency_key"))
-    self.throughSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("through_seq"))
+    self.throughSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("through_seq"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -1025,33 +990,22 @@ public struct DoorSeenBody: Codable, Hashable, Sendable {
   }
 }
 
-/// The person's 👍 on an agent message (`InboxMessage.ack`). The last line wins, as for every record: settling and the agent's read are new snapshot lines of the same message.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxAck: Codable, Hashable, Sendable {
   public var label: String
   public var at: String
-  /// The emoji the person reacted with from the 👍's tray (approval "inbox-reaction-tray"): one of their saved emoji (with its name, when it has one) or any emoji picked once. Absent or null: 👍 Looks good. It can change only inside the Undo window; the agent gets the one the person ended on (the note's `ack_reaction` and `inboxAckLine`), and read_thread shows it (`ack.reaction`).
   public var reaction: InboxReaction?
-  /// The Mark read this ack stands on (the root's `person_read_seq`): Move back on that read withdraws the ack.
-  public var readSeq: Double?
-  /// This ack made that Mark read (the thread was not read before), so its Undo undoes the read too.
+  public var readSeq: Int64?
   public var madeRead: Bool?
-  /// Set once the Undo window passed with the ack standing (the seq of that line, and when): agents see it from then on (read_thread). Null before.
-  public var settledSeq: Double?
+  public var settledSeq: Int64?
   public var settledAt: String?
-  /// The note that carries this 👍 to the agent (`InboxMessage.ack_of`), written when it settled. The note is delivered only while the ack still names it, so a 👍 taken back before its delivery never arrives. Absent on acks settled before the amendment (they were never sent).
   public var noteId: String?
-  /// Set when the Undo window ended but the 👍 could no longer go: the person wrote back after the message (`replied`) or the agent wrote again (`wrote_again`) inside the window. No note is written and no agent sees it; the window says it was not sent. Absent on every other ack.
   public var notSent: InboxAckNotSent?
-  /// When an agent read it (read_thread, or the wake delivered its note). Null until then.
   public var seenAt: String?
-  /// The window's thread only (`GET /api/inbox/threads/:id`): when the 👍 reached the agent (its note delivered as a turn, or an agent read it), else null. Never stored.
   public var deliveredAt: String?
-  /// The window's thread only: its note's `created_at`, `deliver_now_at` and `deliver_now_by` (a 👍 that waited on a busy session goes into the running turn by itself after `INBOX_AUTO_SEND_AFTER_MS`). Never stored.
   public var noteAt: String?
   public var deliverNowAt: String?
   public var deliverNowBy: InboxAckDeliverNowBy?
-  /// The note's `wait_started_at` and its delivery's `into_turn` (the window's thread only).
   public var waitStartedAt: String?
   public var deliveredIntoTurn: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
@@ -1059,7 +1013,7 @@ public struct InboxAck: Codable, Hashable, Sendable {
 
   static let knownKeys: Set<String> = ["label", "at", "reaction", "read_seq", "made_read", "settled_seq", "settled_at", "note_id", "not_sent", "seen_at", "delivered_at", "note_at", "deliver_now_at", "deliver_now_by", "wait_started_at", "delivered_into_turn"]
 
-  public init(label: String, at: String, reaction: InboxReaction? = nil, readSeq: Double? = nil, madeRead: Bool? = nil, settledSeq: Double? = nil, settledAt: String? = nil, noteId: String? = nil, notSent: InboxAckNotSent? = nil, seenAt: String? = nil, deliveredAt: String? = nil, noteAt: String? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxAckDeliverNowBy? = nil, waitStartedAt: String? = nil, deliveredIntoTurn: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(label: String, at: String, reaction: InboxReaction? = nil, readSeq: Int64? = nil, madeRead: Bool? = nil, settledSeq: Int64? = nil, settledAt: String? = nil, noteId: String? = nil, notSent: InboxAckNotSent? = nil, seenAt: String? = nil, deliveredAt: String? = nil, noteAt: String? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxAckDeliverNowBy? = nil, waitStartedAt: String? = nil, deliveredIntoTurn: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.label = label
     self.at = at
     self.reaction = reaction
@@ -1084,9 +1038,9 @@ public struct InboxAck: Codable, Hashable, Sendable {
     self.label = try c.decode(String.self, forKey: WireKey("label"))
     self.at = try c.decode(String.self, forKey: WireKey("at"))
     self.reaction = try c.decodeIfPresent(InboxReaction.self, forKey: WireKey("reaction"))
-    self.readSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("read_seq"))
+    self.readSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("read_seq"))
     self.madeRead = try c.decodeIfPresent(Bool.self, forKey: WireKey("made_read"))
-    self.settledSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("settled_seq"))
+    self.settledSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("settled_seq"))
     self.settledAt = try c.decodeIfPresent(String.self, forKey: WireKey("settled_at"))
     self.noteId = try c.decodeIfPresent(String.self, forKey: WireKey("note_id"))
     self.notSent = try c.decodeIfPresent(InboxAckNotSent.self, forKey: WireKey("not_sent"))
@@ -1178,16 +1132,11 @@ public enum InboxAckNotSent: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// What an action item's block says besides what to do and why (`InboxQuestionRecord.action`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxActionFacts: Codable, Hashable, Sendable {
-  /// `Where:` in words (a place, or the link's name), or null.
   public var whereValue: String?
-  /// `Where:`'s link, http(s) only, or null: the card's "Open" button.
   public var whereUrl: String?
-  /// `Run:`, a command for the person to copy, or null.
   public var run: String?
-  /// `Watching:`, what the agent watches to notice it done by itself, or null.
   public var watching: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -1221,19 +1170,14 @@ public struct InboxActionFacts: Codable, Hashable, Sendable {
   }
 }
 
-/// What came of an action item (`InboxQuestionRecord.action_result`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxActionResult: Codable, Hashable, Sendable {
   public var outcome: InboxActionResultOutcome
-  /// The person's note with Done, or the reason with Can't do it; null for none.
   public var note: String?
   public var at: String
   public var by: InboxActionResultBy
-  /// With `by: "agent"`: the agent's message whose `done` named it.
   public var messageId: MessageID?
-  /// The person's Done or Can't do it waits in their reply draft and goes with their next Send, never on a timer (approval "inbox-action-items-in-reply"). Absent: marked through the timed path (decision mode, the phone door, an older window), sent once the Undo window passes.
   public var staged: Bool?
-  /// With `by: "agent"`: the person's staged mark the agent's `done` settled (approval "inbox-action-items-in-reply", Q3). When it carries a note, the note still goes with the person's next Send (`inboxActionInDraft`).
   public var person: InboxActionResultPerson?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -1393,10 +1337,8 @@ public enum InboxActionResultPersonOutcome: Codable, Hashable, Sendable, RawRepr
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The agent session a person's New message is addressed to (`InboxMessage.to`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxAddressee: Codable, Hashable, Sendable {
-  /// The connection's host, e.g. `claude-code`.
   public var host: String
   public var session: String
   /// Fields this app does not know: kept, and written back when encoded.
@@ -1425,42 +1367,24 @@ public struct InboxAddressee: Codable, Hashable, Sendable {
   }
 }
 
-/// One agent of a machine, as the list model names it for the sidebar's Agents section (`GET /api/inbox/threads`' `agents`; packages/server/inbox-agents-list.ts). An agent is a live session, a session that owns a thread waiting on the person (ended or not), a session that ended today, or a session the Inbox launched (a stopped one is idle).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxAgent: Codable, Hashable, Sendable {
-  /// Stable while the agent lasts: the launch id for a session the Inbox launched, else the session id.
   public var id: String
-  /// The session it runs as now (a launch's placeholder `launch:<id>` until it started).
   public var session: String
-  /// The session ids its conversation had before (a poll's `continues`, nearest first; additive, absent when none): the host gave the conversation a new session id. One of them that still polls is listed as its own agent too.
   public var continues: [String]?
-  /// Set when the Inbox launched it: the launch's id and its thread; whether the host started it (`started`), its run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in a project), absent from an older Inbox.
   public var launch: InboxAgentLaunch?
-  /// `claude-code`, `codex`, `pi`, ... (`InboxAuthor.host`); null when nothing said.
   public var host: String?
-  /// Its title as its connection last said it (the To picker's name). Absent when none.
   public var label: String?
-  /// The title its host generated for the session (Claude Code's own session title; INBOX_TITLE_POLL_FIELD), the last one its connection read. Its name when it has no `label`. Absent when none. Additive.
   public var title: String?
-  /// The thread it got first (the first message it wrote, or a person's to it; a launch's own thread), with that thread's name: its name when it has neither `label` nor `title`. The same thread however many it writes in later. Absent when none is known. Additive.
   public var firstThread: InboxAgentFirstThread?
-  /// The project it works in (`id` null for a folder the Inbox has no project for); null when it never said where.
   public var project: InboxAgentProject?
-  /// `waiting`: it owns `waiting` threads in Stopped on you, Holding up work or Waiting on you (whatever else it does); else `working` (a turn runs, or a launch is starting), `idle` (live, or a launch that is stopped), `ended`.
   public var state: InboxAgentState
-  /// How many of its threads wait on the person (0 when none).
   public var waiting: Double
-  /// Its session is live now (polls, or a launch that a reply starts again); false for an ended one.
   public var live: Bool
-  /// When it started; null when this Inbox never heard it start (it only owns a waiting thread).
   public var startedAt: String?
-  /// When this Inbox last heard from it (a poll, a state change, an Inbox tool call, its latest message); null when never.
   public var lastSeenAt: String?
-  /// Where it lives (`InboxAgentPlace`): a Rex pane Rex confirmed for this read. Absent when none. Additive.
   public var place: InboxAgentPlace?
-  /// What that confirmed Rex pane says the agent is doing (OSC 7501's root record, state and kind only), when it says more than the Inbox knows: `blocked` (`state` then `waiting`), `done` or `error` (`state` idle). This computer's own window only. Additive.
   public var rexStatus: InboxAgentRexStatus?
-  /// The status mark on its icon (the owner's "jelly" marks): only for a session the Inbox started in Rex while "Start new agents in" is Rex, as its pane's status record said at a read of the last few seconds (none when stale or missing: today's icon). This computer's own window only. Additive.
   public var rexMark: InboxRexMark?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -1535,16 +1459,11 @@ public struct InboxAgent: Codable, Hashable, Sendable {
 
 public typealias InboxAgentFace = String
 
-/// One agent's face, and the name the person gave it.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxAgentFaceEntry: Codable, Hashable, Sendable {
-  /// `agent` (its own mark) only beside a `name` or a `tile`: an entry is kept for a face, a tile, a name, or a mix.
   public var face: InboxAgentFace
-  /// A tile choice (`InboxAgentTile`), only beside `face: "agent"`. Absent: none. An older Plannotator passes over it.
   public var tile: InboxAgentFaceEntryTile?
-  /// Every session id this agent was or is (never its key itself), oldest first.
   public var sessions: [String]
-  /// The name the person gave it (Rename… on its sidebar row): the window's name for it everywhere, over its own title. Display only: never sent to an agent. Absent: none given. An older Plannotator drops an entry that has a name and no face when it reads the file, and keeps the face of one with both.
   public var name: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -1578,7 +1497,6 @@ public struct InboxAgentFaceEntry: Codable, Hashable, Sendable {
   }
 }
 
-/// A tile choice (`InboxAgentTile`), only beside `face: "agent"`. Absent: none. An older Plannotator passes over it.
 public enum InboxAgentFaceEntryTile: Codable, Hashable, Sendable, RawRepresentable {
   case mark
   case project
@@ -1607,7 +1525,6 @@ public enum InboxAgentFaceEntryTile: Codable, Hashable, Sendable, RawRepresentab
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The thread it got first (the first message it wrote, or a person's to it; a launch's own thread), with that thread's name: its name when it has neither `label` nor `title`. The same thread however many it writes in later. Absent when none is known. Additive.
 public struct InboxAgentFirstThread: Codable, Hashable, Sendable {
   public var id: String
   public var name: String
@@ -1637,7 +1554,6 @@ public struct InboxAgentFirstThread: Codable, Hashable, Sendable {
   }
 }
 
-/// Set when the Inbox launched it: the launch's id and its thread; whether the host started it (`started`), its run line's state (`run`, null: no line) and the name of the scratch folder its Delete removes (`scratch`, null in a project), absent from an older Inbox.
 public struct InboxAgentLaunch: Codable, Hashable, Sendable {
   public var id: String
   public var threadId: ThreadID
@@ -1735,7 +1651,6 @@ public enum InboxAgentLaunchRun: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Where an agent lives, as this computer's Rex last confirmed it (packages/server/inbox-rex.ts): one quiet line, "Rex · <session> / <tab>" in Rex's own names as of that read. `show`: Show in Rex is offered (the window asking is on this computer, and Rex's app here confirmed a jump in this run and has not failed one since). Additive: absent from an older Inbox, and for an agent whose place Rex does not confirm.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxAgentPlace: Codable, Hashable, Sendable {
   public var kind: String
@@ -1799,7 +1714,6 @@ public struct InboxAgentProject: Codable, Hashable, Sendable {
   }
 }
 
-/// What that confirmed Rex pane says the agent is doing (OSC 7501's root record, state and kind only), when it says more than the Inbox knows: `blocked` (`state` then `waiting`), `done` or `error` (`state` idle). This computer's own window only. Additive.
 public struct InboxAgentRexStatus: Codable, Hashable, Sendable {
   public var state: InboxAgentRexStatusState
   public var kind: InboxAgentRexStatusKind?
@@ -1891,7 +1805,6 @@ public enum InboxAgentRexStatusState: Codable, Hashable, Sendable, RawRepresenta
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// `waiting`: it owns `waiting` threads in Stopped on you, Holding up work or Waiting on you (whatever else it does); else `working` (a turn runs, or a launch is starting), `idle` (live, or a launch that is stopped), `ended`.
 public enum InboxAgentState: Codable, Hashable, Sendable, RawRepresentable {
   case ended
   case idle
@@ -1926,27 +1839,21 @@ public enum InboxAgentState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// One machine's agents on the list model (`agents`, one group per machine), in a fixed order: the newest first seen first, an agent keeping its place whatever it does. At most `INBOX_AGENTS_LISTED_MAX`; past that, the ones waiting on the person stay listed.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxAgentsGroup: Codable, Hashable, Sendable {
-  /// The machine (its `ibx_` id), on the merged view (`machines=1`) only.
   public var machine: String?
   public var agents: [InboxAgent]
-  /// Every agent of the machine, those past the cap included.
-  public var total: Double
-  /// How many of `total` ended today (each `ended`).
+  public var total: Int64
   public var endedToday: Double
-  /// A linked machine's faces and given names for its agents, as kept there (`inbox/agent-faces.json`; approval "inbox-linked-marks"): in that machine's group on the merged view, and in its own group when a linked machine reads its list. Absent from an older Inbox. `faces_rev` is that file's `rev`.
   public var faces: [String: InboxAgentFaceEntry]?
-  public var facesRev: Double?
-  /// The machine keeps a tile choice (`InboxAgentFaceEntry.tile`; approval "inbox-generated-agent-icons"). Absent from an Inbox from before tiles: the window then draws and offers that machine's agents what it can keep (no tile).
+  public var facesRev: Int64?
   public var faceTiles: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["machine", "agents", "total", "ended_today", "faces", "faces_rev", "face_tiles"]
 
-  public init(machine: String? = nil, agents: [InboxAgent], total: Double, endedToday: Double, faces: [String: InboxAgentFaceEntry]? = nil, facesRev: Double? = nil, faceTiles: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(machine: String? = nil, agents: [InboxAgent], total: Int64, endedToday: Double, faces: [String: InboxAgentFaceEntry]? = nil, facesRev: Int64? = nil, faceTiles: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.machine = machine
     self.agents = agents
     self.total = total
@@ -1961,10 +1868,10 @@ public struct InboxAgentsGroup: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.machine = try c.decodeIfPresent(String.self, forKey: WireKey("machine"))
     self.agents = try c.decode([InboxAgent].self, forKey: WireKey("agents"))
-    self.total = try c.decode(Double.self, forKey: WireKey("total"))
+    self.total = try c.decode(Int64.self, forKey: WireKey("total"))
     self.endedToday = try c.decode(Double.self, forKey: WireKey("ended_today"))
     self.faces = try c.decodeIfPresent([String: InboxAgentFaceEntry].self, forKey: WireKey("faces"))
-    self.facesRev = try c.decodeIfPresent(Double.self, forKey: WireKey("faces_rev"))
+    self.facesRev = try c.decodeIfPresent(Int64.self, forKey: WireKey("faces_rev"))
     self.faceTiles = try c.decodeIfPresent(Bool.self, forKey: WireKey("face_tiles"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -1984,36 +1891,25 @@ public struct InboxAgentsGroup: Codable, Hashable, Sendable {
 
 /// From `packages/core/inbox-attachments.ts`.
 public struct InboxAttachment: Codable, Hashable, Sendable {
-  /// `att_<ULID>`.
   public var id: String
-  /// The file's absolute realpath at send time: the only path ever read.
   public var path: String
-  /// The path as the agent named it (absolute) when it differs from `path` (a symlink).
   public var namedPath: String?
-  /// The file name, for display.
   public var name: String
   public var kind: InboxAttachmentKind
-  /// The sha256 of the bytes sent: the blob `inbox/blobs/<sent_sha256>`.
   public var sentSha256: String
-  /// Size in bytes of the sent version.
-  public var size: Double
-  /// When it was sent (the message's time).
+  public var size: Int64
   public var sentAt: String
-  /// The file's mtime when it was sent.
   public var sentMtime: String
-  /// The sniffed content type of the sent bytes (images: `image/png`, ...; PDF: `application/pdf`; video: `video/mp4`, `video/quicktime`, `video/webm`; audio: `audio/mpeg`, `audio/mp4`, `audio/wav`, `audio/ogg`, `audio/flac`, `audio/aac`, `audio/webm`). Added with the image and pdf kinds.
   public var mediaType: String?
-  /// An image's size in pixels, from its header, when it parses; a video's first video track (MP4/MOV only).
   public var width: Double?
   public var height: Double?
-  /// A video's length in milliseconds, from `moov/mvhd` (MP4/MOV only, when it parses); a recording's from its header (M4A, WAV, FLAC, MP3, Ogg, when it parses). Additive.
-  public var durationMs: Double?
+  public var durationMs: Int64?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["id", "path", "named_path", "name", "kind", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
 
-  public init(id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, sentSha256: String, size: Double, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.path = path
     self.namedPath = namedPath
@@ -2038,13 +1934,13 @@ public struct InboxAttachment: Codable, Hashable, Sendable {
     self.name = try c.decode(String.self, forKey: WireKey("name"))
     self.kind = try c.decode(InboxAttachmentKind.self, forKey: WireKey("kind"))
     self.sentSha256 = try c.decode(String.self, forKey: WireKey("sent_sha256"))
-    self.size = try c.decode(Double.self, forKey: WireKey("size"))
+    self.size = try c.decode(Int64.self, forKey: WireKey("size"))
     self.sentAt = try c.decode(String.self, forKey: WireKey("sent_at"))
     self.sentMtime = try c.decode(String.self, forKey: WireKey("sent_mtime"))
     self.mediaType = try c.decodeIfPresent(String.self, forKey: WireKey("media_type"))
     self.width = try c.decodeIfPresent(Double.self, forKey: WireKey("width"))
     self.height = try c.decodeIfPresent(Double.self, forKey: WireKey("height"))
-    self.durationMs = try c.decodeIfPresent(Double.self, forKey: WireKey("duration_ms"))
+    self.durationMs = try c.decodeIfPresent(Int64.self, forKey: WireKey("duration_ms"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -2067,7 +1963,6 @@ public struct InboxAttachment: Codable, Hashable, Sendable {
   }
 }
 
-/// How the window draws a file: Plannotator's viewer for its type. `code` (a source file, a script, or any other UTF-8 text) is drawn as a code view with line comments; `image` inline in the message and in an image viewer; `video` in a player, with comments at moments; `audio` in a player too, with comments at moments the same way (contract 4: `blockId: "video"`, `inboxVideo.time`); `pdf` and `file` are offered as downloads.
 /// From `packages/core/inbox-attachments.ts`.
 public enum InboxAttachmentKind: Codable, Hashable, Sendable, RawRepresentable {
   case audio
@@ -2126,11 +2021,8 @@ public enum InboxAttachmentKind: Codable, Hashable, Sendable, RawRepresentable {
 
 public struct InboxAuthor: Codable, Hashable, Sendable {
   public var kind: InboxAuthorKind
-  /// The agent host when known (`claude-code`, `codex`, ...).
   public var host: String?
-  /// The asking session: the stdio shim's own `ses_` id, or a host's session id.
   public var session: String?
-  /// A display name the agent gave itself.
   public var name: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -2332,18 +2224,13 @@ public enum InboxCloudWakeState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// How a person's reply or New message reached an agent session (`InboxMessage.delivery`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxDelivery: Codable, Hashable, Sendable {
   public var state: String
-  /// Settled by a read of another agent (its host), not by the session named here (`InboxMessage.agent_checked_by`).
   public var readBy: String?
-  /// The connection's host, e.g. `claude-code`.
   public var host: String
-  /// The session it was delivered to (the asking message's `author.session`, or the message's `to.session`).
   public var session: String
   public var at: String
-  /// Written for an item the Inbox marked to go in by itself (approval "inbox-busy-agent-reply"): true when it went into a running turn, false when its session went idle after the mark (the session's own Ask question held the turn, so it went in when the turn ended). Absent otherwise.
   public var intoTurn: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -2383,7 +2270,6 @@ public struct InboxDelivery: Codable, Hashable, Sendable {
   }
 }
 
-/// Which case of the rule decided the state, so a client words it exactly as the thread does: `delivered`, `undelivered` (the addressed session stopped before it took it), `stuck` (not delivered: its session's connection took it and stopped mid-delivery, so that session never gets it), `ended` (saved: the session that asked has ended), `reads` (saved: an agent that reads the thread), `sending_now` (Send now pressed), `working` (queued: its session is in a turn), `idle` (sending: the session is idle, the turn goes now), `away` (queued: its session does not poll now), `next_turn` (queued: the…
 /// From `packages/core/inbox-delivery.ts`.
 public enum InboxDeliveryReason: Codable, Hashable, Sendable, RawRepresentable {
   case ackPending
@@ -2446,7 +2332,6 @@ public enum InboxDeliveryReason: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// delivered ✓✓, not delivered (a warning), saved ✓ (an agent reads it later), queued (a clock), sending (dots).
 /// From `packages/core/inbox-delivery.ts`.
 public enum InboxDeliveryState: Codable, Hashable, Sendable, RawRepresentable {
   case delivered
@@ -2485,34 +2370,27 @@ public enum InboxDeliveryState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// A device as the routes answer it: everything but the token's hash.
 /// From `packages/shared/inbox/devices.ts`.
 public struct InboxDevicePublic: Codable, Hashable, Sendable {
-  /// As the phone sent it, checked like a thread name.
   public var name: String
-  /// `dev_<ULID>`.
   public var id: DeviceID
-  /// "ios".
-  public var platform: String
   public var createdAt: String
-  /// Kept in memory on every request; a line is written when its UTC day changes.
   public var lastSeenAt: String
+  public var platform: String
   public var revokedAt: String?
-  /// The relay carries this phone's items and pushes (section 4); true at pairing.
   public var carriage: Bool
-  /// A linked machine unlinked here while it could not be told (docs/agent-guides/inbox-machines.md): until this time, or until its revoked token has been refused once, the tailnet door stays published so its next contact hears `device_revoked`. Absent otherwise.
   public var refusalOwedUntil: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["name", "id", "platform", "created_at", "last_seen_at", "revoked_at", "carriage", "refusal_owed_until"]
+  static let knownKeys: Set<String> = ["name", "id", "created_at", "last_seen_at", "platform", "revoked_at", "carriage", "refusal_owed_until"]
 
-  public init(name: String, id: DeviceID, platform: String, createdAt: String, lastSeenAt: String, revokedAt: String? = nil, carriage: Bool, refusalOwedUntil: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(name: String, id: DeviceID, createdAt: String, lastSeenAt: String, platform: String, revokedAt: String? = nil, carriage: Bool, refusalOwedUntil: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.name = name
     self.id = id
-    self.platform = platform
     self.createdAt = createdAt
     self.lastSeenAt = lastSeenAt
+    self.platform = platform
     self.revokedAt = revokedAt
     self.carriage = carriage
     self.refusalOwedUntil = refusalOwedUntil
@@ -2523,9 +2401,9 @@ public struct InboxDevicePublic: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.name = try c.decode(String.self, forKey: WireKey("name"))
     self.id = try c.decode(DeviceID.self, forKey: WireKey("id"))
-    self.platform = try c.decode(String.self, forKey: WireKey("platform"))
     self.createdAt = try c.decode(String.self, forKey: WireKey("created_at"))
     self.lastSeenAt = try c.decode(String.self, forKey: WireKey("last_seen_at"))
+    self.platform = try c.decode(String.self, forKey: WireKey("platform"))
     self.revokedAt = try c.decodeIfPresent(String.self, forKey: WireKey("revoked_at"))
     self.carriage = try c.decode(Bool.self, forKey: WireKey("carriage"))
     self.refusalOwedUntil = try c.decodeIfPresent(String.self, forKey: WireKey("refusal_owed_until"))
@@ -2536,9 +2414,9 @@ public struct InboxDevicePublic: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encode(self.name, forKey: WireKey("name"))
     try c.encode(self.id, forKey: WireKey("id"))
-    try c.encode(self.platform, forKey: WireKey("platform"))
     try c.encode(self.createdAt, forKey: WireKey("created_at"))
     try c.encode(self.lastSeenAt, forKey: WireKey("last_seen_at"))
+    try c.encode(self.platform, forKey: WireKey("platform"))
     try c.encode(self.revokedAt, forKey: WireKey("revoked_at"))
     try c.encode(self.carriage, forKey: WireKey("carriage"))
     try c.encodeIfPresent(self.refusalOwedUntil, forKey: WireKey("refusal_owed_until"))
@@ -2554,18 +2432,12 @@ public struct InboxDraft: Codable, Hashable, Sendable {
   public var updatedAt: String
   public var body: String
   public var to: InboxDraftTo?
-  /// The project it was written in (the chosen session's, or the one open in the list).
   public var project: InboxDraftProject?
   public var files: [InboxDraftFile]
-  /// The thread's name the person typed in compose (the chip), as typed. Absent while the chip follows the message (compose's suggestion, worked out again from the body when the draft opens).
   public var threadName: String?
-  /// The Board card it was started for (the opened card's Create thread): the Send that sends the draft links the new thread to this card. Absent for any other draft.
   public var card: InboxDraftCard?
-  /// The pull requests it was started for (Pull requests' Launch an agent): the Send hands them to the new thread. `projects`: the projects of their repository (To offers only those); `ask_line`: the hand-off's guided-review line as it was offered, so a Send whose words no longer hold it is kept as a custom curation.
   public var pulls: InboxDraftPulls?
-  /// Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board.
   public var boardRequest: Bool?
-  /// Where a new session would start, when the person picked a folder that is no project yet (approval "launch-create-clone", D8/D9): the agent, the machine (null: this computer), the folder as `~/…`, its name, and `create` when the Send makes it. Reopened, the pick comes back, checked again (a folder there by now is no longer made).
   public var start: InboxDraftStart?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -2626,7 +2498,6 @@ public struct InboxDraft: Codable, Hashable, Sendable {
   }
 }
 
-/// The Board card it was started for (the opened card's Create thread): the Send that sends the draft links the new thread to this card. Absent for any other draft.
 public struct InboxDraftCard: Codable, Hashable, Sendable {
   public var id: String
   public var title: String
@@ -2656,21 +2527,18 @@ public struct InboxDraftCard: Codable, Hashable, Sendable {
   }
 }
 
-/// A draft's file: an upload not sent yet, and, for a long paste, where it goes back.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxDraftFile: Codable, Hashable, Sendable {
   public var uploadId: UploadID
   public var name: String
-  public var size: Double
+  public var size: Int64
   public var kind: InboxAttachmentKind
   public var sha256: String
   public var createdAt: String
   public var mediaType: String?
   public var width: Double?
   public var height: Double?
-  /// The film or recording's length, when its metadata can be read.
-  public var durationMs: Double?
-  /// The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload.
+  public var durationMs: Int64?
   public var shownSha256: String?
   public var pasted: InboxDraftPasted?
   /// Fields this app does not know: kept, and written back when encoded.
@@ -2678,7 +2546,7 @@ public struct InboxDraftFile: Codable, Hashable, Sendable {
 
   static let knownKeys: Set<String> = ["upload_id", "name", "size", "kind", "sha256", "created_at", "media_type", "width", "height", "duration_ms", "shown_sha256", "pasted"]
 
-  public init(uploadId: UploadID, name: String, size: Double, kind: InboxAttachmentKind, sha256: String, createdAt: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Double? = nil, shownSha256: String? = nil, pasted: InboxDraftPasted? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(uploadId: UploadID, name: String, size: Int64, kind: InboxAttachmentKind, sha256: String, createdAt: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, shownSha256: String? = nil, pasted: InboxDraftPasted? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.uploadId = uploadId
     self.name = name
     self.size = size
@@ -2698,14 +2566,14 @@ public struct InboxDraftFile: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.uploadId = try c.decode(UploadID.self, forKey: WireKey("upload_id"))
     self.name = try c.decode(String.self, forKey: WireKey("name"))
-    self.size = try c.decode(Double.self, forKey: WireKey("size"))
+    self.size = try c.decode(Int64.self, forKey: WireKey("size"))
     self.kind = try c.decode(InboxAttachmentKind.self, forKey: WireKey("kind"))
     self.sha256 = try c.decode(String.self, forKey: WireKey("sha256"))
     self.createdAt = try c.decode(String.self, forKey: WireKey("created_at"))
     self.mediaType = try c.decodeIfPresent(String.self, forKey: WireKey("media_type"))
     self.width = try c.decodeIfPresent(Double.self, forKey: WireKey("width"))
     self.height = try c.decodeIfPresent(Double.self, forKey: WireKey("height"))
-    self.durationMs = try c.decodeIfPresent(Double.self, forKey: WireKey("duration_ms"))
+    self.durationMs = try c.decodeIfPresent(Int64.self, forKey: WireKey("duration_ms"))
     self.shownSha256 = try c.decodeIfPresent(String.self, forKey: WireKey("shown_sha256"))
     self.pasted = try c.decodeIfPresent(InboxDraftPasted.self, forKey: WireKey("pasted"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
@@ -2729,7 +2597,6 @@ public struct InboxDraftFile: Codable, Hashable, Sendable {
   }
 }
 
-/// A long paste that became a file (approval "inbox-paste-attachment"): where Put back returns its text in the draft's words. `at` is an offset into the words as saved, `lead` what goes before it (the thread-name chip's space), `preview` the tile's name line (the paste's first words). The text itself is the upload's bytes.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxDraftPasted: Codable, Hashable, Sendable {
   public var at: Double
@@ -2797,7 +2664,6 @@ public struct InboxDraftProject: Codable, Hashable, Sendable {
   }
 }
 
-/// The pull requests it was started for (Pull requests' Launch an agent): the Send hands them to the new thread. `projects`: the projects of their repository (To offers only those); `ask_line`: the hand-off's guided-review line as it was offered, so a Send whose words no longer hold it is kept as a custom curation.
 public struct InboxDraftPulls: Codable, Hashable, Sendable {
   public var keys: [String]
   public var projects: [String]
@@ -2831,7 +2697,6 @@ public struct InboxDraftPulls: Codable, Hashable, Sendable {
   }
 }
 
-/// A draft's folder pick (`InboxDraft.start`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxDraftStart: Codable, Hashable, Sendable {
   public var agent: String
@@ -2839,7 +2704,6 @@ public struct InboxDraftStart: Codable, Hashable, Sendable {
   public var folder: String
   public var name: String
   public var create: Bool?
-  /// Clone from a git URL: the repo the Send clones into `folder` (D8, D9).
   public var clone: InboxDraftStartClone?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -2879,7 +2743,6 @@ public struct InboxDraftStart: Codable, Hashable, Sendable {
   }
 }
 
-/// Clone from a git URL: the repo the Send clones into `folder` (D8, D9).
 public struct InboxDraftStartClone: Codable, Hashable, Sendable {
   public var url: String
   public var branch: String?
@@ -2909,7 +2772,6 @@ public struct InboxDraftStartClone: Codable, Hashable, Sendable {
   }
 }
 
-/// The session a draft was written for, with enough to name it after it has ended.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxDraftTo: Codable, Hashable, Sendable {
   public var host: String
@@ -2952,35 +2814,26 @@ public struct InboxDraftTo: Codable, Hashable, Sendable {
   }
 }
 
-/// What a message keeps about the guided review it carries: the blob holding the snapshot (Plannotator's portable format, `@plannotator/core/guide-format`, exactly as validated) and the facts the card and the row draw.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxGuideRef: Codable, Hashable, Sendable {
-  /// sha256 (hex) of the snapshot JSON, the blob's name under `inbox/blobs/`.
   public var sha256: String
-  /// sha256 (hex) of what the agent sent (the guide and the patch, or the snapshot, as given). A retry with the same idempotency_key compares this: the built snapshot carries the time it was built, so its own hash differs.
   public var inputSha256: String
-  /// The snapshot JSON's size in bytes.
-  public var bytes: Double
+  public var bytes: Int64
   public var title: String
   public var sections: Double
-  /// Files in the patch.
   public var files: Double
   public var additions: Double
   public var deletions: Double
-  /// The agent asked for a verdict (submit_guide `review: true`, only while the person has Settings → Capabilities → Code review on): the window draws a review card with Start review, and the person's Approve or Send feedback comes back as their reply. Absent on every other guide.
   public var review: Bool?
-  /// A review's chapter titles, in order (the card lists them). Only with `review`.
   public var chapters: [String]?
-  /// A walkthrough: the code as it is, with nothing changed (submit_guide `walkthrough`, or any guide in a thread the New review box started as one). Always with `review`; it takes no verdict, and its patch is context lines only.
   public var walkthrough: Bool?
-  /// A review's source (Reviews, approval "inbox-reviews-page"): the snapshot's `source` (kind, repo, branch, head, PR) and `review` (base, git ref), each one line. Only with `review`; absent on reviews sent before it (the Reviews index reads those from the snapshot once).
   public var source: InboxReviewSource?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["sha256", "input_sha256", "bytes", "title", "sections", "files", "additions", "deletions", "review", "chapters", "walkthrough", "source"]
 
-  public init(sha256: String, inputSha256: String, bytes: Double, title: String, sections: Double, files: Double, additions: Double, deletions: Double, review: Bool? = nil, chapters: [String]? = nil, walkthrough: Bool? = nil, source: InboxReviewSource? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(sha256: String, inputSha256: String, bytes: Int64, title: String, sections: Double, files: Double, additions: Double, deletions: Double, review: Bool? = nil, chapters: [String]? = nil, walkthrough: Bool? = nil, source: InboxReviewSource? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.sha256 = sha256
     self.inputSha256 = inputSha256
     self.bytes = bytes
@@ -3000,7 +2853,7 @@ public struct InboxGuideRef: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.sha256 = try c.decode(String.self, forKey: WireKey("sha256"))
     self.inputSha256 = try c.decode(String.self, forKey: WireKey("input_sha256"))
-    self.bytes = try c.decode(Double.self, forKey: WireKey("bytes"))
+    self.bytes = try c.decode(Int64.self, forKey: WireKey("bytes"))
     self.title = try c.decode(String.self, forKey: WireKey("title"))
     self.sections = try c.decode(Double.self, forKey: WireKey("sections"))
     self.files = try c.decode(Double.self, forKey: WireKey("files"))
@@ -3031,17 +2884,12 @@ public struct InboxGuideRef: Codable, Hashable, Sendable {
   }
 }
 
-/// A hand-off a person's reply carries (`InboxMessage.handoff`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxHandoff: Codable, Hashable, Sendable {
-  /// The session that owned the thread before; null when there was none.
   public var from: InboxHandoffFrom?
-  /// The readable label the person picked for the new owner ("Claude Code (herdr)").
   public var label: String?
   public var at: String
-  /// The Undo window passed: the new owner and the former one are handed it.
   public var settledAt: String?
-  /// Taken back inside the Undo window (the reply went as an Ask instead), or moved back to the former owner later.
   public var undoneAt: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -3111,35 +2959,21 @@ public struct InboxHandoffFrom: Codable, Hashable, Sendable {
 public struct InboxHealth: Codable, Hashable, Sendable {
   public var ok: Bool
   public var app: String
-  /// The running binary's version, or `dev` for a source run.
   public var version: String
   public var serverSession: String
   public var pid: Double
-  /// The sidebar's update button (packages/server/inbox-updates.ts), or null. `available` and `version` keep the older `{ available, version }` shape.
   public var update: InboxUpdate?
-  /// Whether a notification can reach the person now (additive; absent from an older Inbox).
   public var notifyReach: InboxNotifyReach?
-  /// Event streams open now, the windows' and the phone door's (additive). The Inbox tabs of one browser origin share one stream (packages/inbox/sharedEvents.ts).
   public var eventStreams: Double?
-  /// This Inbox honours the peek mark on a read_thread list (`INBOX_PEEK_META_KEY`): no project made for a folder it does not know, the rows not counted as read (additive). A connection reads the session's threads only from an Inbox that says so; an older one would make a project for every folder that compacts or resumes.
   public var peek: Bool?
-  /// This Inbox's stable id, which linked machines key on (additive; packages/server/inbox-links.ts).
   public var inboxId: String?
-  /// The earlier runs of this Inbox's data folder, newest first (additive; packages/shared/inbox/registry.ts `inboxSessionLineage`).
   public var follows: [String]?
-  /// The machine-link protocol this Inbox speaks (additive; absent: it cannot link).
   public var machineLinks: Double?
-  /// Additive: this Inbox's door takes `update`, so a linked machine can update it.
   public var machineUpdate: Double?
-  /// Additive: the install script owns this copy, so it can update itself.
   public var selfUpdate: Bool?
-  /// Additive: a linked machine's Update ended with no error and no new binary: the version it was for.
   public var updateNoChange: String?
-  /// Remote launch: 1 while a linked machine may start agents here, 0 while launch is off. Absent from an older Inbox.
   public var launchFromMachines: Double?
-  /// The store takes a Delete on an agent message's words (`type` "DELETION", approval "inbox-toolbar-delete"; 1). Absent from an older Inbox, whose store refuses one (422): a linked machine's window says it needs an update.
   public var messageDeletions: Double?
-  /// The page honours `--pn-window-controls-width` and `-height` on `:root`, for a desktop host that draws the window's buttons over it, and from 2 names the line they go on in `--pn-window-controls-center-y` (additive; absent from an older Inbox).
   public var windowControls: Double?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -3215,45 +3049,30 @@ public struct InboxHealth: Codable, Hashable, Sendable {
   }
 }
 
-/// An image a message's body shows (`![alt](design/b.png)` or `<img src>`), captured as a file of the thread (approval "inbox-image-viewer", 2026-10-15): the store reads it under the message-image route's rules (referenced in the body, an image by extension and by its bytes, inside the message's project or the linked worktree it was sent from, at most 10 MB and 50 megapixels), copies its bytes into a blob and keeps this record on the message (`InboxMessage.inline_images`). It is an attachment record (an `att_` id, the realpath, the sent blob) plus `ref`, so every attachment route, comment and…
 /// From `packages/core/inbox-attachments.ts`.
 public struct InboxInlineImage: Codable, Hashable, Sendable {
-  /// The src exactly as the body wrote it (`design/checkout-b.png`), what the body's image renders from.
   public var ref: String
-  /// `"on_open"`: the message was sent before images were captured, and the store took this copy the first time the thread was read ("Changed since you first opened it"). Absent: captured when the message was sent.
   public var captured: InboxInlineImageCaptured?
-  /// When it was captured on open; absent when captured at send.
   public var capturedAt: String?
-  /// `att_<ULID>`.
   public var id: String
-  /// The file's absolute realpath at send time: the only path ever read.
   public var path: String
-  /// The path as the agent named it (absolute) when it differs from `path` (a symlink).
   public var namedPath: String?
-  /// The file name, for display.
   public var name: String
   public var kind: InboxAttachmentKind
-  /// The sha256 of the bytes sent: the blob `inbox/blobs/<sent_sha256>`.
   public var sentSha256: String
-  /// Size in bytes of the sent version.
-  public var size: Double
-  /// When it was sent (the message's time).
+  public var size: Int64
   public var sentAt: String
-  /// The file's mtime when it was sent.
   public var sentMtime: String
-  /// The sniffed content type of the sent bytes (images: `image/png`, ...; PDF: `application/pdf`; video: `video/mp4`, `video/quicktime`, `video/webm`; audio: `audio/mpeg`, `audio/mp4`, `audio/wav`, `audio/ogg`, `audio/flac`, `audio/aac`, `audio/webm`). Added with the image and pdf kinds.
   public var mediaType: String?
-  /// An image's size in pixels, from its header, when it parses; a video's first video track (MP4/MOV only).
   public var width: Double?
   public var height: Double?
-  /// A video's length in milliseconds, from `moov/mvhd` (MP4/MOV only, when it parses); a recording's from its header (M4A, WAV, FLAC, MP3, Ogg, when it parses). Additive.
-  public var durationMs: Double?
+  public var durationMs: Int64?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["ref", "captured", "captured_at", "id", "path", "named_path", "name", "kind", "sent_sha256", "size", "sent_at", "sent_mtime", "media_type", "width", "height", "duration_ms"]
 
-  public init(ref: String, captured: InboxInlineImageCaptured? = nil, capturedAt: String? = nil, id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, sentSha256: String, size: Double, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(ref: String, captured: InboxInlineImageCaptured? = nil, capturedAt: String? = nil, id: String, path: String, namedPath: String? = nil, name: String, kind: InboxAttachmentKind, sentSha256: String, size: Int64, sentAt: String, sentMtime: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.ref = ref
     self.captured = captured
     self.capturedAt = capturedAt
@@ -3284,13 +3103,13 @@ public struct InboxInlineImage: Codable, Hashable, Sendable {
     self.name = try c.decode(String.self, forKey: WireKey("name"))
     self.kind = try c.decode(InboxAttachmentKind.self, forKey: WireKey("kind"))
     self.sentSha256 = try c.decode(String.self, forKey: WireKey("sent_sha256"))
-    self.size = try c.decode(Double.self, forKey: WireKey("size"))
+    self.size = try c.decode(Int64.self, forKey: WireKey("size"))
     self.sentAt = try c.decode(String.self, forKey: WireKey("sent_at"))
     self.sentMtime = try c.decode(String.self, forKey: WireKey("sent_mtime"))
     self.mediaType = try c.decodeIfPresent(String.self, forKey: WireKey("media_type"))
     self.width = try c.decodeIfPresent(Double.self, forKey: WireKey("width"))
     self.height = try c.decodeIfPresent(Double.self, forKey: WireKey("height"))
-    self.durationMs = try c.decodeIfPresent(Double.self, forKey: WireKey("duration_ms"))
+    self.durationMs = try c.decodeIfPresent(Int64.self, forKey: WireKey("duration_ms"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -3316,7 +3135,6 @@ public struct InboxInlineImage: Codable, Hashable, Sendable {
   }
 }
 
-/// `"on_open"`: the message was sent before images were captured, and the store took this copy the first time the thread was read ("Changed since you first opened it"). Absent: captured when the message was sent.
 public enum InboxInlineImageCaptured: Codable, Hashable, Sendable, RawRepresentable {
   case onOpen
   /// A value this app does not know (a newer Inbox).
@@ -3342,7 +3160,6 @@ public enum InboxInlineImageCaptured: Codable, Hashable, Sendable, RawRepresenta
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Launch (start an agent from compose): the agents the Inbox can start a session of, one per line: Claude Code (`claude --bg`), Pi (`pi --mode rpc`, owned by the Inbox), Codex (`codex app-server`, owned by the Inbox).
 /// From `packages/core/inbox-types.ts`.
 public enum InboxLaunchAgent: Codable, Hashable, Sendable, RawRepresentable {
   case claudeCode
@@ -3378,26 +3195,17 @@ public enum InboxLaunchAgent: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// A launch's clone (`InboxLaunchRecord.clone`): the repo, as the words name it and as git is given it, and where the clone stands. Its percent is never stored (the run line reads it from the running clone).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxLaunchClone: Codable, Hashable, Sendable {
-  /// What git is given (`parseInboxGitUrl`'s rebuilt URL): https or ssh, never a credential.
   public var url: String
   public var host: String
-  /// "acme/billing-api".
   public var slug: String
-  /// `…/tree/<branch>`: cloned on that branch (decision 8a).
   public var branch: String?
   public var state: InboxLaunchCloneState
-  /// `failed`: why, in the four the run line says (E4 sign-in, E5 no such repo, E6 network, else failed).
   public var error: InboxLaunchCloneError?
-  /// `failed` with `error: "failed"`: git's last words, for the line.
   public var errorText: String?
-  /// E11: the folder the Send named was taken by then: that name, as the person knows it (`~/…`).
   public var renamedFrom: String?
-  /// After the clone, what the repo brings that needs the person's trust first (E10): "hooks", "MCP servers", "settings".
   public var brings: [String]?
-  /// `failed` or `cancelled`: when it ended. Only a reply written after it clones again (E7), never one the clone already had.
   public var endedAt: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -3449,7 +3257,6 @@ public struct InboxLaunchClone: Codable, Hashable, Sendable {
   }
 }
 
-/// `failed`: why, in the four the run line says (E4 sign-in, E5 no such repo, E6 network, else failed).
 public enum InboxLaunchCloneError: Codable, Hashable, Sendable, RawRepresentable {
   case auth
   case failed
@@ -3518,11 +3325,9 @@ public enum InboxLaunchCloneState: Codable, Hashable, Sendable, RawRepresentable
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxLaunchError: Codable, Hashable, Sendable {
   public var code: InboxLaunchErrorCode
-  /// One sentence for the run line (screen 14).
   public var text: String
   public var at: String
   /// Fields this app does not know: kept, and written back when encoded.
@@ -3585,7 +3390,6 @@ public enum InboxLaunchErrorCode: Codable, Hashable, Sendable, RawRepresentable 
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The linked machine a launch was started from: its Inbox id (`ibx_…`) and its name as this Inbox knows it.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxLaunchFrom: Codable, Hashable, Sendable {
   public var machine: String
@@ -3616,45 +3420,28 @@ public struct InboxLaunchFrom: Codable, Hashable, Sendable {
   }
 }
 
-/// On the root of a thread the person started by launching an agent: written with the root, then once more when the host answers (`session_ref`, or `error`). Live state is never stored; the server computes `InboxRun` on read. Per-launch files live in `<dataDir>/inbox/launch/<id>/`.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxLaunchRecord: Codable, Hashable, Sendable {
   public var id: String
   public var agent: InboxLaunchAgent
-  /// The host's own short id (`claude attach <ref>`); null until it started.
   public var sessionRef: String?
-  /// The session it started as, which the root's `to` stops naming once the root moves. Absent until it started, and on an older launch (`inboxLaunchedSession`).
   public var session: String?
-  /// The folder it runs in: the project root, or the scratch folder the Inbox made (its real path).
   public var folder: String
-  /// A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder.
   public var scratch: Bool
-  /// A scratch folder's identity when the Inbox made it (`<dev>:<ino>`): Delete purges and removes the folder only while the same folder is still there, never one made later at that path.
   public var scratchInode: String?
-  /// Create a folder (approval "launch-create-clone", A13): the Send made this folder. It stays when the agent doesn't start (the failed line says so, E8); a thread that was never written removes it again while it is empty.
   public var madeFolder: Bool?
-  /// With `made_folder`: the folder's identity when it was made (`<dev>:<ino>`), so only that folder is ever removed.
   public var madeInode: String?
-  /// Clone from a git URL (approval "launch-create-clone"): the repo cloned into `folder` before the agent starts.
   public var clone: InboxLaunchClone?
   public var startedAt: String
-  /// Started with Settings → Agents' full permissions (bypass mode): the thread's header says so.
   public var fullPermissions: Bool?
-  /// Started in the person's own Claude `permissions.defaultMode` (no `--permission-mode`). Neither this nor full: auto mode.
   public var ownMode: Bool?
-  /// The person recorded Claude Code's bypass consent when the launch was made: it starts with `--allow-dangerously-skip-permissions`, and its card offers Full permissions. Absent (an older launch too): no Full permissions.
   public var bypassAvailable: Bool?
-  /// Fixed at Send, so Try again and every restart start the same.
   public var model: String?
   public var effort: String?
-  /// OpenCode's own primary agent the session started as (build, plan, …); absent: its default.
   public var primaryAgent: String?
   public var error: InboxLaunchError?
-  /// The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line.
   public var deletedAt: String?
-  /// Started from a linked machine's window (remote launch): which one. Where the click came from, never a credential. Absent: this computer.
   public var from: InboxLaunchFrom?
-  /// Settings → Agents' "Start new agents in" said Rex when it was made (fixed at Send): the agent runs in a tab of Rex (superlogical.com/rex) instead of in the background, and Rex owns its process. `line`: where Rex put it ("Rex · <session> / <tab>") once the tab was made; `unavailable`: Rex was not on this computer at the start, so it started in the background as usual; `refused`: Rex answered the ask with an error (it made nothing), so it started in the background as usual. Empty until the start.
   public var rex: InboxLaunchRex?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -3739,7 +3526,6 @@ public struct InboxLaunchRecord: Codable, Hashable, Sendable {
   }
 }
 
-/// `InboxLaunchRecord.rex`. `session` and `block`: the Rex session and the pane Rex made for it (Stop closes that pane).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxLaunchRex: Codable, Hashable, Sendable {
   public var line: String?
@@ -3782,7 +3568,6 @@ public struct InboxLaunchRex: Codable, Hashable, Sendable {
   }
 }
 
-/// A group the list draws: a section, the Priority group above them all (`INBOX_PRIORITY_GROUP`), or the Snoozed band under Quiet (`INBOX_SNOOZED_BAND`). The server places no row in either: the window draws them from the row. The window's Archived group under them all (approval "inbox-archived-group") reads its own rows, never the list's.
 /// From `packages/core/inbox-types.ts`.
 public enum InboxListGroupId: Codable, Hashable, Sendable, RawRepresentable {
   case archived
@@ -3833,74 +3618,41 @@ public enum InboxListGroupId: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// One row of the list: a thread (owner ruling 2026-10-07, "a row is a thread"), with its project as a label and a filter, placed in its section.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxListRow: Codable, Hashable, Sendable {
   public var project: InboxListRowProject
-  /// The machine whose Inbox owns the thread (its stable `ibx_` id), on rows of the merged view only (`GET /api/inbox/threads?machines=1`; linked machines, packages/server/inbox-machines.ts). Absent on this Inbox's own list.
   public var machine: String?
-  /// The thread's name (send_message's `thread`), or null for an unnamed thread.
   public var threadName: String?
-  /// The row's grey line (approval "inbox-row-latest-preview"): the thread's latest message as plain text, cut near `INBOX_ROW_PREVIEW_MAX` characters (core inbox-row-preview.ts): the newest unread agent message while one is unread, else the newest message, the person's own reply as "You: …". Null when there is nothing to show: an unnamed thread whose latest message is its first (its title already says it), or a message with no words. Only on the list model the window and the phone read (an agent's list row never carries it). Absent from an older Inbox: the window then shows the subject under a…
   public var latestPreview: String?
   public var section: InboxSectionId
-  /// The session this thread would reach has ended, as the thread's own note and the delivery line know it (only a host that can tell: a waking connection, not heard from past the grace). Never in Quiet. Absent otherwise.
   public var sessionEnded: Bool?
-  /// Waiting on the person or new to them: drawn bold. Not for a row in New only for the person's own unsent words or comments (`unsent`).
   public var unread: Bool
-  /// No question is open, some are picked and not sent: it waits only for Send.
   public var answeredNotSent: Bool
-  /// What the person has not sent in this thread yet (approval "inbox-reply-drafts"): words typed in the reply box (`reply_at`, when they were last saved; null when none), picks saved and not sent, and comments (on attached files, the guided review or the messages) waiting for a Send. Null when nothing is unsent. A thread holding any of it never sits in Quiet unless it is archived. Additive: absent from an older Inbox.
   public var unsent: InboxRowUnsent?
-  /// When the oldest open question was asked, or null when none is open.
   public var waitingSince: String?
-  /// When the person pinned the thread to the sidebar (approval "inbox-pinned-threads"), or null. Only on the list model the window and the phone read (`GET /api/inbox/threads`), never on anything an agent reads. Additive: absent from an older Inbox.
   public var pinnedAt: String?
-  /// The live tags the thread is in (approval "inbox-thread-tags"), `ini_` ids, oldest tag first; absent when none. Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads.
   public var tags: [String]?
-  /// The thread is snoozed (approval "inbox-snooze"; the rules are core's inbox-snooze.ts), or null. Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads. Additive: absent from an older Inbox.
   public var snoozed: InboxRowSnooze?
-  /// The thread is in the list's Priority group (`inboxRowInPriority`), or null. `person`: the person added it (`inbox/priority.json`), `at` when; `ask` is always null: no agent can set one. Like `pinned_at`, only on the list model the window and the phone read, never on anything an agent reads. Every row from an Inbox that keeps priority carries the key; absent from an older Inbox (no menu item, no group). A linked machine's row carries that machine's own (approval "inbox-linked-marks": the add lives on the thread's machine).
   public var priority: InboxRowPriority?
-  /// The thread came back from a snooze at this time and has not been read since: the row's small clock. Only on the list model, like `snoozed`.
   public var snoozeBack: String?
-  /// A checklist in this thread has a step waiting on the person (approval "inbox-checklist-spinners-2026-11-07", the calm row): the row's still amber pause. Only while the person's Checklist switch is on, and only on the list model the window and the phone read, never on anything an agent reads. Absent otherwise, and from an older Inbox.
   public var stepsWaiting: Bool?
-  /// The thread's PRs (approval "inbox-pr-binding"): how many, and the one the row's mark shows with its last known state. Only on this Inbox's own rows of the list model the window reads; absent when the thread has none, and from an older Inbox.
   public var pulls: InboxThreadPullsSummary?
-  /// The thread's open PRs that are not hidden (keys; the server's inbox-pull-hidden.ts): the row menu's and the picks' "Hide pull request". Only on this Inbox's own rows of the list the window and the phone read; absent when none. A thread whose open PRs are all hidden is left out of that list (it stays in search and in Reviews' Hidden).
   public var hidePulls: [String]?
-  /// Agent messages after the person's last look (a reply of theirs counts as a look; the Inbox's own notes, `isInboxNote`, do not).
   public var unseen: Double
-  /// The person's reply is the last message, the Inbox's own notes read past: when, and when the agent read it (null until it has).
   public var sent: InboxListRowSent?
-  /// When more than one agent session is in the thread (it wrote there or the person tagged it): all of them, the thread's first agent first, for the overlapping marks. Absent with one session and from an older Inbox.
   public var participants: [InboxParticipant]?
-  /// When the latest agent message arrived (`last_at` also moves on the person's messages and the Inbox's notes). The window's held list counts agent activity by it. Absent from an older Inbox.
   public var lastAgentAt: String?
-  /// A message in the thread carries a guided review: the row's "Guided review" mark.
   public var guide: Bool
-  /// The thread's latest guide is a walkthrough: the same mark says Walkthrough.
   public var guideWalkthrough: Bool?
-  /// On a thread the person started (`started_by_person`): the agent session it is addressed to now (the root's `to`, which "Send to another session" may change), so the row draws that agent's mark and "To <agent>". Absent on every other thread and from an older Inbox.
   public var addressee: InboxAddressee?
-  /// On a launched thread (the window's list only): the one muted word after the agent's mark ("Starting", "Working"). Absent otherwise and from an older Inbox.
   public var run: InboxListRowRun?
-  /// The window's own drawing (approval "inbox-multi-select"): the thread is in a Combine still waiting for its new thread, so the row says "Combining…". No server sends it.
   public var combining: Bool?
-  /// When the person marked the thread read (Mark read), while it still holds: no message but a set-aside note since. The row is Quiet. Null otherwise. Absent from an older Inbox.
   public var readAt: String?
-  /// The person's 👍 on the latest agent message, while the Mark read it made still holds: the row says "👍 Looks good" in place of "Read". Null otherwise. Absent from an older Inbox.
   public var ack: InboxListRowAck?
-  /// The thread is archived (resolved) and an agent wrote in it after the archive line (a reply_to reply). Those later messages behave as an open thread's (their questions live and answerable, a reply goes to them); the thread stays resolved until the person acts. Derived from the log, never stored. Absent from an older Inbox.
   public var agentAfterArchive: Bool?
-  /// `agent_after_archive`, and something there still waits: an agent message after the archive the person has not looked at, a live question open or picked, or the person's reply after the archive the agent has not read (not once a Mark read made after it stands: Mark read sends a came-back thread back to the archive). The thread is back in the list, placed as an open thread would be; once handled it returns to the archive on its own. Derived. Absent from an older Inbox.
   public var backFromArchive: Bool?
-  /// The thread's last message (the Inbox's notes read past) is the person's Re-ask note: the row sits in Sent until the agent asks again (owner's rule, approval "inbox-reask"). Absent from an older Inbox.
   public var reaskPending: Bool?
-  /// Where the person's latest sent item in the thread is (approval "inbox-row-delivery", "Ticks"): their reply or message when it is the thread's last message (the Inbox's notes read past), else a 👍 Looks good on the latest agent message once the Inbox sent it through. Computed with the rule the thread's delivery line uses (`inboxDeliveryState`) from the live sessions, so a row and its thread agree. Null when there is none (an agent wrote last, a 👍 not sent). Absent from an older Inbox.
   public var delivery: InboxRowDelivery?
-  /// What the row's Stopped / Holds up badge holds (approval "inbox-row-badges", hover card A): each open question or action item that stops the agent or holds something up, in thread order, at most `INBOX_ROW_WAITS_MAX`, its words capped (`INBOX_ROW_WAIT_TEXT_MAX`, `INBOX_ROW_WAIT_HOLDS_MAX`). Absent when none does, and from an older Inbox (the card then lists `questions.holds_up`). The window's list only: agents' rows never carry it.
   public var waits: [InboxRowWait]?
   public var threadId: ThreadID
   public var projectId: ProjectID
@@ -3909,17 +3661,16 @@ public struct InboxListRow: Codable, Hashable, Sendable {
   public var createdAt: String
   public var lastAt: String
   public var lastAuthor: InboxListRowLastAuthor
-  public var messageCount: Double
+  public var messageCount: Int64
   public var resolvedAt: String?
   public var questions: InboxQuestionSummary
-  /// The last message is an agent's and the thread is open: it waits on the person. The Inbox's own notes (`isInboxNote`) are read past, and it is false while a Mark read stands (nothing waits on the person then).
   public var waitingOnPerson: Bool
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["project", "machine", "thread_name", "latest_preview", "section", "session_ended", "unread", "answered_not_sent", "unsent", "waiting_since", "pinned_at", "tags", "snoozed", "priority", "snooze_back", "steps_waiting", "pulls", "hide_pulls", "unseen", "sent", "participants", "last_agent_at", "guide", "guide_walkthrough", "addressee", "run", "combining", "read_at", "ack", "agent_after_archive", "back_from_archive", "reask_pending", "delivery", "waits", "thread_id", "project_id", "subject", "author", "created_at", "last_at", "last_author", "message_count", "resolved_at", "questions", "waiting_on_person"]
 
-  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Double, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
+  public init(project: InboxListRowProject, machine: String? = nil, threadName: String? = nil, latestPreview: String? = nil, section: InboxSectionId, sessionEnded: Bool? = nil, unread: Bool, answeredNotSent: Bool, unsent: InboxRowUnsent? = nil, waitingSince: String? = nil, pinnedAt: String? = nil, tags: [String]? = nil, snoozed: InboxRowSnooze? = nil, priority: InboxRowPriority? = nil, snoozeBack: String? = nil, stepsWaiting: Bool? = nil, pulls: InboxThreadPullsSummary? = nil, hidePulls: [String]? = nil, unseen: Double, sent: InboxListRowSent? = nil, participants: [InboxParticipant]? = nil, lastAgentAt: String? = nil, guide: Bool, guideWalkthrough: Bool? = nil, addressee: InboxAddressee? = nil, run: InboxListRowRun? = nil, combining: Bool? = nil, readAt: String? = nil, ack: InboxListRowAck? = nil, agentAfterArchive: Bool? = nil, backFromArchive: Bool? = nil, reaskPending: Bool? = nil, delivery: InboxRowDelivery? = nil, waits: [InboxRowWait]? = nil, threadId: ThreadID, projectId: ProjectID, subject: String? = nil, author: InboxAuthor, createdAt: String, lastAt: String, lastAuthor: InboxListRowLastAuthor, messageCount: Int64, resolvedAt: String? = nil, questions: InboxQuestionSummary, waitingOnPerson: Bool, unknownFields: [String: JSONValue] = [:]) {
     self.project = project
     self.machine = machine
     self.threadName = threadName
@@ -4011,7 +3762,7 @@ public struct InboxListRow: Codable, Hashable, Sendable {
     self.createdAt = try c.decode(String.self, forKey: WireKey("created_at"))
     self.lastAt = try c.decode(String.self, forKey: WireKey("last_at"))
     self.lastAuthor = try c.decode(InboxListRowLastAuthor.self, forKey: WireKey("last_author"))
-    self.messageCount = try c.decode(Double.self, forKey: WireKey("message_count"))
+    self.messageCount = try c.decode(Int64.self, forKey: WireKey("message_count"))
     self.resolvedAt = try c.decodeIfPresent(String.self, forKey: WireKey("resolved_at"))
     self.questions = try c.decode(InboxQuestionSummary.self, forKey: WireKey("questions"))
     self.waitingOnPerson = try c.decode(Bool.self, forKey: WireKey("waiting_on_person"))
@@ -4189,11 +3940,8 @@ public enum InboxListRowRun: Codable, Hashable, Sendable, RawRepresentable {
 public struct InboxListRowSent: Codable, Hashable, Sendable {
   public var at: String
   public var checkedAt: String?
-  /// It goes to a session whose connection delivers it as a turn by itself (the asking message came through a waking connection, or the person addressed it to a live session): "Queued for <agent>", not "Saved for". Absent from an older Inbox.
   public var wakes: Bool?
-  /// Settled by a read of another agent than the one it was for: that agent's host ("Read by Claude Code, 6:25 PM"). Absent otherwise, and on a thread from before this was recorded.
   public var readBy: String?
-  /// When the reply tags agents (`InboxMessage.tags`): every session it goes to, the owner first, each with its own delivery ("1 of 3 delivered"). `checked_at` is then set once every recipient a connection wakes has it. Absent otherwise and from an older Inbox.
   public var recipients: [InboxSentRecipient]?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -4264,13 +4012,10 @@ public struct InboxListSection: Codable, Hashable, Sendable {
   }
 }
 
-/// A running local app a thread shows through the Inbox's loopback live proxy (`packages/server/inbox-live.ts`): today, a question choice's prototype (`Prototype: http://localhost:…`). `id` is `liv_` + 16 hex of the URL's normalized identity, the same in every thread.
 /// From `packages/core/inbox-attachments.ts`.
 public struct InboxLiveSiteRef: Codable, Hashable, Sendable {
   public var id: String
-  /// The URL as checked: http, a loopback host, path and query kept, no fragment.
   public var url: String
-  /// Who named it: an agent (a choice's `Prototype:` line). "person" is reserved for a site the person opens (#2258).
   public var openedBy: InboxLiveSiteRefOpenedBy
   public var openedAt: String
   public var web: Bool?
@@ -4313,7 +4058,6 @@ public struct InboxLiveSiteRef: Codable, Hashable, Sendable {
   }
 }
 
-/// Who named it: an agent (a choice's `Prototype:` line). "person" is reserved for a site the person opens (#2258).
 public enum InboxLiveSiteRefOpenedBy: Codable, Hashable, Sendable, RawRepresentable {
   case agent
   case person
@@ -4344,134 +4088,75 @@ public enum InboxLiveSiteRefOpenedBy: Codable, Hashable, Sendable, RawRepresenta
 
 /// From `packages/core/inbox-types.ts`.
 public struct InboxMessageWire: Codable, Hashable, Sendable {
-  /// Omitted when the message asks no question (the Workspaces rule). The server lists the message's action items (`kind: "action"`) here too, after its questions; a reader that does not know `"action"` must not answer them.
   public var questions: [InboxQuestion]?
-  /// Never sent by the server: the Inbox window moves a message's action items here out of `questions` when it reads a thread (packages/inbox/actions.ts), so nothing that picks and sends answers ever meets one.
   public var actions: [InboxQuestion]?
-  /// The seq of the message's first line in the event log. Rides only on `GET /api/inbox/threads/:id` (the window's thread), is never stored and is not on the MCP tools: with the root's `person_seen_seq` it tells the window which messages are new since the person's last look, read BEFORE the window records the next look. Absent from an older Inbox.
-  public var seq: Double?
-  /// On a person's reply, on `GET /api/inbox/threads/:id` only: how many of the person's annotations (on attached files or a guided review's diffs) that reply carried. Absent from an older Inbox.
+  public var seq: Int64?
   public var sentAnnotations: Double?
   public var id: MessageID
   public var projectId: ProjectID
   public var threadId: ThreadID
   public var replyTo: String?
   public var author: InboxAuthor
-  /// Set on a thread's root: the agent's subject, or one derived from the body.
   public var subject: String?
-  /// Markdown, as sent.
   public var body: String
   public var createdAt: String
-  /// On a thread's root: when the thread was resolved, or null while open.
   public var resolvedAt: String?
-  /// The sender's idempotency key, when one was given.
   public var idempotencyKey: String?
-  /// The `thread` name the agent sent this message with (send_message's `thread`), else absent or null. On a root it is the thread's name: a named thread is joined by name across sessions; an unnamed root only by reply_to. Added after step 1: older records lack it.
   public var threadName: String?
-  /// On a root: the event-log seq up to which the person has looked at the thread (the window's "seen"). Agent messages after it are "New since you looked". Absent until the first look.
-  public var personSeenSeq: Double?
-  /// On a root: the person's Mark read, the event-log seq when they pressed it and when. While no message but a set-aside note (`set_aside`) came after it, the thread sits in Quiet without being closed; any other message (an agent's, or the person's own reply) ends it without a write. Null after Undo. Absent on records older than Mark read.
-  public var personReadSeq: Double?
+  public var personSeenSeq: Int64?
+  public var personReadSeq: Int64?
   public var personReadAt: String?
-  /// On a root marked read: `person_seen_seq` before the Mark read (which counts as a look), for its Undo.
   public var personSeenBeforeRead: Double?
-  /// On a person's set-aside note: the questions (`<message id>/<key>`) a Mark read told the asking agent not to wait on. Written once per question, after the Undo window, as a reply to the message that asked. Absent on every other message.
   public var setAside: [String]?
-  /// On a person's reopened note: the questions an Undo of Mark read opened again after a set-aside note had named them. Absent on every other message.
   public var reopened: [String]?
-  /// On the note that carries a 👍 Looks good to the agent (amended 2026-10-16): the agent message the person marked. Written once the ack's Undo window passed (its body is `inboxAckLine`), as a reply to that message, and delivered like any reply (the wake) while the ack still names it (`InboxAck.note_id`). The window and read_thread do not list it: the ack on the message says it. Absent on every other message.
   public var ackOf: String?
-  /// With `ack_of`: the tray reaction the ack had when its Undo window closed (approval "inbox-reaction-tray"), so the wake says the emoji the person ended on (`inboxAckLine`); it never changes after that. Absent for 👍 Looks good and on notes written before.
   public var ackReaction: InboxReaction?
-  /// On the person's Re-ask note (approval "inbox-reask"): the open questions (`<message id>/<key>`) it asked the agent to ask again, together in one new message, with `Replaces:` lines for those still needed. It is the person's reply (never an Inbox note): delivered like one, and while it is the thread's last message the row sits in Sent. Picks the person had made but not sent go with it as answers. Absent on every other message.
   public var reask: [String]?
-  /// On a Tidy note (the person's Tidy, 2026-10-28): its run, and whether it is the one note of its session that carries the wake (`wake`; the others only show in their threads and are never delivered). An Inbox note: the row never moves for it. Absent on every other message.
   public var tidy: InboxTidyMark?
-  /// On a root: the seq up to which the asking agent has read the person's replies (a wake delivered one, or read_thread read the thread), and when. A Sent row moves to Quiet once its reply is checked.
-  public var agentCheckedSeq: Double?
+  public var agentCheckedSeq: Int64?
   public var agentCheckedAt: String?
-  /// The host of the agent whose read moved `agent_checked_seq`, when it is known not to be the agent the reply was for (another host's session, new to the thread, settled a reply no connection wakes). Absent otherwise, and on a thread from before this was recorded: those keep "Delivered".
   public var agentCheckedBy: String?
-  /// The files an agent attached (send_message's `attachments`), recorded at send time and read only by their ids (see inbox-attachments.ts). Added in step 2: older records lack it.
   public var attachments: [InboxAttachment]?
-  /// On an agent's message: the images its body shows, captured as files of the thread (`InboxInlineImage`), in the order the body shows them. Written when the message lands, or, for a message sent before images were captured, the first time its thread is read (each record then marked `captured: "on_open"`). Present (possibly empty) once capture ran; absent on a message whose body shows no local image, and on older records.
   public var inlineImages: [InboxInlineImage]?
-  /// On an agent's message: the running apps its question choices name as prototypes (`Prototype: http://localhost:…`), each checked and probed when it was sent (packages/server/inbox-live.ts). Absent otherwise.
   public var liveSites: [InboxLiveSiteRef]?
-  /// On a person's reply: it reached the asking agent's session as a turn through an agent connection (the Claude Code mod), and when. Absent until then; a reply the agent read through the MCP has none. "Replied" is not stored: it is the asking session's next message in the thread. Added in step 6: older records lack it.
   public var delivery: InboxDelivery?
   public var takenBackAt: String?
   public var readByAgent: InboxMessageWireReadByAgent?
   public var cloudWake: InboxCloudWake?
-  /// On a person's reply or message for a T3 Code thread: why the T3 wake cannot put it in now (packages/server/inbox-t3-wake.ts). Absent while nothing known holds it, and dropped when it is delivered.
   public var t3Wait: InboxMessageWireT3Wait?
-  /// On a person's reply or message not yet delivered: the person pressed Send now in the Inbox, and when. The session's connection then delivers it at once, into the running turn when one runs, instead of waiting for the session to go idle (the bridge command's `now`). Absent otherwise and on older records.
   public var deliverNowAt: String?
-  /// Who asked for `deliver_now_at`: the person (Send now) or the Inbox after the item waited `INBOX_AUTO_SEND_AFTER_MS` on a busy session whose connection can take it mid-turn (approval "inbox-busy-agent-reply"). Kept when a failed attempt clears `deliver_now_at`, so the Inbox never tries by itself twice. Absent on older records (a person's Send now).
   public var deliverNowBy: InboxMessageWireDeliverNowBy?
-  /// When it began to wait on its busy session, written with the Inbox's own mark (`deliver_now_by: "auto"`), so "went into its turn by itself after N min" stays true after delivery. Absent otherwise. Additive.
   public var waitStartedAt: String?
-  /// Try again on a launched session's turn that ended in an error (`InboxRun.turn_error`): the session this message goes to once more, though a read already settled it. It counts only while `delivery` is unset. Absent otherwise. Additive.
   public var sentAgainTo: String?
-  /// The Inbox's note for a launched session's turn that ended in an error ("<Agent>'s turn ended with an error: …", Claude Code, Codex and Pi): the window notifies for it ("<project>: <agent> couldn't answer"). Written only by the Inbox itself, never by an agent's call. Absent otherwise. Additive.
   public var turnError: Bool?
-  /// A guided review this message carries (submit_guide, PLAN step 5): the snapshot is a content-addressed blob, `inbox/blobs/<sha256>`. Absent on every other message and on records older than step 5.
   public var guide: InboxGuideRef?
-  /// On a message carrying a guide: the person's reviewed tick per section, as the window's guide viewer last saved it (the record's 4.2, "kept with the thread"). Absent until the first tick; the snapshot's own ticks apply then.
   public var guideReviewed: [Bool]?
-  /// On a message carrying a review (`guide.review`): the files the person ticked Viewed in the review, as the patch names them. Absent until the first tick.
   public var guideViewed: [String]?
-  /// On the person's reply that gave a verdict on a review (Approve or Send feedback in the review's header): which review, the verdict, and how many of their comments rode it. The review card shows it as its outcome. Absent on every other message.
   public var reviewVerdict: InboxReviewVerdictRecord?
-  /// The reviews (message ids) whose diff comments this person's reply carried (code review in the Inbox), whichever message the reply answers. Set by the store at Send; the window reads it to tell a review happened.
   public var reviewCommentsOf: [String]?
-  /// On a person's reply that quotes a message of the thread (approval "inbox-reply-quote"): the message, and the words selected in it (absent: the whole message). The store wrote the lead the agent reads at the start of the person's words (`inboxReplyQuoteLead`); the window draws this as one quiet line over the reply instead. Absent on every other message and on older records.
   public var quote: InboxReplyQuote?
-  /// On a person's New message (plan step 8): the live agent session it is addressed to. Such a message answers nothing (`reply_to` null) and is delivered to that session as a turn, like a reply. Also on a person's reply (`reply_to` set) when the session that asked had ended and the person chose another live session to take it: that session alone is handed it. Absent on every other message and on records older than step 8.
   public var to: InboxAddressee?
-  /// On an agent's message: the realpath of the `project_path` it was sent from, when that is a folder inside the project other than its root. Relative image paths in the body start there (#1813); absent, they start at the project root. Added after step 8: older records lack it.
   public var basePath: String?
-  /// On an agent's message sent into a thread of another project (`reply_to` from another folder): the project its `project_path` is in, by name (approval "inbox-reply-recipient"). The window names the agent by it ("in plannotator", "Claude Code (plannotator)") after its session ends. Absent for a send from the thread's own project (or a project combined with it), and on older records.
   public var fromProject: InboxMessageWireFromProject?
-  /// On an agent's message: it was sent through a connection that wakes its session with the person's reply (the Claude Code mod, Pi, OpenCode 2; `INBOX_WAKES_META_KEY`). Only such a session can be said to have ended when it stops polling; an MCP-only agent or OpenCode 1 never polls, so the window never calls it ended. Absent otherwise and on older records.
   public var wakes: Bool?
-  /// On an agent's message: the earlier questions it said it supersedes (send_message's `supersedes`, as sent: `<message id>` for every open question of that message, or `<message id>/<key>` for one). The question records carry the result (`InboxQuestionRecord.superseded_by`); this is what the agent asked for, so a retry with another list is refused. Absent when it superseded nothing through the argument (a `Replaces:` line rides the body). Added for replaced questions: older records lack it.
   public var supersedes: [String]?
-  /// On an agent's message: the action items it said it saw done (send_message's `done`, as sent: `<message id>` for every open action item of that message, or `<message id>/<key>` for one). The action item records carry the result (`action_result` with `by: "agent"`). Absent otherwise and on older records.
   public var done: [String]?
-  /// On a person's reply that reports action items (Done, Can't do it): the action items it reports (`<message id>/<key>`), sent once the Undo window passed. Absent on every other message.
   public var actionReport: [String]?
-  /// On a thread's root whose subject the agent did not give: the question (`<message id>/<key>`) the subject was derived from, so the thread's subject follows that question's `superseded_by` chain. Null when the subject was the agent's own or came from the body's first line (it never changes). Absent on records older than replaced questions: then a subject equal to the root's first question's prompt counts as derived from it.
   public var subjectQuestion: String?
-  /// On a thread's root the person wrote (compose: "send a new message to a connected agent"): the thread was started by the person, addressed to one live agent session (`to`). The agent's answer lands in it by `reply_to`. Absent on every other message.
   public var startedByPerson: Bool?
-  /// On the root of a thread the person started with compose's Board chip on (approval "inbox-compose-board-chip", 2026-10-27): the person asked the agent to track the work on the Board. The body stays as typed; what the agent receives for this message (the delivered turn, read_thread) carries `inboxBoardRequestBlock` after it. Absent on every other message.
   public var boardRequest: Bool?
-  /// On the root of a thread the person started from Settings -> Decision data's Ask. The body stays as typed; what the agent receives for this message (the delivered turn, read_thread) carries `INBOX_DECISION_ASK_BLOCK` after it. Absent on every other message.
   public var decisionAsk: Bool?
-  /// On the root of a thread the person started from Settings → Rows' ask box. The body stays as typed; what the agent receives for this message carries `INBOX_ROWS_ASK_BLOCK` (inbox-rows-words.ts) after it. Absent on every other message.
   public var rowsAsk: Bool?
-  /// On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it.
   public var viewing: InboxReplyViewing?
-  /// On the root of a thread the person started by launching an agent (To: "New Claude Code session"), or on a person's reply sent to a new session in place of one that ended (the reply box's "New Claude Code session" row). Absent on every other message.
   public var launch: InboxLaunchRecord?
-  /// A routine's run divider or skip line (inbox-scheduled-types.ts). A divider also carries its run's `launch`.
   public var scheduledRun: InboxScheduledRun?
-  /// An agent's `routine` change, posted as that agent in the thread it called from.
   public var scheduledChange: InboxScheduledChange?
-  /// On the root of a thread the person started: who gave it its name, the thread chip (approval "inbox-agent-names-own-thread"). The person may name it in compose; otherwise the first reply from a session that may name it (`InboxStore.canNameThread`) carrying a valid `thread` names it, once, and the root is written again with the name and this field. Absent while the thread has no name, and on every other message. A name set here is never replaced, except compose's suggestion (`kind: "auto"`), which the first agent that may name the thread replaces.
   public var namedBy: InboxMessageWireNamedBy?
-  /// On an agent's reply: the `thread` it carried, as given (trimmed), so a retry with the same idempotency key and another `thread` is told apart. Absent when it carried none, and on every other message.
   public var replyThread: String?
-  /// On an agent's reply into a thread the person started that it could name: what the naming came to (`InboxThreadNaming`), so a retry answers the same. Absent everywhere else.
   public var threadNaming: InboxMessageWireThreadNaming?
-  /// On an agent's message: the person's 👍 Looks good (design record "inbox-acknowledge", approved 2026-10-15, amended 2026-10-16). The thread is marked read; once the Undo window passes the Inbox sends it to the agent (a note, `note_id`), delivered like a reply. Null after Undo. Absent on every other message and on older records.
   public var ack: InboxAck?
-  /// On a person's reply: the agent sessions they tagged with `@` (approval "inbox-tag-agents", Lines variant), in the order typed, never the session the reply goes to anyway (its owner, `InboxStore.recipientOf`). ONE message, handed to its owner and to every tagged session; each records its own delivery in its entry, so each gets its own line and Send now. A message with tags is settled for each recipient only by that recipient's own delivery, or for one not woken its own read, never by another agent's read. Absent on every other message and on older records.
   public var tags: [InboxTag]?
-  /// On a person's reply that handed the thread to another session (the reply box's "Hand off instead", approval "inbox-tag-handoff", option A2): the reply's `to` is the new owner, and every later reply in the thread goes to it. `from` is the session that owned the thread before (it gets a notice: a tag with `handed_away`). Held for the Undo window: nobody is handed the reply until `settled_at` is set. `undone_at`: the person took the hand-off back inside that window; the reply then went as an Ask (a tag) and no longer moves the thread. Absent on every other message.
   public var handoff: InboxHandoff?
-  /// A person's reply whose `to` took the place of a session that had ended (the recipient pill, or Send to another session). Until an agent writes again the person's next reply follows its `to`. Set only by the server, which checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
   public var tookOver: Bool?
   public var reviewLive: InboxReviewLive?
   public var reviewAnchor: InboxReviewAnchor?
@@ -4482,7 +4167,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
 
   static let knownKeys: Set<String> = ["questions", "actions", "seq", "sent_annotations", "id", "project_id", "thread_id", "reply_to", "author", "subject", "body", "created_at", "resolved_at", "idempotency_key", "thread_name", "person_seen_seq", "person_read_seq", "person_read_at", "person_seen_before_read", "set_aside", "reopened", "ack_of", "ack_reaction", "reask", "tidy", "agent_checked_seq", "agent_checked_at", "agent_checked_by", "attachments", "inline_images", "live_sites", "delivery", "taken_back_at", "read_by_agent", "cloud_wake", "t3_wait", "deliver_now_at", "deliver_now_by", "wait_started_at", "sent_again_to", "turn_error", "guide", "guide_reviewed", "guide_viewed", "review_verdict", "review_comments_of", "quote", "to", "base_path", "from_project", "wakes", "supersedes", "done", "action_report", "subject_question", "started_by_person", "board_request", "decision_ask", "rows_ask", "viewing", "launch", "scheduled_run", "scheduled_change", "named_by", "reply_thread", "thread_naming", "ack", "tags", "handoff", "took_over", "review_live", "review_anchor", "review_batch", "review_resolved"]
 
-  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Double? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Double? = nil, personReadSeq: Double? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Double? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, liveSites: [InboxLiveSiteRef]? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(questions: [InboxQuestion]? = nil, actions: [InboxQuestion]? = nil, seq: Int64? = nil, sentAnnotations: Double? = nil, id: MessageID, projectId: ProjectID, threadId: ThreadID, replyTo: String? = nil, author: InboxAuthor, subject: String? = nil, body: String, createdAt: String, resolvedAt: String? = nil, idempotencyKey: String? = nil, threadName: String? = nil, personSeenSeq: Int64? = nil, personReadSeq: Int64? = nil, personReadAt: String? = nil, personSeenBeforeRead: Double? = nil, setAside: [String]? = nil, reopened: [String]? = nil, ackOf: String? = nil, ackReaction: InboxReaction? = nil, reask: [String]? = nil, tidy: InboxTidyMark? = nil, agentCheckedSeq: Int64? = nil, agentCheckedAt: String? = nil, agentCheckedBy: String? = nil, attachments: [InboxAttachment]? = nil, inlineImages: [InboxInlineImage]? = nil, liveSites: [InboxLiveSiteRef]? = nil, delivery: InboxDelivery? = nil, takenBackAt: String? = nil, readByAgent: InboxMessageWireReadByAgent? = nil, cloudWake: InboxCloudWake? = nil, t3Wait: InboxMessageWireT3Wait? = nil, deliverNowAt: String? = nil, deliverNowBy: InboxMessageWireDeliverNowBy? = nil, waitStartedAt: String? = nil, sentAgainTo: String? = nil, turnError: Bool? = nil, guide: InboxGuideRef? = nil, guideReviewed: [Bool]? = nil, guideViewed: [String]? = nil, reviewVerdict: InboxReviewVerdictRecord? = nil, reviewCommentsOf: [String]? = nil, quote: InboxReplyQuote? = nil, to: InboxAddressee? = nil, basePath: String? = nil, fromProject: InboxMessageWireFromProject? = nil, wakes: Bool? = nil, supersedes: [String]? = nil, done: [String]? = nil, actionReport: [String]? = nil, subjectQuestion: String? = nil, startedByPerson: Bool? = nil, boardRequest: Bool? = nil, decisionAsk: Bool? = nil, rowsAsk: Bool? = nil, viewing: InboxReplyViewing? = nil, launch: InboxLaunchRecord? = nil, scheduledRun: InboxScheduledRun? = nil, scheduledChange: InboxScheduledChange? = nil, namedBy: InboxMessageWireNamedBy? = nil, replyThread: String? = nil, threadNaming: InboxMessageWireThreadNaming? = nil, ack: InboxAck? = nil, tags: [InboxTag]? = nil, handoff: InboxHandoff? = nil, tookOver: Bool? = nil, reviewLive: InboxReviewLive? = nil, reviewAnchor: InboxReviewAnchor? = nil, reviewBatch: InboxReviewBatch? = nil, reviewResolved: InboxReviewResolved? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.questions = questions
     self.actions = actions
     self.seq = seq
@@ -4564,7 +4249,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.questions = try c.decodeIfPresent([InboxQuestion].self, forKey: WireKey("questions"))
     self.actions = try c.decodeIfPresent([InboxQuestion].self, forKey: WireKey("actions"))
-    self.seq = try c.decodeIfPresent(Double.self, forKey: WireKey("seq"))
+    self.seq = try c.decodeIfPresent(Int64.self, forKey: WireKey("seq"))
     self.sentAnnotations = try c.decodeIfPresent(Double.self, forKey: WireKey("sent_annotations"))
     self.id = try c.decode(MessageID.self, forKey: WireKey("id"))
     self.projectId = try c.decode(ProjectID.self, forKey: WireKey("project_id"))
@@ -4577,8 +4262,8 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.resolvedAt = try c.decodeIfPresent(String.self, forKey: WireKey("resolved_at"))
     self.idempotencyKey = try c.decodeIfPresent(String.self, forKey: WireKey("idempotency_key"))
     self.threadName = try c.decodeIfPresent(String.self, forKey: WireKey("thread_name"))
-    self.personSeenSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("person_seen_seq"))
-    self.personReadSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("person_read_seq"))
+    self.personSeenSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("person_seen_seq"))
+    self.personReadSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("person_read_seq"))
     self.personReadAt = try c.decodeIfPresent(String.self, forKey: WireKey("person_read_at"))
     self.personSeenBeforeRead = try c.decodeIfPresent(Double.self, forKey: WireKey("person_seen_before_read"))
     self.setAside = try c.decodeIfPresent([String].self, forKey: WireKey("set_aside"))
@@ -4587,7 +4272,7 @@ public struct InboxMessageWire: Codable, Hashable, Sendable {
     self.ackReaction = try c.decodeIfPresent(InboxReaction.self, forKey: WireKey("ack_reaction"))
     self.reask = try c.decodeIfPresent([String].self, forKey: WireKey("reask"))
     self.tidy = try c.decodeIfPresent(InboxTidyMark.self, forKey: WireKey("tidy"))
-    self.agentCheckedSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("agent_checked_seq"))
+    self.agentCheckedSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("agent_checked_seq"))
     self.agentCheckedAt = try c.decodeIfPresent(String.self, forKey: WireKey("agent_checked_at"))
     self.agentCheckedBy = try c.decodeIfPresent(String.self, forKey: WireKey("agent_checked_by"))
     self.attachments = try c.decodeIfPresent([InboxAttachment].self, forKey: WireKey("attachments"))
@@ -4781,7 +4466,6 @@ public struct InboxMessageWireNamedBy: Codable, Hashable, Sendable {
   public var at: String
   public var host: String?
   public var session: String?
-  /// The reply that carried the name.
   public var messageId: MessageID?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -5008,10 +4692,8 @@ public enum InboxMessageWireThreadNamingStatus: Codable, Hashable, Sendable, Raw
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Whether a browser notification can reach the person now (packages/server/inbox-windows.ts): notifications come from an open Inbox tab, so with none open, or none the browser lets notify, nothing reaches them. `windows`: Inbox tabs holding an event stream; `allowed`: those whose browser reported `granted`; `allowed_origins`: their addresses.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxNotifyReach: Codable, Hashable, Sendable {
-  /// The Settings switch (config.json `inboxNotifications.enabled`).
   public var enabled: Bool
   public var windows: Double
   public var allowed: Double
@@ -5048,7 +4730,6 @@ public struct InboxNotifyReach: Codable, Hashable, Sendable {
   }
 }
 
-/// Who a thread involves, for the overlapping marks on the row and the thread head: the distinct agent sessions that wrote in it or were tagged in it, the thread's first agent first. `name` is an MCP agent's own name.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxParticipant: Codable, Hashable, Sendable {
   public var host: String?
@@ -5113,21 +4794,15 @@ public struct InboxPicker: Codable, Hashable, Sendable {
   }
 }
 
-/// One row of the window: the repository or folder an agent works in.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxProject: Codable, Hashable, Sendable {
   public var id: ProjectID
-  /// The folder name under `inbox/projects/`: `<name>-<6 hex of the root>`.
   public var key: String
   public var name: String
-  /// Absolute realpath of the repository root (git toplevel) or folder.
   public var root: String
   public var createdAt: String
-  /// The name the person gave the project (Rename… in the project menu), shown as it is in place of its folder's name. Additive: absent until someone renames, and absent again after Reset name. Id, key, `name` (the slug) and root never change with it.
   public var displayName: String?
-  /// The project this one was combined into (approval "project-combine"). Every reader shows this project's threads under the end of that chain; nothing of this project moves, and an older reader ignores the field. A target that is gone, or a loop, counts as not combined, so a project can only reappear.
   public var mergedInto: String?
-  /// The project this one's last undone combine went into: Tidy does not suggest the pair again.
   public var separatedFrom: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -5173,7 +4848,6 @@ public struct InboxProject: Codable, Hashable, Sendable {
   }
 }
 
-/// The repository a project's git `origin` names (#1840): its path on the forge (`owner/repo`, or a GitLab `group/sub/project`) and the remote's host, null when the host did not parse. The window links bare `#123` refs with it.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxProjectRepo: Codable, Hashable, Sendable {
   public var display: String
@@ -5204,12 +4878,10 @@ public struct InboxProjectRepo: Codable, Hashable, Sendable {
   }
 }
 
-/// A question as the window and the agents read it: Workspaces' `Question` exactly (`asked_by_checked_at` omitted, as Workspaces omits it outside its two comment lists), plus the Inbox's `message_id`.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxQuestion: Codable, Hashable, Sendable {
   public var key: String
-  public var position: Double
-  /// `"action"` for an action item; read it with `readInboxQuestionKind` (fail-closed).
+  public var position: Int64
   public var kind: InboxQuestionKind
   public var prompt: String
   public var context: String?
@@ -5222,38 +4894,28 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
   public var orphaned: Bool
   public var state: InboxQuestionState
   public var answer: QuestionAnswer?
-  public var revision: Double
-  public var sentRevision: Double
+  public var revision: Int64
+  public var sentRevision: Int64
   public var pickedBy: InboxPicker?
   public var pickedAt: String?
   public var sentReplyId: String?
   public var messageId: MessageID
-  /// What superseded it (`state: "superseded"`), or null.
   public var supersededBy: InboxSupersededBy?
-  /// When the person's Mark read closed it unanswered (`state: "closed"`, answer a skip), or null. Absent from an older Inbox.
   public var setAsideAt: String?
-  /// On an action item (`kind: "action"`): where, run and watching. Absent on a question and from an older Inbox.
   public var action: InboxActionFacts?
-  /// On an action item: what came of it, or null while open. Absent on a question and from an older Inbox.
   public var actionResult: InboxActionResult?
-  /// A question inside an attached Markdown file (`InboxQuestionRecord.attachment`). Absent: a question of the body, or an older Inbox.
   public var attachment: InboxQuestionAttachment?
-  /// `Stakes:` — what the choice affects.
   public var stakes: String?
-  /// `Shows:` — the one picture (`image`) or file (`link`) the decision is about, its src as written.
   public var shows: InboxQuestionShows?
-  /// `Why:` — why the recommendation.
   public var why: String?
-  /// `Reversible: no — <why>`: the answer cannot be taken back. Absent means reversible.
   public var reversible: InboxQuestionReversible?
-  /// `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written.
   public var prototype: InboxQuestionPrototype?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["key", "position", "kind", "prompt", "context", "choices", "recommendation", "suggested_text", "stopped", "holds_up", "asked_by_agent_id", "orphaned", "state", "answer", "revision", "sent_revision", "picked_by", "picked_at", "sent_reply_id", "message_id", "superseded_by", "set_aside_at", "action", "action_result", "attachment", "stakes", "shows", "why", "reversible", "prototype"]
 
-  public init(key: String, position: Double, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Double, sentRevision: Double, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(key: String, position: Int64, kind: InboxQuestionKind, prompt: String, context: String? = nil, choices: [InboxQuestionChoice], recommendation: String? = nil, suggestedText: String? = nil, stopped: String? = nil, holdsUp: [String], askedByAgentId: String? = nil, orphaned: Bool, state: InboxQuestionState, answer: QuestionAnswer? = nil, revision: Int64, sentRevision: Int64, pickedBy: InboxPicker? = nil, pickedAt: String? = nil, sentReplyId: String? = nil, messageId: MessageID, supersededBy: InboxSupersededBy? = nil, setAsideAt: String? = nil, action: InboxActionFacts? = nil, actionResult: InboxActionResult? = nil, attachment: InboxQuestionAttachment? = nil, stakes: String? = nil, shows: InboxQuestionShows? = nil, why: String? = nil, reversible: InboxQuestionReversible? = nil, prototype: InboxQuestionPrototype? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.key = key
     self.position = position
     self.kind = kind
@@ -5290,7 +4952,7 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.key = try c.decode(String.self, forKey: WireKey("key"))
-    self.position = try c.decode(Double.self, forKey: WireKey("position"))
+    self.position = try c.decode(Int64.self, forKey: WireKey("position"))
     self.kind = try c.decode(InboxQuestionKind.self, forKey: WireKey("kind"))
     self.prompt = try c.decode(String.self, forKey: WireKey("prompt"))
     self.context = try c.decodeIfPresent(String.self, forKey: WireKey("context"))
@@ -5303,8 +4965,8 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
     self.orphaned = try c.decode(Bool.self, forKey: WireKey("orphaned"))
     self.state = try c.decode(InboxQuestionState.self, forKey: WireKey("state"))
     self.answer = try c.decodeIfPresent(QuestionAnswer.self, forKey: WireKey("answer"))
-    self.revision = try c.decode(Double.self, forKey: WireKey("revision"))
-    self.sentRevision = try c.decode(Double.self, forKey: WireKey("sent_revision"))
+    self.revision = try c.decode(Int64.self, forKey: WireKey("revision"))
+    self.sentRevision = try c.decode(Int64.self, forKey: WireKey("sent_revision"))
     self.pickedBy = try c.decodeIfPresent(InboxPicker.self, forKey: WireKey("picked_by"))
     self.pickedAt = try c.decodeIfPresent(String.self, forKey: WireKey("picked_at"))
     self.sentReplyId = try c.decodeIfPresent(String.self, forKey: WireKey("sent_reply_id"))
@@ -5358,14 +5020,10 @@ public struct InboxQuestion: Codable, Hashable, Sendable {
   }
 }
 
-/// Where a question inside an attached Markdown file sits (issue #2828): the file the message attaches, and the question's key as that file's own cards compute it (`findQuestionBlocks` over the sent text). The record's `key` is unique among the message's questions (a body question keeps its key; a file's question takes the next free `-N` when a body question or an earlier file has it), and is the one a pick, a supersede and a reply name. The record's `position` is its place among that file's questions (Q1 is the file's first card), and `parsed.line` its prompt's line in the file.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxQuestionAttachment: Codable, Hashable, Sendable {
-  /// The attachment's `att_` id on the same message.
   public var id: String
-  /// The file's name, as the message's attachment record names it.
   public var name: String
-  /// The question's key inside the file (what its card computes).
   public var key: String
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -5396,16 +5054,13 @@ public struct InboxQuestionAttachment: Codable, Hashable, Sendable {
   }
 }
 
-/// One choice as the wire serves it (Workspaces' `QuestionChoice`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxQuestionChoice: Codable, Hashable, Sendable {
   public var label: String
   public var description: String?
   public var recommended: Bool
   public var settled: Bool
-  /// A picture choice (`- [ ] Label — ![alt](path)`): the image, its src as the body writes it (the message image route and the captured `inline_images` take that same src). Present only on a picture choice; absent from records written before picture choices.
   public var image: InboxQuestionChoiceImage?
-  /// Option lines (approval "inbox-question-tradeoffs"), each indented under a `- [ ]` choice and read at send: `Pros:` and `Cons:` items (split on `;`), and `Prototype:`, the page that shows this option as written (an attached HTML file's path, or an `http://` address of an app running on this computer, checked at send and kept in the message's `live_sites`). Each is absent when the choice names none, and on older records.
   public var pros: [String]?
   public var cons: [String]?
   public var prototype: InboxQuestionChoicePrototype?
@@ -5453,7 +5108,6 @@ public struct InboxQuestionChoice: Codable, Hashable, Sendable {
   }
 }
 
-/// A picture choice (`- [ ] Label — ![alt](path)`): the image, its src as the body writes it (the message image route and the captured `inline_images` take that same src). Present only on a picture choice; absent from records written before picture choices.
 public struct InboxQuestionChoiceImage: Codable, Hashable, Sendable {
   public var alt: String
   public var src: String
@@ -5512,7 +5166,6 @@ public struct InboxQuestionChoicePrototype: Codable, Hashable, Sendable {
   }
 }
 
-/// A question's kind as the Inbox stores it: Plannotator's question kinds, plus `"action"` for an action item (approval "inbox-next-actions").
 /// From `packages/core/inbox-types.ts`.
 public enum InboxQuestionKind: Codable, Hashable, Sendable, RawRepresentable {
   case action
@@ -5548,7 +5201,6 @@ public enum InboxQuestionKind: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// `Prototype:` at the block's own indent: one page every option shows (approval "inbox-question-tradeoffs"), as written.
 public struct InboxQuestionPrototype: Codable, Hashable, Sendable {
   public var target: String
   public var label: String?
@@ -5578,7 +5230,6 @@ public struct InboxQuestionPrototype: Codable, Hashable, Sendable {
   }
 }
 
-/// `Reversible: no — <why>`: the answer cannot be taken back. Absent means reversible.
 public struct InboxQuestionReversible: Codable, Hashable, Sendable {
   public var value: Bool
   public var why: String?
@@ -5608,7 +5259,6 @@ public struct InboxQuestionReversible: Codable, Hashable, Sendable {
   }
 }
 
-/// `Shows:` — the one picture (`image`) or file (`link`) the decision is about, its src as written.
 public struct InboxQuestionShows: Codable, Hashable, Sendable {
   public var kind: InboxQuestionShowsKind
   public var label: String
@@ -5670,7 +5320,6 @@ public enum InboxQuestionShowsKind: Codable, Hashable, Sendable, RawRepresentabl
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Derived, never stored. `superseded`: the agent replaced or withdrew the question (`superseded_by`); it wins over `closed`, so a resolved thread's card still says what replaced it. `closed`: the thread is archived, or the person's Mark read closed the question (`set_aside_at`).
 /// From `packages/core/inbox-types.ts`.
 public enum InboxQuestionState: Codable, Hashable, Sendable, RawRepresentable {
   case closed
@@ -5709,18 +5358,14 @@ public enum InboxQuestionState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Workspaces' `NotificationQuestionSummary`: a row's questions, summed.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxQuestionSummary: Codable, Hashable, Sendable {
-  /// Open questions and action items together: an action item counts like a question for every list rule.
   public var openValue: Double
   public var picked: Double
   public var stopped: Bool
   public var holdsUp: [String]
   public var prompt: String?
-  /// How many of `open` are action items (`kind: "action"`): the row reads "1 action item". Absent from an older Inbox.
   public var actions: Double?
-  /// Action items the person marked Done or Can't do it that wait in their reply draft, the agent still stopped on them (approval "inbox-action-items-in-reply", Q2): the row keeps its section by their Stopped / Holds up (`stopped` and `holds_up` count them). Absent: none.
   public var staged: Double?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -5763,11 +5408,9 @@ public struct InboxQuestionSummary: Codable, Hashable, Sendable {
   }
 }
 
-/// The person's reaction tray (approval "inbox-reaction-tray"): an emoji and the name they gave it (optional). An ack's `reaction`, and each of the saved emoji (config.json `inboxReactions`, through GET and POST /api/inbox/settings `reactions`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxReaction: Codable, Hashable, Sendable {
   public var emoji: String
-  /// The person's name for it ("Ship it"); absent when they gave none.
   public var label: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -5795,7 +5438,6 @@ public struct InboxReaction: Codable, Hashable, Sendable {
   }
 }
 
-/// `card`: a Board card (approval "inbox-board"); `steps`: one agent session's steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board initiative (approval "board-initiatives"); `thread_pull`: one PR on one thread (approval "inbox-pr-binding"); `scheduled`: a routine (inbox-scheduled-types.ts). A reader that does not know a kind skips its lines.
 /// From `packages/core/inbox-types.ts`.
 public enum InboxRecordKind: Codable, Hashable, Sendable, RawRepresentable {
   case annotation
@@ -5846,12 +5488,9 @@ public enum InboxRecordKind: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The quote a person's reply carries (approval "inbox-reply-quote"): a message of the thread and, when the person selected some, its words.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxReplyQuote: Codable, Hashable, Sendable {
-  /// The quoted message's id.
   public var of: String
-  /// The words selected in it, as shown on screen. Absent: the message as a whole.
   public var words: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -5879,18 +5518,12 @@ public struct InboxReplyQuote: Codable, Hashable, Sendable {
   }
 }
 
-/// What was on screen when the person sent a reply from full screen's floating box. Context for the agent, not a choice: it never touches the words, and only the agent's read gets it (`inboxViewingLine`), never the thread.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxReplyViewing: Codable, Hashable, Sendable {
-  /// The open file's name.
   public var name: String
-  /// The message that carries the file.
   public var messageId: MessageID
-  /// That message's time, in the person's own time zone.
   public var time: String?
-  /// A page the attached HTML page links to, when that page is the one on screen.
   public var page: String?
-  /// They had the version sent open, and the file has changed since.
   public var asSent: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -5927,19 +5560,17 @@ public struct InboxReplyViewing: Codable, Hashable, Sendable {
   }
 }
 
-/// The live sessions a reload brings up to date (for Claude Code, also after a plugin update: `update_first`), per runtime: the sidebar's "Reload Claude Code N" ("Reload agents N" when more than one runtime has some). Additive beside `restart_claude_code`.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxRestartAgents: Codable, Hashable, Sendable {
-  public var total: Double
+  public var total: Int64
   public var runtimes: InboxRestartAgentsRuntimes
-  /// Of the Claude Code ones, those whose plugin on disk is itself behind this Inbox (`update_plugin`): the plugin update comes before `/reload-plugins`. Additive; absent when none.
   public var updateFirst: Double?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["total", "runtimes", "update_first"]
 
-  public init(total: Double, runtimes: InboxRestartAgentsRuntimes, updateFirst: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(total: Int64, runtimes: InboxRestartAgentsRuntimes, updateFirst: Double? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.total = total
     self.runtimes = runtimes
     self.updateFirst = updateFirst
@@ -5948,7 +5579,7 @@ public struct InboxRestartAgents: Codable, Hashable, Sendable {
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
-    self.total = try c.decode(Double.self, forKey: WireKey("total"))
+    self.total = try c.decode(Int64.self, forKey: WireKey("total"))
     self.runtimes = try c.decode(InboxRestartAgentsRuntimes.self, forKey: WireKey("runtimes"))
     self.updateFirst = try c.decodeIfPresent(Double.self, forKey: WireKey("update_first"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
@@ -6168,20 +5799,14 @@ public struct InboxReviewResolved: Codable, Hashable, Sendable {
   }
 }
 
-/// Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them.
 /// From `packages/core/inbox-reviews.ts`.
 public struct InboxReviewSource: Codable, Hashable, Sendable {
-  /// The snapshot's kind: local changes, a PR, a workspace, a commit.
   public var kind: InboxReviewSourceKind
-  /// `owner/repo` or a folder name, as the producer knew it.
   public var repo: String?
   public var branch: String?
-  /// The branch or ref the diff runs from ("origin/main").
   public var base: String?
-  /// The diff's label ("origin/main...HEAD", "PR #12").
   public var gitRef: String?
   public var headSha: String?
-  /// The PR the guide is of, when it says.
   public var pr: InboxReviewSourcePr?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -6224,7 +5849,6 @@ public struct InboxReviewSource: Codable, Hashable, Sendable {
   }
 }
 
-/// The snapshot's kind: local changes, a PR, a workspace, a commit.
 public enum InboxReviewSourceKind: Codable, Hashable, Sendable, RawRepresentable {
   case commit
   case local
@@ -6259,7 +5883,6 @@ public enum InboxReviewSourceKind: Codable, Hashable, Sendable, RawRepresentable
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The PR the guide is of, when it says.
 public struct InboxReviewSourcePr: Codable, Hashable, Sendable {
   public var url: String
   public var number: Double?
@@ -6321,7 +5944,6 @@ public enum InboxReviewSourcePrPlatform: Codable, Hashable, Sendable, RawReprese
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The person's verdict on a review.
 /// From `packages/core/inbox-review.ts`.
 public enum InboxReviewVerdict: Codable, Hashable, Sendable, RawRepresentable {
   case approved
@@ -6351,13 +5973,10 @@ public enum InboxReviewVerdict: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// What a person's verdict reply records (on the reply: `review_verdict`).
 /// From `packages/core/inbox-review.ts`.
 public struct InboxReviewVerdictRecord: Codable, Hashable, Sendable {
-  /// The review's message id.
   public var of: String
   public var verdict: InboxReviewVerdict
-  /// How many of the person's comments on the review rode the reply.
   public var comments: Double
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -6388,7 +6007,6 @@ public struct InboxReviewVerdictRecord: Codable, Hashable, Sendable {
   }
 }
 
-/// A Rex pane's status as a mark: OSC 7501's state, and for `blocked` its kind.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxRexMark: Codable, Hashable, Sendable {
   public var state: InboxRexMarkState
@@ -6487,39 +6105,24 @@ public enum InboxRexMarkState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The delivery of the person's latest sent item in a thread, on its list row (`InboxListRow.delivery`): a reply, a message the person addressed to a session (a thread they started, a New message, a reply sent to another session), or a 👍 Looks good the Inbox sent through. Computed by the server from the store and the live sessions with `inboxDeliveryState`.
 /// From `packages/core/inbox-delivery.ts`.
 public struct InboxRowDelivery: Codable, Hashable, Sendable {
   public var kind: InboxRowDeliveryKind
   public var state: InboxDeliveryState
   public var reason: InboxDeliveryReason
-  /// Send now is offered in the thread (the row never offers it).
   public var sendNow: Bool
-  /// The person's message (a reply or message), or the agent message the 👍 is on.
   public var messageId: MessageID
-  /// Settled by a read of another agent than the one it was for: that agent's host.
   public var readBy: String?
-  /// Delivered at (`delivered`), else null.
   public var at: String?
-  /// Whom it goes to: the host of the session (null for an agent without one).
   public var host: String?
-  /// An MCP agent's own name, when the thread names it by that.
   public var name: String?
-  /// It went to another session of the asker's own host ("Claude Code (another session)").
   public var anotherSession: Bool?
-  /// `reason: "ended"`: the agent of the session that asked and has ended (`inboxAskingMessage`), which the line names ("Saved for <it>. The session that asked has ended…"). Absent otherwise.
   public var asking: InboxRowDeliveryAsking?
-  /// `reason: "working"` (approval "inbox-busy-agent-reply"): it waits on a busy session since then (the first time the server saw that session busy while it waited), the row's "Undelivered N min". Absent otherwise and from an older Inbox. Additive.
   public var waitingSince: String?
-  /// With `waiting_since`: its connection can put it into the running turn (the badge is blue; grey otherwise).
   public var steerable: Bool?
-  /// With `waiting_since`: when it goes into the running turn by itself; null when it will not.
   public var autoSendAt: String?
-  /// It went (or is going) into the running turn by itself, after this many whole minutes of waiting.
   public var autoAfterMin: Double?
-  /// Delivered after an automatic mark, but when the turn ended (the session's own Ask question held it).
   public var turnEnded: Bool?
-  /// It waits on T3 (`waitsOnT3`): why, as the thread's line words it (`inboxT3WaitLine`). Absent otherwise. Additive.
   public var t3Wait: InboxRowDeliveryT3Wait?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -6592,7 +6195,6 @@ public struct InboxRowDelivery: Codable, Hashable, Sendable {
   }
 }
 
-/// `reason: "ended"`: the agent of the session that asked and has ended (`inboxAskingMessage`), which the line names ("Saved for <it>. The session that asked has ended…"). Absent otherwise.
 public struct InboxRowDeliveryAsking: Codable, Hashable, Sendable {
   public var host: String?
   public var name: String?
@@ -6653,7 +6255,6 @@ public enum InboxRowDeliveryKind: Codable, Hashable, Sendable, RawRepresentable 
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// It waits on T3 (`waitsOnT3`): why, as the thread's line words it (`inboxT3WaitLine`). Absent otherwise. Additive.
 public enum InboxRowDeliveryT3Wait: Codable, Hashable, Sendable, RawRepresentable {
   case access
   case closed
@@ -6688,11 +6289,9 @@ public enum InboxRowDeliveryT3Wait: Codable, Hashable, Sendable, RawRepresentabl
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Why a row is in Priority (`InboxListRow.priority`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxRowPriority: Codable, Hashable, Sendable {
   public var person: Bool
-  /// When the person added it.
   public var at: String
   public var ask: JSONValue?
   /// Fields this app does not know: kept, and written back when encoded.
@@ -6724,10 +6323,8 @@ public struct InboxRowPriority: Codable, Hashable, Sendable {
   }
 }
 
-/// A thread's snooze, on its list row: when it comes back, and when it was snoozed.
 /// From `packages/core/inbox-snooze.ts`.
 public struct InboxRowSnooze: Codable, Hashable, Sendable {
-  /// ISO, UTC.
   public var until: String
   public var at: String
   /// Fields this app does not know: kept, and written back when encoded.
@@ -6756,18 +6353,12 @@ public struct InboxRowSnooze: Codable, Hashable, Sendable {
   }
 }
 
-/// What a list row says is not sent yet (`InboxListRow.unsent`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxRowUnsent: Codable, Hashable, Sendable {
-  /// When the reply box's words were last saved, or null when the thread holds no reply draft.
   public var replyAt: String?
-  /// Picks saved and not sent.
   public var picks: Double
-  /// Comments (on attached files, the guided review, the messages) waiting for a Send.
   public var comments: Double
-  /// Action items marked Done waiting in the reply draft ("Draft · 1 done"; approval "inbox-action-items-in-reply"). Absent: none.
   public var done: Double?
-  /// Action items marked Can't do it waiting in the reply draft ("Draft · 1 can't do"). Absent: none.
   public var cant: Double?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -6804,24 +6395,20 @@ public struct InboxRowUnsent: Codable, Hashable, Sendable {
   }
 }
 
-/// One question behind a row's badge (`InboxListRow.waits`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxRowWait: Codable, Hashable, Sendable {
   public var messageId: MessageID
   public var key: String
-  /// Its place among its message's blocks of its kind: Q1 is 0 (A1 for an action item, `key` starts `a-`).
-  public var position: Double
+  public var position: Int64
   public var prompt: String
-  /// Its `Stopped:` line, or null.
   public var stopped: String?
-  /// Its `Holds up:` entries.
   public var holdsUp: [String]
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["message_id", "key", "position", "prompt", "stopped", "holds_up"]
 
-  public init(messageId: MessageID, key: String, position: Double, prompt: String, stopped: String? = nil, holdsUp: [String], unknownFields: [String: JSONValue] = [:]) {
+  public init(messageId: MessageID, key: String, position: Int64, prompt: String, stopped: String? = nil, holdsUp: [String], unknownFields: [String: JSONValue] = [:]) {
     self.messageId = messageId
     self.key = key
     self.position = position
@@ -6835,7 +6422,7 @@ public struct InboxRowWait: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.messageId = try c.decode(MessageID.self, forKey: WireKey("message_id"))
     self.key = try c.decode(String.self, forKey: WireKey("key"))
-    self.position = try c.decode(Double.self, forKey: WireKey("position"))
+    self.position = try c.decode(Int64.self, forKey: WireKey("position"))
     self.prompt = try c.decode(String.self, forKey: WireKey("prompt"))
     self.stopped = try c.decodeIfPresent(String.self, forKey: WireKey("stopped"))
     self.holdsUp = try c.decode([String].self, forKey: WireKey("holds_up"))
@@ -6854,40 +6441,25 @@ public struct InboxRowWait: Codable, Hashable, Sendable {
   }
 }
 
-/// What a launched thread's run line shows (the thread route's `run`).
 /// From `packages/core/inbox-types.ts`.
 public struct InboxRun: Codable, Hashable, Sendable {
   public var state: InboxRunState
   public var launchId: String
   public var agent: InboxLaunchAgent
-  /// The project's name (the line's "in <project>").
   public var project: String
   public var folder: String
-  /// Since when: the start (starting), the turn (working), the prompt (waiting_answer, waiting_terminal), the stop.
   public var since: String?
-  /// `starting` after a reply's respawn ("Starting … again").
   public var again: Bool
-  /// `stopped`: the person pressed Stop (the line names the time).
   public var stoppedByPerson: Bool
-  /// `failed`: the cause in words; `stopped`: the host's note, when it has one (else null); `missing`: null.
   public var cause: String?
-  /// `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there.
   public var untrusted: Bool
-  /// `failed` because the session's last turn ended in an error (its note is in the thread): Try again sends the message again.
   public var turnError: Bool?
-  /// With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it).
   public var homeFolder: Bool?
-  /// With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this.
   public var trustCoversHome: Bool?
-  /// With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted.
   public var trust: InboxRunTrust?
-  /// `claude attach <ref>` from the folder, for Copy; null before the session exists.
   public var attachCommand: String?
-  /// `failed`, in a folder the Send made (Create a folder): that folder as the person knows it (`~/…`); the line says it was made and stays (E8).
   public var madeFolder: String?
-  /// A launch that clones first (E1-E11): the repo, the percent once git says one (after a few seconds), why it failed, and what it brings.
   public var clone: InboxRunClone?
-  /// `held`: a reply waits to start it again, as its old process may still run (`may_run`: the Inbox just started and has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
   public var rex: InboxRunRex?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -6963,7 +6535,6 @@ public struct InboxRun: Codable, Hashable, Sendable {
   }
 }
 
-/// A launch that clones first (E1-E11): the repo, the percent once git says one (after a few seconds), why it failed, and what it brings.
 public struct InboxRunClone: Codable, Hashable, Sendable {
   public var url: String
   public var host: String
@@ -7059,7 +6630,6 @@ public enum InboxRunCloneError: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// `held`: a reply waits to start it again, as its old process may still run (`may_run`: the Inbox just started and has not heard from it yet) or still does (`still_runs`: a process runs that session, in its tab or wherever it was resumed). `stops`: the Inbox knows its own pane, so Stop closes it (or, run on in a pane the Inbox did not open, ends just its process).
 public struct InboxRunRex: Codable, Hashable, Sendable {
   public var line: String?
   public var unavailable: Bool?
@@ -7167,7 +6737,6 @@ public enum InboxRunRexWaiting: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting).
 /// From `packages/core/inbox-types.ts`.
 public enum InboxRunState: Codable, Hashable, Sendable, RawRepresentable {
   case cloneCancelled
@@ -7221,7 +6790,6 @@ public enum InboxRunState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted.
 public struct InboxRunTrust: Codable, Hashable, Sendable {
   public var warning: String?
   /// Fields this app does not know: kept, and written back when encoded.
@@ -7247,15 +6815,12 @@ public struct InboxRunTrust: Codable, Hashable, Sendable {
   }
 }
 
-/// On a change message an agent's `routine` call posts in the thread it called from ("Made the scheduled thread X…", "Changed…"): the editor link. The body names what changed, old and new.
 /// From `packages/core/inbox-scheduled-types.ts`.
 public struct InboxScheduledChange: Codable, Hashable, Sendable {
   public var scheduledId: String
   public var name: String
   public var op: InboxScheduledChangeOp
-  /// The fields that changed, for an update.
   public var fields: [InboxScheduledChangeFieldsItem]?
-  /// A folder or agent change turned it off until the person turns it on again.
   public var turnedOff: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -7381,25 +6946,16 @@ public enum InboxScheduledChangeOp: Codable, Hashable, Sendable, RawRepresentabl
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// On a message: the run divider ("Run 4"), which carries the prompt to the run's session as its first turn, or a skip line (`skipped`, no `run`), which goes to nobody. Both are written by the Inbox, authored as the person (the prompt is theirs) and drawn as a line, never as "You".
 /// From `packages/core/inbox-scheduled-types.ts`.
 public struct InboxScheduledRun: Codable, Hashable, Sendable {
   public var scheduledId: String
-  /// The routine's name when this was written (the Inbox row's sender).
   public var name: String
-  /// 1, 2, 3…: absent on a skip line.
   public var run: Double?
-  /// The due time it ran for; for Run now, the time it was pressed.
   public var dueAt: String
-  /// Who started it: the clock, or Run now from the window or an agent.
   public var by: InboxScheduledRunBy
-  /// Started more than 2 minutes after `due_at`.
   public var late: Bool?
-  /// Earlier due times folded into this late run (counted up to 1,000).
   public var missedBefore: Double?
-  /// On a skip line: the due times skipped (counted up to 1,000), and why.
   public var skipped: InboxScheduledRunSkipped?
-  /// A run that didn't start (the agent missing, the folder gone): why, in the launch's own words.
   public var failed: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -7448,7 +7004,6 @@ public struct InboxScheduledRun: Codable, Hashable, Sendable {
   }
 }
 
-/// Who started it: the clock, or Run now from the window or an agent.
 public enum InboxScheduledRunBy: Codable, Hashable, Sendable, RawRepresentable {
   case agent
   case person
@@ -7480,9 +7035,8 @@ public enum InboxScheduledRunBy: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// On a skip line: the due times skipped (counted up to 1,000), and why.
 public struct InboxScheduledRunSkipped: Codable, Hashable, Sendable {
-  public var count: Double
+  public var count: Int64
   public var from: String
   public var to: String
   public var reason: InboxScheduledSkipReason
@@ -7491,7 +7045,7 @@ public struct InboxScheduledRunSkipped: Codable, Hashable, Sendable {
 
   static let knownKeys: Set<String> = ["count", "from", "to", "reason"]
 
-  public init(count: Double, from: String, to: String, reason: InboxScheduledSkipReason, unknownFields: [String: JSONValue] = [:]) {
+  public init(count: Int64, from: String, to: String, reason: InboxScheduledSkipReason, unknownFields: [String: JSONValue] = [:]) {
     self.count = count
     self.from = from
     self.to = to
@@ -7501,7 +7055,7 @@ public struct InboxScheduledRunSkipped: Codable, Hashable, Sendable {
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
-    self.count = try c.decode(Double.self, forKey: WireKey("count"))
+    self.count = try c.decode(Int64.self, forKey: WireKey("count"))
     self.from = try c.decode(String.self, forKey: WireKey("from"))
     self.to = try c.decode(String.self, forKey: WireKey("to"))
     self.reason = try c.decode(InboxScheduledSkipReason.self, forKey: WireKey("reason"))
@@ -7556,7 +7110,6 @@ public enum InboxScheduledSkipReason: Codable, Hashable, Sendable, RawRepresenta
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// The list's sections, in the approved order (Workspaces' inbox model).
 /// From `packages/core/inbox-types.ts`.
 public enum InboxSectionId: Codable, Hashable, Sendable, RawRepresentable {
   case holding
@@ -7598,7 +7151,6 @@ public enum InboxSectionId: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// Who a person's last message went to, for the Sent row (`InboxListRow.sent.recipients`): the owner first, then the tagged sessions in the order typed.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxSentRecipient: Codable, Hashable, Sendable {
   public var host: String?
@@ -7606,7 +7158,6 @@ public struct InboxSentRecipient: Codable, Hashable, Sendable {
   public var name: String?
   public var owner: Bool
   public var wakes: Bool
-  /// It reached the session; null while it waits.
   public var deliveredAt: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -7646,7 +7197,6 @@ public struct InboxSentRecipient: Codable, Hashable, Sendable {
   }
 }
 
-/// What superseded a question (`InboxQuestionRecord.superseded_by`): the agent's later message, and the question in it that replaces this one, or null when that message asks nothing in its place ("No longer applies").
 /// From `packages/core/inbox-types.ts`.
 public struct InboxSupersededBy: Codable, Hashable, Sendable {
   public var messageId: MessageID
@@ -7677,31 +7227,19 @@ public struct InboxSupersededBy: Codable, Hashable, Sendable {
   }
 }
 
-/// One agent session a person's reply tags (`InboxMessage.tags`). The last line of the message wins, as for every record: a delivery, a Send now and a read are new snapshots of the whole message.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxTag: Codable, Hashable, Sendable {
-  /// The connection's host (`claude-code`, `pi`); null for an MCP agent that never named one.
   public var host: String?
   public var session: String
-  /// The name an MCP agent gave itself, for the person's view only; null otherwise.
   public var name: String?
-  /// The readable label the person picked, as it reads in their text after `@` ("Pi", "Claude Code (another session)"): the sent message paints that token and names the session's line with it. Absent from an older window.
   public var label: String?
-  /// Its connection wakes it (the Claude Code mod, Pi, OpenCode 2, with the tag capability): the reply arrives as a turn. False: an agent that reads the Inbox only (MCP, OpenCode 1); it sees the tag the next time it reads the thread.
   public var wakes: Bool
-  /// It reached the session (its connection delivered it).
   public var delivery: InboxDelivery?
-  /// The person pressed Send now for this session (or the Inbox did, after the wait: `deliver_now_by`).
   public var deliverNowAt: String?
-  /// Who asked for `deliver_now_at` (see `InboxMessage.deliver_now_by`).
   public var deliverNowBy: InboxTagDeliverNowBy?
-  /// When it began to wait on that session (see `InboxMessage.wait_started_at`).
   public var waitStartedAt: String?
-  /// A session that is not woken read the thread with read_thread after the tag (its own read only).
   public var readAt: String?
-  /// "Add instead" (approval "inbox-tag-handoff", A2): the person added this session to the thread. It works alongside the owner, and every later reply of the person's in the thread goes to it too (the store tags it again). Absent: an Ask, today's tag (this one message only).
   public var joined: Bool?
-  /// The former owner's notice on a hand-off reply (`InboxMessage.handoff`): this session is told the thread moved and to stop work on it. Absent on every other tag.
   public var handedAway: Bool?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -7759,13 +7297,10 @@ public struct InboxTag: Codable, Hashable, Sendable {
   }
 }
 
-/// The switch and the person's own colours, as the list model carries them (`tag_colours`).
 /// From `packages/core/inbox-tag-colours.ts`.
 public struct InboxTagColours: Codable, Hashable, Sendable {
   public var show: Bool
-  /// When the switch was last set (null: never; it is on).
   public var showAt: String?
-  /// The person's own colours, newest first, at most INBOX_TAG_RECENT_MAX.
   public var recent: [InboxTagColoursRecentItem]
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -7853,7 +7388,6 @@ public enum InboxTagDeliverNowBy: Codable, Hashable, Sendable, RawRepresentable 
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// A tag's colour and who set it: `auto` when it was given at creation, `person` once the person picked one or turned Highlight rows off. `colour` is what its rows show; `null` is off (an earlier Inbox's None). Off with a colour kept (the owner: Highlight rows "instantly" on and off, the colour chosen apart): `kept_colour`, so turning it on brings that colour back. An older Inbox ignores the field and reads off as None.
 /// From `packages/core/inbox-tag-colours.ts`.
 public struct InboxTagLook: Codable, Hashable, Sendable {
   public var colour: String?
@@ -7923,19 +7457,13 @@ public enum InboxTagLookBy: Codable, Hashable, Sendable, RawRepresentable {
 /// From `packages/core/inbox-types.ts`.
 public struct InboxThread: Codable, Hashable, Sendable {
   public var threadId: ThreadID
-  /// `repo` rides only on `GET /api/inbox/threads/:id` and is never stored: the project's `origin`, or null for a folder without one or until the Inbox has resolved it. Absent from an older Inbox. `repo_known` (additive, same read): the Inbox has resolved it, so a null `repo` means the folder has no `origin`, not "not known yet". Absent until then, and from an older Inbox (the window then reads the thread again on each of its records, as before).
   public var project: InboxThreadProject
   public var subject: String?
-  /// The thread's name, or null for an unnamed thread.
   public var threadName: String?
   public var resolvedAt: String?
-  /// The window's read only (`GET /api/inbox/threads/:id`): the seq of the archive line of a resolved thread, null for an open one. A message whose `seq` is after it arrived after the archive and behaves as an open thread's. Absent from an older Inbox and from the MCP tools.
-  public var archiveSeq: Double?
-  /// The window's read only: every pull request the person handed to this thread is a teammate's (Pull requests' Hand to an agent; the Inbox's own pull list said so when the owner was kept). Its reviews take no verdict: the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
+  public var archiveSeq: Int64?
   public var pullTheirs: Bool?
-  /// A New review on local changes started this thread: its first message is the box's words, not the person's own.
   public var reviewStarted: Bool?
-  /// The window's read only, with Code review on: the pull requests the person handed to this thread (their list keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
   public var pullKeys: [String]?
   public var messages: [InboxMessageWire]
   /// Fields this app does not know: kept, and written back when encoded.
@@ -7943,7 +7471,7 @@ public struct InboxThread: Codable, Hashable, Sendable {
 
   static let knownKeys: Set<String> = ["thread_id", "project", "subject", "thread_name", "resolved_at", "archive_seq", "pull_theirs", "review_started", "pull_keys", "messages"]
 
-  public init(threadId: ThreadID, project: InboxThreadProject, subject: String? = nil, threadName: String? = nil, resolvedAt: String? = nil, archiveSeq: Double? = nil, pullTheirs: Bool? = nil, reviewStarted: Bool? = nil, pullKeys: [String]? = nil, messages: [InboxMessageWire], unknownFields: [String: JSONValue] = [:]) {
+  public init(threadId: ThreadID, project: InboxThreadProject, subject: String? = nil, threadName: String? = nil, resolvedAt: String? = nil, archiveSeq: Int64? = nil, pullTheirs: Bool? = nil, reviewStarted: Bool? = nil, pullKeys: [String]? = nil, messages: [InboxMessageWire], unknownFields: [String: JSONValue] = [:]) {
     self.threadId = threadId
     self.project = project
     self.subject = subject
@@ -7964,7 +7492,7 @@ public struct InboxThread: Codable, Hashable, Sendable {
     self.subject = try c.decodeIfPresent(String.self, forKey: WireKey("subject"))
     self.threadName = try c.decodeIfPresent(String.self, forKey: WireKey("thread_name"))
     self.resolvedAt = try c.decodeIfPresent(String.self, forKey: WireKey("resolved_at"))
-    self.archiveSeq = try c.decodeIfPresent(Double.self, forKey: WireKey("archive_seq"))
+    self.archiveSeq = try c.decodeIfPresent(Int64.self, forKey: WireKey("archive_seq"))
     self.pullTheirs = try c.decodeIfPresent(Bool.self, forKey: WireKey("pull_theirs"))
     self.reviewStarted = try c.decodeIfPresent(Bool.self, forKey: WireKey("review_started"))
     self.pullKeys = try c.decodeIfPresent([String].self, forKey: WireKey("pull_keys"))
@@ -7988,20 +7516,14 @@ public struct InboxThread: Codable, Hashable, Sendable {
   }
 }
 
-/// `repo` rides only on `GET /api/inbox/threads/:id` and is never stored: the project's `origin`, or null for a folder without one or until the Inbox has resolved it. Absent from an older Inbox. `repo_known` (additive, same read): the Inbox has resolved it, so a null `repo` means the folder has no `origin`, not "not known yet". Absent until then, and from an older Inbox (the window then reads the thread again on each of its records, as before).
 public struct InboxThreadProject: Codable, Hashable, Sendable {
   public var id: String
-  /// The folder name under `inbox/projects/`: `<name>-<6 hex of the root>`.
   public var key: String
   public var name: String
-  /// Absolute realpath of the repository root (git toplevel) or folder.
   public var root: String
   public var createdAt: String
-  /// The name the person gave the project (Rename… in the project menu), shown as it is in place of its folder's name. Additive: absent until someone renames, and absent again after Reset name. Id, key, `name` (the slug) and root never change with it.
   public var displayName: String?
-  /// The project this one was combined into (approval "project-combine"). Every reader shows this project's threads under the end of that chain; nothing of this project moves, and an older reader ignores the field. A target that is gone, or a loop, counts as not combined, so a project can only reappear.
   public var mergedInto: String?
-  /// The project this one's last undone combine went into: Tidy does not suggest the pair again.
   public var separatedFrom: String?
   public var repo: InboxProjectRepo?
   public var repoKnown: Bool?
@@ -8055,7 +7577,6 @@ public struct InboxThreadProject: Codable, Hashable, Sendable {
   }
 }
 
-/// A coupled PR's state as last read: `unknown` until the reader's first answer (or with no gh or glab).
 /// From `packages/core/inbox-thread-pulls.ts`.
 public enum InboxThreadPullState: Codable, Hashable, Sendable, RawRepresentable {
   case closed
@@ -8094,17 +7615,16 @@ public enum InboxThreadPullState: Codable, Hashable, Sendable, RawRepresentable 
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// A list row's PRs, from the stored state: the row paints them without a read of its own.
 /// From `packages/core/inbox-thread-pulls.ts`.
 public struct InboxThreadPullsSummary: Codable, Hashable, Sendable {
-  public var count: Double
+  public var count: Int64
   public var headline: InboxThreadPullsSummaryHeadline
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["count", "headline"]
 
-  public init(count: Double, headline: InboxThreadPullsSummaryHeadline, unknownFields: [String: JSONValue] = [:]) {
+  public init(count: Int64, headline: InboxThreadPullsSummaryHeadline, unknownFields: [String: JSONValue] = [:]) {
     self.count = count
     self.headline = headline
     self.unknownFields = unknownFields
@@ -8112,7 +7632,7 @@ public struct InboxThreadPullsSummary: Codable, Hashable, Sendable {
 
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
-    self.count = try c.decode(Double.self, forKey: WireKey("count"))
+    self.count = try c.decode(Int64.self, forKey: WireKey("count"))
     self.headline = try c.decode(InboxThreadPullsSummaryHeadline.self, forKey: WireKey("headline"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -8154,12 +7674,9 @@ public struct InboxThreadPullsSummaryHeadline: Codable, Hashable, Sendable {
   }
 }
 
-/// On a Tidy note (`InboxMessage.tidy`): its run, and whether it carries the session's wake.
 /// From `packages/core/inbox-tidy.ts`.
 public struct InboxTidyMark: Codable, Hashable, Sendable {
-  /// The run (`tdy_` + ULID): one press of Tidy, across sessions.
   public var id: String
-  /// The one note of the session that is delivered to it (the wake); the others only show in their threads.
   public var wake: Bool
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -8187,17 +7704,12 @@ public struct InboxTidyMark: Codable, Hashable, Sendable {
   }
 }
 
-/// The Inbox's update control: what the button says and does.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxUpdate: Codable, Hashable, Sendable {
   public var available: Bool
-  /// `available`: a newer release exists, nothing installed yet. `updating`: the install script runs. `ready`: a different binary is on disk (restart to update). `failed`: an install the person started exited non-zero.
   public var state: InboxUpdateState
-  /// The version the button names.
   public var version: String
-  /// The version this Inbox runs.
   public var current: String
-  /// `script`: Update now runs the install script. `copy`: the binary is not the script's; the dialog shows the command.
   public var action: InboxUpdateAction
   public var releaseUrl: String
   public var publishedAt: String?
@@ -8242,7 +7754,6 @@ public struct InboxUpdate: Codable, Hashable, Sendable {
   }
 }
 
-/// `script`: Update now runs the install script. `copy`: the binary is not the script's; the dialog shows the command.
 public enum InboxUpdateAction: Codable, Hashable, Sendable, RawRepresentable {
   case copy
   case script
@@ -8271,7 +7782,6 @@ public enum InboxUpdateAction: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// `available`: a newer release exists, nothing installed yet. `updating`: the install script runs. `ready`: a different binary is on disk (restart to update). `failed`: an install the person started exited non-zero.
 public enum InboxUpdateState: Codable, Hashable, Sendable, RawRepresentable {
   case available
   case failed
@@ -8306,28 +7816,25 @@ public enum InboxUpdateState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// A file the person uploaded from the window for a thread they start, not sent yet (`POST /api/inbox/uploads`). At send it becomes an `InboxAttachment`; a draft names it by `upload_id`.
 /// From `packages/core/inbox-types.ts`.
 public struct InboxUpload: Codable, Hashable, Sendable {
   public var uploadId: UploadID
   public var name: String
-  public var size: Double
+  public var size: Int64
   public var kind: InboxAttachmentKind
   public var sha256: String
   public var createdAt: String
   public var mediaType: String?
   public var width: Double?
   public var height: Double?
-  /// The film or recording's length, when its metadata can be read.
-  public var durationMs: Double?
-  /// The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload.
+  public var durationMs: Int64?
   public var shownSha256: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["upload_id", "name", "size", "kind", "sha256", "created_at", "media_type", "width", "height", "duration_ms", "shown_sha256"]
 
-  public init(uploadId: UploadID, name: String, size: Double, kind: InboxAttachmentKind, sha256: String, createdAt: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Double? = nil, shownSha256: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(uploadId: UploadID, name: String, size: Int64, kind: InboxAttachmentKind, sha256: String, createdAt: String, mediaType: String? = nil, width: Double? = nil, height: Double? = nil, durationMs: Int64? = nil, shownSha256: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.uploadId = uploadId
     self.name = name
     self.size = size
@@ -8346,14 +7853,14 @@ public struct InboxUpload: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.uploadId = try c.decode(UploadID.self, forKey: WireKey("upload_id"))
     self.name = try c.decode(String.self, forKey: WireKey("name"))
-    self.size = try c.decode(Double.self, forKey: WireKey("size"))
+    self.size = try c.decode(Int64.self, forKey: WireKey("size"))
     self.kind = try c.decode(InboxAttachmentKind.self, forKey: WireKey("kind"))
     self.sha256 = try c.decode(String.self, forKey: WireKey("sha256"))
     self.createdAt = try c.decode(String.self, forKey: WireKey("created_at"))
     self.mediaType = try c.decodeIfPresent(String.self, forKey: WireKey("media_type"))
     self.width = try c.decodeIfPresent(Double.self, forKey: WireKey("width"))
     self.height = try c.decodeIfPresent(Double.self, forKey: WireKey("height"))
-    self.durationMs = try c.decodeIfPresent(Double.self, forKey: WireKey("duration_ms"))
+    self.durationMs = try c.decodeIfPresent(Int64.self, forKey: WireKey("duration_ms"))
     self.shownSha256 = try c.decodeIfPresent(String.self, forKey: WireKey("shown_sha256"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
@@ -8377,46 +7884,34 @@ public struct InboxUpload: Codable, Hashable, Sendable {
 
 /// From `packages/core/inbox-wire-models.ts`.
 public struct ListModel: Codable, Hashable, Sendable {
-  /// The merged view (`machines=1`): this Inbox's id and every machine, linked ones with their state. Absent from an Inbox that cannot link; with no machine linked, `machines` holds this Inbox alone.
   public var selfValue: String?
   public var machines: [MachineView]?
   public var serverSession: String
   public var version: String
-  public var cursor: Double
+  public var cursor: Int64
   public var update: InboxUpdate?
-  /// This Inbox started on a newer version than the one before it: "What's new in X" for this run. Absent from an older Inbox.
   public var updated: String?
-  /// Claude Code sessions a /reload-plugins would bring up to date: the sidebar's "Reload Claude Code N". Absent from an older Inbox.
   public var restartClaudeCode: Double?
-  /// Every runtime's sessions a reload brings up to date: the sidebar's "Reload agents N". Absent from an older Inbox.
   public var restartAgents: InboxRestartAgents?
-  /// Checking for updates has failed for hours: the sidebar's quiet "Can't check for updates". Absent from an older Inbox.
   public var updateCheckFailing: UpdateCheckFailing?
   public var notice: String?
   public var projects: [ProjectFolder]
   public var project: String?
   public var sections: [InboxListSection]
-  /// The threads snoozed now, soonest back first (approval "inbox-snooze"): the band under Quiet. They are in no section, so no count reads them. Absent from an older Inbox: the window then offers no snooze.
   public var snoozed: [InboxListRow]?
-  /// The sidebar's pinned threads (approval "inbox-pinned-threads"), in pin order, whatever the project filter (an archived thread stays pinned). Absent from an older Inbox: the window then draws no Pinned section and offers no pin.
   public var pins: [InboxListRow]?
-  /// The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox.
   public var listVersion: String?
-  /// Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from an older Inbox, which then reads every session as before.
   public var sessionLabels: [String: String]?
   public var sessionTitles: [String: String]?
-  /// Each machine's agents (the Agents section; agentsList.ts holds them): this Inbox's group, then each linked machine's on the merged view. Absent from an older Inbox.
   public var agents: [InboxAgentsGroup]?
-  /// The live tags, oldest first (approval "inbox-thread-tags"): the sidebar's Tags and the Add tag list; each row's `tags` names them. Absent from an older Inbox: the window then draws no Tags section and offers no Add tag. Merged: one per name across the linked machines that take tags, `machines` its id on each (InboxMachineTag).
   public var tags: [ListModelTagsItem]?
-  /// "Show tag colors" and the person's own colours. Absent from an Inbox before tag colours.
   public var tagColours: InboxTagColours?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["self", "machines", "serverSession", "version", "cursor", "update", "updated", "restart_claude_code", "restart_agents", "update_check_failing", "notice", "projects", "project", "sections", "snoozed", "pins", "list_version", "session_labels", "session_titles", "agents", "tags", "tag_colours"]
 
-  public init(selfValue: String? = nil, machines: [MachineView]? = nil, serverSession: String, version: String, cursor: Double, update: InboxUpdate? = nil, updated: String? = nil, restartClaudeCode: Double? = nil, restartAgents: InboxRestartAgents? = nil, updateCheckFailing: UpdateCheckFailing? = nil, notice: String? = nil, projects: [ProjectFolder], project: String? = nil, sections: [InboxListSection], snoozed: [InboxListRow]? = nil, pins: [InboxListRow]? = nil, listVersion: String? = nil, sessionLabels: [String: String]? = nil, sessionTitles: [String: String]? = nil, agents: [InboxAgentsGroup]? = nil, tags: [ListModelTagsItem]? = nil, tagColours: InboxTagColours? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(selfValue: String? = nil, machines: [MachineView]? = nil, serverSession: String, version: String, cursor: Int64, update: InboxUpdate? = nil, updated: String? = nil, restartClaudeCode: Double? = nil, restartAgents: InboxRestartAgents? = nil, updateCheckFailing: UpdateCheckFailing? = nil, notice: String? = nil, projects: [ProjectFolder], project: String? = nil, sections: [InboxListSection], snoozed: [InboxListRow]? = nil, pins: [InboxListRow]? = nil, listVersion: String? = nil, sessionLabels: [String: String]? = nil, sessionTitles: [String: String]? = nil, agents: [InboxAgentsGroup]? = nil, tags: [ListModelTagsItem]? = nil, tagColours: InboxTagColours? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.selfValue = selfValue
     self.machines = machines
     self.serverSession = serverSession
@@ -8448,7 +7943,7 @@ public struct ListModel: Codable, Hashable, Sendable {
     self.machines = try c.decodeIfPresent([MachineView].self, forKey: WireKey("machines"))
     self.serverSession = try c.decode(String.self, forKey: WireKey("serverSession"))
     self.version = try c.decode(String.self, forKey: WireKey("version"))
-    self.cursor = try c.decode(Double.self, forKey: WireKey("cursor"))
+    self.cursor = try c.decode(Int64.self, forKey: WireKey("cursor"))
     self.update = try c.decodeIfPresent(InboxUpdate.self, forKey: WireKey("update"))
     self.updated = try c.decodeIfPresent(String.self, forKey: WireKey("updated"))
     self.restartClaudeCode = try c.decodeIfPresent(Double.self, forKey: WireKey("restart_claude_code"))
@@ -8498,15 +7993,11 @@ public struct ListModel: Codable, Hashable, Sendable {
 }
 
 public struct ListModelTagsItem: Codable, Hashable, Sendable {
-  /// `ini_` + ULID.
   public var id: String
-  /// One line, at most INBOX_INITIATIVE_NAME_MAX characters, unique (ignoring case) among the live ones.
   public var name: String
   public var createdAt: String
   public var createdBy: InboxAuthor
-  /// The last rename (or the creation).
   public var updatedAt: String
-  /// Set when it was deleted (the person, or an agent): cards that named it read as none; the record stays for their history and an Undo.
   public var deletedAt: String?
   public var machines: [String: String]?
   public var look: InboxTagLook?
@@ -8554,7 +8045,6 @@ public struct ListModelTagsItem: Codable, Hashable, Sendable {
   }
 }
 
-/// A linked machine's update, as `machineUpdateView` (inbox-machines.ts) reads what it hears from there.
 /// From `packages/core/inbox-wire-models.ts`.
 public struct MachineUpdateView: Codable, Hashable, Sendable {
   public var phase: MachineUpdateViewPhase
@@ -8562,7 +8052,6 @@ public struct MachineUpdateView: Codable, Hashable, Sendable {
   public var from: String?
   public var canUpdate: Bool
   public var selfUpdate: Bool
-  /// The person asked an agent there to update it (an older machine): its thread (null while held) and the agent's name.
   public var asked: MachineUpdateViewAsked?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -8602,7 +8091,6 @@ public struct MachineUpdateView: Codable, Hashable, Sendable {
   }
 }
 
-/// The person asked an agent there to update it (an older machine): its thread (null while held) and the agent's name.
 public struct MachineUpdateViewAsked: Codable, Hashable, Sendable {
   public var thread: String?
   public var agent: String
@@ -8679,41 +8167,31 @@ public enum MachineUpdateViewPhase: Codable, Hashable, Sendable, RawRepresentabl
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// A machine as the merged list and its `machines` frames name it (linked machines, packages/server/inbox-machines.ts `MachineView`): this Inbox (`self`) and each linked one.
 /// From `packages/core/inbox-wire-models.ts`.
 public struct MachineView: Codable, Hashable, Sendable {
   public var id: String
   public var name: String
   public var selfValue: Bool
   public var state: MachineViewState
-  /// When it entered that state.
   public var since: String
   public var reason: String?
   public var version: String?
   public var address: String?
   public var bothWays: Bool
-  /// Writes held for it.
   public var waiting: Double
-  /// The cursor of its list this Inbox holds: it moves when its rows changed. Absent from an older Inbox.
-  public var listCursor: Double?
-  /// Its Inbox keeps snoozes (approval "inbox-snooze"). Absent from an older Inbox, and false for a linked one too old: nothing to snooze with on its rows (`snooze_old`).
+  public var listCursor: Int64?
   public var snoozes: Bool?
-  /// Remote launch: agents can start there (true), launch is off there (false), or its Inbox is too old to say (null; null for this machine, whose own launch block says). Absent from an older Inbox.
   public var launch: Bool?
-  /// Its store takes a Delete on an agent message's words. Not: a Delete it refuses (422) reads "<name> needs an update to delete words · Update". Absent from an older Inbox serving the window; false for a linked one too old.
   public var messageDeletions: Bool?
-  /// Its list was read and keeps no snoozes: an older Inbox, so Snooze says why instead of vanishing.
   public var snoozeOld: Bool?
-  /// The marks it takes for its own threads and agents (approval "inbox-linked-marks"; `machineTakes`). Absent from an older Inbox.
   public var marks: [String]?
-  /// Update on that machine, from its own state. Null: nothing to say (level, ahead, this machine, or no newer release known).
   public var update: MachineUpdateView?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["id", "name", "self", "state", "since", "reason", "version", "address", "both_ways", "waiting", "list_cursor", "snoozes", "launch", "message_deletions", "snooze_old", "marks", "update"]
 
-  public init(id: String, name: String, selfValue: Bool, state: MachineViewState, since: String, reason: String? = nil, version: String? = nil, address: String? = nil, bothWays: Bool, waiting: Double, listCursor: Double? = nil, snoozes: Bool? = nil, launch: Bool? = nil, messageDeletions: Bool? = nil, snoozeOld: Bool? = nil, marks: [String]? = nil, update: MachineUpdateView? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(id: String, name: String, selfValue: Bool, state: MachineViewState, since: String, reason: String? = nil, version: String? = nil, address: String? = nil, bothWays: Bool, waiting: Double, listCursor: Int64? = nil, snoozes: Bool? = nil, launch: Bool? = nil, messageDeletions: Bool? = nil, snoozeOld: Bool? = nil, marks: [String]? = nil, update: MachineUpdateView? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.id = id
     self.name = name
     self.selfValue = selfValue
@@ -8746,7 +8224,7 @@ public struct MachineView: Codable, Hashable, Sendable {
     self.address = try c.decodeIfPresent(String.self, forKey: WireKey("address"))
     self.bothWays = try c.decode(Bool.self, forKey: WireKey("both_ways"))
     self.waiting = try c.decode(Double.self, forKey: WireKey("waiting"))
-    self.listCursor = try c.decodeIfPresent(Double.self, forKey: WireKey("list_cursor"))
+    self.listCursor = try c.decodeIfPresent(Int64.self, forKey: WireKey("list_cursor"))
     self.snoozes = try c.decodeIfPresent(Bool.self, forKey: WireKey("snoozes"))
     self.launch = try c.decodeIfPresent(Bool.self, forKey: WireKey("launch"))
     self.messageDeletions = try c.decodeIfPresent(Bool.self, forKey: WireKey("message_deletions"))
@@ -8816,14 +8294,11 @@ public enum MachineViewState: Codable, Hashable, Sendable, RawRepresentable {
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// A write held for another machine (`GET /api/inbox/outbox`, the `outbox` frame).
 /// From `packages/core/inbox-wire-models.ts`.
 public struct OutboxView: Codable, Hashable, Sendable {
   public var key: String
   public var machine: String
-  /// The door route, as `messages/msg_…/reply`.
   public var route: String
-  /// `cancelled`: taken back before it ever left (Cancel on a held launch); never sent.
   public var state: OutboxViewState
   public var queuedAt: String
   public var settledAt: String?
@@ -8831,11 +8306,8 @@ public struct OutboxView: Codable, Hashable, Sendable {
   public var answer: JSONValue
   public var notice: OutboxViewNotice?
   public var dismissed: Bool
-  /// A held reply's or message's words. Absent from an older Inbox.
   public var words: String?
-  /// The thread it is about, as this window named it when it pressed Send. Absent from an older Inbox.
   public var thread: String?
-  /// The machine's name, kept once its link went (an Unlink here or on that machine).
   public var machineName: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -8956,7 +8428,6 @@ public enum OutboxViewNoticeKind: Codable, Hashable, Sendable, RawRepresentable 
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// `cancelled`: taken back before it ever left (Cancel on a held launch); never sent.
 public enum OutboxViewState: Codable, Hashable, Sendable, RawRepresentable {
   case cancelled
   case delivered
@@ -9004,31 +8475,20 @@ public enum OutboxViewState: Codable, Hashable, Sendable, RawRepresentable {
 public struct ProjectFolder: Codable, Hashable, Sendable {
   public var threads: Double
   public var unread: Double
-  /// Threads the window's list holds (not archived). Absent from an older Inbox: the folder is always drawn.
   public var listed: Double?
-  /// Archived threads (resolved, none come back). Absent from an older Inbox.
   public var archived: Double?
-  /// The machine whose project it is (`ibx_…`), in the merged view only.
   public var machine: String?
-  /// The projects combined into this one: a link to one opens this project. Absent when there are none.
   public var combined: [ProjectFolderCombinedItem]?
-  /// When its letter mark's picture was set (Set picture…, ms). Absent when none, and from an older Inbox.
   public var picture: Double?
-  /// Its git origin's host (null: none named, links as github.com); absent with no repo and from an older Inbox.
   public var repoHost: String?
   public var repoForge: ProjectFolderRepoForge?
   public var id: ProjectID
-  /// The folder name under `inbox/projects/`: `<name>-<6 hex of the root>`.
   public var key: String
   public var name: String
-  /// Absolute realpath of the repository root (git toplevel) or folder.
   public var root: String
   public var createdAt: String
-  /// The name the person gave the project (Rename… in the project menu), shown as it is in place of its folder's name. Additive: absent until someone renames, and absent again after Reset name. Id, key, `name` (the slug) and root never change with it.
   public var displayName: String?
-  /// The project this one was combined into (approval "project-combine"). Every reader shows this project's threads under the end of that chain; nothing of this project moves, and an older reader ignores the field. A target that is gone, or a loop, counts as not combined, so a project can only reappear.
   public var mergedInto: String?
-  /// The project this one's last undone combine went into: Tidy does not suggest the pair again.
   public var separatedFrom: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -9159,25 +8619,18 @@ public enum ProjectFolderRepoForge: Codable, Hashable, Sendable, RawRepresentabl
   public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
-/// One answer to one question. Stored as `Annotation.questionAnswer`.
 /// From `packages/core/question-block.ts`.
 public struct QuestionAnswer: Codable, Hashable, Sendable {
   public var v: Double
   public var key: String
   public var kind: QuestionKind
-  /// The prompt, so the export and archive need no re-parse.
   public var prompt: String
-  /// Picked choice LABELS (never ids).
   public var selected: [String]
-  /// "Other…" text on a choice question.
   public var other: String?
-  /// Free-text answer.
   public var text: String?
   public var note: String?
   public var skipped: Bool?
-  /// With `skipped`: the Plannotator Inbox skipped it with a Send, because the person pressed "Skip them" there (not Skip on the card). Printed as "Skipped by the person". Read only with `skipped: true`.
   public var byReply: Bool?
-  /// Document line of the prompt when answered.
   public var sourceLine: Double?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -9232,7 +8685,6 @@ public struct QuestionAnswer: Codable, Hashable, Sendable {
   }
 }
 
-/// How a question is answered.
 /// From `packages/core/question-block.ts`.
 public enum QuestionKind: Codable, Hashable, Sendable, RawRepresentable {
   case multi
@@ -9270,9 +8722,7 @@ public struct ReplyResult: Codable, Hashable, Sendable {
   public var reply: JSONValue
   public var questions: [InboxQuestion]
   public var replayed: Bool
-  /// Asked with `with_thread`: the thread as a read of it answers now (the sent reply in it). Absent from an older Inbox.
   public var threadRead: ThreadModel?
-  /// To another machine: held in this Inbox's outbox until that machine's Inbox answers (the thread shows it waiting).
   public var held: OutboxView?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
@@ -9312,20 +8762,17 @@ public struct ReplyResult: Codable, Hashable, Sendable {
 /// From `packages/core/inbox-wire-models.ts`.
 public struct ThreadModel: Codable, Hashable, Sendable {
   public var serverSession: String
-  public var cursor: Double
+  public var cursor: Int64
   public var thread: InboxThread
-  /// The thread's list row, an archived thread's too (the window's list leaves those out). Absent from an older Inbox.
   public var row: InboxListRow?
-  /// A launched thread's run line (inbox-launch.ts): null while the agent rests. Absent: not a launched thread, or launch is off.
   public var run: InboxRun?
-  /// With `run`: the command that attaches to the launched session in a terminal, also while it rests; null before it exists.
   public var attachCommand: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
   static let knownKeys: Set<String> = ["serverSession", "cursor", "thread", "row", "run", "attach_command"]
 
-  public init(serverSession: String, cursor: Double, thread: InboxThread, row: InboxListRow? = nil, run: InboxRun? = nil, attachCommand: String? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(serverSession: String, cursor: Int64, thread: InboxThread, row: InboxListRow? = nil, run: InboxRun? = nil, attachCommand: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.serverSession = serverSession
     self.cursor = cursor
     self.thread = thread
@@ -9338,7 +8785,7 @@ public struct ThreadModel: Codable, Hashable, Sendable {
   public init(from decoder: Decoder) throws {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.serverSession = try c.decode(String.self, forKey: WireKey("serverSession"))
-    self.cursor = try c.decode(Double.self, forKey: WireKey("cursor"))
+    self.cursor = try c.decode(Int64.self, forKey: WireKey("cursor"))
     self.thread = try c.decode(InboxThread.self, forKey: WireKey("thread"))
     self.row = try c.decodeIfPresent(InboxListRow.self, forKey: WireKey("row"))
     self.run = try c.decodeIfPresent(InboxRun.self, forKey: WireKey("run"))
@@ -9358,7 +8805,6 @@ public struct ThreadModel: Codable, Hashable, Sendable {
   }
 }
 
-/// Checking for updates has failed for hours with no success (packages/shared/update-check.ts releaseCheckFailing).
 /// From `packages/core/inbox-wire-models.ts`.
 public struct UpdateCheckFailing: Codable, Hashable, Sendable {
   public var since: String

@@ -13,7 +13,7 @@ import { emit } from '../scripts/mobile/lib';
 import { generateStreamVectors } from '../scripts/mobile/vectors-stream';
 
 describe('the stream suite', () => {
-  test('is up to date (else: bun scripts/mobile/vectors-stream.ts)', () => {
+  test('is up to date (else: bun scripts/mobile/all.ts)', () => {
     expect(emit(generateStreamVectors(), true)).toEqual([]);
   }, 10_000);
 });

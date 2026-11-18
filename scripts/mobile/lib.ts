@@ -18,6 +18,7 @@ export const OUT = {
   door: 'apps/mobile/contract/door.json',
   schema: 'apps/mobile/contract/schema/wire.schema.json',
   swift: 'apps/mobile/contract/generated/swift/Wire.swift',
+  required: 'apps/mobile/contract/schema/required.json',
   tokens: 'apps/mobile/contract/tokens/tokens.json',
   catalog: 'apps/mobile/contract/generated/swift/Tokens.xcassets/Contents.json',
   words: 'apps/mobile/contract/words/words.json',
@@ -26,7 +27,7 @@ export const OUT = {
   ledger: 'apps/mobile/contract/parity/ledger.json',
 } as const;
 
-/** The contract's number (a whole number; it rises when an app built from an older contract would misread the door). */
+/** The contract's number (a whole number; it rises only for a breaking wire change: one an app built from the older contract would misread). VERSION is the one contract file that holds it. */
 export const VERSION_FILE = 'apps/mobile/contract/VERSION';
 
 export function contractVersion(): number {
@@ -35,12 +36,25 @@ export function contractVersion(): number {
   return Number(text);
 }
 
+/** Write a repository file, by its path from the root (always a path named as a literal by the caller). */
+export function writeRepoText(path: string, text: string): void {
+  writeFileSync(join(ROOT, path), text);
+}
+
+/** Whether a repository file exists, by its path from the root (always a path named as a literal by the caller). */
+export function repoFileExists(path: string): boolean {
+  return existsSync(join(ROOT, path));
+}
+
 /** A repository file's text, by its path from the root (always a path named as a literal by the caller). */
 export function readRepoText(path: string): string {
   return readFileSync(join(ROOT, path), 'utf8');
 }
 
 export type Output = { path: string; text: string };
+
+/** The one command that brings every generated contract file up to date (scripts/mobile/all.ts). */
+export const REGENERATE = 'bun scripts/mobile/all.ts';
 
 /** JSON with two-space indents and a final newline: the same value always gives the same bytes. */
 export function jsonText(value: unknown): string {
@@ -73,7 +87,7 @@ export async function cli(name: string, generate: () => Output[] | Promise<Outpu
   const outputs = await generate();
   const stale = emit(outputs, check);
   if (check && stale.length) {
-    console.error(`${name}: stale, run \`bun scripts/mobile/${name}.ts\` and commit:\n${stale.map((p) => `  ${p}`).join('\n')}`);
+    console.error(`${name}: stale, run \`${REGENERATE}\` and commit:\n${stale.map((p) => `  ${p}`).join('\n')}`);
     process.exit(1);
   }
   console.log(`${name}: ${check ? 'up to date' : 'wrote'} ${outputs.map((o) => o.path).join(', ')}`);
