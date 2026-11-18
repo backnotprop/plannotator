@@ -253,7 +253,7 @@ import { TabIconChoice } from './components/TabIconChoice';
 import { useTabIconChoice } from './tabIconChoice';
 import { ThemeChooser } from './components/ThemeChooser';
 import { openThemeSettings, useThemeChooser } from './themeChooser';
-import { boardInitiativeOf, cardsInInitiative, liveInitiatives, newCardProject } from './board/model';
+import { boardInitiativeOf, cardsInInitiative, liveInitiatives, newCardProject, rememberedBoardFilter } from './board/model';
 import { tagsAcross } from './tagsAcross';
 import { tagById, tagHref, tagListSummary, tagThreadCounts, thisInboxTags, ThreadTagsContext } from './threadTags';
 import { TagIcon } from './components/InitiativePeek';
@@ -3494,7 +3494,7 @@ function Inbox() {
       goBoard: {
         when: (event) => appKeyAllowed(event) && boardOnRef.current,
         handle: () => {
-          if (routeRef.current.page !== 'board') leave({ page: 'board', project: null, thread: null });
+          if (routeRef.current.page !== 'board') leave({ page: 'board', ...rememberedBoardFilter(), thread: null });
           focusSoon(['.ib-bpage h1']);
         },
       },
@@ -5392,7 +5392,7 @@ function Inbox() {
         // The other half of the one filter: a pick is a history entry too, and Back undoes it.
         onInitiative={(initiative) => {
           const open = route.card ? cards?.cards.find((c) => c.id === route.card) : undefined;
-          const shows = open && cardsInInitiative([open], initiative, liveInitiatives(cards?.initiatives)).length > 0;
+          const shows = open && cardsInInitiative([open], initiative, liveInitiatives(cards?.initiatives), projects).length > 0;
           go({ page: 'board', project: route.project, initiative, thread: null, board: route.board ?? 'lanes', card: shows ? open.id : null });
         }}
         onMove={moveCard}
@@ -5877,7 +5877,7 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             onArtifacts={() => leave({ page: 'artifacts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
-            onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            onBoard={boardEnabled ? () => leave({ page: 'board', ...rememberedBoardFilter(), thread: null }) : undefined}
             onPlans={plansOn ? () => leave({ page: 'plans', project: null, thread: null }) : undefined}
             onScheduled={scheduledOn ? () => leave({ page: 'scheduled', project: null, thread: null }) : undefined}
             // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).

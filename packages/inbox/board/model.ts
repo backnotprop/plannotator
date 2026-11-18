@@ -37,6 +37,12 @@ import {
 
 import type { ForgeRefCardData } from '@plannotator/core/forge-ref-card';
 import { projectNames } from '../search/model';
+import { cardInTag, projectTagMap } from '../projectTags';
+import type { ProjectFolder } from '../api';
+
+export { rememberedBoardFilter } from './boardFilterMemory';
+/** The projects as the list gives them, for their tags (projectTags.ts). */
+type TaggedProjects = readonly Pick<ProjectFolder, 'id' | 'tags'>[];
 
 export type BoardView = 'lanes' | 'done' | 'cancelled';
 
@@ -67,18 +73,22 @@ export function cardsInProject<T extends Pick<InboxCardWire, 'project_id'>>(card
  * (`&initiative=none`), or null for every card. It narrows what the project
  * filter left, so the two combine. Given the live initiatives, `none` also
  * holds a card whose initiative is gone, as the counts do (`initiativeCounts`).
+ * A tag also holds the cards of the projects that carry it (`projects`' tags, projectTags.ts); `none` stays the
+ * cards with no tag of their own.
  */
-export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative'>>(
+export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative' | 'project_id'>>(
   cards: readonly T[],
   initiative: string | null,
   live?: readonly Pick<InboxInitiative, 'id'>[],
+  projects?: TaggedProjects,
 ): readonly T[] {
   if (initiative === null) return cards;
   if (initiative === INBOX_NO_INITIATIVE) {
     const ids = live ? new Set(live.map((i) => i.id)) : null;
     return cards.filter((card) => !card.initiative || (ids !== null && !ids.has(card.initiative)));
   }
-  return cards.filter((card) => card.initiative === initiative);
+  const projectTags = projectTagMap(projects);
+  return cards.filter((card) => cardInTag(card, initiative, projectTags));
 }
 
 /** The initiatives the person can pick, in the order they were made (a deleted one is gone from the filter and the menus). */
@@ -90,13 +100,15 @@ export function liveInitiatives(initiatives: readonly InboxInitiative[] | undefi
  * How many cards each initiative holds, and how many are in none (`none`),
  * among `cards` (the Board passes the cards on its lanes in the picked
  * project). A card whose initiative was deleted counts as in none (the
- * server already reads it so).
+ * server already reads it so). A card of a tagged project counts in each of its project's tags too, once.
  */
-export function initiativeCounts(cards: readonly Pick<InboxCardWire, 'initiative'>[], live: readonly Pick<InboxInitiative, 'id'>[]): Map<string, number> {
+export function initiativeCounts(cards: readonly Pick<InboxCardWire, 'initiative' | 'project_id'>[], live: readonly Pick<InboxInitiative, 'id'>[], projects?: TaggedProjects): Map<string, number> {
+  const projectTags = projectTagMap(projects);
   const counts = new Map<string, number>([[INBOX_NO_INITIATIVE, 0], ...live.map((i) => [i.id, 0] as [string, number])]);
   for (const card of cards) {
     const key = card.initiative && counts.has(card.initiative) ? card.initiative : INBOX_NO_INITIATIVE;
     counts.set(key, (counts.get(key) ?? 0) + 1);
+    for (const tag of projectTags.get(card.project_id) ?? []) if (tag !== key && counts.has(tag)) counts.set(tag, counts.get(tag)! + 1);
   }
   return counts;
 }
