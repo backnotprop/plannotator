@@ -1,6 +1,6 @@
 import { inboxBuiltinSkillsBlock } from "@plannotator/core/inbox-builtin-skills-block";
-import { pullHandoffMessage, pullHandoffThreadName } from "@plannotator/core/inbox-pull-handoff";
-import { inboxPullStacks, type InboxLaunchAgent, type InboxProject, type InboxPullRiskAutoMake } from "@plannotator/core/inbox-types";
+import { openLayers, pullHandoffMessage, pullHandoffThreadName } from "@plannotator/core/inbox-pull-handoff";
+import { type InboxLaunchAgent, type InboxPull, type InboxProject, type InboxPullRiskAutoMake } from "@plannotator/core/inbox-types";
 import { INBOX_MESSAGE_SKILL_AUDIENCE } from "@plannotator/core/skill-reference-block";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
@@ -12,15 +12,14 @@ export interface PullRiskAutoStartDeps {
   launch: Pick<InboxLaunch, "enabled" | "prepare" | "abandon" | "begin" | "composeBlock">;
   resolveProject: (path: string) => Promise<InboxProject>;
   projectOf: (job: PullRiskAutoJob) => Promise<string | null>;
-  own: (keys: string[], threadId: string, made: InboxPullRiskAutoMake) => void;
+  own: (layers: InboxPull[], threadId: string, made: InboxPullRiskAutoMake) => void;
 }
 
 const SKILLS: Record<InboxPullRiskAutoMake, string[]> = { guide: ["review-curate"], show_me: ["show-me"], both: ["review-curate", "show-me"] };
 
-export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "pull" | "made">): { name: string; body: string } {
-  const stack = inboxPullStacks([job.pull])[0]!;
-  const words = pullHandoffMessage(stack, { kind: job.made });
-  return { name: pullHandoffThreadName(stack, null), body: `${words}\n\n${inboxBuiltinSkillsBlock(SKILLS[job.made], INBOX_MESSAGE_SKILL_AUDIENCE)}` };
+export function pullRiskAutoBody(job: Pick<PullRiskAutoJob, "stack" | "made">): { name: string; body: string } {
+  const words = pullHandoffMessage(job.stack, { kind: job.made });
+  return { name: pullHandoffThreadName(job.stack, null), body: `${words}\n\n${inboxBuiltinSkillsBlock(SKILLS[job.made], INBOX_MESSAGE_SKILL_AUDIENCE)}` };
 }
 
 export function pullRiskAutoStart(deps: PullRiskAutoStartDeps): (job: PullRiskAutoJob) => Promise<{ thread_id: string }> {
@@ -42,7 +41,7 @@ export function pullRiskAutoStart(deps: PullRiskAutoStartDeps): (job: PullRiskAu
     if (result.replayed) deps.launch.abandon(prepared.launch, prepared.project);
     else deps.launch.begin(result.message);
     try {
-      deps.own([job.key], result.message.thread_id, job.made);
+      deps.own(openLayers(job.stack), result.message.thread_id, job.made);
     } catch {}
     return { thread_id: result.message.thread_id };
   };

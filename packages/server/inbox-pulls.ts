@@ -69,6 +69,7 @@ import {
   type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
+  type InboxPullStack,
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
@@ -725,6 +726,7 @@ export interface InboxPulls {
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  stack(key: string): InboxPullStack | null;
   /**
    * This Inbox merged the PR (the Pull requests page's Merge): every list from now on shows it merged, even a cached
    * answer read before the merge or a forge read that still says open (GitHub's search lags), for
@@ -1593,6 +1595,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     },
     find(key) {
       return findKnown(key) ?? null;
+    },
+    stack(key) {
+      const pull = findKnown(key);
+      return (pull && stackOf(pull)) ?? null;
     },
     markMerged(key) {
       const at = now();

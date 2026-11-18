@@ -5155,20 +5155,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // The hand-off stands without the coupling.
     }
   };
-  const pullRepoProjects = async (pull: InboxPull) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
+  const pullRepoProjects = async (pull: Pick<InboxPull, "host" | "repo">) => (await pullProjects()).projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? [];
   pullRiskAuto = createPullRiskAuto({
     dataDir,
     settings: () => (codeReviewOn() ? inboxPullRiskAutoOf((loadConfig().inboxPullRisk as { auto?: unknown } | undefined)?.auto) : null),
     pullOf: (key) => pulls.find(key),
+    stackOf: (key) => pulls.stack(key),
     levelOf: (pull) => pullRisk.levelOf(pull),
     hasThread: async (pull) => !!linkInboxPulls([pull], pullLinkStore, new Map([[`${pull.host}/${pull.repo}`.toLowerCase(), await pullRepoProjects(pull)]]), pullOwnersNow())[pull.key],
     start: pullRiskAutoStart({
       store,
       launch,
       resolveProject,
-      projectOf: async ({ pull }) => (await pullRepoProjects(pull))[0] ?? null,
-      own: (keys, threadId, made) => {
-        const theirs = keys.every((key) => key !== "" && pulls.find(key)?.mine !== true);
+      projectOf: async ({ stack }) => (await pullRepoProjects(stack))[0] ?? null,
+      own: (layers, threadId, made) => {
+        const keys = layers.map((layer) => layer.key);
+        const theirs = layers.every((layer) => !layer.mine);
         pullOwners.set(keys, threadId, { ask: made === "show_me" ? "show_me" : "guide", theirs });
         if (made === "both") pullOwners.set(keys, threadId, { ask: "show_me", theirs });
         couplePulls(keys, threadId);
