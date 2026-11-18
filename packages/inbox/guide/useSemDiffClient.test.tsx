@@ -6,6 +6,7 @@ import type { SemDiffClient } from '@plannotator/review-editor/semDiff/semDiffCl
 import { loadSemDiffAdvert, resetSemDiffAdvertForTests } from '../semDiffAdvert';
 import { useSemDiffClient } from './useSemDiffClient';
 
+const hasDom = typeof document !== 'undefined';
 const realFetch = globalThis.fetch;
 const roots: Root[] = [];
 
@@ -40,7 +41,7 @@ afterEach(async () => {
   configStore.seed('semanticDiffEnabled', true);
 });
 
-test('a reader keeps the client it made when a different advert arrives later', async () => {
+test.skipIf(!hasDom)('a reader keeps the client it made when a different advert arrives later', async () => {
   resetSemDiffAdvertForTests();
   configStore.seed('semanticDiffEnabled', true);
   configStore.seed('diffSemantic', true);
@@ -55,7 +56,7 @@ test('a reader keeps the client it made when a different advert arrives later', 
   expect(seen.every((client) => client === made)).toBe(true);
 });
 
-test('a reader that started on a failed advert gets semantic diffs from a later one unless it already drew asking for them', async () => {
+test.skipIf(!hasDom)('a reader that started on a failed advert gets semantic diffs from a later one unless it already drew asking for them', async () => {
   resetSemDiffAdvertForTests(40);
   configStore.seed('semanticDiffEnabled', true);
   globalThis.fetch = (async () => {
