@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_PERMISSION_ALLOW_ONCE } from "@plannotator/core/inbox-permission";
@@ -8,7 +8,10 @@ import { installFakeOpenCodeLaunch, type FakeOpenCodeLaunchState } from "../../t
 import { stubBridge } from "../../tests/helpers/stub-bridge";
 import { createInboxLaunch } from "./inbox-launch";
 import { OPENCODE_LAUNCH_ENV } from "@plannotator/shared/inbox/opencode-launch";
-import { installedOpenCodePlugin, openCodeSpawnEnv } from "./inbox-launch-opencode";
+import { createOpenCodeLaunchHost, installedOpenCodePlugin, openCodeSpawnEnv } from "./inbox-launch-opencode";
+import { createAgentEnvironmentFor } from "./inbox-agents";
+import type { LaunchHostContext } from "./inbox-launch-host";
+import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 
 const cleanup: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
@@ -82,7 +85,7 @@ function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; wit
             open: async (request: { command: string; tab: string }) => (rexTabs.push({ command: request.command, tab: request.tab }), { opened: true as const, session: "session:x", window: "window:y", block: "block:z", line: "Rex · project / OpenCode" }),
             appAttachedNow: async () => true,
             paneGone: async () => null,
-            closePane: async () => true,
+            closePane: async () => "closed" as const,
           },
         }
       : {}),
@@ -98,6 +101,43 @@ function setup(options: { state?: FakeOpenCodeLaunchState; plugin?: boolean; wit
   const stopRoute = (launchId: string) =>
     launch.route(new Request(`http://127.0.0.1/api/inbox/launch/${launchId}/stop`, { method: "POST", headers: { "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }, body: JSON.stringify({ server_session: "srv" }) }), `/api/inbox/launch/${launchId}/stop`, "local");
   return { home, store, project, folder, dataDir, fake, launch, send, stopRoute, rexTabs };
+}
+
+/** The OpenCode host alone, its CLI on PATH as `name` (OpenCode 2 may be installed as `opencode`). */
+function bareHost(name: "opencode" | "opencode2", state: FakeOpenCodeLaunchState = {}) {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-opencode-host-")));
+  cleanup.push(() => rmSync(root, { recursive: true, force: true }));
+  const home = join(root, "home");
+  const dataDir = join(root, "data");
+  const folder = join(root, "project");
+  const bin = join(root, "bin");
+  for (const dir of [home, dataDir, folder, bin, join(home, ".config", "opencode")]) mkdirSync(dir, { recursive: true });
+  // OpenCode 2's config (`plugins`): an `opencode` on PATH is that generation.
+  writeFileSync(join(home, ".config", "opencode", "opencode.json"), JSON.stringify({ plugins: ["@plannotator/opencode"] }));
+  const fake = installFakeOpenCodeLaunch(join(root, "fake"), state);
+  symlinkSync(join(fake.bin, "opencode2"), join(bin, name));
+  cleanup.push(() => {
+    for (const start of fake.starts()) if (fake.alive(start.pid)) process.kill(start.pid, "SIGKILL"); // inbox-guard: own child (the fake opencode2)
+  });
+  const env = { HOME: home, PATH: `${bin}:/usr/bin:/bin` };
+  const ctx = {
+    dataDir,
+    homeDir: home,
+    platform: process.platform,
+    selfCommand: ["plannotator"],
+    ownEnv: () => env,
+    environment: async () => createAgentEnvironmentFor({ platform: process.platform, homeDir: home, env }),
+    shell: () => null,
+    loginEnv: async () => env,
+    launchDir: (id: string) => join(dataDir, "launch", id),
+    startLog: () => {},
+    displayFolder: (p: string) => p,
+    bridge: { runStateOf: () => null },
+    log: () => {},
+  } as unknown as LaunchHostContext;
+  const host = createOpenCodeLaunchHost(ctx);
+  cleanup.push(() => host.close());
+  return { host, folder, fake };
 }
 
 describe("OpenCode through the launch engine, against the fake opencode2", () => {
@@ -199,6 +239,22 @@ describe("OpenCode through the launch engine, against the fake opencode2", () =>
     // The person's words reach it as its first turn through the plugin, never on the command line.
     expect(command).not.toContain("readme");
     expect(t.fake.turns()).toEqual([]);
+  });
+
+  test("Rex, right after an Inbox restart (no check has run yet): the tab runs OpenCode 2 by the name it has here, `opencode` too", async () => {
+    const { host, folder } = bareHost("opencode");
+    const again = await host.rexCommand!({ id: "l1", agent: "opencode", folder, session: "ses_one", session_ref: "ses_one" } as unknown as InboxLaunchRecord, { name: "Tidy", login: {}, resume: true });
+    expect(again.ok && again.command).toContain(" opencode --standalone --session 'ses_one'");
+  });
+
+  test("the Inbox closing while a Rex start's short-lived server makes its session: that server ends too", async () => {
+    // Making the session takes a while: the Inbox closes meanwhile.
+    const { host, folder, fake } = bareHost("opencode2", { sessionMs: 5_000 });
+    void host.rexCommand!({ id: "l2", agent: "opencode", folder } as unknown as InboxLaunchRecord, { name: "Tidy", login: {}, resume: false });
+    const [server] = await until("the making server", () => (fake.starts().length ? fake.starts() : null));
+    await until("its session asked for", () => fake.http("POST", /^\/api\/session$/).length > 0);
+    host.close();
+    await until("that server ended", () => !fake.alive(server!.pid));
   });
 
   test("a permission OpenCode asks is the card: Allow once and Deny, and Allow once answers once", async () => {

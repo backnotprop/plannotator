@@ -273,6 +273,36 @@ describe("the Agents list and Rex", () => {
     expect(await (await w.show("ses-by-hand")).json()).toEqual({ shown: true });
   });
 
+  test("Rex chosen: an agent the Inbox started in the background never wears a Rex place, even when its connection reports the person's pane", async () => {
+    const w = await world({ remote: true });
+    // Started in the background, under a supervisor started from the person's own Rex pane: it reports that pane.
+    const background = await w.launched();
+    const turned = await fetch(`${w.base}/api/inbox/launch/settings`, { method: "POST", headers: { Origin: w.base, "Content-Type": "application/json", "Sec-Fetch-Site": "same-origin" }, body: JSON.stringify({ serverSession: w.server.serverSession, start_in: "rex" }) });
+    expect(turned.status).toBe(200);
+    const theirs = w.fake.addSession("their work", "claude");
+    w.fake.setStatus(theirs.block, [{ state: "blocked", kind: "permission", app: "claude-code" }]);
+    await w.poll(background, theirs);
+    // The person's own agent in that pane gets it (so Rex was read), the background one never does.
+    await w.agent("ses-by-hand", theirs);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === "ses-by-hand")?.rex_mark !== undefined);
+    const listed = (await w.agentsOf()).find((a) => a.session === background);
+    expect(listed?.place).toBeUndefined();
+    expect(listed?.rex_mark).toBeUndefined();
+    expect(listed?.state).not.toBe("waiting");
+    expect(await (await w.show(background)).json()).not.toEqual({ shown: true });
+  });
+
+  test("Rex chosen: an agent started in Rex whose connection reports no place (Pi, OpenCode) still gets its tab's place, mark and Show", async () => {
+    const w = await world({ remote: true, startIn: "rex" });
+    const session = await w.launched();
+    const made = w.fake.sessions.find((s) => s.label === "my-app")!;
+    w.fake.setStatus(made.windows[0]!.blocks[0]!, [{ state: "blocked", kind: "question", app: "pi" }]);
+    await w.poll(session);
+    await until(async () => (await w.agentsOf()).find((a) => a.session === session)?.rex_mark !== undefined);
+    expect((await w.agentsOf()).find((a) => a.session === session)).toMatchObject({ place: { kind: "rex", line: "Rex · my-app / Fake Agent", show: true }, rex_mark: { state: "blocked", kind: "question" } });
+    expect(await (await w.show(session)).json()).toEqual({ shown: true });
+  });
+
   test("Rex chosen: a Send from the tailnet or a paired phone starts in Rex too, as one from this window does", async () => {
     const w = await world({ remote: false, startIn: "rex", phones: true });
     const far = w.tailnet();

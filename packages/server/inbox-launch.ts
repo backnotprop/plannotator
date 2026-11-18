@@ -91,9 +91,9 @@ import { accessSync, appendFileSync, constants as fsConstants, existsSync, lstat
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 import type { InboxRex, InboxRexStatus } from "./inbox-rex";
-import { inboxRexResumeHeld, type InboxRexHeld } from "./inbox-rex-resume";
+import { inboxListingSessionPids, inboxProcessListing, inboxRexResumeHeld, type InboxRexHeld } from "./inbox-rex-resume";
 import { inboxId, inboxLaunchInRex, inboxLaunchRexUnstoppable, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchFrom, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxLaunchedSession, inboxRunOf, INBOX_REX_MAY_RUN, INBOX_REX_NOT_HERE_AGAIN, INBOX_REX_REFUSED_AGAIN, INBOX_REX_STILL_RUNS, INBOX_RUN_IN_REX_ELSEWHERE, INBOX_RUN_IN_REX_NO_ANSWER, INBOX_RUN_IN_REX_NO_TAB, INBOX_RUN_IN_REX_OPEN, INBOX_RUN_IN_REX_STOP, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -263,12 +263,14 @@ export function createInboxLaunch(options: {
    * its pane, and a reply finds out at once when that pane is gone. Absent: no Rex.
    */
   rex?: Pick<InboxRex, "open" | "appAttachedNow" | "paneGone" | "closePane">;
-  /** Where a live session says it runs (its polls' place hint), for Stop of a launch in Rex whose pane it reports. */
+  /** Where a live session says it runs (its polls' place hint): Stop of a launch in Rex finds out whether it is still in its own pane. */
   placeOf?: (session: string) => InboxPlace | null;
   /** What a session's confirmed Rex pane says it is doing (inbox-rex.ts `statuses`), for a launch that runs in Rex. */
   rexStatus?: (session: string) => InboxRexStatus | null;
   /** Every process's command line (`ps`), for whether a Rex tab still runs a session (inbox-rex-resume.ts); tests stand in. */
   processListing?: () => Promise<string | null>;
+  /** Ends one process (SIGTERM): Stop of an agent in a Rex pane the Inbox did not open; tests stand in. */
+  endProcess?: (pid: number) => boolean;
   now?: () => number;
   log?: (line: string) => void;
 }) {
@@ -704,7 +706,7 @@ export function createInboxLaunch(options: {
       connector: host.connector,
       // In Rex its tab is the way in: no command opens it elsewhere.
       attachCommand: inRex ? null : host.attach(launch),
-      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}), ...(inRex && rexPaneOf(launch) ? { stops: true as const } : {}) } } : {}),
+      ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}), ...(inRex && ownPaneOf(launch) ? { stops: true as const } : {}) } } : {}),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
       ...(launch.clone?.state === "cloning"
@@ -1159,16 +1161,73 @@ ${result.text}`);
     const host = hostOf(launch);
     // Rex says its pane is gone: no need to wait for a connection that may come back since this Inbox started (its
     // process went with the pane; the process list still has the last word).
-    const pane = rexPaneOf(launch);
+    const pane = ownPaneOf(launch);
     const gone = pane && options.rex ? await options.rex.paneGone(pane).catch(() => null) : null;
     return inboxRexResumeHeld({ session: launch.session ?? launch.session_ref, now: now(), bootAt: gone === true ? Number.NEGATIVE_INFINITY : bootAt, listing: options.processListing, runs: host?.runsSession ? (listing, session) => host.runsSession!(session, listing) : undefined });
   };
-  /** The Rex pane a launch runs in: the one its session's polls report, else the one Rex made for it. */
-  const rexPaneOf = (launch: InboxLaunchRecord): InboxPlace | null => {
-    const session = launch.session ?? null;
+  /**
+   * The Rex pane the Inbox had Rex make for a launch (Rex's own answer to the start, renewed by each start again in
+   * Rex). A pane keeps its id when the person moves it to another tab, so this is the agent's own pane wherever it is;
+   * any other pane (a shell the person resumed it in) is never the Inbox's to close.
+   */
+  const ownPaneOf = (launch: InboxLaunchRecord): InboxPlace | null =>
+    launch.rex?.session && launch.rex.block ? { kind: "rex", session: launch.rex.session, block: launch.rex.block } : null;
+  /** Each session the Inbox started in Rex, with its own pane (`ownPaneOf`); null with launch off. */
+  const rexPanesNow = (): Map<string, InboxPlace | null> | null => {
+    if (!enabled()) return null;
+    const out = new Map<string, InboxPlace | null>();
+    for (const root of roots()) {
+      const launch = root.launch!;
+      const session = inboxLaunchedSession(root);
+      if (!launch.deleted_at && session && inboxLaunchInRex(launch)) out.set(session, ownPaneOf(launch));
+    }
+    return out;
+  };
+  /** The processes that run a launch's session now (its argv names it, or its host's own check: Pi's claims); null when `ps` could not be read. */
+  const sessionPidsOf = async (launch: InboxLaunchRecord, host: LaunchHost): Promise<number[] | null> => {
+    const session = launch.session ?? launch.session_ref;
+    if (!session) return [];
+    const listing = await (options.processListing ?? inboxProcessListing)();
+    if (listing === null) return null;
+    const pids = new Set([...inboxListingSessionPids(listing, session), ...(host.sessionPids?.(session, listing) ?? [])]);
+    pids.delete(process.pid);
+    return [...pids];
+  };
+  const endProcess = options.endProcess ?? ((pid: number) => {
+    try {
+      process.kill(pid, "SIGTERM");
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  /**
+   * Stop of a launch in Rex. In its own pane (the one the Inbox had Rex make, `ownPaneOf`): Rex closes that pane, which
+   * ends the program in it. In a pane the Inbox did not open (the person resumed it in a shell of theirs), or when its
+   * own pane is gone: only the agent's own process ends (SIGTERM), so their shell, its jobs and scrollback stay. Throws
+   * the words when nothing was stopped; `kept` says the held reply stays (Rex may have closed it after all).
+   */
+  const stopInRex = async (launch: InboxLaunchRecord, host: LaunchHost, own: InboxPlace): Promise<LaunchHostResult> => {
+    const session = launch.session ?? launch.session_ref;
     const reported = session ? (options.placeOf?.(session) ?? null) : null;
-    if (reported) return reported;
-    return launch.rex?.session && launch.rex.block ? { kind: "rex", session: launch.rex.session, block: launch.rex.block } : null;
+    const elsewhere = !!reported && (reported.session !== own.session || reported.block !== own.block);
+    if (!elsewhere) {
+      const closed = await options.rex!.closePane(own);
+      if (closed === "closed") return { exitCode: 0, text: `rex: closed ${own.block}` };
+      if (closed === "refused") throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_STOP);
+      if (closed === "no_answer") {
+        // No answer in time: Rex may have closed it anyway. Its pane gone counts as closed; otherwise the reply
+        // written before the Stop stays held (`kept`), so it never reopens an agent the person stopped.
+        if ((await options.rex!.paneGone(own).catch(() => null)) === true) return { exitCode: 0, text: `rex: closed ${own.block}` };
+        throw Object.assign(new InboxError("launch_in_rex", INBOX_RUN_IN_REX_NO_ANSWER), { kept: true });
+      }
+    }
+    // Its own pane is gone (it may run on elsewhere), or it runs in a pane the Inbox did not open.
+    const pids = await sessionPidsOf(launch, host);
+    if (pids === null || (elsewhere && pids.length === 0)) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_ELSEWHERE);
+    const ended = pids.filter((pid) => endProcess(pid));
+    if (pids.length > 0 && ended.length === 0) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_ELSEWHERE);
+    return { exitCode: 0, text: ended.length ? `rex: ended ${ended.join(", ")}` : `rex: ${own.block} already gone` };
   };
   /** Try again on a Rex launch: refused while its old process may still run (the words say why). */
   const refuseIfRexHeld = async (launch: InboxLaunchRecord) => {
@@ -1294,9 +1353,11 @@ ${result.text}`);
       return runOfRoot(store.message(root.id)!);
     }
     if (!launch.session_ref) throw new InboxError("launch_not_found", "That session never started.");
-    // In Rex: Stop closes its pane (Rex ends the program in it). With no pane known, or Rex not doing it, the words say to stop it there.
-    const pane = inboxLaunchInRex(launch) ? rexPaneOf(launch) : null;
-    if (inboxLaunchInRex(launch) && !pane) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_STOP);
+    // In Rex: Stop closes its own pane (Rex ends the program in it), or ends just its process elsewhere (`stopInRex`).
+    // With no pane of its own known (an older record), the words say to stop it there.
+    const inRex = inboxLaunchInRex(launch);
+    const pane = inRex ? ownPaneOf(launch) : null;
+    if (inRex && !pane) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_NO_TAB);
     const memo = memoOf(launch);
     // What waits now was written before the Stop: it stays for the person's next reply.
     memo.heldReply = root.to ? (store.pendingReplies(root.to.session, { tags: true }).at(-1)?.id ?? null) : null;
@@ -1304,13 +1365,10 @@ ${result.text}`);
     let result: LaunchHostResult;
     try {
       await settleDeliveries(launch.id);
-      if (pane) {
-        const closed = await options.rex!.closePane(pane);
-        if (!closed) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_STOP);
-        result = { exitCode: 0, text: `rex: closed ${pane.block}` };
-      } else result = await host.stop(launch.session_ref);
+      if (pane) result = await stopInRex(launch, host, pane);
+      else result = await host.stop(launch.session_ref);
     } catch (error) {
-      if (pane) memo.heldReply = null;
+      if (pane && !(error as { kept?: boolean }).kept) memo.heldReply = null;
       throw error;
     } finally {
       stopping.delete(launch.id);
@@ -2370,12 +2428,29 @@ ${result.text}`);
      * until they end. Null with launch off. No run is read (the list's runs ask Rex's word through this Inbox, which asks this).
      */
     rexSessions(): ReadonlySet<string> | null {
-      if (!enabled()) return null;
+      const panes = rexPanesNow();
+      return panes ? new Set(panes.keys()) : null;
+    },
+
+    /**
+     * The same sessions, each with the pane the Inbox had Rex make for it (null when not known): the place of an agent
+     * whose own connection reports none (Pi, OpenCode). Null with launch off.
+     */
+    rexPanes(): ReadonlyMap<string, InboxPlace | null> | null {
+      return rexPanesNow();
+    },
+
+    /**
+     * The sessions the Inbox started in the background (never in Rex): none of them is in a Rex pane, whatever its
+     * connection reports (a Claude Code supervisor started from the person's Rex pane hands its sessions that pane).
+     */
+    backgroundSessions(): ReadonlySet<string> {
       const out = new Set<string>();
+      if (!enabled()) return out;
       for (const root of roots()) {
         const launch = root.launch!;
         const session = inboxLaunchedSession(root);
-        if (!launch.deleted_at && session && inboxLaunchInRex(launch)) out.add(session);
+        if (!launch.deleted_at && session && launch.session_ref && !inboxLaunchInRex(launch)) out.add(session);
       }
       return out;
     },

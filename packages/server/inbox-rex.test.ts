@@ -15,7 +15,7 @@ import { createInboxRex, inboxRexLine, inboxRexSocketOk, inboxRexSocketPath, inb
 import type { InboxPlace } from "@plannotator/shared/inbox/connection";
 
 /** Every method the Inbox may call: view (ids and labels), status records (`block.method` `program_status` only), a new session or tab with its command, focus, Stop's close of a pane. */
-const ALLOWED = new Set(["target.resolve", "client.list", "client.perform", "session.attach", "session.create", "session.new_window", "session.focus_block", "block.method", "block.close"]);
+const ALLOWED = new Set(["target.resolve", "client.list", "client.perform", "session.attach", "session.attach_all", "session.create", "session.new_window", "session.focus_block", "block.method", "block.close"]);
 
 const fakes: FakeRex[] = [];
 const rexes: InboxRex[] = [];
@@ -66,7 +66,7 @@ describe("where an agent lives", () => {
     expect(changes.length).toBe(2);
   });
 
-  test("the last read stands until the next replaces it: no gap after a quiet spell, nothing once Rex stops answering", async () => {
+  test("the last read stands until the next replaces it: no gap after a quiet spell; a slow Rex keeps it until stale", async () => {
     let clock = 1_000_000;
     const { fake, rex } = setup({}, { readTimeoutMs: 150, now: () => clock });
     const ids = fake.addSession("p", "t");
@@ -78,11 +78,30 @@ describe("where an agent lives", () => {
     expect(rex.places(hints).get("s")).toBe("Rex · p / t");
     expect(rex.appAttached()).toBe(true);
     await rex.settled();
-    // Rex stops answering: that read clears it.
+    // Rex is slow once: what it said last stands (one slow answer never blanks every place and mark)…
     clock += 3_000;
     fake.setDelay(Infinity);
+    expect((await placesRead(rex, hints)).get("s")).toBe("Rex · p / t");
+    expect(rex.appAttached()).toBe(true);
+    await rex.settled();
+    // …until it is stale, when it goes.
+    clock += INBOX_REX_MARK_STALE_MS + 1_000;
     expect((await placesRead(rex, hints)).size).toBe(0);
     expect(rex.appAttached()).toBe(false);
+  });
+
+  test("Rex 0.1 reads a pane's status only on a connection attached to its session: the read attaches to all (no session joined); the older Rex needs none", async () => {
+    for (const revision of [18, 7] as const) {
+      const { fake, rex } = setup({ revision });
+      const ids = fake.addSession("p", "t");
+      fake.setStatus(ids.block, [{ state: "blocked", kind: "question", app: "claude-code", updated_at: "2026-11-18T09:00:00Z" }]);
+      const hints = new Map([["s", placeOf(ids)]]);
+      await placesRead(rex, hints);
+      expect(rex.statuses(hints).get("s")).toEqual({ state: "blocked", kind: "question" });
+      expect(fake.calls.filter((c) => c.method === "session.attach_all").map((c) => c.payload)).toEqual([{ event_scope: "session" }]);
+      // Never joined to the person's session (that would make the Inbox one of its clients).
+      expect(fake.methods()).not.toContain("session.attach");
+    }
   });
 
   test("a miss shows nothing: a block that is gone, or one in another session than the hint says", async () => {
@@ -220,17 +239,23 @@ describe("Stop and a closed tab", () => {
     if (!opened.opened || !opened.block) throw new Error("not opened");
     const pane = placeOf({ session: opened.session, block: opened.block });
     const other = fake.addSession("their work", "shell");
-    expect(await rex.closePane(pane)).toBe(true);
+    expect(await rex.closePane(pane)).toBe("closed");
     expect(fake.calls.filter((c) => c.method === "block.close").map((c) => c.payload)).toEqual([{ session_id: opened.session, block_id: opened.block }]);
     expect(fake.sessions.find((s) => s.session_id === opened.session)!.windows).toEqual([]);
     expect(fake.sessions.find((s) => s.session_id === other.session)!.windows[0]!.blocks).toEqual([other.block]);
-    // Closed by hand already: nothing runs there.
-    expect(await rex.closePane(pane)).toBe(true);
+    // Closed by hand already, or its session gone: Rex has no such pane.
+    expect(await rex.closePane(pane)).toBe("gone");
+    expect(await rex.closePane(placeOf({ session: "session:00000000-0000-4000-8000-000000000000", block: opened.block }))).toBe("gone");
     fake.setRefusal("block.close", { code: "permission_denied", message: "no", status: 403 });
-    expect(await rex.closePane(placeOf(other))).toBe(false);
+    expect(await rex.closePane(placeOf(other))).toBe("refused");
+    fake.setRefusal("block.close", null);
+    fake.setDelay(Infinity, "block.close");
+    const slow = createInboxRex({ socketPath: fake.socketPath, showTimeoutMs: 150 });
+    rexes.push(slow);
+    expect(await slow.closePane(placeOf(other))).toBe("no_answer");
     const none = createInboxRex({ socketPath: null });
     rexes.push(none);
-    expect(await none.closePane(pane)).toBe(false);
+    expect(await none.closePane(pane)).toBe("no_answer");
   });
 
   test("whether a pane is gone: Rex's own word (gone, there), or none when Rex does not answer", async () => {

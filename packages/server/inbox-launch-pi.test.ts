@@ -218,6 +218,8 @@ describe("Pi's launch host, against the fake pi", () => {
       expect(host.runsSession!(session, listing)).toBe(false);
       writePiSessionClaim(dataDir, { session, pid: tab.pid, rpc: false, title: "pi", owner: "tab" });
       expect(host.runsSession!(session, listing)).toBe(true);
+      // Stop of a Pi in a pane the Inbox did not open ends that process (its pid by the claim).
+      expect(host.sessionPids!(session, listing)).toEqual([tab.pid]);
       expect(host.runsSession!(randomUUID(), listing)).toBe(false);
       // Not listed, or its pid now another program: not that Pi.
       expect(host.runsSession!(session, "  1     0 /sbin/launchd\n")).toBe(false);

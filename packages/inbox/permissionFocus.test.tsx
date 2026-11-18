@@ -232,9 +232,13 @@ test.skipIf(!hasDom)("the card's header has Stop", async () => {
   expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
 });
 
-test.skipIf(!hasDom)("an agent that runs in Rex: the card has no Stop (Rex owns it; the Inbox never stops it)", async () => {
+test.skipIf(!hasDom)("an agent that runs in Rex: the card has Stop exactly when its run line does (the Inbox knows its own pane)", async () => {
   const thread = threadOf(card(CARD_1, 'bun run --cwd apps/inbox build', 1));
   await render(thread, idsOf(thread), { ...RUN, rex: { line: 'Rex · app / Claude Code' } });
   expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-perm="once"]`)).toBe(true);
   expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+  await render(thread, idsOf(thread), { ...RUN, rex: { line: 'Rex · app / Claude Code', stops: true } });
+  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
 });

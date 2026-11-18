@@ -482,7 +482,7 @@ export function PermissionCard({
           {minutes && minutes >= 1 ? ` · ${minutes} min` : ''}
         </span>
         <span className="pc-sp" />
-        {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && !inboxRunInRex(run) && (
+        {run && run.state !== 'stopped' && run.state !== 'failed' && run.state !== 'missing' && (!inboxRunInRex(run) || run.rex?.stops) && (
           <button
             type="button"
             className="pc-stop"

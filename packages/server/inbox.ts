@@ -4969,25 +4969,34 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const rexSocket = process.env.NODE_ENV === "test" ? null : process.env.PLANNOTATOR_TEST_SANDBOX ? (process.env.PLANNOTATOR_TEST_REX_SOCKET || null) : inboxRexSocketPath(process.platform, homedir());
   const rex = options.rex ?? createInboxRex({ socketPath: rexSocket, version, sessionsFile: join(store.dir, "rex-sessions.json") });
   rexVersion = rex.version;
-  rexWatch = () => rex.watch(rexHints(live.placedSessions()));
+  rexWatch = () => rex.watch(rexHints([...live.placedSessions(), ...(launch.rexPanes()?.keys() ?? [])]));
   /**
    * Where the given live sessions say they live (their polls' place hints). While "Start new agents in" is Rex: every
    * one in a Rex pane, one the person started there by hand included. Otherwise only the sessions the Inbox started in
    * Rex (`launch.rexSessions()`) and the conversations that go on from them, until they end. None (the default
-   * setting and no such agent, or no agent in a Rex pane): no hints, so no Rex read at all.
+   * setting and no such agent, or no agent in a Rex pane): no hints, so no Rex read at all. An agent the Inbox
+   * started in the background is in no Rex pane, whatever its connection says (it may have inherited one).
    */
   const rexHints = (sessions: Iterable<string>): Map<string, InboxPlace> => {
     const hints = new Map<string, InboxPlace>();
     const every = launch.startsInRex();
-    const inRex = launch.rexSessions();
+    const inRex = launch.rexPanes();
     if (!every && (!inRex || inRex.size === 0)) return hints;
+    const background = launch.backgroundSessions();
     for (const session of sessions) {
+      if (background.has(session)) continue;
       if (!every && !inRex!.has(session) && !live.continuesOf(session).some((old) => inRex!.has(old))) continue;
-      const place = live.placeOf(session);
+      const place = rexPlaceOf(session, inRex);
       if (place) hints.set(session, place);
     }
     return hints;
   };
+  /**
+   * Where a live session runs in Rex: the place its connection reports (Claude Code's), else, for one the Inbox
+   * started in Rex, the pane Rex made for it (Pi and OpenCode report none).
+   */
+  const rexPlaceOf = (session: string, inRex: ReadonlyMap<string, InboxPlace | null> | null): InboxPlace | null =>
+    live.placeOf(session) ?? (live.isSessionLive(session) ? (inRex?.get(session) ?? null) : null);
   /**
    * This Inbox's agents with where they live (inbox-rex.ts), for every window (a phone, the tailnet and a linked
    * machine too): each place Rex last confirmed, as one line, and what that pane says the agent is doing
@@ -5023,9 +5032,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * agent list, whose runs ask this again.
    */
   const rexStatusOf = (session: string): InboxRexStatus | null => {
-    // Only a session the Inbox started in Rex (`rexSessions` reads no runs: no loop).
-    if (!launch.rexSessions()?.has(session)) return null;
-    const place = live.placeOf(session);
+    // Only a session the Inbox started in Rex (`rexPanes` reads no runs: no loop).
+    const inRex = launch.rexPanes();
+    if (!inRex?.has(session)) return null;
+    const place = rexPlaceOf(session, inRex);
     return place ? (rex.statuses(new Map([[session, place]])).get(session) ?? null) : null;
   };
   const launch = createInboxLaunch({

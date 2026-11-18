@@ -5,7 +5,7 @@
  * starting a second process on the same session id.
  */
 import { describe, expect, test } from "bun:test";
-import { INBOX_REX_RESUME_AFTER_BOOT_MS, inboxListingRunsSession, inboxProcessListing, inboxRexResumeHeld } from "./inbox-rex-resume";
+import { INBOX_REX_RESUME_AFTER_BOOT_MS, inboxListingRunsSession, inboxListingSessionPids, inboxProcessListing, inboxRexResumeHeld } from "./inbox-rex-resume";
 
 const ID = "0b9f6c1e-2d3a-4c5b-8e7f-123456789abc";
 const CLAUDE = `  412   401 claude --resume ${ID} --settings /tmp/s.json --permission-mode auto`;
@@ -23,6 +23,21 @@ describe("which process runs a session", () => {
     expect(inboxListingRunsSession(CLAUDE.replace(ID, `${ID}0`), ID)).toBe(false);
     expect(inboxListingRunsSession(`  9 1 grep ${ID}`, ID)).toBe(false);
     expect(inboxListingRunsSession(PI, ID)).toBe(false);
+  });
+
+  test("an OpenCode in its Rex tab (`--session <id>`) runs it, so a reply never opens a second OpenCode on it", () => {
+    const OPENCODE = `  733   720 opencode2 --standalone --session ${ID}`;
+    expect(inboxListingRunsSession(`  1     0 /sbin/launchd\n${OPENCODE}\n`, ID)).toBe(true);
+    expect(inboxListingRunsSession(OPENCODE.replace(ID, `${ID}0`), ID)).toBe(false);
+  });
+
+  test("the processes Stop may end are the agent itself, never the shell it was started from", () => {
+    // A person's own shell pane ran `sh -c '… claude --resume <id>'`: only the Claude Code under it is named.
+    const wrapper = `  640   600 /bin/sh -c claude --resume '${ID}'`;
+    const agent = `  641   640 claude --resume ${ID}`;
+    expect(inboxListingSessionPids(`  600     1 -zsh\n${wrapper}\n${agent}\n`, ID)).toEqual([641]);
+    expect(inboxListingSessionPids(`  1     0 /sbin/launchd\n${CLAUDE}\n`, ID)).toEqual([412]);
+    expect(inboxListingSessionPids(`  9 1 grep ${ID}\n${PI}\n`, ID)).toEqual([]);
   });
 
   test("the listing is this computer's processes, this one among them", async () => {

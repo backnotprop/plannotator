@@ -8,14 +8,16 @@
  *
  * The model: sessions with labelled windows ("tabs") of blocks ("panes"), an optional Mac app client, and the app's
  * Remote Control setting. `session.new_window` and `session.focus_block` need a `session.attach` on the same
- * connection first (409 `conflict`), as the real server does. With Remote Control off, the app answers every
+ * connection first (409 `conflict`), as the real server does. So do `block.method` and `block.close` on Rex 0.1
+ * (API revision 18, as a real one answered on 2026-11-18: 409 `conflict`, "stream is not attached to session …"),
+ * where `session.attach_all` (scope `session`) also counts for every session; `revision: 7` is the older server,
+ * which answered them on any connection and has no `session.attach_all`. With Remote Control off, the app answers every
  * action `refused` (403) with the real app's words (as a real one answered, 2026-11-18). What a
  * real app answers with Remote Control on was never seen: here, the documented success (`performed_by`).
  *
  * Program status (OSC 7501, Rex's `build/program-status`): each block holds the records its programs reported, read
  * with `block.method` `program_status` as a real server answered it (`{ records: [{ id?, state, kind?, app,
- * effective_app, title?, msg?, updated_at, owner }] }`, the root record with no `id`). The manual lists no `conflict`
- * for `block.method`, so the fake needs no attach for it (unseen on a real one: the Inbox never attaches to read it).
+ * effective_app, title?, msg?, updated_at, owner }] }`, the root record with no `id`).
  */
 import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -52,6 +54,8 @@ export interface FakeRexOptions {
   appTransport?: "unix" | "tailscale";
   /** The app connection's uid (default this process's). */
   appUid?: number;
+  /** The server's API revision: 18 (default, Rex 0.1) or 7 (the older server: no `session.attach_all`, no attach for a block's methods). */
+  revision?: 7 | 18;
 }
 
 export interface FakeRex {
@@ -83,7 +87,7 @@ export interface FakeRex {
 const APP_CLIENT = "client:01a1eb00-0000-7000-8000-00000000a99a";
 const uuid = () => crypto.randomUUID();
 
-type Socket = Bun.ServerWebSocket<{ attached: Set<string> }>;
+type Socket = Bun.ServerWebSocket<{ attached: Set<string>; all: boolean }>;
 
 export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
   const dir = options.dir ?? join(mkdtempSync(join(process.platform === "darwin" ? "/tmp" : tmpdir(), "fake-rex-")), "Rex Support");
@@ -97,6 +101,9 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
   let performAnswer: Record<string, unknown> | null = null;
   const appTransport = options.appTransport ?? "unix";
   const appUid = options.appUid ?? process.getuid?.() ?? 501;
+  const older = options.revision === 7;
+  /** Rex 0.1: a block's methods and `block.close` only on a connection attached to its session (or to all). */
+  const unattached = (ws: Socket, session: string) => (older || ws.data.all || ws.data.attached.has(session) ? null : fail("conflict", `stream is not attached to session ${session}`, 409));
   let opened = 0;
   let open = 0;
   const sessions: FakeRexSession[] = [];
@@ -176,6 +183,12 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
         ws.data.attached.add(s.session_id);
         return { payload: { client_id: `client:${uuid()}`, view: { revision: 1, session_id: s.session_id, label: s.label, active_window_id: s.windows[0]?.window_id, windows: [] } } };
       }
+      case "session.attach_all": {
+        if (older) return fail("method_not_found", "unknown method session.attach_all", 404);
+        if (payload.event_scope !== "session" && payload.event_scope !== "all") return fail("bad_request", "event_scope must be session or all", 400);
+        ws.data.all = true;
+        return { payload: { sessions: sessions.map((s) => ({ session_id: s.session_id, label: s.label })) } };
+      }
       case "session.create": {
         const initial = ((payload.initial_windows as Record<string, unknown>[] | undefined) ?? [{}]).map((w) => ({ window_id: `window:${uuid()}`, label: typeof w.window_label === "string" ? w.window_label : "", blocks: [`block:${uuid()}`] }));
         const s: FakeRexSession = { session_id: `session:${uuid()}`, label: typeof payload.label === "string" ? payload.label : "", windows: initial };
@@ -200,6 +213,8 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
         const s = sessionOf(payload.session_id);
         if (!s) return fail("session_not_found", "no such session", 404);
         if (typeof payload.block_id !== "string") return fail("bad_request", "block_id is required", 400);
+        const notAttached = unattached(ws, s.session_id);
+        if (notAttached) return notAttached;
         if (!s.windows.some((w) => w.blocks.includes(payload.block_id as string))) return fail("not_found", "no such block", 404);
         if (payload.method !== "program_status") return fail("method_not_found", `no block method ${String(payload.method)}`, 404);
         return { payload: { records: statuses.get(payload.block_id) ?? [] } };
@@ -208,6 +223,8 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
         // Closing a pane ends its program; its window goes with its last pane.
         const s = sessionOf(payload.session_id);
         if (!s) return fail("session_not_found", "no such session", 404);
+        const notAttached = unattached(ws, s.session_id);
+        if (notAttached) return notAttached;
         const w = s.windows.find((x) => x.blocks.includes(payload.block_id as string));
         if (!w) return fail("not_found", "no such block", 404);
         w.blocks = w.blocks.filter((b) => b !== payload.block_id);
@@ -225,11 +242,11 @@ export function startFakeRex(options: FakeRexOptions = {}): FakeRex {
     }
   };
 
-  const server = Bun.serve<{ attached: Set<string> }, never>({
+  const server = Bun.serve<{ attached: Set<string>; all: boolean }, never>({
     unix: socketPath,
     fetch(req, srv) {
       if (new URL(req.url).pathname !== "/api/control") return new Response("not found", { status: 404 });
-      if (srv.upgrade(req, { data: { attached: new Set<string>() }, headers: { "Sec-WebSocket-Protocol": "rex.control.v1" } })) return undefined;
+      if (srv.upgrade(req, { data: { attached: new Set<string>(), all: false }, headers: { "Sec-WebSocket-Protocol": "rex.control.v1" } })) return undefined;
       return new Response("upgrade required", { status: 426 });
     },
     websocket: {

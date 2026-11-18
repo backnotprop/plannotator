@@ -40,8 +40,8 @@ export const INBOX_REX_READ_TIMEOUT_MS = 400;
 export const INBOX_REX_OPEN_TIMEOUT_MS = 10_000;
 /** The longest Show in Rex waits for the app. */
 export const INBOX_REX_SHOW_TIMEOUT_MS = 3_000;
-/** After a Rex that did not answer in time, how long nothing asks it again. */
-export const INBOX_REX_SLOW_BACKOFF_MS = 30_000;
+/** After a Rex that did not answer in time, how long nothing asks it again (what it last said stands meanwhile, until stale). */
+export const INBOX_REX_SLOW_BACKOFF_MS = 5_000;
 /** How old the last read may be before a list starts another (it still answers from the last one at once). */
 export const INBOX_REX_FRESH_MS = 2_000;
 /** A status read longer ago than this draws no mark on an icon (stale: today's icon until the next read). */
@@ -54,6 +54,9 @@ const IDLE_CLOSE_MS = 3_000;
 const NAME_MAX = 60;
 const TERMINAL_FLAVOR = "com.superlogical.terminal.shell";
 const SESSION_ID = /^session:[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+/** What closing a pane came to (`closePane`). */
+export type InboxRexClosed = "closed" | "gone" | "refused" | "no_answer";
 
 /** A program's state in its pane, as Rex keeps it (OSC 7501's root record): only `state` and `kind`, never its free text. */
 export interface InboxRexStatus {
@@ -235,6 +238,20 @@ export function createInboxRex(options: InboxRexOptions) {
     options.onChange?.();
   };
 
+  /**
+   * Rex 0.1 (API revision 18) answers a block's methods (`program_status`) and closes a block only on a connection
+   * attached to its session. `session.attach_all` with the `session` scope does that for every session without
+   * joining any: no pane's output (`block_event`) comes, and the Inbox is not one of a session's clients. The older
+   * server (revision 7) needs none and does not know the call: its "no" is fine.
+   */
+  const reachAll = async (rex: RexConnection) => {
+    try {
+      await rex.call("session.attach_all", { event_scope: "session" });
+    } catch (error) {
+      if (!(error instanceof RexCallError)) throw error;
+    }
+  };
+
   /** One read connection, reused while reads come, closed once idle. */
   let reader: Promise<RexConnection> | null = null;
   let idle: ReturnType<typeof setTimeout> | null = null;
@@ -248,7 +265,15 @@ export function createInboxRex(options: InboxRexOptions) {
   const readConnection = (): Promise<RexConnection> => {
     const path = socketPath();
     if (!path) return Promise.reject(new RexUnavailable("no Rex here"));
-    reader ??= connectRex(path, { timeoutMs: readTimeout, version: options.version });
+    reader ??= connectRex(path, { timeoutMs: readTimeout, version: options.version }).then(async (rex) => {
+      try {
+        await reachAll(rex);
+        return rex;
+      } catch (error) {
+        rex.close();
+        throw error;
+      }
+    });
     const mine = reader;
     mine.catch(() => {
       if (reader === mine) reader = null;
@@ -261,9 +286,16 @@ export function createInboxRex(options: InboxRexOptions) {
     (idle as { unref?: () => void }).unref?.();
   };
 
+  /** The last read that came back empty did so because Rex was slow (not because it is gone). */
+  let lastLate = false;
   /** Run `work` on the read connection within the read deadline; null on any failure (and a slow Rex is left alone a while). */
   const read = async <T>(work: (rex: RexConnection) => Promise<T>): Promise<T | null> => {
-    if (!options.socketPath || now() < quietUntil) return null;
+    lastLate = false;
+    if (!options.socketPath) return null;
+    if (now() < quietUntil) {
+      lastLate = true;
+      return null;
+    }
     let timer: ReturnType<typeof setTimeout> | null = null;
     const late = new Promise<"late">((resolve) => {
       timer = setTimeout(() => resolve("late"), readTimeout);
@@ -271,6 +303,7 @@ export function createInboxRex(options: InboxRexOptions) {
     try {
       const answer = await Promise.race([readConnection().then(work), late]);
       if (answer === "late") {
+        lastLate = true;
         quietUntil = now() + INBOX_REX_SLOW_BACKOFF_MS;
         dropReader();
         return null;
@@ -387,8 +420,21 @@ export function createInboxRex(options: InboxRexOptions) {
     const at = now();
     lastRead = at;
     let moved = false;
-    if (!found) {
-      // No answer (no Rex, a slow one): nothing confirmed stands, and an app that may be gone is not acted on.
+    if (!found && lastLate) {
+      // A slow Rex (one read over its deadline): what it said last stands until it is stale, so one slow answer
+      // does not blank every place and mark; the next read is soon (INBOX_REX_SLOW_BACKOFF_MS).
+      for (const [session, known] of confirmed) {
+        if (at - known.at > INBOX_REX_MARK_STALE_MS) {
+          confirmed.delete(session);
+          moved = true;
+        }
+      }
+      if (app.id !== null && at - app.at > INBOX_REX_MARK_STALE_MS) {
+        app = { id: null, at };
+        moved = true;
+      }
+    } else if (!found) {
+      // No answer (no Rex): nothing confirmed stands, and an app that may be gone is not acted on.
       if (app.id !== null || confirmed.size > 0) moved = true;
       confirmed.clear();
       app = { id: null, at };
@@ -589,20 +635,21 @@ export function createInboxRex(options: InboxRexOptions) {
 
     /**
      * Stop: close the pane `place` names, which ends the program in it (Rex hangs it up, as closing a terminal does).
-     * True once Rex closed it or has no such pane any more; false when Rex is not here or did not do it.
+     * "closed": Rex closed it. "gone": Rex has no such pane any more (closed by hand, its program ended, the session
+     * went). "refused": Rex said no. "no_answer": no Rex here, or none in time (it may still have closed it).
      */
-    async closePane(place: InboxPlace): Promise<boolean> {
-      const closed = await act(showTimeout, async (rex) => {
+    async closePane(place: InboxPlace): Promise<InboxRexClosed> {
+      const closed = await act(showTimeout, async (rex): Promise<InboxRexClosed> => {
+        await within(showTimeout, reachAll(rex));
         try {
           await within(showTimeout, rex.call("block.close", { session_id: place.session, block_id: place.block }));
-          return true;
+          return "closed";
         } catch (error) {
-          // Already gone (closed by hand, or the session went): nothing runs there.
-          if (error instanceof RexCallError && (error.code === "not_found" || error.code === "session_not_found")) return true;
-          throw error;
+          if (!(error instanceof RexCallError)) throw error;
+          return error.code === "not_found" || error.code === "session_not_found" ? "gone" : "refused";
         }
       });
-      return closed === true;
+      return closed ?? "no_answer";
     },
 
     /** What the list's Rex part depends on (the delivery watch says `agents` when it moves). */

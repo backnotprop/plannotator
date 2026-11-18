@@ -8,7 +8,7 @@
  *  - this Inbox has run long enough for any connection from before it to have come back (the connection retries at
  *    most every `INBOX_RETRY_MS.max`, and counts as live for `INBOX_SESSION_LIVE_MS` after a poll);
  *  - no process on this computer runs that session id: Claude Code keeps its argv (`--session-id <id>` or
- *    `--resume <id>`, as the tab's shell line does); Pi sets `process.title = "pi"`, so its own check is asked too
+ *    `--resume <id>`, as the tab's shell line does), and so does OpenCode (`--session <id>`); Pi sets `process.title = "pi"`, so its own check is asked too
  *    (`LaunchHost.runsSession`: the claim its extension wrote, against the same listing). A listing that cannot be
  *    read counts as one that runs it.
  *
@@ -35,13 +35,31 @@ export async function inboxProcessListing(): Promise<string | null> {
   }
 }
 
-/** Whether `listing` has a process whose command line names `session` as the one it starts or resumes. */
+/**
+ * Whether `listing` has a process whose command line names `session` as the one it starts or resumes: Claude Code's
+ * and Pi's `--session-id <id>` or `--resume <id>`, OpenCode's `--session <id>`.
+ */
 export function inboxListingRunsSession(listing: string, session: string): boolean {
+  return inboxListingSessionPids(listing, session).length > 0;
+}
+
+/**
+ * The processes in `listing` (`pid ppid command` rows) whose command line names `session`, without one whose child
+ * names it too: the agent itself, never a shell or wrapper it runs under (a `sh -c '… claude --resume <id>'` keeps
+ * its pane's shell). Stop ends these when the agent is not in the pane the Inbox had Rex make for it.
+ */
+export function inboxListingSessionPids(listing: string, session: string): number[] {
   const id = session.replace(/[^0-9A-Za-z-]/g, "");
-  if (!id) return false;
+  if (!id) return [];
   // Quoted (the tab's `sh -c`) or not (the agent's own argv), and never a longer id that starts the same.
-  const names = new RegExp(`(?:--session-id|--resume)\\s+'?${id}(?![0-9A-Za-z-])`, "i");
-  return listing.split("\n").some((line) => names.test(line));
+  const names = new RegExp(`(?:--session-id|--session|--resume)\\s+'?${id}(?![0-9A-Za-z-])`, "i");
+  const found = new Map<number, number>();
+  for (const line of listing.split("\n")) {
+    const row = /^\s*(\d+)\s+(\d+)\s+(.*)$/.exec(line);
+    if (row && names.test(row[3]!)) found.set(Number(row[1]), Number(row[2]));
+  }
+  const parents = new Set(found.values());
+  return [...found.keys()].filter((pid) => !parents.has(pid));
 }
 
 /**

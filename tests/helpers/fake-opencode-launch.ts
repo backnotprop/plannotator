@@ -9,6 +9,8 @@ export interface FakeOpenCodeLaunchState {
   agents?: { id: string; mode: "primary" | "subagent" | "all"; hidden: boolean }[];
   failTurn?: string | null;
   turnMs?: number;
+  /** How long making a session takes (`POST /api/session`). */
+  sessionMs?: number;
 }
 
 export type FakeOpenCodeLaunchCall =
@@ -138,6 +140,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname === "/api/model/default") { const m = models()[0]; return send(200, { data: m }); }
   if (url.pathname === "/api/session" && req.method === "POST") {
+    if (now.sessionMs) await new Promise((r) => setTimeout(r, now.sessionMs));
     const id = "ses_" + Math.random().toString(36).slice(2, 14);
     sessions.set(id, { busy: false, model: body && body.model });
     emit("session.created", { sessionID: id, location: body && body.location });

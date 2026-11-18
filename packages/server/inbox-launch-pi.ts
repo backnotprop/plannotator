@@ -711,6 +711,12 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
     return parsePiChoices(help.stdout, models.exitCode === 0 && !models.timedOut ? models.stdout : null);
   });
 
+  /** The Pis that run `session` now by `listing` (argv or claim), not one this Inbox runs in the background. */
+  const piRexPids = (session: string, listing: string): number[] => {
+    const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
+    return piSessionProcesses(listing, session, own, readPiSessionClaims(ctx.dataDir)).flatMap((found) => (found.pid !== process.pid ? [found.pid] : []));
+  };
+
   return {
     agent: PI,
     name: PI_NAME,
@@ -755,8 +761,11 @@ export function createPiLaunchHost(ctx: LaunchHostContext, options: { handoffMs?
      */
     /** Start in Rex: a Pi lists as `pi` alone, so the claim its extension wrote (this Inbox's data dir) says which session it runs. */
     runsSession(session: string, listing: string) {
-      const own = [...procs.values()].filter((p) => !p.exited).map((p) => p.proc.pid);
-      return piSessionProcesses(listing, session, own, readPiSessionClaims(ctx.dataDir)).some((found) => found.pid !== process.pid);
+      return piRexPids(session, listing).length > 0;
+    },
+
+    sessionPids(session: string, listing: string) {
+      return piRexPids(session, listing);
     },
 
     async rexCommand(launch: InboxLaunchRecord, input: { name: string; login: LaunchEnv; resume: boolean }) {

@@ -140,6 +140,8 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
   const binOf = (e: AgentEnvironment): string | null => e.which("opencode2") ?? (openCodeGeneration(e) === "2" ? e.which("opencode") : null);
 
   const procs = new Map<string, OpenCodeServer>();
+  /** Every server this host runs, one still making its session (not in `procs` yet) included: `close` ends them all. */
+  const serving = new Set<OpenCodeServer>();
   const spawning = new Map<string, Spawning>();
   let threads: LaunchPermissionContext | null = null;
   let permissions: ReturnType<typeof createOpenCodePermissions> | null = null;
@@ -265,6 +267,8 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
       return code;
     });
     if (session) procs.set(session, s);
+    serving.add(s);
+    void s.ended.then(() => serving.delete(s));
     void (async () => {
       const decoder = new TextDecoder();
       try {
@@ -428,6 +432,9 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
         await end(made.server, "close");
         session = made.session;
       }
+      // Its name as found now (an Inbox just restarted has not checked it yet: `opencode2`, or OpenCode 2 as `opencode`).
+      const found = binOf(await ctx.environment());
+      if (found) binName = basename(found);
       const command = `cd ${shellQuote(launch.folder)} && exec env ${openCodeTerminalRun(binName, session, dataDirArg())}`;
       ctx.startLog(launch.id, `rex: ${command}`);
       return { ok: true as const, session, ref: session, command };
@@ -539,7 +546,7 @@ export function createOpenCodeLaunchHost(ctx: LaunchHostContext, options: { read
 
     close() {
       for (const mark of spawning.values()) mark.cancel = "stop";
-      for (const s of procs.values()) {
+      for (const s of new Set([...procs.values(), ...serving])) {
         if (s.exited) continue;
         s.ending ??= "close";
         s.proc.kill("SIGTERM");
