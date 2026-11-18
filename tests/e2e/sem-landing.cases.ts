@@ -48,13 +48,19 @@ interface View {
   scroller: string;
   shell: (file: string) => string;
   reads: Set<string>;
+  release: (name: string) => void;
   close: () => Promise<void>;
 }
 
-function delay(page: Page, pattern: string, reads: Set<string>) {
+function delay(page: Page, pattern: string, reads: Set<string>, held: string[]) {
+  const gates = new Map(held.map((name) => {
+    let open = () => {};
+    const gate = new Promise<void>((done) => (open = done));
+    return [name, { gate, open }] as const;
+  }));
   void page.route(pattern, async (route) => {
     const found = swapping.exec(decodeURIComponent(route.request().url()));
-    if (found) await new Promise((done) => setTimeout(done, 1_500));
+    if (found) await (gates.get(found[1]!)?.gate ?? new Promise((done) => setTimeout(done, 1_500)));
     await route.continue().catch(() => {});
     if (found) reads.add(found[1]!);
   });
@@ -62,15 +68,17 @@ function delay(page: Page, pattern: string, reads: Set<string>) {
     await new Promise((done) => setTimeout(done, 800));
     await route.continue().catch(() => {});
   });
+  return (name: string) => gates.get(name)?.open();
 }
 
 const firstRows = (page: Page) =>
   expect.poll(() => page.evaluate(() => [...document.querySelectorAll('diffs-container')].some((host) => host.shadowRoot?.querySelector('[data-line]'))), { timeout: 30_000 }).toBe(true);
 
-async function reviewWindow(browser: Browser): Promise<View> {
+async function reviewWindow(browser: Browser, held: string[]): Promise<View> {
   const session = await reviewOf(`sem-landing-${Math.random().toString(36).slice(2, 8)}`, base, head);
   const reads = new Set<string>();
-  const { context, page } = await openReviewWindow(browser, session.url, async (page) => delay(page, '**/api/file-content?*', reads));
+  let release = (_name: string) => {};
+  const { context, page } = await openReviewWindow(browser, session.url, async (page) => void (release = delay(page, '**/api/file-content?*', reads, held)));
   await firstRows(page);
   await page.evaluate(() => {
     let scroller: HTMLElement | null = document.querySelector('diffs-container')!.parentElement;
@@ -82,6 +90,7 @@ async function reviewWindow(browser: Browser): Promise<View> {
     scroller: '[data-e2e-scroller]',
     shell: (file) => `diffs-container:has([data-file-header-path="src/${file}.ts"])`,
     reads,
+    release: (name) => release(name),
     close: async () => {
       await context.close();
       await session.close();
@@ -150,7 +159,7 @@ function inboxWorld(browser: () => Browser): () => Inbox {
 
 let projects = 0;
 
-async function inboxReview(browser: Browser, world: Inbox): Promise<View> {
+async function inboxReview(browser: Browser, world: Inbox, held: string[], phone = false): Promise<View> {
   const project = scratchProject(join(world.root, 'src'), `shop${++projects}`);
   git(project, 'checkout', '-q', '-b', 'main');
   commitAll(project, base, 'base');
@@ -170,18 +179,24 @@ async function inboxReview(browser: Browser, world: Inbox): Promise<View> {
     body: 'Reading it.',
     review: true,
   } as never);
-  const context: BrowserContext = await browser.newContext({ viewport: { width: 1280, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' });
+  const context: BrowserContext = await browser.newContext(
+    phone
+      ? { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: browser.browserType().name() === 'chromium', colorScheme: 'light', reducedMotion: 'reduce' }
+      : { viewport: { width: 1280, height: 900 }, colorScheme: 'light', reducedMotion: 'reduce' },
+  );
   const page = await context.newPage();
   const reads = new Set<string>();
-  delay(page, '**/guide/file?*', reads);
+  const release = delay(page, '**/guide/file?*', reads, held);
   await page.goto(`${world.url}#thread=${review.thread_id}`);
   await page.locator('[data-review-card]').filter({ hasText: title }).first().getByRole('button', { name: 'Start review' }).click();
   const pane = page.locator('[data-review-message]');
   await expect(pane.locator('[data-guide-file-shell]')).toHaveCount(FILES.length, { timeout: 60_000 });
-  await pane.locator('[data-review-mode-choice="files"]').click();
-  await expect(pane).toHaveAttribute('data-review-mode', 'files');
+  if (!phone) {
+    await pane.locator('[data-review-mode-choice="files"]').click();
+    await expect(pane).toHaveAttribute('data-review-mode', 'files');
+  }
   await firstRows(page);
-  return { page, scroller: '.ib-gbody', shell: (file) => `[data-guide-file-shell="src/${file}.ts"]`, reads, close: () => context.close() };
+  return { page, scroller: '.ib-gbody', shell: (file) => `[data-guide-file-shell="src/${file}.ts"]`, reads, release, close: () => context.close() };
 }
 
 const watch = (view: View) =>
@@ -234,11 +249,6 @@ const moved = (view: View) =>
     return { worst: w.__moves.worst, frames: w.__moves.frames, scrolls: [...w.__moves.scrolls] };
   });
 
-const landed = async (view: View, count: number) => {
-  await expect.poll(() => view.reads.size, { timeout: 45_000 }).toBeGreaterThanOrEqual(count);
-  await view.page.waitForTimeout(2_000);
-};
-
 const noteOf = (view: View, file: string) => view.page.evaluate((selector) => document.querySelector(`${selector} [data-semantic-note]`)?.getAttribute('data-semantic-note') ?? null, view.shell(file));
 
 const edgeOf = (view: View, file: string) =>
@@ -252,28 +262,55 @@ const edgeOf = (view: View, file: string) =>
     { selector: view.shell(file), scroller: view.scroller },
   );
 
-async function wheelUntil(view: View, done: () => Promise<boolean>, by = 120) {
-  const box = (await view.page.evaluate((selector) => document.querySelector(selector)!.getBoundingClientRect().toJSON(), view.scroller)) as DOMRect;
-  await view.page.mouse.move(box.x + box.width / 2, Math.max(box.y, 0) + 300);
-  for (let i = 0; i < 200 && !(await done()); i++) {
-    await view.page.mouse.wheel(0, by);
-    await view.page.waitForTimeout(40);
+const scrollTopOf = (view: View) => view.page.evaluate((selector) => document.querySelector(selector)!.scrollTop, view.scroller);
+
+async function atRest(view: View) {
+  let last = await scrollTopOf(view);
+  for (let calm = 0, i = 0; calm < 4 && i < 100; i++) {
+    await view.page.waitForTimeout(100);
+    const now = await scrollTopOf(view);
+    calm = now === last ? calm + 1 : 0;
+    last = now;
   }
-  expect(await done()).toBe(true);
 }
 
-async function justBelow(view: View, file: string) {
-  const below = async () => {
-    const edge = await edgeOf(view, file);
-    return edge != null && -edge.bottom > 80 && -edge.bottom < 180;
-  };
-  await wheelUntil(view, async () => ((await edgeOf(view, file))?.bottom ?? -1000) > -400, 300);
-  for (let i = 0; i < 40 && !(await below()); i++) {
-    await view.page.mouse.wheel(0, -(await edgeOf(view, file))!.bottom > 130 ? 20 : -20);
-    await view.page.waitForTimeout(40);
+async function scrollBy(view: View, by: number) {
+  const box = (await view.page.evaluate((selector) => document.querySelector(selector)!.getBoundingClientRect().toJSON(), view.scroller)) as DOMRect;
+  await view.page.mouse.move(box.x + box.width / 2, Math.max(box.y, 0) + 300);
+  await view.page.mouse.wheel(0, by);
+  await atRest(view);
+}
+
+async function bring(view: View, what: string, measure: () => Promise<number | null>, target: number, within: number) {
+  for (let i = 0; i < 30; i++) {
+    const now = await measure();
+    if (now != null && Math.abs(now - target) <= within) return;
+    await scrollBy(view, now == null ? 600 : now - target);
   }
-  expect(await below()).toBe(true);
-  return below;
+  expect(await measure(), `precondition: ${what} within ${within} px of ${target}`).toBeGreaterThanOrEqual(target - within);
+  expect(await measure(), `precondition: ${what} within ${within} px of ${target}`).toBeLessThanOrEqual(target + within);
+}
+
+const belowBy = async (view: View, file: string) => {
+  const edge = await edgeOf(view, file);
+  return edge == null ? null : -edge.bottom;
+};
+
+async function justBelow(view: View, file: string) {
+  await bring(view, `${file}'s top below the bottom edge`, () => belowBy(view, file), 130, 50);
+  return async () => ((await belowBy(view, file)) ?? 0) > 60;
+}
+
+async function heldUntilWatched(view: View, name: string, file: string, ends: 'off' | 'semantic') {
+  expect(view.reads.has(name), `precondition: the read of ${name} is still held`).toBe(false);
+  await watch(view);
+  view.release(name);
+  await settles(view, file, ends);
+}
+
+async function settles(view: View, file: string, ends: 'off' | 'semantic') {
+  await expect.poll(() => noteOf(view, file), { timeout: 45_000, message: `${file}'s note ends ${ends}` }).toBe(ends);
+  await view.page.waitForTimeout(1_000);
 }
 
 const still = async (view: View) => {
@@ -293,20 +330,17 @@ export function landingCases(type: BrowserType) {
     await browser?.close();
   });
   const inbox = inboxWorld(() => browser);
-  const open = (host: Host) => (host === 'review' ? reviewWindow(browser) : inboxReview(browser, inbox()));
+  const open = (host: Host, held: string[] = []) => (host === 'review' ? reviewWindow(browser, held) : inboxReview(browser, inbox(), held));
 
   for (const host of ['review', 'inbox'] as const) {
     test.describe(host, () => {
       test('a little scroll before the notes land: nothing on screen moves, its files are offered the note, a file below takes it', async () => {
         const view = await open(host);
         try {
-          await view.page.mouse.move(640, 500);
-          await view.page.mouse.wheel(0, 200);
-          await view.page.waitForTimeout(300);
+          await scrollBy(view, 200);
           await watch(view);
-          await landed(view, 1);
+          await settles(view, 'a-money', 'off');
           await still(view);
-          expect(await noteOf(view, 'a-money')).toBe('off');
           await view.page.locator(`${view.shell('a-money')} [data-semantic-note="off"]`).click();
           await expect.poll(() => noteOf(view, 'a-money')).toBe('semantic');
         } finally {
@@ -315,16 +349,13 @@ export function landingCases(type: BrowserType) {
       });
 
       test('a file just below the bottom edge when its note lands takes it by itself, and nothing on screen moves', async () => {
-        const view = await open(host);
+        const view = await open(host, ['dates']);
         try {
           const below = await justBelow(view, 'e-dates');
-          expect(view.reads.has('dates')).toBe(false);
-          await watch(view);
-          await expect.poll(() => view.reads.has('dates'), { timeout: 45_000 }).toBe(true);
-          await view.page.waitForTimeout(2_000);
+          await heldUntilWatched(view, 'dates', 'e-dates', 'semantic');
           await still(view);
           expect(await below()).toBe(true);
-          await wheelUntil(view, async () => ((await edgeOf(view, 'e-dates'))?.bottom ?? -1) > 200);
+          await bring(view, "e-dates's top on screen", async () => (await edgeOf(view, 'e-dates'))?.top ?? null, 200, 150);
           expect(await noteOf(view, 'e-dates')).toBe('semantic');
         } finally {
           await view.close();
@@ -332,14 +363,12 @@ export function landingCases(type: BrowserType) {
       });
 
       test('a file below when its read began and on screen when its note lands is offered the note, and nothing moves', async () => {
-        const view = await open(host);
+        const view = await open(host, ['names']);
         try {
-          await wheelUntil(view, async () => {
-            const edge = await edgeOf(view, 'c-names');
-            return edge != null && edge.top < 400 && edge.top > 100 && view.reads.size === 0;
-          }, 60);
-          await watch(view);
-          await landed(view, 2);
+          const start = await edgeOf(view, 'c-names');
+          expect(start == null || start.bottom < 0, 'precondition: c-names wholly below the view when its read began').toBe(true);
+          await bring(view, "c-names's top on screen", async () => (await edgeOf(view, 'c-names'))?.top ?? null, 250, 120);
+          await heldUntilWatched(view, 'names', 'c-names', 'off');
           await still(view);
           expect(await noteOf(view, 'c-names')).toBe('off');
         } finally {
@@ -348,13 +377,17 @@ export function landingCases(type: BrowserType) {
       });
 
       test('within a screen of the end of the page, a file below is offered its note, and nothing moves', async () => {
-        const view = await open(host);
+        const view = await open(host, ['tail']);
         try {
           const below = await justBelow(view, 'f-tail');
-          expect(view.reads.has('tail')).toBe(false);
-          await watch(view);
-          await expect.poll(() => view.reads.has('tail'), { timeout: 45_000 }).toBe(true);
-          await view.page.waitForTimeout(2_000);
+          expect(
+            await view.page.evaluate((selector) => {
+              const page = document.querySelector(selector) as HTMLElement;
+              return page.scrollHeight - page.scrollTop - page.clientHeight <= page.clientHeight;
+            }, view.scroller),
+            'precondition: within one screen of the end of the page',
+          ).toBe(true);
+          await heldUntilWatched(view, 'tail', 'f-tail', 'off');
           await still(view);
           expect(await below()).toBe(true);
           expect(await noteOf(view, 'f-tail')).toBe('off');
