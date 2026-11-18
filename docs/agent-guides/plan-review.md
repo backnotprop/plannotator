@@ -82,7 +82,8 @@ hands off and records a non-triggering `plannotator-handoff` message. Nothing
 is implemented before approval because the phase stays `planning` while the
 review is open, so the planning write gate still holds. The open review is
 closed (and its decision dropped) when plan mode is left, when a `/tree` path is
-not planning, and on `session_shutdown`; a plan decision is never re-targeted to
+not planning, on `session_shutdown`, or when Oh My Pi replaces the session
+in-process; a plan decision is never re-targeted to
 a replacement session. The Esc-aborts-the-review behavior of the old blocking
 tool is gone: leaving plan mode is how to abandon a review. Closing it first
 calls the plan server's in-process `closeKeepingDraft()` (never reachable over
