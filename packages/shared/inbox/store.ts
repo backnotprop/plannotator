@@ -7538,8 +7538,9 @@ export class InboxStore {
   /**
    * Started: the root moves from its placeholder to the real session. `delivered`: the start put the root in as the
    * session's first turn (T3 Code), so the same snapshot records it delivered: no wake ever sees it addressed to the
-   * session and undelivered, even if the Inbox stops right after. A reply the person wrote while it started was
-   * addressed to the placeholder: it moves too (one snapshot each), so it goes to the session like any later reply.
+   * session and undelivered, even if the Inbox stops right after. With it (T3 Code only), a reply the person wrote
+   * while it started was addressed to the placeholder: it moves too (one snapshot each), so the T3 wake sends it like
+   * any later reply. Other starts leave such a reply where it is, as before (their session takes its placeholder's).
    */
   private settleLaunchStarted(message: InboxMessage, outcome: { to: InboxAddressee; session_ref: string; delivered?: boolean; rex?: InboxLaunchRecord["rex"]; t3?: InboxLaunchRecord["t3"]; inner?: InboxLaunchInner }): InboxMessage {
     const placeholder = message.to?.session ?? null;
@@ -7556,7 +7557,7 @@ export class InboxStore {
     };
     this.appendMessage(next, at);
     if (delivered) this.markAgentChecked(message.thread_id, this.messageSeq.get(message.id) ?? 0, at, outcome.to.session);
-    if (placeholder?.startsWith("launch:") && placeholder !== outcome.to.session) {
+    if (outcome.delivered === true && placeholder?.startsWith("launch:") && placeholder !== outcome.to.session) {
       for (const later of this.threadMessages(message.thread_id)) {
         if (later.id === message.id || later.author.kind !== "person" || later.delivery || later.launch) continue;
         if (later.to?.session !== placeholder) continue;

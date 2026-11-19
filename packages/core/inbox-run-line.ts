@@ -79,6 +79,16 @@ export const INBOX_RUN_T3_NOT_CONNECTED = "Look at its thread there.";
 export const INBOX_T3_NOT_HERE = "T3 Code isn't open on this computer, so it started in the background.";
 /** The same because T3 Code said no: no model for that agent, a refused token or start (Rex's "Rex didn't open a tab for it, …"). */
 export const INBOX_T3_REFUSED = "T3 Code didn't start a thread for it, so it started in the background.";
+/**
+ * The run line's note for a start T3 Code refused, saying what it refused when it said: the model (the person's, or
+ * the one it was tried on), no model at all for that agent, or the folder; else `INBOX_T3_REFUSED`.
+ */
+export function inboxT3RefusedWords(t3: { why?: "no_model" | "project"; declined?: string } | undefined): string {
+  if (t3?.declined) return `T3 Code didn't take the model ${t3.declined}, so it started in the background.`;
+  if (t3?.why === "no_model") return "T3 Code has no model for it here, so it started in the background.";
+  if (t3?.why === "project") return "T3 Code didn't add this folder as a project, so it started in the background.";
+  return INBOX_T3_REFUSED;
+}
 /** Settings → Agents, T3 Code chosen and not open (Rex's "Rex isn't open on this computer now, …"). */
 export const INBOX_T3_NOT_HERE_SETTINGS = "T3 Code isn't open on this computer now, so new agents start in the background until it is.";
 /** Open in Terminal for an agent T3 Code runs (its line offers none; an older window's press). `INBOX_RUN_IN_REX_OPEN`'s twin. */

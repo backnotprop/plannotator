@@ -194,6 +194,13 @@ test.skipIf(!hasDom)('the header names the machine that started it, unless it wa
   t3.messages[0] = { ...t3.messages[0]!, to: { host: 't3', session: 'thread:project:a:b' }, launch };
   await draw(t3, null);
   expect(started()).toBe('You started Claude Code in billing-svcIn T3 Code · opus');
+  act(() => root!.unmount());
+  host!.remove();
+  // T3 didn't take the person's model: the thread says so beside the one it runs.
+  const declined = threadOf(null);
+  declined.messages[0] = { ...declined.messages[0]!, to: { host: 't3', session: 'thread:project:a:c' }, launch: { ...launch, t3: { declined: 'sonnet' } } };
+  await draw(declined, null);
+  expect(host!.querySelector('[data-launch-t3]')!.textContent).toBe("In T3 Code · opus (T3 Code didn't take sonnet)");
   expect(host!.querySelector('[data-launch-choice]')).toBeNull();
   act(() => root!.unmount());
   host!.remove();
@@ -233,6 +240,11 @@ test.skipIf(!hasDom)("an agent started in T3 Code: Rex's words with T3 Code's na
   expect(host!.querySelector('[data-run-stop]')).not.toBeNull();
   await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true } } as InboxRun);
   expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't start a thread for it, so it started in the background.");
+  // What T3 refused, when it said.
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, declined: 'sonnet' } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe("T3 Code didn't take the model sonnet, so it started in the background.");
+  await redraw(threadOf(null), { ...RUN, state: 'working', t3: { refused: true, why: 'no_model' } } as InboxRun);
+  expect(host!.querySelector('[data-run-t3-refused]')!.textContent).toBe('T3 Code has no model for it here, so it started in the background.');
   // Another agent's not-connected line keeps Try again.
   const cause = "Started, but not connected to the Inbox. Is Plannotator's plugin on in that folder?";
   await redraw(threadOf(null), { ...RUN, state: 'failed', cause, attach_command: null } as InboxRun);

@@ -911,6 +911,8 @@ const ERROR_STATUS: Record<string, number> = {
   launch_not_found: 404,
   // Stop of a session that runs in Rex: Rex owns it.
   launch_in_rex: 409,
+  // Stop, Open or Try again of an agent that runs in T3 Code: T3 Code owns it.
+  launch_in_t3: 409,
   launch_off: 404,
   open_unavailable: 409,
   // Trust folder: the agent's own config could not be changed; nothing was, and the message stays kept.

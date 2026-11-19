@@ -94,7 +94,7 @@ export function t3ScopeOf(access: T3Access): string {
  *   [--option=effort=<v>]] --json` (the Inbox's start in T3 Code,
  *   inbox-launch-t3.ts; each flag also as `--name value`), as T3's
  *   cli/thread.ts answers it: run in a folder inside one of `projects` (T3's
- *   projects, by folder), it makes a new thread (`thread:project:<uuid>:<uuid>`,
+ *   projects, by folder; the deepest, or through `checkouts`, as T3's resolveProject), it makes a new thread (`thread:project:<uuid>:<uuid>`,
  *   the form a real `t3 thread start` gave) on the provider and model given,
  *   else the project's default (`defaultModel`, Claude Code's opus), takes the
  *   message from stdin as its first turn and prints `{ threadId, projectId,
@@ -143,7 +143,7 @@ export interface FakeT3Home {
   /** The environment each call ran with. */
   envs(): Record<string, string>[];
   /** Every thread `thread start` made: its id, the folder it ran in, the base, the title, the provider, model and options asked for, and the message. */
-  starts(): { id: string; cwd: string; base: string | null; title: string | null; provider: string | null; model: string | null; options: string[]; text: string }[];
+  starts(): { id: string; cwd: string; project: string; base: string | null; title: string | null; provider: string | null; model: string | null; options: string[]; text: string }[];
   setState(state: FakeT3HomeState): void;
   /** The status `thread show` gives every thread's run ("completed" until set; "running" has an active run). */
   setRunStatus(status: string): void;
@@ -202,6 +202,11 @@ export function makeFakeT3Home(
     authToken?: string;
     /** The origin its runtime file names (default `http://127.0.0.1:<port>`). */
     origin?: string;
+    /**
+     * Git checkouts of one repository, as `git worktree list` gives them: a folder of a linked worktree → the main
+     * checkout. A folder in no project resolves, as in T3, as the same path in the other checkout's project.
+     */
+    checkouts?: Record<string, string>;
   } = {},
 ): FakeT3Home {
   const dir = join(home, ".t3");
@@ -240,6 +245,16 @@ const started = () => fs.existsSync(startsFile) ? fs.readFileSync(startsFile, "u
 const known = [...${JSON.stringify([...Object.values(threads), ...(options.t3Threads ?? [])])}, ...started().map((s) => s.id)];
 const addedFile = ${JSON.stringify(join(dir, "projects-added"))};
 const projects = [...${JSON.stringify(options.projects ?? [])}, ...(fs.existsSync(addedFile) ? fs.readFileSync(addedFile, "utf8").split("\\n").filter(Boolean) : [])];
+// T3's resolveProject (cli/thread.ts): the deepest project holding the folder; none, the same path in another checkout
+// of its git repository.
+const deepest = (at) => projects.filter((root) => at === root || at.startsWith(root + "/")).sort((a, b) => b.length - a.length)[0];
+const checkouts = ${JSON.stringify(options.checkouts ?? {})};
+const projectOf = (at) => {
+  const own = deepest(at);
+  if (own) return own;
+  const linked = Object.keys(checkouts).find((wt) => at === wt || at.startsWith(wt + "/"));
+  return linked ? deepest(checkouts[linked] + at.slice(linked.length)) : undefined;
+};
 const turnsFile = ${JSON.stringify(turnsLog)};
 const runFile = ${JSON.stringify(join(dir, "run-status"))};
 const turns = () => fs.existsSync(turnsFile) ? fs.readFileSync(turnsFile, "utf8").split("\\n").filter(Boolean).map((line) => JSON.parse(line)) : [];
@@ -274,7 +289,7 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
   process.stdout.write("Added project project:" + require("node:path").basename(root) + " (" + require("node:path").basename(root) + ") at " + root + ".\\n");
 } else if (args[0] === "thread" && args[1] === "start") {
   const cwd = fs.realpathSync(process.cwd());
-  const project = projects.find((root) => cwd === root || cwd.startsWith(root + "/"));
+  const project = projectOf(cwd);
   if (args[2] !== "." || !project) say("No T3 Code project matches '" + args[2] + "'. Pass a project id or a path inside a project.", 1);
   const text = args[3] === "-" ? fs.readFileSync(0, "utf8") : args[3];
   if (!text.trim()) say("The message is empty.", 1);
@@ -296,7 +311,7 @@ else if (args[0] === "auth" && args[1] === "session" && args[2] === "issue") {
   else process.stdout.write(JSON.stringify({ threadId: id, projectId: "project:" + require("node:path").basename(project), runId: "run:" + randomUUID() }) + "\\n");
 } else if (args[0] === "thread" && args[1] === "list") {
   const cwd = fs.realpathSync(process.cwd());
-  const project = projects.find((root) => cwd === root || cwd.startsWith(root + "/"));
+  const project = projectOf(cwd);
   if (!project) say("No T3 Code project matches '.'. Pass a project id or a path inside a project.", 1);
   const mine = started().filter((s) => s.project === project).reverse().map((s) => ({ threadId: s.id, title: s.title ?? "", status: "running", createdAt: s.createdAt, ...runsOf(s.id) }));
   process.stdout.write(JSON.stringify([...mine, ...(used[project] ?? []).map((t) => ({ status: "idle", createdAt: "2026-11-01T00:00:00.000Z", ...t }))]) + "\\n");

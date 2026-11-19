@@ -28,7 +28,11 @@ export function StartedBy({ launched, root, project }: { launched: InboxLaunchRe
       {inT3 ? (
         <>
           <span className="ib-tdot" aria-hidden="true" />
-          <span data-launch-t3="">In T3 Code{launched.inner?.model ? ` · ${launched.inner.model}` : ''}</span>
+          <span data-launch-t3="">
+            In T3 Code{launched.inner?.model ? ` · ${launched.inner.model}` : ''}
+            {/* T3 didn't take the person's model: it runs on T3's own, and says so. */}
+            {launched.t3?.declined && launched.inner?.model !== launched.t3.declined ? ` (T3 Code didn't take ${launched.t3.declined})` : ''}
+          </span>
         </>
       ) : (
         <LaunchChoiceMeta launch={launched} />

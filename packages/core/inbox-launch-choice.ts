@@ -231,15 +231,16 @@ export function t3NewestModelOf(stdout: string, driver: string): T3ModelPick | n
 /**
  * The model T3 lists first for this agent, from `orchestrator_capabilities` (T3's `OrchestratorMcpCapabilitiesResult`:
  * `providers[]` with `providerInstanceId`, `driverKind`, `models[].id`, `constraints`). T3 orders each list itself (the
- * person's favorites and its own preferences first), so its first model is T3's own pick for that agent. A provider of
- * the driver that T3 says can run work now (no `constraints`) is taken before one it says can't. Null when T3 lists none.
+ * person's favorites and its own preferences first), so its first model is T3's own pick for that agent. Only a
+ * provider T3 says can run work now (no `constraints`): one it says can't (signed out, no usage left) would fail its
+ * first turn in T3. Null when T3 lists none.
  */
 export function t3ListedModelOf(answer: unknown, driver: string): T3ModelPick | null {
   const providers = (answer as { providers?: unknown } | null)?.providers;
   if (!Array.isArray(providers)) return null;
   const ofDriver = (providers as { providerInstanceId?: unknown; driverKind?: unknown; models?: unknown; constraints?: unknown }[]).filter((p) => p?.driverKind === driver && Array.isArray(p.models));
   const ready = (p: { constraints?: unknown }) => !Array.isArray(p.constraints) || p.constraints.length === 0;
-  for (const provider of [...ofDriver.filter(ready), ...ofDriver.filter((p) => !ready(p))]) {
+  for (const provider of ofDriver.filter(ready)) {
     for (const entry of provider.models as { id?: unknown }[]) {
       const pick = t3PickOf(provider.providerInstanceId, entry?.id);
       if (pick) return pick;

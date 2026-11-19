@@ -1225,10 +1225,16 @@ export interface InboxLaunchRecord {
   t3?: InboxLaunchT3;
 }
 
-/** `InboxLaunchRecord.t3`. */
+/**
+ * `InboxLaunchRecord.t3`. With `refused`, what T3 refused, for the run line: `why` "no_model" (no model for that agent),
+ * "project" (it didn't add the folder); `declined`, the model it didn't take. Started (no `refused`) with `declined`:
+ * T3 didn't take the person's model, so the thread runs on T3's own.
+ */
 export interface InboxLaunchT3 {
   unavailable?: true;
   refused?: true;
+  why?: "no_model" | "project";
+  declined?: string;
 }
 
 /** The launch runs (or starts) as a T3 Code thread: it asked for T3 Code and didn't fall back to the background. */
@@ -1373,7 +1379,7 @@ export interface InboxRun {
    * `unavailable`: T3 Code was not open here, so it started in the background; `refused`: T3 Code said no, so it started
    * in the background. Absent: not a T3 Code start. Additive.
    */
-  t3?: { started?: true; unavailable?: true; refused?: true };
+  t3?: { started?: true; unavailable?: true; refused?: true; why?: "no_model" | "project"; declined?: string };
 }
 
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */

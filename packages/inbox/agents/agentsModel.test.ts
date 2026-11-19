@@ -127,6 +127,9 @@ test('the hover card says where and when from what the window has, and leaves ou
   // A T3 Code thread, once T3 said what it runs: the agent and model inside, in words.
   const t3 = agent('lch_t3', { host: 't3', launch: { id: 'lch_t3', thread_id: 't3', inner: { provider: 'claudeAgent', model: 'opus', agent: 'Claude Code' } } });
   expect(agentFacts({ agent: t3, machine: MAC, name: 'Checkout page', thread: null }, view(MAC, 'MacBook'), now).sub).toBe('T3 Code (Claude Code · opus) · billing-svc · MacBook');
+  // Before it connects, its row's host is still the person's agent: never "Claude Code (Claude Code · opus)".
+  const early = agent('lch_t3b', { host: 'claude-code', launch: { id: 'lch_t3b', thread_id: 't3b', t3: true, inner: { provider: 'claudeAgent', model: 'opus', agent: 'Claude Code' } } });
+  expect(agentFacts({ agent: early, machine: MAC, name: 'Checkout page', thread: null }, view(MAC, 'MacBook'), now).sub).toBe('T3 Code (Claude Code · opus) · billing-svc · MacBook');
 });
 
 test('a sidebar cookie from before Agents keeps its choice: Machines closed is Agents closed', async () => {

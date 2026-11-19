@@ -215,7 +215,8 @@ export function agentFacts(entry: AgentEntry, machine: MachineView | null, now: 
   const { agent } = entry;
   // An agent the Inbox started in T3 Code: the agent and model T3 runs its thread on ("T3 Code (Claude Code · opus)").
   const inner = launchInnerWords(agent.launch?.inner);
-  const host = inner ? `${agentHostName(agent.host)} (${inner})` : agentHostName(agent.host);
+  // Before the thread connects its host is still the person's agent: T3 Code is where it runs, so it says T3 Code.
+  const host = inner ? `${agent.launch?.t3 ? 'T3 Code' : agentHostName(agent.host)} (${inner})` : agentHostName(agent.host);
   const sub = [host, agent.project?.name, machine?.name].filter(Boolean).join(' · ');
   const away = machine && isAway(machine) ? awayLine(machine, now) : null;
   const state =

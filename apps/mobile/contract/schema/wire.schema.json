@@ -2556,6 +2556,17 @@
         "refused": {
           "type": "boolean",
           "const": true
+        },
+        "why": {
+          "type": "string",
+          "enum": [
+            "no_model",
+            "project"
+          ],
+          "x-open": true
+        },
+        "declined": {
+          "type": "string"
         }
       },
       "additionalProperties": true,
@@ -5188,6 +5199,17 @@
             "refused": {
               "type": "boolean",
               "const": true
+            },
+            "why": {
+              "type": "string",
+              "enum": [
+                "no_model",
+                "project"
+              ],
+              "x-open": true
+            },
+            "declined": {
+              "type": "string"
             }
           },
           "additionalProperties": true

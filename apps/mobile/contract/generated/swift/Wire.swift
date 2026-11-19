@@ -3863,14 +3863,18 @@ public enum InboxLaunchRexWhy: Codable, Hashable, Sendable, RawRepresentable {
 public struct InboxLaunchT3: Codable, Hashable, Sendable {
   public var unavailable: Bool?
   public var refused: Bool?
+  public var why: InboxLaunchT3Why?
+  public var declined: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["unavailable", "refused"]
+  static let knownKeys: Set<String> = ["unavailable", "refused", "why", "declined"]
 
-  public init(unavailable: Bool? = nil, refused: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(unavailable: Bool? = nil, refused: Bool? = nil, why: InboxLaunchT3Why? = nil, declined: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.unavailable = unavailable
     self.refused = refused
+    self.why = why
+    self.declined = declined
     self.unknownFields = unknownFields
   }
 
@@ -3878,6 +3882,8 @@ public struct InboxLaunchT3: Codable, Hashable, Sendable {
     let c = try decoder.container(keyedBy: WireKey.self)
     self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
+    self.why = try c.decodeIfPresent(InboxLaunchT3Why.self, forKey: WireKey("why"))
+    self.declined = try c.decodeIfPresent(String.self, forKey: WireKey("declined"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -3885,8 +3891,38 @@ public struct InboxLaunchT3: Codable, Hashable, Sendable {
     var c = encoder.container(keyedBy: WireKey.self)
     try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
+    try c.encodeIfPresent(self.declined, forKey: WireKey("declined"))
     try WireKey.write(unknownFields, to: &c)
   }
+}
+
+public enum InboxLaunchT3Why: Codable, Hashable, Sendable, RawRepresentable {
+  case noModel
+  case project
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxLaunchT3Why] = [.noModel, .project]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "no_model": self = .noModel
+    case "project": self = .project
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .noModel: return "no_model"
+    case .project: return "project"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
 /// From `packages/core/inbox-types.ts`.
@@ -7226,15 +7262,19 @@ public struct InboxRunT3: Codable, Hashable, Sendable {
   public var started: Bool?
   public var unavailable: Bool?
   public var refused: Bool?
+  public var why: InboxRunT3Why?
+  public var declined: String?
   /// Fields this app does not know: kept, and written back when encoded.
   public var unknownFields: [String: JSONValue] = [:]
 
-  static let knownKeys: Set<String> = ["started", "unavailable", "refused"]
+  static let knownKeys: Set<String> = ["started", "unavailable", "refused", "why", "declined"]
 
-  public init(started: Bool? = nil, unavailable: Bool? = nil, refused: Bool? = nil, unknownFields: [String: JSONValue] = [:]) {
+  public init(started: Bool? = nil, unavailable: Bool? = nil, refused: Bool? = nil, why: InboxRunT3Why? = nil, declined: String? = nil, unknownFields: [String: JSONValue] = [:]) {
     self.started = started
     self.unavailable = unavailable
     self.refused = refused
+    self.why = why
+    self.declined = declined
     self.unknownFields = unknownFields
   }
 
@@ -7243,6 +7283,8 @@ public struct InboxRunT3: Codable, Hashable, Sendable {
     self.started = try c.decodeIfPresent(Bool.self, forKey: WireKey("started"))
     self.unavailable = try c.decodeIfPresent(Bool.self, forKey: WireKey("unavailable"))
     self.refused = try c.decodeIfPresent(Bool.self, forKey: WireKey("refused"))
+    self.why = try c.decodeIfPresent(InboxRunT3Why.self, forKey: WireKey("why"))
+    self.declined = try c.decodeIfPresent(String.self, forKey: WireKey("declined"))
     self.unknownFields = try WireKey.rest(of: c, known: Self.knownKeys)
   }
 
@@ -7251,8 +7293,38 @@ public struct InboxRunT3: Codable, Hashable, Sendable {
     try c.encodeIfPresent(self.started, forKey: WireKey("started"))
     try c.encodeIfPresent(self.unavailable, forKey: WireKey("unavailable"))
     try c.encodeIfPresent(self.refused, forKey: WireKey("refused"))
+    try c.encodeIfPresent(self.why, forKey: WireKey("why"))
+    try c.encodeIfPresent(self.declined, forKey: WireKey("declined"))
     try WireKey.write(unknownFields, to: &c)
   }
+}
+
+public enum InboxRunT3Why: Codable, Hashable, Sendable, RawRepresentable {
+  case noModel
+  case project
+  /// A value this app does not know (a newer Inbox).
+  case unknown(String)
+
+  public static let known: [InboxRunT3Why] = [.noModel, .project]
+
+  public init(rawValue: String) {
+    switch rawValue {
+    case "no_model": self = .noModel
+    case "project": self = .project
+    default: self = .unknown(rawValue)
+    }
+  }
+
+  public var rawValue: String {
+    switch self {
+    case .noModel: return "no_model"
+    case .project: return "project"
+    case .unknown(let value): return value
+    }
+  }
+
+  public init(from decoder: Decoder) throws { self.init(rawValue: try decoder.singleValueContainer().decode(String.self)) }
+  public func encode(to encoder: Encoder) throws { var c = encoder.singleValueContainer(); try c.encode(rawValue) }
 }
 
 public struct InboxRunTrust: Codable, Hashable, Sendable {
@@ -9376,6 +9448,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   case invalidSupersedes
   case lanUnavailable
   case launchInRex
+  case launchInT3
   case launchNotFound
   case launchOff
   case linkFailed
@@ -9448,7 +9521,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
   /// A value this app does not know (a newer Inbox).
   case unknown(String)
 
-  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .invalidDone, .invalidSupersedes, .lanUnavailable, .launchInRex, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
+  public static let known: [WireErrorCode] = [.ackAfterReply, .ackNotAllowed, .ackSent, .ackStale, .actionAlreadySent, .actionClosed, .agentHasIt, .agentNotAcceptedHere, .agentUnavailable, .alreadyCombined, .alreadyDelivered, .alreadyOwner, .annotationClosed, .annotationNotAllowed, .annotationNotFound, .appNotAvailable, .artifactNotFound, .artifactPinsNewer, .askBusy, .askDamaged, .askFull, .askNoBridge, .askNoLivePath, .askNoOwner, .askUnreadable, .attachmentChangedType, .attachmentMissing, .attachmentNotAudio, .attachmentNotFound, .attachmentNotHtml, .attachmentNotImage, .attachmentNotText, .attachmentNotVideo, .attachmentTooLarge, .batchIdReused, .cannotTakeBack, .cardBacklogPersonOnly, .cardDroppedByPerson, .cardNoProject, .cardNotFound, .cardOtherProject, .cardPersonOnly, .codeNotAcceptedHere, .codeReviewOff, .configNotSaved, .cookieHostEnvDecides, .cookieHostUrlHostInUse, .crossOrigin, .deviceNotFound, .deviceRevoked, .deviceRouteNotFound, .deviceTokenInvalid, .deviceTokenMissing, .draftConflict, .experimentalEnvDecides, .folderMissing, .folderUnavailable, .guideNotFound, .handoffSettled, .idempotencyKeyReused, .initiativeExists, .initiativeNotFound, .initiativePersonOnly, .internalError, .invalidDone, .invalidSupersedes, .lanUnavailable, .launchInRex, .launchInT3, .launchNotFound, .launchOff, .linkFailed, .linkToSelf, .linkedPageMissing, .linkedPageNotHtml, .linkedPageOutside, .linkedPageRefused, .linkedPageTooLarge, .liveNotAnswering, .liveSiteNotFound, .liveUnavailable, .localOnly, .machineMismatch, .machineNeedsUpdate, .machineNotAcceptedHere, .machineNotLinked, .machineUnreachable, .machinesViewRefused, .markupTooLarge, .messageNotFound, .modeNeedsLive, .noWayBack, .notAddressed, .nothingToReask, .nothingToTidy, .offerExpired, .openNotAllowed, .openUnavailable, .originNotAllowed, .ownerOnly, .pairingCodeWrong, .pinsNewer, .priorityNewer, .projectNotFound, .projectUnresolved, .questionAlreadySent, .questionNotFound, .questionOpen, .questionRevisionConflict, .questionSetAside, .questionSuperseded, .relayUploadUnavailable, .scratchUnavailable, .sendNowUnavailable, .sessionNotLive, .sessionStillLive, .snoozePast, .snoozesNewer, .systemOff, .tagHostMismatch, .tagNeedsUpdate, .tagsNewer, .tailnetUnavailable, .tailscaleEnvDecides, .tailscaleUnavailable, .takenBack, .threadMovedOn, .threadNameTaken, .threadNotFound, .threadResolved, .trustFailed, .trustWarningChanged, .uploadNoSpace, .uploadNotFound, .uploadRefused, .uploadTooLarge, .validationError, .windowOnly]
 
   public init(rawValue: String) {
     switch rawValue {
@@ -9520,6 +9593,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case "invalid_supersedes": self = .invalidSupersedes
     case "lan_unavailable": self = .lanUnavailable
     case "launch_in_rex": self = .launchInRex
+    case "launch_in_t3": self = .launchInT3
     case "launch_not_found": self = .launchNotFound
     case "launch_off": self = .launchOff
     case "link_failed": self = .linkFailed
@@ -9663,6 +9737,7 @@ public enum WireErrorCode: Codable, Hashable, Sendable, RawRepresentable {
     case .invalidSupersedes: return "invalid_supersedes"
     case .lanUnavailable: return "lan_unavailable"
     case .launchInRex: return "launch_in_rex"
+    case .launchInT3: return "launch_in_t3"
     case .launchNotFound: return "launch_not_found"
     case .launchOff: return "launch_off"
     case .linkFailed: return "link_failed"
@@ -9811,6 +9886,7 @@ extension WireErrorCode {
     "invalid_supersedes": 422,
     "lan_unavailable": 409,
     "launch_in_rex": 409,
+    "launch_in_t3": 409,
     "launch_not_found": 404,
     "launch_off": 404,
     "link_failed": 502,

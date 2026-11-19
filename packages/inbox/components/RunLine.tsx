@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { inboxRunInRex, inboxRunInT3, type InboxRun } from '@plannotator/core/inbox-types';
-import { INBOX_REX_SERVER_AWAY, INBOX_REX_SHARED, INBOX_RUN_REX_NOT_CONNECTED, INBOX_RUN_T3_NOT_CONNECTED, INBOX_T3_NOT_HERE, INBOX_T3_REFUSED, INBOX_TURN_FAILED_WORDS } from '@plannotator/core/inbox-run-line';
+import { INBOX_REX_SERVER_AWAY, INBOX_REX_SHARED, INBOX_RUN_REX_NOT_CONNECTED, INBOX_RUN_T3_NOT_CONNECTED, INBOX_T3_NOT_HERE, INBOX_TURN_FAILED_WORDS, inboxT3RefusedWords } from '@plannotator/core/inbox-run-line';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi } from '../api';
 import { whenTime } from '../format';
@@ -92,7 +92,7 @@ export function RunLine({
       else await inboxApi.launchOpen(run.launch_id);
       onChanged();
     } catch (cause) {
-      if (what === 'retry' && cause instanceof InboxApiError && cause.code === 'launch_in_rex') {
+      if (what === 'retry' && cause instanceof InboxApiError && (cause.code === 'launch_in_rex' || cause.code === 'launch_in_t3')) {
         setNote(cause.message);
         return;
       }
@@ -471,7 +471,7 @@ export function RunLine({
           )}
           {run.t3?.refused && (run.state === 'starting' || run.state === 'working') && (
             <span className="ib-run-sub" data-run-t3-refused="">
-              {INBOX_T3_REFUSED}
+              {inboxT3RefusedWords(run.t3)}
             </span>
           )}
           {run.rex?.refused && (run.state === 'starting' || run.state === 'working') && (

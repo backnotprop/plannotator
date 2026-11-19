@@ -25,7 +25,7 @@ test("a folder T3 doesn't know, just added, with no default model: added once wi
   expect(t.t3!.starts()).toEqual([expect.objectContaining({ id: session, provider: "claudeAgent", model: "opus" })]);
   const verbs = t.t3!.calls().map((args) => args.slice(0, args[0] === "auth" ? 3 : 2).join(" "));
   // The revoke runs beside the start (not waited on), so it may be logged either side of it.
-  expect(verbs.filter((v) => v !== "auth session revoke")).toEqual(["thread list", "project add", "thread list", "auth session issue", "thread start"]);
+  expect(verbs.filter((v) => v !== "auth session revoke")).toEqual(["project add", "thread list", "auth session issue", "thread start"]);
   await until("revoked", () => t.t3!.revoked().length === 1);
 });
 

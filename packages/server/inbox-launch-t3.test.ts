@@ -116,6 +116,58 @@ describe("starting an agent in T3 Code", () => {
     expect(t.t3!.starts()[0]).toMatchObject({ cwd: t.shop, provider: "claudeAgent", model: "opus" });
   });
 
+  test("the thread runs in exactly the Inbox's folder: not in a T3 project that holds it, nor in another checkout of its repository", async () => {
+    // T3 has the folder above it as a project: without its own, T3 would run the thread there.
+    const nested = setup({ used: USED, t3Projects: ({ parent }) => [parent] });
+    const root = await nested.send("Tighten the checkout copy.");
+    await until("the thread", () => nested.store.message(root.id)!.launch!.session_ref);
+    expect(nested.t3!.added()).toEqual([nested.shop]);
+    expect(nested.t3!.starts()[0]).toMatchObject({ cwd: nested.shop, project: nested.shop });
+    // The folder is a git worktree of a repository T3 has: T3 would run it in that checkout.
+    const linked = setup({ t3Projects: ({ parent }) => [join(parent, "shop-main")], checkouts: ({ shop, parent }) => ({ [shop]: join(parent, "shop-main") }), capabilities: CAPABILITIES });
+    const second = await linked.send("Tighten the checkout copy.");
+    await until("the thread", () => linked.store.message(second.id)!.launch!.session_ref);
+    expect(linked.t3!.starts()[0]).toMatchObject({ project: linked.shop });
+  });
+
+  test("the person's model and effort from New message, as Rex starts it: passed to T3 as picked, with no token", async () => {
+    const t = setup({ capabilities: CAPABILITIES });
+    const root = await t.send("Tighten the checkout copy.", "claude-code", "Checkout copy", { model: "haiku", effort: "high" });
+    await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.starts()).toEqual([["thread", "start", ".", "-", "--title=Checkout copy", "--provider=claudeAgent", "--model=haiku", "--option=effort=high", "--json"]]);
+    expect(t.store.message(root.id)!.launch!.inner).toEqual({ provider: "claudeAgent", model: "haiku", agent: "Claude Code" });
+    expect(t.t3!.issued()).toEqual([]);
+  });
+
+  test("a model T3 refuses: once more on T3's own (the project's newest, else its list), and the thread says T3 didn't take the person's", async () => {
+    // The person's pick refused: the newest thread's model, no token.
+    const t = setup({ used: USED, capabilities: CAPABILITIES });
+    const root = await t.send("Tighten the checkout copy.", "claude-code", "Checkout copy", { model: "retired", effort: "high" });
+    await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.t3!.starts().map((s) => s.model)).toEqual(["sonnet"]);
+    expect(t.starts().map((args) => args.filter((a) => a.startsWith("--model") || a.startsWith("--option")))).toEqual([["--model=retired", "--option=effort=high"], ["--model=sonnet"]]);
+    expect(t.store.message(root.id)!.launch).toMatchObject({ t3: { declined: "retired" }, inner: { model: "sonnet" } });
+    expect(t.t3!.issued()).toEqual([]);
+    // The project's newest model refused: T3's listed one, through the token.
+    const old = setup({ used: [{ threadId: "thread:project:p:9", title: "Old", providerInstanceId: "claudeAgent", model: "retired" }], capabilities: CAPABILITIES });
+    const second = await old.send("Tighten the checkout copy.");
+    await until("the thread", () => old.store.message(second.id)!.launch!.session_ref);
+    expect(old.t3!.starts().map((s) => s.model)).toEqual(["opus"]);
+    expect(old.t3!.issued()).toHaveLength(1);
+    expect(old.store.message(second.id)!.launch!.t3).toEqual({});
+    expect(old.background).toEqual([]);
+  });
+
+  test("a start in the background leaves a reply written meanwhile on its placeholder, as before; only a start that took the first turn (T3 Code) moves it", async () => {
+    const t = setup({ startIn: "inbox" });
+    const root = await t.prepare("Tighten the checkout copy.");
+    const early = t.store.sendReply(root.id, { words: "Keep the button label.", idempotency_key: "early-bg" }).reply!;
+    const placeholder = early.to!.session;
+    t.launch.begin(root);
+    await until("started", () => t.store.message(root.id)!.launch!.session_ref);
+    expect(t.store.message(early.id)!.to!.session).toBe(placeholder);
+  });
+
   test("a routine's run never starts in T3 Code: in the background, as with Rex", async () => {
     const t = setup({ used: USED });
     const message = await t.prepare("Nightly totals.", "claude-code", "Totals", { background: true });
@@ -142,7 +194,7 @@ describe("when T3 Code can't start it, the agent starts in the background and th
     const after = t.store.message(root.id)!;
     expect(session).toStartWith("bg-");
     expect(after.to).toEqual({ host: "claude-code", session });
-    expect(after.launch!.t3).toEqual({ [why]: true });
+    expect(after.launch!.t3).toMatchObject({ [why]: true });
     expect(after.launch!.inner).toBeUndefined();
     expect(t.background.map((b) => b.agent)).toEqual(["claude-code"]);
     // Not delivered by the start: the agent's own wake hands it the message, as for any background start.
@@ -157,7 +209,8 @@ describe("when T3 Code can't start it, the agent starts in the background and th
       const t = setup({ used: USED, capabilities: CAPABILITIES });
       t.t3!.setState(state);
       await fellBack(t, "unavailable");
-      expect(t.t3!.calls().filter((args) => args[0] !== "thread" || args[1] !== "list")).toEqual([]);
+      // At most the folder's `project add` and `thread list`, which say T3 isn't running.
+      expect(t.t3!.calls().filter((args) => !(args[0] === "thread" && args[1] === "list") && !(args[0] === "project" && args[1] === "add"))).toEqual([]);
       expect(t.t3!.issued()).toEqual([]);
     }
   });
@@ -171,6 +224,7 @@ describe("when T3 Code can't start it, the agent starts in the background and th
     const t = setup({ capabilities: CAPABILITIES });
     t.t3!.refuseAuth();
     await fellBack(t, "refused");
+    expect(t.store.message(t.store.launchedRoots()[0]!.id)!.launch!.t3).toEqual({ refused: true, why: "no_model" });
     expect(t.t3!.starts()).toEqual([]);
     expect(t.mcp.capabilityCalls).toBe(0);
   });
@@ -190,12 +244,14 @@ describe("when T3 Code can't start it, the agent starts in the background and th
     expect(t.mcp.capabilityCalls).toBe(0);
   });
 
-  test("T3 refuses the start (a model it no longer has), or won't add the folder: refused", async () => {
+  test("T3 refuses the model and lists none to try instead, or won't add the folder: refused, and the record says which", async () => {
     const t = setup({ used: [{ threadId: "thread:project:p:9", title: "Old", providerInstanceId: "claudeAgent", model: "retired" }] });
-    await fellBack(t, "refused");
+    const { root } = await fellBack(t, "refused");
+    expect(t.store.message(root.id)!.launch!.t3).toEqual({ refused: true, declined: "retired" });
     const unknown = setup({ known: false, capabilities: CAPABILITIES });
     unknown.t3!.refuseProjectAdd();
-    await fellBack(unknown, "refused");
+    const second = await fellBack(unknown, "refused");
+    expect(unknown.store.message(second.root.id)!.launch!.t3).toEqual({ refused: true, why: "project" });
     expect(unknown.t3!.starts()).toEqual([]);
   });
 });
@@ -205,8 +261,8 @@ describe("an agent that runs in T3 Code", () => {
     const t = setup({ used: USED });
     const root = await t.send("Tighten the checkout copy.");
     await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
-    expect(await t.route(root.launch!.id, "stop")).toEqual({ ok: false, message: INBOX_RUN_IN_T3_STOP });
-    expect(await t.route(root.launch!.id, "open")).toEqual({ ok: false, message: INBOX_RUN_IN_T3_OPEN });
+    expect(await t.route(root.launch!.id, "stop")).toEqual({ ok: false, message: INBOX_RUN_IN_T3_STOP, code: "launch_in_t3" });
+    expect(await t.route(root.launch!.id, "open")).toEqual({ ok: false, message: INBOX_RUN_IN_T3_OPEN, code: "launch_in_t3" });
     expect(t.starts()).toHaveLength(1);
     expect(t.launch.runOfMessage(root.id)?.state ?? null).not.toBe("stopped");
   });
@@ -284,7 +340,7 @@ describe("an agent that runs in T3 Code", () => {
     const line = await until("the line", () => t.launch.runOfMessage(root.id));
     expect(line).toMatchObject({ state: "failed", cause: "Look at its thread there.", no_retry: true, t3: { started: true } });
     // An older window still offers Try again: refused in Rex's words, and nothing starts, here or in the background.
-    expect(await t.route(root.launch!.id, "retry")).toEqual({ ok: false, message: INBOX_RUN_IN_T3_AGAIN });
+    expect(await t.route(root.launch!.id, "retry")).toEqual({ ok: false, message: INBOX_RUN_IN_T3_AGAIN, code: "launch_in_t3" });
     expect(t.starts()).toHaveLength(1);
     expect(t.background).toEqual([]);
     t.heard.set(session, t.clock.now);
@@ -304,6 +360,22 @@ describe("an agent that runs in T3 Code", () => {
     t.t3!.setRunStatus("completed");
     t.clock.now += 61_000;
     expect(await until("the line", () => t.launch.runOfMessage(root.id))).toMatchObject({ state: "failed", t3: { started: true } });
+  });
+});
+
+describe("a T3 run that failed at once", () => {
+  test("T3 says the thread's run failed (its agent not signed in there): the not-connected line at once, not after the ten-minute wait", async () => {
+    const t = setup({ used: USED });
+    t.t3!.setRunStatus("failed");
+    const root = await t.send("Tighten the checkout copy.");
+    await until("the thread", () => t.store.message(root.id)!.launch!.session_ref);
+    // Past the start's own grace, well inside the ten-minute wait.
+    t.clock.now += 2 * 60_000;
+    const line = await until("the line", () => {
+      const run = t.launch.runOfMessage(root.id);
+      return run?.state === "failed" ? run : null;
+    });
+    expect(line).toMatchObject({ cause: "Look at its thread there.", t3: { started: true } });
   });
 });
 
@@ -347,6 +419,8 @@ describe("T3 start pieces", () => {
     expect(t3ListedModelOf(CAPABILITIES, "claudeAgent")).toEqual({ provider: "claudeAgent", model: "opus" });
     const blocked = { providers: [{ providerInstanceId: "claude-work", driverKind: "claudeAgent", models: [{ id: "haiku" }], constraints: [{ kind: "signed-out" }] }, CAPABILITIES.providers[0]] };
     expect(t3ListedModelOf(blocked, "claudeAgent")).toEqual({ provider: "claudeAgent", model: "opus" });
+    // Only providers that can run now: one T3 says is signed out would fail its first turn there.
+    expect(t3ListedModelOf({ providers: [blocked.providers[0]] }, "claudeAgent")).toBeNull();
     expect(t3ListedModelOf({ providers: [] }, "claudeAgent")).toBeNull();
     expect(t3ListedModelOf(null, "claudeAgent")).toBeNull();
   });
@@ -373,7 +447,8 @@ describe("T3 start pieces", () => {
   test("a thread's turn as `thread show` says it: over when idle or its run ended; not while a run is active or it waits on the person; unknown when T3 didn't say", () => {
     const show = (thread: Record<string, unknown>) => `${JSON.stringify({ thread: { threadId: "t", ...thread }, messages: [] })}\n`;
     expect(t3TurnEndedOf(show({ status: "idle", activeRunId: null, pendingRequestCount: 0 }))).toBe(true);
-    for (const status of ["completed", "failed", "cancelled", "interrupted", "rolled_back"]) expect(t3TurnEndedOf(show({ status, activeRunId: null }))).toBe(true);
+    for (const status of ["completed", "cancelled", "interrupted", "rolled_back"]) expect(t3TurnEndedOf(show({ status, activeRunId: null }))).toBe(true);
+    expect(t3TurnEndedOf(show({ status: "failed", activeRunId: null }))).toBe("failed");
     expect(t3TurnEndedOf(show({ status: "running", activeRunId: "run:1" }))).toBe(false);
     expect(t3TurnEndedOf(show({ status: "idle", activeRunId: null, pendingRequestCount: 1 }))).toBe(false);
     expect(t3TurnEndedOf(show({}))).toBeNull();

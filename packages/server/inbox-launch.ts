@@ -110,7 +110,7 @@ import { createOpenCodeLaunchHost } from "./inbox-launch-opencode";
 import { createT3LaunchHost } from "./inbox-launch-t3";
 import { launchPlainEnv, launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { pathFoldersOf } from "./env-path";
-import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchTrustOffer } from "./inbox-launch-host";
+import type { LaunchAvailability, LaunchDelivery, LaunchHost, LaunchHostContext, LaunchHostPermissions, LaunchHostResult, LaunchLive, LaunchSessions, LaunchStartFailure, LaunchStartWhy, LaunchTrustOffer } from "./inbox-launch-host";
 import { openPermissionSince } from "./inbox-launch-permission";
 import { INBOX_CROSS_SITE_BODY, INBOX_MACHINE_WINDOW_ONLY_BODY, INBOX_WINDOW_ONLY_BODY, isCrossSiteRequest, isWindowRequest } from "./inbox-cross-site";
 import { samePlace } from "./agent-files";
@@ -219,7 +219,7 @@ interface Memo {
    * A `turnEnded` host (T3 Code): its app's last word on whether the session's turn ended (`value`, null when it
    * couldn't be asked), and when it was asked; `asking` while a question runs.
    */
-  ended?: { at: number; value: boolean | null } | null;
+  ended?: { at: number; value: boolean | "failed" | null } | null;
   endedAsking?: boolean;
 }
 
@@ -556,6 +556,8 @@ export function createInboxLaunch(options: {
   /** By each host's own `agent`, so the key a record is looked up by is the agent the host writes. */
   const hosts = Object.fromEntries([...ownHosts, ...(options.hosts?.(context) ?? [])].map((host) => [host.agent, host])) as Record<string, AgentHost>;
   const hostList: AgentHost[] = Object.values(hosts);
+  /** Whose trust a folder needs: the launch's own agent's, also when T3 Code runs it (the same agent runs in that folder). */
+  const trustHostOf = (launch: InboxLaunchRecord, host: LaunchHost): LaunchHost => (host === t3 && Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : host);
   /** The host of a launch's agent; null for an agent with no host here. One that asked for T3 Code and didn't fall back: T3 Code's. */
   const hostOf = (launch: InboxLaunchRecord): LaunchHost | null => {
     if (inboxLaunchInT3(launch) && Object.hasOwn(INBOX_T3_DRIVERS, launch.agent)) return t3;
@@ -714,16 +716,16 @@ export function createInboxLaunch(options: {
   /** How often a `turnEnded` host's app is asked again while its session has not reached the Inbox. */
   const TURN_ENDED_TTL_MS = 60_000;
   /**
-   * Whether the session's turn has ended by its app's last word (true), or the app can't be asked (null, which counts
-   * as ended). Not asked yet, or a turn that runs: false. Asks again in the background once the word is a minute old,
-   * but never after the app said the turn ended: that word can't change the line any more.
+   * Whether the session's turn has ended by its app's last word (true; "failed": its run failed), or the app can't be
+   * asked (null, which counts as ended). Not asked yet, or a turn that runs: false. Asks again in the background once
+   * the word is a minute old, but never after the app said the turn ended: that word can't change the line any more.
    * No `turnEnded` member: true.
    */
-  const quietTurnEnded = (host: LaunchHost, launch: InboxLaunchRecord, memo: Memo): boolean => {
+  const quietTurnEnded = (host: LaunchHost, launch: InboxLaunchRecord, memo: Memo): boolean | "failed" => {
     if (!host.turnEnded) return true;
     const ref = launch.session_ref;
     if (!ref) return false;
-    if (memo.ended?.value === true) return true;
+    if (memo.ended?.value === true || memo.ended?.value === "failed") return memo.ended.value;
     if (!memo.endedAsking && (!memo.ended || now() - memo.ended.at >= TURN_ENDED_TTL_MS)) {
       memo.endedAsking = true;
       void host
@@ -751,8 +753,12 @@ export function createInboxLaunch(options: {
     // The wait counts from the start, or from this Inbox's own start after a restart (what it heard before is gone);
     // and the line shows only once the agent's app says the turn ended (or can't be asked): a session at work in a
     // long first turn is never called not connected.
+    // A run its app says failed (an agent not signed in there) never reached the Inbox and won't: the line at once.
     const heard = host.connectWaitMs ? heardFrom(root) : null;
-    if (heard === false && live && !live.busy && now() - Math.max(memo.startedAt, bootAt) >= host.connectWaitMs! && quietTurnEnded(host, launch, memo)) live = null;
+    if (heard === false && live && !live.busy) {
+      const ended = quietTurnEnded(host, launch, memo);
+      if (ended === "failed" || (ended && now() - Math.max(memo.startedAt, bootAt) >= host.connectWaitMs!)) live = null;
+    }
     // In Rex: the host has no word on it (Rex runs it); its Rex pane's status says when it waits on the person.
     const inRex = inboxLaunchInRex(launch);
     const rexStatus = inRex && root.to ? (options.rexStatus?.(root.to.session) ?? null) : null;
@@ -800,7 +806,7 @@ export function createInboxLaunch(options: {
       restartable: !isAppOwned(launch),
       // In Rex its tab is the way in: no command opens it elsewhere.
       attachCommand: inRex ? null : host.attach(launch),
-      ...(launch.t3 ? { t3: { ...(inboxLaunchInT3(launch) && launch.session_ref ? { started: true as const } : {}), ...(launch.t3.unavailable ? { unavailable: true as const } : {}), ...(launch.t3.refused ? { refused: true as const } : {}) } } : {}),
+      ...(launch.t3 ? { t3: { ...(inboxLaunchInT3(launch) && launch.session_ref ? { started: true as const } : {}), ...(launch.t3.unavailable ? { unavailable: true as const } : {}), ...(launch.t3.refused ? { refused: true as const } : {}), ...(launch.t3.why ? { why: launch.t3.why } : {}), ...(launch.t3.declined ? { declined: launch.t3.declined } : {}) } } : {}),
       ...(launch.rex ? { rex: { line: launch.rex.line ?? null, ...(launch.rex.unavailable ? { unavailable: true as const, ...(launch.rex.why === "server" || launch.rex.why === "shared" ? { why: launch.rex.why } : {}) } : {}), ...(launch.rex.refused ? { refused: true as const } : {}), ...(rexWaiting ? { waiting: rexWaiting } : {}), ...(inRex && memo.rexCheck?.held ? { held: memo.rexCheck.held } : {}), ...(inRex && ownPaneOf(launch) ? { stops: true as const } : {}) } } : {}),
       permissionSince: openPermissionSince(store, root.thread_id),
       ...(launch.made_folder || launch.clone ? { shownFolder: options.displayFolder(launch.folder) } : {}),
@@ -998,8 +1004,7 @@ export function createInboxLaunch(options: {
     try {
       // The person's login env, read for this start only (after the Send answered; never kept).
       const login = await readLogin();
-      // In T3 Code the folder is its own agent's all the same (a fallback starts it there too).
-      await trustMadeFolder(launch, host === t3 && Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : host);
+      await trustMadeFolder(launch, trustHostOf(launch, host));
       // A reply's launch takes its thread's name.
       const head = root.id === root.thread_id ? root : (store.message(root.thread_id) ?? root);
       const name = head.thread_name ?? head.subject ?? "Inbox";
@@ -1014,6 +1019,8 @@ export function createInboxLaunch(options: {
       // the line says why, as for Rex.
       let used = host;
       const t3Away = host === t3 && !result.ok && "away" in result && result.away ? result.away : null;
+      const refused = result as { why?: LaunchStartWhy; declined?: string };
+      const t3Said: Pick<NonNullable<InboxLaunchRecord["t3"]>, "why" | "declined"> | null = t3Away ? { ...(refused.why ? { why: refused.why } : {}), ...(refused.declined ? { declined: refused.declined } : {}) } : null;
       const own = t3Away && Object.hasOwn(hosts, launch.agent) ? hosts[launch.agent]! : null;
       if (t3Away) {
         startLog(launch.id, `T3 Code ${t3Away === "absent" ? "isn't open" : "said no"} (${result.ok ? "" : result.text}): starting in the background`);
@@ -1022,7 +1029,14 @@ export function createInboxLaunch(options: {
           result = await own.start(launch, { name, login });
         }
       }
-      const t3Record = t3Away ? (t3Away === "absent" ? { unavailable: true as const } : { refused: true as const }) : undefined;
+      // What T3 refused rides along (the line says it), and a start whose model T3 didn't take keeps that model's name.
+      const t3Record: InboxLaunchRecord["t3"] = t3Away
+        ? t3Away === "absent"
+          ? { unavailable: true }
+          : { refused: true, ...(t3Said?.why ? { why: t3Said.why } : {}), ...(t3Said?.declined ? { declined: t3Said.declined } : {}) }
+        : result.ok && "declined" in result && result.declined
+          ? { declined: result.declined }
+          : undefined;
       // Rex not here, or it said no: it started in the background, and the line says why.
       const rex = !wantsRex ? undefined : away === "refused" ? { refused: true as const } : away ? { unavailable: true as const, ...(away === "server" || away === "shared" ? { why: away } : {}) } : viaRex?.ok && viaRex.line ? rexRecord(viaRex.line, viaRex.pane) : undefined;
       // Deleted while it started: the session it made goes too (one in Rex is Rex's: left), and the thread stays as the person left it.
@@ -1149,8 +1163,10 @@ ${result.text}`);
       }
       // Done. What it brings decides whether it starts without asking (decision 4a).
       let brings: string[] = [];
-      if (!host.trusts(launch.folder)) {
-        const offer = host.trustOffer?.({ folder: launch.folder, scratch: false }) ?? null;
+      // Started in T3 Code, the agent inside is still the person's own: its trust decides, as for any start.
+      const trusting = trustHostOf(launch, host);
+      if (!trusting.trusts(launch.folder)) {
+        const offer = trusting.trustOffer?.({ folder: launch.folder, scratch: false }) ?? null;
         if (offer) {
           const reading = offer.read();
           if (reading.warns) brings = bringsOf(reading.facts);
@@ -1838,14 +1854,14 @@ ${result.text}`);
       case "stop":
         // An agent T3 Code runs: the Inbox can't stop it, and saying "stopped" would be false. Said in words an older
         // linked window (which still offers Stop) shows as it is.
-        if (isAppOwned(launch)) throw new InboxError("validation_error", INBOX_RUN_IN_T3_STOP);
+        if (isAppOwned(launch)) throw new InboxError("launch_in_t3", INBOX_RUN_IN_T3_STOP);
         return json({ run: await stopLaunch(root, host) });
       case "open": {
         if (via === "tailnet") return localOnly();
         // In Rex its tab is the way in: Terminal would run a second copy (or a command that fails).
         if (inboxLaunchInRex(launch)) throw new InboxError("launch_in_rex", INBOX_RUN_IN_REX_OPEN);
         // In T3 Code its thread is the way in.
-        if (isAppOwned(launch)) throw new InboxError("validation_error", INBOX_RUN_IN_T3_OPEN);
+        if (isAppOwned(launch)) throw new InboxError("launch_in_t3", INBOX_RUN_IN_T3_OPEN);
         const e = await environment();
         // osascript is what decides, not the platform, so the e2e specs' fake runs on a Linux CI runner too. Asked
         // first: `terminal` may hand a session over, and a refused Open must change nothing.
@@ -2008,7 +2024,7 @@ ${result.text}`);
       if (runOfRoot(root)?.state !== "failed") throw new InboxError("validation_error", "That launch did not fail.");
       // T3 Code runs the thread it made: nothing here starts it again, and the line stays as it reads (an older window
       // still offers Try again; it is told why, and nothing changes).
-      if (isAppOwned(launch) && launch.session_ref) throw new InboxError("validation_error", INBOX_RUN_IN_T3_AGAIN);
+      if (isAppOwned(launch) && launch.session_ref) throw new InboxError("launch_in_t3", INBOX_RUN_IN_T3_AGAIN);
       if (launch.session_ref && root.to && !root.to.session.startsWith("launch:")) respawn(root, host, memo.respawn?.for ?? root.id);
       // No session was made: a first start, not "again".
       else void run(root, host, false);
@@ -2235,12 +2251,12 @@ ${result.text}`);
       // Lists not read yet (a slow CLI) check the tokens only: a slow CLI never refuses the start.
       const lists = host.choices ? await withinLaunchWait(host.choices()) : null;
       if (target.choice && !host.choices) throw new InboxError("validation_error", `${host.name} takes no model or effort from the Inbox. Nothing was sent.`, { field: "to.launch.model" });
-      const modelEfforts = target.choice?.model ? lists?.model_efforts?.[target.choice.model] : undefined;
-      if (target.choice?.effort && lists && !modelEfforts && !lists.efforts.includes(target.choice.effort)) {
-        throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ") || "none"}. Nothing was sent.`, { field: "to.launch.effort" });
+      if (target.choice?.effort && lists && !lists.efforts.includes(target.choice.effort)) {
+        throw new InboxError("validation_error", `${host.name} takes ${lists.effort_word.toLowerCase()} ${lists.efforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
+      const modelEfforts = target.choice?.model ? lists?.model_efforts?.[target.choice.model] : undefined;
       if (target.choice?.effort && modelEfforts && !modelEfforts.includes(target.choice.effort)) {
-        throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ") || "none"}. Nothing was sent.`, { field: "to.launch.effort" });
+        throw new InboxError("validation_error", `${target.choice.model} takes ${lists!.effort_word.toLowerCase()} ${modelEfforts.join(", ")}. Nothing was sent.`, { field: "to.launch.effort" });
       }
       // OpenCode's own agent (build, plan, …): one it lists, and only for an agent CLI that lists them.
       const primaryAgent = target.choice?.primary_agent;

@@ -74,6 +74,8 @@ function backgroundHost(agent: InboxLaunchAgent, name: string, started: { agent:
     name,
     shellNames: [],
     available: async () => ({ ok: true, version: "1.0.0" }),
+    // What New message offers it: a model and an effort the person may pick ("retired": one T3 no longer has).
+    choices: async () => ({ models: agent === "codex" ? ["gpt-5.5", "gpt-5.5-mini"] : ["opus", "sonnet", "haiku", "retired"], efforts: ["low", "medium", "high"], effort_word: "Effort" }),
     startOf: () => ({ full: false, ownMode: false, bypass: false }),
     trusts: () => true,
     start: async (launch) => {
@@ -111,6 +113,10 @@ export interface T3LaunchOptions {
   origin?: string;
   /** Rex, standing in (only with `startIn` "rex", or to see that it is never asked). */
   rex?: boolean;
+  /** T3's projects (default: the Inbox project's folder, unless `known` is false); `parent` names the folder holding it. */
+  t3Projects?: (at: { shop: string; parent: string }) => string[];
+  /** Linked git checkouts T3 sees (see fake-t3.ts `checkouts`), by the same names. */
+  checkouts?: (at: { shop: string; parent: string }) => Record<string, string>;
 }
 
 export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: T3LaunchOptions = {}) {
@@ -133,7 +139,8 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
     options.t3 === false
       ? null
       : makeFakeT3Home(home, {}, {
-          projects: options.known === false ? [] : [shop],
+          projects: options.t3Projects ? options.t3Projects({ shop, parent: join(home, "code") }) : options.known === false ? [] : [shop],
+          ...(options.checkouts ? { checkouts: options.checkouts({ shop, parent: join(home, "code") }) } : {}),
           ...(options.used ? { used: { [shop]: options.used } } : {}),
           port: Number(mcp.endpoint.port),
           ...(options.authToken ? { authToken: options.authToken } : {}),
@@ -196,13 +203,13 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
     return again;
   };
   /** What compose sends: the agent and project; `name` null: no thread name (T3's title is the subject). */
-  const prepare = async (body: string, agent: InboxLaunchAgent = "claude-code", name: string | null = "Checkout copy", extra: { background?: true } = {}) => {
-    const target = launch.target({ launch: { agent, project_id: project.id } })!;
+  const prepare = async (body: string, agent: InboxLaunchAgent = "claude-code", name: string | null = "Checkout copy", extra: { background?: true } = {}, pick: { model?: string; effort?: string } = {}) => {
+    const target = launch.target({ launch: { agent, project_id: project.id, ...pick } })!;
     const prepared = await launch.prepare(target, { name, body, resolveProject: async () => project, ...extra });
     return store.startPersonThread({ project_id: project.id, body, to: prepared.to, idempotency_key: `send-${body}`, ...(name !== null ? { thread_name: name } : {}), launch: prepared.launch }).message;
   };
-  const send = async (body: string, agent: InboxLaunchAgent = "claude-code", name: string | null = "Checkout copy") => {
-    const message = await prepare(body, agent, name);
+  const send = async (body: string, agent: InboxLaunchAgent = "claude-code", name: string | null = "Checkout copy", pick: { model?: string; effort?: string } = {}) => {
+    const message = await prepare(body, agent, name, {}, pick);
     launch.begin(message);
     return message;
   };
@@ -211,7 +218,7 @@ export function t3LaunchSetup(cleanup: (() => void | Promise<void>)[], options: 
     const request = new Request(`http://127.0.0.1:4000${at}`, { method: "POST", headers: { host: "127.0.0.1:4000", "content-type": "application/json" }, body: JSON.stringify({ serverSession: "srv" }) });
     return launch.route(request, at, "local").then(
       async (response) => ({ ok: true as const, body: (await response!.json()) as Record<string, unknown> }),
-      (error: Error) => ({ ok: false as const, message: error.message }),
+      (error: Error & { code?: string }) => ({ ok: false as const, message: error.message, code: error.code }),
     );
   };
   /** Settings → Agents' own read, as this computer's window asks it. */

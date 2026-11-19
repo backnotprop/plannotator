@@ -149,6 +149,12 @@ export type LaunchStartFailure = { code: InboxLaunchError["code"]; text: string 
  */
 export type LaunchStartAway = "absent" | "refused";
 
+/**
+ * T3 Code only, what it refused (the run line says it): `no_model`, it has no model for that agent; `project`, it didn't
+ * add the folder. `declined` beside it: the model T3 didn't take.
+ */
+export type LaunchStartWhy = "no_model" | "project";
+
 /** What trusting a folder turns on, read from its files now. */
 export interface LaunchTrustReading {
   /** The run line's one plain line on what would run once trusted, or null when there is nothing to say. */
@@ -308,7 +314,7 @@ export interface LaunchHost {
    * true when it ended (or never ran), false while a turn runs or waits on the person there, null when the app can't
    * be asked. The "not connected" line shows only on true or null: a session at work is never called not connected.
    */
-  turnEnded?(ref: string): Promise<boolean | null>;
+  turnEnded?(ref: string): Promise<boolean | "failed" | null>;
   /**
    * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
    * session (`settleLaunch`) and its own channel delivers it (but see `startsWithTurn`). It writes its own start.log entries.
@@ -316,7 +322,7 @@ export interface LaunchHost {
   start(
     launch: InboxLaunchRecord,
     input: { name: string; login: LaunchEnv; firstTurn?: string },
-  ): Promise<{ ok: true; session: string; ref: string; inner?: InboxLaunchInner } | ({ ok: false; away?: LaunchStartAway } & LaunchStartFailure)>;
+  ): Promise<{ ok: true; session: string; ref: string; inner?: InboxLaunchInner; declined?: string } | ({ ok: false; away?: LaunchStartAway; why?: LaunchStartWhy; declined?: string } & LaunchStartFailure)>;
   /**
    * Start in Rex (Settings → Agents' "Start new agents in"): the agent's ordinary interactive command, for a Rex tab
    * to run through the person's login shell. Only a host whose interactive session connects to the Inbox by itself
