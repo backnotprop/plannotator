@@ -3931,6 +3931,9 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-sheet-h .ib-sp { flex: 1; }
   .ib-changed { flex-wrap: wrap; padding: 8px 14px; }
   .ib-docscroll { padding: 56px 10px 24px; }
+  /* Full screen, the file's bar floats 14 px over the bottom (54 px tall, above the home indicator): the end of a
+     document scrolls clear of it, so its last lines and a drawing's foot can be read and pressed. */
+  .ib-view.ib-fullview.ib-phone .ib-docscroll { padding-bottom: calc(92px + max(var(--ib-fvfoot, 0px), env(safe-area-inset-bottom))); }
   .ib-toolstrip { top: 10px; left: 10px; }
   /* the viewer's Global comment and Copy float right on a desktop; on a phone they sit on their own line, so the file keeps the width */
   .ib-phone [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
@@ -8748,9 +8751,6 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 223px), calc(100v
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
 .ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }
-@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .pn-inbox:has(.ib-fcomp) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
-}
 /* A comment on an HTML page on a phone (HtmlPageComment.tsx): what it is on with Parent and Child, then the field and
    Comment, under the tabs. The card is the one tool left, solid so the page's words do not read through it, and every
    target is 44 px. */
@@ -12631,3 +12631,10 @@ button.ib-ctxn-chip:focus-visible { outline: 2px solid color-mix(in oklch, var(-
 /* Under the pointer the ghost says "Open here" beside it: the pane's own label keeps its place, out of sight. */
 .ib-topen[data-ghost-says] { visibility: hidden; }
 .pn-inbox span.ib-pr-hid-t:hover .ib-pr-hid-title { text-decoration: none; }
+
+/* Under 360 px the drawing screen's tools take three rows whatever the gaps (the colours and the history need 201 px
+   of a 193 px strip at 320): tools and size, the colours, then Undo, Redo and Clear together, never one left alone
+   (the 2026-11-19 phone audit). The divider before Undo becomes the break. */
+@media (max-width: 359px) {
+  .pn-inbox [data-pn-image-toolbar-scroll] > div > div:has(+ button[aria-label="Undo"]) { flex-basis: 100%; width: 0; height: 0; }
+}

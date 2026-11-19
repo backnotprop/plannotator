@@ -15,6 +15,10 @@ public enum Words {
   public static let sectionSent = "Sent"
   /// section.quiet: packages/core/inbox-types.ts INBOX_SECTIONS quiet
   public static let sectionQuiet = "Quiet"
+  /// group.priority: packages/core/inbox-types.ts INBOX_PRIORITY_GROUP
+  public static let groupPriority = "Priority"
+  /// group.snoozed: packages/core/inbox-snooze.ts INBOX_SNOOZED_BAND
+  public static let groupSnoozed = "Snoozed"
   /// agent.claude-code: packages/core/inbox-types.ts INBOX_AGENT_LABELS claude-code
   public static let agentClaudeCode = "Claude Code"
   /// agent.codex: packages/core/inbox-types.ts INBOX_AGENT_LABELS codex
