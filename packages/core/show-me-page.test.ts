@@ -17,3 +17,14 @@ test("only a real head meta marks the page, and only the head's title names it",
   expect(isShowMePage(`<head><script>if (a <!--b) c("<body")</script>${META}</head><body></body>`)).toBe(true);
   expect(showMePageTitle(`<head>${META}</head><body><svg><title>Arrow tip</title></svg></body>`)).toBe("");
 });
+
+test("a hostile megabyte of unclosed tags is read at once, and blocks that only look like script or comment hide nothing", () => {
+  const started = performance.now();
+  expect(isShowMePage("<meta ".repeat(180_000))).toBe(false);
+  expect(isShowMePage(`${META}<title>${"<title ".repeat(150_000)}`)).toBe(true);
+  expect(showMePageTitle(`${META}<title>${"<title ".repeat(150_000)}`)).toBe("");
+  expect(performance.now() - started).toBeLessThan(1000);
+  expect(isShowMePage(`<head><!-- <script> -->${META}</head><body></body>`)).toBe(true);
+  expect(isShowMePage(`<head><style-x></style-x>${META}</head><body></body>`)).toBe(true);
+  expect(showMePageTitle(`<HEAD><TITLE>İ Big\n  title</TITLE>${META}</HEAD>`)).toBe("İ Big title");
+});
