@@ -1144,6 +1144,13 @@
         },
         "rex_mark": {
           "$ref": "#/$defs/InboxRexMark"
+        },
+        "status_mark": {
+          "$ref": "#/$defs/InboxAgentMark"
+        },
+        "turns_unknown": {
+          "type": "boolean",
+          "const": true
         }
       },
       "required": [
@@ -1191,6 +1198,40 @@
       "required": [
         "face",
         "sessions"
+      ],
+      "additionalProperties": true,
+      "x-source": "packages/core/inbox-types.ts"
+    },
+    "InboxAgentMark": {
+      "type": "object",
+      "properties": {
+        "state": {
+          "type": "string",
+          "enum": [
+            "blocked",
+            "working"
+          ],
+          "x-open": true
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "permission",
+            "question"
+          ],
+          "x-open": true
+        },
+        "where": {
+          "type": "string",
+          "enum": [
+            "inbox",
+            "terminal"
+          ],
+          "x-open": true
+        }
+      },
+      "required": [
+        "state"
       ],
       "additionalProperties": true,
       "x-source": "packages/core/inbox-types.ts"
@@ -1246,6 +1287,10 @@
           "type": "integer"
         },
         "face_tiles": {
+          "type": "boolean",
+          "const": true
+        },
+        "status_marks": {
           "type": "boolean",
           "const": true
         }

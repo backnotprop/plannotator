@@ -19896,6 +19896,188 @@
       "ios": {
         "state": "not-started"
       }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-kind-permission",
+      "title": "enum:InboxAgentMark.kind.permission",
+      "surface": [
+        "enum:InboxAgentMark.kind.permission"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-kind-question",
+      "title": "enum:InboxAgentMark.kind.question",
+      "surface": [
+        "enum:InboxAgentMark.kind.question"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-state-blocked",
+      "title": "enum:InboxAgentMark.state.blocked",
+      "surface": [
+        "enum:InboxAgentMark.state.blocked"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-state-working",
+      "title": "enum:InboxAgentMark.state.working",
+      "surface": [
+        "enum:InboxAgentMark.state.working"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-where-inbox",
+      "title": "enum:InboxAgentMark.where.inbox",
+      "surface": [
+        "enum:InboxAgentMark.where.inbox"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-enum-inboxagentmark-where-terminal",
+      "title": "enum:InboxAgentMark.where.terminal",
+      "surface": [
+        "enum:InboxAgentMark.where.terminal"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-status-mark",
+      "title": "field:InboxAgent.status_mark",
+      "surface": [
+        "field:InboxAgent.status_mark"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagent-turns-unknown",
+      "title": "field:InboxAgent.turns_unknown",
+      "surface": [
+        "field:InboxAgent.turns_unknown"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentmark-kind",
+      "title": "field:InboxAgentMark.kind",
+      "surface": [
+        "field:InboxAgentMark.kind"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentmark-state",
+      "title": "field:InboxAgentMark.state",
+      "surface": [
+        "field:InboxAgentMark.state"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentmark-where",
+      "title": "field:InboxAgentMark.where",
+      "surface": [
+        "field:InboxAgentMark.where"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-field-inboxagentsgroup-status-marks",
+      "title": "field:InboxAgentsGroup.status_marks",
+      "surface": [
+        "field:InboxAgentsGroup.status_marks"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
+    },
+    {
+      "id": "undecided-setting-agent-status",
+      "title": "setting:agent_status",
+      "surface": [
+        "setting:agent_status"
+      ],
+      "flows": [],
+      "mobile": "undecided",
+      "why": "",
+      "since": "2026-11-19",
+      "ios": {
+        "state": "not-started"
+      }
     }
   ]
 }
