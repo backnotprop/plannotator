@@ -309,7 +309,7 @@ export async function handleReviewCommand(
     // The decision is delivered below into the command's session, and this
     // server runs inside OpenCode, so it never outlives it. With no session
     // nothing could receive it: Send says so and keeps the draft.
-    agentPresence: sessionId ? undefined : () => "gone" as const,
+    agentPresence: sessionId ? undefined : () => "no-session" as const,
     htmlContent: reviewHtmlContent,
     diagramEngine: deps.reviewDiagramEngineDir ? diagramEngineSourcesFromDir(deps.reviewDiagramEngineDir) : undefined,
     opencodeClient: client,

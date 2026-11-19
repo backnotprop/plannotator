@@ -200,7 +200,7 @@ import { createReviewLiveRoute } from "./review-live-route";
 import type { ReviewLiveTarget } from "@plannotator/shared/review-live";
 import { refuseTailnetPeer, sessionTailnetAudience, sessionTailnetGate } from "./session-tailnet";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "@plannotator/shared/host-control";
-import { AGENT_GONE_STATUS, agentGoneBody, refusesDecisionForGoneAgent, type AgentPresence } from "@plannotator/shared/review-agent-gone";
+import { agentRefusal, type AgentPresence } from "@plannotator/shared/review-agent-gone";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "@plannotator/shared/server-session";
 import { isAIEndpointPath, isLongLivedAIEndpointPath, type AIEndpoints, type SessionBridge } from "@plannotator/ai";
 import { isWSL } from "./browser";
@@ -412,8 +412,9 @@ export interface ReviewServerResult {
    * The agent that asked for this review is gone and the host is about to
    * stop the server: tell the open tabs (`session-closed`, `by: "gone"`).
    * Settles nothing: the draft stays for the next review of the same changes.
+   * False when the review was decided already: the host must then not end it.
    */
-  announceAgentGone: () => void;
+  announceAgentGone: () => boolean;
 }
 
 // --- Server Implementation ---
@@ -4375,9 +4376,8 @@ export async function startReviewServer(
               // draft, or answer ok for feedback nobody will receive.
               if (reviewDecided) return reviewAlreadyDecided();
               // Nobody left to receive it: keep the draft, archive nothing.
-              if (refusesDecisionForGoneAgent(body, options.agentPresence)) {
-                return Response.json(agentGoneBody(), { status: AGENT_GONE_STATUS });
-              }
+              const refusal = agentRefusal(body, options.agentPresence);
+              if (refusal) return Response.json(refusal.body, { status: refusal.status });
 
               // Archive BEFORE the draft delete: a failed write keeps the
               // draft as the reviewer's recovery copy (#678 ordering).
@@ -4651,8 +4651,9 @@ export async function startReviewServer(
     stop,
     hostControl,
     announceAgentGone: () => {
-      if (reviewDecided) return;
+      if (reviewDecided) return false;
       externalAnnotations.broadcast(hostSessionClosedEvent(unsentReviewComments(), "gone"));
+      return true;
     },
   };
 }

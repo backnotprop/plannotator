@@ -23,52 +23,77 @@ Approve → approved prompt sent to agent session (with the note/annotations whe
 A local code review's server used to stay until its tab closed or the machine
 restarted, even after the agent that asked for it quit, and Send then
 "succeeded": the draft was deleted and the feedback archived with nobody to
-receive it. Now the review's program quits once its agent is gone, the comments
-stay in the draft and come back when the same review is opened again, and Send
-never reports success to a gone agent.
+receive it. Now the review's program quits once its agent is surely gone, the
+comments stay in the draft and come back when a review of the same changes is
+opened again, and Send never reports success when nobody can receive it.
+Ending a review under a live agent is the one outcome that must never happen,
+so every doubt keeps the review.
 
 - **Send never pretends (both runtimes).** `startReviewServer` takes
-  `agentPresence?: () => "here" | "gone"` (Bun `packages/server/review.ts`, Pi
-  `apps/pi-extension/server/serverReview.ts`; the shared rule is
-  `refusesDecisionForGoneAgent` in `packages/shared/review-agent-gone.ts`).
-  `/api/feedback` asks it before archiving or settling: "gone" answers
-  `410 { code: "agent_gone" }` and archives, decides and deletes nothing. The
-  platform path's status post (`platform: true`) is never refused: the review
-  went to GitHub, GitLab or Bitbucket. Without the probe nothing changes.
-- **The review ends (Bun CLI only).** `apps/hook/server/review-agent-watch.ts`
-  picks what to watch for `review` and `opencode-review`: a host result file
-  under `claude-code-mod/` watches the mod's lease (`watcher.json`: gone after
-  2 minutes of the server's own awake time with no Claude Code process holding
-  it; a sleep gap starts the count again; no lease file is never gone); else,
-  with stdout on a pipe and a real parent, the parent (gone once reparented; on
-  Windows, where nothing is reparented, once the parent pid no longer exists,
-  where Bun reports stdout as a pipe); else nothing (a terminal, a file, a T3 or
-  DeepSeek Harness result file). Every 10 s; once gone, a local review (not a
-  PR review) broadcasts `session-closed` with `by: "gone"`, waits 1 s, stops and
-  exits 3 (not 0: a mod launch that exits 0 with no record is read as an old
-  CLI's printed decision). A review the Inbox opened from a live thread has no
-  watch: its decision goes to that thread.
+  `agentPresence?: () => "here" | "gone" | "away" | "no-session"` (Bun
+  `packages/server/review.ts`, Pi `apps/pi-extension/server/serverReview.ts`;
+  the shared rule is `agentRefusal` in `packages/shared/review-agent-gone.ts`).
+  `/api/feedback` asks it on every Send, before archiving or settling: "gone"
+  answers `410 agent_gone`, "away" `409 agent_away` (Retry stays: a session may
+  be back a moment later), "no-session" `410 no_session`; each archives,
+  decides and deletes nothing. A probe that throws is "here". The platform
+  path's status post (`platform: true`) is never refused: the review went to
+  GitHub, GitLab or Bitbucket. Without the probe nothing changes.
+- **How each launch path knows (`apps/hook/server/review-agent-watch.ts`).**
+  Each watch has `presence()` (Send, asked live, never latched while the agent
+  can come back) and `ended()` (the 10 s timer; latched).
+  - A host result file under `claude-code-mod/`: the mod's lease
+    (`watcher.json` beside it, `{ owner, at, touchedAt, pid }`). Gone only when
+    its stamp has not changed for 2 minutes of the CLI's own clock (no clock is
+    compared across processes; a gap over 30 s between looks, a sleep, starts
+    the count again) AND the Claude Code pid the lease names no longer runs.
+    No lease file, or no pid in it (an older mod; Git Bash, where `$PPID` is
+    not a Windows pid), is never gone.
+  - Else, stdout on a pipe with a real parent (an agent's shell, the OpenCode
+    CLI bridge): a changed parent (reparented; on Windows, a parent pid that
+    no longer exists) is only a suspicion, since `plannotator review &`, nohup,
+    setsid, `start /b` or an agent's background shell reparents at once. The
+    reader is gone only when a newline written to stdout fails with EPIPE
+    (SIGPIPE ignored). The probe runs only under suspicion, every 10 s
+    doubling to 60 s, and at once on Send.
+  - Else nothing (a terminal, a file, a T3 or DeepSeek Harness result file,
+    a review the Inbox opened from a live thread): the review runs as before.
+- **The end (Bun CLI, local reviews only).** Once `ended()`, the CLI
+  broadcasts `session-closed` with `by: "gone"`, waits 1 s, stops and exits 3
+  (not 0: a mod launch that exits 0 with no record is read as an old CLI's
+  printed decision). A decision taken first always wins: the watch is stopped
+  as soon as `waitForDecision` resolves, and `announceAgentGone` answers false
+  (no end) once the review was decided.
 - **PR reviews stay.** A review of a PR/MR URL (`isPRMode`, from the URL
-  argument) keeps its server with no agent, since it can still post to the
-  platform; Send to the agent is still refused while the agent is gone.
+  argument) has no end timer, since it can still post to the platform; Send to
+  the agent is still refused while the agent is gone.
 - **Pi and OpenCode's own server** run inside the agent's process and die with
-  it. Pi's probe is "the opening session's context is alive or Pi has a
-  current session" (feedback goes to that session); OpenCode's in-process
-  review is "gone" only when the command had no session to prompt into.
-- **The page.** On `by: "gone"` the review editor saves its draft at once and
-  shows `ReviewEndedBar` (one line, "This review has ended because its agent is
-  gone. Your comments are saved and come back when you reopen it.", with Copy
-  feedback); the page stays readable. A send then, or a `410 agent_gone`,
-  shows the send-failure toast with "The agent that asked for this review is
-  gone. Your comments are kept." and Copy feedback, no Retry
-  (`packages/ui/utils/sendFailure.ts`).
-- Tests: `apps/hook/server/review-agent-watch.test.ts` (each watch, the mod's
-  real lease, the end sequence), `apps/hook/server/review-agent-gone-cli.test.ts`
-  (the real process tree: an agent shell killed, Send refused, the review exits
-  keeping the draft, the reopened review restores it and a live Send settles it;
-  a Bitbucket PR review stays and posts), `packages/server/review-agent-gone.test.ts`
-  and its Pi mirror, `packages/ui/utils/sendFailure.agentGone.test.ts`,
-  `ReviewEndedBar.dom.test.tsx`.
+  it. Pi: "here" while the opening session's context is alive or Pi has a
+  current session (feedback goes to that session), else "away" (between two
+  sessions). OpenCode's in-process review: "no-session" when the command had
+  no session to prompt into, else no probe.
+- **The page.** On `by: "gone"` the review editor saves its draft at once
+  (twice, so an edit made during the first save is saved too), then shows the
+  done screen (`CompletionOverlay`, `packages/review-editor/components/ReviewEnded.tsx`):
+  "Review Ended", "The agent that asked for this review is gone, so nothing
+  could be sent." plus, with comments, " Your comments are saved as a draft:
+  open a review of the same changes to get them back." and Copy feedback. The
+  screen covers the page, so nothing can be typed into a review that can no
+  longer save it. A send refused before that shows the send-failure toast
+  (`packages/ui/utils/sendFailure.ts`): agent-gone and no-session have no
+  Retry; away keeps it.
+- Tests: `apps/hook/server/review-agent-watch.test.ts` (each watch: a
+  backgrounded reader kept, EPIPE ends; the lease with a live or dead pid, a
+  foreign clock, a sleep, Send not latched; the mod's real lease and pid; the
+  end sequence and a decision cancelling it),
+  `apps/hook/server/review-agent-gone-cli.test.ts` (the real process tree: a
+  backgrounded review still read lives past a look and delivers; its reader
+  killed, Send is refused, the review exits keeping the draft, the reopened
+  review restores it and a live Send settles it; a Bitbucket PR review stays
+  and posts), `apps/hook/hooks/mod/review-agent-gone.test.ts` (the mod's side,
+  see `claude-code-mod.md`), `packages/server/review-agent-gone.test.ts` and its
+  Pi mirror, `packages/ui/utils/sendFailure.agentGone.test.ts`,
+  `ReviewEnded.dom.test.tsx`, `App.agentGone.test.tsx`.
 
 ### Color-free VCS output (#1661)
 

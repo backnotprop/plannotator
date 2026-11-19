@@ -1895,10 +1895,12 @@ if (args[0] === "sessions") {
 
   // A local review ends once its agent is gone, keeping its draft. A PR
   // review stays: it can still post to GitHub/GitLab with no agent.
-  if (agentWatch && !isPRMode) endReviewWhenAgentGone(agentWatch, server);
+  const stopAgentWatch = agentWatch && !isPRMode ? endReviewWhenAgentGone(agentWatch, server) : () => {};
 
   // Wait for user feedback
   const result = await server.waitForDecision();
+  // A decision was taken: it is delivered below, whatever the agent does now.
+  stopAgentWatch();
 
   // Give browser time to receive response and update UI
   await Bun.sleep(1500);
@@ -2969,9 +2971,10 @@ if (args[0] === "sessions") {
     ...(reviewTarget ? { target: reviewTarget } : {}),
   });
 
-  if (agentWatch && !isPRMode) endReviewWhenAgentGone(agentWatch, server);
+  const stopAgentWatch = agentWatch && !isPRMode ? endReviewWhenAgentGone(agentWatch, server) : () => {};
 
   const result = await server.waitForDecision();
+  stopAgentWatch();
   await Bun.sleep(1500);
   server.stop();
 

@@ -380,14 +380,23 @@ crashed keeps its directory (its `stderr` explains why). Servers outlive the
 terminal on purpose: the wrapper ignores SIGHUP and starts the CLI under
 `nohup` (a closing terminal otherwise took the server with it), so closing the
 terminal does not lose a review; verified live, `claude --continue` reattached
-and delivered it. They do not outlive the session for long: a code review
-whose launch no Claude Code process has held (`watcher.json`, released at
-`session.end`, stale after 20 s) for 2 minutes of the server's own awake time
-ends by itself, keeping its draft and writing no result (exit 3, so the mod
-reports "stopped (exit 3) without a decision. Your draft is saved." when the
-session is resumed, and reopening the review brings the comments back). A
-decision written before that is delivered on resume as before. See "When the
-agent that asked for a review is gone" in `code-review.md`.
+and delivered it. They do not outlive the session for long: every lease
+write names the Claude Code process (`pid`, asked once per instance through
+the `host-pid` script, `$PPID` / the PowerShell parent; recorded only when two
+runs agree and it is over 1; Git Bash records none), and a code review whose
+lease stamp has not moved for 2 minutes of the CLI's own clock while that pid
+no longer runs ends by itself, keeping its draft and writing no result (exit 3:
+the mod then logs "The review of <subject> ended while no Claude Code session
+was open for it. Your comments are saved as a draft; open a review of the same
+changes to get them back." when the session is resumed). An idle or compacting
+session never loses its review: its process still runs. The launch timer is
+re-armed when it went silent for 10 s (`ensureLaunchTicking`, from every hook
+through `currentMod` and from the 30 s self-heal look). `/clear` and an
+in-process `/resume` move the open code reviews to the new session
+(`takeOverReviews`, before `restore`): it holds their lease and receives their
+decisions. A decision written before an end is delivered on resume as before.
+Tests: `apps/hook/hooks/mod/review-agent-gone.test.ts`. See "When the agent
+that asked for a review is gone" in `code-review.md`.
 
 *Two processes on one session.* `claude --continue` while the first process
 still runs gives two Claude Code processes the same session id, and both

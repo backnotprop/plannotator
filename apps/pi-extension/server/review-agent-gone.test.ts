@@ -73,6 +73,25 @@ describe("Send when the agent is gone (Pi)", () => {
 			}
 		}));
 
+	// Between two Pi sessions: refused as "away" (409, Retry stays), delivered once a session is there.
+	test("between sessions: refused as away, and the same Send goes through once a session is back", () =>
+		sandboxed(async () => {
+			let presence: "here" | "away" = "away";
+			const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, project: "demo", agentPresence: () => presence });
+			try {
+				await saveDraft(server.url);
+				const refused = await send(server.url);
+				expect(refused.status).toBe(409);
+				expect(await refused.json()).toMatchObject({ code: "agent_away" });
+				expect((await (await fetch(`${server.url}/api/draft`)).json()).codeAnnotations).toHaveLength(1);
+				presence = "here";
+				expect((await send(server.url)).status).toBe(200);
+				expect(await server.waitForDecision()).toMatchObject({ feedback: "Fix a.ts" });
+			} finally {
+				server.stop();
+			}
+		}));
+
 	test("the platform path's status post is never refused", () =>
 		sandboxed(async () => {
 			const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, agentPresence: () => "gone" });

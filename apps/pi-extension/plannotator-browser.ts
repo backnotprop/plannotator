@@ -833,10 +833,11 @@ async function createCodeReviewBrowserSession(
 	const server = await startServerWithSelfPreemption(() => startReviewServer({
 		sessionBridge: options.sessionBridge,
 		// The decision goes to the session that opened the review, or to the
-		// one Pi switched to since (index.ts): with neither, Send is refused
-		// and the draft kept. The server lives in Pi's process, so it never
-		// outlives Pi itself.
-		agentPresence: () => (isCtxAlive(ctx) || hasCurrentPiSession() ? "here" : "gone"),
+		// one Pi switched to since (index.ts). With neither (the moment between
+		// two sessions) Send is refused as "away" and the draft kept; sending
+		// again a moment later works. The server lives in Pi's process, so it
+		// never outlives Pi itself.
+		agentPresence: () => (isCtxAlive(ctx) || hasCurrentPiSession() ? "here" : "away"),
 		liveReviewAgent: piLiveReviewAgent(ctx),
 		rawPatch,
 		gitRef,

@@ -16,10 +16,15 @@ export const ALREADY_DECIDED_CODE = 'already_decided';
 /** The `code` of plan review's 409 for a decision on an older revision. */
 export const PLAN_REVISED_CODE = 'plan_revised';
 
-/** The `code` a code review server (Bun and Pi) puts on its 410 when the
- *  agent that asked for the review is gone: nothing was sent and the draft
- *  is kept (also `packages/shared/review-agent-gone.ts`). */
+/** The codes a code review server (Bun and Pi) refuses a decision with when
+ *  nobody can receive it: nothing was sent and the draft is kept (the same
+ *  literals as `packages/shared/review-agent-gone.ts`, which this package
+ *  cannot import). `agent_gone`: the agent quit (410). `agent_away`: no
+ *  session right now, one may come back (409, Pi between sessions).
+ *  `no_session`: the review never had a session to send to (410). */
 export const AGENT_GONE_CODE = 'agent_gone';
+export const AGENT_AWAY_CODE = 'agent_away';
+export const NO_SESSION_CODE = 'no_session';
 
 export type SendFailure =
   /** fetch rejected: the server is gone (stopped, crashed) or unreachable. */
@@ -32,6 +37,10 @@ export type SendFailure =
   /** The agent that asked for this review is gone: nothing was sent, the
    *  comments are kept. Sending again cannot reach it. */
   | { kind: 'agent-gone' }
+  /** No agent session can take it right now; sending again may work. */
+  | { kind: 'agent-away' }
+  /** The review has no agent session to send to. */
+  | { kind: 'no-session' }
   /** Anything else thrown before the response settled. */
   | { kind: 'unknown' };
 
@@ -63,12 +72,11 @@ export async function refusalCode(res: Response): Promise<string | undefined> {
  *  servers' already-decided refusal, `rejected` with the status otherwise. */
 export async function assertSendOk(res: Response): Promise<void> {
   if (res.ok) return;
-  if (res.status === 409 && (await refusalCode(res)) === ALREADY_DECIDED_CODE) {
-    throw new DecisionSendError({ kind: 'decided' });
-  }
-  if (res.status === 410 && (await refusalCode(res)) === AGENT_GONE_CODE) {
-    throw new DecisionSendError({ kind: 'agent-gone' });
-  }
+  const code = res.status === 409 || res.status === 410 ? await refusalCode(res) : undefined;
+  if (res.status === 409 && code === ALREADY_DECIDED_CODE) throw new DecisionSendError({ kind: 'decided' });
+  if (res.status === 409 && code === AGENT_AWAY_CODE) throw new DecisionSendError({ kind: 'agent-away' });
+  if (res.status === 410 && code === AGENT_GONE_CODE) throw new DecisionSendError({ kind: 'agent-gone' });
+  if (res.status === 410 && code === NO_SESSION_CODE) throw new DecisionSendError({ kind: 'no-session' });
   throw new DecisionSendError({ kind: 'rejected', status: res.status });
 }
 
@@ -87,7 +95,7 @@ export function sendFailureOf(error: unknown): SendFailure {
 
 /** Whether sending the same decision again could work. */
 export function canRetrySend(failure: SendFailure): boolean {
-  return failure.kind !== 'decided' && failure.kind !== 'agent-gone';
+  return failure.kind !== 'decided' && failure.kind !== 'agent-gone' && failure.kind !== 'no-session';
 }
 
 /** The one sentence under the toast's title: why nothing reached the agent. */
@@ -101,6 +109,10 @@ export function describeSendFailure(failure: SendFailure): string {
       return 'This review was already decided, in another window or because its session ended.';
     case 'agent-gone':
       return 'The agent that asked for this review is gone. Your comments are kept.';
+    case 'agent-away':
+      return 'No agent session can receive this right now. Your comments are kept.';
+    case 'no-session':
+      return 'This review has no agent session to send to. Your comments are kept.';
     default:
       return 'Something went wrong before it was sent.';
   }

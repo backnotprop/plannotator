@@ -123,6 +123,44 @@ describe("Send when the agent is gone (Bun)", () => {
     }
   });
 
+  // H3: the server asks on every Send; a gone answer is never remembered.
+  test("asks on every Send: refused while gone, delivered once the agent is back", async () => {
+    let presence: "here" | "gone" = "gone";
+    const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, project: "demo", agentPresence: () => presence });
+    try {
+      await saveDraft(server.url);
+      expect((await send(server.url)).status).toBe(410);
+      presence = "here";
+      expect((await send(server.url)).status).toBe(200);
+      expect(await server.waitForDecision()).toMatchObject({ feedback: "Fix a.ts" });
+    } finally {
+      server.stop();
+    }
+  });
+
+  test("a review with no agent session to send to says so, not that an agent is gone", async () => {
+    const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, agentPresence: () => "no-session" });
+    try {
+      const refused = await send(server.url);
+      expect(refused.status).toBe(410);
+      expect(await refused.json()).toMatchObject({ code: "no_session" });
+    } finally {
+      server.stop();
+    }
+  });
+
+  // M1: the CLI must not end a review that was decided.
+  test("announcing after a decision does nothing and says so", async () => {
+    const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML, agentPresence: () => "here" });
+    try {
+      expect(server.announceAgentGone()).toBe(true);
+      expect((await send(server.url)).status).toBe(200);
+      expect(server.announceAgentGone()).toBe(false);
+    } finally {
+      server.stop();
+    }
+  });
+
   test("a server without the probe takes every decision as before", async () => {
     const server = await startReviewServer({ rawPatch: patch(), gitRef: "HEAD", htmlContent: MINIMAL_HTML });
     try {

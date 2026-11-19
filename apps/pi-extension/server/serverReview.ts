@@ -28,7 +28,7 @@ import { basename, dirname as dirnamePath, join as joinPath, resolve as resolveP
 import { SingleFlight } from "../generated/single-flight.ts";
 import { contentHash } from "../generated/draft.ts";
 import { countUnsentDraftComments, hostSessionClosedEvent } from "../generated/host-control.ts";
-import { AGENT_GONE_STATUS, agentGoneBody, refusesDecisionForGoneAgent, type AgentPresence } from "../generated/review-agent-gone.ts";
+import { agentRefusal, type AgentPresence } from "../generated/review-agent-gone.ts";
 import { checkServerSession, createServerSessionNonce, serverSessionMismatchBody } from "../generated/server-session.ts";
 import { handleHostControl, resolveHostControlToken, type HostControl } from "./host-control.ts";
 import { createPiRefCards, handleRefCards, type RefRunner } from "./ref-cards.ts";
@@ -4230,8 +4230,9 @@ export async function startReviewServer(options: {
 					return;
 				}
 				// Nobody left to receive it: keep the draft, archive nothing.
-				if (refusesDecisionForGoneAgent(body, options.agentPresence)) {
-					json(res, agentGoneBody(), AGENT_GONE_STATUS);
+				const refusal = agentRefusal(body, options.agentPresence);
+				if (refusal) {
+					json(res, refusal.body, refusal.status);
 					return;
 				}
 				// Archive BEFORE the draft delete: a failed write keeps the

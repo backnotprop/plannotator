@@ -1,21 +1,28 @@
 /**
- * A code review whose agent quit, as the real process tree: the agent is a
- * shell that runs `plannotator review` with its stdout on a pipe (as an
- * agent's shell command does) and is then killed.
+ * A code review whose agent quit, as the real process tree. The agent reads
+ * the review's stdout through a named pipe (`cat`), as an agent's shell does,
+ * and the review is started in the background by a shell that then exits, so
+ * it is reparented at once (`plannotator review &`, nohup, an agent's
+ * background shell).
  *
  * What regresses if this fails:
- * - the local review keeps its server forever after its agent quit (the pile
- *   of leftover programs), or deletes the reviewer's comments as it ends;
+ * - a backgrounded review whose agent still reads it is ended under the
+ *   agent (reparenting taken for "gone");
+ * - the local review keeps its server forever after its reader quit (the
+ *   pile of leftover programs), or deletes the reviewer's comments as it ends;
  * - opening the same review again no longer brings the comments back;
  * - Send to the gone agent answers ok (the silent loss), or Send to a live
  *   agent stops deleting the draft;
  * - a PR review stops staying open, though it can still post to the platform
  *   with no agent.
  *
- * Every process started here is killed in `finally` by its exact pid.
+ * Every process started here is killed in `finally` (and again in afterAll)
+ * by its exact pid, and a watchdog shell kills the review if this test
+ * runner itself is killed first.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -40,7 +47,10 @@ const PATCH = [
 beforeAll(() => {
   stubs = stubHookDistHtml();
 });
+/** Every pid started here, killed again after the file (a test that timed out skips its own finally). */
+const started = new Set<number>();
 afterAll(() => {
+  for (const pid of started) kill(pid);
   removeStubbedHtml(stubs);
   for (const root of roots) rmSync(root, { recursive: true, force: true });
 });
@@ -106,25 +116,41 @@ async function baseOf(readyFile: string): Promise<string> {
   return `http://localhost:${(JSON.parse(line) as { port: number }).port}`;
 }
 
-/** The agent: a shell that starts the review in the background, prints its pid, and waits. */
-async function underAgentShell(root: string, env: Record<string, string | undefined>, reviewArgs: string[]) {
-  const agent = Bun.spawn(["/bin/sh", "-c", '"$@" & echo "$!"; wait', "agent", process.execPath, "run", entry, "review", ...reviewArgs], {
+/**
+ * The agent: `cat` reads the review's stdout from a named pipe; a shell starts
+ * the review in the background with its stdout on that pipe, prints its pid
+ * and exits two seconds later (after the review read its parent), so the
+ * review is reparented while `cat` still reads it. A watchdog shell kills the
+ * review once this test runner is gone.
+ */
+let launches = 0;
+async function backgrounded(root: string, env: Record<string, string | undefined>, reviewArgs: string[]) {
+  launches += 1;
+  const fifo = join(root, `stdout-${launches}`);
+  if (spawnSync("mkfifo", [fifo]).status !== 0) throw new Error("mkfifo failed");
+  const reader = Bun.spawn(["cat", fifo], { stdout: "pipe", stderr: "ignore" });
+  started.add(reader.pid);
+  const script = [
+    'runner=$1; out=$2; shift 2',
+    '"$@" > "$out" &',
+    'cli=$!',
+    '( while kill -0 "$runner" 2>/dev/null && kill -0 "$cli" 2>/dev/null; do sleep 1; done; kill -9 "$cli" 2>/dev/null ) </dev/null >/dev/null 2>&1 &',
+    'echo "$cli $!"',
+    'sleep 2',
+  ].join("\n");
+  const launcher = Bun.spawn(["/bin/sh", "-c", script, "agent", String(process.pid), fifo, process.execPath, "run", entry, "review", ...reviewArgs], {
     cwd: root,
     env,
     stdout: "pipe",
     stderr: "pipe",
   });
-  const reader = agent.stdout.getReader();
-  let text = "";
-  while (!text.includes("\n")) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    text += new TextDecoder().decode(value);
-  }
-  reader.releaseLock();
-  const cliPid = Number(text.trim().split("\n")[0]);
-  if (!Number.isInteger(cliPid) || cliPid <= 1) throw new Error(`no review pid: ${JSON.stringify(text)}`);
-  return { agent, cliPid };
+  started.add(launcher.pid);
+  const [cliPid, watchdogPid] = (await new Response(launcher.stdout).text()).trim().split(/\s+/).map(Number);
+  if (!Number.isInteger(cliPid) || cliPid <= 1) throw new Error("no review pid");
+  started.add(cliPid);
+  if (Number.isInteger(watchdogPid) && watchdogPid > 1) started.add(watchdogPid);
+  await launcher.exited;
+  return { reader, cliPid, watchdogPid, readerOutput: () => new Response(reader.stdout).text() };
 }
 
 const json = { "Content-Type": "application/json" };
@@ -137,24 +163,47 @@ const saveDraft = (base: string) =>
 const send = (base: string) =>
   fetch(`${base}/api/feedback`, { method: "POST", headers: json, body: JSON.stringify({ approved: false, feedback: "Why 2?", annotations: [{ id: "c1" }] }) });
 
+describe("a local review started in the background", () => {
+  test("lives while its agent still reads it, and its Send is delivered there", async () => {
+    const { root, dataDir } = workspace();
+    const ready = join(root, "ready-live");
+    let run: Awaited<ReturnType<typeof backgrounded>> | undefined;
+    try {
+      run = await backgrounded(root, cliEnv(root, dataDir, ready), ["--patch-file", "change.patch"]);
+      const base = await baseOf(ready);
+      expect((await saveDraft(base)).status).toBe(200);
+      // Reparented (its shell exited) for longer than a look: still here.
+      await Bun.sleep(PARENT_CHECK_MS + 3_000);
+      expect(alive(run.cliPid)).toBe(true);
+      expect((await fetch(`${base}/api/diff`)).status).toBe(200);
+
+      expect((await send(base)).status).toBe(200);
+      expect(await run.readerOutput()).toContain("Why 2?");
+      const reviewPid = run.cliPid;
+      await waitFor(() => !alive(reviewPid), 10_000, "the review to exit after its decision");
+    } finally {
+      kill(run?.cliPid);
+      kill(run?.reader.pid);
+      kill(run?.watchdogPid);
+    }
+  }, 40_000);
+});
+
 describe("a local review whose agent quit", () => {
   test("refuses Send, ends by itself keeping the draft, and the comments come back when the same review is opened again", async () => {
     const { root, dataDir } = workspace();
     const firstReady = join(root, "ready-1");
     const secondReady = join(root, "ready-2");
-    let agentPid: number | undefined;
-    let cliPid: number | undefined;
+    let run: Awaited<ReturnType<typeof backgrounded>> | undefined;
     let reopened: ReturnType<typeof Bun.spawn> | undefined;
     try {
-      const run = await underAgentShell(root, cliEnv(root, dataDir, firstReady), ["--patch-file", "change.patch"]);
-      agentPid = run.agent.pid;
-      cliPid = run.cliPid;
+      run = await backgrounded(root, cliEnv(root, dataDir, firstReady), ["--patch-file", "change.patch"]);
       const base = await baseOf(firstReady);
       expect((await saveDraft(base)).status).toBe(200);
 
-      // The agent quits.
-      kill(agentPid);
-      await run.agent.exited;
+      // The agent quits: nobody reads the review's stdout any more.
+      kill(run.reader.pid);
+      await run.reader.exited;
 
       // Send now: the truth, and nothing lost.
       const refused = await send(base);
@@ -162,7 +211,7 @@ describe("a local review whose agent quit", () => {
       expect(await refused.json()).toMatchObject({ code: "agent_gone" });
 
       // The program quits by itself at its next look.
-      const reviewPid = cliPid;
+      const reviewPid = run.cliPid;
       await waitFor(() => !alive(reviewPid), PARENT_CHECK_MS + 8_000, "the review to exit");
 
       // Opened again (by an agent that is here): the comments are offered back.
@@ -172,6 +221,7 @@ describe("a local review whose agent quit", () => {
         stdout: "pipe",
         stderr: "pipe",
       });
+      started.add(reopened.pid);
       const again = await baseOf(secondReady);
       const draft = await (await fetch(`${again}/api/draft`)).json();
       expect(draft.codeAnnotations).toHaveLength(1);
@@ -183,11 +233,12 @@ describe("a local review whose agent quit", () => {
       expect(await reopened.exited).toBe(0);
       expect(await new Response(reopened.stdout).text()).toContain("Why 2?");
     } finally {
-      kill(agentPid);
-      kill(cliPid);
+      kill(run?.cliPid);
+      kill(run?.reader.pid);
+      kill(run?.watchdogPid);
       kill(reopened?.pid);
     }
-  }, 40_000);
+  }, 50_000);
 });
 
 describe("a PR review whose agent quit", () => {
@@ -200,10 +251,9 @@ describe("a PR review whose agent quit", () => {
     const TOKEN = "fake-token-for-agent-gone-test-1234";
     const EMAIL = "ada@example.invalid";
     fake = startFakeBitbucket({ email: EMAIL, token: TOKEN });
-    let agentPid: number | undefined;
-    let cliPid: number | undefined;
+    let run: Awaited<ReturnType<typeof backgrounded>> | undefined;
     try {
-      const run = await underAgentShell(
+      run = await backgrounded(
         root,
         cliEnv(root, dataDir, readyFile, {
           PLANNOTATOR_BITBUCKET_API_URL: fake.apiUrl,
@@ -212,15 +262,13 @@ describe("a PR review whose agent quit", () => {
         }),
         ["https://bitbucket.org/ws/repo/pull-requests/1", "--no-local"],
       );
-      agentPid = run.agent.pid;
-      cliPid = run.cliPid;
       const base = await baseOf(readyFile);
 
-      kill(agentPid);
-      await run.agent.exited;
+      kill(run.reader.pid);
+      await run.reader.exited;
       // Longer than a local review takes to end.
-      await Bun.sleep(PARENT_CHECK_MS + 3_000);
-      expect(alive(cliPid)).toBe(true);
+      await Bun.sleep(PARENT_CHECK_MS + 5_000);
+      expect(alive(run.cliPid)).toBe(true);
       expect((await fetch(`${base}/api/diff`)).status).toBe(200);
 
       const posted = await fetch(`${base}/api/pr-action`, {
@@ -232,8 +280,9 @@ describe("a PR review whose agent quit", () => {
       expect(fake.requests.some((r) => r.method === "POST" && JSON.stringify(r.body).includes("Posted with no agent."))).toBe(true);
       expect((await send(base)).status).toBe(410);
     } finally {
-      kill(agentPid);
-      kill(cliPid);
+      kill(run?.cliPid);
+      kill(run?.reader.pid);
+      kill(run?.watchdogPid);
     }
-  }, 40_000);
+  }, 50_000);
 });

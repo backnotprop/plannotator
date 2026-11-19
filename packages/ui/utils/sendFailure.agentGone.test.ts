@@ -37,6 +37,22 @@ describe('agent gone', () => {
     expect(describeSendFailure(failure!)).not.toBe(describeSendFailure({ kind: 'unreachable' }));
   });
 
+  // L2: Pi between sessions answers 409 agent_away: Retry stays, since a session may be back a moment later.
+  test("no session right now (Pi between sessions): Retry stays, and the reason says so", async () => {
+    const failure = await failureFor(Response.json({ error: 'away', code: 'agent_away' }, { status: 409 }));
+    expect(failure).toEqual({ kind: 'agent-away' });
+    expect(canRetrySend(failure!)).toBe(true);
+    expect(describeSendFailure(failure!)).not.toContain('gone');
+  });
+
+  // L1: OpenCode with no session never had an agent to lose.
+  test('a review with no session: no Retry, and it never claims an agent is gone', async () => {
+    const failure = await failureFor(Response.json({ error: 'none', code: 'no_session' }, { status: 410 }));
+    expect(failure).toEqual({ kind: 'no-session' });
+    expect(canRetrySend(failure!)).toBe(false);
+    expect(describeSendFailure(failure!)).not.toContain('gone');
+  });
+
   test('any other 410 stays a plain rejection', async () => {
     expect(await failureFor(Response.json({ error: 'x' }, { status: 410 }))).toEqual({ kind: 'rejected', status: 410 });
   });
