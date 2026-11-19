@@ -130,8 +130,8 @@ function readEnd(value: unknown): ArrowEnd | null {
 
 /**
  * A drawn line's points, copied into a plain array of plain numbers, or null. The length is looked at before
- * anything else, so the work is bounded whatever is handed in; each slot is read by index, so a hole in the
- * array is refused like any other value that is not a number from 0 to 1.
+ * anything else, so the work is bounded whatever is handed in; each slot is read by index into a new list, so
+ * what comes out is plain numbers of its own (a hole reads as not a number and is refused; JSON cannot make one).
  */
 function readInkPoints(value: unknown): number[] | null {
   if (!Array.isArray(value)) return null;
