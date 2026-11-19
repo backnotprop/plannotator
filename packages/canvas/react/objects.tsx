@@ -4,7 +4,7 @@
  * object re-renders one of these, however many are mounted.
  */
 import { File, FileCode, FileText, Film, Globe, Image as ImageIcon } from 'lucide-react';
-import React, { memo, useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CanvasColor } from '../model/color';
 import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSrc } from '../model/html-item';
 import { referenceCard } from '../model/reference';
@@ -86,7 +86,20 @@ function spriteStyle(object: SpriteObject, resolveImageSrc?: (src: string) => st
 
 /** The only way custom HTML is ever drawn. See `model/html-item.ts`. */
 function HtmlFrame({ object }: { object: HtmlObject }) {
-  return <iframe title="" sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html)} {...HTML_ITEM_FRAME_ATTRS} />;
+  const frame = useRef<HTMLIFrameElement>(null);
+  const [scheme, setScheme] = useState<'light' | 'dark' | null>(null);
+  // The item is told the theme it sits in, and told again when it changes.
+  useLayoutEffect(() => {
+    const read = () => {
+      const value = frame.current ? getComputedStyle(frame.current).colorScheme : '';
+      setScheme(value === 'dark' || value === 'light' ? value : null);
+    };
+    read();
+    const observer = new MutationObserver(read);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'data-theme'] });
+    return () => observer.disconnect();
+  }, []);
+  return <iframe ref={frame} title="" sandbox={HTML_ITEM_SANDBOX} srcDoc={htmlItemSrcdoc(object.html, scheme)} {...HTML_ITEM_FRAME_ATTRS} />;
 }
 
 /** The words a card shows for what kind of thing it points at, when the thing has no site of its own. */

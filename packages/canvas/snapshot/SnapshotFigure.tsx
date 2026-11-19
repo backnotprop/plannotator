@@ -133,10 +133,15 @@ export function SnapshotFigure({ canvas, snapshot, title, fallback, registry, on
   const still = !store && fallback ? fallback : null;
   const canOpen = !!onOpen && !!store && !!resolved.rect;
 
+  // The figure is exactly the shape of what it shows, never larger than
+  // life and never taller than the cap, so nothing outside the snapshot's
+  // rectangle shows at its sides.
+  const width = store && resolved.rect ? Math.ceil(Math.min(resolved.rect.w * FIGURE_MAX_ZOOM, (FIGURE_MAX_HEIGHT * resolved.rect.w) / resolved.rect.h)) : null;
+
   let body: React.ReactNode;
   if (store && resolved.rect) {
     body = (
-      <div ref={view} className="pcv-figure-view" style={{ aspectRatio: `${resolved.rect.w} / ${resolved.rect.h}`, maxHeight: Math.min(FIGURE_MAX_HEIGHT, Math.ceil(resolved.rect.h)) }}>
+      <div ref={view} className="pcv-figure-view" style={{ aspectRatio: `${resolved.rect.w} / ${resolved.rect.h}` }}>
         {near ? <LiveView store={store} resolved={resolved} resolveImageSrc={resolveImageSrc} /> : null}
       </div>
     );
@@ -147,7 +152,7 @@ export function SnapshotFigure({ canvas, snapshot, title, fallback, registry, on
   }
 
   return (
-    <figure className="pcv pcv-figure" data-status={store ? resolved.status : 'still'} data-canvas={canvas} data-snapshot={snapshot}>
+    <figure className="pcv pcv-figure" style={width ? { width: `min(100%, ${width}px)` } : undefined} data-status={store ? resolved.status : 'still'} data-canvas={canvas} data-snapshot={snapshot}>
       <div className="pcv-figure-frame">
         {body}
         {canOpen ? (

@@ -55,9 +55,11 @@ const escapeAttr = (value: string): string => value.replace(/&/g, '&amp;').repla
 /**
  * The whole document the iframe shows. The policy is the first thing in the
  * head, before any of the item's own markup, so nothing the item says can
- * come ahead of it; a later policy can only narrow an earlier one.
+ * come ahead of it; a later policy can only narrow an earlier one. `scheme`
+ * is the theme the item is drawn in; it must match the frame element's own
+ * colour scheme, or the browser gives the frame an opaque backdrop.
  */
-export function htmlItemSrcdoc(html: string): string {
+export function htmlItemSrcdoc(html: string, scheme: 'light' | 'dark' | null = null): string {
   const body = html.length > HTML_ITEM_MAX_LENGTH ? '' : html;
   return (
     '<!doctype html><html><head>' +
@@ -65,7 +67,7 @@ export function htmlItemSrcdoc(html: string): string {
     '<meta charset="utf-8">' +
     '<style>html,body{margin:0;background:transparent;overflow:hidden}' +
     'body{font:14px/1.45 system-ui,sans-serif;color:CanvasText}' +
-    ':root{color-scheme:light dark}</style>' +
+    `:root{color-scheme:${scheme ?? 'light dark'}}</style>` +
     `</head><body>${body}</body></html>`
   );
 }
