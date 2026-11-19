@@ -86,21 +86,24 @@ export function emptyScene(): CanvasScene {
 /** A scene from anything: a wrong shape gives an empty scene, never a throw. */
 export function asScene(value: unknown): CanvasScene {
   const v = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
-  const elements = Array.isArray(v.elements) ? v.elements.filter(isElement) : [];
+  const elements = Array.isArray(v.elements) ? v.elements.map(asElement).filter((e): e is CanvasElement => e !== null) : [];
   const appState = v.appState && typeof v.appState === 'object' && !Array.isArray(v.appState) ? (v.appState as Record<string, unknown>) : {};
   const files = v.files && typeof v.files === 'object' && !Array.isArray(v.files) ? (v.files as Record<string, unknown>) : {};
   return { type: 'excalidraw', version: 2, source: typeof v.source === 'string' ? v.source : CANVAS_SOURCE, elements, appState, files };
 }
 
-function isElement(value: unknown): value is CanvasElement {
-  if (!value || typeof value !== 'object') return false;
+/**
+ * An element from anywhere (a file a person opened can hold anything). One with an id and a type is kept, and its
+ * place and size are made numbers: a number written as text is that number, anything else is 0. The editor keeps such
+ * an element too, so dropping it here would leave the window holding a thing the Inbox does not.
+ */
+function asElement(value: unknown): CanvasElement | null {
+  if (!value || typeof value !== 'object') return null;
   const e = value as Record<string, unknown>;
-  return (
-    typeof e.id === 'string' && e.id.length > 0 && e.id.length <= 200 &&
-    typeof e.type === 'string' &&
-    Number.isFinite(e.x) && Number.isFinite(e.y) &&
-    Number.isFinite(e.width) && Number.isFinite(e.height)
-  );
+  if (typeof e.id !== 'string' || e.id.length === 0 || e.id.length > 200 || typeof e.type !== 'string') return null;
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : typeof v === 'string' && v.trim() !== '' && Number.isFinite(Number(v)) ? Number(v) : 0);
+  if (Number.isFinite(e.x) && Number.isFinite(e.y) && Number.isFinite(e.width) && Number.isFinite(e.height)) return e as CanvasElement;
+  return { ...e, x: n(e.x), y: n(e.y), width: n(e.width), height: n(e.height) } as CanvasElement;
 }
 
 export interface Box {
@@ -162,6 +165,102 @@ export function centerOf(b: Box): [number, number] {
 
 export function live(scene: CanvasScene): CanvasElement[] {
   return scene.elements.filter((e) => !e.isDeleted);
+}
+
+/**
+ * A text element's words as they were written. Excalidraw keeps them in `originalText`; its `text` is the same words
+ * with the line breaks its own wrapping put in to draw them (a label wraps to its box). Reading, naming and comparing
+ * go by the words, never by how they happen to be broken on screen.
+ */
+export function wordsOf(el: CanvasElement | undefined | null): string {
+  if (!el) return '';
+  if (typeof el.originalText === 'string' && el.originalText !== '') return el.originalText;
+  return typeof el.text === 'string' ? el.text : '';
+}
+
+/** How far from the rest of a drawing a thing may be, and how large, before it is taken for a mistake in a file. */
+export const FAR_REACH = 250_000;
+const FAR_SIZE = 20_000;
+
+/**
+ * The elements that are nowhere near the rest: farther than `FAR_REACH` from the middle one, or larger than that. A
+ * file can hold a box a billion pixels away; counted in, the drawing reads as a billion pixels wide and the editor
+ * stops drawing. A drawing of one thing has no "rest", so nothing in it is far.
+ */
+export function farElements(elements: readonly CanvasElement[]): Set<string> {
+  const out = new Set<string>();
+  const shown = elements.filter((e) => !e.isDeleted);
+  if (shown.length === 0) return out;
+  const boxes = shown.map(boxOf);
+  const mid = (values: number[]) => values.slice().sort((a, b) => a - b)[Math.floor((values.length - 1) / 2)]!;
+  const cx = mid(boxes.map((b) => b.x + b.w / 2));
+  const cy = mid(boxes.map((b) => b.y + b.h / 2));
+  shown.forEach((el, i) => {
+    const b = boxes[i]!;
+    const off = Math.max(Math.abs(b.x + b.w / 2 - cx), Math.abs(b.y + b.h / 2 - cy));
+    if (!(off <= FAR_REACH) || !(b.w <= FAR_REACH) || !(b.h <= FAR_REACH)) out.add(el.id);
+  });
+  return out;
+}
+
+/**
+ * Far-off elements brought beside the rest of the drawing (the window does this to a file a person opens). Those that
+ * sit together stay together; one too large is made a size that can be drawn. `moved`: the ids that changed (the
+ * caller gives them a new version).
+ */
+export function tameFar(elements: readonly CanvasElement[]): { elements: CanvasElement[]; moved: string[] } {
+  const far = farElements(elements);
+  if (far.size === 0) return { elements: elements.slice(), moved: [] };
+  const near = elements.filter((e) => !e.isDeleted && !far.has(e.id));
+  const ground = unionBox(near.map(boxOf));
+  const strays = elements.filter((e) => far.has(e.id));
+  // Too large to draw: made a size that can be, before it is placed.
+  const sized = new Map<string, CanvasElement>();
+  for (const el of strays) {
+    const b = boxOf(el);
+    const k = Math.min(1, FAR_SIZE / Math.max(b.w, b.h, 1));
+    sized.set(el.id, k === 1 ? el : { ...el, width: el.width * k, height: el.height * k, ...(el.points ? { points: el.points.map((p) => p.map((v) => (Number(v) || 0) * k)) } : {}) });
+  }
+  const all = unionBox([...sized.values()].map(boxOf));
+  const together = all.w <= FAR_SIZE && all.h <= FAR_SIZE;
+  // Where each goes: beside the rest, in the arrangement they had when they sit together, else one after another.
+  const delta = new Map<string, [number, number]>();
+  let n = 0;
+  for (const stray of sized.values()) {
+    if (stray.type === 'text' && stray.containerId && sized.has(stray.containerId)) continue;
+    const b = boxOf(stray);
+    const home = together ? { x: ground.x + ground.w + 120 + (b.x - all.x), y: ground.y + (b.y - all.y) } : { x: ground.x + ground.w + 120 + n * 40, y: ground.y + n++ * 40 };
+    delta.set(stray.id, [home.x - b.x, home.y - b.y]);
+  }
+  const out = elements.map((el) => {
+    const stray = sized.get(el.id);
+    if (!stray) return el;
+    // A label goes where its shape goes.
+    const [dx, dy] = delta.get(stray.id) ?? delta.get(String(stray.containerId)) ?? [0, 0];
+    return { ...stray, x: Math.round(stray.x + dx), y: Math.round(stray.y + dy) };
+  });
+  return { elements: out, moved: [...far] };
+}
+
+/**
+ * How a picture of a part of the canvas is cut so it can be read. One picture is at most `max` pixels on its long
+ * side; a strip many times longer than it is wide (a tall screenshot) would come out a sliver, so it is cut along its
+ * length into pieces that each show it at a readable size, in order (top to bottom, or left to right).
+ */
+export function pictureTiles(box: Box, max = 2400, most = 8): Box[] {
+  const long = Math.max(box.w, box.h);
+  const short = Math.max(1, Math.min(box.w, box.h));
+  if (long <= max || long / short < 3) return [box];
+  const count = Math.min(most, Math.ceil(long / max));
+  const step = long / count;
+  const lap = Math.min(40, step / 10);
+  const tiles: Box[] = [];
+  for (let i = 0; i < count; i++) {
+    const from = Math.max(0, i * step - lap);
+    const to = Math.min(long, (i + 1) * step + lap);
+    tiles.push(box.h >= box.w ? { x: box.x, y: box.y + from, w: box.w, h: to - from } : { x: box.x + from, y: box.y, w: to - from, h: box.h });
+  }
+  return tiles;
 }
 
 const PALETTE: [string, [number, number, number]][] = [

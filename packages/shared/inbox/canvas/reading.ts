@@ -1,4 +1,4 @@
-import { boxContains, boxGap, boxOf, boxesOverlap, centerOf, colorWord, live, unionBox, type Box, type CanvasElement, type CanvasScene } from './scene';
+import { boxContains, boxGap, boxOf, boxesOverlap, centerOf, colorWord, farElements, live, unionBox, wordsOf, type Box, type CanvasElement, type CanvasScene } from './scene';
 
 /**
  * The text reading of a canvas: one line per thing, each opening with an id an
@@ -30,6 +30,8 @@ export interface Thing {
   fill: string;
   strokes?: number;
   groups: string[];
+  /** Nowhere near the rest of the drawing (scene.ts `farElements`): said in its line, left out of the drawing's size. */
+  far?: boolean;
 }
 
 const SKETCH_GAP = 32;
@@ -117,7 +119,8 @@ export function thingsOf(scene: CanvasScene): Thing[] {
     const thing: Thing = {
       id: alias(e.id),
       kind,
-      words: kind === 'frame' ? oneLine(e.name) : kind === 'text' ? oneLine(e.text) : oneLine(label?.text),
+      // The words as written (`originalText`), never the line breaks the editor's wrapping drew them with.
+      words: kind === 'frame' ? oneLine(e.name) : kind === 'text' ? oneLine(wordsOf(e)) : oneLine(wordsOf(label)),
       box: boxOf(e),
       elementIds: label ? [e.id, label.id] : [e.id],
       stroke: colorWord(e.strokeColor),
@@ -195,6 +198,9 @@ export function thingsOf(scene: CanvasScene): Thing[] {
     for (const id of ids) thingOfElement.set(id, thing);
   }
 
+  const far = farElements(els);
+  if (far.size > 0) for (const thing of things) if (thing.elementIds.every((id) => far.has(id)) || far.has(thing.elementIds[0]!)) thing.far = true;
+
   // Frames.
   for (const e of els) {
     const thing = thingOfElement.get(e.id);
@@ -250,7 +256,14 @@ export function thingsOf(scene: CanvasScene): Thing[] {
 
 const round = (n: number) => String(Math.round(n));
 const place = (b: Box) => `at ${round(b.x)},${round(b.y)} ${round(b.w)}x${round(b.h)}`;
-const quote = (words: string, max = 90) => JSON.stringify(words.length > max ? `${words.slice(0, max - 1)}…` : words);
+/** How many characters of a thing's words a line of the reading holds; a read of named things (`things`) holds them all. */
+export const WORDS_SHOWN = 90;
+const WORDS_ALL = 4000;
+const quote = (words: string, max = WORDS_SHOWN) => {
+  // Cut between characters, never inside one (an emoji is two units of a string).
+  const letters = words.length > max ? Array.from(words) : null;
+  return JSON.stringify(letters && letters.length > max ? `${letters.slice(0, max - 1).join('')}…` : words);
+};
 
 function look(t: Thing): string {
   const parts: string[] = [];
@@ -272,14 +285,25 @@ function spot(inner: Box, outer: Box): string {
   return SPOTS[row]![col]!;
 }
 
+interface StrokeShape {
+  /** "dot", "closed loop", "flat line", "upright line", "slanted line", "curve", "squiggle". */
+  kind: string;
+  /** The stroke in plain words, with its size and where in the sketch it is. */
+  words: string;
+  /** Which ninth of the sketch it is in ("top left" … "bottom right"). */
+  where: string;
+}
+
 /** One freehand stroke in plain words: a dot, a closed loop, a straight line, or which way a curve opens. */
-function strokeWords(el: CanvasElement, cluster: Box): string {
+function strokeShape(el: CanvasElement, cluster: Box, own = false): StrokeShape {
   const points = el.points ?? [];
   const box = boxOf(el);
   const diag = Math.hypot(box.w, box.h);
   const clusterDiag = Math.hypot(cluster.w, cluster.h) || 1;
   const where = spot(box, cluster);
-  if (points.length < 2 || diag < Math.max(6, clusterDiag * 0.04)) return `a dot at the ${where}`;
+  // Among a few strokes, one that is tiny beside the drawing is a dot (an eye in a face). Among very many (`own`),
+  // each is judged by its own shape: hatching is short lines, not three thousand dots.
+  if (points.length < 2 || diag < (own ? 6 : Math.max(6, clusterDiag * 0.04))) return { kind: 'dot', words: `a dot at the ${where}`, where };
   const first = points[0]!;
   const last = points[points.length - 1]!;
   let length = 0;
@@ -289,36 +313,77 @@ function strokeWords(el: CanvasElement, cluster: Box): string {
   const whole = boxContains({ x: box.x - 4, y: box.y - 4, w: box.w + 8, h: box.h + 8 }, cluster) || diag > clusterDiag * 0.85;
   const span = whole ? 'around the whole sketch' : `at the ${where}`;
   if (chord < diag * 0.25 && length > diag * 1.8) {
-    return `a ${size} closed loop ${span}`;
+    return { kind: 'closed loop', words: `a ${size} closed loop ${span}`, where };
   }
   if (length < chord * 1.12) {
     const flat = Math.abs(last[0]! - first[0]!) >= Math.abs(last[1]! - first[1]!) * 2;
     const tall = Math.abs(last[1]! - first[1]!) >= Math.abs(last[0]! - first[0]!) * 2;
-    return `a ${size} ${flat ? 'flat' : tall ? 'upright' : 'slanted'} line ${span}`;
+    const lean = flat ? 'flat' : tall ? 'upright' : 'slanted';
+    return { kind: `${lean} line`, words: `a ${size} ${lean} line ${span}`, where };
   }
   // A curve: which side of the line between its ends does its middle fall on?
   const mid = points[Math.floor(points.length / 2)]!;
   const mx = (first[0]! + last[0]!) / 2;
   const my = (first[1]! + last[1]!) / 2;
   const flatish = Math.abs(last[0]! - first[0]!) >= Math.abs(last[1]! - first[1]!);
-  if (length > chord * 2.6) return `a ${size} squiggle ${span}`;
+  if (length > chord * 2.6) return { kind: 'squiggle', words: `a ${size} squiggle ${span}`, where };
   const bend = flatish ? (mid[1]! > my ? 'ends up, like a smile' : 'ends down, like an arch') : mid[0]! > mx ? 'bulging right' : 'bulging left';
-  return `a ${size} curve (${bend}) ${span}`;
+  return { kind: 'curve', words: `a ${size} curve (${bend}) ${span}`, where };
+}
+
+const MANY_STROKES = 12;
+const plural = (kind: string, n: number) => (n === 1 ? kind : kind === 'squiggle' ? 'squiggles' : `${kind}s`);
+
+/**
+ * A sketch of very many strokes (hatching, handwriting, a page of scribbles), said as what it is made of and where
+ * the strokes gather: how many of each kind, which parts of the sketch hold the most, and the few largest strokes.
+ * Listing eight strokes of three thousand and "2992 more" tells a reader nothing.
+ */
+function manyStrokesWords(strokes: CanvasElement[], box: Box): string {
+  const shapes = strokes.map((s) => strokeShape(s, box, true));
+  const kinds = new Map<string, number>();
+  const places = new Map<string, number>();
+  for (const shape of shapes) {
+    kinds.set(shape.kind, (kinds.get(shape.kind) ?? 0) + 1);
+    places.set(shape.where, (places.get(shape.where) ?? 0) + 1);
+  }
+  const byCount = (a: [string, number], b: [string, number]) => b[1] - a[1];
+  const made = [...kinds].sort(byCount).slice(0, 5).map(([kind, n]) => `${n} ${plural(kind, n)}`);
+  // Where they gather: each ninth of the sketch against an even spread.
+  const even = strokes.length / 9;
+  const dense = [...places].filter(([, n]) => n > even * 1.6).sort(byCount);
+  const bare = SPOTS.flat().filter((name) => (places.get(name) ?? 0) < even * 0.25);
+  const share = (n: number) => `${Math.round((n / strokes.length) * 100)}%`;
+  const where =
+    dense.length === 0 && bare.length === 0
+      ? 'spread evenly over the sketch'
+      : [dense.length > 0 ? `most at the ${dense.slice(0, 3).map(([name, n]) => `${name} (${share(n)})`).join(', ')}` : '', bare.length > 0 && bare.length <= 5 ? `few or none at the ${bare.join(', ')}` : ''].filter(Boolean).join('; ') || 'gathered in parts of the sketch';
+  const largest = strokes
+    .map((s, i) => ({ area: boxOf(s).w * boxOf(s).h, words: shapes[i]!.words }))
+    .sort((a, b) => b.area - a.area)
+    .slice(0, 3)
+    .map((s) => s.words);
+  const middle = (values: number[]) => Math.round(values.sort((a, b) => a - b)[Math.floor(values.length / 2)] ?? 0);
+  const typical = `${middle(strokes.map((s) => boxOf(s).w))}x${middle(strokes.map((s) => boxOf(s).h))}`;
+  return `${made.join(', ')}, typically ${typical}; ${where}; the largest: ${largest.join('; ')}`;
 }
 
 function sketchWords(t: Thing, scene: CanvasScene, things: Thing[]): string {
   const byId = new Map(scene.elements.map((e) => [e.id, e]));
   const strokes = t.elementIds.map((id) => byId.get(id)).filter((e): e is CanvasElement => !!e);
-  const ranked = strokes.slice().sort((a, b) => {
-    const A = boxOf(a);
-    const B = boxOf(b);
-    return B.w * B.h - A.w * A.h;
-  });
-  const shown = ranked.slice(0, 8).map((s) => strokeWords(s, t.box));
-  const counts = new Map<string, number>();
-  for (const w of shown) counts.set(w, (counts.get(w) ?? 0) + 1);
-  const parts = [...counts].map(([w, n]) => (n > 1 ? `${n}x ${w.replace(/^an? /, '')}` : w));
-  if (ranked.length > 8) parts.push(`${ranked.length - 8} more`);
+  let parts: string[];
+  if (strokes.length > MANY_STROKES) parts = [manyStrokesWords(strokes, t.box)];
+  else {
+    const ranked = strokes.slice().sort((a, b) => {
+      const A = boxOf(a);
+      const B = boxOf(b);
+      return B.w * B.h - A.w * A.h;
+    });
+    const shown = ranked.map((s) => strokeShape(s, t.box).words);
+    const counts = new Map<string, number>();
+    for (const w of shown) counts.set(w, (counts.get(w) ?? 0) + 1);
+    parts = [...counts].map(([w, n]) => (n > 1 ? `${n}x ${w.replace(/^an? /, '')}` : w));
+  }
   // What the sketch is drawn on, or next to.
   let on = '';
   let best: Thing | undefined;
@@ -342,26 +407,28 @@ function sketchWords(t: Thing, scene: CanvasScene, things: Thing[]): string {
   return `${t.strokes} freehand stroke${t.strokes === 1 ? '' : 's'}${on}: ${parts.join('; ')}`;
 }
 
-/** One line for a thing, without its indent. */
-export function lineOf(t: Thing, scene: CanvasScene, things: Thing[]): string {
+/** One line for a thing, without its indent. `full`: all of its words, however long (a read of named things). */
+export function lineOf(t: Thing, scene: CanvasScene, things: Thing[], full = false): string {
   const end = (e: Thing['from']) => (e ? `${e.attached ? '' : '~'}${e.id}` : '(open)');
+  const max = full ? WORDS_ALL : WORDS_SHOWN;
+  const far = t.far ? ' (far from the rest; not counted in the size)' : '';
   switch (t.kind) {
     case 'frame': {
       const holds = things.filter((o) => o.frame === t.id).length;
-      return `frame ${t.id} ${quote(t.words || 'untitled')} ${place(t.box)}, holds ${holds}`;
+      return `frame ${t.id} ${quote(t.words || 'untitled', max)} ${place(t.box)}, holds ${holds}${far}`;
     }
     case 'arrow':
     case 'line': {
       const ends = t.kind === 'arrow' || t.from || t.to ? ` ${end(t.from)} -> ${end(t.to)}` : '';
       const loose = !t.from && !t.to ? ` ${place(t.box)}` : '';
-      return `${t.kind} ${t.id}${ends}${t.words ? ` ${quote(t.words)}` : ''}${loose}${look(t)}`;
+      return `${t.kind} ${t.id}${ends}${t.words ? ` ${quote(t.words, max)}` : ''}${loose}${look(t)}${far}`;
     }
     case 'sketch':
-      return `sketch ${t.id} ${place(t.box)}${look(t)}: ${sketchWords(t, scene, things)}`;
+      return `sketch ${t.id} ${place(t.box)}${look(t)}: ${sketchWords(t, scene, things)}${far}`;
     case 'picture':
-      return `picture ${t.id} ${place(t.box)}`;
+      return `picture ${t.id} ${place(t.box)}${far}`;
     default:
-      return `${t.kind} ${t.id}${t.words ? ` ${quote(t.words)}` : ''} ${place(t.box)}${look(t)}`;
+      return `${t.kind} ${t.id}${t.words ? ` ${quote(t.words, max)}` : ''} ${place(t.box)}${look(t)}${far}`;
   }
 }
 
@@ -374,6 +441,8 @@ export interface ReadOptions {
   after?: string;
   /** At most this many lines. */
   limit?: number;
+  /** Every thing's words whole (a read of named things), not cut at `WORDS_SHOWN`. */
+  full?: boolean;
 }
 
 export interface Reading {
@@ -386,7 +455,10 @@ export interface Reading {
   afterMissing?: boolean;
   /** The things whose lines are in `lines`. */
   shown: Thing[];
+  /** Where the chosen things are, without those far from the rest. */
   box: Box;
+  /** The things shown whose words were cut (their ids): a read of exactly those gives them whole. */
+  cutWords: string[];
 }
 
 export function readThings(scene: CanvasScene, things: Thing[], options: ReadOptions = {}): Reading {
@@ -394,7 +466,8 @@ export function readThings(scene: CanvasScene, things: Thing[], options: ReadOpt
   if (options.frame) chosen = chosen.filter((t) => t.id === options.frame || t.frame === options.frame);
   if (options.only) chosen = chosen.filter((t) => options.only!.has(t.id));
   const total = chosen.length;
-  const box = unionBox(chosen.map((t) => t.box));
+  const near = chosen.filter((t) => !t.far);
+  const box = unionBox((near.length > 0 ? near : chosen).map((t) => t.box));
   let start = 0;
   let afterMissing = false;
   if (options.after) {
@@ -404,7 +477,8 @@ export function readThings(scene: CanvasScene, things: Thing[], options: ReadOpt
   }
   const limit = Math.max(1, options.limit ?? 150);
   const page = chosen.slice(start, start + limit);
-  const lines = page.map((t) => `${t.frame && chosen.some((o) => o.id === t.frame) ? '  ' : ''}${lineOf(t, scene, things)}`);
+  const lines = page.map((t) => `${t.frame && chosen.some((o) => o.id === t.frame) ? '  ' : ''}${lineOf(t, scene, things, options.full)}`);
+  const cutWords = options.full ? [] : page.filter((t) => Array.from(t.words).length > WORDS_SHOWN).map((t) => t.id);
 
   // Groups a person made, named once after the things (only when the whole reading is shown).
   if (start === 0 && page.length === chosen.length) {
@@ -417,7 +491,7 @@ export function readThings(scene: CanvasScene, things: Thing[], options: ReadOpt
       if (members.length > 1) lines.push(`group: ${members.join(', ')}`);
     }
   }
-  return { lines, total, cutAfter: start + limit < chosen.length ? page[page.length - 1]?.id : undefined, box, shown: page, ...(afterMissing ? { afterMissing } : {}) };
+  return { lines, total, cutAfter: start + limit < chosen.length ? page[page.length - 1]?.id : undefined, box, shown: page, cutWords, ...(afterMissing ? { afterMissing } : {}) };
 }
 
 /** What a canvas holds in a few words: "12 things: 5 boxes, 4 arrows, 2 texts, 1 sketch". */

@@ -13,7 +13,7 @@
  */
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { diffScenes, type CanvasAuthor, type CanvasLogEntry } from './changes';
+import { diffScenes, type CanvasAuthor, type CanvasLogEntry, type CanvasUndone } from './changes';
 import { asScene, emptyScene, type Box, type CanvasScene } from './scene';
 
 export const INBOX_CANVAS_DIR = 'canvas';
@@ -158,7 +158,7 @@ export function readCanvasLog(inboxDirPath: string, threadId: string): CanvasLog
  * Returns the revision it now is and the log entry written (null when nothing
  * a reader would see changed).
  */
-export function commitCanvas(inboxDirPath: string, threadId: string, next: CanvasScene, by: CanvasAuthor, at: Date, extra: { undid?: number } = {}): { rev: number; entry: CanvasLogEntry | null } {
+export function commitCanvas(inboxDirPath: string, threadId: string, next: CanvasScene, by: CanvasAuthor, at: Date, extra: { undid?: number; undone?: CanvasUndone } = {}): { rev: number; entry: CanvasLogEntry | null } {
   const dir = canvasDirOf(inboxDirPath, threadId);
   const prev = readCanvasScene(inboxDirPath, threadId, false);
   const meta = readCanvasMeta(inboxDirPath, threadId);
@@ -174,7 +174,7 @@ export function commitCanvas(inboxDirPath: string, threadId: string, next: Canva
     if (existsSync(join(dir, 'scene.excalidraw')) || next.elements.length > 0) writeWhole(join(dir, 'scene.excalidraw'), text);
     return { rev: meta.rev, entry: null };
   }
-  const entry: CanvasLogEntry = { rev: meta.rev + 1, at: at.toISOString(), by, changes: changes.slice(0, 300), ...(extra.undid !== undefined ? { undid: extra.undid } : {}) };
+  const entry: CanvasLogEntry = { rev: meta.rev + 1, at: at.toISOString(), by, changes: changes.slice(0, 300), ...(extra.undid !== undefined ? { undid: extra.undid, ...(extra.undone ? { undone: extra.undone } : {}) } : {}) };
   writeWhole(join(dir, 'scene.excalidraw'), text);
   const log = readCanvasLog(inboxDirPath, threadId);
   if (log.length >= LOG_KEEP * 2) writeWhole(join(dir, 'log.jsonl'), `${[...log.slice(-LOG_KEEP), entry].map((e) => JSON.stringify(e)).join('\n')}\n`);

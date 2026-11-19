@@ -25,9 +25,9 @@ import { gunzipSync } from "node:zlib";
 import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxAgentName, type InboxReplySketch } from "@plannotator/core/inbox-types";
 import { applyOps, mermaidTexts, RefError, resolveThing } from "@plannotator/shared/inbox/canvas/apply";
-import { mergeSave, sameAuthor, sinceLines, type CanvasAuthor } from "@plannotator/shared/inbox/canvas/changes";
+import { mergeSave, sameAuthor, sinceLines, undoneLine, type CanvasAuthor, type CanvasLogEntry, type CanvasUndone } from "@plannotator/shared/inbox/canvas/changes";
 import { countWords, lineOf, readThings, thingsOf, type Thing } from "@plannotator/shared/inbox/canvas/reading";
-import { asScene, lookOf, unionBox, type Box, type CanvasElement, type CanvasScene } from "@plannotator/shared/inbox/canvas/scene";
+import { asScene, lookOf, pictureTiles, unionBox, type Box, type CanvasElement, type CanvasScene } from "@plannotator/shared/inbox/canvas/scene";
 import {
   canvasThreads,
   commitCanvas,
@@ -185,7 +185,8 @@ export function createInboxCanvas(options: {
   };
   const readCall = (threadId: string, more: Record<string, unknown> = {}) => `canvas ${JSON.stringify({ thread_id: threadId, ...more })}`;
 
-  const undoneLines = (revs: number[]) => revs.map((n) => `The person undid your change (rev ${n}): what it changed is as it was before, and what it added is gone.`);
+  /** Exactly what each Undo took back and what the person kept (changes.ts `undoneLine`); each thing is in the list that follows, as it is now. */
+  const undoneLines = (entries: CanvasLogEntry[]) => entries.map(undoneLine);
 
   /**
    * The lines an answer opens with: what others changed since this session's last answer about the canvas. Each
@@ -233,7 +234,8 @@ export function createInboxCanvas(options: {
       const known = new Set(things.map((t) => t.id));
       only = new Set(readOptions.things.filter((id) => known.has(id)));
     }
-    const reading = readThings(scene, things, { frame, after: readOptions.after, only, ...(only ? { limit: 400 } : {}) });
+    // Things asked for by id come with all their words; a reading of the canvas holds the first 90 characters of each.
+    const reading = readThings(scene, things, { frame, after: readOptions.after, only, ...(only ? { limit: 400, full: true } : {}) });
     const key = sessionOf(viewer);
     if (key) markCanvasTold(dir, threadId, key, looksIn(scene, reading.shown.flatMap((t) => t.elementIds)));
     const size = `${Math.round(reading.box.w)}x${Math.round(reading.box.h)}`;
@@ -241,6 +243,8 @@ export function createInboxCanvas(options: {
     if (reading.afterMissing) lines.push(`(Nothing is called ${JSON.stringify(readOptions.after)} any more, so this reading starts from the top.)`);
     lines.push(...reading.lines);
     if (reading.cutAfter) lines.push(`${reading.total - reading.lines.length} more. Next: ${readCall(threadId, { ...(frame ? { in: frame } : {}), after_thing: reading.cutAfter })}`);
+    // Words cut short say so, with the call that gives them whole.
+    if (reading.cutWords.length > 0) lines.push(`Words ending in … are cut at 90 characters. All of a thing's words: ${readCall(threadId, { things: reading.cutWords.slice(0, 12) })}`);
     return lines.join("\n");
   };
 
@@ -262,7 +266,7 @@ export function createInboxCanvas(options: {
     return encodePng(w, h, out);
   };
 
-  const picture = async (threadId: string, of: unknown): Promise<{ path: string; note: string; only: Set<string> | null; named: string[] }> => {
+  const picture = async (threadId: string, of: unknown): Promise<{ path: string; paths?: string[]; note: string; only: Set<string> | null; named: string[] }> => {
     const scene = readCanvasScene(dir, threadId, false);
     const meta = readCanvasMeta(dir, threadId);
     const things = thingsOf(scene);
@@ -288,6 +292,22 @@ export function createInboxCanvas(options: {
       for (const t of shown) only.add(t.id);
     }
     const name = `rev${meta.rev}-${only ? named.slice(0, 3).join("-") : "all"}`;
+    // A strip many times longer than it is wide (a tall screenshot) is drawn in pieces along its length, each at a
+    // size that can be read; as one picture it would be a sliver.
+    const near = things.filter((t) => !t.far);
+    const whole = box ?? ((b: Box) => ({ x: b.x - 24, y: b.y - 24, w: b.w + 48, h: b.h + 48 }))(unionBox((near.length > 0 ? near : things).map((t) => t.box)));
+    const tiles = pictureTiles(whole);
+    if (tiles.length > 1) {
+      const paths: string[] = [];
+      for (const [i, tile] of tiles.entries()) {
+        const part = await askWindow<PictureAnswer>("picture", { thread_id: threadId, rev: meta.rev, box: tile, crop: true }, PICTURE_WAIT_MS);
+        if (!part) break;
+        paths.push(writeAgentPicture(dir, threadId, `${name}-part${i + 1}of${tiles.length}`, part.png));
+      }
+      if (paths.length === tiles.length) {
+        return { path: paths[0]!, paths, note: ` It is ${Math.round(whole.w)}x${Math.round(whole.h)}, too long for one readable picture, so it is in ${paths.length} parts from ${whole.h >= whole.w ? "top to bottom" : "left to right"}.`, only, named };
+      }
+    }
     const drawn = await askWindow<PictureAnswer>("picture", { thread_id: threadId, rev: meta.rev, box }, PICTURE_WAIT_MS);
     if (drawn) {
       if (!box) writeCanvasPicture(dir, threadId, drawn.png, { rev: meta.rev, box: drawn.box, scale: drawn.scale });
@@ -570,46 +590,81 @@ export function createInboxCanvas(options: {
         if (!undo) return json({ serverSession: options.serverSession, rev: readCanvasMeta(dir, threadId).rev, already: true, kept: [], scene: stored });
         const was = new Map(undo.before.map((e) => [e.id, e]));
         const added = new Set(undo.added);
-        const things = thingsOf(stored);
-        const nameOf = (id: string) => {
-          const thing = things.find((t) => t.elementIds.includes(id));
-          return thing ? `${thing.kind}${thing.words ? ` ${JSON.stringify(thing.words.slice(0, 40))}` : ""}` : null;
-        };
-        const kept = new Set<string>();
+        // What each element came to: back as it was, part of it back, none of it (the person's), or removed.
+        const fate = new Map<string, "back" | "part" | "kept" | "gone">();
         const stamp = (e: CanvasElement, current: CanvasElement) => ({ ...e, version: (current.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: now() });
         // Field by field: what the change made of a thing goes back only where it is still what the change made it.
         // A thing the person moved keeps its place and still loses the agent's colour; one they rewrote keeps their
         // words; one they deleted stays deleted. What the agent added goes only if nobody touched it.
         const left = new Map(undo.left.map((e) => [e.id, e]));
         const FIELDS = ["x", "y", "width", "height", "text", "originalText", "strokeColor", "backgroundColor", "frameId", "containerId", "name", "points", "isDeleted", "startBinding", "endBinding", "boundElements"] as const;
+        // What only follows along (who is tied to whom) is not something a person "kept".
+        const QUIET = new Set<string>(["boundElements", "startBinding", "endBinding"]);
         const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+        const byStored = new Map(stored.elements.map((e) => [e.id, e]));
+        // A shape and its label are one thing: what the agent added goes only when neither was touched since.
+        const unitOf = (e: CanvasElement) => (e.type === "text" && e.containerId && added.has(e.containerId) && !byStored.get(e.containerId)?.isDeleted ? e.containerId : e.id);
+        const touchedUnits = new Set<string>();
+        for (const e of stored.elements) if (added.has(e.id) && !e.isDeleted && lookOf(e) !== undo.after[e.id]) touchedUnits.add(unitOf(e));
         const elements = stored.elements.map((e) => {
           const before = was.get(e.id);
           const after = left.get(e.id);
           if (before && after) {
             // Deleted by the person since: theirs to decide; it stays gone.
-            if (e.isDeleted && !after.isDeleted) return e;
-            const made = FIELDS.filter((f) => !same(before[f], after[f]));
-            const back = made.filter((f) => same(e[f], after[f]));
-            if (back.length < made.length && made.some((f) => !["boundElements", "startBinding", "endBinding"].includes(f) && !back.includes(f))) {
-              const name = nameOf(e.id);
-              if (name) kept.add(name);
+            if (e.isDeleted && !after.isDeleted) {
+              fate.set(e.id, "kept");
+              return e;
             }
+            // A label's place and size are the editor's (it wraps the words to the shape and centres them): they
+            // follow the shape and are never put back on their own. Its words are judged as written (`originalText`).
+            const label = e.type === "text" && !!e.containerId;
+            const made = FIELDS.filter((f) => !same(before[f], after[f]) && !(label && (f === "x" || f === "y")));
+            const words = (el: CanvasElement) => el.originalText ?? el.text;
+            const still = (f: string) => (label && (f === "text" || f === "width" || f === "height") ? same(words(e), words(after)) : same(e[f], after[f]));
+            const back = made.filter(still);
+            const loud = made.filter((f) => !QUIET.has(f) && !(label && (f === "width" || f === "height")));
+            const loudBack = loud.filter((f) => back.includes(f));
+            if (loud.length > 0) fate.set(e.id, loudBack.length === loud.length ? "back" : loudBack.length === 0 ? "kept" : "part");
             if (back.length === 0) return e;
             return stamp({ ...e, ...Object.fromEntries(back.map((f) => [f, before[f]])) } as CanvasElement, e);
           }
           if (!added.has(e.id) || e.isDeleted) return e;
-          if (lookOf(e) !== undo.after[e.id]) {
-            const name = nameOf(e.id);
-            if (name) kept.add(name);
+          if (touchedUnits.has(unitOf(e))) {
+            fate.set(e.id, "kept");
             return e;
           }
+          fate.set(e.id, "gone");
           return stamp({ ...e, isDeleted: true }, e);
         });
-        const committed = commitCanvas(dir, threadId, { ...stored, elements }, { kind: "person" }, new Date(now()), { undid: undo.rev });
+        const next = { ...stored, elements };
+        // Said by thing, as a person would name it: its kind and its words (as they are after the Undo; as they were, for what was removed).
+        const namesIn = (scene: CanvasScene) => {
+          const map = new Map<string, { id: string; name: string }>();
+          for (const t of thingsOf(scene)) for (const id of t.elementIds) map.set(id, { id: t.id, name: `${t.kind}${t.words ? ` ${JSON.stringify(Array.from(t.words).slice(0, 40).join(""))}` : ""}` });
+          return map;
+        };
+        const nowNames = namesIn(next);
+        const oldNames = namesIn(stored);
+        const perThing = new Map<string, { name: string; fates: Set<string> }>();
+        for (const [id, f] of fate) {
+          const named = (f === "gone" ? oldNames.get(id) : nowNames.get(id)) ?? oldNames.get(id);
+          if (!named) continue;
+          const entry = perThing.get(named.id) ?? { name: named.name, fates: new Set<string>() };
+          entry.fates.add(f);
+          perThing.set(named.id, entry);
+        }
+        const undone: CanvasUndone = { back: [], part: [], kept: [], gone: [] };
+        for (const { name, fates } of perThing.values()) {
+          if (fates.has("gone") && fates.size === 1) undone.gone.push(name);
+          else if (fates.has("part") || (fates.has("kept") && (fates.has("back") || fates.has("gone")))) undone.part.push(name);
+          else if (fates.has("kept")) undone.kept.push(name);
+          else undone.back.push(name);
+        }
+        const committed = commitCanvas(dir, threadId, next, { kind: "person" }, new Date(now()), { undid: undo.rev, undone });
         removeCanvasUndo(dir, threadId, undo.rev);
+        const kept = [...undone.part, ...undone.kept];
         emit("canvas", { thread_id: threadId, rev: committed.rev, by: null, window: typeof body.window === "string" ? body.window : null, elements: [] });
-        return json({ serverSession: options.serverSession, rev: committed.rev, kept: [...kept].slice(0, 8), scene: readCanvasScene(dir, threadId, false) });
+        return json({ serverSession: options.serverSession, rev: committed.rev, kept: kept.slice(0, 8), kept_count: kept.length, scene: readCanvasScene(dir, threadId, false) });
       }
       if (match[2]) {
         // The window's drawing of the whole canvas, kept for an agent's `picture` when no window is open.
@@ -715,8 +770,8 @@ export function createInboxCanvas(options: {
               if (input.picture !== undefined && input.picture !== false) {
                 const drawn = await picture(threadId, input.picture);
                 const text = read(threadId, viewer, { in: input.in });
-                const head = `Picture${drawn.only ? ` of ${drawn.named.slice(0, 8).join(", ")}` : " of the whole canvas"}: ${drawn.path}${drawn.note}`;
-                return okComplete(`${head}\n${text}`, { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev, picture: drawn.path });
+                const head = `Picture${drawn.only ? ` of ${drawn.named.slice(0, 8).join(", ")}` : " of the whole canvas"}: ${(drawn.paths ?? [drawn.path]).join(", ")}${drawn.note}`;
+                return okComplete(`${head}\n${text}`, { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev, picture: drawn.path, ...(drawn.paths ? { pictures: drawn.paths } : {}) });
               }
               return okComplete(read(threadId, viewer, { in: input.in, after: input.after_thing, things: input.things }), { thread_id: threadId, rev: readCanvasMeta(dir, threadId).rev });
             } catch (error) {

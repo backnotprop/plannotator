@@ -2,10 +2,10 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyOps } from "./apply";
-import { mergeSave, sinceLines } from "./changes";
+import { applyOps, seenWords } from "./apply";
+import { mergeSave, sinceLines, undoneLine } from "./changes";
 import { readThings, thingsOf } from "./reading";
-import { emptyScene, type CanvasElement, type CanvasScene } from "./scene";
+import { asScene, boxOf, boxesOverlap, emptyScene, farElements, pictureTiles, tameFar, type CanvasElement, type CanvasScene } from "./scene";
 import { commitCanvas, readCanvasLog, readCanvasMeta, readCanvasScene } from "./store";
 
 const agent = { by: "Agent", now: 1_000 };
@@ -168,7 +168,7 @@ describe("who changed what", () => {
     expect(sinceLines(readCanvasLog(dir, thread), cut.through, { kind: "agent", name: "Agent", key: "a" }).lines.length).toBeGreaterThan(0);
     // The person taking back the agent's change is said as that, to that agent only.
     commitCanvas(dir, thread, { ...scene, elements: scene.elements.map((e) => (e.type === "ellipse" ? { ...e, x: e.x - 200, version: (e.version ?? 1) + 5 } : e)) }, { kind: "person" }, new Date(20), { undid: 1 });
-    expect(sinceLines(readCanvasLog(dir, thread), 5, { kind: "agent", name: "Agent", key: "a" }).undone).toEqual([1]);
+    expect(sinceLines(readCanvasLog(dir, thread), 5, { kind: "agent", name: "Agent", key: "a" }).undone.map((entry) => entry.undid)).toEqual([1]);
     expect(sinceLines(readCanvasLog(dir, thread), 5, { kind: "agent", name: "Other", key: "o" }).undone).toEqual([]);
   });
 });
@@ -199,5 +199,188 @@ describe("what the break pass found in an agent's placement", () => {
     const w = Math.max(...xs) - Math.min(...xs);
     const h = Math.max(...ys) - Math.min(...ys);
     expect(Math.max(w, h) / Math.min(w, h)).toBeLessThan(3);
+  });
+});
+
+describe("what the recheck found (round 4)", () => {
+  const URL = "https://example.com/workspaces/acme/projects/q3-launch/docs/9f8e7d6c5b4a?tab=comments&filter=unresolved";
+  const CJK = "\u652f\u4ed8\u7f51\u5173\u8d85\u65f6\u540e\u7684\u91cd\u8bd5\u7b56\u7565\u9700\u8981\u4e0e\u98ce\u63a7\u56e2\u961f\u786e\u8ba4\u540e\u624d\u80fd\u4e0a\u7ebf";
+
+  test("N2: an agent's words are stored exactly as given; no line break is ever put into them", () => {
+    const made = applyOps(emptyScene(), [
+      { add: "box", text: URL },
+      { add: "box", text: CJK, below: URL },
+      { add: "box", text: "B", rightOf: URL },
+      { connect: URL, to: "B", label: "enqueue" },
+      { add: "text", text: "one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen", below: CJK },
+    ], agent);
+    expect(made.ok).toBe(true);
+    const texts = made.scene.elements.filter((e) => e.type === "text").map((e) => e.text);
+    expect(texts).toContain(URL);
+    expect(texts).toContain(CJK);
+    expect(texts).toContain("enqueue");
+    for (const el of made.scene.elements.filter((e) => e.type === "text")) expect(el.text).toBe(el.originalText!);
+    // A long free text keeps to a column by its width (the editor wraps it on screen), not by breaks in its words.
+    const long = made.scene.elements.find((e) => e.type === "text" && String(e.text).startsWith("one two"))!;
+    expect(long.autoResize).toBe(false);
+    expect(long.text).not.toContain("\n");
+    // Whole words name the thing, also when they are Chinese (no spaces to split on).
+    const recolour = applyOps(made.scene, [{ set: CJK, color: "red" }], agent);
+    expect(recolour.errors).toEqual([]);
+  });
+
+  test("N2: the reading and a name go by the words as written, not by the line breaks the editor drew them with", () => {
+    const scene = applyOps(emptyScene(), [{ add: "box", text: URL }], agent).scene;
+    // The editor wrapped the label for display: `text` has breaks, `originalText` is the words.
+    const wrapped: CanvasScene = { ...scene, elements: scene.elements.map((e) => (e.type === "text" ? { ...e, text: `${URL.slice(0, 29)}\n${URL.slice(29, 58)}\n${URL.slice(58)}`, originalText: URL } : e)) };
+    const thing = thingsOf(wrapped)[0]!;
+    expect(thing.words).toBe(URL);
+    expect(readThings(wrapped, thingsOf(wrapped), { full: true }).lines[0]).toContain(JSON.stringify(URL));
+    expect(applyOps(wrapped, [{ set: URL, color: "blue" }], agent).ok).toBe(true);
+  });
+
+  test("N3: the joiner inside an emoji stays, a script's non-joiner stays, and invisible characters alone are still no words", () => {
+    const dev = "\u{1f469}\u{1f3fd}\u200d\u{1f4bb}";
+    expect(seenWords(`Fox ${dev}`)).toBe(`Fox ${dev}`);
+    expect(seenWords("a\u200db\u200bc\ufeff")).toBe("abc");
+    const persian = "\u0645\u06cc\u200c\u062e\u0648\u0627\u0647\u0645";
+    expect(seenWords(persian)).toBe(persian);
+    const made = applyOps(emptyScene(), [{ add: "ellipse", text: `Fox owns the retry lane ${dev}` }], agent);
+    expect(made.scene.elements.find((e) => e.type === "text")!.text).toContain(dev);
+    expect(applyOps(emptyScene(), [{ add: "note", text: "\u200d\u200c \u200b" }], agent).ok).toBe(false);
+    // A name typed without the invisible characters still finds the thing.
+    const named = applyOps(emptyScene(), [{ add: "box", text: "\u0110\u1eb7ng\u200b approves" }], agent).scene;
+    expect(applyOps(named, [{ set: "\u0110\u1eb7ng approves", color: "red" }], agent).ok).toBe(true);
+  });
+
+  test("6: a thing a billion pixels away is not the drawing's size, is brought beside the rest, and a place that is text is a number", () => {
+    const scene = asScene({
+      elements: [
+        { id: "a1", type: "rectangle", x: 0, y: 0, width: 150, height: 80 },
+        { id: "a2", type: "rectangle", x: 170, y: 0, width: 150, height: 80 },
+        { id: "a3", type: "rectangle", x: 340, y: 0, width: 150, height: 80 },
+        { id: "far1", type: "rectangle", x: 1e9, y: 1e9, width: 150, height: 80 },
+        { id: "odd1", type: "rectangle", x: "12", y: null, width: 100, height: 100 },
+      ],
+    });
+    // The element whose place was text is kept (the editor keeps it too), as a number.
+    expect(scene.elements.find((e) => e.id === "odd1")).toMatchObject({ x: 12, y: 0 });
+    expect([...farElements(scene.elements)]).toEqual(["far1"]);
+    const reading = readThings(scene, thingsOf(scene));
+    expect(Math.round(reading.box.w)).toBe(490);
+    expect(reading.lines.find((l) => l.includes("far1"))).toContain("far from the rest");
+    const tamed = tameFar(scene.elements);
+    expect(tamed.moved).toEqual(["far1"]);
+    expect(farElements(tamed.elements).size).toBe(0);
+    const home = tamed.elements.find((e) => e.id === "far1")!;
+    expect(home.x).toBeGreaterThan(490);
+    expect(home.x).toBeLessThan(1000);
+    // One thing alone, wherever it is, is the drawing: nothing to be far from.
+    expect(farElements([{ id: "solo", type: "rectangle", x: 1e9, y: 1e9, width: 10, height: 10 }]).size).toBe(0);
+  });
+
+  test("16: one drag saved three times is told as one move, and a colour changed and changed back is not told", () => {
+    const dir = mkdtempSync(join(tmpdir(), "canvas-net-"));
+    const thread = "msg_net";
+    let scene = board();
+    commitCanvas(dir, thread, scene, { kind: "agent", name: "Agent", key: "a" }, new Date(1));
+    const step = (change: (e: CanvasElement) => Partial<CanvasElement>, type: string) => {
+      scene = { ...scene, elements: scene.elements.map((e) => (e.type === type ? { ...e, ...change(e), version: (e.version ?? 1) + 1, versionNonce: (e.versionNonce ?? 1) + 1 } : e)) };
+      commitCanvas(dir, thread, scene, { kind: "person" }, new Date(2));
+    };
+    for (let i = 0; i < 3; i++) step((e) => ({ x: e.x + 40, y: e.y + 30 }), "ellipse");
+    step(() => ({ strokeColor: "#e03131", backgroundColor: "#ffc9c9" }), "ellipse");
+    step(() => ({ strokeColor: "#1e1e1e", backgroundColor: "transparent" }), "ellipse");
+    const since = sinceLines(readCanvasLog(dir, thread), 1, { kind: "agent", name: "Agent", key: "a" });
+    const queue = since.lines.filter((l) => l.includes('"queue"'));
+    expect(queue).toHaveLength(1);
+    expect(queue[0]).toMatch(/the person moved: ellipse/);
+    expect(queue[0]).not.toContain("new colour");
+  });
+
+  test("N6: the Undo's line says what went back and what the person kept, by name", () => {
+    const line = undoneLine({ rev: 5, at: "", by: { kind: "person" }, changes: [], undid: 2, undone: { back: ['box "Payments queue"'], part: ['box "Ledger, mine"'], kept: ['box "Agent note"'], gone: [] } });
+    expect(line).toContain("undid your change (rev 2)");
+    expect(line).toContain('Back as before: box "Payments queue".');
+    expect(line).toContain('Partly back, with the person\'s own later change kept: box "Ledger, mine".');
+    expect(line).toContain('Not undone, because the person changed it since: box "Agent note".');
+    expect(line).not.toContain("what it added is gone");
+  });
+
+  test("29: a thing asked for by id comes with all its words; a reading cuts them and names the ones it cut", () => {
+    const long = Array.from({ length: 60 }, (_, i) => `word${i}`).join(" ");
+    const scene = applyOps(emptyScene(), [{ add: "box", text: long }], agent).scene;
+    const things = thingsOf(scene);
+    const cut = readThings(scene, things);
+    expect(cut.lines[0]).toContain("\u2026");
+    expect(cut.cutWords).toEqual([things[0]!.id]);
+    const whole = readThings(scene, things, { only: new Set([things[0]!.id]), full: true });
+    expect(whole.lines[0]).toContain(JSON.stringify(long));
+    expect(whole.cutWords).toEqual([]);
+  });
+
+  test("29: three thousand strokes are said as what they are made of and where they gather, not as eight of them and a count", () => {
+    const strokes: CanvasElement[] = [];
+    for (let i = 0; i < 3000; i++) strokes.push(stroke(`s${String(i).padStart(5, "0")}x`, (i % 60) * 20, Math.floor(i / 60) * 20, i % 10 === 0 ? loop(8) : [[0, 0], [14, 1], [28, 0]]));
+    const scene: CanvasScene = { ...emptyScene(), elements: strokes };
+    const line = readThings(scene, thingsOf(scene)).lines[0]!;
+    expect(line).toContain("3000 freehand strokes");
+    expect(line).toMatch(/2700 flat lines/);
+    expect(line).toMatch(/300 (closed loops|dots)/);
+    expect(line).toContain("spread evenly");
+    expect(line).not.toMatch(/\d+ more/);
+    expect(line.length).toBeLessThan(500);
+  });
+
+  test("33: a frame's title has a length", () => {
+    const made = applyOps(emptyScene(), [{ add: "frame", text: "t".repeat(121) }], agent);
+    expect(made.ok).toBe(false);
+    expect(made.errors[0]).toContain("120");
+    const framed = applyOps(emptyScene(), [{ add: "frame", text: "Release" }], agent).scene;
+    expect(applyOps(framed, [{ set: "Release", text: "x".repeat(121) }], agent).ok).toBe(false);
+    expect(applyOps(framed, [{ set: "Release", text: "x".repeat(120) }], agent).ok).toBe(true);
+  });
+
+  test("10: a long strip is cut along its length into readable pieces; anything else is one picture", () => {
+    expect(pictureTiles({ x: 0, y: 0, w: 1500, h: 900 })).toHaveLength(1);
+    expect(pictureTiles({ x: 0, y: 0, w: 448, h: 2000 })).toHaveLength(1);
+    const tiles = pictureTiles({ x: 10, y: 20, w: 448, h: 9048 });
+    expect(tiles).toHaveLength(4);
+    for (const tile of tiles) {
+      expect(tile.w).toBe(448);
+      expect(tile.h).toBeLessThanOrEqual(2400);
+    }
+    // In order, nothing left out between two pieces.
+    expect(tiles[0]!.y).toBe(20);
+    for (let i = 1; i < tiles.length; i++) expect(tiles[i]!.y).toBeLessThanOrEqual(tiles[i - 1]!.y + tiles[i - 1]!.h);
+    expect(tiles[3]!.y + tiles[3]!.h).toBe(9068);
+    expect(pictureTiles({ x: 0, y: 0, w: 12000, h: 800 }).every((t) => t.h === 800)).toBe(true);
+  });
+
+  test("18: a long label between two things that stand close sits beside them: the arrow bows out, the words lie on no thing", () => {
+    const made = applyOps(emptyScene(), [
+      { add: "box", text: "J", at: [0, 0] },
+      { add: "ellipse", text: "Fox owns the retry lane", at: [300, -10] },
+      { connect: "J", to: "Fox owns the retry lane", label: "Benachrichtigungseinstellungen \u2192 Param\u00e8tres de confidentialit\u00e9 et de s\u00e9curit\u00e9" },
+    ], agent);
+    expect(made.ok).toBe(true);
+    const arrow = made.scene.elements.find((e) => e.type === "arrow")!;
+    expect(arrow.points).toHaveLength(3);
+    const label = made.scene.elements.find((e) => e.type === "text" && e.containerId === arrow.id)!;
+    // The label is centred on the arrow's middle point, where the editor draws it.
+    const mid = [arrow.x + arrow.points![1]![0]!, arrow.y + arrow.points![1]![1]!];
+    expect(Math.abs(label.x + label.width / 2 - mid[0]!)).toBeLessThan(2);
+    for (const shape of made.scene.elements.filter((e) => e.type === "rectangle" || e.type === "ellipse")) expect(boxesOverlap(boxOf(shape), boxOf(label))).toBe(false);
+    // With room between the two, the arrow is straight.
+    const roomy = applyOps(emptyScene(), [{ add: "box", text: "A", at: [0, 0] }, { add: "box", text: "B", at: [700, 0] }, { connect: "A", to: "B", label: "enqueue" }], agent);
+    expect(roomy.scene.elements.find((e) => e.type === "arrow")!.points).toHaveLength(2);
+  });
+
+  test("19: words with marks that stack on letters are drawn in the plain face, which carries them", () => {
+    const made = applyOps(emptyScene(), [{ add: "diamond", text: "approves? Z\u0351\u034c\u0300a\u0310\u0311l\u0352g\u0301o\u0300" }, { add: "box", text: "\u0110\u1eb7ng Th\u1ecb Ng\u1ecdc H\u00e2n", at: [0, 400] }], agent);
+    const [zalgo, viet] = made.scene.elements.filter((e) => e.type === "text");
+    expect(zalgo!.fontFamily).toBe(2);
+    // Composed letters need no stacking: they keep the hand-drawn face.
+    expect(viet!.fontFamily).toBe(5);
   });
 });

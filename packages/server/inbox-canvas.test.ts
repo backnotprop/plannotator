@@ -356,3 +356,80 @@ describe("pictures and sketches for agents", () => {
     expect(readdirSync(gone)).toHaveLength(1);
   });
 });
+
+describe("what the recheck found (round 4)", () => {
+  const post = (t: ReturnType<typeof setup>, path: string, body: unknown) =>
+    t.canvas.route(new Request(`http://localhost${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), path).then(async (r) => (await r!.json()) as { rev: number; kept?: string[]; kept_count?: number });
+  /** The person's window saves: these elements changed (the editor bumps their version). */
+  const personEdits = (t: ReturnType<typeof setup>, change: (el: CanvasElement) => Partial<CanvasElement> | null) => {
+    const scene = readCanvasScene(t.dir, THREAD);
+    for (const el of scene.elements) {
+      const next = change(el);
+      if (next) Object.assign(el, next, { version: (el.version ?? 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) });
+    }
+    return commitCanvas(t.dir, THREAD, scene, { kind: "person" }, new Date()).rev;
+  };
+
+  test("N1, N6: an Undo keeps a note the person moved together with its words, and the agent is told exactly what went back and what was kept", async () => {
+    const t = setup();
+    const first = await t.canvas.apply(THREAD, agent("a"), 0, [{ add: "box", text: "Orders API", at: [0, 0] }, { add: "box", text: "Payments queue", at: [300, 0] }, { add: "box", text: "Ledger writer", at: [600, 0] }]);
+    const second = await t.canvas.apply(THREAD, agent("a"), first.rev, [{ add: "note", text: "Agent note", below: "Orders API" }, { set: "Ledger writer", text: "Ledger v2", color: "red" }, { remove: "Payments queue" }]);
+    expect(second.ok).toBe(true);
+    // The editor wrapped the agent's label for display (its `text` and size change, the words do not): not the person's doing.
+    personEdits(t, (el) => (el.type === "text" && el.originalText === "Agent note" ? { text: "Agent\nnote", width: 61, height: 50 } : null));
+    // The person drags the agent's note and retypes the box the agent renamed.
+    personEdits(t, (el) => (el.type === "rectangle" && el.customData?.note ? { x: el.x + 200, y: el.y + 100 } : null));
+    personEdits(t, (el) => (el.type === "text" && el.originalText === "Ledger v2" ? { text: "Ledger, mine", originalText: "Ledger, mine" } : null));
+    const undone = await post(t, `/api/inbox/threads/${THREAD}/canvas/undo`, { rev: second.rev });
+    const after = readCanvasScene(t.dir, THREAD);
+    const liveText = after.elements.filter((e) => e.type === "text" && !e.isDeleted).map((e) => e.originalText).sort();
+    // The moved note still has its words (it is not an empty box), the removed box is back with its label, the person's words stay.
+    expect(liveText).toEqual(["Agent note", "Ledger, mine", "Orders API", "Payments queue"]);
+    const ledger = after.elements.find((e) => e.type === "rectangle" && !e.isDeleted && e.x === 600)!;
+    expect(ledger.strokeColor).toBe("#1e1e1e");
+    // The window's line counts what stayed the person's: the note, and the box whose words they rewrote.
+    expect(undone.kept_count).toBe(2);
+    const told = t.canvas.read(THREAD, agent("a"));
+    const line = told.split("\n").find((l) => l.startsWith("The person undid your change"))!;
+    expect(line).toContain(`(rev ${second.rev})`);
+    expect(line).toContain('Back as before: box "Payments queue".');
+    expect(line).toContain('Partly back, with the person\'s own later change kept: box "Ledger, mine".');
+    expect(line).toContain('Not undone, because the person changed it since: box "Agent note".');
+    expect(told).not.toContain("what it added is gone");
+  });
+
+  test("N6: an Undo nobody got in the way of says it all went back", async () => {
+    const t = setup();
+    const first = await t.canvas.apply(THREAD, agent("a"), 0, [{ add: "box", text: "Orders API", at: [0, 0] }]);
+    const second = await t.canvas.apply(THREAD, agent("a"), first.rev, [{ add: "note", text: "Agent note", below: "Orders API" }, { set: "Orders API", color: "red" }]);
+    const undone = await post(t, `/api/inbox/threads/${THREAD}/canvas/undo`, { rev: second.rev });
+    expect(undone.kept_count).toBe(0);
+    const line = t.canvas.read(THREAD, agent("a")).split("\n").find((l) => l.startsWith("The person undid your change"))!;
+    expect(line).toContain('Back as before: box "Orders API".');
+    expect(line).toContain('Removed (you had added it): box "Agent note".');
+    expect(line).not.toContain("kept");
+  });
+
+  test("29: asking for one thing by id gives all its words", async () => {
+    const t = setup();
+    const long = Array.from({ length: 70 }, (_, i) => `w${i}`).join(" ");
+    await t.canvas.apply(THREAD, agent("a"), 0, [{ add: "box", text: long }]);
+    const whole = t.canvas.read(THREAD, agent("a"));
+    expect(whole).not.toContain(long);
+    const call = whole.split("\n").find((l) => l.includes("All of a thing's words"))!;
+    const id = /"things":\["([^"]+)"\]/.exec(call)![1]!;
+    expect(t.canvas.read(THREAD, agent("a"), { things: [id] })).toContain(JSON.stringify(long));
+  });
+
+  test("N2: words the editor wrapped for display are still named by their whole words", async () => {
+    const t = setup();
+    const W = "\u652f\u4ed8\u7f51\u5173\u8d85\u65f6\u540e\u7684\u91cd\u8bd5\u7b56\u7565\u9700\u8981\u4e0e\u98ce\u63a7\u56e2\u961f\u786e\u8ba4\u540e\u624d\u80fd\u4e0a\u7ebf";
+    const made = await t.canvas.apply(THREAD, agent("a"), 0, [{ add: "box", text: W }]);
+    expect(t.words()).toEqual([W]);
+    // The window saved the label as the editor wrapped it.
+    personEdits(t, (el) => (el.type === "text" ? { text: `${W.slice(0, 10)}\n${W.slice(10, 20)}\n${W.slice(20)}`, originalText: W } : null));
+    const again = await t.canvas.apply(THREAD, agent("a"), made.rev, [{ set: W, color: "red" }]);
+    expect(again.text).not.toContain("nothing on the canvas is called");
+    expect(again.ok).toBe(true);
+  });
+});

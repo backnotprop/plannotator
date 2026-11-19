@@ -13,14 +13,14 @@
  * what is selected ("work on this"). The agent gets a picture and a text
  * reading of the same things (the reply route's `sketch`).
  */
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { CaptureUpdateAction, Excalidraw, MainMenu, WelcomeScreen, convertToExcalidrawElements, exportToCanvas, getSceneVersion, restoreElements, serializeAsJSON, sceneCoordsToViewportCoords, viewportCoordsToSceneCoords } from '@excalidraw/excalidraw';
 import type { AppState, BinaryFileData, BinaryFiles, ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import type { ExcalidrawElement } from '@excalidraw/excalidraw/element/types';
 import excalidrawCss from '@excalidraw/excalidraw/index.css?inline';
 import { authorWords } from '@plannotator/shared/inbox/canvas/changes';
 import { thingsOf } from '@plannotator/shared/inbox/canvas/reading';
-import { boxOf, boxesOverlap, unionBox, type Box, type CanvasElement, type CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
+import { boxOf, boxesOverlap, farElements, pictureTiles, tameFar, unionBox, type Box, type CanvasElement, type CanvasScene } from '@plannotator/shared/inbox/canvas/scene';
 import boardCss from './canvas.css?inline';
 import { CANVAS_WINDOW, canvasApi, canvasLooked, subscribeCanvasFrames, type CanvasFrame, type CanvasJob, type CanvasReply } from './canvasApi';
 
@@ -29,6 +29,10 @@ export interface CanvasBoardProps {
   dark: boolean;
   /** Who a reply from here reaches, as the thread names it ("Claude Code"); null when nobody is known. */
   agent: string | null;
+  /** That agent's icon, as the thread draws it. */
+  agentMark?: ReactNode;
+  /** The person's newest reply reached a running session of that agent (the thread's own delivery mark). */
+  received?: boolean;
   /** The reply box's words when the canvas opened (they may arrive a moment after it): the bar starts from them. */
   draft?: string;
   /** The bar's words as they change: they go back to the reply box when the canvas closes. */
@@ -55,23 +59,86 @@ const asExcalidraw = (elements: readonly CanvasElement[]) => elements as unknown
 const sig = (el: { version?: number; versionNonce?: number; isDeleted?: boolean }) => `${el.version ?? 0}:${el.versionNonce ?? 0}:${el.isDeleted ? 1 : 0}`;
 
 /**
- * Elements from the Inbox, made whole for the editor: defaults filled in, labels centred on what they label. Text is
- * not measured again here: the drawing fonts may not be in yet, and text measured with a stand-in face is cut off
- * when the real one draws it (the server sizes an agent's text generously instead, apply.ts).
+ * The one drawing face this build does not ship (Xiaolai, 12 MB of Chinese and Japanese handwriting) never enters the
+ * page's font list: Excalidraw adds its faces again on every load and every export, and each asks for a file that is
+ * not there ("Failed to load font … Xiaolai"). Those characters draw in the system's face.
+ */
+function leaveOutUnshippedFaces(): void {
+  const fonts = document.fonts as FontFaceSet & { __ibcGuard?: true };
+  if (fonts.__ibcGuard) return;
+  fonts.__ibcGuard = true;
+  const unshipped = (face: FontFace) => face.family.replace(/["']/g, '') === 'Xiaolai';
+  const add = fonts.add.bind(fonts);
+  fonts.add = (face: FontFace) => (unshipped(face) ? fonts : add(face));
+  for (const face of [...fonts]) if (unshipped(face)) fonts.delete(face);
+}
+
+/** Excalidraw's font families by number, for the ones it ships as files (2, Helvetica, is the system's). */
+const FACES: Record<number, string> = { 1: 'Virgil', 3: 'Cascadia', 5: 'Excalifont', 6: 'Nunito', 7: 'Lilita One', 8: 'Comic Shanns', 9: 'Liberation Sans' };
+
+/**
+ * The faces these texts are drawn in, loaded, so that measuring them gives the size they are drawn at. Text measured
+ * with a stand-in face is wrapped and cut wrong once the real one draws it. Gives up after a moment: a canvas is not
+ * held back by a font.
+ */
+async function facesReady(elements: readonly { type: string; isDeleted?: boolean; fontFamily?: unknown; fontSize?: unknown; text?: unknown; originalText?: unknown }[]): Promise<void> {
+  const chars = new Map<string, Set<string>>();
+  for (const el of elements) {
+    if (el.type !== 'text' || el.isDeleted) continue;
+    const family = FACES[Number(el.fontFamily)];
+    if (!family) continue;
+    const set = chars.get(family) ?? new Set<string>();
+    for (const ch of String(el.originalText ?? el.text ?? '')) set.add(ch);
+    chars.set(family, set);
+  }
+  if (chars.size === 0) return;
+  const registered = () => [...document.fonts].some((face) => chars.has(face.family.replace(/["']/g, '')));
+  // Excalidraw lists its faces as it mounts: a text that arrives before that waits for the list, briefly.
+  for (let waited = 0; !registered() && waited < 1500; waited += 50) await new Promise((resolve) => setTimeout(resolve, 50));
+  const loads = [...chars].map(([family, set]) => document.fonts.load(`20px "${family}"`, [...set].join('')).catch(() => []));
+  await Promise.race([Promise.all(loads), new Promise((resolve) => setTimeout(resolve, 2500))]);
+}
+
+/** The middle of an arrow, where its label sits (Excalidraw's rule: its middle point, or the middle of its middle stretch). */
+function arrowMiddle(arrow: ExcalidrawElement): { x: number; y: number } | null {
+  const points = (arrow as unknown as CanvasElement).points ?? [];
+  if (points.length < 2) return null;
+  const at = (i: number) => ({ x: arrow.x + (Number(points[i]?.[0]) || 0), y: arrow.y + (Number(points[i]?.[1]) || 0) });
+  const half = Math.floor(points.length / 2);
+  if (points.length % 2 === 1) return at(half);
+  const a = at(half - 1);
+  const b = at(half);
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+}
+
+/**
+ * Elements from the Inbox, made whole for the editor. `context`: what the editor already holds, so a label finds its
+ * shape and a shape its label when only one of the two came (without it Excalidraw unties them: a box drawn empty
+ * while its words sit in the scene).
+ *
+ * Text is wrapped and measured here, by Excalidraw's own rule, from the words as written (`originalText`): the Inbox
+ * stores an agent's words whole and guesses their size, and the line breaks are only ever a matter of display. Call
+ * after `facesReady`.
  */
 function restored(elements: readonly CanvasElement[], context: readonly { id: string }[] = []): ExcalidrawElement[] {
-  const out = restoreElements(asExcalidraw(elements), null, { refreshDimensions: false, repairBindings: true }) as ExcalidrawElement[];
-  const byId = new Map<string, ExcalidrawElement>([...(context as ExcalidrawElement[]), ...out].map((e) => [e.id, e]));
-  return out.map((el) => {
-    // A label an agent placed was sized by guess on the server: now that it is measured, centre it again.
-    if (el.type !== 'text' || !el.containerId || !(el.customData as { by?: string } | undefined)?.by) return el;
-    const container = byId.get(el.containerId);
-    if (!container) return el;
-    const box = boxOf(container as unknown as CanvasElement);
-    const x = box.x + box.w / 2 - el.width / 2;
-    const y = box.y + box.h / 2 - el.height / 2;
-    return Math.abs(x - el.x) < 0.5 && Math.abs(y - el.y) < 0.5 ? el : { ...el, x, y };
-  });
+  const mine = new Set(elements.map((e) => e.id));
+  const fresh = asExcalidraw(elements).map((el) => (el.type === 'text' && typeof el.originalText === 'string' && el.originalText !== '' ? { ...el, text: el.originalText } : el));
+  const around = (context as ExcalidrawElement[]).filter((e) => !mine.has(e.id));
+  const all = restoreElements([...fresh, ...around], null, { refreshDimensions: true, repairBindings: true }) as ExcalidrawElement[];
+  const byId = new Map<string, ExcalidrawElement>(all.map((e) => [e.id, e]));
+  return all
+    .filter((el) => mine.has(el.id))
+    .map((el) => {
+      // A label sits in the middle of its shape, or on the middle of its arrow (left where the person aligned it otherwise).
+      if (el.type !== 'text' || !el.containerId || el.textAlign !== 'center' || el.verticalAlign !== 'middle') return el;
+      const container = byId.get(el.containerId);
+      if (!container) return el;
+      const box = boxOf(container as unknown as CanvasElement);
+      const middle = container.type === 'arrow' ? arrowMiddle(container) : null;
+      const x = (middle?.x ?? box.x + box.w / 2) - el.width / 2;
+      const y = (middle?.y ?? box.y + box.h / 2) - el.height / 2;
+      return Math.abs(x - el.x) < 0.5 && Math.abs(y - el.y) < 0.5 ? el : { ...el, x, y };
+    });
 }
 
 interface Drawn {
@@ -81,7 +148,7 @@ interface Drawn {
 }
 
 /** A PNG of some elements, always on white in the light look (what an agent reads must not depend on the person's theme). */
-async function draw(elements: readonly ExcalidrawElement[], files: BinaryFiles, max = PICTURE_MAX): Promise<Drawn | null> {
+async function draw(elements: readonly ExcalidrawElement[], files: BinaryFiles, max = PICTURE_MAX, most = 2): Promise<Drawn | null> {
   const shown = elements.filter((e) => !e.isDeleted);
   if (shown.length === 0) return null;
   let scale = 1;
@@ -91,7 +158,7 @@ async function draw(elements: readonly ExcalidrawElement[], files: BinaryFiles, 
     files,
     exportPadding: PAD,
     getDimensions: (width: number, height: number) => {
-      scale = Math.min(2, max / Math.max(width, height, 1));
+      scale = Math.min(most, max / Math.max(width, height, 1));
       return { width: Math.round(width * scale), height: Math.round(height * scale), scale };
     },
   });
@@ -117,13 +184,36 @@ async function cut(whole: Drawn, part: Box, pad = 28): Promise<Blob | null> {
 }
 
 /** The same picture, with where on the canvas it is. */
-async function drawPlaced(elements: readonly ExcalidrawElement[], files: BinaryFiles): Promise<Drawn | null> {
+async function drawPlaced(elements: readonly ExcalidrawElement[], files: BinaryFiles, max = PICTURE_MAX, most = 2): Promise<Drawn | null> {
   const shown = elements.filter((e) => !e.isDeleted);
-  const drawn = await draw(shown, files);
+  const drawn = await draw(shown, files, max, most);
   if (!drawn) return null;
   const around = unionBox(asCanvas(shown).map(boxOf));
   // The picture is the elements' bounds with the padding around them; a stroke's width can push it a little past, which the size carries.
   return { blob: drawn.blob, canvas: drawn.canvas, place: { ...drawn.place, x: around.x - (drawn.place.w - around.w) / 2, y: around.y - (drawn.place.h - around.h) / 2 } };
+}
+
+/** The longest side, in pixels, of the one large drawing that pieces of a long picture are cut from. */
+const STRIP_MAX = 14_000;
+
+/**
+ * A long strip (a tall screenshot, a wide timeline) as pieces that can each be read, in order: one picture of it
+ * would be a sliver. Empty when one picture is enough.
+ */
+async function pieces(elements: readonly ExcalidrawElement[], files: BinaryFiles, most: number): Promise<Blob[]> {
+  const shown = elements.filter((e) => !e.isDeleted);
+  if (shown.length === 0) return [];
+  const around = unionBox(asCanvas(shown).map(boxOf));
+  const tiles = pictureTiles({ x: around.x - PAD, y: around.y - PAD, w: around.w + PAD * 2, h: around.h + PAD * 2 }, PICTURE_MAX, most);
+  if (tiles.length < 2) return [];
+  const whole = await drawPlaced(shown, files, STRIP_MAX, 1);
+  if (!whole) return [];
+  const out: Blob[] = [];
+  for (const tile of tiles) {
+    const part = await cut(whole, tile, 0);
+    if (part) out.push(part);
+  }
+  return out.length === tiles.length ? out : [];
 }
 
 /** The boards open in this window, so a drawing job reads what is on screen, not the last save. */
@@ -166,6 +256,13 @@ export async function runCanvasJob(job: CanvasJob): Promise<void> {
       const inside = new Set(asCanvas(shown).filter((e) => e.type !== 'frame' && boxesOverlap(boxOf(e), box)).map((e) => e.id));
       shown = shown.filter((e) => inside.has(e.id) || (e.type === 'text' && e.containerId && inside.has(e.containerId)));
     }
+    if (job.crop && job.box) {
+      // One piece of a long strip: drawn large, cut to exactly the part asked for.
+      const whole = await drawPlaced(shown, files, STRIP_MAX, 1);
+      const part = whole ? await cut(whole, job.box, 0) : null;
+      await canvasApi.answerPicture(job.id, part, part && whole ? { ...job.box, scale: whole.place.scale } : undefined);
+      return;
+    }
     const drawn = await drawPlaced(shown, files);
     await canvasApi.answerPicture(job.id, drawn?.blob ?? null, drawn?.place);
   } catch {
@@ -174,25 +271,53 @@ export async function runCanvasJob(job: CanvasJob): Promise<void> {
 }
 
 const NUMBER = new Intl.NumberFormat('en-US');
+/** A press with no movement for this long is no longer a stroke in progress: what the Inbox holds back for it is let in. */
+const PRESS_IDLE_MS = 4000;
+/** Something said once stays at least this long; after that the person's next press on the canvas clears it. */
+const NOTICE_STAYS_MS = 6000;
+/** A save that fails is tried again this many times, quietly, before the canvas says it is not saved. */
+const SAVE_TRIES = 4;
 
-export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords, onSend }: CanvasBoardProps) {
+/** A picture's own size, from its file. */
+function naturalSize(dataURL: string): Promise<{ w: number; h: number } | null> {
+  return new Promise((resolve) => {
+    const image = new Image();
+    image.onload = () => resolve(image.naturalWidth > 0 && image.naturalHeight > 0 ? { w: image.naturalWidth, h: image.naturalHeight } : null);
+    image.onerror = () => resolve(null);
+    image.src = dataURL;
+  });
+}
+
+export default function CanvasBoard({ threadId, dark, agent, agentMark, received = false, draft = '', onWords, onSend }: CanvasBoardProps) {
   useLayoutEffect(withStyles, []);
+  useLayoutEffect(leaveOutUnshippedFaces, []);
   const api = useRef<ExcalidrawImperativeAPI | null>(null);
   const stage = useRef<HTMLDivElement | null>(null);
   const root = useRef<HTMLDivElement | null>(null);
   const [initial, setInitial] = useState<{ elements: ExcalidrawElement[]; files: BinaryFiles; background: string | undefined } | null>(null);
   const [failed, setFailed] = useState(false);
+  /** Every text is wrapped and measured in its own face: the drawing is shown (a moment after the editor mounts). */
+  const [settled, setSettled] = useState(true);
   const [selected, setSelected] = useState(0);
   const [empty, setEmpty] = useState(true);
+  /** Only freehand on the canvas: it is a sketch; with a box, a text or a photo it is a canvas. */
+  const [freehand, setFreehand] = useState(true);
   const [words, setWords] = useState('');
-  const [state, setState] = useState<{ text: string; bad?: boolean } | null>(null);
+  /** Something to say once (an Undo's outcome, a file that is not a picture): it stays until the person's next press on the canvas. */
+  const [notice, setNoticeNow] = useState<{ text: string; bad?: boolean; at: number } | null>(null);
+  const setNotice = useCallback((next: { text: string; bad?: boolean } | null) => setNoticeNow(next ? { ...next, at: Date.now() } : null), []);
+  /** The save: `saving` while a failed one is tried again, `failed` once it has given up for now. */
+  const [saveState, setSaveState] = useState<'saving' | 'failed' | null>(null);
   const [note, setNote] = useState<{ who: string; added: number; changed: number; removed: number; ids: string[]; rev: number } | null>(null);
   /** The selection the person was writing about was removed by someone else. */
   const [lost, setLost] = useState(false);
   const pickedSig = useRef('');
   const pickedBefore = useRef(0);
-  /** Sent, and no change from the agent yet: the canvas says it waits for one. */
-  const [waiting, setWaiting] = useState(false);
+  /** Sent, and no change from the agent yet: when it was sent (the canvas says "Sent" for a moment, then shows the agent while a session has the reply). */
+  const [waiting, setWaiting] = useState<number | null>(null);
+  const [justSent, setJustSent] = useState(false);
+  /** The thread's delivery mark at the moment of Send: the mark of an older reply is not this one's. */
+  const receivedAtSend = useRef(false);
   // The reply box's words arrive: the bar takes them while it is still empty.
   useEffect(() => {
     if (draft) setWords((now) => now || draft);
@@ -203,10 +328,19 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [words]);
   useEffect(() => {
-    if (!waiting) return;
-    const timer = setTimeout(() => setWaiting(false), 3 * 60_000);
-    return () => clearTimeout(timer);
+    if (waiting === null) return;
+    setJustSent(true);
+    const brief = setTimeout(() => setJustSent(false), 4000);
+    const timer = setTimeout(() => setWaiting(null), 3 * 60_000);
+    return () => {
+      clearTimeout(brief);
+      clearTimeout(timer);
+    };
   }, [waiting]);
+  // The delivery mark went away (a new reply is on its way): the next one that shows is this reply's.
+  useEffect(() => {
+    if (!received) receivedAtSend.current = false;
+  }, [received]);
   const [flashes, setFlashes] = useState<{ key: string; box: Box }[]>([]);
   const [busy, setBusy] = useState(false);
 
@@ -218,17 +352,26 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
   /** Something of the person's is not in the Inbox yet (a save pending, in flight, or failed). */
   const unsaved = useRef(false);
   const retry = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fails = useRef(0);
   const threadGone = useRef(false);
   const [gone, setGone] = useState(false);
   /** When the person last touched the canvas: an agent's change never moves the view under their hands. */
   const lastInput = useRef(0);
   const lastVersion = useRef('');
+  const lastCount = useRef(-1);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pictureTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saving = useRef<Promise<void> | null>(null);
   const again = useRef(false);
   const pointerDown = useRef(false);
+  /** A button is still down from a press on the canvas (also after the hold was let go for standing still). */
+  const pressed = useRef(false);
+  const lastMove = useRef(0);
   const live = useRef(true);
+  /** Pictures already given a readable size (once each). */
+  const sized = useRef(new Set<string>());
+  /** Pictures the person just placed, until each has the shape Excalidraw gives it: its file's own size once read (null before it is asked for). */
+  const placing = useRef(new Map<string, { w: number; h: number } | null>());
 
   /** Take a scene from the Inbox into the editor, keeping what the person changed since the last save. */
   const take = useCallback((scene: CanvasScene): Set<string> => {
@@ -271,7 +414,8 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     // Nothing of theirs to take: the editor is left exactly as it is.
     if (taken.size === 0) return taken;
     // What is not taken is handed back as the very same objects the editor holds (a stroke being drawn, a text being
-    // typed go on untouched); only what is taken is made new.
+    // typed go on untouched); only what is taken is made new, in the company of the rest (a label that came without
+    // its shape still finds it).
     const fresh = new Map(restored(order.filter((o) => o.remote).map((o) => o.remote!), local).map((e) => [e.id, e]));
     const next = order.map((o) => fresh.get(o.id) ?? mine.get(o.id)).filter((e): e is ExcalidrawElement => !!e);
     lastVersion.current = '';
@@ -283,18 +427,26 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
 
   /**
    * While a pointer is down (a stroke, a drag) nothing from the Inbox touches the editor: the newest scene waits and
-   * is taken when the pointer lifts.
+   * is taken when the pointer lifts. Each scene is taken after the faces its words are drawn in have arrived, in the
+   * order the scenes came.
    */
   const waitingScene = useRef<{ scene: CanvasScene; then?: (taken: Set<string>) => void } | null>(null);
+  const takeQueue = useRef<Promise<void>>(Promise.resolve());
   const takeWhenFree = useCallback(
     (scene: CanvasScene, then?: (taken: Set<string>) => void) => {
-      if (pointerDown.current) {
-        const before = waitingScene.current?.then;
-        waitingScene.current = { scene, then: before && then ? (taken) => (before(taken), then(taken)) : then ?? before };
-        return;
-      }
-      const taken = take(scene);
-      then?.(taken);
+      takeQueue.current = takeQueue.current
+        .then(() => facesReady(scene.elements))
+        .catch(() => {})
+        .then(() => {
+          if (!live.current) return;
+          if (pointerDown.current) {
+            const before = waitingScene.current?.then;
+            waitingScene.current = { scene, then: before && then ? (taken) => (before(taken), then(taken)) : then ?? before };
+            return;
+          }
+          const taken = take(scene);
+          then?.(taken);
+        });
     },
     [take],
   );
@@ -353,23 +505,29 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         if (answer.scene) takeWhenFree(answer.scene);
         rev.current = answer.rev;
         unsaved.current = again.current;
-        if (live.current) setState((now) => (now?.bad ? null : now));
+        fails.current = 0;
+        if (live.current) setSaveState(null);
         storePicture();
       })
       .catch((error: unknown) => {
         // The thread is gone (deleted in another window): there is nowhere to save to, and trying again will not help.
         const gone = (error as { status?: number } | null)?.status === 404;
         threadGone.current = gone;
+        fails.current++;
         if (live.current) {
-          setState({ text: gone ? 'Thread deleted' : 'Not saved', bad: true });
           if (gone) setGone(true);
+          // Tried again by itself, and only said to have failed once that has not helped.
+          else setSaveState(fails.current >= SAVE_TRIES ? 'failed' : 'saving');
         }
-        // Tried again by itself: a few seconds on, and at once when the network is back.
+        // A few seconds on (longer once it has given up), and at once when the network is back.
         if (!gone && live.current && !retry.current) {
-          retry.current = setTimeout(() => {
-            retry.current = null;
-            void save();
-          }, 4000);
+          retry.current = setTimeout(
+            () => {
+              retry.current = null;
+              void save();
+            },
+            fails.current >= SAVE_TRIES ? 15_000 : 4000,
+          );
         }
       })
       .finally(() => {
@@ -415,8 +573,14 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         rev.current = read.rev;
         for (const el of read.scene.elements) synced.current.set(el.id, sig(el));
         for (const id of Object.keys(read.scene.files)) sentFiles.current.add(id);
-        setEmpty(!read.scene.elements.some((e) => !e.isDeleted));
-        setInitial({ elements: restored(read.scene.elements), files: read.scene.files as BinaryFiles, background: read.scene.appState.viewBackgroundColor as string | undefined });
+        const shown = read.scene.elements.filter((e) => !e.isDeleted);
+        setEmpty(shown.length === 0);
+        setFreehand(shown.every((e) => e.type === 'freedraw'));
+        // Not measured yet: the editor's faces are listed only once it mounts, and text wrapped with a stand-in face
+        // is cut off when the real one draws it (Excalidraw also remembers the stand-in's letter widths). `settleText`
+        // wraps and measures every text once the faces are in; the drawing is shown then.
+        setSettled(!shown.some((e) => e.type === 'text'));
+        setInitial({ elements: restoreElements(asExcalidraw(read.scene.elements), null, { refreshDimensions: false, repairBindings: true }) as ExcalidrawElement[], files: read.scene.files as BinaryFiles, background: read.scene.appState.viewBackgroundColor as string | undefined });
       })
       .catch(() => {
         if (!stop.signal.aborted) setFailed(true);
@@ -426,6 +590,32 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       stop.abort();
     };
   }, [threadId]);
+
+  /**
+   * Once the editor is up and its faces have arrived: every text is wrapped and measured as it is drawn (the Inbox
+   * stores an agent's words whole, with a guessed size). The text a person is typing is left alone.
+   */
+  const settleText = useCallback(async () => {
+    try {
+      // The editor hands over its API before it has taken the scene in: wait for the scene, briefly.
+      for (let waited = 0; waited < 3000 && live.current && (api.current?.getSceneElementsIncludingDeleted().length ?? 0) === 0; waited += 30) await new Promise((resolve) => setTimeout(resolve, 30));
+      const first = api.current?.getSceneElementsIncludingDeleted() ?? [];
+      if (!first.some((e) => e.type === 'text' && !e.isDeleted)) return;
+      await facesReady(first as unknown as CanvasElement[]);
+      const editor = api.current;
+      if (!editor || !live.current || pointerDown.current) return;
+      const local = editor.getSceneElementsIncludingDeleted();
+      const editing = editor.getAppState().editingTextElement?.id ?? null;
+      const texts = local.filter((e) => e.type === 'text' && !e.isDeleted && e.id !== editing);
+      if (texts.length === 0) return;
+      // Measuring changes no version: what was saved stays saved, what was not is still the person's to save.
+      const fresh = new Map(restored(asCanvas(texts), local).map((e) => [e.id, e]));
+      lastVersion.current = '';
+      editor.updateScene({ elements: local.map((e) => fresh.get(e.id) ?? e), captureUpdate: CaptureUpdateAction.NEVER });
+    } finally {
+      if (live.current) setSettled(true);
+    }
+  }, []);
 
   // Open boards answer drawing jobs from what is on screen; leaving saves what is not saved yet.
   useEffect(() => {
@@ -473,12 +663,34 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       const target = event.target instanceof Element ? event.target : null;
-      // Anywhere in the canvas's layer (its header too: focus starts on its Thread button), or nowhere in particular.
+      // Anywhere in the canvas's layer (its header too), or nowhere in particular.
       const here = !target || target === document.body || target === document.documentElement || !target.isConnected || !!root.current?.contains(target) || !!target.closest('.excalidraw, [data-canvas-layer]');
       if (here) event.preventDefault();
     };
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+
+  // A file that is not a picture (a renamed .png): Excalidraw's resizer fails on it twice, once caught and once not.
+  // The one nobody catches is taken here, and said.
+  useEffect(() => {
+    const notPicture = (reason: unknown) => /ImageBlobReduce|failed to create Image/i.test(String((reason as { message?: unknown } | null)?.message ?? reason ?? ''));
+    const onRejection = (event: PromiseRejectionEvent) => {
+      if (!notPicture(event.reason)) return;
+      event.preventDefault();
+      setNotice({ text: 'Not a picture', bad: true });
+    };
+    const onError = (event: ErrorEvent) => {
+      if (!notPicture(event.error ?? event.message)) return;
+      event.preventDefault();
+      setNotice({ text: 'Not a picture', bad: true });
+    };
+    window.addEventListener('unhandledrejection', onRejection);
+    window.addEventListener('error', onError);
+    return () => {
+      window.removeEventListener('unhandledrejection', onRejection);
+      window.removeEventListener('error', onError);
+    };
   }, []);
 
   /** Show the person what changed: a wash over each changed thing, and the view brought to them when they are out of sight. */
@@ -546,7 +758,6 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
           if (!live.current || read.rev <= rev.current) return;
           rev.current = read.rev;
           takeWhenFree(read.scene, (taken) => {
-            setEmpty(!read.scene.elements.some((e) => !e.isDeleted));
             const agents = read.changes.filter((e) => e.by.kind === 'agent');
             if (agents.length === 0) return;
             // Only what this window took counts: a thing the person was dragging stays theirs and is not called changed.
@@ -561,10 +772,10 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
                 if (change.op !== 'removed') ids.push(...mine.filter((id) => !now.get(id)?.isDeleted));
               }
             }
-            // The selection the person was writing about is gone: the bar must not fall back to the whole canvas.
+            // The selection the person was writing about is gone: the bar must not fall back to the whole canvas unasked.
             const selectedNow = api.current?.getAppState().selectedElementIds ?? {};
             if (pickedBefore.current > 0 && !Object.keys(selectedNow).some((id) => now.get(id) && !now.get(id)!.isDeleted)) setLost(true);
-            setWaiting(false);
+            setWaiting(null);
             if (count.added + count.changed + count.removed === 0) return;
             const who = authorWords(agents[agents.length - 1]!.by);
             // The pill adds up until it is dismissed; Undo is for the last change, Show for all of them.
@@ -594,8 +805,8 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       if (frame.thread_id !== threadId || frame.window === CANVAS_WINDOW) return;
       // An agent tried and the Inbox refused it: nothing landed, and the canvas stops saying one is on its way.
       if (frame.refused) {
-        setWaiting(false);
-        setState({ text: `${frame.by ?? 'Agent'}: no change` });
+        setWaiting(null);
+        setNotice({ text: `${frame.by ?? 'Agent'}'s change failed` });
         return;
       }
       if (frame.rev <= rev.current) return;
@@ -603,6 +814,107 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     };
     return subscribeCanvasFrames(onFrame);
   }, [threadId, takeWhenFree, reveal, storePicture]);
+
+  /**
+   * What a file or a paste brought in that cannot stay as it is, put right once: a thing nowhere near the rest (a
+   * file can hold a box a billion pixels away, and the editor stops drawing) is brought beside the drawing, a place
+   * that is not a number is made one, and a long strip of a picture (a tall screenshot, which Excalidraw places a few
+   * pixels wide) is given a size it can be read at.
+   */
+  const tidy = useCallback((elements: readonly ExcalidrawElement[]) => {
+    const editor = api.current;
+    if (!editor) return;
+    const bump = (e: ExcalidrawElement, change: Partial<CanvasElement>) => ({ ...e, ...change, version: e.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) }) as ExcalidrawElement;
+    const fixes = new Map<string, Partial<CanvasElement>>();
+    const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : 0);
+    for (const e of elements) {
+      const raw = e as unknown as Record<string, unknown>;
+      if ([raw.x, raw.y, raw.width, raw.height].some((v) => typeof v !== 'number' || !Number.isFinite(v))) fixes.set(e.id, { x: num(raw.x), y: num(raw.y), width: num(raw.width), height: num(raw.height) });
+    }
+    const whole = asCanvas(elements).map((e) => (fixes.has(e.id) ? { ...e, ...fixes.get(e.id) } : e));
+    if (farElements(whole).size > 0) {
+      const tamed = tameFar(whole);
+      const by = new Map(tamed.elements.map((e) => [e.id, e]));
+      for (const id of tamed.moved) {
+        const e = by.get(id);
+        if (e) fixes.set(id, { ...fixes.get(id), x: e.x, y: e.y, width: e.width, height: e.height, ...(e.points ? { points: e.points } : {}) });
+      }
+    }
+    if (fixes.size > 0) {
+      setTimeout(() => {
+        const now = api.current;
+        if (!now) return;
+        lastVersion.current = '';
+        now.updateScene({ elements: now.getSceneElementsIncludingDeleted().map((e) => (fixes.has(e.id) ? bump(e, fixes.get(e.id)!) : e)), captureUpdate: CaptureUpdateAction.NEVER });
+        now.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.85, maxZoom: 1, animate: false });
+      }, 0);
+    }
+    // Pictures the person just placed are looked at until each has the size Excalidraw gives it (`fitPictures`).
+    for (const e of elements) {
+      if (e.isDeleted || e.type !== 'image' || !e.fileId || sized.current.has(e.id) || synced.current.has(e.id) || placing.current.has(e.id)) continue;
+      placing.current.set(e.id, null);
+    }
+  }, []);
+
+  /**
+   * A picture the person just placed, far longer than it is wide (or the other way): Excalidraw fits its long side
+   * into half the window, which leaves a tall screenshot a few pixels wide. Its short side gets a readable width (its
+   * own, up to most of the view); the long side follows, and the top stays where it was put. Once per picture, after
+   * Excalidraw has given it its own shape.
+   */
+  const fitPictures = useCallback(() => {
+    const now = api.current;
+    const host = stage.current;
+    if (!now || !host || placing.current.size === 0) return;
+    const files = now.getFiles();
+    const all = now.getSceneElementsIncludingDeleted();
+    const changes = new Map<string, Partial<CanvasElement>>();
+    for (const [id, natural] of placing.current) {
+      const el = all.find((x) => x.id === id);
+      if (!el || el.isDeleted || el.type !== 'image') {
+        placing.current.delete(id);
+        continue;
+      }
+      if (!natural) {
+        const file = el.fileId ? files[el.fileId] : undefined;
+        if (!file?.dataURL) continue;
+        // Asked once; the answer comes back through here.
+        placing.current.set(id, { w: 0, h: 0 });
+        void naturalSize(file.dataURL).then((size) => {
+          if (!size) placing.current.delete(id);
+          else placing.current.set(id, size);
+          fitPictures();
+        });
+        continue;
+      }
+      if (natural.w === 0 || el.width < 1 || el.height < 1) continue;
+      // Still the placeholder Excalidraw draws while it reads the file: its shape is not the picture's yet.
+      if (Math.abs(el.width / el.height - natural.w / natural.h) > 0.02 * (natural.w / natural.h)) continue;
+      placing.current.delete(id);
+      sized.current.add(id);
+      const long = Math.max(natural.w, natural.h);
+      const short = Math.min(natural.w, natural.h);
+      if (long / short < 3) continue;
+      const zoom = now.getAppState().zoom.value;
+      const rect = host.getBoundingClientRect();
+      const tall = natural.h >= natural.w;
+      const room = ((tall ? rect.width : rect.height) * 0.7) / zoom;
+      const wantShort = Math.min(short, Math.max(240, room));
+      const haveShort = Math.min(el.width, el.height);
+      if (haveShort >= wantShort * 0.9) continue;
+      const k = wantShort / haveShort;
+      const width = el.width * k;
+      const height = el.height * k;
+      // The top (a tall picture) or the left end (a wide one) stays where it was put.
+      changes.set(id, { width, height, x: tall ? el.x + el.width / 2 - width / 2 : el.x, y: tall ? el.y : el.y + el.height / 2 - height / 2 });
+    }
+    if (changes.size === 0) return;
+    lastVersion.current = '';
+    now.updateScene({
+      elements: all.map((e) => (changes.has(e.id) ? ({ ...e, ...changes.get(e.id), version: e.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) } as ExcalidrawElement) : e)),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+  }, []);
 
   const onChange = useCallback(
     (elements: readonly ExcalidrawElement[], appState: AppState, files: BinaryFiles) => {
@@ -625,18 +937,28 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       const broken = elements.filter((e) => !e.isDeleted && e.type === 'image' && (e as { status?: string }).status === 'error');
       if (broken.length > 0) {
         const ids = new Set(broken.map((e) => e.id));
-        setState({ text: 'Not a picture', bad: true });
+        setNotice({ text: 'Not a picture', bad: true });
         setTimeout(() => api.current?.updateScene({ elements: api.current.getSceneElementsIncludingDeleted().map((e) => (ids.has(e.id) ? { ...e, isDeleted: true, version: e.version + 1 } : e)), captureUpdate: CaptureUpdateAction.NEVER }), 0);
       }
       // Nothing to send: no element, or only a speck (a stray tap of the pen).
       const shown = asCanvas(elements.filter((e) => !e.isDeleted));
       const all = unionBox(shown.map(boxOf));
       setEmpty(shown.length === 0 || (shown.every((e) => e.type === 'freedraw') && all.w < 4 && all.h < 4));
+      setFreehand(shown.every((e) => e.type === 'freedraw'));
+      // How many elements the editor holds and is not deleted, for a browser test to compare with the Inbox's.
+      stage.current?.setAttribute('data-held', String(shown.length));
+      // Something new came in (a file opened, a paste, a picture): looked over once, when the count changes.
+      const files2 = Object.keys(files).length;
+      if (elements.length + files2 !== lastCount.current) {
+        lastCount.current = elements.length + files2;
+        tidy(elements);
+      }
+      if (placing.current.size > 0) setTimeout(fitPictures, 0);
       // The scene as the Inbox has it (just read, or just taken from it): nothing of the person's to save.
       if (elements.length === synced.current.size && elements.every((e) => synced.current.get(e.id) === sig(e)) && Object.keys(files).every((id) => sentFiles.current.has(id))) return;
       saveSoon();
     },
-    [saveSoon],
+    [saveSoon, tidy, fitPictures],
   );
 
   /** Take back the agent's change: what it changed is as it was, what it added is gone; what the person did since stays. */
@@ -648,13 +970,11 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       rev.current = answer.rev;
       setEmpty(!answer.scene.elements.some((e) => !e.isDeleted));
       setNote(null);
-      const kept = answer.kept ?? [];
-      setState({
-        text: answer.already ? 'Already undone' : kept.length > 0 ? `Undone, kept: ${kept.slice(0, 2).join(', ')}${kept.length > 2 ? ` +${kept.length - 2}` : ''}` : 'Undone',
-      });
+      const kept = answer.kept_count ?? answer.kept?.length ?? 0;
+      setNotice({ text: answer.already ? 'Already undone' : kept > 0 ? `Undone. Yours kept: ${NUMBER.format(kept)}` : 'Undone' });
       storePicture();
     } catch {
-      setState({ text: "Can't undo", bad: true });
+      setNotice({ text: "Can't undo", bad: true });
     }
   };
 
@@ -690,12 +1010,50 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
     editor.updateScene({ elements: editor.getSceneElementsIncludingDeleted().map((el) => (ids.has(el.id) ? { ...el, locked: false } : el)), captureUpdate: CaptureUpdateAction.NEVER });
   };
 
-  const send = async (event: FormEvent) => {
-    event.preventDefault();
+  /**
+   * The press is over, however it ended: the pointer lifted (anywhere, the header or another window included), the
+   * browser cancelled it, the window lost focus or was put away mid-press, or it has not moved for a few seconds.
+   * A press that never lifts must not hold an agent's change back until some later press does.
+   */
+  const pressOver = useCallback((ended: boolean | Event = true) => {
+    if (ended !== false) pressed.current = false;
+    if (!pointerDown.current) return;
+    pointerDown.current = false;
+    lastInput.current = Date.now();
+    // After Excalidraw has finished the press: the frame is put back, and what arrived meanwhile is taken.
+    setTimeout(() => {
+      releaseFrames();
+      pointerLifted();
+    }, 0);
+    // releaseFrames reads refs only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pointerLifted]);
+  useEffect(() => {
+    const away = () => {
+      if (document.visibilityState === 'hidden') pressOver();
+    };
+    const idle = setInterval(() => {
+      if (pointerDown.current && Date.now() - lastMove.current > PRESS_IDLE_MS) pressOver(false);
+    }, 1000);
+    window.addEventListener('pointerup', pressOver, true);
+    window.addEventListener('pointercancel', pressOver, true);
+    window.addEventListener('blur', pressOver);
+    document.addEventListener('visibilitychange', away);
+    return () => {
+      clearInterval(idle);
+      window.removeEventListener('pointerup', pressOver, true);
+      window.removeEventListener('pointercancel', pressOver, true);
+      window.removeEventListener('blur', pressOver);
+      document.removeEventListener('visibilitychange', away);
+    };
+  }, [pressOver]);
+
+  const send = async (event?: FormEvent) => {
+    event?.preventDefault();
     const editor = api.current;
     if (!editor || busy || empty) return;
     setBusy(true);
-    setState({ text: 'Sending…' });
+    setNotice({ text: 'Sending…' });
     try {
       await flush();
       const all = editor.getSceneElements();
@@ -714,15 +1072,22 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         const kept = Object.fromEntries(Object.entries(files).filter(([id]) => used.has(id as never)));
         out.push(new File([serializeAsJSON(elements, appState, kept, 'local')], name, { type: 'application/json' }));
       };
+      // A long strip (a tall screenshot) also goes as pieces that can each be read, in order.
+      const strip = async (elements: readonly ExcalidrawElement[], stem: string) => {
+        const parts = await pieces(elements, files, 6);
+        parts.forEach((part, i) => out.push(new File([part], `${stem}-part-${i + 1}-of-${parts.length}.png`, { type: 'image/png' })));
+      };
       if (picked.size > 0) {
         const chosen = all.filter((e) => picked.has(e.id));
         const drawn = await draw(chosen, files);
         if (drawn) png(drawn, 'canvas-selection.png');
+        await strip(chosen, 'canvas-selection');
         sceneFile(chosen, 'canvas-selection.excalidraw');
         onSend({ words: words.trim(), files: out, sketch: { kind: 'selection', elements: [...picked], pictures } });
       } else {
         const whole = await drawPlaced(all, files);
         if (whole) png(whole, 'canvas.png');
+        await strip(all, 'canvas');
         // Each freehand drawing as its own picture, so nobody groups a face by hand and no model has to find it in the whole.
         const things = thingsOf({ type: 'excalidraw', version: 2, source: '', elements: asCanvas(all), appState: {}, files: {} });
         const sketches = things.filter((t) => t.kind === 'sketch').sort((a, b) => b.box.w * b.box.h - a.box.w * a.box.h).slice(0, 6);
@@ -740,13 +1105,15 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         onSend({ words: words.trim(), files: out, sketch: { kind: 'sketch', elements: [], pictures } });
       }
       setWords('');
+      setLost(false);
       // What was picked has gone with the reply: the selection (and Excalidraw's panel for it) steps aside for the answer.
       if (picked.size > 0) editor.updateScene({ appState: { selectedElementIds: {}, selectedGroupIds: {} }, captureUpdate: CaptureUpdateAction.NEVER });
-      setState(null);
+      setNotice(null);
       setNote(null);
-      setWaiting(true);
+      receivedAtSend.current = received;
+      setWaiting(Date.now());
     } catch {
-      setState({ text: 'Not sent', bad: true });
+      setNotice({ text: 'Not sent', bad: true });
     } finally {
       setBusy(false);
     }
@@ -761,6 +1128,15 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
       </div>
     );
   }
+
+  // One line of state: the thread is gone, something to say once, or a save that is not through.
+  const state: { text: string; bad?: boolean } | null = gone ? { text: 'Thread deleted', bad: true } : (notice ?? (saveState === 'failed' ? { text: 'Not saved', bad: true } : saveState === 'saving' ? { text: 'Saving…' } : null));
+  // A running session has the reply: the agent's icon, working. Before that, "Sent" for a moment and then nothing.
+  const working = waiting !== null && received && !receivedAtSend.current;
+  const sentChip = waiting !== null && !note && (working || justSent);
+  // The pill names who changed the canvas: the thread's agent by its icon (its name beside it where there is room).
+  const noteMark = note && agentMark && note.who === agent ? agentMark : null;
+  const sendAll = lost && selected === 0;
 
   return (
     <div
@@ -779,42 +1155,30 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         }}
         onPointerDownCapture={(event) => {
           pointerDown.current = true;
+          pressed.current = true;
           lastInput.current = Date.now();
+          lastMove.current = Date.now();
+          // Said once, and seen: the person is back at the drawing.
+          // (Not at once: the press that places a picture comes right after the file that was no picture.)
+          if (event.target instanceof HTMLCanvasElement) setNoticeNow((now) => (now && now.text !== 'Sending…' && Date.now() - now.at > NOTICE_STAYS_MS ? null : now));
           if (event.button === 0 && event.target instanceof HTMLCanvasElement) overFrame(event.clientX, event.clientY);
         }}
-        onPointerUpCapture={() => {
-          pointerDown.current = false;
-          lastInput.current = Date.now();
-          // After Excalidraw has finished the press: the frame is put back, and what arrived meanwhile is taken.
-          setTimeout(() => {
-            releaseFrames();
-            pointerLifted();
-          }, 0);
-        }}
-        onPointerCancelCapture={() => {
-          pointerDown.current = false;
-          setTimeout(() => {
-            releaseFrames();
-            pointerLifted();
-          }, 0);
+        onPointerMoveCapture={(event) => {
+          // A press that stood still and was let go of, moving again: it is a stroke once more.
+          if (pressed.current && event.buttons !== 0) pointerDown.current = true;
+          if (pointerDown.current) lastMove.current = Date.now();
         }}
       >
         {!initial ? (
           <div className="ibc-wait" aria-busy="true" />
         ) : (
-          <div className="excalidraw-host">
+          <div className="excalidraw-host" data-settling={settled ? undefined : ''}>
             <Excalidraw
               excalidrawAPI={(next) => {
                 api.current = next;
-                // The one face this build does not ship (Xiaolai, 12 MB of Chinese and Japanese handwriting) is taken off the
-                // page's font list, so those characters draw in the system's face and nothing asks for a file that is not there.
-                const dropUnshipped = () => {
-                  for (const face of [...document.fonts]) if (face.family.replace(/["']/g, '') === 'Xiaolai') document.fonts.delete(face);
-                };
-                dropUnshipped();
-                setTimeout(dropUnshipped, 600);
                 // The whole drawing in view, never larger than life.
                 setTimeout(() => next.scrollToContent(undefined, { fitToViewport: true, viewportZoomFactor: 0.85, maxZoom: 1, animate: false }), 0);
+                if (initial.elements.some((e) => !e.isDeleted && e.type === 'text')) void settleText();
                 try {
                   if (performance.getEntriesByName('canvas:open').length > 0 && performance.getEntriesByName('canvas:ready').length === 0) performance.measure('canvas:ready', 'canvas:open');
                 } catch {
@@ -825,6 +1189,8 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
               onChange={onChange}
               theme={dark ? 'dark' : 'light'}
               name="canvas"
+              // The drawing has the keys from the start: R, then a drag, draws a rectangle without a click first.
+              autoFocus
               UIOptions={{ canvasActions: { toggleTheme: false, saveToActiveFile: false } }}
               // Embedding a web page cannot work here (the Inbox's pages load nothing from other sites): not offered.
               validateEmbeddable={false}
@@ -841,7 +1207,7 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
                 <WelcomeScreen.Hints.ToolbarHint />
                 <WelcomeScreen.Hints.MenuHint />
                 <WelcomeScreen.Center>
-                  <WelcomeScreen.Center.Heading>Sketch, then Send. Or select a part.</WelcomeScreen.Center.Heading>
+                  <WelcomeScreen.Center.Heading>Sketch or select, then Send</WelcomeScreen.Center.Heading>
                 </WelcomeScreen.Center>
               </WelcomeScreen>
             </Excalidraw>
@@ -850,21 +1216,26 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         {flashes.map((flash) => (
           <span key={flash.key} className="ibc-flash" aria-hidden="true" style={{ left: flash.box.x, top: flash.box.y, width: flash.box.w, height: flash.box.h }} />
         ))}
-        {waiting && !note && (
-          <div className="ibc-note ibc-waiting" role="status" data-canvas-waiting="" aria-label={`Sent to ${agent ?? 'the agent'}`}>
-            <span className="ibc-dots" aria-hidden="true">
-              <i />
-              <i />
-              <i />
-            </span>
-            <b className="ibc-who" title={agent ?? undefined}>
-              {agent ?? 'Sent'}
-            </b>
+        {sentChip && (
+          <div className="ibc-note ibc-waiting" role="status" data-canvas-waiting={working ? 'working' : 'sent'} aria-label={working ? `${agent ?? 'The agent'} has it` : 'Sent'}>
+            {working ? (
+              <>
+                {agentMark ? <span className="ibc-mark" aria-hidden="true">{agentMark}</span> : null}
+                <span className="ibc-dots" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+              </>
+            ) : (
+              <b className="ibc-who">Sent</b>
+            )}
           </div>
         )}
         {note && (
-          <div className="ibc-note" role="status" data-canvas-note="">
-            <b className="ibc-who" title={note.who}>
+          <div className="ibc-note" role="status" data-canvas-note="" aria-label={`${note.who}: ${[note.added ? `added ${note.added}` : '', note.changed ? `changed ${note.changed}` : '', note.removed ? `removed ${note.removed}` : ''].filter(Boolean).join(', ')}`}>
+            {noteMark ? <span className="ibc-mark" title={note.who} aria-hidden="true">{noteMark}</span> : null}
+            <b className="ibc-who" data-marked={noteMark ? '' : undefined} title={note.who}>
               {note.who}
             </b>
             <span className="ibc-counts">{[note.added ? `added ${NUMBER.format(note.added)}` : '', note.changed ? `changed ${NUMBER.format(note.changed)}` : '', note.removed ? `removed ${NUMBER.format(note.removed)}` : ''].filter(Boolean).join(', ')}</span>
@@ -885,8 +1256,8 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
         )}
       </div>
       <form className="ibc-bar" onSubmit={send} data-canvas-bar="">
-        <span className="ibc-what" data-on={selected > 0 ? '' : undefined} data-lost={lost && selected === 0 ? '' : undefined} data-canvas-what="" aria-live="polite">
-          {selected > 0 ? `${NUMBER.format(selected)} selected` : lost ? 'Selection removed' : 'Whole canvas'}
+        <span className="ibc-what" data-on={selected > 0 ? '' : undefined} data-lost={sendAll ? '' : undefined} data-canvas-what="" aria-live="polite">
+          {selected > 0 ? `${NUMBER.format(selected)} selected` : lost ? 'Selection gone' : 'Whole canvas'}
         </span>
         <textarea
           className="ibc-words"
@@ -896,6 +1267,14 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
           onChange={(event) => {
             setWords(event.target.value);
             if (!event.target.value) setLost(false);
+          }}
+          onKeyDown={(event) => {
+            // The reply box's own Send key: Enter with Cmd or Ctrl. Enter alone is a new line, as it is there.
+            if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+              event.preventDefault();
+              event.stopPropagation();
+              void send();
+            }
           }}
           ref={(el) => {
             // As tall as its words, up to a few lines.
@@ -911,9 +1290,9 @@ export default function CanvasBoard({ threadId, dark, agent, draft = '', onWords
             {state.text}
           </span>
         )}
-        {/* A request written about a selection that was then removed is not sent about the whole canvas instead. */}
-        <button type="submit" className="ibc-send" disabled={busy || empty || !initial || gone || (lost && selected === 0 && words.trim() !== '')} data-canvas-send="">
-          {selected > 0 ? 'Send selection' : 'Send sketch'}
+        {/* A request written about a selection that was then removed goes about the whole canvas only when the person says so: the button says "Send all". */}
+        <button type="submit" className="ibc-send" disabled={busy || empty || !initial || gone} data-canvas-send="">
+          {selected > 0 ? 'Send selection' : sendAll ? 'Send all' : freehand ? 'Send sketch' : 'Send canvas'}
         </button>
       </form>
     </div>

@@ -14,6 +14,7 @@ import type { HeldThread } from '../data/apply/record';
 import { drawnSection } from '../held';
 import { machineOf } from '../inboxUrl';
 import { inboxApi } from '../api';
+import { HostMark } from '../icons';
 import { machineTakes, rowSnoozes, snoozeBlockedBy, threadAwayLine, threadOutbox } from '../machines';
 import { MAIN_PANE, type PaneId } from '../panes/model';
 import type { PaneOnScreen } from '../panes/onScreen';
@@ -127,6 +128,9 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
   };
   const toggleCanvas = () => (canvasOn ? closeCanvas() : openCanvas());
   const canvasAgent = thread ? ([...thread.messages].reverse().find((m) => m.author.kind === 'agent')?.author ?? null) : null;
+  // The person's newest reply reached a running session (the thread's own delivery mark): the canvas shows the agent at work.
+  const canvasLast = thread ? thread.messages[thread.messages.length - 1] : undefined;
+  const canvasReceived = !!canvasLast && canvasLast.author.kind === 'person' && canvasLast.delivery?.state === 'delivered';
   const boardNode = shapeNode;
   const canvasNode =
     canvasOn && canvasFor && thread ? (
@@ -135,6 +139,8 @@ export function ThreadSlot({ paneId, threadId, active, shown: onPage = true, hel
         subject={thread.thread_name?.trim() || thread.subject || 'Thread'}
         dark={themeShown === 'dark'}
         agent={canvasAgent ? inboxAgentName(canvasAgent) : null}
+        agentMark={canvasAgent && canvasAgent.kind === 'agent' ? <HostMark host={canvasAgent.host} agent={canvasAgent.session} /> : undefined}
+        received={canvasReceived}
         draft={canvasDraft}
         onWords={(words) => {
           canvasWords.current = words;

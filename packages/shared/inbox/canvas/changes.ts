@@ -26,6 +26,50 @@ export interface CanvasChange {
   line: string;
   /** The Excalidraw elements of it that differ. */
   elements: string[];
+  /**
+   * For a changed thing: what it was and what it became, in the few facts "what changed" is said from. Several
+   * revisions of one thing (a drag is saved more than once) are told as the one change from the first `was` to the
+   * last `now`.
+   */
+  was?: ThingFacts;
+  now?: ThingFacts;
+}
+
+/** What "what changed" is judged by: place and size, words, colours, frame, ends, and a sketch's stroke count. */
+export interface ThingFacts {
+  kind: string;
+  box: [number, number, number, number];
+  words: string;
+  stroke: string;
+  fill: string;
+  frame: string;
+  from: string;
+  to: string;
+  strokes?: number;
+}
+
+const factsOf = (t: Thing): ThingFacts => ({
+  kind: t.kind,
+  box: [Math.round(t.box.x), Math.round(t.box.y), Math.round(t.box.w), Math.round(t.box.h)],
+  words: t.words,
+  stroke: t.stroke,
+  fill: t.fill,
+  frame: t.frame ?? '',
+  from: t.from?.id ?? '',
+  to: t.to?.id ?? '',
+  ...(t.strokes !== undefined ? { strokes: t.strokes } : {}),
+});
+
+/** What the person kept when they took back an agent's change, and what went back (the Undo's log entry). Each is a list of things by kind and words. */
+export interface CanvasUndone {
+  /** Back as they were before the agent's change. */
+  back: string[];
+  /** Partly back: the person had changed them since, and what they changed stays theirs. */
+  part: string[];
+  /** Not taken back at all: the person had changed them since. */
+  kept: string[];
+  /** Things the agent had added, now removed. */
+  gone: string[];
 }
 
 export interface CanvasLogEntry {
@@ -35,6 +79,8 @@ export interface CanvasLogEntry {
   changes: CanvasChange[];
   /** The person took back the change of this revision (the window's Undo on an agent's change). */
   undid?: number;
+  /** With `undid`: exactly what went back and what the person kept. */
+  undone?: CanvasUndone;
 }
 
 const same = (a: CanvasElement | undefined, b: CanvasElement | undefined) =>
@@ -53,17 +99,17 @@ export function changedElements(prev: CanvasScene, next: CanvasScene): Set<strin
   return out;
 }
 
-function whatChanged(a: Thing, b: Thing): string {
+export function whatChanged(a: ThingFacts, b: ThingFacts): string {
   const parts: string[] = [];
-  const moved = Math.abs(a.box.x - b.box.x) > 1 || Math.abs(a.box.y - b.box.y) > 1;
-  const resized = Math.abs(a.box.w - b.box.w) > 1 || Math.abs(a.box.h - b.box.h) > 1;
+  const moved = Math.abs(a.box[0] - b.box[0]) > 1 || Math.abs(a.box[1] - b.box[1]) > 1;
+  const resized = Math.abs(a.box[2] - b.box[2]) > 1 || Math.abs(a.box[3] - b.box[3]) > 1;
   if (a.kind === 'sketch' && a.strokes !== b.strokes) parts.push(`${(b.strokes ?? 0) > (a.strokes ?? 0) ? 'drawn on' : 'partly erased'}`);
   else if (resized) parts.push(moved && (a.kind === 'arrow' || a.kind === 'line') ? 'rerouted' : 'resized');
   else if (moved) parts.push('moved');
   if (a.words !== b.words) parts.push('new words');
   if (a.stroke !== b.stroke || a.fill !== b.fill) parts.push('new colour');
-  if ((a.from?.id ?? '') !== (b.from?.id ?? '') || (a.to?.id ?? '') !== (b.to?.id ?? '')) parts.push('new ends');
-  if ((a.frame ?? '') !== (b.frame ?? '')) parts.push(b.frame ? `now in ${b.frame}` : 'out of its frame');
+  if (a.from !== b.from || a.to !== b.to) parts.push('new ends');
+  if (a.frame !== b.frame) parts.push(b.frame ? `now in ${b.frame}` : 'out of its frame');
   return parts.join(', ');
 }
 
@@ -89,13 +135,15 @@ export function diffScenes(prev: CanvasScene, next: CanvasScene): CanvasChange[]
       if (was) seenBefore.add(was);
       if (!was) changes.push({ thing: now.id, op: 'added', line: lineOf(now, next, after), elements });
       else {
-        const said = whatChanged(was, now);
+        const said = whatChanged(factsOf(was), factsOf(now));
         // Nothing a reader would see differs (the editor only re-stamped the element): not a change.
         if (!said && lineOf(was, prev, before) === lineOf(now, next, after)) continue;
+        // A text's size is the editor's measure of its words (it wraps and measures them when a window opens): not a change anyone made.
+        if (now.kind === 'text' && was.words === now.words && (!said || said === 'resized')) continue;
         const what = said || 'edited';
         // An arrow that only followed the thing it is attached to is not news.
         if (what === 'rerouted' && (now.from?.attached || now.to?.attached)) continue;
-        changes.push({ thing: now.id, op: 'changed', what, line: lineOf(now, next, after), elements });
+        changes.push({ thing: now.id, op: 'changed', what, line: lineOf(now, next, after), elements, was: factsOf(was), now: factsOf(now) });
       }
     }
   }
@@ -130,10 +178,11 @@ export function sinceLines(
   rev: number,
   me: CanvasAuthor | null,
   max = 30,
-): { lines: string[]; elements: Set<string>; byElement: Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>; through: number; cut: boolean; undone: number[] } {
-  const last = new Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number; ops: Set<string> }>();
+): { lines: string[]; elements: Set<string>; byElement: Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>; through: number; cut: boolean; undone: CanvasLogEntry[] } {
+  // Per thing and author: the first change since the agent looked and the last. What is told is the one change between them.
+  const last = new Map<string, { by: CanvasAuthor; first: CanvasChange; change: CanvasChange; rev: number; parts: string[] }>();
   const byElement = new Map<string, { by: CanvasAuthor; change: CanvasChange; rev: number }>();
-  const undone: number[] = [];
+  const undone: CanvasLogEntry[] = [];
   let through = rev;
   let cut = false;
   for (const entry of log) {
@@ -152,25 +201,55 @@ export function sinceLines(
     // The person took back a change of this agent's: said in its own line (the server words it).
     if (entry.undid !== undefined && me) {
       const made = log.find((e) => e.rev === entry.undid);
-      if (made && sameAuthor(made.by, me)) undone.push(entry.undid);
+      if (made && sameAuthor(made.by, me)) undone.push(entry);
     }
     for (const change of entry.changes) {
       const key = `${entry.by.kind}:${entry.by.key ?? entry.by.name ?? ''}:${change.elements.slice().sort()[0] ?? change.thing}`;
       const prior = last.get(key);
-      const ops = prior?.ops ?? new Set<string>();
-      ops.add(change.op === 'changed' ? change.what ?? 'edited' : change.op);
-      last.set(key, { by: entry.by, change, rev: entry.rev, ops });
+      const parts = prior?.parts ?? [];
+      if (change.op === 'changed') for (const part of (change.what ?? 'edited').split(', ')) if (!parts.includes(part)) parts.push(part);
+      last.set(key, { by: entry.by, first: prior?.first ?? change, change, rev: entry.rev, parts });
       for (const id of change.elements) byElement.set(id, { by: entry.by, change, rev: entry.rev });
     }
   }
   const elements = new Set<string>(byElement.keys());
-  const said = [...last.values()].map((item) => {
-    const added = item.ops.has('added') && item.change.op !== 'removed';
-    const ops = added ? 'added' : item.change.op === 'removed' ? 'removed' : [...item.ops].join(', ');
-    return { added, line: `  ${authorWords(item.by)} ${ops}: ${item.change.line}` };
-  });
+  const said: { added: boolean; line: string }[] = [];
+  for (const item of last.values()) {
+    const born = item.first.op === 'added';
+    const gone = item.change.op === 'removed';
+    // Added and removed again between two looks: the agent never saw it, and there is nothing to see.
+    if (born && gone) continue;
+    let ops: string;
+    if (gone) ops = 'removed';
+    else if (born) ops = 'added';
+    else if (item.first.op === 'removed') ops = 'removed and brought back';
+    else if (item.first.was && item.change.now) {
+      // One drag saved three times is one move; a colour changed and changed back is no change.
+      ops = whatChanged(item.first.was, item.change.now);
+      if (!ops) {
+        if (JSON.stringify(item.first.was) === JSON.stringify(item.change.now)) continue;
+        ops = 'edited';
+      }
+    } else ops = item.parts.join(', ') || 'edited';
+    said.push({ added: born, line: `  ${authorWords(item.by)} ${ops}: ${item.change.line}` });
+  }
   const lines = [...said.filter((x) => !x.added), ...said.filter((x) => x.added)].map((x) => x.line);
   return { lines, elements, byElement, through, cut, undone };
+}
+
+/** The line an agent's answer opens with when the person took back one of its changes: exactly what went back and what they kept. */
+export function undoneLine(entry: CanvasLogEntry): string {
+  const u = entry.undone;
+  const head = `The person undid your change (rev ${entry.undid})`;
+  if (!u) return `${head}.`;
+  const list = (names: string[]) => `${names.slice(0, 6).join(', ')}${names.length > 6 ? ` and ${names.length - 6} more` : ''}`;
+  const parts = [
+    u.back.length > 0 ? `Back as before: ${list(u.back)}.` : '',
+    u.gone.length > 0 ? `Removed (you had added ${u.gone.length === 1 ? 'it' : 'them'}): ${list(u.gone)}.` : '',
+    u.part.length > 0 ? `Partly back, with the person's own later change kept: ${list(u.part)}.` : '',
+    u.kept.length > 0 ? `Not undone, because the person changed ${u.kept.length === 1 ? 'it' : 'them'} since: ${list(u.kept)}.` : '',
+  ].filter(Boolean);
+  return parts.length > 0 ? `${head}. ${parts.join(' ')}` : `${head}.`;
 }
 
 const TOMBSTONE_DAYS = 7;

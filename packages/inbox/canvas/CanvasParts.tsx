@@ -14,7 +14,7 @@
  * presses Sketch loads none of it. This file's few styles are inline for that
  * reason too: the window's stylesheet does not grow.
  */
-import { useCallback, useEffect, useRef, useSyncExternalStore, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore, type CSSProperties, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { CanvasBoardPart, PanePart } from '../lazyParts';
 import { Icon } from '../icons';
@@ -68,7 +68,7 @@ export function SketchButton({ threadId, open, onToggle, where, size = 16 }: { t
         type="button"
         className={`ib-iconbtn${open ? ' ib-on' : ''}`}
         style={{ position: 'relative' }}
-        aria-label={mark?.changed ? 'Canvas, changed by an agent since you looked' : mark ? 'Canvas' : 'Sketch'}
+        aria-label={tip}
         aria-pressed={open}
         data-thread-sketch=""
         data-canvas-mark={mark ? (mark.changed ? 'changed' : 'has') : undefined}
@@ -88,7 +88,7 @@ export function RowCanvasMark({ threadId }: { threadId: string }) {
   return (
     <span
       role="img"
-      aria-label={mark.changed ? 'Canvas, changed by an agent since you looked' : 'Has a canvas'}
+      aria-label={mark.changed ? 'Canvas, changed by an agent' : 'Canvas'}
       title={mark.changed ? 'Canvas, changed by an agent' : 'Canvas'}
       data-row-canvas={mark.changed ? 'changed' : 'has'}
       style={{ display: 'inline-flex', flex: 'none', alignItems: 'center', marginLeft: 6, color: mark.changed ? 'var(--primary)' : 'var(--muted-foreground)', opacity: mark.changed ? 1 : 0.7 }}
@@ -115,9 +115,16 @@ const WINDOW: CSSProperties = {
   color: 'var(--foreground)',
   overflow: 'hidden',
 };
-const HEAD: CSSProperties = { touchAction: 'none', flex: 'none', display: 'flex', alignItems: 'center', gap: 6, height: 48, padding: '0 10px 0 6px', boxShadow: '0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent)' };
-const BACK: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, height: 40, minWidth: 44, padding: '0 10px 0 6px', border: 0, borderRadius: 9, background: 'transparent', color: 'inherit', font: 'inherit', fontSize: 14, fontWeight: 550, cursor: 'pointer', flex: 'none' };
+const HEAD: CSSProperties = { touchAction: 'none', flex: 'none', display: 'flex', alignItems: 'center', gap: 6, height: 52, padding: '0 10px 0 6px', boxShadow: '0 1px 0 color-mix(in oklab, var(--foreground) 9%, transparent)' };
+const BACK: CSSProperties = { display: 'inline-flex', alignItems: 'center', gap: 4, height: 44, minWidth: 44, padding: '0 10px 0 6px', border: 0, borderRadius: 9, background: 'transparent', color: 'inherit', font: 'inherit', fontSize: 14, fontWeight: 550, cursor: 'pointer', flex: 'none' };
 const TITLE: CSSProperties = { flex: 1, minWidth: 0, margin: 0, fontSize: 14, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--muted-foreground)' };
+
+/** A thread's title as the canvas's layer names it: one line, at most this long (the header cuts what does not fit and keeps the whole in its tip). */
+export const CANVAS_TITLE_MAX = 120;
+const titleShown = (subject: string) => {
+  const line = Array.from(subject.replace(/\s+/g, ' ').trim());
+  return line.length > CANVAS_TITLE_MAX ? `${line.slice(0, CANVAS_TITLE_MAX - 1).join('')}…` : line.join('');
+};
 
 /** The canvas, over the whole window. */
 export function CanvasLayer({
@@ -125,6 +132,8 @@ export function CanvasLayer({
   subject,
   dark,
   agent,
+  agentMark,
+  received,
   draft,
   onWords,
   onSend,
@@ -134,6 +143,9 @@ export function CanvasLayer({
   subject: string;
   dark: boolean;
   agent: string | null;
+  /** That agent's icon, and whether the person's newest reply reached a running session of it. */
+  agentMark?: ReactNode;
+  received?: boolean;
   /** The reply box's words when the canvas opened: the bar starts from them. */
   draft: string;
   /** The bar's words as they change, so they go back to the reply box when the canvas closes. */
@@ -161,7 +173,7 @@ export function CanvasLayer({
     };
   }, []);
   return createPortal(
-    <dialog open role="dialog" aria-modal="true" aria-label={`Canvas of ${subject}`} style={WINDOW} data-canvas-layer={threadId}>
+    <dialog open role="dialog" aria-modal="true" aria-label={`Canvas of ${titleShown(subject)}`} style={WINDOW} data-canvas-layer={threadId}>
       {/* The Inbox's own scope, so its icons and buttons look here as they do in the window (the layer sits on the page's body). */}
       <div className="pn-inbox" style={{ display: 'contents' }}>
       <header style={HEAD}>
@@ -169,7 +181,7 @@ export function CanvasLayer({
           <Icon name="chevL" size={16} />
           Thread
         </button>
-        <h2 style={TITLE} title={subject}>{subject}</h2>
+        <h2 style={TITLE} title={subject}>{titleShown(subject)}</h2>
         <Tip content="Close">
           <button type="button" className="ib-iconbtn" style={{ minWidth: 30, minHeight: 30, flex: 'none' }} aria-label="Close the canvas" onClick={onClose} data-canvas-close="">
             <Icon name="x" size={16} />
@@ -177,7 +189,7 @@ export function CanvasLayer({
         </Tip>
       </header>
       <PanePart loading={<div style={{ flex: 1 }} aria-busy="true" />} onFailed={failed}>
-        <CanvasBoard threadId={threadId} dark={dark} agent={agent} draft={draft} onWords={onWords} onSend={onSend} />
+        <CanvasBoard threadId={threadId} dark={dark} agent={agent} agentMark={agentMark} received={received} draft={draft} onWords={onWords} onSend={onSend} />
       </PanePart>
       </div>
     </dialog>,

@@ -1,5 +1,5 @@
 import { lineOf, thingsOf, type Thing } from './reading';
-import { boxGap as boxGapOf, boxOf, boxesOverlap, centerOf, COLOR_NAMES, unionBox, type Box, type CanvasElement, type CanvasScene } from './scene';
+import { boxGap as boxGapOf, boxOf, boxesOverlap, centerOf, COLOR_NAMES, unionBox, wordsOf, type Box, type CanvasElement, type CanvasScene } from './scene';
 
 /**
  * An agent's changes to a canvas, by intent: "add a box right of the gateway",
@@ -50,7 +50,43 @@ const LINE = 25;
 // Wider than the hand-drawn face really is: a label measured too narrow is cut off, one too wide only sits centred.
 const CHAR = 12.5;
 
+/** A frame's title is one line over its corner: this many characters at most. */
+export const FRAME_TITLE_MAX = 120;
+
 export class RefError extends Error {}
+
+const EMOJI = /[\p{Extended_Pictographic}\p{Emoji_Modifier}\u{fe0f}\u{e0020}-\u{e007f}]/u;
+/** Scripts whose letters join, where a joiner or a non-joiner between two letters changes how they are drawn (Persian, Hindi, Sinhala and the like). */
+const JOINING = /[\p{Script=Arabic}\p{Script=Syriac}\p{Script=Mongolian}\p{Script=Devanagari}\p{Script=Bengali}\p{Script=Gurmukhi}\p{Script=Gujarati}\p{Script=Oriya}\p{Script=Tamil}\p{Script=Telugu}\p{Script=Kannada}\p{Script=Malayalam}\p{Script=Sinhala}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
+/**
+ * Words without the characters nobody can see: zero-width spaces, word joiners, byte-order marks, soft hyphens,
+ * direction marks. Two invisible characters carry meaning and stay where they do: the joiner inside an emoji
+ * (a woman, a skin tone and a laptop joined are one technologist) and the joiner or non-joiner between two letters of
+ * a script whose letters join. Anywhere else they go too. Letters and their marks are put in their composed form, so
+ * the same words always compare equal.
+ */
+export function seenWords(value: string): string {
+  const chars = Array.from(value.normalize('NFC'));
+  const out: string[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    const ch = chars[i]!;
+    if (/[\u200b\u200e\u200f\u2060\ufeff\u00ad]/.test(ch)) continue;
+    if (ch === '\u200d' || ch === '\u200c') {
+      const before = out[out.length - 1] ?? '';
+      let next = '';
+      for (let j = i + 1; j < chars.length && !next; j++) if (!/[\u200b-\u200f\u2060\ufeff\u00ad]/.test(chars[j]!)) next = chars[j]!;
+      const emoji = ch === '\u200d' && EMOJI.test(before) && EMOJI.test(next);
+      const letters = JOINING.test(before) && JOINING.test(next);
+      if (!emoji && !letters) continue;
+    }
+    out.push(ch);
+  }
+  return out.join('');
+}
+
+/** A name and a thing's words, made comparable: the same invisible characters gone, one space between words, no case. */
+const plain = (words: string) => seenWords(words).replace(/\s+/g, ' ').trim().toLowerCase();
 
 const FILLER = new Set(['the', 'a', 'an', 'of', 'for', 'to', 'in', 'on', 'at', 'about', 'with', 'and', 'that', 'this', 'one', 'thing', 'called', 'named', 'labelled', 'labeled', 'saying', 'says']);
 const KIND_WORDS: Record<string, string[]> = {
@@ -81,17 +117,17 @@ export interface ResolveOptions {
 export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene, options: ResolveOptions = {}): Thing {
   if (typeof ref !== 'string' || !ref.trim()) throw new RefError('name a thing by its id or its words');
   const name = ref.trim();
-  const lower = name.toLowerCase();
+  const lower = plain(name);
   const list = (found: Thing[]) => found.slice(0, 6).map((t) => `  ${lineOf(t, scene, things)}`).join('\n');
   // A thing's whole words come first, before anything that could read the name as an id.
-  const same = things.filter((t) => t.words.toLowerCase() === lower);
+  const same = things.filter((t) => t.words && plain(t.words) === lower);
   if (same.length === 1) return same[0]!;
   if (same.length > 1) throw new RefError(`${JSON.stringify(name)} is the words of ${same.length} things; name one by its id:\n${list(same)}`);
   // An id is the whole id, as the reading prints it (or the element's own full id). Never the start of one.
   const byId = things.filter((t) => t.id === name || t.elementIds.includes(name));
   if (byId.length === 1) return byId[0]!;
   // Loose: part of its words, or its words in any order, with a kind word standing for the kind.
-  const holds = things.filter((t) => t.words && t.words.toLowerCase().includes(lower));
+  const holds = things.filter((t) => t.words && plain(t.words).includes(lower));
   let loose = holds;
   if (loose.length === 0) {
     const words = lower.split(/[^a-z0-9]+/).filter((w) => w && !FILLER.has(w));
@@ -104,12 +140,12 @@ export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene, 
     const isNote = (t: Thing) => t.kind === 'box' && t.fill === 'yellow';
     const ofKind = (t: Thing) => kinds.size === 0 || kinds.has(t.kind) || (kinds.has('note') && isNote(t));
     if (rest.length > 0 || kinds.size > 0) {
-      loose = things.filter((t) => ofKind(t) && rest.every((w) => t.words.toLowerCase().includes(w)) && (rest.length > 0 || t.kind !== 'arrow'));
+      loose = things.filter((t) => ofKind(t) && rest.every((w) => plain(t.words).includes(w)) && (rest.length > 0 || t.kind !== 'arrow'));
     }
   }
   if (loose.length === 1 && !options.exact) {
     const thing = loose[0]!;
-    options.notes?.push(`${JSON.stringify(name)} read as ${thing.id}${thing.words ? ` ${JSON.stringify(thing.words.slice(0, 60))}` : ''}`);
+    options.notes?.push(`${JSON.stringify(name)} read as ${thing.id}${thing.words ? ` ${JSON.stringify(Array.from(thing.words).slice(0, 60).join(''))}` : ''}`);
     return thing;
   }
   if (loose.length >= 1 && options.exact) {
@@ -117,7 +153,7 @@ export function resolveThing(ref: unknown, things: Thing[], scene: CanvasScene, 
   }
   if (loose.length > 1) throw new RefError(`${JSON.stringify(name)} fits ${loose.length} things; name one by its id:\n${list(loose)}`);
   const words = lower.split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !FILLER.has(w));
-  const close = things.filter((t) => words.some((w) => t.words.toLowerCase().includes(w)));
+  const close = things.filter((t) => words.some((w) => plain(t.words).includes(w)));
   throw new RefError(`nothing on the canvas is called ${JSON.stringify(name)}${close.length ? `; closest:\n${list(close)}` : ' (read the canvas to see what is there)'}`);
 }
 
@@ -206,7 +242,11 @@ function columns(text: string): number {
   return n;
 }
 
-/** Lines no wider than `maxChars` columns. A word longer than a line (and text with no spaces, as Chinese has none) breaks inside. */
+/**
+ * Lines no wider than `maxChars` columns, to GUESS how much room words need. Never what is stored: a thing's words
+ * are kept exactly as given, and the editor wraps them on screen itself (a label to its shape, a text to its width).
+ * A word longer than a line (and text with no spaces, as Chinese has none) breaks inside.
+ */
 function wrap(text: string, maxChars: number): string[] {
   const out: string[] = [];
   const push = (word: string, line: string): string => {
@@ -238,12 +278,20 @@ function textSize(lines: string[]): { w: number; h: number } {
   return { w: Math.max(10, Math.ceil(Math.max(...lines.map(columns)) * CHAR)), h: lines.length * LINE };
 }
 
+/**
+ * The hand-drawn face has no marks that stack on a letter (and none of Vietnamese's or a "Zalgo" text's): drawn with
+ * it, the marks fall beside the letters as stray characters. Words that still hold such marks after composing are
+ * drawn in the plain face (2), whose letters carry their marks.
+ */
+const fontFor = (words: string) => (/\p{M}/u.test(words.replace(/[\u{fe0f}\u{20e3}]/gu, '')) ? 2 : 5);
+
 function textElement(work: Work, words: string, box: Box, extra: Partial<CanvasElement> = {}): CanvasElement {
   return base(work, 'text', box, {
+    // The words, exactly: no line break is ever put into them. The editor wraps them for display and keeps them whole in `originalText`.
     text: words,
     originalText: words,
     fontSize: FONT,
-    fontFamily: 5,
+    fontFamily: fontFor(words),
     textAlign: 'center',
     verticalAlign: 'middle',
     containerId: null,
@@ -253,13 +301,37 @@ function textElement(work: Work, words: string, box: Box, extra: Partial<CanvasE
   });
 }
 
+/** The width the editor wraps a label to (Excalidraw's own rule: an arrow's label gets 70% of its width and at least 11 times its font size). */
+function labelRun(container: CanvasElement): number {
+  const w = Math.abs(container.width);
+  if (container.type === 'arrow') return Math.max(0.7 * w, FONT * 11);
+  if (container.type === 'ellipse') return Math.round((w / 2) * Math.SQRT2) - 10;
+  if (container.type === 'diamond') return Math.round(w / 2) - 10;
+  return w - 10;
+}
+
+/** About how large a label's words will be once the editor has wrapped them to their shape: a guess, on the generous side. */
+function labelSize(container: CanvasElement, words: string): { w: number; h: number } {
+  const run = labelRun(container);
+  const size = textSize(wrap(words, Math.max(4, Math.floor(run / CHAR))));
+  return { w: Math.min(size.w, Math.max(10, Math.round(run))), h: size.h };
+}
+
+/** The middle of an arrow, where the editor puts its label: its middle point, or the middle of its middle stretch. */
+function midOf(arrow: CanvasElement): [number, number] {
+  const points = arrow.points ?? [];
+  if (points.length === 0) return centerOf(boxOf(arrow));
+  const at = (i: number): [number, number] => [arrow.x + (Number(points[i]?.[0]) || 0), arrow.y + (Number(points[i]?.[1]) || 0)];
+  const half = Math.floor(points.length / 2);
+  if (points.length % 2 === 1) return at(half);
+  const a = at(half - 1);
+  const b = at(half);
+  return [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+}
+
 function label(work: Work, container: CanvasElement, words: string, at: [number, number]): CanvasElement {
-  // An arrow's words fit along it, between the two things; a shape's words fit inside it (a diamond or an ellipse holds about half its width).
-  const run = container.type === 'arrow' ? Math.hypot(container.width, container.height) * 0.62 : (Math.abs(container.width) - 20) * (container.type === 'diamond' ? 0.5 : container.type === 'ellipse' ? 0.7 : 1);
-  const lines = wrap(words, Math.max(6, Math.floor(run / CHAR)));
-  const size = textSize(lines);
-  const el = textElement(work, lines.join('\n'), { x: at[0] - size.w / 2, y: at[1] - size.h / 2, w: size.w, h: size.h }, {
-    originalText: words,
+  const size = labelSize(container, words);
+  const el = textElement(work, words, { x: at[0] - size.w / 2, y: at[1] - size.h / 2, w: size.w, h: size.h }, {
     containerId: container.id,
     frameId: container.frameId ?? null,
   });
@@ -481,13 +553,58 @@ function edgePoint(box: Box, toward: [number, number], gap: number): [number, nu
   return [cx + dx * scale, cy + dy * scale];
 }
 
-function route(arrow: CanvasElement, from: Box, to: Box): Partial<CanvasElement> {
-  const start = edgePoint(from, centerOf(to), 6);
-  const end = edgePoint(to, centerOf(from), 6);
+function route(arrow: CanvasElement, from: Box, to: Box, via?: [number, number]): Partial<CanvasElement> {
+  const start = edgePoint(from, via ?? centerOf(to), 6);
+  const end = edgePoint(to, via ?? centerOf(from), 6);
   const dx = Math.round(end[0] - start[0]);
   const dy = Math.round(end[1] - start[1]);
-  return { x: Math.round(start[0]), y: Math.round(start[1]), width: Math.abs(dx), height: Math.abs(dy), points: [[0, 0], [dx, dy]] };
+  const x = Math.round(start[0]);
+  const y = Math.round(start[1]);
+  if (!via) return { x, y, width: Math.abs(dx), height: Math.abs(dy), points: [[0, 0], [dx, dy]] };
+  const mx = Math.round(via[0]) - x;
+  const my = Math.round(via[1]) - y;
+  return { x, y, width: Math.max(0, mx, dx) - Math.min(0, mx, dx), height: Math.max(0, my, dy) - Math.min(0, my, dy), points: [[0, 0], [mx, my], [dx, dy]] };
 }
+
+/**
+ * An arrow between two things, with room for its words. The editor draws an arrow's label on the arrow's middle,
+ * wrapped by words to a width of its own choosing (at least 220), so between two things that stand close the label
+ * would lie over them. Then the arrow bows out to one side, through the nearest free spot that holds the label: the
+ * words sit beside the things, never on one.
+ */
+function routeLabelled(work: Work, arrow: CanvasElement, from: Box, to: Box, words: string): Partial<CanvasElement> {
+  const straight = route(arrow, from, to);
+  if (!words) return straight;
+  const taken = obstacles(work, new Set([arrow.id]));
+  // Does the label, as large as it will be on this route, lie clear of every thing when centred here?
+  const free = (c: [number, number], on: Partial<CanvasElement>) => {
+    const size = labelSize({ ...arrow, ...on } as CanvasElement, words);
+    return !taken.some((o) => boxesOverlap(o, { x: c[0] - size.w / 2, y: c[1] - size.h / 2, w: size.w, h: size.h }, 8));
+  };
+  const mid = midOf({ ...arrow, ...straight } as CanvasElement);
+  if (free(mid, straight)) return straight;
+  const others = taken.filter((o) => !sameBox(o, from) && !sameBox(o, to));
+  // Every spot around the middle, nearest first: the first where the label lies on nothing and the bow runs over nothing.
+  const spots: [number, number][] = [];
+  for (let dy = -600; dy <= 600; dy += 20) for (let dx = -600; dx <= 600; dx += 20) if (dx !== 0 || dy !== 0) spots.push([dx, dy]);
+  spots.sort((a, b) => Math.hypot(a[0], a[1]) - Math.hypot(b[0], b[1]));
+  let fallback: Partial<CanvasElement> | undefined;
+  for (const [dx, dy] of spots) {
+    const via: [number, number] = [mid[0] + dx, mid[1] + dy];
+    const bowed = route(arrow, from, to, via);
+    if (!free(via, bowed)) continue;
+    const p = bowed.points!;
+    const out: Segment = [bowed.x! + p[0]![0]!, bowed.y! + p[0]![1]!, bowed.x! + p[1]![0]!, bowed.y! + p[1]![1]!];
+    const back: Segment = [bowed.x! + p[1]![0]!, bowed.y! + p[1]![1]!, bowed.x! + p[2]![0]!, bowed.y! + p[2]![1]!];
+    // The bow runs over no other thing, and does not double back through either of the two it joins.
+    const clear = !others.some((o) => crosses(out, o, 4) || crosses(back, o, 4)) && !crosses(out, to, 0) && !crosses(back, from, 0);
+    if (clear) return bowed;
+    fallback ??= bowed;
+  }
+  return fallback ?? straight;
+}
+
+const sameBox = (a: Box, b: Box) => Math.abs(a.x - b.x) < 1 && Math.abs(a.y - b.y) < 1 && Math.abs(a.w - b.w) < 1 && Math.abs(a.h - b.h) < 1;
 
 /** Arrows attached to things that moved follow them. */
 function reroute(work: Work, moved: Set<string>): void {
@@ -504,10 +621,10 @@ function reroute(work: Work, moved: Set<string>): void {
     const last: [number, number] = [arrow.x + (points[points.length - 1]?.[0] ?? 0), arrow.y + (points[points.length - 1]?.[1] ?? 0)];
     const fromBox = from && !from.isDeleted ? boxOf(from) : { x: first[0], y: first[1], w: 0, h: 0 };
     const toBox = to && !to.isDeleted ? boxOf(to) : { x: last[0], y: last[1], w: 0, h: 0 };
-    touch(work, arrow, route(arrow, fromBox, toBox));
     const text = work.scene.elements.find((e) => !e.isDeleted && e.type === 'text' && e.containerId === arrow.id);
+    touch(work, arrow, routeLabelled(work, arrow, fromBox, toBox, text ? wordsOf(text) : ''));
     if (text) {
-      const [cx, cy] = centerOf(boxOf(arrow));
+      const [cx, cy] = midOf(arrow);
       touch(work, text, { x: Math.round(cx - text.width / 2), y: Math.round(cy - text.height / 2) });
     }
   }
@@ -533,16 +650,17 @@ function remove(work: Work, els: CanvasElement[]): void {
   }
 }
 
-function text(value: unknown, field: string, required = true): string {
+function text(value: unknown, field: string, required = true, max = 4000): string {
   if (value === undefined || value === null) {
     if (required) throw new RefError(`"${field}" is missing`);
     return '';
   }
   if (typeof value !== 'string') throw new RefError(`"${field}" is text`);
   if (value.length > 4000) throw new RefError(`"${field}" is longer than 4,000 characters`);
-  // Characters nobody can see are not words.
-  const seen = value.replace(/[\u200b-\u200f\u2060\ufeff\u00ad]/g, '');
-  if (required && !seen.trim()) throw new RefError(`"${field}" has no words in it`);
+  // Characters nobody can see are not words (the joiners that hold an emoji or a script's letters together stay).
+  const seen = seenWords(value);
+  if (required && !seen.replace(/[\u200c\u200d]/g, '').trim()) throw new RefError(`"${field}" has no words in it`);
+  if (Array.from(seen).length > max) throw new RefError(`"${field}" is longer than ${max} characters`);
   return seen;
 }
 
@@ -595,7 +713,7 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
     return { line: `added a mermaid diagram at ${Math.round(spot.box.x)},${Math.round(spot.box.y)} ${Math.round(from.w)}x${Math.round(from.h)}: ${shapes} shapes, ${arrows} arrows (a group; each part can be edited)`, box: spot.box };
   }
   if (kind === 'frame') {
-    const title = text(op.text ?? op.title, 'text', false);
+    const title = text(op.text ?? op.title, 'text', false, FRAME_TITLE_MAX).replace(/\s+/g, ' ').trim();
     const size = sizeOf(op, { w: 480, h: 320 });
     const spot = findSpot(work, op, size, new Set(), fallback);
     const el = base(work, 'frame', spot.box, { name: title || null, strokeColor: '#bbb', customData: { by: work.ctx.by } });
@@ -606,7 +724,9 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
     const lines = wrap(words, 48);
     const size = textSize(lines);
     const spot = findSpot(work, op, size, new Set(), fallback);
-    const el = textElement(work, lines.join('\n'), spot.box, { originalText: words, textAlign: 'left', verticalAlign: 'top', ...(color ? { strokeColor: color.stroke } : {}) });
+    // Long words keep to a column: a text of a set width (autoResize off) is wrapped by the editor, on screen only.
+    const column = lines.length > words.split('\n').length;
+    const el = textElement(work, words, spot.box, { textAlign: 'left', verticalAlign: 'top', ...(column ? { autoResize: false } : {}), ...(color ? { strokeColor: color.stroke } : {}) });
     settle(work, [el], spot);
     return { line: `added ${describe(work, el)}`, box: spot.box };
   }
@@ -616,9 +736,9 @@ function add(work: Work, op: CanvasOp, fallback?: Box): { line: string; box: Box
   const inner = textSize(lines);
   const natural =
     kind === 'diamond'
-      ? { w: Math.max(160, inner.w * 2 + 40), h: Math.max(90, inner.h * 2 + 30) }
+      ? { w: Math.max(160, inner.w * 2 + 60), h: Math.max(90, inner.h * 2 + 70) }
       : kind === 'ellipse'
-        ? { w: Math.max(150, Math.ceil(inner.w * 1.45) + 30), h: Math.max(80, Math.ceil(inner.h * 1.45) + 24) }
+        ? { w: Math.max(150, Math.ceil(inner.w * 1.45) + 30), h: Math.max(80, Math.ceil(inner.h * 1.45) + 44) }
         : { w: Math.max(kind === 'note' ? 180 : 140, inner.w + 40), h: Math.max(kind === 'note' ? 120 : 64, inner.h + 34) };
   const size = sizeOf(op, natural);
   const spot = findSpot(work, op, size, new Set(), fallback);
@@ -664,12 +784,12 @@ function connect(work: Work, op: CanvasOp): string {
     endBinding: b ? { elementId: b.id, focus: 0, gap: 6 } : null,
     ...(color ? { strokeColor: color.stroke } : {}),
   });
-  Object.assign(arrow, route(arrow, from.box, to.box));
+  Object.assign(arrow, routeLabelled(work, arrow, from.box, to.box, words));
   for (const el of [a, b]) {
     if (el) touch(work, el, { boundElements: [...(el.boundElements ?? []), { id: arrow.id, type: 'arrow' }] });
   }
   if (a?.frameId && a.frameId === b?.frameId) arrow.frameId = a.frameId;
-  if (words) label(work, arrow, words, centerOf(boxOf(arrow)));
+  if (words) label(work, arrow, words, midOf(arrow));
   return `connected ${from.id} -> ${to.id}${words ? ` ${JSON.stringify(words)}` : ''} (arrow ${describeId(work, arrow)}, pointing at ${to.id})`;
 }
 
@@ -688,21 +808,31 @@ function set(work: Work, op: CanvasOp): string {
     const words = text(op.text, 'text');
     if (thing.kind === 'sketch' || thing.kind === 'picture' || thing.kind === 'line') throw new RefError(`${thing.id} is a ${thing.kind} and has no words; add a text near it instead`);
     const main = els[0]!;
-    if (thing.kind === 'frame') touch(work, main, { name: words });
-    else if (thing.kind === 'text') {
+    if (thing.kind === 'frame') {
+      if (Array.from(words).length > FRAME_TITLE_MAX) throw new RefError(`a frame's title is at most ${FRAME_TITLE_MAX} characters`);
+      touch(work, main, { name: words.replace(/\s+/g, ' ').trim() });
+    } else if (thing.kind === 'text') {
       const lines = wrap(words, 48);
       const size = textSize(lines);
-      touch(work, main, { text: lines.join('\n'), originalText: words, width: size.w, height: size.h });
+      const column = lines.length > words.split('\n').length;
+      touch(work, main, { text: words, originalText: words, fontFamily: fontFor(words), autoResize: !column, width: size.w, height: size.h });
     } else {
       const old = els.find((e) => e.type === 'text' && e.containerId === main.id);
       if (old) {
-        const lines = wrap(words, main.type === 'arrow' ? 26 : Math.max(8, Math.floor((Math.abs(main.width) - 20) / CHAR)));
-        const size = textSize(lines);
-        const [cx, cy] = centerOf(boxOf(main));
-        touch(work, old, { text: lines.join('\n'), originalText: words, width: size.w, height: size.h, x: Math.round(cx - size.w / 2), y: Math.round(cy - size.h / 2) });
-        if (main.type !== 'arrow' && size.h + 24 > main.height) touch(work, main, { height: size.h + 34 });
+        if (main.type === 'arrow') {
+          // New words may need more room than the old: the arrow is routed for them again.
+          const byId = new Map(work.scene.elements.map((e) => [e.id, e]));
+          const a = main.startBinding?.elementId ? byId.get(main.startBinding.elementId) : undefined;
+          const b = main.endBinding?.elementId ? byId.get(main.endBinding.elementId) : undefined;
+          if (a && b && !a.isDeleted && !b.isDeleted) touch(work, main, routeLabelled(work, main, boxOf(a), boxOf(b), words));
+        }
+        const size = labelSize(main, words);
+        const [cx, cy] = main.type === 'arrow' ? midOf(main) : centerOf(boxOf(main));
+        touch(work, old, { text: words, originalText: words, fontFamily: fontFor(words), width: size.w, height: size.h, x: Math.round(cx - size.w / 2), y: Math.round(cy - size.h / 2) });
+        const room = main.type === 'diamond' ? size.h * 2 + 70 : main.type === 'ellipse' ? Math.ceil(size.h * 1.45) + 44 : size.h + 34;
+        if (main.type !== 'arrow' && room > main.height) touch(work, main, { height: room });
       } else {
-        label(work, main, words, centerOf(boxOf(main)));
+        label(work, main, words, main.type === 'arrow' ? midOf(main) : centerOf(boxOf(main)));
         touch(work, main, {});
       }
     }
@@ -747,7 +877,7 @@ function frame(work: Work, op: CanvasOp): string {
   const things = thingsNow(work);
   const members = names.map((n) => resolveThing(n, things, work.scene, { notes: work.notes }));
   for (const m of members) if (m.kind === 'frame') throw new RefError(`${m.id} is a frame; a frame cannot go in a frame`);
-  const title = text(op.title ?? op.text, 'title', false);
+  const title = text(op.title ?? op.text, 'title', false, FRAME_TITLE_MAX).replace(/\s+/g, ' ').trim();
   const els = members.flatMap((m) => elementsOf(work, m));
   for (const el of els) work.direct.add(el.id);
   const around = unionBox(els.map(boxOf));
