@@ -1045,6 +1045,7 @@ test('one PR with no review thread, on its launchpad: Guided review, the New rev
   await phoneShot(browser, LOCALE, 'phone-6a-review-arrived');
   writeFileSync(join(world.projects.web, 'picture-it-fallback.html'), '<!doctype html><html><head><meta name="plannotator-page" content="picture-it"><title>How the English fallback works</title></head><body><h1>Fallback</h1></body></html>');
   await world.claude.send({ project_path: world.projects.web, reply_to: String(opening.id), body: 'Here is a Picture page of the fallback.', attachments: ['picture-it-fallback.html'] });
+  rmSync(join(world.projects.web, 'picture-it-fallback.html'));
   await page.reload();
   await expect(stackPane.locator('[data-launch-line="picture"]')).toContainText('How the English fallback works');
   await expect(stackPane.locator('[data-launch-line="guide"]')).toContainText('Open');

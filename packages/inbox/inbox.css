@@ -10377,7 +10377,9 @@ a.ib-rv-narrow-pr[href]:hover b { text-decoration: underline; text-underline-off
   .ib-riskd-row .absolute { top: auto; bottom: 100%; width: 100%; min-width: 0; margin: 0 0 4px; }
   .ib-riskd-row .absolute > .overflow-y-auto { max-height: min(224px, 30dvh); }
   /* A short phone keeps Save and Cancel on screen: the box gives up its height first. */
-  .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(88px, 16dvh, 140px); }
+  .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); height: clamp(72px, 13dvh, 140px); }
+  .ib-riskd-auto { flex-wrap: nowrap; margin-top: 10px; padding-top: 10px; }
+  .ib-riskd-auto > div { width: auto; flex: 1; min-width: 0; }
 }
 /* A long chain: the first two marks, "+N", the last two. */
 .ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
