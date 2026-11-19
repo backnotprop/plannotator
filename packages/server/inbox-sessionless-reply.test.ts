@@ -123,6 +123,31 @@ describe("a script's post does not steal the thread", () => {
     expect(w.store.readSettles(sent, "ses_shim1")).toBe(true);
   });
 
+  test("an agent's shell the CLI names (Gemini CLI: a name, no session, no host) asks while the session that wrote is live: the reply is owed to it, as on main", async () => {
+    const w = world();
+    await w.poll("ses-ops");
+    const first = w.tool("ses-ops", "Started.");
+    const asked = w.store.sendMessage({ project_id: first.project_id, author: { kind: "agent", host: null, session: null, name: "Gemini CLI" }, body: "Which queue should I drain first?", reply_to: first.id }).message;
+    const sent = w.reply(first.thread_id, "The billing queue.");
+    expect(sent.reply_to).toBe(asked.id);
+    expect(sent.to).toBeUndefined();
+    expect(w.live.pendingOf("ses-ops")).toEqual([]);
+  });
+
+  test("the script's action item marked Done in the draft while the session that wrote has ended: the row's mark agrees with the Send (the script's, so no Session ended)", async () => {
+    const w = world();
+    const first = w.tool("ses-ops", "The nightly sync is green.");
+    const posted = w.script(":::action\nRotate the disk on node 3\nStopped: the cleanup\n:::", first.id);
+    const action = w.store.questionsOf(posted.id).find((q) => q.kind === "action")!;
+    w.later(INBOX_ASKER_RESTART_GRACE_MS + 1_000);
+    await w.poll("ses-other");
+    // Unmarked: the words would go to the ended session, and the row says so.
+    expect(w.row(first.thread_id).session_ended).toBe(true);
+    w.store.markAction(posted.id, action.key, { outcome: "done", staged: true });
+    // Marked: the Send's reply is the script's (sendTargets.test.ts proves the window's side), and the row agrees.
+    expect(w.row(first.thread_id).session_ended).toBeUndefined();
+  });
+
   test("a thread only a script wrote in: the reply is the script's and its line is as before, while a session is live in the project", async () => {
     const w = world();
     await w.poll("ses-ops");

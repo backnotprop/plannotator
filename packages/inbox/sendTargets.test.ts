@@ -7,6 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { inboxAskingMessage, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
 import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SentContents } from './sendTargets';
+import { askingSessionOf } from './thread/helpers';
 
 type State = 'open' | 'picked' | 'sent';
 const message = (id: string, session: string | null, states: State[]): InboxMessageWire =>
@@ -253,6 +254,34 @@ describe("a script's post does not take the words from the session that wrote (n
     const m = [script('msg_s1'), script('msg_s2')];
     expect(wordsMessage(thread(m)).id).toBe('msg_s2');
     expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_s2');
+  });
+
+  test("an agent's shell the CLI names (Gemini CLI: a name, no session, no host) keeps it, as before; a nameless one is a script", () => {
+    const gemini = { ...script('msg_g'), author: { kind: 'agent', host: null, session: null, name: 'Gemini CLI' } } as unknown as InboxMessageWire;
+    const m = [message('msg_a', 'ses_a', []), gemini];
+    expect(wordsMessage(thread(m)).id).toBe('msg_g');
+    expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_g');
+    expect(wordsMessage(thread([message('msg_a', 'ses_a', []), script('msg_s')])).id).toBe('msg_a');
+  });
+
+  test("the script's action item marked Done in the draft, nothing picked: the Send and the session that asked (the ended note's) agree on the script", () => {
+    const marked = {
+      ...script('msg_s'),
+      actions: [{ key: 'a-1', kind: 'action', state: 'picked', revision: 1, sent_revision: null, action_result: { outcome: 'done', note: null, at: '2026-10-26T09:00:00.000Z', by: 'person', message_id: null, staged: true } }],
+    } as unknown as InboxMessageWire;
+    const t = thread([{ ...message('msg_a', 'ses_a', []), wakes: true } as InboxMessageWire, marked]);
+    expect(sendTargetsOf(t).at(-1)!.message.id).toBe('msg_s');
+    // No session asked, so no ended note for ses_a: the window's note and its Send name the same message.
+    expect(askingSessionOf(t, { skip: new Set(), carries: false })).toBeNull();
+    expect(askingSessionOf(t, { skip: new Set(), carries: true })).toBeNull();
+  });
+
+  test('a permission prompt or a routine change line after the script: both rules pass over all three to the session', () => {
+    const prompt = message('msg_p', 'perm:ses_a', ['open']);
+    const change = { ...message('msg_c', 'ses_b', []), scheduled_change: { scheduled_id: 'r', name: 'nightly', op: 'edit' } } as unknown as InboxMessageWire;
+    const m = [message('msg_a', 'ses_a', []), script('msg_s'), prompt, change];
+    expect(wordsMessage(thread(m)).id).toBe('msg_a');
+    expect(inboxAskingMessage(m, statesOf, false)?.id).toBe('msg_a');
   });
 
   test('a sender with a session id and no host (a stdio shim outside a session), or one with a host and no session, keeps it, as before', () => {

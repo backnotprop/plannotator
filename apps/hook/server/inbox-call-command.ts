@@ -54,7 +54,7 @@ import { questionOpenersWithTextText, type QuestionOpenerWithText } from "@plann
 import { hasHelpFlag, INBOX_CALL_ACTIONS, INBOX_CALL_USAGE, INBOX_PAIRED_CALL_USAGE } from "./cli";
 import { pairedAttachments } from "./inbox-call-pieces";
 import { writeWholeToStdout } from "./write-whole-stdout";
-import { fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
+import { AUTHOR_TOOLS, fillInboxToolArguments, type InboxHostSession, INBOX_DSH_ROOT_FOR_ENV, INBOX_DSH_ROOT_SESSION_ENV, INBOX_SESSION_HOST_NAMES, inboxHostSessionFromEnv, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 /** One request never waits longer: a wedged Inbox must not hang a script. */
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -82,6 +82,19 @@ const SESSIONLESS_HOSTS: readonly { variable: string; name: string; host?: strin
   { variable: "CURSOR_AGENT", name: "Cursor" },
   { variable: "DSH_SHELL", name: "DeepSeek Harness", host: "dsh" },
 ];
+
+/**
+ * The agent a shell that names no session belongs to, by its one marker (`SESSIONLESS_HOSTS`: GEMINI_CLI, COPILOT_CLI,
+ * CURSOR_AGENT, OPENCODE, CLAUDECODE, OMPCODE, QWEN_CODE, DSH_SHELL): its name, and its host when it has one. A
+ * message it sends then reads as that agent's, never as a script's (`inboxSessionlessSend`). Null for a shell with no
+ * marker (a script, a hook, a cron job) and for one with two, which cannot say which of them is calling.
+ */
+export function inboxShellAgentOf(env: Record<string, string | undefined>): { name: string; host?: string } | null {
+  const markers = SESSIONLESS_HOSTS.filter(({ variable }) => env[variable]);
+  if (markers.length !== 1) return null;
+  const { name, host } = markers[0]!;
+  return host ? { name, host } : { name };
+}
 
 export type InboxCaller = Pick<InboxHostSession, "session"> & Partial<InboxHostSession>;
 
@@ -232,6 +245,13 @@ export async function runInboxCallCommand(argv: readonly string[], deps: CallCom
 
   // With no project_path, the session's own project (its host's PLANNOTATOR_SESSION_PROJECT), wherever the shell has cd'd to.
   const call = fillInboxToolArguments({ method: "tools/call", params: { name: parsed.action, arguments: input.args } }, deps.cwd, null, caller.caller, null, inboxSessionProjectFromEnv(deps.env));
+  // An agent's own shell that names no session (Gemini CLI, Copilot CLI, Cursor…): its message carries that agent's name.
+  const shellAgent = caller.caller === null && AUTHOR_TOOLS.has(parsed.action) ? inboxShellAgentOf(deps.env) : null;
+  if (shellAgent) {
+    const filled = call.params!.arguments as Record<string, unknown>;
+    filled.agent_name = shellAgent.name;
+    if (shellAgent.host) filled.agent_host = shellAgent.host;
+  }
   // Where the script runs is where its relative attachments and images are, wherever its project is.
   const params = inboxToolCallParams({ name: parsed.action, arguments: call.params!.arguments as Record<string, unknown> }, { wakes: false, workingFolder: deps.cwd });
   // Only on a read of one thread or message: a list has nothing to settle, and the peek would empty it.

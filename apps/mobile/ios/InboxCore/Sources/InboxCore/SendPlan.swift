@@ -71,13 +71,13 @@ public enum SendPlan {
   public static func needsComputer(_ thread: InboxThread) -> Bool { activeHandoff(thread) || tookOver(thread) }
 
   /// The message the person's words answer: the latest agent message that is not a permission prompt's and not
-  /// a routine's change line (`wordsMessage`, sendTargets.ts:147). A script's post (no session, no host:
-  /// `inboxSessionlessSend`, packages/core/inbox-delivery.ts) does not take the words from the latest agent
+  /// a routine's change line (`wordsMessage`, sendTargets.ts:147). A script's post (no session, no host, no name:
+  /// `inboxSessionlessSend` and `inboxWordsDefault`, packages/core/inbox-delivery.ts) does not take the words from the latest agent
   /// message that has a session, unless the Send answers its own questions or action items.
   static func wordsMessage(_ thread: InboxThread) -> InboxMessageWire? {
     let agents = thread.messages.filter { $0.author.kind == .agent && !($0.author.session ?? "").hasPrefix(permissionSessionPrefix) && $0.scheduledChange == nil }
     guard let latest = agents.last else { return thread.messages.first }
-    let sessionless = (latest.author.session ?? "").isEmpty && (latest.author.host ?? "").isEmpty
+    let sessionless = (latest.author.session ?? "").isEmpty && (latest.author.host ?? "").isEmpty && (latest.author.name ?? "").isEmpty
     let answered = (latest.questions ?? []).contains { $0.state == .picked && $0.kind != .action } || ActionMarks.items(of: latest).contains(where: actionInDraft)
     guard sessionless, !answered else { return latest }
     return agents.last { !($0.author.session ?? "").isEmpty } ?? latest
