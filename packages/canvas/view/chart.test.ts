@@ -19,6 +19,8 @@ function chart(fields: Record<string, unknown>): ChartObject {
 
 const WEEKS = { fields: ['week', 'minutes', 'plan'], rows: [['W1', 11.2, 10], ['W2', 4.1, 9], ['W3', 1.3, 8]] };
 const texts = (shapes: ChartShape[]) => shapes.filter((shape) => shape.kind === 'text').map((shape) => (shape as { text: string }).text);
+/** A series' mark: filled, or a hollow series' outline. Not a rule, a ground line or a legend's line. */
+const isMark = (shape: Extract<ChartShape, { kind: 'path' }>) => (!!shape.fill && shape.fill !== 'rule') || (!!shape.stroke && shape.width === 1.5 && !shape.dash);
 const paths = (shapes: ChartShape[]) => shapes.filter((shape): shape is Extract<ChartShape, { kind: 'path' }> => shape.kind === 'path');
 
 /** Every number in a path, and every place a word is put. */
@@ -53,7 +55,7 @@ function awkward(): Record<string, unknown>[] {
   for (const table of tables) {
     for (const mark of ['bar', 'line', 'area', 'dot']) {
       out.push({ ...table, mark, encode: { x: 'x', y: 'v' } });
-      out.push({ ...table, mark, encode: { x: 'x', y: ['v', 'w'] }, stack: true, flip: true, dash: ['w'], rules: [{ at: 3, label: 'limit' }, { at: 'a', on: 'x' }, { at: 2, on: 'x' }] });
+      out.push({ ...table, mark, encode: { x: 'x', y: ['v', 'w'] }, stack: true, flip: true, dash: ['w'], rules: [{ at: 3, label: 'limit' }, { at: -4 }] });
       out.push({ ...table, mark, encode: { x: 'x', y: 'v', series: 'k', size: 'w' in table ? undefined : undefined }, stack: true });
       out.push({ ...table, mark, encode: { x: 'x', y: 'v', facet: 'k' }, title: 'Small charts', unit: 'ms' });
     }
@@ -68,10 +70,14 @@ function awkward(): Record<string, unknown>[] {
 describe('any chart the codec passes can be drawn', () => {
   test('every mark, on awkward tables, at every size: only finite numbers, and never a throw', () => {
     let drawn = 0;
+    let refusedTables = 0;
     for (const fields of awkward()) {
       // A negative size is refused by the codec (sizes are for dots); skip a table it does not take.
       const checked = checkObject({ id: 'c', type: 'chart', x: 0, y: 0, w: 380, h: 240, ...fields });
-      if (!checked.ok) continue;
+      if (!checked.ok) {
+        refusedTables += 1;
+        continue;
+      }
       const object = checked.value as ChartObject;
       for (const [w, h] of [[1, 1], [16, 16], [60, 300], [300, 40], [380, 240], [1200, 700], [20_000, 20_000]]) {
         for (const detail of ['full', 'marks'] as const) {
@@ -85,6 +91,7 @@ describe('any chart the codec passes can be drawn', () => {
     }
     // Most of the awkward tables must really have been drawn, or this proves nothing.
     expect(drawn).toBeGreaterThan(1500);
+    expect(refusedTables).toBeLessThan(40);
   });
 
   test('the six marks are all drawn: each gives marks of its own', () => {
@@ -108,7 +115,8 @@ describe('what a chart costs to draw', () => {
     expect(paths(chartShapes(object, { detail: 'marks' })).length).toBeLessThanOrEqual(4 + 2);
     expect(chartShapes(object).length).toBeLessThan(80);
     const cells = chart({ mark: 'cell', fields: ['x', 'y', 'v'], rows: Array.from({ length: CHART_LIMITS.rows }, (_row, i) => [i % 25, Math.floor(i / 25), i]), encode: { x: 'x', y: 'y', value: 'v' } });
-    expect(paths(chartShapes(cells, { detail: 'marks' })).length).toBeLessThanOrEqual(5);
+    // Five steps of size, and the ground they stand on.
+    expect(paths(chartShapes(cells, { detail: 'marks' })).length).toBeLessThanOrEqual(6);
   });
 
   test('too small to read on screen, a chart keeps its marks and draws no words', () => {
@@ -129,10 +137,117 @@ describe('the look', () => {
     expect(lines[1].width).toBeGreaterThan(lines[0].width!);
   });
 
-  test('only a series that is named is dashed', () => {
-    const object = chart({ ...WEEKS, mark: 'line', encode: { x: 'week', y: ['minutes', 'plan'] }, dash: ['plan', 'not a series'] });
-    const lines = paths(chartShapes(object)).filter((shape) => shape.width === 2 || shape.width === 1.25);
-    expect(lines.map((shape) => [shape.stroke, !!shape.dash])).toEqual([['ink', true], ['accent', false]]);
+  test('no two lines are told apart by colour alone: every line after the first has a pattern of its own', () => {
+    const rows = Array.from({ length: 6 }, (_row, i) => [`W${i}`, i, i + 1, i + 2, i + 3]);
+    const object = chart({ mark: 'line', fields: ['week', 'a', 'b', 'c', 'd'], rows, encode: { x: 'week', y: ['a', 'b', 'c', 'd'] } });
+    const lines = paths(chartShapes(object)).filter((shape) => shape.stroke && shape.d.split('L').length === 6);
+    expect(lines).toHaveLength(4);
+    const patterns = lines.map((shape) => shape.dash ?? 'solid');
+    expect(new Set(patterns).size).toBe(4);
+    // The first series, drawn last, is the solid one; `dash` can pattern it too, and the others stay distinct.
+    expect(patterns[3]).toBe('solid');
+    const all = paths(chartShapes(chart({ mark: 'line', fields: ['week', 'a', 'b', 'c', 'd'], rows, encode: { x: 'week', y: ['a', 'b', 'c', 'd'] }, dash: ['a'] }))).filter((shape) => shape.stroke && shape.d.split('L').length === 6);
+    expect(new Set(all.map((shape) => shape.dash)).size).toBe(4);
+    expect(all.every((shape) => !!shape.dash)).toBe(true);
+  });
+
+  test('each line is named where it ends, beside its last value, and two ends that meet are moved apart', () => {
+    const rows = [[0, 'failing', 180], [6, 'failing', 76], [0, 'plan', 180], [9, 'plan', 0], [6, 'at this rate', 76], [9, 'at this rate', 4]];
+    const object = chart({ mark: 'line', fields: ['week', 'line', 'tests'], rows, encode: { x: 'week', y: 'tests', series: 'line' }, w: 520, h: 320 });
+    const shapes = chartShapes(object);
+    const ends = shapes.filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && /^(76 failing|0 plan|4 at this rate)$/.test(shape.text));
+    expect(ends.map((shape) => shape.text).sort()).toEqual(['0 plan', '4 at this rate', '76 failing']);
+    const ys = ends.map((shape) => shape.y).sort((a, b) => a - b);
+    for (let i = 1; i < ys.length; i++) expect(ys[i] - ys[i - 1]).toBeGreaterThanOrEqual(11);
+    for (const end of ends) expect(end.y).toBeLessThanOrEqual(object.h);
+    // Two lines that end side by side in the middle of the chart, far from its foot.
+    const close = chart({ mark: 'line', fields: ['week', 'a', 'b'], rows: [[0, 10, 200], [9, 100, 101]], encode: { x: 'week', y: ['a', 'b'] }, w: 520, h: 320 });
+    const pair = chartShapes(close).filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && /^10[01] [ab]$/.test(shape.text));
+    expect(pair).toHaveLength(2);
+    expect(Math.abs(pair[0].y - pair[1].y)).toBeGreaterThanOrEqual(11);
+    // Named at their ends, the lines need no legend: no name is written twice.
+    expect(texts(shapes).filter((word) => word === 'plan')).toEqual([]);
+  });
+
+  test('dots of different series have different outlines, and the legend names every series on as many lines as it takes', () => {
+    const rows = Array.from({ length: 8 }, (_row, i) => [10, 10, `a series with a long name ${i + 1}`]);
+    const object = chart({ mark: 'dot', fields: ['x', 'y', 'k'], rows, encode: { x: 'x', y: 'y', series: 'k' }, w: 380, h: 300 });
+    const shapes = chartShapes(object, { detail: 'marks' });
+    // Eight dots at one place: eight outlines, none the same.
+    const dots = paths(shapes).filter(isMark);
+    expect(new Set(dots.map((shape) => shape.d)).size).toBe(8);
+    const words = texts(chartShapes(object));
+    for (let i = 1; i <= 8; i++) expect(words).toContain(`a series with a long name ${i}`);
+    expect(words.filter((word) => /^\+\d/.test(word))).toEqual([]);
+    const legend = chartShapes(object).filter((shape): shape is Extract<ChartShape, { kind: 'text' }> => shape.kind === 'text' && shape.text.startsWith('a series'));
+    expect(legend).toHaveLength(8);
+    expect(new Set(legend.map((shape) => shape.y)).size).toBeGreaterThan(1);
+    for (const item of legend) expect(item.x + item.text.length * 6.1).toBeLessThanOrEqual(object.w);
+  });
+
+  test('a line runs along the x axis whatever order its rows came in, and the latest value is the right-most one', () => {
+    // B's rows come W3, W1, W2; the axis reads W1, W2, W3 because that is how the names first appear.
+    const inOrder = [['W1', 'A', 10], ['W2', 'A', 8], ['W3', 'A', 6], ['W1', 'B', 50], ['W2', 'B', 40], ['W3', 'B', 30]];
+    const jumbled = [['W1', 'A', 10], ['W2', 'A', 8], ['W3', 'A', 6], ['W3', 'B', 30], ['W1', 'B', 50], ['W2', 'B', 40]];
+    const draw = (rows: unknown[][]) => chartShapes(chart({ mark: 'line', fields: ['week', 'team', 'minutes'], rows, encode: { x: 'week', y: 'minutes', series: 'team' } }));
+    expect(draw(jumbled)).toEqual(draw(inOrder));
+    expect(texts(draw(jumbled))).toContain('30 B');
+    // Numbers along the bottom: sorted by size, and the large number at the head is the last in time.
+    const byNumber = (rows: number[][]) => chartShapes(chart({ mark: 'area', fields: ['day', 'v'], rows, encode: { x: 'day', y: 'v' } }));
+    expect(byNumber([[3, 5], [1, 9], [2, 7]])).toEqual(byNumber([[1, 9], [2, 7], [3, 5]]));
+    const head = byNumber([[3, 5], [1, 9], [2, 7]]).find((shape) => shape.kind === 'text' && shape.size === 28) as { text: string };
+    expect(head.text).toBe('5');
+  });
+
+  test('an upright rule past the data is inside the chart too: the x axis grows to hold it', () => {
+    const rows = Array.from({ length: 8 }, (_row, i) => [i + 1, 10 - i]);
+    const object = chart({ mark: 'line', fields: ['week', 'v'], rows, encode: { x: 'week', y: 'v' }, rules: [{ at: 12, on: 'x', label: 'freeze' }] });
+    const rule = paths(chartShapes(object)).find((shape) => shape.dash === '4 3')!;
+    const x = Number(rule.d.match(/^M([\d.-]+) /)![1]);
+    const end = paths(chartShapes(object)).find((shape) => shape.stroke === 'accent')!;
+    const lastX = Number(end.d.match(/L([\d.-]+) [\d.-]+$/)![1]);
+    expect(x).toBeGreaterThan(lastX);
+    expect(x).toBeLessThanOrEqual(object.w - 14);
+  });
+
+  test('a chart of amounts says what its sizes mean, with a title or without, and the smallest amount is still a mark', () => {
+    const rows = [['a', 'p', 2], ['b', 'p', 40], ['a', 'q', 21]];
+    for (const title of [undefined, 'Minutes on the knobs']) {
+      const object = chart({ mark: 'cell', fields: ['x', 'y', 'v'], rows, encode: { x: 'x', y: 'y', value: 'v' }, unit: 'min', ...(title ? { title } : {}) });
+      const words = texts(chartShapes(object));
+      expect(words).toContain('2');
+      expect(words).toContain('40 min');
+      // Three tiles in three different sizes, every one in the colour at full strength.
+      const tiles = paths(chartShapes(object, { detail: 'marks' })).filter((shape) => shape.fill === 'accent');
+      expect(tiles).toHaveLength(3);
+      expect(tiles.every((shape) => shape.opacity === undefined || shape.opacity === 1)).toBe(true);
+      const widths = tiles.map((shape) => Number(shape.d.match(/h([\d.]+)v/)![1]));
+      expect(new Set(widths).size).toBe(3);
+      expect(Math.min(...widths)).toBeGreaterThan(8);
+    }
+  });
+
+  test('spans in one lane that overlap in time stand in rows of their own; spans that only meet share a row', () => {
+    const rows = [['Dish', 0, 6, 'listening'], ['Dish', 4, 5, 'locked'], ['Dish', 6, 9, 'listening'], ['Log', 0, 9, 'listening']];
+    const shapes = paths(chartShapes(chart({ mark: 'span', fields: ['lane', 'from', 'to', 'state'], rows, encode: { x: 'from', x2: 'to', y: 'lane', series: 'state' } }), { detail: 'marks' }));
+    const tops = (d: string) => [...d.matchAll(/M[\d.-]+ ([\d.-]+)h/g)].map((m) => Number(m[1]));
+    const listening = tops(shapes.find((shape) => shape.fill === 'accent')!.d);
+    const locked = tops(shapes.find((shape) => shape.fill === 'ink')!.d);
+    // Dish 0-6 and Dish 6-9 meet and share a row; "locked" 4-5 lies inside the first and stands under it.
+    expect(listening[0]).toBe(listening[1]);
+    expect(locked[0]).toBeGreaterThan(listening[0]);
+  });
+
+  test('every step a mark is drawn in is strong enough to be seen: none is a faint patch', () => {
+    const rows = Array.from({ length: 16 }, (_row, i) => [`n${i % 2}`, `k${i % 8}`, i + 1]);
+    for (const mark of ['bar', 'dot', 'span', 'cell'] as const) {
+      const encode = mark === 'span' ? { x: 'v', x2: 'v', y: 'x', series: 'k' } : mark === 'cell' ? { x: 'x', y: 'k', series: 'k' } : { x: 'x', y: 'v', series: 'k' };
+      const marks = paths(chartShapes(chart({ mark, fields: ['x', 'k', 'v'], rows, encode, stack: true }), { detail: 'marks' })).filter(isMark);
+      expect(marks.length).toBeGreaterThanOrEqual(8);
+      for (const shape of marks) expect(shape.opacity ?? 1).toBeGreaterThanOrEqual((shape.fill ?? shape.stroke) === 'accent' ? 0.82 : 0.55);
+      // Among the first five series there are filled marks and hollow ones: they differ by more than a shade.
+      expect(marks.some((shape) => !shape.fill && shape.stroke)).toBe(true);
+    }
   });
 
   test('a rule past the data is still inside the chart: the scale grows to hold it', () => {
@@ -198,14 +313,40 @@ describe('the still picture', () => {
 });
 
 describe('a chart in words', () => {
-  test('a line is read from its start to its end', () => {
+  test('a line is read from its left end to its right end, one series at a time', () => {
     expect(describeChart(chart({ ...WEEKS, mark: 'line', encode: { x: 'week', y: ['minutes', 'plan'] }, title: 'Scan to alert', unit: 'min' }))).toBe(
-      'Scan to alert. Line chart of minutes from 11.2 to 1.3 min, plan from 10 to 8 min by week: 3 rows, W1 to W3.',
+      'Scan to alert. Line chart of minutes from 11.2 to 1.3 min, plan from 10 to 8 min, by week: 3 rows, W1 to W3.',
     );
   });
 
+  test('it is true of the rows: two series that both fall are never read as one that rises', () => {
+    const rows = [['W1', 'A', 10], ['W2', 'A', 8], ['W1', 'B', 50], ['W2', 'B', 40]];
+    expect(describeChart(chart({ mark: 'line', fields: ['week', 'team', 'minutes'], rows, encode: { x: 'week', y: 'minutes', series: 'team' } }))).toBe(
+      'Line chart of minutes by team: A from 10 to 8, B from 50 to 40, by week: 4 rows, W1 to W2.',
+    );
+    // Rows out of order: read along the axis, not down the table.
+    expect(describeChart(chart({ mark: 'line', fields: ['day', 'v'], rows: [[3, 5], [1, 9], [2, 7]], encode: { x: 'day', y: 'v' } }))).toBe('Line chart of v from 9 to 5, by day: 3 rows, 1 to 3.');
+    expect(describeChart(chart({ mark: 'line', fields: ['week', 'team', 'minutes'], rows: [['W1', 'A', 1], ['W2', 'A', 2], ['W2', 'B', 9], ['W1', 'B', 7]], encode: { x: 'week', y: 'minutes', series: 'team' } }))).toContain('B from 7 to 9');
+  });
+
+  test('small charts, or more series than can be read out, give how far the values reach and claim no direction', () => {
+    const rows = ['p1', 'p2', 'p3'].flatMap((player) => [[player, 'keys', 20], [player, 'knobs', 30]]);
+    const faceted = describeChart(chart({ mark: 'line', fields: ['player', 'doing', 'minutes'], rows, encode: { x: 'doing', y: 'minutes', facet: 'player' } }));
+    expect(faceted).toBe('Line chart of minutes, 20 to 30, by doing, one small chart for each player (3): 6 rows, keys to knobs.');
+    const many = Array.from({ length: 10 }, (_row, i) => [i % 2, `k${i % 5}`, 10 - i]);
+    const crowded = describeChart(chart({ mark: 'line', fields: ['x', 'k', 'v'], rows: many, encode: { x: 'x', y: 'v', series: 'k' } }));
+    expect(crowded).toBe('Line chart of v in 5 series by k, 1 to 10, by x: 10 rows, 0 to 1.');
+    expect(crowded).not.toContain('from');
+  });
+
+  test('nothing is never written as minus nothing', () => {
+    const text = describeChart(chart({ mark: 'bar', fields: ['x', 'v'], rows: [['a', -0], ['b', 0]], encode: { x: 'x', y: 'v' } }));
+    expect(text).toBe('Bar chart of v 0 to 0, by x: 2 rows, a to b.');
+    expect(texts(chartShapes(chart({ mark: 'line', fields: ['x', 'v'], rows: [[1, -0], [2, -0]], encode: { x: 'x', y: 'v' } }))).join(' ')).not.toContain('-0');
+  });
+
   test('bars by how far they reach; a grid and a timeline by their size', () => {
-    expect(describeChart(chart({ ...WEEKS, mark: 'bar', encode: { x: 'week', y: 'minutes' } }))).toBe('Bar chart of minutes 1.3 to 11.2 by week: 3 rows, W1 to W3.');
+    expect(describeChart(chart({ ...WEEKS, mark: 'bar', encode: { x: 'week', y: 'minutes' } }))).toBe('Bar chart of minutes 1.3 to 11.2, by week: 3 rows, W1 to W3.');
     expect(describeChart(chart({ ...WEEKS, mark: 'cell', encode: { x: 'week', y: 'plan', value: 'minutes' } }))).toBe('Grid of minutes by week and plan, 3 by 3, 1.3 to 11.2.');
     expect(describeChart(chart({ ...WEEKS, mark: 'span', encode: { x: 'plan', x2: 'minutes', y: 'week' } }))).toBe('Timeline of 3 spans in 3 lanes, 1.3 to 11.2.');
   });
