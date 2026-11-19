@@ -2,8 +2,8 @@
  * The list's "N new" line and the project a session started in a checkouts folder files under, proved
  * against the compiled binary with agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts).
  *
- * The owner, 2026-11-02: the held line read "1 new in appnotes · Users/ramos/workspaces/projects" on two
- * lines beside Show. `~/workspaces/projects/appnotes` is a plain folder of notes whose `worktrees` folder
+ * The owner, 2026-11-02: the held line read "1 new in appnotes · Users/sam/work/projects" on two
+ * lines beside Show. `~/work/projects/appnotes` is a plain folder of notes whose `worktrees` folder
  * holds the repository's checkouts (`worktrees/main` and linked worktrees); a session started in the folder
  * made a folder project beside the repository's, both "appnotes", and the window's name climbed to the root.
  *
