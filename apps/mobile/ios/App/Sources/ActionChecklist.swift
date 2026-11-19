@@ -50,7 +50,7 @@ struct ActionChecklist: View {
       .padding(.top, 16)
       .padding(.bottom, 10)
       ForEach(actions, id: \.key) { action in
-        Divider().overlay(Token.border).padding(.leading, 16)
+        Divider().overlay(Token.border).padding(.horizontal, 16)
         ActionRow(session: session, thread: thread, message: message, action: action, agent: agent, readOnly: readOnly || !session.canMarkActions(), open: open == action.key, drafts: drafts) {
           chosen = true
           openKey = open == action.key ? nil : action.key
@@ -61,7 +61,7 @@ struct ActionChecklist: View {
         }
       }
       if !watching.isEmpty {
-        Divider().overlay(Token.border).padding(.leading, 16)
+        Divider().overlay(Token.border).padding(.horizontal, 16)
         Label(PhoneWords.watching(agent, watching), systemImage: "eye")
           .font(.footnote)
           .foregroundStyle(Token.mutedForeground)
@@ -128,7 +128,8 @@ private struct ActionRow: View {
   private var inDraft: Bool { ActionMarks.inDraft(action) }
   private var doneLike: Bool { ActionMarks.isDone(action) }
   private var cantLike: Bool { state == .cant || (pending && result?.outcome == .cant) }
-  private var when: String { result.map { TimeWords().when($0.at) } ?? "" }
+  /// The time alone, as the window's lines have it ("3:12 PM").
+  private var when: String { result.map { TimeWords().clock($0.at) } ?? "" }
   /// The person's own mark: theirs, or the one the agent's "saw it done" settled.
   private var mine: (cant: Bool, note: String?, at: String)? {
     guard let result else { return nil }
@@ -187,7 +188,7 @@ private struct ActionRow: View {
       }
       if inDraft, let mine { draftNote(mine) }
       if let refusal = session.refusal(message: message, key: action.key) {
-        Label(PhoneWords.notice(refusal, computer: session.computer.name, what: PhoneWords.markNotSaved), systemImage: "exclamationmark.circle")
+        Label(PhoneWords.markNotice(refusal, computer: session.computer.name), systemImage: "exclamationmark.circle")
           .font(.footnote)
           .foregroundStyle(Token.destructive)
           .padding(.leading, 54)
@@ -268,9 +269,10 @@ private struct ActionRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(minHeight: 44)
-        .background(Token.input.opacity(0.5), in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+        .fieldGround(radius: Token.radius)
         .toolbar { if focus == .note { keyboardDone } }
-      Text(held ? "\(PhoneWords.markOnPhone(cant: mine.cant)) · \(PhoneWords.willSendWhenBack(session.computer.name))" : PhoneWords.markInDraft(cant: mine.cant, seen: state == .seen, at: TimeWords().when(mine.at)))
+        .accessibilityLabel(PhoneWords.noteLabel(agent, cant: mine.cant))
+      Text(held ? PhoneWords.markWaits(cant: mine.cant, computer: session.computer.name) : PhoneWords.markInDraft(cant: mine.cant, seen: state == .seen, at: TimeWords().clock(mine.at)))
         .font(.footnote)
         .foregroundStyle(Token.mutedForeground)
     }
@@ -346,29 +348,35 @@ private struct ActionRow: View {
   }
 
   private var answers: some View {
-    HStack(spacing: 6) {
+    // Side by side; one under the other when the words are too large to fit whole.
+    ViewThatFits(in: .horizontal) {
+      HStack(spacing: 6) { answerButtons }
+      VStack(alignment: .leading, spacing: 6) { answerButtons }
+    }
+    .buttonStyle(ChoiceStyle())
+    .disabled(busy)
+  }
+
+  @ViewBuilder private var answerButtons: some View {
+    Group {
       Button {
         mark(ActionMarks.Mark(.done))
       } label: {
         Label(PhoneWords.done, systemImage: "checkmark")
           .font(.body.weight(.semibold))
           .foregroundStyle(Token.primaryForeground)
+          .fixedSize()
           .padding(.horizontal, 18)
           .frame(minHeight: 44)
           .background(Token.primary, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
       }
-      Button(PhoneWords.cantDoItMore) {
+      Button {
         composing = true
         focus = .reason
+      } label: {
+        Text(PhoneWords.cantDoItMore).font(.body).foregroundStyle(Token.foreground).fixedSize().padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
       }
-      .font(.body)
-      .foregroundStyle(Token.foreground)
-      .padding(.horizontal, 12)
-      .frame(minHeight: 44)
-      .contentShape(Rectangle())
     }
-    .buttonStyle(ChoiceStyle())
-    .disabled(busy)
   }
 
   private var compose: some View {
@@ -381,7 +389,7 @@ private struct ActionRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(minHeight: 44)
-        .background(Token.input.opacity(0.5), in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+        .fieldGround(radius: Token.radius)
         .accessibilityLabel(PhoneWords.whyCant(agent))
       HStack(spacing: 6) {
         let empty = reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -416,7 +424,8 @@ private struct ActionRow: View {
     Task {
       let taken = await session.mark(action: action, thread: thread, message: message, next)
       busy = false
-      guard taken else { return }
+      // Refused: the row stays as it is, with the reason the person typed, and says why.
+      guard taken == .saved || taken == .waits else { return }
       composing = false
       reason = ""
       focus = nil
@@ -435,7 +444,8 @@ private struct ActionRow: View {
     }
     // The agent saw it done itself: an emptied note leaves nothing of the person's to send.
     let next: ActionMarks.Mark? = state == .seen && typed.isEmpty ? nil : ActionMarks.Mark(mine.cant ? .cant : .done, note: typed.isEmpty ? nil : typed)
-    guard session.hold(mark: next, action: action, thread: thread, message: message) else { return }
+    // `note_only`: it never marks again an item taken back meanwhile.
+    guard session.hold(mark: next, action: action, thread: thread, message: message, quiet: next != nil) else { return }
     Task { await session.deliverHeld(thread: thread) }
   }
 }

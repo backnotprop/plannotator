@@ -44,7 +44,21 @@ public final class InboxSession {
     /// This Inbox does not offer it.
     case notOffered
     case appNeedsUpdate
+    /// The pick waited on this phone while another device answered: the Inbox's answer is shown, not this one.
+    case gaveWay
   }
+
+  /// A question the person picked on that the agent replaced before the pick went.
+  public struct Stale: Hashable, Sendable {
+    public var message: MessageID
+    public var key: String
+  }
+
+  /// Picks an agent replaced before they went, by thread. While any stand, nothing is sent until the person
+  /// chooses (the window's stale guard, packages/inbox/components/ReplacedQuestion.tsx `StaleGuard`).
+  public private(set) var stale: [ThreadID: [Stale]] = [:]
+  /// Threads where a Send stopped at such a replacement: the person is asked what to do.
+  public private(set) var stopped: Set<ThreadID> = []
 
   /// Why a Send in a thread was refused, shown at the composer until the person sends again.
   public private(set) var notices: [ThreadID: Notice] = [:]
@@ -285,6 +299,12 @@ public final class InboxSession {
       let key = write.path.split(separator: "/").last.map(String.init) ?? ""
       let result = mark.outcome.map { InboxActionResult(outcome: InboxActionResultOutcome(rawValue: $0), note: mark.note, at: Self.stamp(write.madeAt), by: .person, staged: true) }
       func draw(_ item: inout InboxQuestion) {
+        // The agent saw it done itself: only the person's note on it is theirs to change.
+        if item.actionResult?.by == .agent {
+          let at = item.actionResult?.person?.at ?? Self.stamp(write.madeAt)
+          item.actionResult?.person = mark.outcome.map { InboxActionResultPerson(outcome: InboxActionResultPersonOutcome(rawValue: $0), note: mark.note, at: at) }
+          return
+        }
         item.actionResult = result
         item.state = result == nil ? .openValue : .picked
       }
@@ -303,11 +323,13 @@ public final class InboxSession {
     return model
   }
 
-  private static func stamp(_ date: Date) -> String {
+  private static let stamps: ISO8601DateFormatter = {
     let formatter = ISO8601DateFormatter()
     formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-    return formatter.string(from: date)
-  }
+    return formatter
+  }()
+
+  private static func stamp(_ date: Date) -> String { stamps.string(from: date) }
 
   // MARK: Writing
 
@@ -365,17 +387,35 @@ public final class InboxSession {
     switch write.kind {
     case .pick:
       let questions = (try? JSONDecoder().decode(DoorPicksBody.self, from: write.body))?.questions ?? []
-      // A refusal the thread itself says once read again (answered elsewhere, replaced, closed) adds no words.
-      var quiet = false
-      if case .refused(_, let code) = notice { quiet = PickConflict.saysItself(code) }
+      var code = ""
+      if case .refused(_, let refused) = notice { code = refused }
       for question in questions {
-        if !quiet { refusals[ref(write.message, question.key)] = notice }
-        // A Send made after this pick, for this answer alone, has nothing left to carry.
-        dropFromLaterSends(after: write, message: write.message, key: question.key)
+        // A newer answer of the same question waits behind this one: that one decides, and says what comes of it.
+        let newer = laterPick(after: write, key: question.key)
+        // Said on the card only when an answer was lost (not for taking one back), as the window does.
+        let says = question.answer != nil && !newer
+        switch code {
+        case "question_superseded":
+          // The agent replaced the question: the card redraws as Replaced, and a Send stops until the person chooses.
+          let ref = Stale(message: MessageID(write.message ?? ""), key: question.key)
+          if !(stale[thread] ?? []).contains(ref) { stale[thread, default: []].append(ref) }
+          if says { refusals[self.ref(write.message, question.key)] = notice }
+          pullBackSends(after: write, notice: nil)
+        case "question_already_sent":
+          // It went with a reply while this save waited: that reply stands. A Send behind it goes without it.
+          if says { refusals[self.ref(write.message, question.key)] = notice }
+          dropFromLaterSends(after: write, message: write.message, key: question.key)
+        default:
+          // Not saved: the person is told, and a Send made after it does not go on without the answer.
+          if !newer { refusals[self.ref(write.message, question.key)] = notice }
+          pullBackSends(after: write, notice: notice)
+        }
       }
     case .action:
       let key = write.path.split(separator: "/").last.map(String.init) ?? ""
-      refusals[ref(write.message, key)] = notice
+      var code = ""
+      if case .refused(_, let refused) = notice { code = refused }
+      if !ActionMarks.mootNoteRefusal(quiet: write.quiet == true, code: code) { refusals[ref(write.message, key)] = notice }
       dropFromLaterSends(after: write, message: write.message, key: key)
     case .reply:
       notices[thread] = notice
@@ -386,6 +426,44 @@ public final class InboxSession {
     case .seen:
       break
     }
+  }
+
+  private func laterPick(after write: HeldWrite, key: String) -> Bool {
+    guard let start = held.firstIndex(where: { $0.id == write.id }) else { return false }
+    return held.indices.contains { later in
+      later > start && held[later].kind == .pick && held[later].message == write.message
+        && ((try? JSONDecoder().decode(DoorPicksBody.self, from: held[later].body))?.questions.contains { $0.key == key } ?? false)
+    }
+  }
+
+  /// Nothing goes on without an answer the person meant to send: the Sends made after `write` are taken back, their
+  /// words returned to the reply field, and (when there is something to say) the reason shown there.
+  private func pullBackSends(after write: HeldWrite, notice: Notice?) {
+    guard let start = held.firstIndex(where: { $0.id == write.id }) else { return }
+    let thread = ThreadID(write.thread)
+    let pulled = held.indices.filter { $0 > start && held[$0].thread == write.thread && held[$0].kind == .reply }.map { held[$0] }
+    guard !pulled.isEmpty else { return }
+    var more = false
+    for reply in pulled {
+      if let words = reply.words, !words.isEmpty {
+        returned[thread] = [returned[thread], words].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: "\n\n")
+        more = true
+      }
+      let body = try? JSONDecoder().decode(DoorReplyBody.self, from: reply.body)
+      if (body?.questions?.count ?? 0) + (body?.actions?.count ?? 0) > 1 { more = true }
+    }
+    held.removeAll { item in pulled.contains { $0.id == item.id } }
+    copy.saveOutbox(held)
+    if !(stale[thread] ?? []).isEmpty { stopped.insert(thread) }
+    // A reply that carried only this one answer and no words (a permission prompt's) has nothing more to say.
+    if more, let notice { notices[thread] = notice }
+    keepGivenBack()
+  }
+
+  /// The person chose at the stale guard: it is shown once for each replacement.
+  public func clearStale(_ id: ThreadID) {
+    stale[id] = nil
+    stopped.remove(id)
   }
 
   /// Take one question (or action item) out of the Sends made after `write`; a Send left with no answer, no
@@ -415,13 +493,15 @@ public final class InboxSession {
     let message = MessageID(write.message ?? "")
     let stale = body.questions.map { ($0.key, $0.revision) }
     // The person's own later writes on this question name the revision this pick read: they go at the Inbox's.
-    for (key, from) in stale { follow(after: write, message: message, key: key, from: from, to: now) }
+    // Not behind a pick that waited: a later pick of that wait must meet the Inbox's answer itself, and give way too.
+    if write.waited != true { for (key, from) in stale { follow(after: write, message: message, key: key, from: from, to: now) } }
     // A newer answer of it waits behind this one: that one decides.
     let newer = held.indices.contains { later in
       later > index && held[later].kind == .pick && held[later].message == write.message
         && ((try? JSONDecoder().decode(DoorPicksBody.self, from: held[later].body))?.questions.contains { q in stale.contains { $0.0 == q.key } } ?? false)
     }
-    if !newer, case .retry(let revision)? = PickConflict.step(failure, tries: write.tries ?? 0) {
+    let step = PickConflict.step(failure, tries: write.tries ?? 0, waited: write.waited == true)
+    if !newer, case .retry(let revision)? = step {
       // The refused key is spent: the same answer goes again as a new write, in the same place in the queue.
       var again = write
       let key = UUID().uuidString
@@ -433,6 +513,12 @@ public final class InboxSession {
       held[index] = again
       copy.saveOutbox(held)
       return true
+    }
+    if !newer, write.waited == true, body.questions.contains(where: { $0.answer != nil }) {
+      // An old pick never goes over a newer answer made elsewhere: the Inbox's is shown, the person is told in one
+      // line, and a Send made behind this pick waits for them to look.
+      for (key, _) in stale { refusals[ref(write.message, key)] = .gaveWay }
+      pullBackSends(after: write, notice: .refused("", code: "question_revision_conflict"))
     }
     // The Inbox's answer is drawn; a Send behind it carries that answer, at the Inbox's revision.
     settle(write.id)
@@ -458,8 +544,21 @@ public final class InboxSession {
     } catch let failure as DoorFailure {
       if removed { return false }
       note(failure)
-      guard failure.isDefinite else { return false }
+      guard failure.isDefinite else {
+        if let index = held.firstIndex(where: { $0.id == write.id }), held[index].waited != true {
+          held[index].waited = true
+          copy.saveOutbox(held)
+        }
+        return false
+      }
       if await settleConflict(write, failure) { return true }
+      // The race at Send itself: the agent replaced a picked question as the person sent. Nothing went.
+      if write.kind == .reply, case .refused(_, let error) = failure, error.code == "question_superseded", let key = error.key,
+        let asked = threads[ThreadID(write.thread)]?.thread.messages.first(where: { message in (message.questions ?? []).contains { $0.key == key && $0.state == .picked } }) {
+        let ref = Stale(message: asked.id, key: key)
+        if !(stale[ThreadID(write.thread)] ?? []).contains(ref) { stale[ThreadID(write.thread), default: []].append(ref) }
+        stopped.insert(ThreadID(write.thread))
+      }
       // Words first, then the outbox: a refusal never leaves the phone with neither.
       switch failure {
       case .refused(_, let error): giveBack(write, .refused(error.error, code: error.code))
@@ -569,8 +668,10 @@ public final class InboxSession {
 
   private func encode<Body: Encodable>(_ body: Body) -> Data { (try? JSONEncoder().encode(body)) ?? Data("{}".utf8) }
 
-  private func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil) {
-    hold(HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date(), words: words))
+  private func enqueue(kind: HeldWrite.Kind, thread: ThreadID, message: MessageID?, request: DoorRequest, body: Data, key: String, words: String? = nil, quiet: Bool = false) {
+    // Made while the computer does not answer: it waits, and so never goes over a newer answer made elsewhere.
+    let waits = client == nil || reach != .here
+    hold(HeldWrite(id: key, kind: kind, thread: thread.rawValue, message: message?.rawValue, route: request.route.name, method: request.route.method.rawValue, path: request.path, body: body, madeAt: Date(), words: words, waited: waits ? true : nil, quiet: quiet ? true : nil))
   }
 
   private func markSeen(_ id: ThreadID) async {
@@ -620,19 +721,22 @@ public final class InboxSession {
   /// It waits in the reply draft and goes with the next Send, as in the window (`staged`; contract flow thread-09).
   /// Returns false when this Inbox does not offer it.
   @discardableResult
-  public func mark(action: InboxQuestion, thread: ThreadID, message: MessageID, _ mark: ActionMarks.Mark?) async -> Bool {
-    guard hold(mark: mark, action: action, thread: thread, message: message) else { return false }
+  public func mark(action: InboxQuestion, thread: ThreadID, message: MessageID, _ mark: ActionMarks.Mark?) async -> ActionMarks.Taken {
+    guard hold(mark: mark, action: action, thread: thread, message: message) else { return .notOffered }
     await pump(thread.rawValue)
-    return true
+    // Only what the computer answered counts: a refused mark leaves what the person typed where it is.
+    if refusals[ref(message.rawValue, action.key)] != nil { return .refused }
+    return isHeldMark(message: message, key: action.key) ? .waits : .saved
   }
 
   /// Put a mark in the outbox now, before anything else can run: a Send made right after already follows it.
+  /// `quiet`: a note typed under the marked row (`note_only`).
   @discardableResult
-  public func hold(mark: ActionMarks.Mark?, action: InboxQuestion, thread: ThreadID, message: MessageID) -> Bool {
+  public func hold(mark: ActionMarks.Mark?, action: InboxQuestion, thread: ThreadID, message: MessageID, quiet: Bool = false) -> Bool {
     guard canMarkActions() else { return false }
     refusals[ref(message.rawValue, action.key)] = nil
     let key = UUID().uuidString
-    enqueue(kind: .action, thread: thread, message: message, request: Door.postMessageAction(message: message, action: action.key), body: encode(ActionMarks.body(mark, idempotencyKey: key)), key: key)
+    enqueue(kind: .action, thread: thread, message: message, request: Door.postMessageAction(message: message, action: action.key), body: encode(ActionMarks.body(mark, quiet: quiet, idempotencyKey: key)), key: key, quiet: quiet)
     return true
   }
 
@@ -644,7 +748,14 @@ public final class InboxSession {
   /// Send: every saved pick in the thread, one reply per agent session, the words riding the last.
   /// False when there was nothing to send or nowhere to send it.
   @discardableResult
-  public func send(thread id: ThreadID, words: String) async -> Bool {
+  public func send(thread id: ThreadID, words: String, pastGuard: Bool = false) async -> Bool {
+    // A pick of theirs was replaced before it went: nothing is sent until the person chooses.
+    if !(stale[id] ?? []).isEmpty, !pastGuard {
+      stopped.insert(id)
+      return false
+    }
+    stale[id] = nil
+    stopped.remove(id)
     guard let model = thread(id), !sending.contains(id), !SendPlan.needsComputer(model.thread), offers(DoorRoutes.postMessageReply) || skew == nil else { return false }
     let text = words.trimmingCharacters(in: .whitespacesAndNewlines)
     let targets = SendPlan.targets(in: model.thread)

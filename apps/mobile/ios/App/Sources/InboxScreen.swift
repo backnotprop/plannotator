@@ -259,14 +259,13 @@ struct ThreadRow: View {
   /// At the largest sizes the project alone: the agent's mark already says who.
   private var lead: String { large ? row.project.name : "\(Names.agent(row.author)) · \(row.project.name)" }
   private var time: String { TimeWords().short(row.lastAt) }
-  /// The window counts what is still open (packages/inbox/pins.ts:39).
-  private var todos: Int { min(Int(row.questions.actions ?? 0), Int(row.questions.openValue)) }
-  private var asks: Int { Int(row.questions.openValue) - todos }
+  /// The row's two marks as the window draws them (`rowMarks`): each has its own number and its own step.
+  private var marks: RowMarks { RowMarks(row) }
+  /// What the marks say to a screen reader: the state in words, never by colour alone.
   private var spoken: String? {
     if held { return PhoneWords.willSend }
-    let waiting = CountWords.waiting(open: Int(row.questions.openValue), actions: Int(row.questions.actions ?? 0))
-    if !waiting.isEmpty { return waiting }
-    return asks == 1 ? PhoneWords.openQuestions(1) : nil
+    let words = PhoneWords.markWords(marks)
+    return words.isEmpty ? nil : words.joined(separator: ", ")
   }
 
   var body: some View {
@@ -329,8 +328,9 @@ struct ThreadRow: View {
     Text(lead).font(.subheadline).foregroundStyle(Token.mutedForeground).lineLimit(1).truncationMode(.tail)
   }
 
-  /// What waits, compact, as the window's row has it: a mark and a number each for action items and questions.
-  /// Red when an agent is stopped, amber when work is held up, quiet otherwise.
+  /// What waits, compact, as the window's row has it (packages/inbox/components/RowBadge.tsx): the action box
+  /// and the question mark, each coloured by its own step. Open is quiet (the question mark plain, the action box a
+  /// neutral pill); held-up work is amber; a stopped agent is red.
   @ViewBuilder private var counts: some View {
     if held {
       Text(PhoneWords.willSend)
@@ -340,32 +340,41 @@ struct ThreadRow: View {
         .frame(height: 22)
         .background(Token.muted, in: Capsule())
         .fixedSize()
-    } else if todos + asks > 0 {
-      let ink = row.questions.stopped ? Token.destructive : !row.questions.holdsUp.isEmpty ? Token.warning : Token.primary
+    } else if marks.actions + marks.questions > 0 {
       HStack(spacing: 6) {
-        if todos > 0 { CountMark(symbol: "checklist", count: todos, ink: ink) }
-        if asks > 0 { CountMark(symbol: "questionmark.bubble", count: asks, ink: ink) }
+        if marks.actions > 0 { CountMark(symbol: "checklist", count: marks.actions, step: marks.action, boxed: true) }
+        if marks.questions > 0 { CountMark(symbol: "questionmark.bubble", count: marks.questions, step: marks.question, boxed: false) }
       }
       .fixedSize()
     }
   }
 }
 
-/// One count in a row: its mark and its number on a tinted capsule.
+/// One count in a row: its mark and its number ("99+" past 99).
 private struct CountMark: View {
   let symbol: String
   let count: Int
-  let ink: Color
+  let step: RowMarks.Step
+  /// The action box keeps a pill when it is open; the question mark is plain text then.
+  let boxed: Bool
+
+  private var ink: Color {
+    switch step {
+    case .stop: return Token.destructive
+    case .hold: return Token.warning
+    case .open: return boxed ? Token.foreground : Token.mutedForeground
+    }
+  }
 
   var body: some View {
     HStack(spacing: 3) {
       Image(systemName: symbol).font(.caption2.weight(.semibold))
-      Text("\(count)").font(.footnote.weight(.semibold)).monospacedDigit()
+      Text(RowMarks.shown(count)).font(.footnote.weight(step == .open && !boxed ? .regular : .semibold)).monospacedDigit()
     }
     .foregroundStyle(ink)
-    .padding(.horizontal, 8)
+    .padding(.horizontal, step == .open && !boxed ? 2 : 8)
     .frame(height: 22)
-    .background(ink.opacity(0.13), in: Capsule())
+    .background(step == .open ? (boxed ? Token.muted : Color.clear) : ink.opacity(0.14), in: Capsule())
     .accessibilityHidden(true)
   }
 }

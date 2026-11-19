@@ -24,7 +24,11 @@ struct PermissionCard: View {
   private static let arm: TimeInterval = 0.6
 
   private var question: InboxQuestion? { message.questions?.first }
-  private var agent: String { Names.agent(message.author) }
+  /// The agent that asks; Claude Code for a prompt with no name (the window's card, `agentNameOf`).
+  private var agent: String {
+    let name = Names.agent(message.author)
+    return name == PhoneWords.anAgent ? "Claude Code" : name
+  }
   /// As the deny field addresses it: "Claude" for Claude Code.
   private var shortAgent: String { agent == "Claude Code" ? "Claude" : agent }
 
@@ -112,7 +116,7 @@ struct PermissionCard: View {
             if toTerminal { LinkButton(words: PermissionPrompt.terminal, quiet: true) { answer(question, PermissionPrompt.terminal) } }
           }
         }
-        if self.session.refusal(message: message.id, key: question.key) != nil {
+        if self.session.refusal(message: message.id, key: question.key) != nil, mode != .confirmFull {
           Label(PhoneWords.answerNotSent, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(Token.destructive)
         }
       }
@@ -134,7 +138,7 @@ struct PermissionCard: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .frame(minHeight: 64, alignment: .top)
-        .background(Token.input.opacity(0.5), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .fieldGround(radius: 14)
         .accessibilityLabel(PhoneWords.whyYouDeny(shortAgent))
       HStack(spacing: 8) {
         let empty = reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -173,7 +177,14 @@ struct PermissionCard: View {
     Task {
       await session.answerNow(thread: thread.threadId, message: message.id, question: question, answer: picked, confirmFull: confirmFull)
       busy = false
-      mode = .answers
+      // Refused: what the person typed stays. A Full permissions answer the Inbox wants confirmed first (this
+      // phone took it for confirmed already) opens the confirmation, never a dead end.
+      if case .refused(let words, _)? = session.refusal(message: message.id, key: question.key) {
+        if words.contains("confirm_full") { mode = .confirmFull }
+      } else {
+        mode = .answers
+        self.reason = ""
+      }
     }
   }
 
@@ -198,7 +209,9 @@ struct PermissionCard: View {
       }
     }()
     let held = session.isHeldSend(message: message.id, key: question.key)
-    let time = held ? "" : TimeWords().when(question.sentReplyId.flatMap { id in thread.messages.first { $0.id.rawValue == id }?.createdAt } ?? message.createdAt)
+    // The prompt's own time, as the window's record has it.
+    let time = held ? "" : TimeWords().when(message.createdAt)
+    let what = read.what(title: title)
     return VStack(alignment: .leading, spacing: 0) {
       Button {
         opened.toggle()
@@ -209,19 +222,26 @@ struct PermissionCard: View {
             .font(.footnote.weight(.bold))
             .foregroundStyle(allowed ? Token.success : Token.mutedForeground)
             .accessibilityHidden(true)
-          ViewThatFits(in: .horizontal) {
+          // Everything the record says shares one left edge: the verdict, the request, the person's reason.
+          VStack(alignment: .leading, spacing: 3) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-              verbText(verb)
-              whatText(read.what(title: title))
-            }
-            // A long verdict keeps all its words: the request goes under it.
-            VStack(alignment: .leading, spacing: 2) {
               verbText(verb).fixedSize(horizontal: false, vertical: true)
-              whatText(read.what(title: title))
+              Spacer(minLength: 4)
+              Text(time).font(.footnote).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(1)
+            }
+            // The request whole when it fits in two lines; a longer one is cut in its middle, so its end (the
+            // part that says what and where) always shows.
+            whatText(what)
+            if outcome == .deny, let reason = PermissionPrompt.reason(question) {
+              Text(PhoneWords.youSaid(reason)).font(.footnote).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+            }
+            if outcome == .terminal, let handoff = read.handoff {
+              Text(handoff).font(.footnote).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
+            }
+            if held {
+              Label(PhoneWords.willSendWhenBack(session.computer.name), systemImage: "clock").font(.footnote).foregroundStyle(Token.mutedForeground)
             }
           }
-          Spacer(minLength: 4)
-          Text(time).font(.footnote).monospacedDigit().foregroundStyle(Token.mutedForeground).lineLimit(1)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -230,15 +250,6 @@ struct PermissionCard: View {
       }
       .buttonStyle(ChoiceStyle())
       .accessibilityElement(children: .combine)
-      if outcome == .deny, let reason = PermissionPrompt.reason(question) {
-        Text(PhoneWords.youSaid(reason)).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.bottom, 10)
-      }
-      if outcome == .terminal, let handoff = read.handoff {
-        Text(handoff).font(.footnote).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true).padding(.horizontal, 14).padding(.bottom, 10)
-      }
-      if held {
-        Label(PhoneWords.willSendWhenBack(session.computer.name), systemImage: "clock").font(.footnote).foregroundStyle(Token.mutedForeground).padding(.horizontal, 14).padding(.bottom, 10)
-      }
       if opened {
         Divider().overlay(Token.border)
         VStack(alignment: .leading, spacing: 10) {
@@ -255,7 +266,7 @@ struct PermissionCard: View {
   }
 
   private func whatText(_ what: String) -> some View {
-    Text(what).font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.mutedForeground).lineLimit(1).truncationMode(.tail)
+    Text(what).font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.mutedForeground).multilineTextAlignment(.leading).lineLimit(2).truncationMode(.middle)
   }
 
   /// A label with its inline code as code.
@@ -265,7 +276,7 @@ struct PermissionCard: View {
       var part = AttributedString(span.text)
       if span.code {
         part.font = .system(.callout, design: .monospaced)
-        part.backgroundColor = (onPrimary ? Token.primaryForeground : Token.foreground).opacity(onPrimary ? 0.18 : 0.07)
+        part.backgroundColor = (onPrimary ? Token.primaryForeground : Token.foreground).opacity(onPrimary ? 0.18 : 0.12)
       }
       out += part
     }
@@ -294,7 +305,8 @@ private struct AnswerButton: View {
         .padding(.vertical, 10)
         .frame(maxWidth: hugs ? nil : .infinity, minHeight: 48)
         .frame(minWidth: hugs ? 72 : nil)
-        .background(style == .filled ? Token.primary : style == .ghost ? Color.clear : Token.muted, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        // A tint of the words' own colour, so the button stands off its card in the dark as in the light.
+        .background(style == .filled ? Token.primary : style == .ghost ? Color.clear : Token.foreground.opacity(style == .off ? 0.05 : 0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .contentShape(Rectangle())
     }
     .buttonStyle(ChoiceStyle())
@@ -346,12 +358,17 @@ struct PermissionRequest: View {
           }
           CodeBlock(code: detail.onLine && kind == .file ? PermissionPrompt.relative(detail.text, to: read.folder) : detail.text, copies: false)
           linksTo
-          if kind == .bash, read.purpose != nil || read.folder != nil {
-            let purpose = read.purpose.map { ($0.hasSuffix(".") ? String($0.dropLast()) : $0) + ". " } ?? ""
-            run(Text(purpose), Text(read.folder == nil ? "" : PhoneWords.runsIn + " "), Text(read.folder ?? "").font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.foreground))
-              .font(.subheadline)
-              .foregroundStyle(Token.mutedForeground)
-              .fixedSize(horizontal: false, vertical: true)
+          if kind == .bash {
+            if let purpose = read.purpose {
+              Text((purpose.hasSuffix(".") ? String(purpose.dropLast()) : purpose) + ".").font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize(horizontal: false, vertical: true)
+            }
+            if let folder = read.folder {
+              // On its own line, so the path is never split after "~/"; a path longer than the line cuts in its middle.
+              HStack(alignment: .firstTextBaseline, spacing: 5) {
+                Text(PhoneWords.runsIn).font(.subheadline).foregroundStyle(Token.mutedForeground).fixedSize()
+                Text(folder).font(.system(.footnote, design: .monospaced)).foregroundStyle(Token.foreground).lineLimit(1).truncationMode(.middle)
+              }
+            }
           }
         }
         rest

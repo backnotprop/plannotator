@@ -99,28 +99,93 @@ enum PhoneWords {
   static let wordsBack = "Your words are back in the box."
   /// Who a reply went to, beside "You" (the window says it in the delivery line, "Delivered to Claude Code").
   static func to(_ name: String) -> String { "to \(name)" }
-  /// The window's pill at the foot of a thread ("1 open question").
-  static func openQuestions(_ n: Int) -> String { n == 1 ? "1 open question" : "\(n) open questions" }
-  /// packages/ui/components/blocks/CodeBlock.tsx: the copy button and its answer.
-  static let copy = "Copy"
-  static let copied = "Copied"
-  /// The window's "Question 1 of 2" (packages/inbox/components/Thread.tsx).
-  static func questionOf(_ index: Int, _ count: Int) -> String { "Question \(index) of \(count)" }
-  /// Why a Send was not taken, in the app's words. `what` is the write's own line for a plain refusal.
-  static func notice(_ notice: InboxSession.Notice, computer: String, what: String = replyNotSent) -> String {
+  /// TODO(contract): "words rows" (`openItemsLabel`, packages/core/inbox-open-questions.ts). The button at a thread's
+  /// foot: "3 open questions" or "2 open action items" when one kind waits; both named, without "open", when both
+  /// do; "1 permission waiting" when only a started agent's permission prompts do.
+  static func openItems(_ items: OpenItems) -> String {
+    func each(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
+    if items.questions == 0, items.actions == 0 { return "\(items.permissions) permission\(items.permissions == 1 ? "" : "s") waiting" }
+    if items.actions == 0 { return "\(items.questions) open question\(items.questions == 1 ? "" : "s")" }
+    if items.questions == 0 { return "\(items.actions) open action item\(items.actions == 1 ? "" : "s")" }
+    return "\(each(items.questions, "question")), \(each(items.actions, "action item"))"
+  }
+  /// TODO(contract): "words rows". packages/ui/components/blocks/CodeBlock.tsx:63: the copy button and its answer.
+  static let copy = "Copy code"
+  static let copied = "Copied!"
+  /// TODO(contract): "words rows" (the question eyebrow, packages/ui/components/blocks/QuestionBlock.tsx:743).
+  static func eyebrow(_ index: Int, _ count: Int, multi: Bool) -> String { "Question \(index) of \(count)\(multi ? " · pick any" : "")" }
+
+  // MARK: What was not taken (TODO(contract): "words rows": sendFailure.ts and the pick lines of Thread.tsx)
+  /// Why a Send was not taken (packages/inbox/sendFailure.ts): a short plain refusal of the Inbox is the line as it
+  /// is, because it says what to do; anything else is the window's own line. Two cases have their own words: an
+  /// answer another device changed (the Inbox's line for it names a key and a revision), and a session that ended.
+  static func notice(_ notice: InboxSession.Notice, computer: String, agent: String? = nil) -> String {
     switch notice {
-    case .refused(_, let code): return code == "question_revision_conflict" ? answerChanged : what
-    case .unreadable(let status): return "\(computer) did not take this (\(status))."
+    case .refused(_, "question_revision_conflict"): return answerChanged
+    case .refused(_, "session_not_live"): return sessionEnded(agent)
+    case .refused(let words, _): return SendFailure.plain(words) ?? replyNotSent
+    case .unreadable: return replyNotSent
     case .notOffered: return "Plannotator on \(computer) cannot do this yet."
     case .appNeedsUpdate: return updatePhone
+    case .gaveWay: return answerChanged
     }
   }
-  static let replyNotSent = "Your reply was not sent."
+  /// packages/inbox/sendFailure.ts.
+  static let replyNotSent = "The reply was not sent."
+  /// `raceWhat` (packages/inbox/components/ReplyRoute.tsx:387).
+  static func sessionEnded(_ agent: String?) -> String { "That \(agent.map { "\($0) " } ?? "")session ended before your reply went. Nothing was sent." }
   /// A Send that named an answer another device changed after this phone read it.
   static let answerChanged = "An answer changed on another device. Check it, then send again."
-  /// The window's words (packages/inbox/components/Thread.tsx, the card's save line).
+  /// Why a pick did not go, on its card (packages/inbox/components/Thread.tsx:2499, :2505, :2516).
+  static func pickNotice(_ notice: InboxSession.Notice, computer: String) -> String {
+    switch notice {
+    case .refused(_, "question_superseded"): return "Pick not saved. That question was replaced, so this answer won't be sent."
+    case .refused(_, "question_already_sent"): return "Pick not saved. That question was already sent, so your last change did not go."
+    case .refused(_, "question_revision_conflict"): return pickNotSaved
+    case .refused(let words, _): return SendFailure.plain(words) ?? pickNotSaved
+    case .gaveWay: return gaveWay
+    case .unreadable: return pickNotSaved
+    case .notOffered, .appNeedsUpdate: return self.notice(notice, computer: computer)
+    }
+  }
   static let pickNotSaved = "The pick was not saved."
-  static let markNotSaved = "Not saved. Try again."
+  /// The phone's own: a pick that waited on the phone while another device answered gives way to that answer.
+  static let gaveWay = "Another device answered this while your pick waited. Its answer is shown."
+  /// Why a Done or Can't do it the person pressed did not go. The Inbox's own lines name the item's key.
+  static func markNotice(_ notice: InboxSession.Notice, computer: String) -> String {
+    switch notice {
+    case .refused(_, "action_already_sent"): return "Not saved. It was already sent."
+    case .refused(_, "action_closed"): return "Not saved. This action item is closed."
+    case .refused(_, "thread_resolved"): return "Not saved. This thread is archived."
+    case .notOffered, .appNeedsUpdate: return self.notice(notice, computer: computer)
+    default: return "Not saved. Try again."
+    }
+  }
+
+  // MARK: The stale guard (packages/inbox/components/ReplacedQuestion.tsx `StaleGuard`: every word is the window's)
+  static func guardHeading(position: Int?, count: Int) -> String { count == 1 ? "Question \((position ?? 0) + 1) changed before you sent" : "\(count) questions changed before you sent" }
+  static func guardReplaced(agent: String, prompt: String, at time: String, by: Bool) -> String { by ? "\(agent) replaced **\(prompt)** at \(time)." : "\(agent) said at \(time) that **\(prompt)** no longer applies." }
+  static func guardPick(_ words: String?) -> String { words.map { "Your pick, **\($0)**, will not be sent." } ?? "Your pick on it will not be sent." }
+  static let guardWordsGo = "Your words still go if you send. They were written for the old question, so check they still fit."
+  static let guardRestGoes = "The rest of this reply still goes if you send."
+  static let guardNothingElse = "Nothing else is in this reply yet."
+  static let guardAnswerNew = "Answer the new question"
+  static let guardReadWhy = "Read why"
+  static func guardSendRest(words: Bool, picks: Int) -> String {
+    let rest = [words ? "your words" : nil, picks > 0 ? "\(picks) other \(picks == 1 ? "pick" : "picks")" : nil].compactMap { $0 }
+    return "Send \(rest.joined(separator: " and ")) only"
+  }
+  static let guardKeepEditing = "Keep editing"
+
+  // MARK: A row's marks, said (TODO(contract): "words rows": `questionMarkWords`, `actionMarkWords`, RowBadge.tsx)
+  static func markWords(_ marks: RowMarks) -> [String] {
+    func head(_ step: RowMarks.Step) -> String? { step == .open ? nil : Words.sections[step == .stop ? "stopped" : "holding"] }
+    func plural(_ n: Int, _ noun: String) -> String { "\(n) \(noun)\(n == 1 ? "" : "s")" }
+    var out: [String] = []
+    if marks.actions > 0 { out.append(head(marks.action).map { "\($0): \(plural(marks.actions, "action item"))" } ?? "\(marks.actions) action\(marks.actions == 1 ? "" : "s") to do") }
+    if marks.questions > 0 { out.append(head(marks.question).map { "\($0): \(plural(marks.questions, "question"))" } ?? plural(marks.questions, "question")) }
+    return out
+  }
 
   // MARK: Answering (FLOWS 5, mock 4; contract flow checks answer-01 to answer-14)
   /// FLOWS 5: the kind, above the prompt.
@@ -170,11 +235,13 @@ enum PhoneWords {
   static let closed = "Closed"
   static func whyCant(_ agent: String) -> String { "Why can't you? \(agent) gets this word for word." }
   static func noteFor(_ agent: String) -> String { "Add a note for \(agent)" }
+  /// The draft field's name for a screen reader: a reason, or a note.
+  static func noteLabel(_ agent: String, cant: Bool) -> String { cant ? "Why you can't, for \(agent)" : "A note for \(agent)" }
   static func markInDraft(cant: Bool, seen: Bool, at time: String) -> String {
     if seen { return "\(cant ? "Your reason" : "Your note") · in your draft" }
     return "\(cant ? cantDoIt : done)\(time.isEmpty ? "" : " \(time)") · in your draft"
   }
-  static func markOnPhone(cant: Bool) -> String { "\(cant ? cantDoIt : done) · on this phone" }
+  static func markWaits(cant: Bool, computer: String) -> String { "\(cant ? cantDoIt : done) · will send when \(computer) is back" }
   static func watching(_ agent: String, _ what: [String]) -> String {
     let text = what.joined(separator: "; ")
     return "\(agent) is watching: \(text)\(text.last.map { ".!?…".contains($0) } == true ? "" : ".")"

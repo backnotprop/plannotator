@@ -34,7 +34,7 @@ struct QuestionCard: View {
   let question: InboxQuestion
   /// When the reply that sent this answer was written.
   var sentAt: String?
-  /// Its place among the message's questions ("Question 1 of 2"), when there is more than one.
+  /// Its place among the message's questions: the card's eyebrow, "Question 1 of 2".
   var place: (index: Int, count: Int)?
   let drafts: ThreadDrafts
 
@@ -57,9 +57,11 @@ struct QuestionCard: View {
       if let refusal = session.refusal(message: message, key: question.key) {
         // A pick the computer did not take, in the app's own words, where the person reads first; it stays until
         // they act on this question. A clash with another device's answer never comes here: it settles quietly.
-        Label(PhoneWords.notice(refusal, computer: session.computer.name, what: PhoneWords.pickNotSaved), systemImage: "exclamationmark.circle")
+        let calm = refusal == .gaveWay
+        Label(PhoneWords.pickNotice(refusal, computer: session.computer.name), systemImage: calm ? "arrow.triangle.2.circlepath" : "exclamationmark.circle")
           .font(.footnote)
-          .foregroundStyle(Token.destructive)
+          .foregroundStyle(calm ? Token.mutedForeground : Token.destructive)
+          .fixedSize(horizontal: false, vertical: true)
       }
       Text(question.prompt)
         .font(.title3.weight(.semibold))
@@ -130,8 +132,7 @@ struct QuestionCard: View {
   }
 
   @ViewBuilder private var kindText: some View {
-    let words = [place.map { PhoneWords.questionOf($0.index, $0.count) }, PhoneWords.kind(question.kind)].compactMap { $0 }
-    if !words.isEmpty { Text(words.joined(separator: " · ")) }
+    if let place { Text(PhoneWords.eyebrow(place.index, place.count, multi: question.kind == .multi)) }
   }
 
   @ViewBuilder private var marks: some View {
@@ -216,7 +217,7 @@ struct QuestionCard: View {
       .padding(.horizontal, 12)
       .padding(.vertical, 10)
       .frame(minHeight: 44)
-      .background(Token.input.opacity(0.5), in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+      .fieldGround(radius: Token.radius)
       .toolbar {
         if focus == which {
           ToolbarItemGroup(placement: .keyboard) {

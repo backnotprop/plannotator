@@ -31,7 +31,7 @@ public struct PermissionPrompt: Hashable, Sendable {
   public var note: String?
   public var handoff: String?
 
-  // The fixed choices (packages/core/inbox-permission.ts).
+  // TODO(contract): "permission vectors" (words rows for INBOX_PERMISSION_*). The fixed choices (packages/core/inbox-permission.ts).
   public static let allowOnce = "Allow once"
   public static let deny = "Deny"
   public static let auto = "Allow and switch to Auto mode"
@@ -229,16 +229,38 @@ public struct PermissionPrompt: Hashable, Sendable {
     return nil
   }
 
-  /// A link's origin (`https://host`), when the text starts with it and a path, query or fragment (or nothing)
-  /// follows: the card stresses it. `host` is named on its own line when the text does not start with its origin.
+  /// TODO(contract): "permission vectors" (the Link origin and host). A link's origin (`https://host`) and host as a
+  /// browser reads them, which is what the window's card shows (`new URL`, PermissionCard.tsx `Link`): the scheme and
+  /// host in lower case, the default port dropped, anything before an `@` in the authority left out, a backslash
+  /// ending the authority as a slash does, a host that is not ASCII in its punycode form. `origin` is given only
+  /// when the text starts with it and a path, query or fragment (or nothing) follows: the card stresses it then,
+  /// and names `host` on its own line when it does not.
   public static func link(_ text: String) -> (origin: String?, host: String?) {
-    guard let parts = URLComponents(string: text), let scheme = parts.scheme, let host = parts.host, !host.isEmpty else { return (nil, nil) }
-    let named = parts.port.map { "\(host):\($0)" } ?? host
-    let origin = "\(scheme)://\(named)"
-    guard text.hasPrefix(origin) else { return (nil, named) }
-    let rest = text.dropFirst(origin.count)
-    if rest.isEmpty || ["/", "?", "#"].contains(rest.first!) { return (origin, named) }
-    return (nil, named)
+    guard let cut = text.range(of: "://") else { return (nil, nil) }
+    let scheme = text[..<cut.lowerBound].lowercased()
+    guard scheme == "http" || scheme == "https" else { return (nil, nil) }
+    let rest = text[cut.upperBound...]
+    let authority = rest.prefix { !"/\\?#".contains($0) }
+    // What a browser opens is what follows the last `@`.
+    var named = String(authority.split(separator: "@", omittingEmptySubsequences: false).last ?? "").lowercased()
+    var port: String?
+    if !named.hasPrefix("["), let colon = named.lastIndex(of: ":") {
+      port = String(named[named.index(after: colon)...])
+      named = String(named[..<colon])
+    }
+    guard !named.isEmpty, port?.allSatisfy(\.isNumber) ?? true else { return (nil, nil) }
+    if !named.allSatisfy(\.isASCII) {
+      // The form a browser shows for a host outside ASCII, which gives a look-alike letter away.
+      guard let ascii = URLComponents(string: "\(scheme)://\(named)")?.encodedHost, ascii.allSatisfy(\.isASCII) else { return (nil, nil) }
+      named = ascii.lowercased()
+    }
+    if let given = port, given.isEmpty || given == (scheme == "https" ? "443" : "80") { port = nil }
+    let host = port.map { "\(named):\($0)" } ?? named
+    let origin = "\(scheme)://\(host)"
+    guard text.hasPrefix(origin) else { return (nil, host) }
+    let after = text.dropFirst(origin.count)
+    if after.isEmpty || "/?#".contains(after.first!) { return (origin, host) }
+    return (nil, host)
   }
 
   /// The session already switched to Full permissions from an earlier prompt in the thread: no confirmation again

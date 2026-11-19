@@ -2,21 +2,30 @@ import InboxCore
 import InboxWire
 import SwiftUI
 
-/// Where the thread's scroll is, kept outside the views' state so a scroll never redraws the thread.
+/// Where the thread's scroll is, and what the person last touched. Its values are not observed: a scroll never
+/// redraws the thread, and the scroll's own callbacks read them as they are now.
 @MainActor
+@Observable
 final class ScrollBox {
   /// The part of the content on screen, in the content's own coordinates: under the title bar, over the reply field.
-  var top: CGFloat = 0
-  var bottom: CGFloat = 0
+  @ObservationIgnored var top: CGFloat = 0
+  @ObservationIgnored var bottom: CGFloat = 0
   var height: CGFloat { bottom - top }
-  /// The card that last grew under the person's hand: when the keyboard then rises, its end stays in view.
-  var grown: String?
-  /// The page's height with no keyboard, and whether the keyboard is over it now.
-  var full: CGFloat = 0
-  var covered = false
-  /// True once the thread has landed. Kept here, not in the view's state: the scroll's own callbacks read it as it
-  /// is now, not as it was when they were made.
-  var landed = false
+  /// True once the thread has landed: it lands once, and never again under the person's eyes.
+  @ObservationIgnored var landed = false
+  /// The card the person last touched, and when. Only that card, and only for a moment after the touch, is
+  /// brought back over the reply field when it grows or the keyboard rises.
+  @ObservationIgnored var acted: String?
+  @ObservationIgnored var actedAt = Date.distantPast
+
+  func act(_ key: String) {
+    acted = key
+    actedAt = Date()
+    landed = true
+  }
+
+  /// The card a reveal may still follow: the one touched within the last few seconds.
+  func fresh(within seconds: TimeInterval) -> String? { Date().timeIntervalSince(actedAt) <= seconds ? acted : nil }
 }
 
 /// A thread: its messages oldest first, questions as cards in place, the composer at the bottom (FLOWS 4, mock 4).
@@ -91,7 +100,9 @@ struct ThreadScreen: View {
   private func messages(_ thread: InboxThread) -> some View {
     // A reply that only carried a permission prompt's answer is said by the prompt's own card.
     let said = PermissionPrompt.saidByCards(in: thread)
-    let shown = thread.messages.filter { !said.contains($0.id) }
+    // A permission prompt's message with no question left draws nothing, as in the window.
+    let shown = thread.messages.filter { !said.contains($0.id) && !(SendPlan.isPermissionPrompt($0) && ($0.questions ?? []).isEmpty) }
+    let items = OpenItems(thread)
     let lastPerson = shown.last { $0.author.kind == .person }?.id
     // Where the thread lands: the newest agent message, at the top of the page, with what follows it. A message
     // is never cut in half by the title bar: it starts whole, as a page does.
@@ -102,13 +113,13 @@ struct ThreadScreen: View {
     ScrollView {
       VStack(alignment: .leading, spacing: 0) {
         ForEach(shown[..<landing], id: \.id) { message in
-          MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts)
+          MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
           Divider().overlay(Token.border).padding(.top, 18).padding(.bottom, message.id == shown[landing - 1].id ? 6 : 18)
         }
         VStack(alignment: .leading, spacing: 0) {
           ForEach(Array(shown[landing...].enumerated()), id: \.element.id) { index, message in
             if index > 0 { Divider().overlay(Token.border).padding(.vertical, 18) }
-            MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts)
+            MessageView(session: session, thread: thread, message: message, showsDelivery: message.id == lastPerson, drafts: drafts).id("m/\(message.id.rawValue)")
           }
           // A reply that waits for the computer is the person's own message already, said to be waiting.
           ForEach(held) { write in
@@ -129,20 +140,14 @@ struct ThreadScreen: View {
       .onPreferenceChange(CardFrames.self) { now in
         let before = cards
         cards.merge(now) { $1 }
-        // A card that grew under the person's hand (a pick's line, a note field, a reason) stays whole on screen.
-        for (key, frame) in now where key != Self.landing {
-          if let old = before[key], frame.height > old.height + 1 {
-            scroll.grown = key
-            // The person is already at work on the page: it does not land again under their hand.
-            scroll.landed = true
-            reveal(key, proxy)
-          }
-        }
+        // Only the card the person just touched follows its own growth (a pick's line, a note field, a reason):
+        // a card that changes on its own (another device's answer, a refusal's line) never moves the page.
+        if let key = scroll.fresh(within: 1.5), let old = before[key], let frame = now[key], frame.height > old.height + 1 { reveal(key, proxy) }
       }
       Color.clear.frame(height: 1).id(Self.end)
     }
-    // The title bar is a hard edge: no message runs under the title or the status bar.
-    .scrollEdgeEffectStyle(.hard, for: .top)
+    // Words fade out under the title bar: no line is cut through by a hard edge.
+    .scrollEdgeEffectStyle(.soft, for: .top)
     .toolbarBackground(Token.background, for: .navigationBar)
     .toolbarBackgroundVisibility(.visible, for: .navigationBar)
     .scrollPosition($position)
@@ -151,18 +156,16 @@ struct ThreadScreen: View {
     .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentOffset.y + $0.contentInsets.top, $0.contentOffset.y + $0.contentInsets.top + $0.containerSize.height] } action: { _, now in
       scroll.top = now[0]
       scroll.bottom = now[1]
-      let covered = scroll.height < scroll.full - 80
-      if !covered { scroll.full = max(scroll.full, scroll.height) }
-      let rose = covered && !scroll.covered
-      scroll.covered = covered
-      // The keyboard rose over a card the person just opened a field on: what they are filling in stays in view.
-      if rose, let key = scroll.grown { reveal(key, proxy) }
     }
-    // A new message from an agent lands the same way; the person's own Send is followed to the end.
+    // The keyboard rose over the card the person just opened a field on: once it has settled, what they are
+    // filling in is brought over the reply field.
+    .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardDidShowNotification)) { _ in
+      if let key = scroll.fresh(within: 3) { reveal(key, proxy) }
+    }
+    .environment(scroll)
+    // The person's own Send is followed to the end. A message that arrives while they read moves nothing.
     .onChange(of: shown.count) { _, _ in
-      withAnimation {
-        if shown.last?.author.kind == .person { proxy.scrollTo(Self.end, anchor: .bottom) } else { land(waiting, proxy) }
-      }
+      if shown.last?.author.kind == .person { withAnimation { proxy.scrollTo(Self.end, anchor: .bottom) } }
     }
     .onChange(of: held.count) { _, now in if now > 0 { withAnimation { proxy.scrollTo(Self.end, anchor: .bottom) } } }
     // Land once the page is measured (a thread already on the phone is laid out before it is on screen).
@@ -176,7 +179,7 @@ struct ThreadScreen: View {
     }
     .task {
       try? await Task.sleep(for: .milliseconds(60))
-      land(waiting, proxy)
+      if !scroll.landed { land(waiting, proxy) }
       try? await Task.sleep(for: .milliseconds(700))
       if !scroll.landed { land(waiting, proxy) }
       scroll.landed = true
@@ -184,9 +187,13 @@ struct ThreadScreen: View {
     .scrollDismissesKeyboard(.interactively)
     .refreshable { await session.refresh() }
     .safeAreaInset(edge: .bottom, spacing: 0) {
-      Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, waiting: waiting.count > 1 ? waiting.filter(\.open).count : 0, counts: counts(thread)) {
-        // The next card that still wants an answer, after the one last visited, then from the start.
-        let open = waiting.filter(\.open).map(\.id)
+      Composer(session: session, id: id, thread: thread, words: $words, drafts: drafts, focused: $composing, items: items) { card in
+        scroll.landed = true
+        withAnimation { show(card, proxy) }
+      } jump: {
+        // The next card that still waits, after the one last visited, then from the start.
+        scroll.landed = true
+        let open = waiting.map(\.id)
         guard !open.isEmpty else { return }
         let next = jumped.flatMap { open.firstIndex(of: $0) }.map { open[($0 + 1) % open.count] } ?? open[0]
         jumped = next
@@ -199,14 +206,6 @@ struct ThreadScreen: View {
       words = words.isEmpty ? text : "\(text)\n\n\(words)"
     }
     }
-  }
-
-  private func counts(_ thread: InboxThread) -> (questions: Int, actions: Int) {
-    let agents = thread.messages.filter { $0.author.kind == .agent && !SendPlan.isPermissionPrompt($0) }
-    return (
-      agents.flatMap { MessageView.questions(of: $0) }.filter { $0.state == .openValue }.count,
-      agents.flatMap { ActionMarks.items(of: $0) }.filter { ActionMarks.state($0) == .open }.count
-    )
   }
 
   /// Land on the newest agent message. When what it asks would end under the reply field, land on the card
@@ -225,18 +224,13 @@ struct ThreadScreen: View {
     proxy.scrollTo(key, anchor: card.height + Self.margin * 2 <= scroll.height ? .bottom : .top)
   }
 
-  /// After a card grows, or the keyboard rises over it: if its end went under the reply field, bring it back
-  /// over it. A card taller than the page shows its end too: what just opened (a note, a reason, its buttons) is
-  /// there. Done now and once more when the keyboard has settled, which moves the page on its own.
+  /// The card the person is at work on, after it grew or the keyboard rose: if its end went under the reply
+  /// field, it is brought back over it. A card taller than the page is left where it is: the system keeps the
+  /// field being typed in on screen, and the card's end would push that field off the top.
   private func reveal(_ key: String, _ proxy: ScrollViewProxy) {
-    Task {
-      for wait in [0, 420] {
-        try? await Task.sleep(for: .milliseconds(wait))
-        guard let card = cards[key], scroll.height > 0, card.maxY + Self.margin > scroll.bottom else { continue }
-        // By its own distance, not by name: a named scroll rests the card on the page's edge under the keyboard.
-        withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(y: scroll.top + card.maxY + Self.margin - scroll.bottom) }
-      }
-    }
+    guard let card = cards[key], scroll.height > 0, card.height + Self.margin * 2 <= scroll.height, card.maxY + Self.margin > scroll.bottom else { return }
+    // By its own distance, not by name: a named scroll rests the card on the page's edge under the keyboard.
+    withAnimation(.easeOut(duration: 0.2)) { position.scrollTo(y: scroll.top + card.maxY + Self.margin - scroll.bottom) }
   }
 
   private static let end = "end"
@@ -259,16 +253,24 @@ struct CardFrames: PreferenceKey {
   static func reduce(value: inout [String: CGRect], nextValue: () -> [String: CGRect]) { value.merge(nextValue()) { $1 } }
 }
 
-extension View {
-  /// A card the thread can scroll to and keep clear of the reply field: the name's frame reaches a margin past
-  /// the card on both sides, so a card brought to an edge keeps its air.
-  func card(_ key: String) -> some View {
-    self
+/// A card the thread can scroll to and keep clear of the reply field: the name's frame reaches a margin past the
+/// card on both sides, so a card brought to an edge keeps its air. A touch on it says which card the person is on.
+struct CardPlace: ViewModifier {
+  let key: String
+  @Environment(ScrollBox.self) private var scroll
+
+  func body(content: Content) -> some View {
+    content
       .background { GeometryReader { geometry in Color.clear.preference(key: CardFrames.self, value: [key: geometry.frame(in: .named("content"))]) } }
+      .simultaneousGesture(TapGesture().onEnded { scroll.act(key) })
       .padding(.vertical, ThreadScreen.margin)
       .id(key)
       .padding(.vertical, -ThreadScreen.margin)
   }
+}
+
+extension View {
+  func card(_ key: String) -> some View { modifier(CardPlace(key: key)) }
 }
 
 /// One message: plain text on the page, never a bubble; the person's own in the same column.
@@ -327,11 +329,11 @@ struct MessageView: View {
           QuestionCard(
             session: session, thread: thread.threadId, message: message.id, question: question,
             sentAt: question.sentReplyId.flatMap { reply in thread.messages.first { $0.id.rawValue == reply }?.createdAt },
-            place: questions.count > 1 ? (index + 1, questions.count) : nil, drafts: drafts
+            place: (index + 1, questions.count), drafts: drafts
           )
           .card(CardID.question(message.id, question.key))
         case .actions(let first, let count):
-          ActionChecklist(session: session, thread: thread.threadId, message: message.id, actions: Array(todos[first..<min(first + count, todos.count)]), agent: name, readOnly: thread.resolvedAt != nil, drafts: drafts)
+          ActionChecklist(session: session, thread: thread.threadId, message: message.id, actions: Array(todos[first..<min(first + count, todos.count)]), agent: name, readOnly: !SendPlan.live(message, in: thread), drafts: drafts)
             .card(CardID.actions(message.id, first))
         default:
           MessageWords(block: block)
@@ -385,9 +387,10 @@ struct Composer: View {
   @Binding var words: String
   let drafts: ThreadDrafts
   var focused: FocusState<Bool>.Binding
-  /// How many cards still want an answer, when the thread has more than one: the jump is offered.
-  let waiting: Int
-  let counts: (questions: Int, actions: Int)
+  /// What still waits in the thread: the button at the foot says it, and a touch goes to the next one.
+  let items: OpenItems
+  /// Go to a card.
+  let go: (String) -> Void
   let jump: () -> Void
 
   private var hasPicks: Bool { thread.messages.contains { ($0.questions ?? []).contains { $0.state == .picked } } }
@@ -410,18 +413,20 @@ struct Composer: View {
           .padding(.horizontal, 6)
       }
       if let notice = session.notices[id] {
-        let said = PhoneWords.notice(notice, computer: session.computer.name)
+        let said = PhoneWords.notice(notice, computer: session.computer.name, agent: thread.messages.last { $0.author.kind == .agent }.map { Names.agent($0.author) })
         Label(words.isEmpty ? said : "\(said) \(PhoneWords.wordsBack)", systemImage: "exclamationmark.circle")
           .font(.footnote)
           .foregroundStyle(Token.destructive)
           .padding(.horizontal, 6)
       }
-      if waiting > 0 {
+      if session.stopped.contains(id), let stale = session.stale[id], !stale.isEmpty {
+        StaleGuard(session: session, id: id, thread: thread, stale: stale, words: $words, drafts: drafts, go: go)
+      } else if items.shown {
         // The window's own pill: what still wants an answer, and a touch goes to the next one.
         Button(action: jump) {
           HStack(spacing: 6) {
             Image(systemName: "questionmark.circle")
-            Text(counts.actions == 0 ? PhoneWords.openQuestions(counts.questions) : CountWords.waiting(open: counts.questions + counts.actions, actions: counts.actions))
+            Text(PhoneWords.openItems(items))
             Image(systemName: "chevron.down").font(.caption.weight(.bold))
           }
           .font(.subheadline.weight(.medium))
@@ -452,6 +457,13 @@ struct Composer: View {
     .padding(.top, 8)
     .padding(.bottom, 8)
     .background(Token.background)
+    // What scrolls under the reply field fades into it: no card or line is cut through by a hard edge.
+    .overlay(alignment: .top) {
+      LinearGradient(colors: [Token.background.opacity(0), Token.background], startPoint: .top, endPoint: .bottom)
+        .frame(height: 22)
+        .offset(y: -22)
+        .allowsHitTesting(false)
+    }
   }
 
   private var box: some View {
@@ -484,5 +496,81 @@ struct Composer: View {
       .padding(4)
     }
     .glassEffect(.regular, in: .rect(cornerRadius: 26))
+  }
+}
+
+/// A pick the person made was replaced before it went: nothing is sent until they choose (the window's stale
+/// guard, packages/inbox/components/ReplacedQuestion.tsx). Answer the new question, send the rest, or keep editing.
+struct StaleGuard: View {
+  let session: InboxSession
+  let id: ThreadID
+  let thread: InboxThread
+  let stale: [InboxSession.Stale]
+  @Binding var words: String
+  let drafts: ThreadDrafts
+  let go: (String) -> Void
+
+  private func question(_ ref: InboxSession.Stale) -> InboxQuestion? {
+    thread.messages.first { $0.id == ref.message }?.questions?.first { $0.key == ref.key }
+  }
+  private func pick(_ answer: QuestionAnswer?) -> String? {
+    guard let answer else { return nil }
+    let parts = answer.selected + [answer.other, answer.text].compactMap { $0 }.filter { !$0.isEmpty }
+    return parts.isEmpty ? nil : parts.joined(separator: ", ")
+  }
+
+  var body: some View {
+    let asked = stale.compactMap(question)
+    let typed = !words.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    let others = thread.messages.flatMap { $0.questions ?? [] }.filter { $0.kind != .action && $0.state == .picked }.count
+    let first = asked.first?.supersededBy
+    VStack(alignment: .leading, spacing: 8) {
+      Label(PhoneWords.guardHeading(position: asked.first.map { Int($0.position) }, count: max(stale.count, 1)), systemImage: "exclamationmark.triangle")
+        .font(.subheadline.weight(.semibold))
+        .foregroundStyle(Token.foreground)
+        .accessibilityAddTraits(.isHeader)
+      ForEach(asked, id: \.key) { question in
+        if let by = question.supersededBy, let message = thread.messages.first(where: { $0.id == by.messageId }) {
+          Text(MessageBody.attributed("\(PhoneWords.guardReplaced(agent: Names.agent(message.author), prompt: question.prompt, at: TimeWords().clock(message.createdAt), by: by.key != nil)) \(PhoneWords.guardPick(pick(question.answer)))"))
+            .font(.subheadline)
+            .foregroundStyle(Token.foreground)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+      Text(typed ? PhoneWords.guardWordsGo : others > 0 ? PhoneWords.guardRestGoes : PhoneWords.guardNothingElse)
+        .font(.footnote)
+        .foregroundStyle(Token.mutedForeground)
+        .fixedSize(horizontal: false, vertical: true)
+      VStack(spacing: 6) {
+        if let first {
+          WideButton(words: first.key != nil ? PhoneWords.guardAnswerNew : PhoneWords.guardReadWhy) {
+            session.clearStale(id)
+            go(first.key.map { CardID.question(first.messageId, $0) } ?? "m/\(first.messageId.rawValue)")
+          }
+        }
+        if typed || others > 0 {
+          Button(PhoneWords.guardSendRest(words: typed, picks: others)) {
+            drafts.saveAll()
+            let text = words
+            words = ""
+            Task { if !(await session.send(thread: id, words: text, pastGuard: true)), words.isEmpty { words = text } }
+          }
+          .font(.body.weight(.semibold))
+          .foregroundStyle(Token.foreground)
+          .frame(maxWidth: .infinity, minHeight: 48)
+          .background(Token.foreground.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        Button(PhoneWords.guardKeepEditing) { session.clearStale(id) }
+          .font(.body)
+          .foregroundStyle(Token.foreground)
+          .frame(maxWidth: .infinity, minHeight: 44)
+          .contentShape(Rectangle())
+      }
+      .buttonStyle(ChoiceStyle())
+    }
+    .padding(14)
+    .background(Token.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Token.warning.opacity(0.5)))
+    .accessibilityElement(children: .contain)
   }
 }

@@ -74,43 +74,86 @@ final class ParityTests: XCTestCase {
     XCTAssertEqual(try retry(session).1.answer?.selected, ["Everyone at once"], "the Inbox's answer is drawn")
   }
 
-  func testWhenANewerAnswerOfItWaitsThatOneDecides() async throws {
+  func testAPickThatWaitedOnThePhoneNeverGoesOverANewerAnswerMadeElsewhere() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
     await session.start()
     await session.open(StandInData.retry)
     let (asked, question) = try retry(session)
+    // 9:00, the computer away: the person picks on the phone, twice, and writes a reply.
     await door.setOffline(true)
     await session.refresh()
     await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
     let drawn = try retry(session).1
-    await session.pick(thread: StandInData.retry, message: asked.id, question: drawn, answer: QuestionAnswers.choice(drawn, selected: ["Everyone at once"], note: "second thoughts"))
+    await session.pick(thread: StandInData.retry, message: asked.id, question: drawn, answer: QuestionAnswers.choice(drawn, selected: ["Staged, 10% first"], note: "second thoughts"))
+    await session.send(thread: StandInData.retry, words: "Go ahead")
+    XCTAssertEqual(session.held.filter { $0.waited == true }.count, 3)
+    // 11:00: they pick something else on the laptop. 11:30: the phone is back.
     await door.setOffline(false)
     await door.setOptions { $0.racesPicks = 1 }
     await session.refresh()
 
     let posts = await door.posts("/picks").count
-    XCTAssertEqual(posts, 2, "the first is not saved again: the second goes at the Inbox's revision")
+    XCTAssertEqual(posts, 2, "neither old pick is saved again")
+    let stored = await door.thread(StandInData.retry)
+    XCTAssertEqual(stored?.messages.last?.questions?.first?.answer?.selected, ["Everyone at once"], "the newer answer, made elsewhere, stands")
+    XCTAssertEqual(stored?.messages.last?.author.kind, .agent, "and the reply written behind the old pick did not go on its own")
+    XCTAssertEqual(session.refusal(message: asked.id, key: question.key), .gaveWay, "the card says so, in one line")
+    XCTAssertEqual(try retry(session).1.answer?.selected, ["Everyone at once"])
     XCTAssertTrue(session.held.isEmpty)
-    XCTAssertNil(session.refusal(message: asked.id, key: question.key))
-    let stored = await door.thread(StandInData.retry)?.messages.last?.questions?.first
-    XCTAssertEqual(stored?.answer?.note, "second thoughts")
+    XCTAssertEqual(session.takeReturnedWords(StandInData.retry), "Go ahead", "the words are back in the reply field")
   }
 
-  func testAPickTheThreadAlreadyExplainsAddsNoWords() async throws {
+  func testAPickTheAgentReplacedSaysSoAndASendBehindItStopsUntilThePersonChooses() async throws {
     let door = StandInDoor()
     let session = await pairedSession(door: door)
     await session.start()
     await session.open(StandInData.retry)
     let (asked, question) = try retry(session)
-    // The agent replaced the question while the phone still shows it.
+    // The pick and the Send are both still on the phone when the agent replaces the question.
+    await door.holdPickAnswers()
+    session.hold(pick: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""), thread: StandInData.retry, message: asked.id, question: question)
+    async let sending = session.send(thread: StandInData.retry, words: "Go ahead")
     await door.change(StandInData.retry) { thread in
       let last = thread.messages.count - 1
       thread.messages[last].questions?[0].state = .superseded
     }
-    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
-    XCTAssertNil(session.refusal(message: asked.id, key: question.key))
-    XCTAssertEqual(try retry(session).1.state, .superseded, "the card now says it was replaced")
+    await door.release()
+    _ = await sending
+
+    guard case .refused(_, code: "question_superseded")? = session.refusal(message: asked.id, key: question.key) else { return XCTFail("the card says the pick was not saved") }
+    XCTAssertEqual(session.stale[StandInData.retry], [InboxSession.Stale(message: asked.id, key: question.key)])
+    let none = await door.posts("/reply").isEmpty
+    XCTAssertTrue(none, "the reply did not go without its answer")
+    XCTAssertEqual(session.takeReturnedWords(StandInData.retry), "Go ahead")
+    XCTAssertEqual(try retry(session).1.state, .superseded)
+
+    // Nothing is sent until the person chooses; "send the rest" then goes.
+    let stopped = await session.send(thread: StandInData.retry, words: "Go ahead")
+    XCTAssertFalse(stopped)
+    let went = await session.send(thread: StandInData.retry, words: "Go ahead", pastGuard: true)
+    XCTAssertTrue(went)
+    XCTAssertNil(session.stale[StandInData.retry])
+    let replies = await door.posts("/reply").map(body)
+    XCTAssertEqual(replies.map { $0["words"]?.text }, ["Go ahead"])
+    XCTAssertNil(replies.first?["questions"]?.items.first)
+  }
+
+  func testAPickOnAQuestionAlreadySentSaysItDidNotGo() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.retry)
+    let (asked, question) = try retry(session)
+    // The laptop sent the earlier answer while the phone still shows the question open.
+    await session.pick(thread: StandInData.retry, message: asked.id, question: question, answer: QuestionAnswers.choice(question, selected: ["Everyone at once"], note: ""))
+    let other = DoorClient(transport: StandInTransport(door: door), token: session.computer.token, app: testApp)
+    _ = try await other.reply(asked.id, body: DoorReplyBody(idempotencyKey: "laptop-send", words: "", questions: [DoorQuestionPick(key: question.key, revision: 1)]))
+    let seen = try retry(session).1
+    XCTAssertEqual(seen.state, .picked, "the phone has not read the thread again")
+    await session.pick(thread: StandInData.retry, message: asked.id, question: seen, answer: QuestionAnswers.choice(question, selected: ["Staged, 10% first"], note: ""))
+    guard case .refused(_, code: "question_already_sent")? = session.refusal(message: asked.id, key: question.key) else { return XCTFail("the change did not go, and the card says so") }
+    XCTAssertEqual(try retry(session).1.state, .sent)
   }
 
   // MARK: An action item (packages/inbox/components/ActionChecklist.tsx, contract flow thread-09)
@@ -193,6 +236,70 @@ final class ParityTests: XCTestCase {
     XCTAssertEqual(stored?.actionResult?.staged, true)
   }
 
+  func testANoteTypedUnderAMarkNeverMarksAgainAnItemTakenBack() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.onboarding)
+    let (asked, todo) = try onboarding(session)
+    let saved = await session.mark(action: todo, thread: StandInData.onboarding, message: asked.id, ActionMarks.Mark(.done))
+    XCTAssertEqual(saved, .saved)
+    let marked = try onboarding(session).1
+    // Away: a note is typed under the Done. Meanwhile the Done is taken out of the draft on the computer.
+    await door.setOffline(true)
+    await session.refresh()
+    session.hold(mark: ActionMarks.Mark(.done, note: "In the vault."), action: marked, thread: StandInData.onboarding, message: asked.id, quiet: true)
+    await door.change(StandInData.onboarding) { thread in
+      let at = thread.messages[0].questions!.firstIndex { $0.kind == .action }!
+      thread.messages[0].questions![at].actionResult = nil
+      thread.messages[0].questions![at].state = .openValue
+    }
+    await door.setOffline(false)
+    await session.refresh()
+    let posts = await door.posts("/actions/\(todo.key)")
+    let note = try XCTUnwrap(posts.last.map(body))
+    XCTAssertEqual(note["note_only"]?.flag, true)
+    let stored = await door.thread(StandInData.onboarding)?.messages.first?.questions?.first { $0.kind == .action }
+    XCTAssertEqual(stored?.state, .openValue, "the take-back wins")
+    XCTAssertNil(session.refusal(message: asked.id, key: todo.key))
+  }
+
+  func testARefusedMarkIsToldAsRefusedAndANoteSaveOnAnItemThatMovedOnSaysNothing() async throws {
+    let door = StandInDoor()
+    let session = await pairedSession(door: door)
+    await session.start()
+    await session.open(StandInData.onboarding)
+    let (asked, todo) = try onboarding(session)
+    // Sent from another window while the phone still shows it open.
+    await door.change(StandInData.onboarding) { thread in
+      let at = thread.messages[0].questions!.firstIndex { $0.kind == .action }!
+      thread.messages[0].questions![at].state = .sent
+    }
+    let taken = await session.mark(action: todo, thread: StandInData.onboarding, message: asked.id, ActionMarks.Mark(.cant, note: "No access."))
+    XCTAssertEqual(taken, .refused, "the row keeps the reason the person typed")
+    guard case .refused(_, code: "action_already_sent")? = session.refusal(message: asked.id, key: todo.key) else { return XCTFail("a pressed mark's refusal is shown") }
+
+    session.hold(mark: ActionMarks.Mark(.done, note: "late note"), action: todo, thread: StandInData.onboarding, message: asked.id, quiet: true)
+    await session.deliverHeld(thread: StandInData.onboarding)
+    XCTAssertNil(session.refusal(message: asked.id, key: todo.key), "nothing for the person to do about a note that came too late")
+    XCTAssertFalse(ActionMarks.mootNoteRefusal(quiet: false, code: "action_closed"))
+    XCTAssertFalse(ActionMarks.mootNoteRefusal(quiet: true, code: "validation_error"))
+  }
+
+  func testInAnArchivedThreadOnlyWhatCameAfterTheArchiveLineIsLive() throws {
+    var thread = try XCTUnwrap(StandInData.threads(now: Date()).first { $0.threadId == StandInData.onboarding })
+    var later = thread.messages[0]
+    later.seq = 50
+    thread.messages[0].seq = 10
+    thread.messages.append(later)
+    XCTAssertTrue(SendPlan.live(thread.messages[0], in: thread))
+    thread.resolvedAt = "2026-11-18T10:00:00.000Z"
+    XCTAssertFalse(SendPlan.live(thread.messages[0], in: thread), "archived with no line: read only")
+    thread.archiveSeq = 20
+    XCTAssertFalse(SendPlan.live(thread.messages[0], in: thread))
+    XCTAssertTrue(SendPlan.live(thread.messages[1], in: thread), "an action item an agent wrote after the archive can still be marked")
+  }
+
   func testTheNextOpenItemAndTheCountLeaveReplacedOnesOut() throws {
     let message = MessageID("msg_X")
     func item(_ key: String, _ position: Int64, _ state: InboxQuestionState, result: InboxActionResult? = nil) -> InboxQuestion {
@@ -249,6 +356,88 @@ final class ParityTests: XCTestCase {
     XCTAssertEqual(link.origin, "https://bun.sh")
     XCTAssertNil(PermissionPrompt.link("https://bun.sh.evil.example@other.example/x").origin, "a host that is not where the text starts is never stressed")
     XCTAssertEqual(PermissionPrompt.read("`~/work/api-server/notes.md`\n\nin `~/work/api-server`\n").what(title: "Create a file"), "notes.md")
+  }
+
+  func testTheHostShownIsTheOneABrowserWouldOpen() {
+    // A backslash ends the authority as a slash does: what follows it is path, and the host is the first name.
+    let spoof = PermissionPrompt.link("https://evil.com\\@bun.sh/")
+    XCTAssertNil(spoof.origin, "nothing is stressed")
+    XCTAssertEqual(spoof.host, "evil.com", "the real host is named on its own line")
+    // What stands before an @ is not the host.
+    XCTAssertEqual(PermissionPrompt.link("https://bun.sh@evil.com/x").host, "evil.com")
+    XCTAssertNil(PermissionPrompt.link("https://bun.sh@evil.com/x").origin)
+    // Upper case and a default port are not how the text starts once read: no stress, the host named.
+    XCTAssertNil(PermissionPrompt.link("HTTPS://Bun.sh/x").origin)
+    XCTAssertEqual(PermissionPrompt.link("HTTPS://Bun.sh/x").host, "bun.sh")
+    XCTAssertNil(PermissionPrompt.link("https://bun.sh:443/x").origin)
+    XCTAssertEqual(PermissionPrompt.link("https://bun.sh:443/x").host, "bun.sh")
+    XCTAssertEqual(PermissionPrompt.link("http://localhost:3000/a").origin, "http://localhost:3000")
+    XCTAssertEqual(PermissionPrompt.link("https://bun.sh/docs/bundler#splitting").origin, "https://bun.sh")
+    // A look-alike letter shows in its punycode form.
+    let lookalike = PermissionPrompt.link("https://b\u{0443}n.sh/")
+    XCTAssertNil(lookalike.origin)
+    XCTAssertEqual(lookalike.host?.hasPrefix("xn--"), true)
+    XCTAssertNil(PermissionPrompt.link("file:///etc/passwd").host)
+  }
+
+  // MARK: Small rules of the window
+
+  func testAShortPlainRefusalIsTheLineAndAnythingElseIsNot() {
+    XCTAssertEqual(SendFailure.plain(" This thread is resolved; reopen it to answer. "), "This thread is resolved; reopen it to answer.")
+    XCTAssertNil(SendFailure.plain(String(repeating: "x", count: 161)))
+    XCTAssertNil(SendFailure.plain("Could not write /Users/a/inbox/x.jsonl"))
+    XCTAssertNil(SendFailure.plain("write failed: ENOSPC"))
+    XCTAssertNil(SendFailure.plain("  "))
+  }
+
+  func testDrawnOrAlignedCodeKeepsItsLayoutAndOrdinaryCodeWraps() {
+    XCTAssertTrue(CodeLayout.keeps("┌───┐\n│ a │\n└───┘"))
+    XCTAssertTrue(CodeLayout.keeps(" M apps/a.swift\nname    size"))
+    XCTAssertTrue(CodeLayout.keeps("a\tb"))
+    XCTAssertFalse(CodeLayout.keeps("const wait = Math.min(60_000, 1000 * 2 ** tries)\n  await sleep(wait)"))
+    XCTAssertFalse(CodeLayout.keeps("One sentence.  Another one."), "a double space after a sentence is prose")
+  }
+
+  func testEachMarkOfARowHasItsOwnStepAndADoneInTheDraftStillShows() throws {
+    func row(_ section: InboxSectionId, open: Double, actions: Double? = nil, staged: Double? = nil, waits: [InboxRowWait]? = nil) throws -> InboxListRow {
+      var row = try XCTUnwrap(StandInData.list(threads: StandInData.threads(now: Date()), unread: [], session: "s", cursor: 1, version: "1").sections.flatMap(\.threads).first)
+      row.section = section
+      row.questions.openValue = open
+      row.questions.actions = actions
+      row.questions.staged = staged
+      row.waits = waits
+      return row
+    }
+    let message = MessageID("msg_X")
+    func wait(_ key: String, stopped: String? = nil, holds: [String] = []) -> InboxRowWait { InboxRowWait(messageId: message, key: key, position: 0, prompt: "p", stopped: stopped, holdsUp: holds) }
+    // Stopped only by an action item: the action box is the red one, the question mark stays quiet.
+    var marks = RowMarks(try row(.stopped, open: 2, actions: 1, waits: [wait("a-00000001", stopped: ""), wait("q-00000001")]))
+    XCTAssertEqual([marks.questions, marks.actions], [1, 1])
+    XCTAssertEqual([marks.question, marks.action], [.open, .stop])
+    // Nothing open, the agent still stopped: a Done waits in the draft, and its mark shows.
+    marks = RowMarks(try row(.stopped, open: 0, staged: 1))
+    XCTAssertEqual([marks.questions, marks.actions], [0, 1])
+    XCTAssertEqual(marks.action, .stop)
+    // No waits told (an older Inbox): the row's state goes on the question mark.
+    marks = RowMarks(try row(.holding, open: 3))
+    XCTAssertEqual([marks.question, marks.action], [.hold, .open])
+    // A row that only waits: both quiet.
+    marks = RowMarks(try row(.waiting, open: 2, actions: 1))
+    XCTAssertEqual([marks.question, marks.action], [.open, .open])
+    XCTAssertEqual([RowMarks.shown(99), RowMarks.shown(100)], ["99", "99+"])
+  }
+
+  func testTheButtonAtAThreadsFootCountsWhatWaitsIncludingPickedAnswers() throws {
+    var thread = try XCTUnwrap(StandInData.threads(now: Date()).first { $0.threadId == StandInData.onboarding })
+    var items = OpenItems(thread)
+    XCTAssertEqual([items.questions, items.actions, items.permissions], [1, 1, 0])
+    let at = try XCTUnwrap(thread.messages[0].questions?.firstIndex { $0.kind != .action })
+    thread.messages[0].questions?[at].state = .picked
+    items = OpenItems(thread)
+    XCTAssertEqual(items.questions, 1, "a picked answer still waits until it is sent")
+    items = OpenItems(StandInData.permissionThread(now: Date()))
+    XCTAssertEqual([items.questions, items.actions, items.permissions], [0, 0, 1])
+    XCTAssertTrue(items.shown)
   }
 
   private func prompt(_ session: InboxSession) throws -> (InboxMessageWire, InboxQuestion) {

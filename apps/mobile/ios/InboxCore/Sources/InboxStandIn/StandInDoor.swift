@@ -360,6 +360,10 @@ public actor StandInDoor {
       let state = questions[q].state
       if state == .sent { return refuse(409, "action_already_sent", "Action item \(key) was already sent to the agent.", key: key) }
       guard state == .openValue || state == .picked else { return refuse(409, "action_closed", "Action item \(key) is \(state.rawValue): it can no longer be marked.", key: key) }
+      // A note save that lands after the mark was taken back: the take-back wins.
+      if fields["note_only"] == .bool(true), state == .openValue {
+        return encode(200, JSONValue.object(["questions": (try? JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(questions))) ?? .array([])]))
+      }
       guard let outcome else {
         if state == .picked {
           questions[q].actionResult = nil

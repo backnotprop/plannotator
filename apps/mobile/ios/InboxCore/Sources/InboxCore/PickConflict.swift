@@ -25,6 +25,7 @@ public enum PickConflict {
   /// `conflictRevision`: the revision the Inbox holds now, when the refusal is another answer landing first.
   public static func revision(_ failure: DoorFailure) -> Int64? {
     guard case .refused(_, let error) = failure, error.code == "question_revision_conflict" else { return nil }
+    // TODO(contract): "typed door error fields" (`current_revision`).
     guard case .number(let value)? = error.unknownFields["current_revision"], value >= 0, value.rounded() == value else { return nil }
     return Int64(value)
   }
@@ -36,9 +37,12 @@ public enum PickConflict {
     return tries < retries ? .retry(revision: revision) : .adopt
   }
 
-  /// Refusals of a pick that the thread itself says once it is read again (the card draws as sent, replaced or
-  /// closed): nothing more is said.
-  public static func saysItself(_ code: String) -> Bool {
-    ["question_already_sent", "question_superseded", "question_set_aside", "question_revision_conflict"].contains(code)
+  /// The phone's own rule, on top of the window's: a pick that waited on the phone (made while the computer was
+  /// away, or sent and never answered) is never saved again over an answer the Inbox holds. The window's rule
+  /// takes the order saves reach the Inbox for the order of the clicks; a pick held for hours breaks that, and
+  /// would put an old choice over a newer one made elsewhere. Only a pick sent the moment it was made may go again.
+  public static func step(_ failure: DoorFailure, tries: Int, waited: Bool, rule: Rule = PickConflict.rule) -> Step? {
+    guard let step = step(failure, tries: tries, rule: rule) else { return nil }
+    return waited ? .adopt : step
   }
 }

@@ -96,4 +96,8 @@ public struct HeldWrite: Codable, Hashable, Sendable, Identifiable {
   public var words: String?
   /// How many times this pick was saved again over another place's answer (PickConflict).
   public var tries: Int?
+  /// True once this write has waited for the computer: made while it was away, or sent and not answered.
+  public var waited: Bool?
+  /// A note typed under a marked action item: its refusal, when the item moved on meanwhile, is not the person's to act on.
+  public var quiet: Bool?
 }

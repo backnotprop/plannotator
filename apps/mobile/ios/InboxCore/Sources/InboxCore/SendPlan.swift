@@ -24,6 +24,14 @@ public enum SendPlan {
     message.author.kind == .agent && (message.author.session ?? "").hasPrefix(permissionSessionPrefix)
   }
 
+  /// `liveMessage` (packages/inbox/components/Thread.tsx): in an archived thread, only what an agent wrote after
+  /// the archive line is still live (its action items can be marked); everything before it is read only.
+  public static func live(_ message: InboxMessageWire, in thread: InboxThread) -> Bool {
+    guard thread.resolvedAt != nil else { return true }
+    guard let line = thread.archiveSeq else { return false }
+    return (message.seq ?? 0) > line
+  }
+
   static func group(of message: InboxMessageWire) -> String {
     if let session = message.author.session, !session.isEmpty { return "session:\(message.author.host ?? "")\u{0}\(session)" }
     return "message:\(message.id.rawValue)"

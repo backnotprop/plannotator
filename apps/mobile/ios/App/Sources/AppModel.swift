@@ -286,6 +286,32 @@ struct LaunchOptions {
           if let asked = session.thread(StandInData.permission)?.thread.messages.last, let question = asked.questions?.first {
             await session.answerNow(thread: StandInData.permission, message: asked.id, question: question, answer: QuestionAnswer(v: 1, key: question.key, kind: .single, prompt: question.prompt, selected: [PermissionPrompt.allowOnce]))
           }
+        case "back":
+          // The computer answers again, and another device picked while the phone was away.
+          await door.setOptions { $0.racesPicks = 1 }
+          await door.setOffline(false)
+          await session.refresh()
+        case "online":
+          await door.setOffline(false)
+          await session.refresh()
+        case "replaced":
+          // The agent replaces the question the phone's held pick and Send answer.
+          if let (asked, question) = retry() {
+            var newer = question
+            newer.key = "q_rollout2"
+            newer.prompt = "Roll out to 10% or 25% first?"
+            newer.choices = [InboxQuestionChoice(label: "10%", recommended: true, settled: false), InboxQuestionChoice(label: "25%", recommended: false, settled: false)]
+            newer.answer = nil
+            newer.state = .openValue
+            newer.revision = 0
+            await door.agentWrites(thread: StandInData.retry, body: "One more thing came up, so I asked this again.\n\n:::question\nRoll out to 10% or 25% first?\n\n- [ ] 10%\n- [ ] 25%\n:::", questions: [newer])
+            let written = await door.thread(StandInData.retry)?.messages.last?.id
+            await door.change(StandInData.retry) { thread in
+              guard let at = thread.messages.firstIndex(where: { $0.id == asked.id }), let written else { return }
+              thread.messages[at].questions?[0].state = .superseded
+              thread.messages[at].questions?[0].supersededBy = InboxSupersededBy(messageId: written, key: "q_rollout2")
+            }
+          }
         case "outdated":
           // The computer was updated past this app after the phone last read it: the copy stays readable.
           await door.setOptions { $0.minAppContract = 99; $0.contract = 99 }

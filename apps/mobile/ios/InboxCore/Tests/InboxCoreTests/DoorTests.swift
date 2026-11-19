@@ -437,7 +437,7 @@ final class DoorTests: XCTestCase {
     let onboarding = try await client.thread(StandInData.onboarding)
     let mixed = try XCTUnwrap(onboarding.thread.messages.last)
     let tone = try XCTUnwrap(mixed.questions?.first)
-    refused = await code { _ = try await client.picks(mixed.id, body: QuestionAnswers.pickBody(key: "a_key", revision: 0, answer: QuestionAnswers.choice(tone, selected: ["Plain"], note: ""), idempotencyKey: "p3")) }
+    refused = await code { _ = try await client.picks(mixed.id, body: QuestionAnswers.pickBody(key: "a-0a1b2c3d", revision: 0, answer: QuestionAnswers.choice(tone, selected: ["Plain"], note: ""), idempotencyKey: "p3")) }
     XCTAssertEqual(refused, "validation_error")
     await door.change(StandInData.onboarding) { $0.messages[0].questions?[0].setAsideAt = "2026-11-18T10:00:00.000Z" }
     refused = await code { _ = try await client.picks(mixed.id, body: QuestionAnswers.pickBody(key: tone.key, revision: 0, answer: QuestionAnswers.choice(tone, selected: ["Plain"], note: ""), idempotencyKey: "p4")) }

@@ -58,6 +58,14 @@ func run(_ parts: Text...) -> Text {
   parts.dropFirst().reduce(parts.first ?? Text(verbatim: "")) { Text("\($0)\($1)") }
 }
 
+extension View {
+  /// A field's ground: a tint and a hairline, so it reads as a field on a card in the dark too.
+  func fieldGround(radius: CGFloat = Token.radius) -> some View {
+    background(Token.input.opacity(0.5), in: RoundedRectangle(cornerRadius: radius, style: .continuous))
+      .overlay(RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(Token.foreground.opacity(0.14)))
+  }
+}
+
 enum Names {
   /// An author's name as the window gives it (`inboxAgentName`): its own name, else its agent's, else "An agent".
   static func agent(_ author: InboxAuthor) -> String {

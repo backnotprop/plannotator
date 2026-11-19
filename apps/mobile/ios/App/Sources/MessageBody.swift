@@ -1,3 +1,4 @@
+import InboxCore
 import SwiftUI
 
 /// A message's words for this first slice: paragraphs, headings, lists and code, drawn by the system's own
@@ -45,10 +46,12 @@ enum MessageBody {
       if let name = directive {
         if trimmed == ":::" {
           flush()
-          if name.hasPrefix("question"), questions > 0 {
+          // The block's own name, whole: `:::actions` is another block.
+          let kind = name.split(whereSeparator: { $0 == " " || $0 == "{" }).first.map(String.init) ?? name
+          if kind == "question", questions > 0 {
             if askedSoFar < questions { out.append(.question(askedSoFar)) }
             askedSoFar += 1
-          } else if name.hasPrefix("action"), actions > 0 {
+          } else if kind == "action", actions > 0 {
             if todosSoFar < actions {
               if case .actions(let first, let count)? = out.last { out[out.count - 1] = .actions(first: first, count: count + 1) } else { out.append(.actions(first: todosSoFar, count: 1)) }
             }
@@ -128,27 +131,60 @@ struct MessageWords: View {
 }
 
 /// Code as the window draws it on a phone (packages/ui/components/blocks/CodeBlock.tsx): a long line wraps, so
-/// nothing is cut and nothing scrolls sideways, and Copy sits in the top corner.
+/// nothing is cut, and Copy sits in the top corner. A block that is drawn or aligned (a box diagram, columns)
+/// keeps its layout instead (`codeBlockKeepsLayout`): it scrolls sideways, and where a line is cut the edge fades.
 struct CodeBlock: View {
   let code: String
   /// A permission prompt's request: the same box, with no Copy (the window's has none).
   var copies = true
   @State private var copied = false
+  @State private var textWidth: CGFloat = 0
+  @State private var boxWidth: CGFloat = 0
+  @State private var atEnd = false
+  private var fades: Bool { textWidth > boxWidth + 1 && !atEnd }
 
-  var body: some View {
+  private var words: some View {
     Text(code)
       .font(.system(copies ? .callout : .footnote, design: .monospaced))
       .foregroundStyle(Token.foreground)
       .textSelection(.enabled)
-      .fixedSize(horizontal: false, vertical: true)
-      .frame(maxWidth: .infinity, alignment: .leading)
-      .padding(.leading, 14)
-      .padding(.vertical, 13)
-      // The words never run under the button.
-      .padding(.trailing, copies ? 44 : 14)
-      .frame(minHeight: copies ? 44 : 0)
-      .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
-      .overlay(alignment: .topTrailing) { if copies { CopyButton(text: code, copied: $copied) } }
+  }
+
+  var body: some View {
+    Group {
+      if CodeLayout.keeps(code) {
+        ScrollView(.horizontal) {
+          words
+            .fixedSize()
+            .padding(.horizontal, 14)
+            // Copy has its own line here: the drawing's first row never runs under it.
+            .padding(.top, copies ? 36 : 13)
+            .padding(.bottom, 13)
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { textWidth = $0 }
+        }
+        .scrollIndicators(.visible)
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { boxWidth = $0 }
+        .onScrollGeometryChange(for: Bool.self) { $0.contentOffset.x + $0.containerSize.width >= $0.contentSize.width - 2 } action: { _, now in atEnd = now }
+        .mask {
+          HStack(spacing: 0) {
+            Color.black
+            LinearGradient(colors: [.black, .black.opacity(fades ? 0 : 1)], startPoint: .leading, endPoint: .trailing).frame(width: 56)
+          }
+        }
+        .animation(.easeOut(duration: 0.15), value: fades)
+      } else {
+        words
+          .fixedSize(horizontal: false, vertical: true)
+          .frame(maxWidth: .infinity, alignment: .leading)
+          .padding(.leading, 14)
+          .padding(.vertical, 13)
+          // The words never run under the button.
+          .padding(.trailing, copies ? 44 : 14)
+      }
+    }
+    .frame(minHeight: copies ? 44 : 0)
+    .background(Token.codeBackground, in: RoundedRectangle(cornerRadius: Token.radius, style: .continuous))
+    .overlay(alignment: .topTrailing) { if copies { CopyButton(text: code, copied: $copied) } }
   }
 }
 

@@ -147,7 +147,7 @@ public enum StandInData {
     let docsThread = InboxThread(
       threadId: docs, project: project("docs-site"), threadName: "Docs search is slow",
       messages: [
-        message(docs.rawValue, docs, "docs-site", pi, minutesAgo: 380, "Found it. The index is rebuilt on every request; a fix is on a branch.\n\n- Build the index once at start\n- Rebuild only when a page changes\n- Search drops from 900 ms to 40 ms")
+        message(docs.rawValue, docs, "docs-site", pi, minutesAgo: 380, "Found it. The index is rebuilt on every request; a fix is on a branch.\n\n- Build the index once at start\n- Rebuild only when a page changes\n- Search drops from 900 ms to 40 ms\n\n```\nroute             before    after\n/search?q=hooks   912 ms    38 ms\n/search?q=inbox   884 ms    41 ms\n/search?q=pair    931 ms    44 ms\n```")
       ])
 
     let uploadThread = InboxThread(
@@ -183,7 +183,7 @@ public enum StandInData {
       :::
       """,
       questions: [question("q_tone", .single, "Which tone for the first screen?", choices: [choice("Plain", "says what the app does"), choice("Warm", "greets the person first")], message: onboardingAsk)])
-    var todo = question("a_key", .action, "Add the production analytics key to the team vault", position: 0, message: onboardingAsk)
+    var todo = question("a-0a1b2c3d", .action, "Add the production analytics key to the team vault", position: 0, message: onboardingAsk)
     todo.orphaned = false
     // The door lists an action item among the message's questions (kind "action").
     onboardingMessage.questions = (onboardingMessage.questions ?? []) + [todo]

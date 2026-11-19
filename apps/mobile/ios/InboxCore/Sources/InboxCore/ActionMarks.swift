@@ -17,16 +17,18 @@ public enum ActionMarks {
     }
   }
 
-  /// The body of `POST messages/:id/actions/:id`. The contract lists the route and has no generated type for its
-  /// body yet, so its four fields are written here (packages/server/inbox.ts, the action route; `staged` puts the
-  /// mark in the reply draft, sent with the person's Send).
+  /// TODO(contract): "generated action body type". The body of `POST messages/:id/actions/:id`: the contract lists
+  /// the route and has no generated type for its body yet, so its fields are written here (packages/server/inbox.ts,
+  /// the action route; packages/inbox/api.ts `actionMarkBody`). `staged` puts the mark in the reply draft, sent with
+  /// the person's Send; `note_only` is a note typed under a marked row, which never marks again an item taken back.
   public struct Body: Codable, Hashable, Sendable {
     public var idempotencyKey: String
     public var outcome: String?
     public var note: String?
     public var staged: Bool?
+    public var noteOnly: Bool?
 
-    enum CodingKeys: String, CodingKey { case idempotencyKey = "idempotency_key", outcome, note, staged }
+    enum CodingKeys: String, CodingKey { case idempotencyKey = "idempotency_key", outcome, note, staged, noteOnly = "note_only" }
 
     public func encode(to encoder: Encoder) throws {
       var c = encoder.container(keyedBy: CodingKeys.self)
@@ -35,10 +37,11 @@ public enum ActionMarks {
       try c.encode(outcome, forKey: .outcome)
       try c.encodeIfPresent(note, forKey: .note)
       try c.encodeIfPresent(staged, forKey: .staged)
+      try c.encodeIfPresent(noteOnly, forKey: .noteOnly)
     }
   }
 
-  /// The route's answer: the message's questions and action items as they are now.
+  /// TODO(contract): "generated action body type" (its answer). The message's questions and action items as they are now.
   public struct Answer: Decodable, Sendable {
     public var questions: [InboxQuestion]
   }
@@ -51,9 +54,27 @@ public enum ActionMarks {
     return Mark(mark.outcome, note: note.isEmpty ? nil : note)
   }
 
-  static func body(_ mark: Mark?, idempotencyKey: String) -> Body {
-    guard let mark = mark.flatMap(checked) else { return Body(idempotencyKey: idempotencyKey, outcome: nil, note: nil, staged: nil) }
-    return Body(idempotencyKey: idempotencyKey, outcome: mark.outcome.rawValue, note: mark.note, staged: true)
+  static func body(_ mark: Mark?, quiet: Bool = false, idempotencyKey: String) -> Body {
+    guard let mark = mark.flatMap(checked) else { return Body(idempotencyKey: idempotencyKey, outcome: nil, note: nil, staged: true) }
+    return Body(idempotencyKey: idempotencyKey, outcome: mark.outcome.rawValue, note: mark.note, staged: true, noteOnly: quiet ? true : nil)
+  }
+
+  /// What came of a mark the person pressed.
+  public enum Taken: Hashable, Sendable {
+    /// The computer has it.
+    case saved
+    /// It waits on the phone for the computer.
+    case waits
+    /// The computer refused it: what the person typed stays where it is.
+    case refused
+    /// This Inbox does not offer it.
+    case notOffered
+  }
+
+  /// `isMootNoteRefusal` (packages/inbox/actionSaves.ts): a note save refused because the item moved on while the
+  /// note was in its typing pause is nothing for the person to do anything about, so nothing is said.
+  public static func mootNoteRefusal(quiet: Bool, code: String) -> Bool {
+    quiet && (code == "action_already_sent" || code == "action_closed")
   }
 
   /// `ActionCardState` (packages/inbox/actions.ts).

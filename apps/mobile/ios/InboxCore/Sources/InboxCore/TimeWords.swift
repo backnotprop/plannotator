@@ -50,6 +50,12 @@ public struct TimeWords: Sendable {
     return calendar.isDate(date, inSameDayAs: now) ? format(date, "jmm") : "\(day(date, now: now)), \(format(date, "jmm"))"
   }
 
+  /// The time alone ("3:12 PM"), as the window's `clockTime` says it on an action item's line.
+  public func clock(_ iso: String) -> String {
+    guard let date = Self.date(iso) else { return "" }
+    return format(date, "jmm")
+  }
+
   /// The contract's rule for comparing with the window's words: iOS puts U+202F before AM and PM.
   public static func normalise(_ text: String) -> String {
     text.replacingOccurrences(of: "\u{202F}", with: " ").replacingOccurrences(of: "\u{00A0}", with: " ")
