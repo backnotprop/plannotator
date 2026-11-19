@@ -4,6 +4,7 @@
  */
 import { FRAME_TITLE_HEIGHT } from '../model/capture';
 import { arrowPoints, resolveArrow } from '../model/document';
+import { distanceToInk } from '../model/ink';
 import {
   type Point,
   type Rect,
@@ -14,7 +15,8 @@ import {
 } from '../model/geometry';
 import { type ArrowEnd, type CanvasDocument, type CanvasObject, type FrameObject, type ObjectId, isPlaced } from '../model/types';
 import type { DocumentIndex } from './document-index';
-import { distanceToRoute } from './route-path';
+import { PEN_WIDTH } from './ink-path';
+import { curveRoute, distanceToRoute } from './route-path';
 import type { Router } from './routes';
 
 /** How far inside a frame's edge still grabs the frame, in world units at zoom 1. */
@@ -26,7 +28,11 @@ function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: nu
     const routed = routes && (object.routing ?? 'elbow') === 'elbow' ? routes.get(object.id) : null;
     if (routed) return distanceToRoute(p, routed.points) <= tolerance;
     const geometry = resolveArrow(doc, object);
-    return !!geometry && (geometry.via ? distanceToRoute(p, arrowPoints(geometry)) : distanceToSegment(p, geometry.from, geometry.to)) <= tolerance;
+    if (!geometry) return false;
+    if (geometry.via) return distanceToRoute(p, arrowPoints(geometry)) <= tolerance;
+    // A curved connector is grabbed along its curve, not along the straight line under it.
+    if (object.routing === 'curve') return distanceToRoute(p, curveRoute(geometry.from, geometry.to).points) <= tolerance;
+    return distanceToSegment(p, geometry.from, geometry.to) <= tolerance;
   }
   if (!isPlaced(object)) return false;
   if (object.type === 'frame') {
@@ -40,6 +46,8 @@ function hits(doc: CanvasDocument, object: CanvasObject, p: Point, tolerance: nu
     const inner = { x: object.x + band, y: object.y + band, w: object.w - band * 2, h: object.h - band * 2 };
     return inner.w <= 0 || inner.h <= 0 || !rectContainsPoint(inner, p);
   }
+  // A drawn line is grabbed along the line, as wide as its pen. What it was drawn round stays open to the pointer.
+  if (object.type === 'ink') return distanceToInk(p, object) <= tolerance + PEN_WIDTH[object.pen ?? 'marker'] / 2;
   return rectContainsPoint(object, p);
 }
 

@@ -16,10 +16,13 @@ import {
   ARTIFACT_KINDS,
   BOX_SHAPES,
   CANVAS_DOCUMENT_VERSION,
+  INK_PENS,
   STAMP_KINDS,
   STYLE_ENDS,
   STYLE_FILLS,
   STYLE_SIDES,
+  TEXT_FACES,
+  TEXT_SIZES,
   type Actor,
   type ArrowRouting,
   type BoxShape,
@@ -28,12 +31,14 @@ import {
   type CanvasDocument,
   type CanvasLink,
   type CanvasObject,
+  type InkObject,
   type ObjectStyle,
   type ReferenceTarget,
   type Snapshot,
   type SnapshotInput,
   type StampObject,
   type SnapshotSource,
+  type TextObject,
 } from './types';
 
 export type Checked<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -56,6 +61,11 @@ export const LIMITS = {
   snapshots: 2_000,
   spriteFrames: 512,
   spriteFps: 60,
+  /**
+   * The most points one drawn line holds. A stroke of a hand is a few dozen once simplified
+   * (`strokeFromPoints`); this is room for a long scribble, and the bound on what one line costs to draw.
+   */
+  inkPoints: 1000,
 } as const;
 
 /**
@@ -66,6 +76,7 @@ export const OBJECT_FIELDS: ReadonlySet<string> = new Set([
   'id', 'type', 'x', 'y', 'w', 'h', 'z', 'group', 'color', 'style', 'by', 'link',
   'text', 'detail', 'shape', 'lanes', 'size', 'title', 'src', 'alt', 'frames', 'fps', 'html',
   'target', 'description', 'site', 'image', 'icon', 'from', 'to', 'label', 'routing', 'kind', 'count',
+  'face', 'points', 'pen',
 ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -115,6 +126,25 @@ function readEnd(value: unknown): ArrowEnd | null {
   if (!isRecord(value)) return null;
   if ('object' in value) return isValidId(value.object) ? { object: value.object } : null;
   return isCoordinate(value.x) && isCoordinate(value.y) ? { x: value.x, y: value.y } : null;
+}
+
+/**
+ * A drawn line's points, copied into a plain array of plain numbers, or null. The length is looked at before
+ * anything else, so the work is bounded whatever is handed in; each slot is read by index, so a hole in the
+ * array is refused like any other value that is not a number from 0 to 1.
+ */
+function readInkPoints(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const length = value.length;
+  if (length < 4 || length % 2 !== 0 || length > LIMITS.inkPoints * 2) return null;
+  const out = new Array<number>(length);
+  for (let i = 0; i < length; i++) {
+    const v: unknown = value[i];
+    if (typeof v !== 'number' || !(v >= 0 && v <= 1)) return null;
+    // Minus nothing is nothing: it would be saved as 0 and then differ from itself.
+    out[i] = v === 0 ? 0 : v;
+  }
+  return out;
 }
 
 function readLink(value: unknown): CanvasLink | null {
@@ -216,9 +246,13 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       return { ok: true, value: { ...base, ...r, type, text: value.text } };
     case 'text': {
       if (!isText(value.text, LIMITS.text)) return fail(`${id}: text is missing or too long`);
-      const size = value.size;
-      if (size !== undefined && size !== 'small' && size !== 'medium' && size !== 'large') return fail(`${id}: size must be small, medium or large`);
-      return { ok: true, value: { ...base, ...r, type, text: value.text, ...(size ? { size } : {}) } };
+      const { size, face } = value;
+      if (size !== undefined && !(TEXT_SIZES as readonly unknown[]).includes(size)) return fail(`${id}: size must be one of ${TEXT_SIZES.join(', ')}`);
+      if (face !== undefined && !(TEXT_FACES as readonly unknown[]).includes(face)) return fail(`${id}: face must be one of ${TEXT_FACES.join(', ')}`);
+      return {
+        ok: true,
+        value: { ...base, ...r, type, text: value.text, ...(size ? { size: size as TextObject['size'] } : {}), ...(face && face !== 'sans' ? { face: face as TextObject['face'] } : {}) },
+      };
     }
     case 'frame':
       if (!isText(value.title, LIMITS.title)) return fail(`${id}: title is missing or too long`);
@@ -245,6 +279,13 @@ export function checkObject(value: unknown): Checked<CanvasObject> {
       const count = value.count;
       if (count !== undefined && (typeof count !== 'number' || !Number.isInteger(count) || count < 1 || count > 999)) return fail(`${id}: count must be a whole number from 1 to 999`);
       return { ok: true, value: { ...base, ...r, type, kind: value.kind as StampObject['kind'], ...(count && count > 1 ? { count } : {}) } };
+    }
+    case 'ink': {
+      const points = readInkPoints(value.points);
+      if (!points) return fail(`${id}: points must be x then y for 2 to ${LIMITS.inkPoints} points, each a number from 0 to 1 across the object's box`);
+      const pen = value.pen;
+      if (pen !== undefined && !(INK_PENS as readonly unknown[]).includes(pen)) return fail(`${id}: pen must be one of ${INK_PENS.join(', ')}`);
+      return { ok: true, value: { ...base, ...r, type, points, ...(pen && pen !== 'marker' ? { pen: pen as InkObject['pen'] } : {}) } };
     }
     case 'reference': {
       const target = readTarget(value.target);

@@ -10,8 +10,10 @@ import { HTML_ITEM_FRAME_ATTRS, HTML_ITEM_SANDBOX, htmlItemSrcdoc, isSafeImageSr
 import { referenceCard } from '../model/reference';
 import { seedOf, seeded } from '../view/rough';
 import { Face, usePerson } from './people';
+import { type Ground, lookAtPicture, pictureLooks } from './picture-look';
 import { previewsPending } from './references';
 import type { ArrowObject, ArtifactKind, BoxObject, BoxShape, HtmlObject, ImageObject, PlacedCanvasObject, ReferenceObject, SpriteObject } from '../model/types';
+import { inkPath } from '../view/ink-path';
 import { flatten, hachure, roughStrokes } from '../view/rough';
 import { CONTAINER_HEADER, type ShapeOutline, shapeOutline, toPath } from '../view/shape-outline';
 
@@ -33,6 +35,8 @@ export interface ObjectViewProps {
   buried?: boolean;
   /** Being dragged right now: a note lifts off the board while it is carried. */
   carried?: boolean;
+  /** Bare text or a drawn line lying over a picture: what its ink is read against (`picture-look.ts`). Absent: the board. */
+  ground?: Ground;
 }
 
 /** Typing into an object's words has ended. `words` is the element typed into, still laid out, for measuring. */
@@ -110,35 +114,9 @@ function Words({ id, text, editing, className, onEditEnd, title, clamp }: { id: 
   );
 }
 
-/** Whether a loaded picture has see-through parts, by address: looked at once. `null`: it could not be told. */
-const CLEAR = new Map<string, boolean | null>();
-
-function hasClearParts(src: string, image: CanvasImageSource): boolean | null {
-  if (CLEAR.has(src)) return CLEAR.get(src)!;
-  let clear: boolean | null = null;
-  try {
-    const probe = document.createElement('canvas');
-    probe.width = probe.height = 24;
-    const context = probe.getContext('2d', { willReadFrequently: true });
-    if (context) {
-      context.drawImage(image, 0, 0, 24, 24);
-      // A picture from another site cannot be read back (this throws), and is left as it is.
-      const data = context.getImageData(0, 0, 24, 24).data;
-      clear = false;
-      for (let i = 3; i < data.length; i += 4) {
-        if (data[i] < 250) {
-          clear = true;
-          break;
-        }
-      }
-    }
-  } catch {
-    clear = null;
-  }
-  if (CLEAR.size > 2000) CLEAR.clear();
-  CLEAR.set(src, clear);
-  return clear;
-}
+/** Whether a loaded picture has see-through parts: looked at once per address (`picture-look.ts`). `null`: it could not be told. */
+const clearOf = (src: string): boolean | null => pictureLooks.get(src)?.clear ?? null;
+const hasClearParts = (src: string, image: HTMLImageElement): boolean | null => lookAtPicture(src, image)?.clear ?? null;
 
 /** Kinds of picture that never move. Any other may be animated. */
 const NEVER_MOVES = /\.jpe?g(?:[?#]|$)/i;
@@ -154,7 +132,7 @@ function wantsLessMotion(): boolean {
  */
 function StillPicture({ src, alt, onFail }: { src: string; alt: string; onFail: () => void }) {
   const canvas = useRef<HTMLCanvasElement>(null);
-  const [clear, setClear] = useState<boolean | null>(CLEAR.get(src) ?? null);
+  const [clear, setClear] = useState<boolean | null>(clearOf(src));
   useEffect(() => {
     const image = new Image();
     image.referrerPolicy = 'no-referrer';
@@ -187,10 +165,10 @@ function Picture({ object, resolveImageSrc }: { object: ImageObject; resolveImag
   // The stored reference is resolved first; what the browser is then asked to load is checked.
   const resolved = resolveImageSrc ? resolveImageSrc(object.src) : object.src;
   const src = isSafeImageSrc(resolved) ? resolved : null;
-  const [clear, setClear] = useState<boolean | null>(src ? (CLEAR.get(src) ?? null) : null);
+  const [clear, setClear] = useState<boolean | null>(src ? clearOf(src) : null);
   useEffect(() => {
     setFailed(false);
-    setClear(src ? (CLEAR.get(src) ?? null) : null);
+    setClear(src ? clearOf(src) : null);
   }, [src]);
   if (!src || failed) return <div className="pcv-missing">{object.alt}</div>;
   if (!NEVER_MOVES.test(src) && wantsLessMotion()) return <StillPicture src={src} alt={object.alt} onFail={() => setFailed(true)} />;
@@ -441,7 +419,7 @@ function BoxWords({ object, editing, onEditEnd, common, style }: { object: BoxOb
   const lines = titleLines(object.h - 18, !!object.detail);
   const clamp = mayOverflow(object.text, object.w - 30, lines);
   return (
-    <div className="pcv-obj pcv-box" {...common} style={clamp ? { ...style, ['--pcv-lines' as string]: lines } : style}>
+    <div className="pcv-obj pcv-box" {...common} data-fill={object.style?.fill} data-dash={object.style?.dash ? '' : undefined} style={clamp ? { ...style, ['--pcv-lines' as string]: lines } : style}>
       <Words id={object.id} text={object.text} editing={editing} className="pcv-box-text" onEditEnd={onEditEnd} clamp={clamp} title={clamp && object.text.length > LONG_WORDS ? object.text : undefined} />
       {object.detail && !editing ? <div className="pcv-words pcv-box-detail" dir="auto">{object.detail}</div> : null}
     </div>
@@ -449,7 +427,7 @@ function BoxWords({ object, editing, onEditEnd, common, style }: { object: BoxOb
 }
 
 /** What an object is called when it has no words of its own. */
-export const OBJECT_NAMES = { box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', reference: 'Card', stamp: 'Stamp' } as const;
+export const OBJECT_NAMES = { ink: 'Drawing', box: 'Box', note: 'Note', text: 'Text', frame: 'Frame', image: 'Image', sprite: 'Animation', html: 'Embedded content', reference: 'Card', stamp: 'Stamp' } as const;
 export const STAMP_NAMES = { check: 'Agreed', thumb: 'Liked', ask: 'In question' } as const;
 
 /** What a screen reader says for an object: its own words, else what it is. */
@@ -506,7 +484,7 @@ function ByBadge({ actor }: { actor: PlacedCanvasObject['by'] }) {
 
 const STAMP_GLYPHS = { check: Check, thumb: ThumbsUp, ask: CircleHelp } as const;
 
-export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex, carried, buried }: ObjectViewProps) {
+export const ObjectView = memo(function ObjectView({ object, selected, editing, rich, resolveImageSrc, onEditEnd, tabIndex, carried, buried, ground }: ObjectViewProps) {
   const color = colorAttrs(object.color);
   const style: React.CSSProperties = {
     ...color.style,
@@ -550,7 +528,7 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
     }
     case 'text':
       return (
-        <div className="pcv-obj pcv-text" {...common} data-size={object.size} style={style}>
+        <div className="pcv-obj pcv-text" {...common} data-size={object.size} data-face={object.face} data-ground={ground} style={style}>
           <Words id={object.id} text={object.text} editing={editing} onEditEnd={onEditEnd} />
         </div>
       );
@@ -581,6 +559,15 @@ export const ObjectView = memo(function ObjectView({ object, selected, editing, 
         <div className="pcv-obj pcv-card" {...common} data-target={object.target.kind} style={style}>
           <Card object={object} resolveImageSrc={resolveImageSrc} />
           <ByBadge actor={object.by} />
+        </div>
+      );
+    case 'ink':
+      return (
+        <div className="pcv-obj pcv-ink" {...common} data-pen={object.pen} data-ground={ground} style={style}>
+          {/* The line may run half a pen's width outside its box, so the drawing is never clipped to it. */}
+          <svg width={object.w} height={object.h} viewBox={`0 0 ${object.w} ${object.h}`} aria-hidden="true" focusable="false">
+            <path d={inkPath(object.points, object.w, object.h)} />
+          </svg>
         </div>
       );
     case 'html':
@@ -629,6 +616,8 @@ export interface ArrowViewProps {
   lx: number;
   ly: number;
   selected: boolean;
+  /** Both ends lie on one picture: what the line and its label are read against. Absent: the board. */
+  ground?: Ground;
 }
 
 /** About how many characters of a label fit on a line between two things without lying over them. */
@@ -661,7 +650,7 @@ function bar(x: number, y: number, angle: number): { x1: number; y1: number; x2:
 }
 
 /** A connector: its line, what its ends look like, and its label on the line. Memoised on its path and numbers. */
-export const ArrowView = memo(function ArrowView({ arrow, label, d, x1, y1, a1, x2, y2, a2, lx, ly, room, selected }: ArrowViewProps) {
+export const ArrowView = memo(function ArrowView({ arrow, label, d, x1, y1, a1, x2, y2, a2, lx, ly, room, selected, ground }: ArrowViewProps) {
   const shown = arrow.label ? shortLabel(arrow.label, room) : '';
   const color = colorAttrs(arrow.color);
   const ends = arrow.style?.ends ?? 'arrow';
@@ -674,6 +663,7 @@ export const ArrowView = memo(function ArrowView({ arrow, label, d, x1, y1, a1, 
       data-color={color['data-color']}
       data-dash={arrow.style?.dash ? '' : undefined}
       data-selected={selected ? '' : undefined}
+      data-ground={ground}
       style={color.style}
     >
       <path className="pcv-arrow-line" d={d} />

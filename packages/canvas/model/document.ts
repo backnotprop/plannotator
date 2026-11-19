@@ -163,6 +163,46 @@ export function groupCycle(lookup: ObjectLookup, id: ObjectId): boolean {
   return false;
 }
 
+/** How far a curved connector bows off the straight line between its ends: a share of that line's length, and the most, in world units. */
+export const CURVE_BOW = 0.16;
+export const CURVE_BOW_MAX = 90;
+
+/**
+ * The one point that shapes a curved connector (`routing: 'curve'`): the
+ * control point of the quadratic curve between its ends. The curve bows to
+ * the left of the way it runs, so it is the same every time, and two
+ * connectors between one pair, one each way, part instead of lying on each
+ * other. Null when the ends are in one place: there is no way it runs.
+ */
+export function curveControl(from: Point, to: Point): Point | null {
+  const dx = to.x - from.x;
+  const dy = to.y - from.y;
+  const length = Math.hypot(dx, dy);
+  if (!(length >= 1)) return null;
+  // The control point of a quadratic curve stands twice as far off the line as the curve's own middle does.
+  const off = 2 * Math.min(CURVE_BOW_MAX, length * CURVE_BOW);
+  return { x: (from.x + to.x) / 2 + (dy / length) * off, y: (from.y + to.y) / 2 - (dx / length) * off };
+}
+
+/** A point of the quadratic curve from `a` to `b` shaped by `c`, at `t` from 0 to 1. */
+export function curvePoint(a: Point, c: Point, b: Point, t: number): Point {
+  const u = 1 - t;
+  return { x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y };
+}
+
+/** The rect that holds the whole of that curve: its ends, and where it turns back along each axis. */
+function curveBounds(a: Point, c: Point, b: Point): Rect {
+  const xs = [a.x, b.x];
+  const ys = [a.y, b.y];
+  const tx = (a.x - c.x) / (a.x - 2 * c.x + b.x);
+  const ty = (a.y - c.y) / (a.y - 2 * c.y + b.y);
+  if (tx > 0 && tx < 1) xs.push(curvePoint(a, c, b, tx).x);
+  if (ty > 0 && ty < 1) ys.push(curvePoint(a, c, b, ty).y);
+  const x = Math.min(...xs);
+  const y = Math.min(...ys);
+  return { x, y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+}
+
 const anchorCenter = (anchor: Rect | Point): Point => ('w' in anchor ? rectCenter(anchor) : anchor);
 
 /**
@@ -214,7 +254,11 @@ export function objectBounds(doc: CanvasDocument, id: ObjectId): Rect | null {
   if (object.type === 'arrow') {
     const geometry = resolveArrow(doc, object);
     if (!geometry) return null;
-    if (!geometry.via) return rectFromPoints(geometry.from, geometry.to);
+    if (!geometry.via) {
+      // A curve's box holds its bow, so it is mounted, captured and found by the pointer wherever it runs.
+      const control = object.routing === 'curve' ? curveControl(geometry.from, geometry.to) : null;
+      return control ? curveBounds(geometry.from, control, geometry.to) : rectFromPoints(geometry.from, geometry.to);
+    }
     const points = arrowPoints(geometry);
     const xs = points.map((p) => p.x);
     const ys = points.map((p) => p.y);

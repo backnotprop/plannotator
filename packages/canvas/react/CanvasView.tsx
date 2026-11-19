@@ -31,17 +31,21 @@
 import React, { useCallback, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { CanvasStore } from '../events/store';
 import { arrowPoints, boundsOf, isBoundEnd, resolveArrow } from '../model/document';
-import type { Point, Rect } from '../model/geometry';
-import { type ArrowEnd, type ArrowObject, type CanvasDocument, type ObjectId, isPlaced } from '../model/types';
+import { type Point, type Rect, rectContainsPoint, rectFromPoints } from '../model/geometry';
+import { isSafeImageSrc } from '../model/html-item';
+import { type ArrowEnd, type ArrowObject, type CanvasDocument, type ImageObject, type ObjectId, isPlaced } from '../model/types';
 import type { Camera, CameraController, Size } from '../view/camera';
 import { type Lod, OVERSCAN, lodFor, lodForZoom, renderWindow, visibleIds, windowIsStale } from '../view/cull';
 import { indexFor } from '../view/document-index';
-import { endAngles, findHops, pointAlong, routePath } from '../view/route-path';
+import { curveRoute, endAngles, findHops, pointAlong, routePath } from '../view/route-path';
 import { roughLine, seedOf } from '../view/rough';
 import { ROUTE_BUDGET_MS, routesFor } from '../view/routes';
 import { ArrowView, type EditEnd, FlatView, ObjectView, objectLabel } from './objects';
+import { type Ground, groundUnder, pictureLooks } from './picture-look';
 
 const NONE: ReadonlySet<ObjectId> = new Set();
+/** Bare text in a size a board is read by from far off: it stays words at every level of detail. */
+const isHeading = (size: string | undefined): boolean => size === 'title' || size === 'display';
 /**
  * Past this many mounted objects, far out, each object is one flat element instead of its full markup. Only
  * that far: swapping markup as the zoom crosses a detail level costs a long frame (measured: 83 ms at 2,000
@@ -50,6 +54,13 @@ const NONE: ReadonlySet<ObjectId> = new Set();
 const FLAT_ABOVE = 4000;
 /** Past this many mounted objects shadows are not drawn: they are what costs frames when a crowded board zooms. */
 const CROWDED = 500;
+
+/** Whether half or more of `area` lies on `picture`. */
+function mostlyOn(picture: Rect, area: Rect): boolean {
+  const w = Math.min(picture.x + picture.w, area.x + area.w) - Math.max(picture.x, area.x);
+  const h = Math.min(picture.y + picture.h, area.y + area.h) - Math.max(picture.y, area.y);
+  return w > 0 && h > 0 && w * h * 2 >= area.w * area.h;
+}
 
 /** How long a line is, end to end. */
 function lengthOf(points: readonly Point[]): number {
@@ -156,6 +167,8 @@ export function CanvasView({
   const router = routesFor(store);
   // Draw again when routes that were waiting have been finished.
   useSyncExternalStore(router.subscribe, router.getVersion, router.getVersion);
+  // And when a picture has been looked at: what lies over it takes its ink from it.
+  useSyncExternalStore(pictureLooks.subscribe, pictureLooks.getVersion, pictureLooks.getVersion);
   const root = useRef<HTMLDivElement | null>(null);
   const world = useRef<HTMLDivElement | null>(null);
   const overlay = useRef<HTMLDivElement | null>(null);
@@ -276,7 +289,19 @@ export function CanvasView({
 
   const placed: React.ReactNode[] = [];
   const arrows: React.ReactNode[] = [];
-  const lines: { arrow: ArrowObject; points: Point[] }[] = [];
+  const lines: { arrow: ArrowObject; points: Point[]; d?: string }[] = [];
+  // The pictures drawn so far, back to front. Words and lines that lie on one (half of them or more) are read
+  // against it, not against the board (`groundUnder`). Nothing is looked for on a board with no picture in view.
+  const pictures: ImageObject[] = [];
+  const groundOf = (area: Rect, whole: (picture: ImageObject) => boolean): Ground | undefined => {
+    for (let i = pictures.length - 1; i >= 0; i--) {
+      const picture = pictures[i];
+      if (!whole(picture)) continue;
+      const src = resolveImageSrc ? resolveImageSrc(picture.src) : picture.src;
+      return groundUnder(isSafeImageSrc(src) ? pictureLooks.get(src) : null, picture, area);
+    }
+    return undefined;
+  };
   // Routes that are stale are worked out as they are drawn, for a few milliseconds; the rest keep their last
   // shape and are finished next frame (the router says when).
   const deadline = performance.now() + ROUTE_BUDGET_MS;
@@ -286,20 +311,25 @@ export function CanvasView({
     if (!object) continue;
     if (object.type === 'arrow') {
       // An elbow connector is routed round what is in the way; far out, where a route could not be told from a
-      // line, and for the other routings, it is the straight line between its ends.
+      // line, it is the straight line between its ends. A straight one always is, and a curve is its arc.
       const routed = lod !== 'far' && (object.routing ?? 'elbow') === 'elbow' ? router.get(id, deadline) : null;
       if (routed) lines.push({ arrow: object, points: routed.points });
       else {
         const g = resolveArrow(doc, object);
-        if (g) lines.push({ arrow: object, points: arrowPoints(g) });
+        // A curve is one arc between its two ends. A loop back to the same object keeps its own shape.
+        if (g && !g.via && object.routing === 'curve') lines.push({ arrow: object, ...curveRoute(g.from, g.to) });
+        else if (g) lines.push({ arrow: object, points: arrowPoints(g) });
       }
-    } else if (object.type !== 'group' && flat && editingId !== id && tabStop !== id) {
-      // Far out on a crowded board: a flat patch each. Bare text has nothing to show at this size.
+    } else if (object.type !== 'group' && flat && editingId !== id && tabStop !== id && !(object.type === 'text' && isHeading(object.size)) && object.type !== 'ink') {
+      // Far out on a crowded board: a flat patch each. Small bare text has nothing to show at this size (a
+      // title still does, and a drawn line is one path already: both are drawn as themselves, below).
       if (object.type !== 'text') placed.push(<FlatView key={id} object={object} />);
       if (selection.size === 1 && selection.has(id)) {
         overlayNodes.push(<div key={id} className="pcv-outline" style={{ transform: `translate(${object.x}px, ${object.y}px)`, width: object.w, height: object.h }} />);
       }
     } else if (object.type !== 'group') {
+      if (object.type === 'image') pictures.push(object);
+      const ground = (object.type === 'text' || object.type === 'ink') && pictures.length ? groundOf(object, (picture) => mostlyOn(picture, object)) : undefined;
       placed.push(
         <ObjectView
           key={id}
@@ -312,6 +342,7 @@ export function CanvasView({
           tabIndex={tabStop === undefined ? undefined : tabStop === id ? 0 : -1}
           carried={carried?.has(id) ?? false}
           buried={buried.has(id)}
+          ground={ground}
         />,
       );
       // The selection outline is its own element in the overlay, so its
@@ -326,7 +357,7 @@ export function CanvasView({
 
   // Hops are found among the lines on screen, once all of them are known.
   const hops = lod === 'full' ? findHops(lines.map((line) => line.points)) : null;
-  lines.forEach(({ arrow, points }, i) => {
+  lines.forEach(({ arrow, points, d }, i) => {
     const angles = endAngles(points);
     const at = pointAlong(points, arrow.style?.labelAt ?? 0.5);
     const last = points[points.length - 1];
@@ -336,7 +367,7 @@ export function CanvasView({
         arrow={arrow}
         label={arrowLabel(doc, arrow)}
         room={arrow.label ? lengthOf(points) : 0}
-        d={arrow.style?.look === 'sketch' ? sketchLine(arrow, points) : routePath(points, hops?.[i])}
+        d={arrow.style?.look === 'sketch' ? sketchLine(arrow, points) : (d ?? routePath(points, hops?.[i]))}
         x1={points[0].x}
         y1={points[0].y}
         a1={angles.start}
@@ -346,6 +377,7 @@ export function CanvasView({
         lx={at.x}
         ly={at.horizontal ? at.y : at.y}
         selected={selection.has(arrow.id)}
+        ground={pictures.length ? groundOf(rectFromPoints(points[0], last), (picture) => rectContainsPoint(picture, points[0]) && rectContainsPoint(picture, last)) : undefined}
       />,
     );
   });

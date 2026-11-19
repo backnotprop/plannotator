@@ -12,6 +12,7 @@ import { isValidId } from '../model/ids';
 import { keyBetween } from '../model/order-key';
 import {
   DEFAULT_SIZES,
+  TEXT_SIZE_PX,
   type Actor,
   type ArrowEnd,
   type CanvasDocument,
@@ -31,19 +32,20 @@ export const MIN_OBJECT_SIZE = 16;
 const PATCH_FIELDS: Readonly<Record<CanvasObject['type'], readonly (keyof ObjectPatch)[]>> = {
   box: ['text', 'detail', 'link', 'style', 'shape', 'lanes'],
   note: ['text', 'link', 'style'],
-  text: ['text', 'size', 'link', 'style'],
+  text: ['text', 'size', 'face', 'link', 'style'],
   frame: ['title', 'link', 'style'],
   image: ['src', 'alt', 'link', 'style'],
   sprite: ['src', 'alt', 'frames', 'fps', 'link', 'style'],
   html: ['html', 'alt', 'link', 'style'],
   reference: ['target', 'title', 'description', 'site', 'image', 'icon', 'link', 'style'],
   stamp: ['kind', 'count', 'link'],
+  ink: ['points', 'pen', 'link'],
   arrow: ['from', 'to', 'label', 'link', 'style', 'routing'],
   group: ['label', 'link'],
 };
 
 /** Fields an edit removes when given `null` or an empty string. */
-const OPTIONAL_FIELDS = new Set(['count', 'alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'lanes', 'routing']);
+const OPTIONAL_FIELDS = new Set(['face', 'pen', 'count', 'alt', 'link', 'detail', 'label', 'description', 'site', 'image', 'icon', 'style', 'shape', 'lanes', 'routing']);
 
 /** Add the event that turns `before` into `after`, when they differ. */
 function push(events: CanvasEvent[], before: CanvasObject, after: CanvasObject): void {
@@ -57,13 +59,38 @@ function changes(pairs: [CanvasObject, CanvasObject][]): CanvasEvent[] {
   return events;
 }
 
+/**
+ * The box for a heading (bare text in the `title` or `display` size) that came with no size: wide enough for
+ * its longest line and tall enough for all of them, by a count that errs wide (a letter is taken as six-tenths
+ * of its height, one outside Latin as the whole of it). An agent names the words; they should not arrive
+ * wrapped into a box made for small text.
+ */
+function headingSize(text: unknown, size: 'title' | 'display'): { w: number; h: number } {
+  const px = TEXT_SIZE_PX[size];
+  const lines = (typeof text === 'string' ? text : '').split('\n').slice(0, 200);
+  let longest = 1;
+  for (const line of lines) {
+    let units = 0;
+    for (let i = 0; i < line.length && i < 2000; i++) units += line.charCodeAt(i) > 0x24f ? 1 : 0.6;
+    if (units > longest) longest = units;
+  }
+  return { w: Math.min(LIMITS.size, Math.max(px * 2, Math.ceil(longest * px + px * 0.4))), h: Math.min(LIMITS.size, Math.ceil(lines.length * px * 1.2)) };
+}
+
 /** The same object with the default size for what it is, when it came with no width or no height. */
 function withDefaultSize(raw: unknown): unknown {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return raw;
   const object = raw as Record<string, unknown>;
   if (object.w !== undefined && object.h !== undefined) return raw;
   const shaped = `${String(object.type)}:${String(object.shape)}`;
-  const size = Object.hasOwn(DEFAULT_SIZES, shaped) ? DEFAULT_SIZES[shaped] : Object.hasOwn(DEFAULT_SIZES, String(object.type)) ? DEFAULT_SIZES[String(object.type)] : undefined;
+  const size =
+    object.type === 'text' && (object.size === 'title' || object.size === 'display')
+      ? headingSize(object.text, object.size)
+      : Object.hasOwn(DEFAULT_SIZES, shaped)
+        ? DEFAULT_SIZES[shaped]
+        : Object.hasOwn(DEFAULT_SIZES, String(object.type))
+          ? DEFAULT_SIZES[String(object.type)]
+          : undefined;
   return size ? { ...object, w: object.w ?? size.w, h: object.h ?? size.h } : raw;
 }
 

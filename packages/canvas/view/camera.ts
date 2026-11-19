@@ -55,14 +55,36 @@ export function zoomAt(camera: Camera, z: number, at: Point): Camera {
   return { x: world.x - at.x / next, y: world.y - at.y / next, z: next };
 }
 
+/** Room kept clear round what a view is fitted to, in screen pixels: one number for every side, or one each way. */
+export type FitPadding = number | { x: number; y: number };
+
+/**
+ * The room "fit" keeps round a whole board in an editor of this size.
+ *
+ * Above and below, the editor's bars lie over the board, so the room there
+ * clears them (72 px, less only in a view too short to spare it). At the
+ * sides nothing lies over the board: the room is a twentieth of the width,
+ * 72 px at most and 12 at least. A wide view keeps the 72 px it always had;
+ * a phone 390 px wide gives 20 px a side instead of 72, so a board that is
+ * wider than it is tall, as most are, is drawn nearly half as large again.
+ */
+export function fitPadding(size: Size): { x: number; y: number } {
+  return {
+    x: Math.round(Math.max(12, Math.min(72, size.w * 0.05))),
+    y: Math.round(Math.max(12, Math.min(72, size.h * 0.12))),
+  };
+}
+
 /**
  * The camera that shows `target` whole and centred in a view of `size`, with
  * `padding` screen pixels around it. `maxZoom` stops a small target from
  * being blown up.
  */
-export function fitRect(target: Rect, size: Size, padding = 0, maxZoom = MAX_ZOOM): Camera {
-  const availW = Math.max(1, size.w - padding * 2);
-  const availH = Math.max(1, size.h - padding * 2);
+export function fitRect(target: Rect, size: Size, padding: FitPadding = 0, maxZoom = MAX_ZOOM): Camera {
+  const padX = typeof padding === 'number' ? padding : padding.x;
+  const padY = typeof padding === 'number' ? padding : padding.y;
+  const availW = Math.max(1, size.w - padX * 2);
+  const availH = Math.max(1, size.h - padY * 2);
   const z = Math.max(MIN_ZOOM, Math.min(maxZoom, availW / Math.max(1, target.w), availH / Math.max(1, target.h)));
   return {
     x: target.x + target.w / 2 - size.w / z / 2,
