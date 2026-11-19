@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { inboxNextTagColour, inboxTagLook, inboxTagLookColour, inboxTagShownHex, type InboxInitiative, type InboxListRow, type InboxListSection, type InboxTagColours, type InboxTagLook } from '@plannotator/core/inbox-types';
-import { InboxHeldError, inboxApi } from './api';
+import { inboxApi } from './api';
 import type { MachinesModel } from './machines';
 import { machineOf } from './inboxUrl';
 import { setSidebarSectionOpen } from './sidebarSections';
@@ -69,15 +69,8 @@ export type { ListTagColours };
 
 export function useThreadTagsHost({ listTags, across, routeTag, machines, windowRows, openRow, latestSections, rowOf, showError, showToast, dismissToast, refreshList, openTag, tagGone, tagColours, projects = NO_PROJECTS }: TagsInputs) {
 const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string[]>>(() => new Map());
-  // A tick stays drawn while its write is in flight or held for a linked machine that is away (tagWrites.ts).
+  // Of two quick ticks, only the latest write takes its tick back (tagWrites.ts).
   const [tagWritesHere] = useState(tagWrites);
-  useEffect(() => {
-    const done = tagWritesHere.landed((threadId) => {
-      const row = windowRows.find((r) => r.thread_id === threadId);
-      return row ? (row.tags ?? []) : undefined;
-    });
-    if (done.length > 0) setTagPatches((current) => new Map([...current].filter(([id]) => !done.includes(id))));
-  }, [windowRows, tagWritesHere]);
   const tagsOfRow = useCallback((row: Pick<InboxListRow, 'thread_id' | 'tags' | 'machine'>) => rowTagsHere(row, machines, tagPatches), [tagPatches, machines]);
   // Project tags (projectTags.ts): the filters read a row's own tags and its project's; the project's ⋯ sets them.
   const { filterTagsOfRow, projectTagsHost } = useProjectTags({ projects, machines, tagsOfRow, showError, showToast, dismissToast, refreshList });
@@ -99,9 +92,7 @@ const [tagPatches, setTagPatches] = useState<ReadonlyMap<string, readonly string
     try {
       await inboxApi.setThreadTag(threadId, tagWrite(tag, machineOf(threadId), machines.self), on);
     } catch (cause) {
-      // Held for a machine that is away: the tick stays, pending, until the list says it (the clock toast says it waits).
-      if (cause instanceof InboxHeldError && tag.id) tagWritesHere.hold(threadId, turn, next);
-      else unpatch();
+      unpatch();
       showError(cause);
       return;
     }

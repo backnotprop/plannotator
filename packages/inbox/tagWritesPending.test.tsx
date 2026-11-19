@@ -2,10 +2,8 @@
  * A tick while its write is on its way (tagWrites.ts), for a thread's tag (useThreadTagsHost.ts) and a project's
  * (useProjectTags.ts), through the window's own hook with fetch mocked.
  *
- * The failures this catches: the second of two quick ticks flickering off when the first write's list read comes back
- * (the first write took the whole patch back); a tick for a linked machine that is away vanishing while its write
- * waits in the outbox (the clock toast says "Waiting for …", the tick must stay, pending); and a held tick that never
- * goes once the list says it.
+ * The failure this catches: the second of two quick ticks flickering off when the first write's list read comes back
+ * (the first write took the whole patch back).
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt. Fetch is mocked: no server.
  */
@@ -20,7 +18,7 @@ const hasDom = typeof document !== 'undefined';
 const { act } = (hasDom ? await import('react') : {}) as typeof import('react');
 const { createRoot } = (hasDom ? await import('react-dom/client') : {}) as typeof import('react-dom/client');
 const { useThreadTagsHost } = (hasDom ? await import('./useThreadTagsHost') : {}) as typeof import('./useThreadTagsHost');
-const { setSelfMachine, rememberMachine, resetMachineRoutes } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
+const { setSelfMachine, resetMachineRoutes } = (hasDom ? await import('./inboxUrl') : {}) as typeof import('./inboxUrl');
 const { errorToast } = (hasDom ? await import('./toastError') : {}) as typeof import('./toastError');
 
 const SELF = 'ibx_01ARZ3NDEKTSV4RRFFQ69G5FAV';
@@ -33,11 +31,6 @@ const MACHINES: MachinesModel = { self: SELF, all: [], linked: [mac], names: new
 const row = (id: string, machine: string, tags?: string[]) => ({ thread_id: id, machine, project: { id: 'prj_bill', name: 'billing-svc' }, ...(tags ? { tags } : {}) }) as unknown as InboxListRow;
 const project = (id: string, machine: string, tags?: string[]) =>
   ({ id, name: id, key: id, root: `/code/${id}`, created_at: '2026-11-01T00:00:00.000Z', threads: 1, unread: 0, listed: 1, archived: 0, machine, ...(tags ? { tags } : {}) }) as ProjectFolder;
-const HELD = (route: string) =>
-  Response.json(
-    { outbox: { key: 'k1', machine: MAC, route, state: 'queued', queued_at: '2026-11-18T09:00:00.000Z', settled_at: null, status: null, answer: null, notice: null, dismissed: false, words: null, thread: null, machine_name: null }, machine: mac },
-    { status: 202 },
-  );
 
 type Hosted = ReturnType<typeof useThreadTagsHost>;
 let hosted: Hosted | null = null;
@@ -138,41 +131,4 @@ test.skipIf(!hasDom)('two quick ticks on a project: the second stays while its w
   reads.shift()!();
   await settle();
   expect(projectTicks('prj_bill')).toEqual(['ini_work', 'ini_personal']);
-});
-
-test.skipIf(!hasDom)("a thread tag held for a machine that is away stays ticked, says it waits, and goes once the list says it", async () => {
-  rememberMachine(['msg_far'], MAC);
-  globalThis.fetch = (async () => HELD('threads/msg_far/tags')) as unknown as typeof fetch;
-  mount([row('msg_far', MAC)], []);
-  act(() => hosted!.threadTagsHost!.set('msg_far', WORK, true));
-  await settle();
-  expect(toasts.map((t) => t.lead)).toEqual(['Waiting for MacBook: this applies when MacBook is back.']);
-  expect(threadTicks('msg_far')).toEqual(['ini_work']);
-  // A list read while the machine is still away: the tick stays.
-  draw!({ rows: [row('msg_far', MAC)], projects: [] });
-  await settle();
-  expect(threadTicks('msg_far')).toEqual(['ini_work']);
-  // The machine is back and the write landed: the list says it, and later list reads are what the thread shows.
-  draw!({ rows: [row('msg_far', MAC, ['ini_work'])], projects: [] });
-  await settle();
-  draw!({ rows: [row('msg_far', MAC, ['ini_personal'])], projects: [] });
-  await settle();
-  expect(threadTicks('msg_far')).toEqual(['ini_personal']);
-});
-
-test.skipIf(!hasDom)("a project tag held for a machine that is away stays ticked, says it waits, and goes once the list says it", async () => {
-  globalThis.fetch = (async () => HELD('projects/prj_far/tags')) as unknown as typeof fetch;
-  mount([], [project('prj_far', MAC)]);
-  act(() => hosted!.threadTagsHost!.projects!.target('prj_far').set(WORK, true));
-  await settle();
-  expect(toasts.map((t) => t.lead)).toEqual(['Waiting for MacBook: this applies when MacBook is back.']);
-  expect(projectTicks('prj_far')).toEqual(['ini_work']);
-  draw!({ rows: [], projects: [project('prj_far', MAC)] });
-  await settle();
-  expect(projectTicks('prj_far')).toEqual(['ini_work']);
-  draw!({ rows: [], projects: [project('prj_far', MAC, ['ini_work'])] });
-  await settle();
-  draw!({ rows: [], projects: [project('prj_far', MAC)] });
-  await settle();
-  expect(projectTicks('prj_far')).toEqual([]);
 });
